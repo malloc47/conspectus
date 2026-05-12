@@ -5,6 +5,12 @@ association into a separate binary that complements atelier. The goal is to
 reduce atelier's CLI surface area while preserving enough shared code to avoid
 duplicating brittle harness and workspace discovery logic.
 
+This document is the north star for breaking Conspectus work into phases,
+stories, and implementation tasks. Accepted Architecture Decision Records in
+`docs/adr/` provide the detailed rationale behind major data-model decisions;
+this design document should stay aligned with those decisions and summarize the
+current intended shape.
+
 ## Product Goal
 
 Build an opinionated read-only-first status tool for the user's AI work graph.
@@ -14,7 +20,7 @@ It should show, in one integrated view:
 - associated repos, worktrees, branches, and workspaces
 - mux sessions linked to workspaces, worktrees, or agent sessions
 - forge PRs linked to branches/worktrees
-- fork lineage at both context and session level
+- fork provenance across context, branch, worktree, and session effects
 - basic activity/status signals where each source can provide them
 
 Unlike `atelier status`, this tool should discover sparse records. A row with
@@ -132,22 +138,19 @@ Nodes:
 - `Worktree`
 - `Branch`
 - `Workspace`
-- `ContextFork`
-- `SessionFork`
-- `ForkGroup`
+- `Fork`
 - `ForgePr`
 
 Links:
 
 - agent session launched from cwd/worktree
-- agent session belongs to workspace, context fork, or session fork
+- agent session belongs to workspace or fork provenance
 - mux session rooted at path
 - mux session linked to agent session
 - worktree belongs to repo and branch
 - branch has forge PR
-- context forks and session forks have parent/child lineage
-- fork group records whether a fork-like operation affected context, session,
-  or both
+- forks record parent/child lineage and link to affected repos, worktrees,
+  branches, paths, and agent sessions
 - user-declared override or confirmation
 
 Links should carry provenance:
@@ -159,7 +162,10 @@ Links should carry provenance:
 - `declared`: explicitly configured by the user
 - `cached`: remembered for performance and invalidated by freshness rules
 
-Manual `declared` links should win over discovered links when they conflict.
+Graph collection produces candidate `GraphLink` records first. A resolver turns
+candidate links into typed relationships for table projections and higher-level
+graph views. Manual `declared` links should win over discovered links when they
+conflict, but they should not delete the original evidence.
 
 ## Entity Relationship Draft
 
@@ -178,24 +184,20 @@ erDiagram
     AGENT_SESSION }o--o| WORKSPACE : associated_with
     AGENT_SESSION }o--o| REPO : associated_with
     AGENT_SESSION }o--o| WORKTREE : associated_with
-    AGENT_SESSION }o--o| CONTEXT_FORK : associated_with
-    AGENT_SESSION }o--o| SESSION_FORK : associated_with
+    AGENT_SESSION }o--o| FORK : associated_with
     AGENT_SESSION }o--o| MUX_SESSION : linked_to
     MUX_SESSION }o--o| WORKSPACE : rooted_in
     MUX_SESSION }o--o| REPO : rooted_in
     MUX_SESSION }o--o| WORKTREE : rooted_in
-    MUX_SESSION }o--o| CONTEXT_FORK : rooted_in
-    MUX_SESSION }o--o| SESSION_FORK : rooted_in
+    MUX_SESSION }o--o| FORK : rooted_in
 
-    FORK_GROUP }o--o| CONTEXT_FORK : includes
-    FORK_GROUP }o--o| SESSION_FORK : includes
-    CONTEXT_FORK }o--o| WORKSPACE : forks_workspace
-    CONTEXT_FORK }o--o| REPO : forks_repo
-    CONTEXT_FORK }o--o{ WORKTREE : may_reference
-    CONTEXT_FORK |o--o{ CONTEXT_FORK : parent_of
-    SESSION_FORK }o--o| AGENT_SESSION : parent_session
-    SESSION_FORK }o--o| AGENT_SESSION : child_session
-    SESSION_FORK |o--o{ SESSION_FORK : parent_of
+    FORK }o--o| WORKSPACE : forks_workspace
+    FORK }o--o| REPO : forks_repo
+    FORK }o--o{ WORKTREE : may_reference
+    FORK }o--o{ BRANCH : may_reference
+    FORK }o--o| AGENT_SESSION : parent_session
+    FORK }o--o| AGENT_SESSION : child_session
+    FORK |o--o{ FORK : parent_of
 
     BRANCH ||--o{ FORGE_PR : may_have
     WORKTREE }o--o| FORGE_PR : may_reference
@@ -224,28 +226,22 @@ Entity notes:
 - `Branch` belongs to a repo and may have zero or more forge PRs. Multiple PRs
   are possible across forges, remotes, closed historical PRs, or ambiguous
   branch reuse.
-- `ContextFork` records provenance for a fork-like change to the working
-  context: a repo, a workspace, or both. It may create concrete worktrees,
-  reference existing worktrees, or exist only as provider metadata, and it can
-  have parent/child lineage independent of agent sessions.
-- `SessionFork` records a fork of agent session state. It connects a parent
-  agent session to a child agent session and can have parent/child lineage
-  independent of repo or workspace changes.
-- `ForkGroup` records a user-visible fork-like operation when a provider exposes
-  one. It may include both context lineage and session lineage, only context
-  lineage, or only session lineage. A group with neither is a noop and should
-  not be represented.
+- `Fork` is a polymorphic provider-neutral node for fork-like provenance. It can
+  represent context effects, session effects, both, or metadata-only provenance.
+  Its meaning is expressed through attributes, provider/source metadata, and
+  links to affected workspaces, repos, worktrees, branches, paths, sessions, and
+  parent/child forks.
 - `AgentSession` is a harness-native session record. It may be global, orphaned,
-  repo-rooted, worktree-rooted, workspace-rooted, context-fork-rooted, or
-  session-fork-rooted.
+  repo-rooted, worktree-rooted, workspace-rooted, or fork-associated.
 - `MuxSession` is a terminal multiplexer session. It can be linked to an agent
-  session and/or rooted in a workspace, repo, worktree, context fork, or session
-  fork path.
+  session and/or rooted in a workspace, repo, worktree, or fork path.
 - `ForgePr` is a forge pull request record. GitHub is the only v1 provider, but
   the entity should not encode GitHub-specific assumptions into the graph shape.
-- `GraphLink` is the normalized edge record used in JSON output and durable
-  declared state. It captures source, target, relation kind, provenance,
-  confidence, freshness, and whether it is ignored or overridden.
+- `GraphLink` is the canonical candidate/evidence edge record used for
+  discovery, conventions, caches, declared state, diagnostics, and
+  machine-readable graph output. It captures source, target or unresolved
+  endpoint evidence, relation kind, provenance, confidence, freshness, and
+  whether it is ignored or overridden.
 
 Expected cardinality and sparsity:
 
@@ -254,36 +250,34 @@ Expected cardinality and sparsity:
 - A workspace can contain many repo participants, including worktrees, ordinary
   repos, symlinks, or convention-derived members. A worktree may be outside any
   workspace.
-- A context fork can fork a repo, a workspace, or both. It may create concrete
-  worktrees, reference existing worktrees, or be represented only by provider
-  metadata.
-- A context fork can have zero or one parent context fork and many child context
-  forks.
-- A session fork connects one parent agent session to one child agent session.
-  The child session may be active, inactive, or not yet discovered by a harness
-  adapter.
-- A session fork can have zero or one parent session fork and many child session
-  forks.
-- A fork group must include a context fork, a session fork, or both. A group
-  with neither side is a noop and is not supported.
+- A fork can affect a repo, a workspace, sessions, branches, worktrees, paths,
+  or any combination of those. It may create concrete worktrees, reference
+  existing worktrees, create or associate branches, represent session lineage,
+  or be represented only by provider metadata.
+- A fork can have zero or one parent fork and many child forks.
+- Session-lineage endpoints may be unresolved. Parent or child session evidence
+  can exist before the corresponding `AgentSession` node has been discovered.
 - An agent session can exist without any known repo, worktree, workspace, mux
   session, or PR.
 - A mux session can exist without any known agent session.
-- An agent session should have at most one active mux link by default, but the
-  graph should preserve conflicting candidates for diagnostics.
-- A mux session may contain multiple agent sessions in practice. The default
-  `agent` projection still renders one row per agent session.
+- An agent session can have many candidate mux links. A resolver may choose one
+  preferred mux for a projection, but the graph should preserve all candidates
+  for diagnostics and picker-style UIs.
+- A mux session may contain multiple agent sessions in practice. The `agent`
+  projection renders one row per agent session; the `mux` projection can render
+  zero, one, or many linked agent sessions per mux.
 - A branch can have zero, one, or many PR records. The table view should prefer
   open PRs and report ambiguity rather than collapsing it silently.
 
-Fork type matrix:
+Fork effect matrix:
 
-| Context Fork | Session Fork | Meaning |
+| Context Effects | Session Effects | Meaning |
 | --- | --- | --- |
-| yes | yes | Heavyweight fork; probably the default for agent work. Records context lineage and isolated session lineage, and may create isolated worktrees. |
-| yes | no | Context-only fork. Useful for pure git workflows, branch/worktree experiments, or pre-staging work for a later agent. |
-| no | yes | Session-only fork. Useful for parallel non-colliding work, read-only agents, or multiple agents sharing one context. |
-| no | no | Noop. Do not support or persist this as a graph node. |
+| yes | yes | Heavyweight fork-like workflow. A single `Fork` records both context provenance and session lineage evidence. |
+| yes | no | Context-only fork-like workflow for pure git, branch/worktree experiments, or pre-staging later agent work. |
+| no | yes | Session-only fork-like workflow for parallel non-colliding work, read-only agents, or multiple agents sharing one context. |
+| metadata only | optional | Provider records a fork root or operation but no concrete context or session endpoints have been discovered yet. |
+| no | no | Noop. Do not support or persist this as a fork node unless provider metadata supplies meaningful provenance. |
 
 Lifecycle transitions:
 
@@ -294,30 +288,28 @@ Lifecycle transitions:
 - Workspace to standalone repo: removing or ignoring a workspace should not
   delete repo, worktree, branch, agent session, mux session, or PR nodes. The
   graph should degrade to repo/worktree associations.
-- Context fork: forking a repo or workspace creates a `ContextFork` and may
-  create worktrees, reference existing worktrees, or record only provider
-  metadata. Existing sessions rooted in those paths may gain a context-fork
-  association on the next discovery pass.
-- Session fork: forking an agent session creates a `SessionFork` linking the
-  parent and child agent sessions. It may reuse the same worktree when no
-  context fork was requested.
-- Context plus session fork: a heavyweight fork creates both context lineage and
-  session lineage, grouped by one `ForkGroup` when the provider exposes a
-  single operation that created both.
-- Context fork without session fork: supported for pure git workflows, even
-  though it may not be useful for agent activity by itself.
-- Session fork without context fork: supported for parallel work that will not
-  collide, read-only agents, or multi-agent setups where separate session state
-  is useful without a new checkout.
-- Fork group with no context fork and no session fork: noop; do not create a
-  graph node.
+- Context-like fork: forking a repo or workspace creates a `Fork` node and may
+  create worktrees, reference existing worktrees, create or associate branches,
+  record a fork root, or record only provider metadata. Existing sessions rooted
+  in those paths may gain fork associations on the next discovery pass.
+- Session-like fork: forking an agent session creates `parent_session` and/or
+  `child_session` link candidates from the `Fork`. It may reuse the same
+  worktree when no context effect was requested. Missing endpoints remain
+  unresolved evidence until a concrete `AgentSession` is discovered or declared.
+- Combined fork: a heavyweight fork-like workflow creates one `Fork` node with
+  both context-effect links and session-lineage links.
+- Context effects without session effects are supported for pure git workflows.
+- Session effects without context effects are supported for parallel work that
+  will not collide, read-only agents, or multi-agent setups where separate
+  session state is useful without a new checkout.
+- Fork with no context effect, no session effect, and no meaningful provider
+  provenance is a noop; do not create a graph node.
 - Fork back to ordinary worktree: if fork metadata disappears but the worktree
   remains, sessions should keep their worktree/repo links and lose only the
-  context-fork lineage unless a declared link preserves it.
+  fork lineage unless a declared link preserves it.
 - Orphan session to rooted session: when a later discovery pass finds cwd,
   transcript, mux, or declared metadata, the same `AgentSession` can gain links
-  to repo/worktree/workspace/context-fork/session-fork nodes without changing
-  session identity.
+  to repo/worktree/workspace/fork nodes without changing session identity.
 - Discovered link to declared link: user confirmation or override should create
   a durable `GraphLink` with `declared` provenance, leaving the discovered link
   visible in detailed diagnostics.
@@ -413,8 +405,7 @@ relationships that discovery cannot infer:
 
 - link/unlink mux session to agent session
 - link/unlink GitHub PR to worktree or branch
-- link/unlink agent session to workspace, repo, worktree, context fork, or
-  session fork
+- link/unlink agent session to workspace, repo, worktree, or fork
 - mark session/repo/mux rows ignored
 - confirm or override a discovered relationship
 
@@ -455,8 +446,7 @@ Candidate columns for the default AgentSession-oriented table:
 - repo/worktree
 - branch
 - workspace
-- context fork
-- session fork
+- fork
 - lineage
 - PR
 - last activity
@@ -466,6 +456,12 @@ Machine-readable output should preserve the graph shape directly: nodes, links,
 provenance, and source metadata. The table can be a projection over that graph.
 The first implementation can expose this as JSON, but the interface should be
 treated as a graph API for future tools rather than a table serialization.
+
+Machine-readable output should distinguish raw candidate links from resolved
+relationships. Candidate links preserve discovery evidence, provenance,
+confidence, freshness, ignored/overridden state, and unresolved endpoint
+metadata. Resolved relationships are the projection chosen by the resolver for a
+given graph snapshot.
 
 Declared relationships should be authoritative but not destructive:
 
@@ -478,12 +474,21 @@ Declared relationships should be authoritative but not destructive:
 Fork-aware views should:
 
 - read fork metadata from supported providers when available
-- show context fork lineage and session fork lineage separately
-- show fork groups when a single user action created both sides
-- associate sessions rooted in context-fork paths or session-fork state
-- associate mux sessions rooted under context-fork paths
+- show context-effect lineage and session-lineage evidence separately when a
+  single `Fork` has both kinds of links
+- show one provider-visible `Fork` when a single user action affected both
+  context and session state
+- associate sessions rooted in fork paths or fork-associated session state
+- associate mux sessions rooted under fork paths
 - fall back to path/branch/session conventions when provider metadata is
   unavailable
+
+Mux-aware views should:
+
+- preserve all candidate agent-session-to-mux links
+- select one preferred mux link per agent-session row when evidence supports it
+- show ambiguity when multiple non-ignored candidates remain
+- allow mux-oriented views to show zero, one, or many linked agent sessions
 
 ## Migration Plan
 
@@ -509,6 +514,28 @@ Fork-aware views should:
 ## Decisions
 
 - Name: `conspectus`.
+- Accepted ADRs:
+  - ADR 0001: use structured provider-aware local node identities.
+  - ADR 0002: collect all relationship evidence as `GraphLink` candidates and
+    derive typed resolved relationships from them.
+  - ADR 0003: use one polymorphic `Fork` node instead of multiple fork node
+    classes.
+  - ADR 0004: represent fork context effects with provider-neutral relation
+    kinds such as `created_worktree`, `referenced_worktree`, `created_branch`,
+    `associated_branch`, `rooted_at_path`, and `parent_fork`.
+  - ADR 0005: preserve unresolved session-lineage endpoint evidence without
+    creating placeholder `AgentSession` nodes.
+  - ADR 0006: preserve many mux/session link candidates and let projections
+    choose preferred links while exposing ambiguity.
+- Node identity:
+  - repos use canonical git common dir for local discovery
+  - worktrees use repo identity plus canonical worktree root
+  - workspaces use provider plus canonical root, or canonical root for generic
+    inferred workspaces
+  - agent sessions use harness key, state root or scope, and native session id
+    or source-path fallback
+  - branches use repo identity plus refname
+  - forge PRs use provider, host, owner, repo, and PR number
 - Local state files:
   - persistent workspace: `.conspectus.toml`
   - standalone repo: `.conspectus.toml`
@@ -529,123 +556,10 @@ Fork-aware views should:
 - Bootstrap scans should print suggested roots and links by default. Persisting
   them to global config should require an explicit write flag.
 
-## Open Design Questions
+## Remaining Design Questions
 
-These questions should be worked through incrementally before locking the
-phased implementation plan. They are intentionally phrased as unresolved design
-pressure points rather than decisions.
-
-### Likely Answered By Design Requirements
-
-- Whether Conspectus should copy Atelier's model is answered: no. Atelier is an
-  input provider and migration source, but the Conspectus graph should be
-  provider-neutral and may diverge where the data model calls for it.
-- Whether provider-specific details belong in the graph is constrained:
-  provider-specific reality belongs at the edges as source metadata or adapter
-  behavior, while the core graph remains provider-neutral.
-- Whether graph consumers can expect dense, fully linked rows is answered: no.
-  Sparse cliques and missing links are intrinsic to the product and must be
-  handled by all projections and downstream tools.
-- Whether users should be expected to maintain many override files is answered:
-  no. Conspectus should derive links from on-disk state and conventions first,
-  using overrides as a rare escape hatch.
-- Whether performance caches can live inside repos or workspaces is answered:
-  no for rebuildable state. Caches and indexes should live globally; durable
-  user-authored link intent should be federated near the project when rooted
-  there.
-- Whether `Workspace` should mean only an Atelier workspace is answered: no. A
-  workspace is a loose coordinated working context that may be inferred from
-  repos, symlinks, worktrees, metadata, and conventions.
-- Whether Conspectus should own workspace contents is answered: no. It tracks
-  links and may write Conspectus link state on demand, but it should not become
-  a materializer.
-- Whether `ContextFork creates Worktree` is sufficient is answered: no. Context
-  lineage must distinguish created worktrees, referenced worktrees, and
-  metadata-only fork roots.
-- Whether Atelier-specific fork fields should become core graph shape is
-  constrained: they should be preserved as provider/source metadata unless the
-  data model identifies a provider-neutral concept.
-- Whether the first interface is only human-readable tables is answered: no.
-  The CLI should provide tabular views and link CRUD, while machine-readable
-  graph output is a primary interface for other tools.
-
-### Node Identity And Stable IDs
-
-- What is the stable identity for each node type? In particular, should `Repo`
-  identity come from canonical path, git common-dir, remote URL, or a derived
-  fingerprint?
-- Is `Worktree` identity path-based, git metadata-based, or both? How should
-  moved worktrees be recognized?
-- How should `Workspace` identity survive path moves, copied directories, and
-  ephemeral workspaces with no versioned metadata?
-- Are harness-native session IDs globally unique, or should `AgentSession`
-  identity always include harness key, state root, and source path?
-
-### GraphLink Versus Typed Relationships
-
-- Are concrete ERD relationships such as `WORKTREE -> BRANCH` and
-  `BRANCH -> FORGE_PR` stored as typed relationship records, represented only as
-  `GraphLink`, or maintained as both typed structs and normalized graph links?
-- If both typed relationships and `GraphLink` exist, which one is authoritative
-  for JSON output, conflict reporting, declared overrides, and table
-  projections?
-- Should `GraphLink` represent every discovered relationship, or only durable
-  declared links plus diagnostics for conflicts?
-
-### Atelier Fork Metadata Mapping
-
-- How exactly does one Atelier `.atelier/forks/index.toml` `ForkEntry` map into
-  Conspectus `ContextFork`, `SessionFork`, and `ForkGroup` nodes?
-- Does one Atelier fork entry become one `ForkGroup`, or can a single fork entry
-  produce multiple fork groups when it contains multiple harness session rows?
-- How should Atelier's per-repo fork membership states (`forked`, `link`, or
-  neither for research mode) map into context-fork relationships?
-- Which Atelier-specific fork fields, if any, should be promoted into
-  provider-neutral graph concepts rather than preserved only as source metadata?
-
-### Context Fork Edge Cases
-
-- How should research forks be represented when they create a fork root and
-  metadata but no worktrees or branches?
-- How should selected forks represent symlinked reference repos where edits
-  affect the parent worktree rather than an isolated fork worktree?
-- What relation kinds or attributes should distinguish created worktrees,
-  referenced parent worktrees, and metadata-only context roots?
-- Can a context fork exist for a single standalone repo without an enclosing
-  workspace, and if so how is that different from an ordinary worktree branch?
-
-### Session Fork Cardinality And Unresolved Endpoints
-
-- Can `SessionFork` exist when the parent session is unknown, intentionally
-  absent, or represented only by a harness-native ID?
-- Can `SessionFork` exist before the child `AgentSession` has been discovered on
-  disk?
-- How should degraded or approximate harness behavior be represented, such as
-  copied transcript history, unsupported native forking, or fresh-session
-  starts?
-- Should unresolved parent or child endpoints be placeholder `AgentSession`
-  nodes, nullable fields on `SessionFork`, or provider metadata attached to a
-  fork-group record?
-
-### ForkGroup Granularity
-
-- Is `ForkGroup` a user-visible operation, an Atelier fork entry, a
-  context/session pair, or a grouping of all context and harness session effects
-  created under one fork name?
-- Can a `ForkGroup` contain one context fork and multiple session forks for
-  different harnesses?
-- Should context-only and session-only operations always create a `ForkGroup`,
-  or only when the source provider exposes an operation-level grouping?
-
-### Session And Mux Link Candidates
-
-- Should ERD cardinalities for agent-session-to-mux and mux-to-agent links be
-  many-candidate relationships, with a projection rule selecting the default
-  display link?
-- What makes one mux link "active" or preferred when multiple candidates exist:
-  attachment state, cwd match, naming convention, declared link, or recency?
-- How should a mux session containing multiple agent sessions render in the
-  default agent projection and in the mux projection?
+The remaining open questions should be settled before or during phase planning
+only when the answer materially changes implementation scope.
 
 ### Workspace Detection And Identity
 
