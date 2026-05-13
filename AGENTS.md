@@ -13,6 +13,10 @@ behavior, read:
 - `docs/adr/` for accepted Architecture Decision Records
 - `README.md` for the project summary
 
+Use `nix develop` for local development. The shell provides Rust tooling,
+standard checks, and Beads from `numtide/llm-agents.nix`. The Beads CLI is
+available as `bd`.
+
 ## Design Guardrails
 
 - Design data-model-first. New features and implementation phases should flow
@@ -48,6 +52,7 @@ behavior, read:
 - Start read-only unless a task explicitly calls for persistence or link CRUD.
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
+- Track implementation work with Beads (`bd`) once tracker state is initialized.
 - Preserve user changes and avoid rewriting unrelated files.
 - For docs-only changes, run `git diff --check`. For code changes, add or run
   the most relevant checks once the project has executable code.
