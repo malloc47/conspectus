@@ -59,16 +59,23 @@ available as `bd`.
 
 ## Git And Review Conventions
 
-- Use short imperative commit subjects, e.g. `Add graph resolver tests`.
-  Conventional Commit prefixes are optional; use them only when they add
-  clarity.
-- Keep commits focused. Separate ADR/design updates, scaffolding, model changes,
-  and behavior changes when that makes review easier.
+- Use Conventional Commit subjects, e.g. `feat(resolve): add graph resolver
+  tests`, `docs(adr): record workspace detection decision`, or
+  `chore(nix): add dev shell tools`.
+- Keep commit size proportional to impact. Small docs fixes can be one commit;
+  broad model, resolver, or workflow changes should be split into reviewable
+  commits by concern.
+- Keep commits focused. Separate ADR/design updates, scaffolding, model
+  changes, tests, and behavior changes when that makes review easier.
 - Prefer short-lived feature branches for multi-step work. Keep `main`
   releasable.
 - Prefer squash merges for feature branches so `main` stays story-oriented.
   Use fast-forward only for small linear branches. Avoid merge commits unless
   preserving branch topology is explicitly useful.
+- Every PR should include at least one sentence of commentary beyond the title
+  that describes the change and surrounding context. Use more detail when the
+  change affects the data model, resolver semantics, persistence, or user
+  workflows.
 - Rebase local feature branches on `main` before merging when practical; do not
   rewrite shared history without coordination.
 - Do not commit generated caches, local state, or work tracker scratch data
