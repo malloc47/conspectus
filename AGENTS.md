@@ -56,3 +56,40 @@ available as `bd`.
 - Preserve user changes and avoid rewriting unrelated files.
 - For docs-only changes, run `git diff --check`. For code changes, add or run
   the most relevant checks once the project has executable code.
+
+## Git And Review Conventions
+
+- Use short imperative commit subjects, e.g. `Add graph resolver tests`.
+  Conventional Commit prefixes are optional; use them only when they add
+  clarity.
+- Keep commits focused. Separate ADR/design updates, scaffolding, model changes,
+  and behavior changes when that makes review easier.
+- Prefer short-lived feature branches for multi-step work. Keep `main`
+  releasable.
+- Prefer squash merges for feature branches so `main` stays story-oriented.
+  Use fast-forward only for small linear branches. Avoid merge commits unless
+  preserving branch topology is explicitly useful.
+- Rebase local feature branches on `main` before merging when practical; do not
+  rewrite shared history without coordination.
+- Do not commit generated caches, local state, or work tracker scratch data
+  unless the file is an intentional project artifact.
+
+## Pre-Main Invariants
+
+Before a feature branch, squash merge, or direct commit lands on `main`:
+
+- Relevant tests pass. Once the Rust crate exists, run at least
+  `cargo test --all-targets --all-features`; prefer
+  `cargo nextest run --all-targets --all-features` for full validation.
+- Formatting and linting pass: `cargo fmt -- --check` and
+  `cargo clippy --all-targets --all-features -- -D warnings` when code exists.
+- `git diff --check` passes for every change.
+- Documentation is updated when behavior, architecture, workflow, or commands
+  change.
+- Significant decisions are recorded in a new ADR under `docs/adr/`, and
+  `docs/design.md` is updated when the north-star model or requirements change.
+- Tests cover new resolver/model behavior, including sparse and ambiguous graph
+  cases.
+- Machine-readable output changes include snapshot or fixture coverage once
+  output tests exist.
+- The working tree is clean before pushing.
