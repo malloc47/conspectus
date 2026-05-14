@@ -17,3 +17,9 @@ names, collision notes, and the rationale for choosing `conspectus`.
 
 Purpose: interim work tracker for turning the design and ADRs into phases,
 stories, blockers, and follow-up implementation tasks.
+
+## `docs/implementation/`
+
+Purpose: phase-by-phase implementation plan for turning the design into
+deliverable milestones, including expected behavior, tests, manual checks, and
+assumptions for each phase.

@@ -18,13 +18,15 @@ CLI queries, dependency operations, or agent/MCP integration.
 
 ## Phase 0: Planning
 
-- [ ] `P0-001` Convert `docs/design.md` into implementation phases and
+- [x] `P0-001` Convert `docs/design.md` into implementation phases and
   milestone-level stories.
   - Blockers: none.
-- [ ] `P0-002` Identify the first vertical slice for the Rust crate and CLI.
+- [x] `P0-002` Identify the first vertical slice for the Rust crate and CLI.
   - Blockers: `P0-001`.
-- [ ] `P0-003` Define the fixture strategy for sparse graph and resolver tests.
+- [x] `P0-003` Define the fixture strategy for sparse graph and resolver tests.
   - Blockers: `P0-001`.
+  - Outcome: see `docs/implementation/`; first vertical slice is JSON graph
+    output with sparse graph and resolver fixtures.
 
 ## Phase 1: Foundation
 
