@@ -12,3 +12,8 @@ and migration from atelier-adjacent concepts.
 
 Purpose: historical naming artifact documenting accepted and rejected project
 names, collision notes, and the rationale for choosing `conspectus`.
+
+## `docs/backlog.md`
+
+Purpose: interim work tracker for turning the design and ADRs into phases,
+stories, blockers, and follow-up implementation tasks.

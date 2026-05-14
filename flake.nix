@@ -4,18 +4,15 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    llm-agents.url = "github:numtide/llm-agents.nix";
   };
 
-  outputs = { self, nixpkgs, flake-utils, llm-agents }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
         };
-
-        llmPkgs = llm-agents.packages.${system};
 
         rustTools = with pkgs; [
           cargo
@@ -35,17 +32,13 @@
           which
         ];
 
-        workTrackingTools = [
-          llmPkgs.beads
-        ];
-
         darwinInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libiconv
         ];
       in
       {
         devShells.default = pkgs.mkShell {
-          packages = rustTools ++ devTools ++ workTrackingTools ++ darwinInputs;
+          packages = rustTools ++ devTools ++ darwinInputs;
 
           shellHook = ''
             echo "conspectus dev shell (system: ${system})"
@@ -55,19 +48,6 @@
             if command -v cargo-nextest >/dev/null 2>&1; then
               printf "  nextest: %s\n" "$(cargo nextest --version 2>/dev/null | head -n1)"
             fi
-            echo
-            echo "Work tracking tools:"
-            for tool in beads bd br; do
-              if command -v "$tool" >/dev/null 2>&1; then
-                version=$("$tool" --version 2>/dev/null \
-                  || "$tool" version 2>/dev/null \
-                  || echo "(installed; version probe failed)")
-                version=$(printf '%s' "$version" | head -n1)
-                printf "  %-7s %s\n" "$tool:" "$version"
-              else
-                printf "  %-7s (not installed)\n" "$tool:"
-              fi
-            done
             echo
             echo "Common checks:"
             echo "  cargo fmt -- --check"

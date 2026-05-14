@@ -17,5 +17,4 @@ nix develop
 ```
 
 The shell provides Rust tooling, `cargo-nextest`, `just`, `pre-commit`, tmux,
-GitHub CLI, and Beads from `numtide/llm-agents.nix`. Beads is available as
-`bd`.
+and GitHub CLI.

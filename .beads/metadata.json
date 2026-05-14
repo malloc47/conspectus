@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "conspectus",
-  "project_id": "27dd7b20-8ad2-4994-a898-58aee34dd871"
-}
