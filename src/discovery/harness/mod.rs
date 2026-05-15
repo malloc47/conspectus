@@ -19,6 +19,8 @@ use anyhow::Result;
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::GraphSnapshot;
 
+pub mod fixtures;
+
 pub trait HarnessAdapter: Send + Sync {
     fn harness_key(&self) -> &str;
 

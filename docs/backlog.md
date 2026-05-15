@@ -333,7 +333,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     and `HarnessDiscovery` provider; extended `DiscoveryContext` with per-harness
     state-root overrides; covered empty adapters, missing state roots, state-root
     passthrough, and deterministic fragment merging.
-- [ ] `P3-002` Add synthetic harness fixture support.
+- [x] `P3-002` Add synthetic harness fixture support.
   - Scope: add test helpers for creating provider state directories and session
     records for `claude-code`, `opencode`, `codex`, and `aider` without reading
     the user's real harness state.
@@ -342,6 +342,11 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: verify fixtures live under temporary directories and do not
     depend on local home-directory state.
   - Blockers: `P3-001`.
+  - Outcome: added a `discovery::harness::fixtures` module with a
+    `HarnessFixture` builder and standalone writers for Codex, Claude Code,
+    opencode, and aider state layouts plus a malformed-record helper, all rooted
+    at a caller-supplied temp directory; covered paths, optional fields, cwd
+    encoding, opencode time fields, aider marker files, and malformed records.
 - [ ] `P3-003` Discover supported agent sessions.
   - Scope: implement read-only adapters that emit Conspectus-native
     `AgentSession` nodes and source metadata for supported local state from
