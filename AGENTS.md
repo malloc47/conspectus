@@ -39,6 +39,10 @@ standard checks.
 
 - Significant decisions resolved while building features or drafting plans must
   be memorialized as new ADRs under `docs/adr/`.
+- Do not introduce new project dependencies, workflow tools, or persistent
+  conventions just because they are convenient. First document the need,
+  research reasonable alternatives, compare tradeoffs, and record the
+  conclusion as an ADR.
 - Use the existing ADR style: status, context, decision, consequences,
   alternatives considered, and open questions answered when applicable.
 - Update `docs/design.md` whenever requirements are introduced or refined, or
