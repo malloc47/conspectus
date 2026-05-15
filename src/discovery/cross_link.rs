@@ -129,6 +129,19 @@ fn linked_to_mux(
 ) -> GraphLink {
     let source = NodeId::AgentSession(session.id.clone());
     let target = NodeId::MuxSession(mux.id.clone());
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "match_kind".to_string(),
+        serde_json::Value::String(evidence.to_string()),
+    );
+
+    if let Some(activity) = mux.activity_epoch {
+        fields.insert(
+            "mux_activity_epoch".to_string(),
+            serde_json::Value::Number(activity.into()),
+        );
+    }
+
     GraphLink {
         id: format!("cross_link:{source}:linked_to_mux:{target}:{evidence}"),
         source,
@@ -140,7 +153,7 @@ fn linked_to_mux(
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some(evidence.to_string()),
-            fields: Default::default(),
+            fields,
         },
         state: LinkState::Active,
     }
@@ -212,6 +225,8 @@ mod tests {
             backend: "tmux".to_string(),
             native_id: native.to_string(),
             cwd: cwd.map(str::to_string),
+            activity_epoch: None,
+            created_epoch: None,
         })
     }
 

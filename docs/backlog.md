@@ -424,7 +424,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     sits at or below an atelier `RootedAtPath` fork root; every plausible mux
     match is preserved and atelier-emitted `ParentSession`/`ChildSession`
     unresolved lineage links pass through untouched.
-- [ ] `P3-008` Implement session-to-mux resolver scoring.
+- [x] `P3-008` Implement session-to-mux resolver scoring.
   - Scope: apply ADR 0006 scoring for session-to-mux candidates: local
     declared, global declared, strong process or provider evidence, exact
     cwd/root match, naming convention, then recency or activity correlation.
@@ -433,6 +433,14 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: inspect resolved relationships for one-to-many mux scenarios
     and confirm lower-ranked candidates remain visible.
   - Blockers: `P3-007`.
+  - Outcome: extended `MuxSessionNode` with optional `activity_epoch` and
+    `created_epoch`, forwarded the activity through `cross_link::infer`
+    onto `LinkedToMux` candidate metadata, and added a session-mux-specific
+    resolver comparator that ranks declared > strong > exact-cwd >
+    naming-convention > cached and breaks remaining ties by activity
+    recency. Ignored and overridden candidates continue to be skipped and
+    every losing candidate is recorded as a competing link plus a
+    `Conflict` diagnostic.
 - [ ] `P3-009` Wire agent and tmux discovery into local graph discovery.
   - Scope: register the harness and tmux providers in local discovery so
     `conspectus graph --format json` emits repo, workspace, fork, session, and

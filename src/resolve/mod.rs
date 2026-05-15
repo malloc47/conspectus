@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{Diagnostic, GraphLink, GraphSnapshot, LinkState, NodeId, ResolvedRelationship};
+use crate::model::{
+    Confidence, Diagnostic, GraphLink, GraphSnapshot, LinkState, NodeId, Provenance, RelationKind,
+    ResolvedRelationship,
+};
 
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     let output = resolve_links(&snapshot.candidate_links);
@@ -80,12 +83,73 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
 }
 
 fn compare_candidates(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
+    match left.relation {
+        RelationKind::LinkedToMux => compare_session_mux(left, right),
+        _ => compare_generic(left, right),
+    }
+}
+
+fn compare_generic(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
     right
         .provenance
         .precedence()
         .cmp(&left.provenance.precedence())
         .then_with(|| right.confidence.cmp(&left.confidence))
         .then_with(|| left.id.cmp(&right.id))
+}
+
+/// Session ↔ mux ordering per ADR 0006: declared → strong evidence → exact
+/// cwd/root match → naming convention → recency tie-breaker.
+fn compare_session_mux(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
+    let l = mux_score(left);
+    let r = mux_score(right);
+
+    r.tier
+        .cmp(&l.tier)
+        .then_with(|| r.confidence.cmp(&l.confidence))
+        .then_with(|| r.activity_epoch.cmp(&l.activity_epoch))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct MuxScore {
+    tier: MuxTier,
+    confidence: Confidence,
+    activity_epoch: i64,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum MuxTier {
+    Cached = 0,
+    Convention = 1,
+    Discovered = 2,
+    StrongDiscovered = 3,
+    GlobalDeclared = 4,
+    LocalDeclared = 5,
+}
+
+fn mux_score(link: &GraphLink) -> MuxScore {
+    MuxScore {
+        tier: mux_tier(link.provenance),
+        confidence: link.confidence,
+        activity_epoch: link
+            .source_metadata
+            .fields
+            .get("mux_activity_epoch")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(i64::MIN),
+    }
+}
+
+fn mux_tier(provenance: Provenance) -> MuxTier {
+    match provenance {
+        Provenance::LocalDeclared => MuxTier::LocalDeclared,
+        Provenance::GlobalDeclared => MuxTier::GlobalDeclared,
+        Provenance::StrongDiscovered => MuxTier::StrongDiscovered,
+        Provenance::Discovered => MuxTier::Discovered,
+        Provenance::Convention => MuxTier::Convention,
+        Provenance::Cached => MuxTier::Cached,
+    }
 }
 
 #[cfg(test)]
@@ -187,6 +251,197 @@ mod tests {
         let output = resolve_links(&[cached, strong]);
 
         assert_eq!(output.resolved_relationships[0].selected_link_id, "strong");
+    }
+
+    fn linked_to_mux_link(
+        id: &str,
+        source: NodeId,
+        target: NodeId,
+        provenance: Provenance,
+        confidence: Confidence,
+        activity_epoch: Option<i64>,
+    ) -> GraphLink {
+        let mut link = GraphLink::new(
+            id,
+            source,
+            LinkEndpoint::Node { id: target },
+            RelationKind::LinkedToMux,
+            provenance,
+        );
+        link.confidence = confidence;
+
+        if let Some(epoch) = activity_epoch {
+            link.source_metadata.fields.insert(
+                "mux_activity_epoch".to_string(),
+                serde_json::Value::Number(epoch.into()),
+            );
+        }
+
+        link
+    }
+
+    #[test]
+    fn session_mux_resolver_picks_local_declared_over_lower_tiers() {
+        let strong = linked_to_mux_link(
+            "strong",
+            session("a"),
+            mux("tmux:strong"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(2_000),
+        );
+        let declared = linked_to_mux_link(
+            "declared",
+            session("a"),
+            mux("tmux:declared"),
+            Provenance::LocalDeclared,
+            Confidence::Low,
+            None,
+        );
+        let convention = linked_to_mux_link(
+            "convention",
+            session("a"),
+            mux("tmux:convention"),
+            Provenance::Convention,
+            Confidence::High,
+            Some(9_999),
+        );
+
+        let output = resolve_links(&[convention, strong, declared]);
+
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id,
+            "declared"
+        );
+    }
+
+    #[test]
+    fn session_mux_resolver_prefers_exact_cwd_over_naming_convention() {
+        let discovered_exact = linked_to_mux_link(
+            "exact",
+            session("a"),
+            mux("tmux:exact"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            None,
+        );
+        let convention = linked_to_mux_link(
+            "convention",
+            session("a"),
+            mux("tmux:convention"),
+            Provenance::Convention,
+            Confidence::High,
+            Some(9_999),
+        );
+
+        let output = resolve_links(&[convention, discovered_exact]);
+
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "exact");
+    }
+
+    #[test]
+    fn session_mux_resolver_breaks_ties_on_activity_recency() {
+        let older = linked_to_mux_link(
+            "older",
+            session("a"),
+            mux("tmux:older"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(1_000),
+        );
+        let newer = linked_to_mux_link(
+            "newer",
+            session("a"),
+            mux("tmux:newer"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(5_000),
+        );
+
+        let output = resolve_links(&[older, newer]);
+
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "newer");
+        assert_eq!(
+            output.resolved_relationships[0].competing_link_ids,
+            vec!["older".to_string()]
+        );
+    }
+
+    #[test]
+    fn session_mux_resolver_emits_ambiguity_diagnostic_for_multiple_candidates() {
+        let one = linked_to_mux_link(
+            "one",
+            session("a"),
+            mux("tmux:one"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(2_000),
+        );
+        let two = linked_to_mux_link(
+            "two",
+            session("a"),
+            mux("tmux:two"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(3_000),
+        );
+
+        let output = resolve_links(&[one, two]);
+
+        let conflict = output
+            .diagnostics
+            .iter()
+            .find(|d| matches!(d, Diagnostic::Conflict { .. }))
+            .expect("conflict diagnostic");
+        match conflict {
+            Diagnostic::Conflict {
+                selected_link_id,
+                competing_link_ids,
+                ..
+            } => {
+                assert_eq!(selected_link_id, "two");
+                assert_eq!(competing_link_ids, &vec!["one".to_string()]);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn session_mux_resolver_skips_ignored_and_overridden_candidates() {
+        let mut ignored = linked_to_mux_link(
+            "ignored",
+            session("a"),
+            mux("tmux:ignored"),
+            Provenance::LocalDeclared,
+            Confidence::High,
+            Some(9_999),
+        );
+        ignored.state = LinkState::Ignored { reason: None };
+        let mut overridden = linked_to_mux_link(
+            "overridden",
+            session("a"),
+            mux("tmux:overridden"),
+            Provenance::GlobalDeclared,
+            Confidence::High,
+            Some(9_999),
+        );
+        overridden.state = LinkState::Overridden {
+            by: "winner".to_string(),
+            reason: None,
+        };
+        let active = linked_to_mux_link(
+            "active",
+            session("a"),
+            mux("tmux:active"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(1_000),
+        );
+
+        let output = resolve_links(&[ignored, overridden, active]);
+
+        assert_eq!(output.resolved_relationships.len(), 1);
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "active");
     }
 
     #[test]

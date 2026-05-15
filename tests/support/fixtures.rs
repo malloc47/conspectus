@@ -28,6 +28,8 @@ pub fn mux_only_graph() -> GraphSnapshot {
             backend: "tmux".to_string(),
             native_id: "solo".to_string(),
             cwd: Some("/workspace".to_string()),
+            activity_epoch: None,
+            created_epoch: None,
         })],
         ..GraphSnapshot::empty()
     })
@@ -186,5 +188,7 @@ fn mux_node(id: &str, native_id: &str) -> GraphNode {
         backend: "tmux".to_string(),
         native_id: native_id.to_string(),
         cwd: Some("/workspace".to_string()),
+        activity_epoch: None,
+        created_epoch: None,
     })
 }

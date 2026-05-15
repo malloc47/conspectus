@@ -234,6 +234,8 @@ mod tests {
                     backend: "tmux".to_string(),
                     native_id: "s1".to_string(),
                     cwd: None,
+                    activity_epoch: None,
+                    created_epoch: None,
                 })],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
@@ -255,6 +257,8 @@ mod tests {
             backend: "tmux".to_string(),
             native_id: "s1".to_string(),
             cwd: None,
+            activity_epoch: None,
+            created_epoch: None,
         });
         let source = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
         let target = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));

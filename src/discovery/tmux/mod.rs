@@ -278,6 +278,8 @@ impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 backend: TMUX_BACKEND.to_string(),
                 native_id: row.name.clone(),
                 cwd: row.path.clone(),
+                activity_epoch: row.activity_epoch,
+                created_epoch: row.created_epoch,
             }));
         }
 
