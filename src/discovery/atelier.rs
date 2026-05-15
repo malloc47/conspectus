@@ -8,8 +8,9 @@ use serde::Deserialize;
 use crate::discovery::git::{GitProbe, fragment_from_probe};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::{
-    Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState, NodeId, Provenance,
-    RelationKind, SourceMetadata, WorkspaceId, WorkspaceNode,
+    BranchId, BranchNode, Confidence, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
+    LinkEndpoint, LinkState, Metadata, NodeId, Provenance, RelationKind, RepoId, RepoNode,
+    SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode, WorktreeId, WorktreeNode,
 };
 
 pub const ATELIER_CONFIG_FILENAME: &str = "atelier.toml";
@@ -92,6 +93,16 @@ impl AtelierWorkspaceDiscovery {
         let mut snapshot = merge_fragments(child_fragments);
         snapshot.nodes.push(workspace_node);
         snapshot.candidate_links.extend(repo_links);
+
+        let fork_records =
+            AtelierForkIndex::load(&workspace_root)?.into_provider_records(&workspace_root);
+        let fork_fragment = fork_records_fragment(&workspace, &fork_records);
+        snapshot.nodes.extend(fork_fragment.nodes);
+        snapshot
+            .candidate_links
+            .extend(fork_fragment.candidate_links);
+        snapshot.diagnostics.extend(fork_fragment.diagnostics);
+
         snapshot.canonicalize();
         Ok(snapshot_fragment(snapshot))
     }
@@ -250,6 +261,215 @@ impl AtelierForkRecord {
             harness: entry.harness,
         }
     }
+}
+
+pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) -> GraphFragment {
+    let mut fragment = GraphFragment::empty();
+
+    for record in records {
+        let fork_id = ForkId::new(format!("atelier:{}", record.source_key));
+        let fork = NodeId::Fork(fork_id.clone());
+        fragment.nodes.push(GraphNode::Fork(ForkNode {
+            id: fork_id,
+            provider: record.provider.clone(),
+            provider_source_key: record.source_key.clone(),
+            name: Some(record.name.clone()),
+            scope: Some("workspace".to_string()),
+            capabilities: fork_capabilities(record),
+        }));
+        fragment.candidate_links.push(atelier_link(
+            fork.clone(),
+            LinkEndpoint::Node {
+                id: workspace.clone(),
+            },
+            RelationKind::ForksWorkspace,
+            "fork belongs to Atelier workspace",
+            record_metadata(record, None),
+        ));
+        fragment.candidate_links.push(atelier_link(
+            fork.clone(),
+            LinkEndpoint::Unresolved {
+                evidence: UnresolvedEndpoint {
+                    node_type: "path".to_string(),
+                    harness_key: None,
+                    native_id: None,
+                    state_scope: None,
+                    path: Some(path_string(&record.root)),
+                    metadata: record_metadata(record, None),
+                },
+            },
+            RelationKind::RootedAtPath,
+            "fork root path",
+            record_metadata(record, None),
+        ));
+
+        if let Some(parent) = &record.parent {
+            fragment.candidate_links.push(atelier_link(
+                fork.clone(),
+                LinkEndpoint::Node {
+                    id: NodeId::Fork(ForkId::new(format!("atelier:{parent}"))),
+                },
+                RelationKind::ParentFork,
+                "fork parent",
+                record_metadata(record, None),
+            ));
+        }
+
+        for repo in &record.repos {
+            let repo_id = RepoId::new(path_string(&repo.source));
+            let repo_node = NodeId::Repo(repo_id.clone());
+            fragment
+                .nodes
+                .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+            fragment.candidate_links.push(atelier_link(
+                fork.clone(),
+                LinkEndpoint::Node {
+                    id: repo_node.clone(),
+                },
+                RelationKind::ForksRepo,
+                "fork repo membership",
+                record_metadata(record, Some(repo)),
+            ));
+
+            if let Some(fork_worktree) = &repo.fork_worktree {
+                let worktree_id = WorktreeId::new(repo_id.clone(), path_string(fork_worktree));
+                fragment.nodes.push(GraphNode::Worktree(WorktreeNode {
+                    id: worktree_id.clone(),
+                    root: path_string(fork_worktree),
+                    git_dir: None,
+                    current_branch: repo
+                        .branch
+                        .as_ref()
+                        .map(|branch| BranchId::new(repo_id.clone(), branch.clone())),
+                }));
+                fragment.candidate_links.push(atelier_link(
+                    fork.clone(),
+                    LinkEndpoint::Node {
+                        id: NodeId::Worktree(worktree_id),
+                    },
+                    RelationKind::CreatedWorktree,
+                    "fork created worktree",
+                    record_metadata(record, Some(repo)),
+                ));
+            }
+
+            if repo.link {
+                let worktree_id =
+                    WorktreeId::new(repo_id.clone(), path_string(&repo.parent_worktree));
+                fragment.nodes.push(GraphNode::Worktree(WorktreeNode {
+                    id: worktree_id.clone(),
+                    root: path_string(&repo.parent_worktree),
+                    git_dir: None,
+                    current_branch: None,
+                }));
+                fragment.candidate_links.push(atelier_link(
+                    fork.clone(),
+                    LinkEndpoint::Node {
+                        id: NodeId::Worktree(worktree_id),
+                    },
+                    RelationKind::ReferencedWorktree,
+                    "fork referenced parent worktree",
+                    record_metadata(record, Some(repo)),
+                ));
+            }
+
+            if let Some(branch) = &repo.branch {
+                let branch_id = BranchId::new(repo_id.clone(), branch.clone());
+                fragment.nodes.push(GraphNode::Branch(BranchNode {
+                    id: branch_id.clone(),
+                    refname: branch.clone(),
+                    current_commit: None,
+                    upstream: None,
+                }));
+                fragment.candidate_links.push(atelier_link(
+                    fork.clone(),
+                    LinkEndpoint::Node {
+                        id: NodeId::Branch(branch_id),
+                    },
+                    if repo.forked {
+                        RelationKind::CreatedBranch
+                    } else {
+                        RelationKind::AssociatedBranch
+                    },
+                    "fork branch metadata",
+                    record_metadata(record, Some(repo)),
+                ));
+            }
+        }
+    }
+
+    snapshot_fragment(fragment.into_snapshot())
+}
+
+fn fork_capabilities(record: &AtelierForkRecord) -> Vec<String> {
+    let mut capabilities = vec![format!("mode:{:?}", record.mode).to_lowercase()];
+
+    if record.read_only {
+        capabilities.push("read_only".to_string());
+    }
+
+    capabilities.push(format!("state:{:?}", record.state).to_lowercase());
+    capabilities
+}
+
+fn atelier_link(
+    source: NodeId,
+    target: LinkEndpoint,
+    relation: RelationKind,
+    evidence: &str,
+    fields: Metadata,
+) -> GraphLink {
+    let target_key = match &target {
+        LinkEndpoint::Node { id } => id.to_string(),
+        LinkEndpoint::Unresolved { evidence } => evidence
+            .path
+            .clone()
+            .or_else(|| evidence.native_id.clone())
+            .unwrap_or_else(|| "unresolved".to_string()),
+    };
+    let relation_name = relation_name(&relation);
+    GraphLink {
+        id: format!("atelier:{source}:{relation_name}:{target_key}"),
+        source,
+        target,
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "atelier".to_string(),
+            evidence: Some(evidence.to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn record_metadata(record: &AtelierForkRecord, repo: Option<&AtelierForkRepoEntry>) -> Metadata {
+    let mut fields = Metadata::new();
+    fields.insert(
+        "fork_name".to_string(),
+        serde_json::Value::String(record.name.clone()),
+    );
+    fields.insert(
+        "fork_mode".to_string(),
+        serde_json::Value::String(format!("{:?}", record.mode).to_lowercase()),
+    );
+    fields.insert(
+        "created_epoch".to_string(),
+        serde_json::Value::Number(record.created_epoch.into()),
+    );
+
+    if let Some(repo) = repo {
+        fields.insert(
+            "repo_name".to_string(),
+            serde_json::Value::String(repo.name.clone()),
+        );
+        fields.insert("forked".to_string(), serde_json::Value::Bool(repo.forked));
+        fields.insert("link".to_string(), serde_json::Value::Bool(repo.link));
+    }
+
+    fields
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]

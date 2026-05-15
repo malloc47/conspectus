@@ -262,7 +262,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     provider-neutral fork records for worktree, selected, research, standalone,
     parent, repo membership, and harness lineage metadata; missing indexes load
     as empty.
-- [ ] `P2-008` Map Atelier forks into graph nodes and context-effect links.
+- [x] `P2-008` Map Atelier forks into graph nodes and context-effect links.
   - Scope: emit one polymorphic `Fork` node per provider fork and candidate
     links for `forks_workspace`, `forks_repo`, `created_worktree`,
     `referenced_worktree`, `created_branch`, `associated_branch`,
@@ -273,6 +273,11 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: inspect graph JSON from Atelier fork fixtures and confirm no
     fake workspace nodes are fabricated for standalone repo contexts.
   - Blockers: `P2-007`.
+  - Outcome: emitted one `Fork` node per Atelier fork plus candidate links for
+    workspace scope, repo scope, created worktrees, referenced worktrees,
+    created or associated branches, fork roots as unresolved path evidence, and
+    parent forks, with snapshot coverage for worktree, selected, research, and
+    standalone contexts.
 - [ ] `P2-009` Wire local discovery into `graph --format json`.
   - Scope: replace empty graph discovery with local discovery orchestration for
     cwd/configured roots while preserving deterministic output and existing
