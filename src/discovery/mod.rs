@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
 pub mod atelier;
+pub mod cross_link;
 pub mod git;
 pub mod harness;
 pub mod tmux;

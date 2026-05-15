@@ -407,7 +407,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     `TmuxDiscovery` provider that emits one `MuxSession` node per row while
     surfacing `Available`/`Unavailable`/`Failed` status to callers that need
     diagnostics. All tests use `FakeTmux` so no real tmux server is required.
-- [ ] `P3-007` Generate session, workspace, fork, and mux candidate links.
+- [x] `P3-007` Generate session, workspace, fork, and mux candidate links.
   - Scope: emit candidate links for session cwd/root matches, fork
     associations, mux candidates, parent session evidence, child session
     evidence, and unresolved lineage endpoints while preserving all plausible
@@ -417,6 +417,13 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: inspect JSON to confirm ambiguous mux evidence remains in
     `candidate_links`.
   - Blockers: `P3-004`, `P3-006`.
+  - Outcome: added a `discovery::cross_link::infer` post-merge pass that derives
+    `AgentSession`→`MuxSession` `LinkedToMux` candidates (StrongDiscovered for
+    exact cwd matches, Discovered for prefix matches) and
+    `AgentSession`→`Fork` `AssociatedWith` candidates whenever a session cwd
+    sits at or below an atelier `RootedAtPath` fork root; every plausible mux
+    match is preserved and atelier-emitted `ParentSession`/`ChildSession`
+    unresolved lineage links pass through untouched.
 - [ ] `P3-008` Implement session-to-mux resolver scoring.
   - Scope: apply ADR 0006 scoring for session-to-mux candidates: local
     declared, global declared, strong process or provider evidence, exact
