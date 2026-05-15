@@ -212,7 +212,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     nodes with strong-discovered candidate links for repo membership and checked
     out branches, plus fixed-path JSON snapshots for plain, detached, and linked
     worktree cases.
-- [ ] `P2-004` Add cwd and configured scan-root discovery inputs.
+- [x] `P2-004` Add cwd and configured scan-root discovery inputs.
   - Scope: discover from the current working directory and from explicitly
     configured scan roots without recursively walking `$HOME` by default.
   - Tests: unit tests for scan-root normalization, duplicate-root handling, and
@@ -220,6 +220,9 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: verify running outside a git repo still returns a valid
     sparse graph document.
   - Blockers: `P2-001`, `P2-003`.
+  - Outcome: added current-directory and explicit scan-root context builders,
+    canonicalization and deduplication for existing roots, missing-root errors,
+    and local discovery over non-git roots without recursive scanning.
 - [ ] `P2-005` Add generic workspace inference.
   - Scope: infer generic workspace roots from configured roots or layout
     evidence and link participating repos/worktrees without fabricating

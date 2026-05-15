@@ -3,10 +3,11 @@
 //! This module will hold providers for git, agent harnesses, tmux, forge, and
 //! workspace metadata.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
@@ -22,10 +23,30 @@ pub struct DiscoveryContext {
 }
 
 impl DiscoveryContext {
+    pub fn from_current_dir() -> Result<Self> {
+        Self::from_roots([env::current_dir().context("failed to read current directory")?])
+    }
+
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
         Self {
             roots: vec![root.into()],
         }
+    }
+
+    pub fn from_roots(roots: impl IntoIterator<Item = impl Into<PathBuf>>) -> Result<Self> {
+        let mut seen = BTreeSet::new();
+        let mut normalized = Vec::new();
+
+        for root in roots {
+            let root = root.into();
+            let normalized_root = normalize_scan_root(&root)?;
+
+            if seen.insert(normalized_root.clone()) {
+                normalized.push(normalized_root);
+            }
+        }
+
+        Ok(Self { roots: normalized })
     }
 
     pub fn roots(&self) -> &[PathBuf] {
@@ -84,6 +105,14 @@ pub fn discover_empty_at(root: impl AsRef<Path>) -> Result<GraphSnapshot> {
     LocalDiscovery::new().discover(&DiscoveryContext::from_root(root.as_ref()))
 }
 
+pub fn discover_local_at_roots(
+    roots: impl IntoIterator<Item = impl Into<PathBuf>>,
+) -> Result<GraphSnapshot> {
+    LocalDiscovery::new()
+        .with_provider(git::GitDiscovery::new())
+        .discover(&DiscoveryContext::from_roots(roots)?)
+}
+
 pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> GraphSnapshot {
     let mut nodes = BTreeMap::new();
     let mut candidate_links = BTreeMap::new();
@@ -109,6 +138,19 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     };
     snapshot.canonicalize();
     snapshot
+}
+
+fn normalize_scan_root(root: &Path) -> Result<PathBuf> {
+    if !root.exists() {
+        bail!("scan root does not exist: {}", root.display());
+    }
+
+    if !root.is_dir() {
+        bail!("scan root is not a directory: {}", root.display());
+    }
+
+    root.canonicalize()
+        .with_context(|| format!("failed to canonicalize scan root: {}", root.display()))
 }
 
 #[cfg(test)]
@@ -211,5 +253,39 @@ mod tests {
 
         assert_eq!(snapshot.nodes.len(), 1);
         assert_eq!(snapshot.candidate_links, vec![link]);
+    }
+
+    #[test]
+    fn context_normalizes_and_deduplicates_scan_roots() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let root = temp.path();
+        let nested = root.join("nested");
+        std::fs::create_dir(&nested).expect("create nested dir");
+
+        let context =
+            DiscoveryContext::from_roots([root, root, nested.as_path()]).expect("roots normalize");
+
+        assert_eq!(context.roots().len(), 2);
+        assert!(context.roots()[0].is_absolute());
+    }
+
+    #[test]
+    fn context_rejects_missing_scan_roots() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let missing = temp.path().join("missing");
+
+        let error =
+            DiscoveryContext::from_roots([missing]).expect_err("missing roots should be rejected");
+
+        assert!(error.to_string().contains("scan root does not exist"));
+    }
+
+    #[test]
+    fn local_discovery_accepts_existing_non_git_roots_as_sparse_graphs() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+
+        let snapshot = discover_local_at_roots([temp.path()]).expect("local discovery succeeds");
+
+        assert_eq!(snapshot, GraphSnapshot::empty());
     }
 }
