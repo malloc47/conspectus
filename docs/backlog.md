@@ -304,13 +304,17 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Outcome: added normalized temp-fixture snapshots for plain repo, linked
     worktree, generic workspace, Atelier workspace without forks, and Atelier
     workspace with worktree, selected, and research fork metadata.
-- [ ] `P2-011` Verify the Phase 2 end state.
+- [x] `P2-011` Verify the Phase 2 end state.
   - Scope: run the full Phase 2 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 2 scope.
   - Tests: `just check`.
   - Manual checks: run `cargo run -- graph --format json` from the Phase 2
     manual-check contexts and confirm discovery remains read-only.
   - Blockers: `P2-009`, `P2-010`.
+  - Outcome: `nix develop --command just check` passed with 56 tests, and
+    `nix develop --command cargo run -- graph --format json` from the
+    Conspectus repo emitted git repo, worktree, branch, candidate link, and
+    resolved relationship JSON without modifying workspace files.
 
 ## Later
 
