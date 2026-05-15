@@ -478,13 +478,36 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     unresolved parent/child lineage. All temp paths are normalized to
     `/fixture` for stable ordering and no placeholder session nodes are
     emitted.
-- [ ] `P3-011` Verify the Phase 3 end state.
+- [x] `P3-011` Verify the Phase 3 end state.
   - Scope: run the full Phase 3 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 3 scope.
   - Tests: `just check`.
   - Manual checks: run the tmux smoke commands from the Phase 3 plan and run
     against real local harness state if available.
   - Blockers: `P3-009`, `P3-010`.
+  - Outcome: `nix develop --command just check` passed with 124 tests. The
+    tmux smoke test (`tmux new-session -d -s conspectus-smoke -c "$PWD"` +
+    `cargo run -- graph --format json`) emitted one repo/worktree/branch,
+    three mux sessions (including the smoke session at the conspectus repo
+    cwd) and 16 agent sessions from the real `~/.codex`, `~/.claude`, and
+    `~/.local/share/opencode` state. Discovery remained read-only.
+  - Follow-up: real codex/claude/opencode state did not populate
+    `agent_session.cwd`, so `cross_link::infer` never matched the smoke
+    session against the live harness data. The Phase 3 adapters parse the
+    synthetic fixture shapes; aligning them with the actual production
+    JSONL/info.json layouts (and propagating cwd plus activity epochs)
+    belongs in a Phase 4-or-later task rather than expanding Phase 3.
+
+## Phase 3 Follow-Ups
+
+- [ ] `P3-FU-001` Align harness adapter parsers with real provider state.
+  - Scope: extend the Codex, Claude Code, and opencode adapters so the cwd
+    and any activity/recency timestamps from real local state populate
+    `AgentSessionNode.cwd` (and link metadata where applicable). The Phase 3
+    `cross_link::infer` pass already correlates sessions and mux sessions on
+    matching cwds, but real harness JSONL/info.json layouts left
+    `agent_session.cwd` empty during the Phase 3 smoke test.
+  - Blockers: none.
 
 ## Later
 
