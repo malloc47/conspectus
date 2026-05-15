@@ -379,13 +379,19 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     Approximate=Medium, Unsupported/Fresh=Low); fresh sessions without a
     `source_session` omit the parent link rather than inventing one, and no
     placeholder `AgentSession` nodes are emitted.
-- [ ] `P3-005` Add injectable tmux command execution.
+- [x] `P3-005` Add injectable tmux command execution.
   - Scope: introduce a small command-runner seam for tmux discovery so tests can
     use fake output and production discovery can call `tmux` read-only.
   - Tests: unit tests for unavailable tmux, command failures, invalid UTF-8 or
     malformed rows, and deterministic error diagnostics.
   - Manual checks: verify no tests require a real tmux server.
   - Blockers: `P3-001`.
+  - Outcome: added `discovery::tmux` with a `TmuxRunner` trait, a `SystemTmux`
+    implementation that invokes `tmux list-sessions -F`, and a `FakeTmux`
+    test runner; outcomes are classified as `Sessions`, `Unavailable`
+    (binary missing or no server), or `Failed` with a stable diagnostic
+    string, and stdout is decoded lossily so invalid UTF-8 surfaces to the
+    parser rather than failing the runner.
 - [ ] `P3-006` Discover tmux sessions.
   - Scope: parse `tmux list-sessions` format output into `MuxSession` nodes,
     including session name, activity metadata when available, and root/cwd path

@@ -14,6 +14,7 @@ use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 pub mod atelier;
 pub mod git;
 pub mod harness;
+pub mod tmux;
 pub mod workspace;
 
 pub fn empty_graph() -> GraphSnapshot {
