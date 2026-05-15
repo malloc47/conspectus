@@ -1,18 +1,26 @@
 //! Terminal multiplexer (tmux) discovery boundaries.
 //!
 //! Production discovery shells out to `tmux list-sessions -F <format>` via
-//! [`SystemTmux`]. Tests inject [`FakeTmux`] (or a closure-based runner) so they
-//! never need a real tmux server. Both expose the same [`TmuxRunner`] surface.
-//!
-//! The runner only owns command execution and outcome classification. The
-//! actual format parsing that turns `tmux` rows into [`MuxSession`] nodes will
-//! land in a follow-up.
+//! [`SystemTmux`]. Tests inject [`FakeTmux`] (or any other [`TmuxRunner`]) so
+//! they never need a real tmux server. [`TmuxDiscovery`] is the
+//! [`DiscoveryProvider`] that asks a runner for sessions, parses the rows, and
+//! emits provider-neutral `MuxSession` nodes.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
+
+use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
+use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
+
+pub const TMUX_BACKEND: &str = "tmux";
+
+/// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
+/// session roots can safely contain spaces.
+pub const TMUX_LIST_FORMAT: &str =
+    "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}";
 
 pub trait TmuxRunner: Send + Sync {
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
@@ -151,6 +159,136 @@ impl TmuxRunner for FakeTmux {
     }
 }
 
+/// One row of `tmux list-sessions` output. Activity and creation epochs are
+/// optional so the parser can keep using rows even when tmux is configured with
+/// a custom format or when fields are blank.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TmuxSessionRow {
+    pub name: String,
+    pub path: Option<String>,
+    pub activity_epoch: Option<i64>,
+    pub created_epoch: Option<i64>,
+}
+
+pub fn parse_list_sessions(stdout: &str) -> Vec<TmuxSessionRow> {
+    stdout.lines().filter_map(parse_session_line).collect()
+}
+
+fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
+    if line.trim().is_empty() {
+        return None;
+    }
+    let mut fields = line.split('\t');
+    let name = fields.next()?.trim().to_string();
+
+    if name.is_empty() {
+        return None;
+    }
+
+    let path = optional_string(fields.next());
+    let activity_epoch = optional_epoch(fields.next());
+    let created_epoch = optional_epoch(fields.next());
+
+    Some(TmuxSessionRow {
+        name,
+        path,
+        activity_epoch,
+        created_epoch,
+    })
+}
+
+fn optional_string(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim();
+
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn optional_epoch(value: Option<&str>) -> Option<i64> {
+    optional_string(value)?.parse().ok()
+}
+
+#[derive(Clone, Debug)]
+pub struct TmuxDiscovery<R: TmuxRunner> {
+    runner: R,
+}
+
+impl Default for TmuxDiscovery<SystemTmux> {
+    fn default() -> Self {
+        Self {
+            runner: SystemTmux::new(),
+        }
+    }
+}
+
+impl TmuxDiscovery<SystemTmux> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl<R: TmuxRunner> TmuxDiscovery<R> {
+    pub fn with_runner(runner: R) -> Self {
+        Self { runner }
+    }
+
+    pub fn rows(&self) -> Result<TmuxDiscoveryRows> {
+        let outcome = self.runner.list_sessions(TMUX_LIST_FORMAT)?;
+        Ok(match outcome {
+            TmuxOutcome::Sessions(stdout) => TmuxDiscoveryRows {
+                rows: parse_list_sessions(&stdout),
+                status: TmuxStatus::Available,
+            },
+            TmuxOutcome::Unavailable(reason) => TmuxDiscoveryRows {
+                rows: Vec::new(),
+                status: TmuxStatus::Unavailable(reason),
+            },
+            TmuxOutcome::Failed { code, message } => TmuxDiscoveryRows {
+                rows: Vec::new(),
+                status: TmuxStatus::Failed { code, message },
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TmuxDiscoveryRows {
+    pub rows: Vec<TmuxSessionRow>,
+    pub status: TmuxStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TmuxStatus {
+    Available,
+    Unavailable(UnavailableReason),
+    Failed { code: Option<i32>, message: String },
+}
+
+impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
+    fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+        let outcome = self.rows()?;
+        let mut nodes = Vec::with_capacity(outcome.rows.len());
+
+        for row in &outcome.rows {
+            nodes.push(GraphNode::MuxSession(MuxSessionNode {
+                id: MuxSessionId::new(format!("{TMUX_BACKEND}:{}", row.name)),
+                backend: TMUX_BACKEND.to_string(),
+                native_id: row.name.clone(),
+                cwd: row.path.clone(),
+            }));
+        }
+
+        Ok(GraphFragment {
+            nodes,
+            candidate_links: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +364,145 @@ mod tests {
         assert_eq!(
             UnavailableReason::NoServer.as_str(),
             "tmux server not running"
+        );
+    }
+
+    #[test]
+    fn parser_yields_empty_rows_for_empty_output() {
+        assert!(parse_list_sessions("").is_empty());
+        assert!(parse_list_sessions("\n\n   \n").is_empty());
+    }
+
+    #[test]
+    fn parser_extracts_name_path_activity_and_created_epoch() {
+        let rows = parse_list_sessions("alpha\t/work/alpha\t1700000500\t1700000000\n");
+
+        assert_eq!(
+            rows,
+            vec![TmuxSessionRow {
+                name: "alpha".to_string(),
+                path: Some("/work/alpha".to_string()),
+                activity_epoch: Some(1700000500),
+                created_epoch: Some(1700000000),
+            }]
+        );
+    }
+
+    #[test]
+    fn parser_handles_paths_with_spaces() {
+        let rows = parse_list_sessions("with-space\t/work/has spaces/here\t\t\n");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path.as_deref(), Some("/work/has spaces/here"));
+        assert!(rows[0].activity_epoch.is_none());
+        assert!(rows[0].created_epoch.is_none());
+    }
+
+    #[test]
+    fn parser_handles_missing_optional_fields() {
+        let rows = parse_list_sessions("only-name\n");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].name, "only-name");
+        assert!(rows[0].path.is_none());
+    }
+
+    #[test]
+    fn parser_skips_rows_without_a_name() {
+        let rows = parse_list_sessions("\t/work\t\t\n");
+
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn parser_drops_malformed_epoch_fields() {
+        let rows = parse_list_sessions("alpha\t/work\tNaN\tunknown\n");
+
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].activity_epoch.is_none());
+        assert!(rows[0].created_epoch.is_none());
+    }
+
+    #[test]
+    fn discovery_returns_zero_sessions_for_blank_runner_output() {
+        let discovery = TmuxDiscovery::with_runner(FakeTmux::with_sessions(""));
+
+        let fragment = discovery
+            .discover(&DiscoveryContext::default())
+            .expect("discover");
+
+        assert!(fragment.nodes.is_empty());
+    }
+
+    #[test]
+    fn discovery_emits_mux_session_per_row() {
+        let stdout = "alpha\t/work/alpha\t1\t0\nbeta\t/work/has space\t\t\n";
+        let discovery = TmuxDiscovery::with_runner(FakeTmux::with_sessions(stdout));
+
+        let fragment = discovery
+            .discover(&DiscoveryContext::default())
+            .expect("discover");
+
+        let sessions: Vec<_> = fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::MuxSession(session) => Some(session.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sessions.len(), 2);
+        let alpha = sessions
+            .iter()
+            .find(|s| s.native_id == "alpha")
+            .expect("alpha");
+        assert_eq!(alpha.id.native_id, "tmux:alpha");
+        assert_eq!(alpha.cwd.as_deref(), Some("/work/alpha"));
+        let beta = sessions
+            .iter()
+            .find(|s| s.native_id == "beta")
+            .expect("beta");
+        assert_eq!(beta.cwd.as_deref(), Some("/work/has space"));
+    }
+
+    #[test]
+    fn discovery_yields_empty_fragment_when_tmux_unavailable() {
+        let discovery =
+            TmuxDiscovery::with_runner(FakeTmux::unavailable(UnavailableReason::NoServer));
+
+        let fragment = discovery
+            .discover(&DiscoveryContext::default())
+            .expect("discover");
+
+        assert!(fragment.nodes.is_empty());
+    }
+
+    #[test]
+    fn discovery_rows_preserve_status_for_unavailable_tmux() {
+        let discovery =
+            TmuxDiscovery::with_runner(FakeTmux::unavailable(UnavailableReason::BinaryNotFound));
+
+        let rows = discovery.rows().expect("rows");
+
+        assert_eq!(
+            rows.status,
+            TmuxStatus::Unavailable(UnavailableReason::BinaryNotFound)
+        );
+        assert!(rows.rows.is_empty());
+    }
+
+    #[test]
+    fn discovery_rows_surface_failed_status() {
+        let discovery = TmuxDiscovery::with_runner(FakeTmux::failed(Some(2), "permission denied"));
+
+        let rows = discovery.rows().expect("rows");
+
+        assert_eq!(
+            rows.status,
+            TmuxStatus::Failed {
+                code: Some(2),
+                message: "permission denied".to_string(),
+            }
         );
     }
 }

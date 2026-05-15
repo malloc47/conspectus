@@ -392,7 +392,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     (binary missing or no server), or `Failed` with a stable diagnostic
     string, and stdout is decoded lossily so invalid UTF-8 surfaces to the
     parser rather than failing the runner.
-- [ ] `P3-006` Discover tmux sessions.
+- [x] `P3-006` Discover tmux sessions.
   - Scope: parse `tmux list-sessions` format output into `MuxSession` nodes,
     including session name, activity metadata when available, and root/cwd path
     evidence.
@@ -400,6 +400,13 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     sessions, paths with spaces, missing root/cwd fields, and unavailable tmux.
   - Manual checks: create a temporary tmux session and inspect mux-session JSON.
   - Blockers: `P3-005`.
+  - Outcome: added a tab-separated `TMUX_LIST_FORMAT`
+    (`#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}`),
+    a `parse_list_sessions` parser that yields rich `TmuxSessionRow` values
+    (preserving activity/creation epochs and paths with spaces), and a
+    `TmuxDiscovery` provider that emits one `MuxSession` node per row while
+    surfacing `Available`/`Unavailable`/`Failed` status to callers that need
+    diagnostics. All tests use `FakeTmux` so no real tmux server is required.
 - [ ] `P3-007` Generate session, workspace, fork, and mux candidate links.
   - Scope: emit candidate links for session cwd/root matches, fork
     associations, mux candidates, parent session evidence, child session
