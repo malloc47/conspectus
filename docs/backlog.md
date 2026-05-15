@@ -278,7 +278,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     created or associated branches, fork roots as unresolved path evidence, and
     parent forks, with snapshot coverage for worktree, selected, research, and
     standalone contexts.
-- [ ] `P2-009` Wire local discovery into `graph --format json`.
+- [x] `P2-009` Wire local discovery into `graph --format json`.
   - Scope: replace empty graph discovery with local discovery orchestration for
     cwd/configured roots while preserving deterministic output and existing
     Phase 1 JSON shape.
@@ -288,6 +288,10 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     linked worktree, an Atelier workspace with no forks, and an Atelier
     workspace with worktree, selected, and research forks.
   - Blockers: `P2-004`, `P2-008`.
+  - Outcome: wired `graph --format json` to local discovery from the current
+    directory or explicit `--scan-root` values, preserving deterministic JSON
+    output and adding CLI coverage for non-repo, plain repo, missing-root, and
+    invalid-format cases.
 - [ ] `P2-010` Add representative local-discovery snapshots.
   - Scope: snapshot graph JSON for plain repo, linked worktree, generic
     workspace, Atelier workspace without forks, and Atelier workspace with
