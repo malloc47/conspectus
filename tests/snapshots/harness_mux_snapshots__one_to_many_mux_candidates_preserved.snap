@@ -1,0 +1,139 @@
+---
+source: tests/harness_mux_snapshots.rs
+expression: normalized
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "harness_key": "codex",
+      "cwd": "/fixture/work"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:alpha"
+      },
+      "backend": "tmux",
+      "native_id": "alpha",
+      "cwd": "/fixture/work",
+      "activity_epoch": 1700000100,
+      "created_epoch": 1700000000
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:beta"
+      },
+      "backend": "tmux",
+      "native_id": "beta",
+      "cwd": "/fixture/work",
+      "activity_epoch": 1700000900,
+      "created_epoch": 1700000000
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:alpha:exact_cwd_match",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:alpha"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "exact_cwd_match",
+        "fields": {
+          "match_kind": "exact_cwd_match",
+          "mux_activity_epoch": 1700000100
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:beta:exact_cwd_match",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:beta"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "exact_cwd_match",
+        "fields": {
+          "match_kind": "exact_cwd_match",
+          "mux_activity_epoch": 1700000900
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:beta"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:beta:exact_cwd_match",
+      "competing_link_ids": [
+        "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:alpha:exact_cwd_match"
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "conflict",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:beta:exact_cwd_match",
+      "competing_link_ids": [
+        "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:alpha:exact_cwd_match"
+      ]
+    }
+  ]
+}

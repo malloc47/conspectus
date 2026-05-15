@@ -1,0 +1,206 @@
+//! End-to-end JSON snapshots for harness and tmux discovery wired into
+//! `discover_local_with`. Each test sets up a single temp directory, points
+//! every harness state root at it, optionally injects a `FakeTmux` runner, and
+//! snapshots the rendered JSON after path normalization.
+
+use std::fs;
+use std::path::Path;
+
+use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
+use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
+use conspectus::discovery::tmux::{FakeTmux, UnavailableReason};
+use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
+use conspectus::output::render_graph_json;
+use conspectus::resolve::resolve_snapshot;
+
+#[test]
+fn orphan_harness_session_snapshot() {
+    let fixture = ScenarioFixture::new();
+    fixture.write_codex_session("orphan-session", None);
+
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(CODEX_HARNESS_KEY, fixture.codex_state_root());
+
+    assert_snapshot(&fixture, "orphan_harness_session", config);
+}
+
+#[test]
+fn mux_only_with_unavailable_harness_snapshot() {
+    let fixture = ScenarioFixture::new();
+    let config = LocalDiscoveryConfig::empty().with_tmux_runner(FakeTmux::with_sessions(
+        "solo\t/fixture/work\t1700000500\t1700000000\n",
+    ));
+
+    assert_snapshot(&fixture, "mux_only_with_unavailable_harness", config);
+}
+
+#[test]
+fn unavailable_tmux_yields_no_mux_nodes_snapshot() {
+    let fixture = ScenarioFixture::new();
+    let config = LocalDiscoveryConfig::empty()
+        .with_tmux_runner(FakeTmux::unavailable(UnavailableReason::NoServer));
+
+    assert_snapshot(&fixture, "unavailable_tmux_yields_no_mux_nodes", config);
+}
+
+#[test]
+fn session_and_tmux_cwd_match_emits_linked_to_mux_snapshot() {
+    let fixture = ScenarioFixture::new();
+    let work = fixture.path().join("work");
+    fs::create_dir_all(&work).expect("work dir");
+    fixture.write_codex_session("session-x", Some(work.to_str().expect("utf8")));
+    let stdout = format!("alpha\t{}\t1700000500\t1700000000\n", work.display());
+
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(CODEX_HARNESS_KEY, fixture.codex_state_root())
+        .with_tmux_runner(FakeTmux::with_sessions(stdout));
+
+    assert_snapshot(&fixture, "session_and_tmux_cwd_match", config);
+}
+
+#[test]
+fn one_to_many_mux_candidates_preserved_snapshot() {
+    let fixture = ScenarioFixture::new();
+    let work = fixture.path().join("work");
+    fs::create_dir_all(&work).expect("work dir");
+    fixture.write_codex_session("session-x", Some(work.to_str().expect("utf8")));
+    let stdout = format!(
+        "alpha\t{cwd}\t1700000100\t1700000000\nbeta\t{cwd}\t1700000900\t1700000000\n",
+        cwd = work.display()
+    );
+
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(CODEX_HARNESS_KEY, fixture.codex_state_root())
+        .with_tmux_runner(FakeTmux::with_sessions(stdout));
+
+    assert_snapshot(&fixture, "one_to_many_mux_candidates_preserved", config);
+}
+
+#[test]
+fn fork_associated_session_and_unresolved_lineage_snapshot() {
+    let fixture = ScenarioFixture::new();
+    fixture.write_atelier_config(
+        r#"
+[workspace]
+name = "atelier-demo"
+
+[[repos]]
+name = "repo-a"
+path = "/sources/repo-a"
+"#,
+    );
+    fixture.init_repo("repo-a");
+    fixture.write_fork_index(
+        r#"
+[[forks]]
+name = "alpha"
+created-epoch = 1
+mode = "worktree"
+root = ".atelier/forks/alpha"
+state = "isolated"
+
+[[forks.repos]]
+name = "repo-a"
+source = "/sources/repo-a"
+parent-worktree = "repo-a"
+fork-worktree = ".atelier/forks/alpha/repo-a"
+branch = "fork/alpha/repo-a"
+forked = true
+
+[[forks.harness]]
+key = "codex"
+source-session = "parent-session"
+fork-session = "child-session"
+capability = "native"
+"#,
+    );
+    let fork_cwd = fixture.path().join(".atelier/forks/alpha/repo-a");
+    fs::create_dir_all(&fork_cwd).expect("fork cwd");
+    fixture.write_codex_session("session-x", Some(fork_cwd.to_str().expect("utf8")));
+
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(CODEX_HARNESS_KEY, fixture.codex_state_root());
+
+    assert_snapshot(
+        &fixture,
+        "fork_associated_session_and_unresolved_lineage",
+        config,
+    );
+}
+
+fn assert_snapshot(fixture: &ScenarioFixture, name: &str, config: LocalDiscoveryConfig) {
+    let snapshot = discover_local_with([fixture.path()], config).expect("discover");
+    let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render");
+    let normalized = fixture.normalize(&rendered);
+    insta::assert_snapshot!(name, normalized);
+}
+
+struct ScenarioFixture {
+    temp: tempfile::TempDir,
+    state_dir: std::path::PathBuf,
+}
+
+impl ScenarioFixture {
+    fn new() -> Self {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let state_dir = temp.path().join(".state");
+        fs::create_dir_all(&state_dir).expect("state dir");
+        Self { temp, state_dir }
+    }
+
+    fn path(&self) -> &Path {
+        self.temp.path()
+    }
+
+    fn codex_state_root(&self) -> std::path::PathBuf {
+        self.state_dir.join("codex")
+    }
+
+    fn write_codex_session(&self, id: &str, cwd: Option<&str>) {
+        let record = match cwd {
+            Some(cwd) => CodexSessionRecord::new(id).with_cwd(cwd),
+            None => CodexSessionRecord::new(id),
+        };
+        HarnessFixture::at(&self.state_dir)
+            .write_codex_session(&record)
+            .expect("write codex session");
+    }
+
+    fn init_repo(&self, name: &str) {
+        use std::process::Command;
+        let root = self.temp.path().join(name);
+        fs::create_dir_all(&root).expect("create repo dir");
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {} failed", args.join(" "));
+        };
+        git(&["init", "--initial-branch", "main"]);
+        git(&["config", "user.name", "Conspectus Test"]);
+        git(&["config", "user.email", "conspectus@example.invalid"]);
+        fs::write(root.join("README.md"), "fixture\n").expect("write readme");
+        git(&["add", "README.md"]);
+        git(&["commit", "-m", "initial"]);
+    }
+
+    fn write_atelier_config(&self, text: &str) {
+        fs::write(self.temp.path().join("atelier.toml"), text).expect("write atelier config");
+    }
+
+    fn write_fork_index(&self, text: &str) {
+        let path = self.temp.path().join(".atelier/forks/index.toml");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create fork dir");
+        fs::write(path, text).expect("write fork index");
+    }
+
+    fn normalize(&self, rendered: &str) -> String {
+        let mut out = rendered.replace(&self.temp.path().to_string_lossy().to_string(), "/fixture");
+        if let Some(name) = self.temp.path().file_name().and_then(|s| s.to_str()) {
+            out = out.replace(name, "fixture");
+        }
+        out
+    }
+}

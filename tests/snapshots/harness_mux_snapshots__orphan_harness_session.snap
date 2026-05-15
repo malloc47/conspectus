@@ -1,0 +1,20 @@
+---
+source: tests/harness_mux_snapshots.rs
+expression: normalized
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "orphan-session"
+      },
+      "harness_key": "codex"
+    }
+  ],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

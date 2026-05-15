@@ -1,0 +1,22 @@
+---
+source: tests/harness_mux_snapshots.rs
+expression: normalized
+---
+{
+  "nodes": [
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:solo"
+      },
+      "backend": "tmux",
+      "native_id": "solo",
+      "cwd": "/fixture/work",
+      "activity_epoch": 1700000500,
+      "created_epoch": 1700000000
+    }
+  ],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

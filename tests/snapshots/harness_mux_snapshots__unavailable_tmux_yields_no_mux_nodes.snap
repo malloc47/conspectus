@@ -1,0 +1,10 @@
+---
+source: tests/harness_mux_snapshots.rs
+expression: normalized
+---
+{
+  "nodes": [],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

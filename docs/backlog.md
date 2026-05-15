@@ -460,7 +460,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     session↔fork candidates appear automatically. CLI integration tests run
     with an isolated `$HOME` and `CONSPECTUS_DISABLE_TMUX=1`, and library
     tests exercise the full chain with `FakeTmux` plus fixture state.
-- [ ] `P3-010` Add representative agent and mux JSON snapshots.
+- [x] `P3-010` Add representative agent and mux JSON snapshots.
   - Scope: snapshot graph JSON for orphan sessions, mux-only sessions,
     one-to-many mux candidates, fork-linked sessions, and unresolved session
     lineage evidence.
@@ -469,6 +469,15 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: review snapshots for stable ordering, readable provenance,
     preserved ambiguity, and no placeholder session nodes.
   - Blockers: `P3-007`, `P3-008`, `P3-009`.
+  - Outcome: added `tests/harness_mux_snapshots.rs` with six end-to-end
+    snapshots driven by `discover_local_with` + `FakeTmux` + codex fixture
+    state covering orphan harness sessions, mux-only output, unavailable
+    tmux, exact-cwd session↔mux resolution, one-to-many mux candidates
+    (resolver picks the most recently active session per ADR 0006), and a
+    fork-associated session whose atelier harness entry stays as
+    unresolved parent/child lineage. All temp paths are normalized to
+    `/fixture` for stable ordering and no placeholder session nodes are
+    emitted.
 - [ ] `P3-011` Verify the Phase 3 end state.
   - Scope: run the full Phase 3 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 3 scope.
