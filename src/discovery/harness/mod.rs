@@ -1,30 +1,38 @@
 //! Agent harness discovery boundaries.
 //!
 //! Each supported harness ships with a small adapter implementing
-//! [`HarnessAdapter`]. Adapters take a single read-only state root and emit a
+//! [`HarnessAdapter`]. Adapters take the active [`DiscoveryContext`] and emit a
 //! provider-neutral [`GraphFragment`] containing `AgentSession` nodes and the
 //! source metadata needed to preserve provider provenance. Adapters must not
 //! perform rendering, fork lineage resolution, or session/mux scoring – those
 //! belong to higher layers.
 //!
-//! The [`HarnessDiscovery`] coordinator is a [`DiscoveryProvider`] that runs
-//! every registered adapter, looks up its state root from
-//! [`DiscoveryContext::harness_state_root`], and merges fragments
-//! deterministically through [`merge_fragments`].
-
-use std::path::Path;
+//! Most adapters look up a single state root via
+//! [`DiscoveryContext::harness_state_root`]; per-repo harnesses such as aider
+//! walk the configured scan roots instead. The [`HarnessDiscovery`] coordinator
+//! is a [`DiscoveryProvider`] that runs every registered adapter and merges
+//! fragments deterministically through [`merge_fragments`].
 
 use anyhow::Result;
 
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::GraphSnapshot;
 
+pub mod aider;
+pub mod claude_code;
+pub mod codex;
 pub mod fixtures;
+pub mod opencode;
+
+pub use aider::AiderAdapter;
+pub use claude_code::ClaudeCodeAdapter;
+pub use codex::CodexAdapter;
+pub use opencode::OpenCodeAdapter;
 
 pub trait HarnessAdapter: Send + Sync {
     fn harness_key(&self) -> &str;
 
-    fn discover(&self, state_root: Option<&Path>) -> Result<GraphFragment>;
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
 }
 
 #[derive(Default)]
@@ -41,6 +49,14 @@ impl HarnessDiscovery {
         self.adapters.push(Box::new(adapter));
         self
     }
+
+    pub fn with_default_adapters() -> Self {
+        Self::new()
+            .with_adapter(CodexAdapter::new())
+            .with_adapter(ClaudeCodeAdapter::new())
+            .with_adapter(OpenCodeAdapter::new())
+            .with_adapter(AiderAdapter::new())
+    }
 }
 
 impl DiscoveryProvider for HarnessDiscovery {
@@ -48,15 +64,14 @@ impl DiscoveryProvider for HarnessDiscovery {
         let mut fragments = Vec::with_capacity(self.adapters.len());
 
         for adapter in &self.adapters {
-            let state_root = context.harness_state_root(adapter.harness_key());
-            fragments.push(adapter.discover(state_root)?);
+            fragments.push(adapter.discover(context)?);
         }
 
         Ok(snapshot_fragment(merge_fragments(fragments)))
     }
 }
 
-fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
+pub(crate) fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
     GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
@@ -66,7 +81,7 @@ fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::*;
     use crate::model::{AgentSessionId, AgentSessionNode, GraphNode};
@@ -81,7 +96,7 @@ mod tests {
             self.key
         }
 
-        fn discover(&self, _state_root: Option<&Path>) -> Result<GraphFragment> {
+        fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
             Ok(self.fragment.clone())
         }
     }
@@ -93,8 +108,8 @@ mod tests {
             "state-aware"
         }
 
-        fn discover(&self, state_root: Option<&Path>) -> Result<GraphFragment> {
-            let Some(root) = state_root else {
+        fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+            let Some(root) = context.harness_state_root(self.harness_key()) else {
                 return Ok(GraphFragment::empty());
             };
 
@@ -151,8 +166,10 @@ mod tests {
                 "codex"
             }
 
-            fn discover(&self, state_root: Option<&Path>) -> Result<GraphFragment> {
-                *self.captured.lock().expect("lock") = state_root.map(PathBuf::from);
+            fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+                *self.captured.lock().expect("lock") = context
+                    .harness_state_root(self.harness_key())
+                    .map(Path::to_path_buf);
                 Ok(GraphFragment::empty())
             }
         }
@@ -209,7 +226,6 @@ mod tests {
             .discover(&DiscoveryContext::default())
             .expect("discovery succeeds");
 
-        // merge_fragments canonicalizes order regardless of adapter registration order.
         assert_eq!(fragment.nodes, vec![session_alpha, session_beta]);
     }
 }

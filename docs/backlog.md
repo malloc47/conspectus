@@ -347,7 +347,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     opencode, and aider state layouts plus a malformed-record helper, all rooted
     at a caller-supplied temp directory; covered paths, optional fields, cwd
     encoding, opencode time fields, aider marker files, and malformed records.
-- [ ] `P3-003` Discover supported agent sessions.
+- [x] `P3-003` Discover supported agent sessions.
   - Scope: implement read-only adapters that emit Conspectus-native
     `AgentSession` nodes and source metadata for supported local state from
     `claude-code`, `opencode`, `codex`, and `aider`.
@@ -356,6 +356,12 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: run against local synthetic state roots and inspect session
     nodes for readable provider metadata.
   - Blockers: `P3-001`, `P3-002`.
+  - Outcome: added `CodexAdapter`, `ClaudeCodeAdapter`, `OpenCodeAdapter`, and
+    `AiderAdapter`; widened the `HarnessAdapter` trait to receive the full
+    `DiscoveryContext` so the per-repo aider adapter can walk scan roots while
+    state-root harnesses pull their root via `harness_state_root`. Covered
+    discovered sessions, missing state directories, malformed records, missing
+    optional fields, and stable ID reproducibility for each adapter.
 - [ ] `P3-004` Preserve fork session lineage evidence.
   - Scope: map native, approximate, unsupported, fresh, and not-yet-discovered
     lineage evidence from provider metadata into candidate links or unresolved
