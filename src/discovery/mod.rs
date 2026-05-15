@@ -10,6 +10,8 @@ use anyhow::Result;
 
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
+pub mod git;
+
 pub fn empty_graph() -> GraphSnapshot {
     GraphSnapshot::empty()
 }

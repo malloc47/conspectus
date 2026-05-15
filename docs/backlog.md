@@ -189,7 +189,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Outcome: added provider, context, graph-fragment, and local coordinator
     boundaries; discovery merges fragments into an unresolved graph snapshot and
     leaves resolution/output to existing modules.
-- [ ] `P2-002` Add read-only git command probes.
+- [x] `P2-002` Add read-only git command probes.
   - Scope: shell out to `git` for repo common dir, worktree root, current
     branch/refname, remotes, upstream, and per-worktree metadata when available.
   - Tests: integration tests using temporary git repos, detached HEADs, branch
@@ -197,6 +197,9 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: run probes from a plain repo and linked worktree and verify
     no files are modified.
   - Blockers: `P2-001`.
+  - Outcome: added read-only git probes for common dir, worktree root, git dir,
+    branch ref, upstream, and remotes with temp-repo coverage for plain,
+    detached, upstream, and linked-worktree cases.
 - [ ] `P2-003` Map git probes into graph nodes and candidate links.
   - Scope: emit `Repo`, `Worktree`, and `Branch` nodes plus links for repo
     membership and checked-out branch evidence from git probe results.
