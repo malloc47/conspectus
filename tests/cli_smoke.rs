@@ -1,8 +1,22 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+
+/// Builds a `conspectus` binary command isolated from the host environment:
+/// HOME is pinned to an empty directory (so the harness adapters see no real
+/// `~/.codex` etc.) and tmux discovery is disabled. Tests that want harness or
+/// tmux discovery override these env vars explicitly.
+fn isolated_cmd(home: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
+    cmd.env("HOME", home);
+    cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
+    cmd.env_remove("CONSPECTUS_CODEX_STATE");
+    cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
+    cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
+    cmd
+}
 
 #[test]
 fn help_prints_usage() {
@@ -29,10 +43,10 @@ fn version_prints_package_version() {
 
 #[test]
 fn graph_json_prints_empty_graph_document() {
+    let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
 
-    let assert = cmd
+    let assert = isolated_cmd(home.path())
         .current_dir(temp.path())
         .arg("graph")
         .arg("--format")
@@ -50,11 +64,10 @@ fn graph_json_prints_empty_graph_document() {
 
 #[test]
 fn graph_json_output_is_deterministic() {
+    let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let mut first = Command::cargo_bin("conspectus").expect("conspectus binary exists");
-    let mut second = Command::cargo_bin("conspectus").expect("conspectus binary exists");
 
-    let first_output = first
+    let first_output = isolated_cmd(home.path())
         .current_dir(temp.path())
         .arg("graph")
         .arg("--format")
@@ -64,7 +77,7 @@ fn graph_json_output_is_deterministic() {
         .get_output()
         .stdout
         .clone();
-    let second_output = second
+    let second_output = isolated_cmd(home.path())
         .current_dir(temp.path())
         .arg("graph")
         .arg("--format")
@@ -92,10 +105,10 @@ fn graph_rejects_invalid_format() {
 
 #[test]
 fn graph_json_discovers_plain_repo_from_scan_root() {
+    let home = tempfile::TempDir::new().expect("home temp");
     let repo = temp_git_repo();
-    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
 
-    let assert = cmd
+    let assert = isolated_cmd(home.path())
         .arg("graph")
         .arg("--format")
         .arg("json")
@@ -143,6 +156,68 @@ fn graph_json_rejects_missing_scan_root() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("scan root does not exist"));
+}
+
+#[test]
+fn graph_json_emits_agent_sessions_from_env_state_root() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    fs::write(
+        codex_state.join("rollout-cli-test.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"cli-test\",\"cwd\":\"/work/x\"}}\n",
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    let json: serde_json::Value = serde_json::from_str(&output).expect("valid json output");
+
+    let sessions: Vec<_> = json["nodes"]
+        .as_array()
+        .expect("nodes array")
+        .iter()
+        .filter(|node| node["type"] == "agent_session")
+        .collect();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["harness_key"], "codex");
+    assert_eq!(sessions[0]["cwd"], "/work/x");
+}
+
+#[test]
+fn graph_json_emits_no_mux_nodes_when_tmux_disabled() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(scan_root.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    let json: serde_json::Value = serde_json::from_str(&output).expect("valid json output");
+
+    let mux_nodes: Vec<_> = json["nodes"]
+        .as_array()
+        .expect("nodes array")
+        .iter()
+        .filter(|node| node["type"] == "mux_session")
+        .collect();
+    assert!(
+        mux_nodes.is_empty(),
+        "tmux discovery should be skipped when CONSPECTUS_DISABLE_TMUX is set"
+    );
 }
 
 fn temp_git_repo() -> tempfile::TempDir {

@@ -143,7 +143,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::discovery::{DiscoveryContext, discover_local_at_roots};
+    use crate::discovery::{DiscoveryContext, LocalDiscoveryConfig, discover_local_with};
 
     #[test]
     fn standalone_repo_root_does_not_fabricate_workspace() {
@@ -163,7 +163,8 @@ mod tests {
         let _first = GitRepoFixture::init_at(temp.path(), "repo-a");
         let _second = GitRepoFixture::init_at(temp.path(), "repo-b");
 
-        let snapshot = discover_local_at_roots([temp.path()]).expect("local discovery succeeds");
+        let snapshot = discover_local_with([temp.path()], LocalDiscoveryConfig::empty())
+            .expect("local discovery succeeds");
 
         let workspace_nodes = snapshot
             .nodes
@@ -191,7 +192,8 @@ mod tests {
         let temp = TempDir::new().expect("temp dir");
         let _repo = GitRepoFixture::init_at(temp.path(), "repo");
 
-        let snapshot = discover_local_at_roots([temp.path()]).expect("local discovery succeeds");
+        let snapshot = discover_local_with([temp.path()], LocalDiscoveryConfig::empty())
+            .expect("local discovery succeeds");
 
         assert!(
             snapshot

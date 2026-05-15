@@ -134,11 +134,104 @@ pub fn discover_empty_at(root: impl AsRef<Path>) -> Result<GraphSnapshot> {
 pub fn discover_local_at_roots(
     roots: impl IntoIterator<Item = impl Into<PathBuf>>,
 ) -> Result<GraphSnapshot> {
-    LocalDiscovery::new()
+    discover_local_with(roots, LocalDiscoveryConfig::from_env())
+}
+
+pub fn discover_local_with(
+    roots: impl IntoIterator<Item = impl Into<PathBuf>>,
+    config: LocalDiscoveryConfig,
+) -> Result<GraphSnapshot> {
+    let mut context = DiscoveryContext::from_roots(roots)?;
+
+    for (key, root) in &config.harness_state_roots {
+        context = context.with_harness_state_root(key.clone(), root.clone());
+    }
+
+    let mut providers = LocalDiscovery::new()
         .with_provider(git::GitDiscovery::new())
         .with_provider(atelier::AtelierWorkspaceDiscovery::new())
         .with_provider(workspace::GenericWorkspaceDiscovery::new())
-        .discover(&DiscoveryContext::from_roots(roots)?)
+        .with_provider(harness::HarnessDiscovery::with_default_adapters());
+
+    if let Some(runner) = config.tmux_runner {
+        providers = providers.with_provider(tmux::TmuxDiscovery::with_runner(runner));
+    }
+
+    let mut snapshot = providers.discover(&context)?;
+    cross_link::infer(&mut snapshot);
+    Ok(snapshot)
+}
+
+/// Configuration that controls which providers run during local discovery.
+pub struct LocalDiscoveryConfig {
+    pub harness_state_roots: BTreeMap<String, PathBuf>,
+    pub tmux_runner: Option<Box<dyn tmux::TmuxRunner>>,
+}
+
+impl LocalDiscoveryConfig {
+    /// Defaults derived from the process environment: harness state roots from
+    /// `CONSPECTUS_<HARNESS>_STATE` (falling back to standard `$HOME`-relative
+    /// paths) and a real `SystemTmux` runner unless `CONSPECTUS_DISABLE_TMUX`
+    /// is set.
+    pub fn from_env() -> Self {
+        let mut harness_state_roots = BTreeMap::new();
+
+        if let Some(path) = env_state_root("CONSPECTUS_CODEX_STATE", ".codex") {
+            harness_state_roots.insert(harness::codex::HARNESS_KEY.to_string(), path);
+        }
+        if let Some(path) = env_state_root("CONSPECTUS_CLAUDE_CODE_STATE", ".claude") {
+            harness_state_roots.insert(harness::claude_code::HARNESS_KEY.to_string(), path);
+        }
+        if let Some(path) = env_state_root("CONSPECTUS_OPENCODE_STATE", ".local/share/opencode") {
+            harness_state_roots.insert(harness::opencode::HARNESS_KEY.to_string(), path);
+        }
+
+        let tmux_runner: Option<Box<dyn tmux::TmuxRunner>> =
+            if env::var_os("CONSPECTUS_DISABLE_TMUX").is_some() {
+                None
+            } else {
+                Some(Box::new(tmux::SystemTmux::new()))
+            };
+
+        Self {
+            harness_state_roots,
+            tmux_runner,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            harness_state_roots: BTreeMap::new(),
+            tmux_runner: None,
+        }
+    }
+
+    pub fn with_harness_state_root(
+        mut self,
+        harness_key: impl Into<String>,
+        root: impl Into<PathBuf>,
+    ) -> Self {
+        self.harness_state_roots
+            .insert(harness_key.into(), root.into());
+        self
+    }
+
+    pub fn with_tmux_runner(mut self, runner: impl tmux::TmuxRunner + 'static) -> Self {
+        self.tmux_runner = Some(Box::new(runner));
+        self
+    }
+
+    pub fn without_tmux(mut self) -> Self {
+        self.tmux_runner = None;
+        self
+    }
+}
+
+fn env_state_root(env_key: &str, home_relative: &str) -> Option<PathBuf> {
+    if let Some(value) = env::var_os(env_key) {
+        return Some(PathBuf::from(value));
+    }
+    env::var_os("HOME").map(|home| PathBuf::from(home).join(home_relative))
 }
 
 pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> GraphSnapshot {
@@ -316,8 +409,74 @@ mod tests {
     fn local_discovery_accepts_existing_non_git_roots_as_sparse_graphs() {
         let temp = tempfile::TempDir::new().expect("temp dir");
 
-        let snapshot = discover_local_at_roots([temp.path()]).expect("local discovery succeeds");
+        let snapshot = discover_local_with([temp.path()], LocalDiscoveryConfig::empty())
+            .expect("local discovery succeeds");
 
         assert_eq!(snapshot, GraphSnapshot::empty());
+    }
+
+    #[test]
+    fn discover_local_with_runs_harness_and_tmux_providers_and_cross_links() {
+        use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
+        use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
+        use crate::discovery::tmux::FakeTmux;
+        use crate::model::{GraphNode, RelationKind};
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let scan_root = temp.path().join("scan");
+        std::fs::create_dir(&scan_root).expect("scan dir");
+        let harness_root = temp.path().join("state");
+        std::fs::create_dir(&harness_root).expect("state dir");
+        let fixture = HarnessFixture::at(&harness_root);
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("session-x").with_cwd("/work/x"))
+            .expect("write codex session");
+
+        let config = LocalDiscoveryConfig::empty()
+            .with_harness_state_root(CODEX_KEY, fixture.codex_state_root())
+            .with_tmux_runner(FakeTmux::with_sessions(
+                "alpha\t/work/x\t1700000500\t1700000000\n",
+            ));
+
+        let snapshot = discover_local_with([scan_root.as_path()], config).expect("discover");
+
+        assert!(
+            snapshot.nodes.iter().any(
+                |node| matches!(node, GraphNode::AgentSession(s) if s.harness_key == CODEX_KEY)
+            ),
+            "codex session node should be present"
+        );
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| matches!(node, GraphNode::MuxSession(_))),
+            "fake tmux session node should be present"
+        );
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .any(|link| link.relation == RelationKind::LinkedToMux),
+            "cross_link should infer at least one LinkedToMux candidate"
+        );
+    }
+
+    #[test]
+    fn discover_local_with_skips_tmux_when_runner_absent() {
+        use crate::model::GraphNode;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+
+        let snapshot =
+            discover_local_with([temp.path()], LocalDiscoveryConfig::empty()).expect("discover");
+
+        assert!(
+            !snapshot
+                .nodes
+                .iter()
+                .any(|node| matches!(node, GraphNode::MuxSession(_))),
+            "no mux nodes should appear when tmux runner is not configured"
+        );
     }
 }

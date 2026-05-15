@@ -708,7 +708,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::discovery::{DiscoveryContext, discover_local_at_roots};
+    use crate::discovery::{DiscoveryContext, LocalDiscoveryConfig, discover_local_with};
     use crate::model::{GraphNode, RelationKind};
 
     #[test]
@@ -761,7 +761,8 @@ path = "/source/repo-b"
         fixture.init_repo("repo-a");
         fixture.init_repo("repo-b");
 
-        let snapshot = discover_local_at_roots([fixture.root()]).expect("local discovery succeeds");
+        let snapshot = discover_local_with([fixture.root()], LocalDiscoveryConfig::empty())
+            .expect("local discovery succeeds");
 
         let atelier_workspaces = snapshot
             .nodes

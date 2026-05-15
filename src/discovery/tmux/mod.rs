@@ -159,6 +159,12 @@ impl TmuxRunner for FakeTmux {
     }
 }
 
+impl TmuxRunner for Box<dyn TmuxRunner> {
+    fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
+        (**self).list_sessions(format)
+    }
+}
+
 /// One row of `tmux list-sessions` output. Activity and creation epochs are
 /// optional so the parser can keep using rows even when tmux is configured with
 /// a custom format or when fields are blank.

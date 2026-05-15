@@ -441,7 +441,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     recency. Ignored and overridden candidates continue to be skipped and
     every losing candidate is recorded as a competing link plus a
     `Conflict` diagnostic.
-- [ ] `P3-009` Wire agent and tmux discovery into local graph discovery.
+- [x] `P3-009` Wire agent and tmux discovery into local graph discovery.
   - Scope: register the harness and tmux providers in local discovery so
     `conspectus graph --format json` emits repo, workspace, fork, session, and
     mux evidence from cwd/configured roots and supported local state.
@@ -450,6 +450,16 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: run `cargo run -- graph --format json` with a tmux smoke
     session and confirm useful output when sessions remain unlinked.
   - Blockers: `P3-003`, `P3-006`, `P3-008`.
+  - Outcome: added a `LocalDiscoveryConfig` (harness state roots + optional
+    tmux runner) and a `discover_local_with` entry point. The default
+    `discover_local_at_roots` builds the config from the environment
+    (`CONSPECTUS_CODEX_STATE` / `_CLAUDE_CODE_STATE` / `_OPENCODE_STATE`
+    overrides, otherwise `$HOME`-relative paths, plus `CONSPECTUS_DISABLE_TMUX`
+    to skip the tmux provider). Discovery now also calls
+    `cross_link::infer` after merging fragments so session↔mux and
+    session↔fork candidates appear automatically. CLI integration tests run
+    with an isolated `$HOME` and `CONSPECTUS_DISABLE_TMUX=1`, and library
+    tests exercise the full chain with `FakeTmux` plus fixture state.
 - [ ] `P3-010` Add representative agent and mux JSON snapshots.
   - Scope: snapshot graph JSON for orphan sessions, mux-only sessions,
     one-to-many mux candidates, fork-linked sessions, and unresolved session

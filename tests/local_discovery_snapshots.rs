@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use conspectus::discovery::discover_local_at_roots;
+use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
 use conspectus::output::render_graph_json;
 use conspectus::resolve::resolve_snapshot;
 
@@ -131,7 +131,8 @@ root = ".atelier/forks/research"
 }
 
 fn assert_local_snapshot(name: &str, root: impl AsRef<Path>, fixture: &LocalFixture) {
-    let snapshot = discover_local_at_roots([root.as_ref()]).expect("local discovery succeeds");
+    let snapshot = discover_local_with([root.as_ref()], LocalDiscoveryConfig::empty())
+        .expect("local discovery succeeds");
     let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render graph");
     let normalized = normalize_fixture_paths(&rendered, fixture.root());
 
