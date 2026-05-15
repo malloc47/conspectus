@@ -1,4 +1,24 @@
 //! Atelier workspace metadata discovery.
+//!
+//! Atelier workspaces are represented on disk by an `atelier.toml` file at the
+//! workspace root. Conspectus treats that file as a read-only provider manifest:
+//! the `[workspace]` table names the workspace, and each `[[repos]]` entry names
+//! a repository that belongs to it. Atelier stores the source path in
+//! `repo.path`, while materialized checkouts are expected to live directly under
+//! the workspace root using `repo.name`; discovery probes that checkout first and
+//! falls back to the source path when the checkout is not present.
+//!
+//! Fork metadata comes from `.atelier/forks/index.toml`. Conspectus parses the
+//! subset of the index needed to describe workspace-scoped forks, their source
+//! repositories, associated worktrees, branches, parent fork relationships, and
+//! harness/session capabilities. Unknown TOML fields are intentionally ignored so
+//! new Atelier metadata can be added without breaking discovery.
+//!
+//! This module is the provider boundary. It preserves Atelier provenance in
+//! provider names, source metadata, and stable link identifiers, but maps the
+//! underlying concepts into Conspectus graph nodes and relation kinds as soon as
+//! possible. Downstream resolution and rendering should be able to reason over
+//! the generic graph model without understanding Atelier's implementation.
 
 use std::path::{Path, PathBuf};
 
