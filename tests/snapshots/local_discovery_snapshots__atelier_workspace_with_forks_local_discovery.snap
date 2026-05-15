@@ -1,0 +1,1041 @@
+---
+source: tests/local_discovery_snapshots.rs
+expression: normalized
+---
+{
+  "nodes": [
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/sources/repo-a"
+      },
+      "common_dir": "/sources/repo-a"
+    },
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/sources/repo-b"
+      },
+      "common_dir": "/sources/repo-b"
+    },
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "common_dir": "/fixture/repo-a/.git",
+      "source_paths": [
+        "/fixture/repo-a"
+      ]
+    },
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/fixture/repo-b/.git"
+      },
+      "common_dir": "/fixture/repo-b/.git",
+      "source_paths": [
+        "/fixture/repo-b"
+      ]
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "root": ".atelier/forks/alpha/repo-a"
+      },
+      "root": ".atelier/forks/alpha/repo-a",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "refname": "fork/alpha/repo-a"
+      }
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/sources/repo-b"
+        },
+        "root": "repo-b"
+      },
+      "root": "repo-b"
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "root": "/fixture/repo-a",
+      "git_dir": "/fixture/repo-a/.git",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      }
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "root": "/fixture/repo-b",
+      "git_dir": "/fixture/repo-b/.git",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "refname": "refs/heads/main"
+      }
+    },
+    {
+      "type": "workspace",
+      "id": {
+        "root": "/fixture"
+      },
+      "root": "/fixture",
+      "provider": "atelier",
+      "name": "atelier-demo"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "refname": "fork/alpha/repo-a"
+      },
+      "refname": "fork/alpha/repo-a"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
+    },
+    {
+      "type": "fork",
+      "id": {
+        "provider_source_key": "atelier:alpha"
+      },
+      "provider": "atelier",
+      "provider_source_key": "alpha",
+      "name": "alpha",
+      "scope": "workspace",
+      "capabilities": [
+        "mode:worktree",
+        "state:isolated"
+      ]
+    },
+    {
+      "type": "fork",
+      "id": {
+        "provider_source_key": "atelier:beta"
+      },
+      "provider": "atelier",
+      "provider_source_key": "beta",
+      "name": "beta",
+      "scope": "workspace",
+      "capabilities": [
+        "mode:selected",
+        "state:inherit"
+      ]
+    },
+    {
+      "type": "fork",
+      "id": {
+        "provider_source_key": "atelier:research"
+      },
+      "provider": "atelier",
+      "provider_source_key": "research",
+      "name": "research",
+      "scope": "workspace",
+      "capabilities": [
+        "mode:research",
+        "state:inherit"
+      ]
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "atelier:fork:atelier:alpha:created_branch:branch:repo:/sources/repo-a@fork/alpha/repo-a",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "branch",
+          "repo": {
+            "common_dir": "/sources/repo-a"
+          },
+          "refname": "fork/alpha/repo-a"
+        }
+      },
+      "relation": "created_branch",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork branch metadata",
+        "fields": {
+          "created_epoch": 1,
+          "fork_mode": "worktree",
+          "fork_name": "alpha",
+          "forked": true,
+          "link": false,
+          "repo_name": "repo-a"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:alpha:created_worktree:worktree:repo:/sources/repo-a@.atelier/forks/alpha/repo-a",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "worktree",
+          "repo": {
+            "common_dir": "/sources/repo-a"
+          },
+          "root": ".atelier/forks/alpha/repo-a"
+        }
+      },
+      "relation": "created_worktree",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork created worktree",
+        "fields": {
+          "created_epoch": 1,
+          "fork_mode": "worktree",
+          "fork_name": "alpha",
+          "forked": true,
+          "link": false,
+          "repo_name": "repo-a"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:alpha:forks_repo:repo:/sources/repo-a",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/sources/repo-a"
+        }
+      },
+      "relation": "forks_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork repo membership",
+        "fields": {
+          "created_epoch": 1,
+          "fork_mode": "worktree",
+          "fork_name": "alpha",
+          "forked": true,
+          "link": false,
+          "repo_name": "repo-a"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:alpha:forks_workspace:workspace:/fixture",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture"
+        }
+      },
+      "relation": "forks_workspace",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork belongs to Atelier workspace",
+        "fields": {
+          "created_epoch": 1,
+          "fork_mode": "worktree",
+          "fork_name": "alpha"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/.atelier/forks/alpha",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "kind": "unresolved",
+        "evidence": {
+          "node_type": "path",
+          "path": "/fixture/.atelier/forks/alpha",
+          "metadata": {
+            "created_epoch": 1,
+            "fork_mode": "worktree",
+            "fork_name": "alpha"
+          }
+        }
+      },
+      "relation": "rooted_at_path",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork root path",
+        "fields": {
+          "created_epoch": 1,
+          "fork_mode": "worktree",
+          "fork_name": "alpha"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:beta:forks_repo:repo:/sources/repo-b",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/sources/repo-b"
+        }
+      },
+      "relation": "forks_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork repo membership",
+        "fields": {
+          "created_epoch": 2,
+          "fork_mode": "selected",
+          "fork_name": "beta",
+          "forked": false,
+          "link": true,
+          "repo_name": "repo-b"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:beta:forks_workspace:workspace:/fixture",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture"
+        }
+      },
+      "relation": "forks_workspace",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork belongs to Atelier workspace",
+        "fields": {
+          "created_epoch": 2,
+          "fork_mode": "selected",
+          "fork_name": "beta"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:beta:parent_fork:fork:atelier:alpha",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "fork",
+          "provider_source_key": "atelier:alpha"
+        }
+      },
+      "relation": "parent_fork",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork parent",
+        "fields": {
+          "created_epoch": 2,
+          "fork_mode": "selected",
+          "fork_name": "beta"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:beta:referenced_worktree:worktree:repo:/sources/repo-b@repo-b",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "worktree",
+          "repo": {
+            "common_dir": "/sources/repo-b"
+          },
+          "root": "repo-b"
+        }
+      },
+      "relation": "referenced_worktree",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork referenced parent worktree",
+        "fields": {
+          "created_epoch": 2,
+          "fork_mode": "selected",
+          "fork_name": "beta",
+          "forked": false,
+          "link": true,
+          "repo_name": "repo-b"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:beta:rooted_at_path:/fixture/.atelier/forks/beta",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "kind": "unresolved",
+        "evidence": {
+          "node_type": "path",
+          "path": "/fixture/.atelier/forks/beta",
+          "metadata": {
+            "created_epoch": 2,
+            "fork_mode": "selected",
+            "fork_name": "beta"
+          }
+        }
+      },
+      "relation": "rooted_at_path",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork root path",
+        "fields": {
+          "created_epoch": 2,
+          "fork_mode": "selected",
+          "fork_name": "beta"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:research:forks_workspace:workspace:/fixture",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:research"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture"
+        }
+      },
+      "relation": "forks_workspace",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork belongs to Atelier workspace",
+        "fields": {
+          "created_epoch": 3,
+          "fork_mode": "research",
+          "fork_name": "research"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:fork:atelier:research:rooted_at_path:/fixture/.atelier/forks/research",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:research"
+      },
+      "target": {
+        "kind": "unresolved",
+        "evidence": {
+          "node_type": "path",
+          "path": "/fixture/.atelier/forks/research",
+          "metadata": {
+            "created_epoch": 3,
+            "fork_mode": "research",
+            "fork_name": "research"
+          }
+        }
+      },
+      "relation": "rooted_at_path",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork root path",
+        "fields": {
+          "created_epoch": 3,
+          "fork_mode": "research",
+          "fork_name": "research"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-a/.git"
+        }
+      },
+      "relation": "workspace_contains_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "atelier.toml repo entry",
+        "fields": {
+          "repo_name": "repo-a"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b",
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-b/.git"
+        }
+      },
+      "relation": "workspace_contains_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "atelier.toml repo entry",
+        "fields": {
+          "repo_name": "repo-b"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git",
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-a/.git"
+        }
+      },
+      "relation": "workspace_contains_repo",
+      "provenance": "convention",
+      "confidence": "medium",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "generic_workspace",
+        "evidence": "multiple git repos under explicit scan root"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git",
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-b/.git"
+        }
+      },
+      "relation": "workspace_contains_repo",
+      "provenance": "convention",
+      "confidence": "medium",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "generic_workspace",
+        "evidence": "multiple git repos under explicit scan root"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-a/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "git common dir"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "branch",
+          "repo": {
+            "common_dir": "/fixture/repo-a/.git"
+          },
+          "refname": "refs/heads/main"
+        }
+      },
+      "relation": "checked_out_branch",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "symbolic HEAD"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo-b/.git@/fixture/repo-b:belongs_to_repo:repo:/fixture/repo-b/.git",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-b/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "git common dir"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo-b/.git@/fixture/repo-b:checked_out_branch:branch:repo:/fixture/repo-b/.git@refs/heads/main",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "branch",
+          "repo": {
+            "common_dir": "/fixture/repo-b/.git"
+          },
+          "refname": "refs/heads/main"
+        }
+      },
+      "relation": "checked_out_branch",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "symbolic HEAD"
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git"
+    },
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "relation": "checked_out_branch",
+      "selected_link_id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main"
+    },
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-b/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "git:worktree:repo:/fixture/repo-b/.git@/fixture/repo-b:belongs_to_repo:repo:/fixture/repo-b/.git"
+    },
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "target": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "relation": "checked_out_branch",
+      "selected_link_id": "git:worktree:repo:/fixture/repo-b/.git@/fixture/repo-b:checked_out_branch:branch:repo:/fixture/repo-b/.git@refs/heads/main"
+    },
+    {
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "relation": "workspace_contains_repo",
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
+      "competing_link_ids": [
+        "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b",
+        "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git",
+        "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git"
+      ]
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/sources/repo-a"
+      },
+      "relation": "forks_repo",
+      "selected_link_id": "atelier:fork:atelier:alpha:forks_repo:repo:/sources/repo-a"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "root": ".atelier/forks/alpha/repo-a"
+      },
+      "relation": "created_worktree",
+      "selected_link_id": "atelier:fork:atelier:alpha:created_worktree:worktree:repo:/sources/repo-a@.atelier/forks/alpha/repo-a"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "relation": "forks_workspace",
+      "selected_link_id": "atelier:fork:atelier:alpha:forks_workspace:workspace:/fixture"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "target": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "refname": "fork/alpha/repo-a"
+      },
+      "relation": "created_branch",
+      "selected_link_id": "atelier:fork:atelier:alpha:created_branch:branch:repo:/sources/repo-a@fork/alpha/repo-a"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/sources/repo-b"
+      },
+      "relation": "forks_repo",
+      "selected_link_id": "atelier:fork:atelier:beta:forks_repo:repo:/sources/repo-b"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/sources/repo-b"
+        },
+        "root": "repo-b"
+      },
+      "relation": "referenced_worktree",
+      "selected_link_id": "atelier:fork:atelier:beta:referenced_worktree:worktree:repo:/sources/repo-b@repo-b"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "relation": "forks_workspace",
+      "selected_link_id": "atelier:fork:atelier:beta:forks_workspace:workspace:/fixture"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "target": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "relation": "parent_fork",
+      "selected_link_id": "atelier:fork:atelier:beta:parent_fork:fork:atelier:alpha"
+    },
+    {
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier:research"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "relation": "forks_workspace",
+      "selected_link_id": "atelier:fork:atelier:research:forks_workspace:workspace:/fixture"
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "unresolved_endpoint",
+      "link_id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/.atelier/forks/alpha",
+      "relation": "rooted_at_path"
+    },
+    {
+      "kind": "unresolved_endpoint",
+      "link_id": "atelier:fork:atelier:beta:rooted_at_path:/fixture/.atelier/forks/beta",
+      "relation": "rooted_at_path"
+    },
+    {
+      "kind": "unresolved_endpoint",
+      "link_id": "atelier:fork:atelier:research:rooted_at_path:/fixture/.atelier/forks/research",
+      "relation": "rooted_at_path"
+    },
+    {
+      "kind": "conflict",
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "relation": "workspace_contains_repo",
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
+      "competing_link_ids": [
+        "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b",
+        "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git",
+        "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git"
+      ]
+    }
+  ]
+}

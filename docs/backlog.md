@@ -292,7 +292,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     directory or explicit `--scan-root` values, preserving deterministic JSON
     output and adding CLI coverage for non-repo, plain repo, missing-root, and
     invalid-format cases.
-- [ ] `P2-010` Add representative local-discovery snapshots.
+- [x] `P2-010` Add representative local-discovery snapshots.
   - Scope: snapshot graph JSON for plain repo, linked worktree, generic
     workspace, Atelier workspace without forks, and Atelier workspace with
     worktree, selected, research, and standalone fork contexts.
@@ -301,6 +301,9 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: review snapshots for stable ordering, readable provenance,
     and separation of candidate links from resolved relationships.
   - Blockers: `P2-003`, `P2-005`, `P2-008`, `P2-009`.
+  - Outcome: added normalized temp-fixture snapshots for plain repo, linked
+    worktree, generic workspace, Atelier workspace without forks, and Atelier
+    workspace with worktree, selected, and research fork metadata.
 - [ ] `P2-011` Verify the Phase 2 end state.
   - Scope: run the full Phase 2 automated and manual check set and record any
     follow-up tasks instead of expanding Phase 2 scope.

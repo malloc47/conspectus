@@ -1,0 +1,191 @@
+---
+source: tests/local_discovery_snapshots.rs
+expression: normalized
+---
+{
+  "nodes": [
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "common_dir": "/fixture/repo-a/.git",
+      "source_paths": [
+        "/fixture/repo-a"
+      ]
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "root": "/fixture/repo-a",
+      "git_dir": "/fixture/repo-a/.git",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      }
+    },
+    {
+      "type": "workspace",
+      "id": {
+        "root": "/fixture"
+      },
+      "root": "/fixture",
+      "provider": "atelier",
+      "name": "atelier-demo"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-a/.git"
+        }
+      },
+      "relation": "workspace_contains_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "atelier.toml repo entry",
+        "fields": {
+          "repo_name": "repo-a"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo-a/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "git common dir"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "branch",
+          "repo": {
+            "common_dir": "/fixture/repo-a/.git"
+          },
+          "refname": "refs/heads/main"
+        }
+      },
+      "relation": "checked_out_branch",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "symbolic HEAD"
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git"
+    },
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "target": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "relation": "checked_out_branch",
+      "selected_link_id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main"
+    },
+    {
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "relation": "workspace_contains_repo",
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a"
+    }
+  ],
+  "diagnostics": []
+}
