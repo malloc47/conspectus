@@ -316,6 +316,106 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     Conspectus repo emitted git repo, worktree, branch, candidate link, and
     resolved relationship JSON without modifying workspace files.
 
+## Phase 3: Agent And Mux Discovery
+
+Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
+
+- [ ] `P3-001` Define agent harness discovery boundaries.
+  - Scope: add read-only harness discovery traits, source-state inputs, and
+    graph-fragment outputs for `AgentSession` nodes without binding the public
+    graph model to provider-private schemas.
+  - Tests: unit tests for empty harness discovery, missing state directories,
+    and deterministic fragment merging.
+  - Manual checks: inspect module boundaries for ADR 0007 alignment and confirm
+    harness discovery does not perform output rendering.
+  - Blockers: `P2-011`.
+- [ ] `P3-002` Add synthetic harness fixture support.
+  - Scope: add test helpers for creating provider state directories and session
+    records for `claude-code`, `opencode`, `codex`, and `aider` without reading
+    the user's real harness state.
+  - Tests: fixture self-checks for generated paths, timestamps, cwd/root
+    fields, and malformed records.
+  - Manual checks: verify fixtures live under temporary directories and do not
+    depend on local home-directory state.
+  - Blockers: `P3-001`.
+- [ ] `P3-003` Discover supported agent sessions.
+  - Scope: implement read-only adapters that emit Conspectus-native
+    `AgentSession` nodes and source metadata for supported local state from
+    `claude-code`, `opencode`, `codex`, and `aider`.
+  - Tests: fixture-based adapter tests for discovered sessions, orphaned
+    sessions, malformed records, missing optional fields, and stable node IDs.
+  - Manual checks: run against local synthetic state roots and inspect session
+    nodes for readable provider metadata.
+  - Blockers: `P3-001`, `P3-002`.
+- [ ] `P3-004` Preserve fork session lineage evidence.
+  - Scope: map native, approximate, unsupported, fresh, and not-yet-discovered
+    lineage evidence from provider metadata into candidate links or unresolved
+    endpoints without fabricating placeholder session nodes.
+  - Tests: unit tests for each lineage capability and unresolved parent/child
+    session evidence per ADR 0005.
+  - Manual checks: inspect JSON for unresolved lineage evidence and confirm the
+    evidence is preserved without fake nodes.
+  - Blockers: `P2-008`, `P3-003`.
+- [ ] `P3-005` Add injectable tmux command execution.
+  - Scope: introduce a small command-runner seam for tmux discovery so tests can
+    use fake output and production discovery can call `tmux` read-only.
+  - Tests: unit tests for unavailable tmux, command failures, invalid UTF-8 or
+    malformed rows, and deterministic error diagnostics.
+  - Manual checks: verify no tests require a real tmux server.
+  - Blockers: `P3-001`.
+- [ ] `P3-006` Discover tmux sessions.
+  - Scope: parse `tmux list-sessions` format output into `MuxSession` nodes,
+    including session name, activity metadata when available, and root/cwd path
+    evidence.
+  - Tests: fake-command tests for zero sessions, one session, multiple
+    sessions, paths with spaces, missing root/cwd fields, and unavailable tmux.
+  - Manual checks: create a temporary tmux session and inspect mux-session JSON.
+  - Blockers: `P3-005`.
+- [ ] `P3-007` Generate session, workspace, fork, and mux candidate links.
+  - Scope: emit candidate links for session cwd/root matches, fork
+    associations, mux candidates, parent session evidence, child session
+    evidence, and unresolved lineage endpoints while preserving all plausible
+    mux links.
+  - Tests: graph-fragment tests for orphan sessions, mux-only sessions,
+    one-to-many mux candidates, fork-linked sessions, and unresolved lineage.
+  - Manual checks: inspect JSON to confirm ambiguous mux evidence remains in
+    `candidate_links`.
+  - Blockers: `P3-004`, `P3-006`.
+- [ ] `P3-008` Implement session-to-mux resolver scoring.
+  - Scope: apply ADR 0006 scoring for session-to-mux candidates: local
+    declared, global declared, strong process or provider evidence, exact
+    cwd/root match, naming convention, then recency or activity correlation.
+  - Tests: table-driven resolver tests for each scoring tier, ties, ambiguity
+    diagnostics, ignored candidates, and overridden candidates.
+  - Manual checks: inspect resolved relationships for one-to-many mux scenarios
+    and confirm lower-ranked candidates remain visible.
+  - Blockers: `P3-007`.
+- [ ] `P3-009` Wire agent and tmux discovery into local graph discovery.
+  - Scope: register the harness and tmux providers in local discovery so
+    `conspectus graph --format json` emits repo, workspace, fork, session, and
+    mux evidence from cwd/configured roots and supported local state.
+  - Tests: CLI tests for deterministic graph output with fake harness and tmux
+    discovery, unavailable tmux, and orphan sessions.
+  - Manual checks: run `cargo run -- graph --format json` with a tmux smoke
+    session and confirm useful output when sessions remain unlinked.
+  - Blockers: `P3-003`, `P3-006`, `P3-008`.
+- [ ] `P3-010` Add representative agent and mux JSON snapshots.
+  - Scope: snapshot graph JSON for orphan sessions, mux-only sessions,
+    one-to-many mux candidates, fork-linked sessions, and unresolved session
+    lineage evidence.
+  - Tests: `cargo test --all-targets --all-features`; `cargo nextest run
+    --all-targets --all-features`.
+  - Manual checks: review snapshots for stable ordering, readable provenance,
+    preserved ambiguity, and no placeholder session nodes.
+  - Blockers: `P3-007`, `P3-008`, `P3-009`.
+- [ ] `P3-011` Verify the Phase 3 end state.
+  - Scope: run the full Phase 3 automated and manual check set and record any
+    follow-up tasks instead of expanding Phase 3 scope.
+  - Tests: `just check`.
+  - Manual checks: run the tmux smoke commands from the Phase 3 plan and run
+    against real local harness state if available.
+  - Blockers: `P3-009`, `P3-010`.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
