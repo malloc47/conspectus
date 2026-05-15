@@ -13,6 +13,7 @@ use crate::model::{
 };
 
 pub const ATELIER_CONFIG_FILENAME: &str = "atelier.toml";
+pub const ATELIER_FORK_INDEX_PATH: &str = ".atelier/forks/index.toml";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AtelierWorkspaceDiscovery {
@@ -97,7 +98,6 @@ impl AtelierWorkspaceDiscovery {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct AtelierWorkspaceConfig {
     pub workspace: AtelierWorkspaceMetadata,
     #[serde(default)]
@@ -112,8 +112,147 @@ impl AtelierWorkspaceConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct AtelierForkIndex {
+    #[serde(default)]
+    pub forks: Vec<AtelierForkEntry>,
+}
+
+impl AtelierForkIndex {
+    pub fn path_for(workspace_root: &Path) -> PathBuf {
+        workspace_root.join(ATELIER_FORK_INDEX_PATH)
+    }
+
+    pub fn load(workspace_root: &Path) -> Result<Self> {
+        let path = Self::path_for(workspace_root);
+
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub fn into_provider_records(self, workspace_root: &Path) -> Vec<AtelierForkRecord> {
+        self.forks
+            .into_iter()
+            .map(|entry| AtelierForkRecord::from_entry(workspace_root, entry))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
+pub struct AtelierForkEntry {
+    pub name: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+    pub created_epoch: i64,
+    pub mode: AtelierForkMode,
+    pub root: PathBuf,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub state: AtelierForkState,
+    #[serde(default)]
+    pub repos: Vec<AtelierForkRepoEntry>,
+    #[serde(default)]
+    pub harness: Vec<AtelierForkHarnessEntry>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AtelierForkMode {
+    Worktree,
+    Selected,
+    Research,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AtelierForkState {
+    #[default]
+    Inherit,
+    Shared,
+    Isolated,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct AtelierForkRepoEntry {
+    pub name: String,
+    pub source: PathBuf,
+    pub parent_worktree: PathBuf,
+    #[serde(default)]
+    pub fork_worktree: Option<PathBuf>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub forked: bool,
+    #[serde(default)]
+    pub link: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct AtelierForkHarnessEntry {
+    pub key: String,
+    #[serde(default)]
+    pub source_session: Option<String>,
+    #[serde(default)]
+    pub fork_session: Option<String>,
+    pub capability: AtelierHarnessCapability,
+    #[serde(default)]
+    pub degraded_warning: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AtelierHarnessCapability {
+    Native,
+    Approximate,
+    Unsupported,
+    Fresh,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AtelierForkRecord {
+    pub provider: String,
+    pub source_key: String,
+    pub name: String,
+    pub parent: Option<String>,
+    pub created_epoch: i64,
+    pub mode: AtelierForkMode,
+    pub root: PathBuf,
+    pub read_only: bool,
+    pub state: AtelierForkState,
+    pub repos: Vec<AtelierForkRepoEntry>,
+    pub harness: Vec<AtelierForkHarnessEntry>,
+}
+
+impl AtelierForkRecord {
+    fn from_entry(workspace_root: &Path, entry: AtelierForkEntry) -> Self {
+        let root = absolutize(workspace_root, &entry.root);
+
+        Self {
+            provider: "atelier".to_string(),
+            source_key: entry.name.clone(),
+            name: entry.name,
+            parent: entry.parent,
+            created_epoch: entry.created_epoch,
+            mode: entry.mode,
+            root,
+            read_only: entry.read_only,
+            state: entry.state,
+            repos: entry.repos,
+            harness: entry.harness,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct AtelierWorkspaceMetadata {
     pub name: String,
     #[serde(default)]
@@ -125,7 +264,6 @@ pub struct AtelierWorkspaceMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct AtelierRepoEntry {
     pub name: String,
     pub path: PathBuf,
@@ -204,6 +342,14 @@ fn relation_name(relation: &RelationKind) -> String {
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+fn absolutize(base: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.join(path)
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +466,118 @@ path = "/source/repo-a"
                 .iter()
                 .any(|node| matches!(node, GraphNode::Workspace(_)))
         );
+    }
+
+    #[test]
+    fn missing_fork_index_loads_as_empty() {
+        let temp = TempDir::new().expect("temp dir");
+
+        let index = AtelierForkIndex::load(temp.path()).expect("load missing index");
+
+        assert!(index.forks.is_empty());
+    }
+
+    #[test]
+    fn parses_worktree_selected_research_and_standalone_fork_records() {
+        let temp = TempDir::new().expect("temp dir");
+        let index_path = AtelierForkIndex::path_for(temp.path());
+        fs::create_dir_all(index_path.parent().expect("index parent")).expect("create parent");
+        fs::write(
+            &index_path,
+            r#"
+[[forks]]
+name = "alpha"
+created-epoch = 1
+mode = "worktree"
+root = ".atelier/forks/alpha"
+state = "isolated"
+
+[[forks.repos]]
+name = "repo-a"
+source = "/src/repo-a"
+parent-worktree = "/workspace/repo-a"
+fork-worktree = ".atelier/forks/alpha/repo-a"
+branch = "fork/alpha/repo-a"
+forked = true
+
+[[forks.harness]]
+key = "codex"
+source-session = "parent-session"
+fork-session = "child-session"
+capability = "native"
+
+[[forks]]
+name = "beta"
+parent = "alpha"
+created-epoch = 2
+mode = "selected"
+root = ".atelier/forks/beta"
+read-only = true
+
+[[forks.repos]]
+name = "repo-b"
+source = "/src/repo-b"
+parent-worktree = "/workspace/repo-b"
+link = true
+
+[[forks]]
+name = "research"
+created-epoch = 3
+mode = "research"
+root = ".atelier/forks/research"
+
+[[forks]]
+name = "standalone"
+created-epoch = 4
+mode = "worktree"
+root = "/tmp/standalone"
+
+[[forks.repos]]
+name = "repo-c"
+source = "/src/repo-c"
+parent-worktree = "/workspace/repo-c"
+"#,
+        )
+        .expect("write fork index");
+
+        let records = AtelierForkIndex::load(temp.path())
+            .expect("load fork index")
+            .into_provider_records(temp.path());
+
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[0].provider, "atelier");
+        assert_eq!(records[0].source_key, "alpha");
+        assert_eq!(records[0].mode, AtelierForkMode::Worktree);
+        assert_eq!(
+            records[0].repos[0].fork_worktree.as_deref(),
+            Some(Path::new(".atelier/forks/alpha/repo-a"))
+        );
+        assert_eq!(records[1].mode, AtelierForkMode::Selected);
+        assert_eq!(records[1].parent.as_deref(), Some("alpha"));
+        assert_eq!(records[2].mode, AtelierForkMode::Research);
+        assert_eq!(records[3].root, PathBuf::from("/tmp/standalone"));
+    }
+
+    #[test]
+    fn malformed_fork_index_returns_parse_error() {
+        let temp = TempDir::new().expect("temp dir");
+        let index_path = AtelierForkIndex::path_for(temp.path());
+        fs::create_dir_all(index_path.parent().expect("index parent")).expect("create parent");
+        fs::write(
+            &index_path,
+            r#"
+[[forks]]
+name = "bad"
+created-epoch = 1
+mode = "not-a-mode"
+root = ".atelier/forks/bad"
+"#,
+        )
+        .expect("write bad fork index");
+
+        let error = AtelierForkIndex::load(temp.path()).expect_err("parse should fail");
+
+        assert!(error.to_string().contains("parsing"));
     }
 
     struct AtelierFixture {

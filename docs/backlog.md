@@ -248,7 +248,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     workspace discovery that emits Atelier workspace nodes, discovered repo
     graph fragments, and strong-discovered workspace membership links without
     depending on Atelier command modules.
-- [ ] `P2-007` Read Atelier fork index metadata.
+- [x] `P2-007` Read Atelier fork index metadata.
   - Scope: parse `.atelier/forks/index.toml` into provider-neutral fork records
     with source metadata for worktree, selected, research, and standalone
     fork-like contexts.
@@ -258,6 +258,10 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: confirm parsing remains read-only and does not write
     `.conspectus.toml` or provider metadata.
   - Blockers: `P2-006`.
+  - Outcome: added read-only `.atelier/forks/index.toml` parsing with
+    provider-neutral fork records for worktree, selected, research, standalone,
+    parent, repo membership, and harness lineage metadata; missing indexes load
+    as empty.
 - [ ] `P2-008` Map Atelier forks into graph nodes and context-effect links.
   - Scope: emit one polymorphic `Fork` node per provider fork and candidate
     links for `forks_workspace`, `forks_repo`, `created_worktree`,
