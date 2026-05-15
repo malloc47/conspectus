@@ -5,6 +5,12 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
+use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
+use crate::model::{
+    BranchId, BranchNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState,
+    NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata, WorktreeId, WorktreeNode,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitProbe {
     git_bin: PathBuf,
@@ -114,6 +120,31 @@ impl GitProbe {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GitDiscovery {
+    probe: GitProbe,
+}
+
+impl GitDiscovery {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl DiscoveryProvider for GitDiscovery {
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+        let mut fragments = Vec::new();
+
+        for root in context.roots() {
+            if let Some(probe) = self.probe.probe(root)? {
+                fragments.push(fragment_from_probe(&probe));
+            }
+        }
+
+        Ok(snapshot_fragment(merge_fragments(fragments)))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitProbeResult {
     pub common_dir: PathBuf,
@@ -128,6 +159,105 @@ impl GitProbeResult {
     pub fn is_linked_worktree(&self) -> bool {
         self.common_dir != self.git_dir
     }
+}
+
+pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
+    let repo_id = RepoId::new(path_string(&probe.common_dir));
+    let worktree_id = WorktreeId::new(repo_id.clone(), path_string(&probe.worktree_root));
+    let repo_node = repo_node(repo_id.clone(), probe);
+    let worktree_node = worktree_node(worktree_id.clone(), probe);
+    let mut nodes = vec![
+        GraphNode::Repo(repo_node),
+        GraphNode::Worktree(worktree_node),
+    ];
+    let mut candidate_links = vec![git_link(
+        NodeId::Worktree(worktree_id.clone()),
+        NodeId::Repo(repo_id.clone()),
+        RelationKind::BelongsToRepo,
+        "git common dir",
+    )];
+
+    if let Some(branch_ref) = &probe.branch_ref {
+        let branch_id = BranchId::new(repo_id, branch_ref.clone());
+        nodes.push(GraphNode::Branch(BranchNode {
+            id: branch_id.clone(),
+            refname: branch_ref.clone(),
+            current_commit: None,
+            upstream: probe.upstream.clone(),
+        }));
+        candidate_links.push(git_link(
+            NodeId::Worktree(worktree_id),
+            NodeId::Branch(branch_id),
+            RelationKind::CheckedOutBranch,
+            "symbolic HEAD",
+        ));
+    }
+
+    GraphFragment {
+        nodes,
+        candidate_links,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn repo_node(repo_id: RepoId, probe: &GitProbeResult) -> RepoNode {
+    let mut repo = RepoNode::new(repo_id);
+    repo.source_paths.push(path_string(&probe.worktree_root));
+    repo.remotes = probe
+        .remotes
+        .iter()
+        .map(|remote| format!("{}={}", remote.name, remote.url))
+        .collect();
+    repo
+}
+
+fn worktree_node(worktree_id: WorktreeId, probe: &GitProbeResult) -> WorktreeNode {
+    WorktreeNode {
+        id: worktree_id,
+        root: path_string(&probe.worktree_root),
+        git_dir: Some(path_string(&probe.git_dir)),
+        current_branch: probe.branch_ref.as_ref().map(|branch| {
+            BranchId::new(RepoId::new(path_string(&probe.common_dir)), branch.clone())
+        }),
+    }
+}
+
+fn git_link(source: NodeId, target: NodeId, relation: RelationKind, evidence: &str) -> GraphLink {
+    let relation_name = relation_name(&relation);
+    GraphLink {
+        id: format!("git:{source}:{relation_name}:{target}"),
+        source,
+        target: LinkEndpoint::Node { id: target },
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "git".to_string(),
+            evidence: Some(evidence.to_string()),
+            fields: Default::default(),
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn relation_name(relation: &RelationKind) -> String {
+    serde_json::to_string(relation)
+        .expect("relation serializes")
+        .trim_matches('"')
+        .to_string()
+}
+
+fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
+    GraphFragment {
+        nodes: snapshot.nodes,
+        candidate_links: snapshot.candidate_links,
+        diagnostics: snapshot.diagnostics,
+    }
+}
+
+fn path_string(path: &Path) -> String {
+    path.to_string_lossy().to_string()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -241,6 +371,26 @@ mod tests {
             Some("refs/heads/linked-branch")
         );
         assert!(linked_result.is_linked_worktree());
+    }
+
+    #[test]
+    fn fragment_maps_git_probe_to_repo_worktree_branch_and_links() {
+        let probe = GitProbeResult {
+            common_dir: PathBuf::from("/workspace/repo/.git"),
+            worktree_root: PathBuf::from("/workspace/repo"),
+            git_dir: PathBuf::from("/workspace/repo/.git"),
+            branch_ref: Some("refs/heads/main".to_string()),
+            upstream: Some("origin/main".to_string()),
+            remotes: vec![GitRemote {
+                name: "origin".to_string(),
+                url: "git@example.com:owner/repo.git".to_string(),
+            }],
+        };
+
+        let fragment = fragment_from_probe(&probe);
+
+        assert_eq!(fragment.nodes.len(), 3);
+        assert_eq!(fragment.candidate_links.len(), 2);
     }
 
     struct GitFixture {

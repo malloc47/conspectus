@@ -200,7 +200,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Outcome: added read-only git probes for common dir, worktree root, git dir,
     branch ref, upstream, and remotes with temp-repo coverage for plain,
     detached, upstream, and linked-worktree cases.
-- [ ] `P2-003` Map git probes into graph nodes and candidate links.
+- [x] `P2-003` Map git probes into graph nodes and candidate links.
   - Scope: emit `Repo`, `Worktree`, and `Branch` nodes plus links for repo
     membership and checked-out branch evidence from git probe results.
   - Tests: JSON snapshot tests for a plain repo, a detached worktree, and a
@@ -208,6 +208,10 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: run `cargo run -- graph --format json` from a plain git repo
     and inspect repo/worktree/branch identity shape.
   - Blockers: `P2-002`.
+  - Outcome: mapped git probe results into `Repo`, `Worktree`, and `Branch`
+    nodes with strong-discovered candidate links for repo membership and checked
+    out branches, plus fixed-path JSON snapshots for plain, detached, and linked
+    worktree cases.
 - [ ] `P2-004` Add cwd and configured scan-root discovery inputs.
   - Scope: discover from the current working directory and from explicitly
     configured scan roots without recursively walking `$HOME` by default.

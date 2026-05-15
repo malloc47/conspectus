@@ -1,0 +1,77 @@
+---
+source: tests/git_discovery_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/workspace/repo/.git"
+      },
+      "common_dir": "/workspace/repo/.git",
+      "source_paths": [
+        "/workspace/repo"
+      ]
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/workspace/repo/.git"
+        },
+        "root": "/workspace/repo"
+      },
+      "root": "/workspace/repo",
+      "git_dir": "/workspace/repo/.git"
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "git:worktree:repo:/workspace/repo/.git@/workspace/repo:belongs_to_repo:repo:/workspace/repo/.git",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/workspace/repo/.git"
+        },
+        "root": "/workspace/repo"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/workspace/repo/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "git common dir"
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/workspace/repo/.git"
+        },
+        "root": "/workspace/repo"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/workspace/repo/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "git:worktree:repo:/workspace/repo/.git@/workspace/repo:belongs_to_repo:repo:/workspace/repo/.git"
+    }
+  ],
+  "diagnostics": []
+}
