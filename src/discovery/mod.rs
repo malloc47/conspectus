@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
+pub mod atelier;
 pub mod git;
 pub mod workspace;
 
@@ -111,6 +112,7 @@ pub fn discover_local_at_roots(
 ) -> Result<GraphSnapshot> {
     LocalDiscovery::new()
         .with_provider(git::GitDiscovery::new())
+        .with_provider(atelier::AtelierWorkspaceDiscovery::new())
         .with_provider(workspace::GenericWorkspaceDiscovery::new())
         .discover(&DiscoveryContext::from_roots(roots)?)
 }

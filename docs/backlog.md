@@ -235,7 +235,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Outcome: inferred generic workspaces only for explicit scan roots with
     multiple immediate git repo children, linked those repos with convention
     evidence, and kept standalone or single-repo roots repo-only.
-- [ ] `P2-006` Read Atelier workspace metadata.
+- [x] `P2-006` Read Atelier workspace metadata.
   - Scope: parse `atelier.toml` enough to emit Atelier workspace context,
     workspace repo membership evidence, and related source metadata without
     depending on Atelier command modules.
@@ -244,6 +244,10 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: run from an Atelier workspace with no forks and inspect
     workspace, repo, worktree, and branch nodes.
   - Blockers: `P2-003`, `P2-005`.
+  - Outcome: added a read-only `atelier.toml` subset parser and parent-walk
+    workspace discovery that emits Atelier workspace nodes, discovered repo
+    graph fragments, and strong-discovered workspace membership links without
+    depending on Atelier command modules.
 - [ ] `P2-007` Read Atelier fork index metadata.
   - Scope: parse `.atelier/forks/index.toml` into provider-neutral fork records
     with source metadata for worktree, selected, research, and standalone
