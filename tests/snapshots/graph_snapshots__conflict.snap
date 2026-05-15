@@ -1,0 +1,125 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "harness_key": "codex",
+      "cwd": "/workspace"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:one"
+      },
+      "backend": "tmux",
+      "native_id": "one",
+      "cwd": "/workspace"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:two"
+      },
+      "backend": "tmux",
+      "native_id": "two",
+      "cwd": "/workspace"
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "mux-declared",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:two"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "local_declared",
+      "confidence": "medium",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": ""
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "mux-discovered",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:one"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "medium",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": ""
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:two"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "mux-declared",
+      "competing_link_ids": [
+        "mux-discovered"
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "conflict",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "mux-declared",
+      "competing_link_ids": [
+        "mux-discovered"
+      ]
+    }
+  ]
+}

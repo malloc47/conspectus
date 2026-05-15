@@ -1,0 +1,18 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/workspace/repo/.git"
+      },
+      "common_dir": "/workspace/repo/.git"
+    }
+  ],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

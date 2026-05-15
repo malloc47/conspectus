@@ -1,0 +1,20 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:solo"
+      },
+      "backend": "tmux",
+      "native_id": "solo",
+      "cwd": "/workspace"
+    }
+  ],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

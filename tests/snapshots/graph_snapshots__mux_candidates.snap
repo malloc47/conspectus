@@ -1,0 +1,164 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "harness_key": "codex",
+      "cwd": "/workspace"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:cached"
+      },
+      "backend": "tmux",
+      "native_id": "cached",
+      "cwd": "/workspace"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:convention"
+      },
+      "backend": "tmux",
+      "native_id": "convention",
+      "cwd": "/workspace"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:process"
+      },
+      "backend": "tmux",
+      "native_id": "process",
+      "cwd": "/workspace"
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "mux-cached",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:cached"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "cached",
+      "confidence": "medium",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": ""
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "mux-convention",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:convention"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "convention",
+      "confidence": "medium",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "tmux",
+        "evidence": "naming convention"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "mux-process",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:process"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "process",
+        "evidence": "launcher pid"
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:process"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "mux-process",
+      "competing_link_ids": [
+        "mux-convention",
+        "mux-cached"
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "conflict",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-a"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "mux-process",
+      "competing_link_ids": [
+        "mux-convention",
+        "mux-cached"
+      ]
+    }
+  ]
+}

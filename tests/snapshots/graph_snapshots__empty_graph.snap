@@ -1,0 +1,10 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

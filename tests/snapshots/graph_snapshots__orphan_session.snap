@@ -1,0 +1,21 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/home/me/.codex",
+        "session_key": "session-orphan"
+      },
+      "harness_key": "codex",
+      "title": "orphan session"
+    }
+  ],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": []
+}

@@ -1,0 +1,59 @@
+---
+source: tests/graph_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "fork",
+      "id": {
+        "provider_source_key": "atelier/fork-alpha"
+      },
+      "provider": "atelier",
+      "provider_source_key": "fork-alpha",
+      "name": "alpha",
+      "scope": "workspace",
+      "capabilities": [
+        "session"
+      ]
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "lineage-child-unresolved",
+      "source": {
+        "type": "fork",
+        "provider_source_key": "atelier/fork-alpha"
+      },
+      "target": {
+        "kind": "unresolved",
+        "evidence": {
+          "node_type": "agent_session",
+          "harness_key": "codex",
+          "native_id": "pending-child",
+          "state_scope": "/home/me/.codex",
+          "path": "/workspace/fork-alpha"
+        }
+      },
+      "relation": "child_session",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "atelier",
+        "evidence": "fork harness entry"
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [],
+  "diagnostics": [
+    {
+      "kind": "unresolved_endpoint",
+      "link_id": "lineage-child-unresolved",
+      "relation": "child_session"
+    }
+  ]
+}

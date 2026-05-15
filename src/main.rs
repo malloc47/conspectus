@@ -2,7 +2,7 @@ mod cli;
 
 use clap::Parser;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let cli = cli::Cli::parse();
-    cli.run();
+    cli.run()
 }
