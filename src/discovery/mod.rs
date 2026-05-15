@@ -13,6 +13,7 @@ use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
 pub mod atelier;
 pub mod git;
+pub mod harness;
 pub mod workspace;
 
 pub fn empty_graph() -> GraphSnapshot {
@@ -22,6 +23,7 @@ pub fn empty_graph() -> GraphSnapshot {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DiscoveryContext {
     roots: Vec<PathBuf>,
+    harness_state_roots: BTreeMap<String, PathBuf>,
 }
 
 impl DiscoveryContext {
@@ -32,6 +34,7 @@ impl DiscoveryContext {
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
         Self {
             roots: vec![root.into()],
+            harness_state_roots: BTreeMap::new(),
         }
     }
 
@@ -48,11 +51,30 @@ impl DiscoveryContext {
             }
         }
 
-        Ok(Self { roots: normalized })
+        Ok(Self {
+            roots: normalized,
+            harness_state_roots: BTreeMap::new(),
+        })
+    }
+
+    pub fn with_harness_state_root(
+        mut self,
+        harness_key: impl Into<String>,
+        root: impl Into<PathBuf>,
+    ) -> Self {
+        self.harness_state_roots
+            .insert(harness_key.into(), root.into());
+        self
     }
 
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    pub fn harness_state_root(&self, harness_key: &str) -> Option<&Path> {
+        self.harness_state_roots
+            .get(harness_key)
+            .map(PathBuf::as_path)
     }
 }
 

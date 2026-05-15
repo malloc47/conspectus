@@ -320,7 +320,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
 
 Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
 
-- [ ] `P3-001` Define agent harness discovery boundaries.
+- [x] `P3-001` Define agent harness discovery boundaries.
   - Scope: add read-only harness discovery traits, source-state inputs, and
     graph-fragment outputs for `AgentSession` nodes without binding the public
     graph model to provider-private schemas.
@@ -329,6 +329,10 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: inspect module boundaries for ADR 0007 alignment and confirm
     harness discovery does not perform output rendering.
   - Blockers: `P2-011`.
+  - Outcome: added a `discovery::harness` module with a `HarnessAdapter` trait
+    and `HarnessDiscovery` provider; extended `DiscoveryContext` with per-harness
+    state-root overrides; covered empty adapters, missing state roots, state-root
+    passthrough, and deterministic fragment merging.
 - [ ] `P3-002` Add synthetic harness fixture support.
   - Scope: add test helpers for creating provider state directories and session
     records for `claude-code`, `opencode`, `codex`, and `aider` without reading
