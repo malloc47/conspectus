@@ -83,6 +83,90 @@ Source plan: `docs/implementation/phase-00-project-foundation.md`.
   - Outcome: `nix develop --command just check`, `cargo run -- --help`,
     `cargo run -- --version`, and `just --list` passed.
 
+## Phase 1: Core Graph JSON
+
+Source plan: `docs/implementation/phase-01-core-graph-json.md`.
+
+- [ ] `P1-001` Define graph node identity types.
+  - Scope: implement structured node IDs from ADR 0001 for `Repo`,
+    `Worktree`, `Workspace`, `AgentSession`, `MuxSession`, `Branch`, `Fork`,
+    and `ForgePr`.
+  - Tests: unit tests for ID construction, display/debug behavior, serde round
+    trips, and deterministic ordering.
+  - Manual checks: inspect JSON snippets from unit fixtures for stable ID
+    shape.
+  - Blockers: `P0-007`.
+- [ ] `P1-002` Define typed node models.
+  - Scope: add typed node structs/enums for the Phase 1 graph without
+    provider-specific discovery behavior.
+  - Tests: unit tests for serde round trips and sparse node serialization.
+  - Manual checks: inspect representative serialized orphan session,
+    mux-only, and repo-only nodes.
+  - Blockers: `P1-001`.
+- [ ] `P1-003` Define GraphLink evidence types.
+  - Scope: implement `GraphLink`, relation kinds, provenance, confidence,
+    freshness, source metadata, unresolved endpoint evidence, and ignored or
+    overridden state.
+  - Tests: unit tests for relation-kind serialization, round trips, unresolved
+    endpoints, ignored links, and overridden links.
+  - Manual checks: inspect serialized candidate links for readable relation and
+    provenance names.
+  - Blockers: `P1-001`.
+- [ ] `P1-004` Define graph snapshot JSON output.
+  - Scope: add the deterministic top-level graph document with `nodes`,
+    `candidate_links`, `resolved_relationships`, and `diagnostics`.
+  - Tests: snapshot tests for empty graph JSON and sparse graph fixtures.
+  - Manual checks: confirm key ordering and separation between candidate links
+    and resolved relationships.
+  - Blockers: `P1-002`, `P1-003`.
+- [ ] `P1-005` Add fixture builders for sparse graph scenarios.
+  - Scope: add internal test helpers for orphan sessions, mux-only rows,
+    repo-only rows, unresolved lineage evidence, conflicts, and mux
+    candidates.
+  - Tests: fixture self-checks through JSON snapshot coverage.
+  - Manual checks: verify fixtures are internal test helpers, not public API.
+  - Blockers: `P1-002`, `P1-003`.
+- [ ] `P1-006` Implement the resolver skeleton.
+  - Scope: accept GraphLink candidates and emit typed resolved relationships
+    without deleting or mutating lower-priority evidence.
+  - Tests: table-driven resolver tests for sparse links, no-op empty graphs,
+    unresolved lineage evidence, and conflict preservation.
+  - Manual checks: inspect resolver output for a sparse fixture and confirm
+    candidate evidence remains present.
+  - Blockers: `P1-003`, `P1-005`.
+- [ ] `P1-007` Implement resolver precedence rules.
+  - Scope: apply default precedence: local declared, global declared, strong
+    discovered evidence, convention, then cached evidence.
+  - Tests: table-driven tests for declared-over-discovered precedence,
+    discovered-over-cached precedence, ignored candidates, overridden
+    candidates, and mux candidate precedence.
+  - Manual checks: inspect diagnostic output for conflicts and selected
+    relationships.
+  - Blockers: `P1-006`.
+- [ ] `P1-008` Add `conspectus graph --format json`.
+  - Scope: add the CLI command that emits the Phase 1 graph document; the
+    command may produce an empty graph or fixture-backed graph, but not local
+    discovery.
+  - Tests: CLI integration tests for `graph --format json`, invalid formats,
+    and deterministic output.
+  - Manual checks: `cargo run -- graph --format json`.
+  - Blockers: `P1-004`, `P1-006`.
+- [ ] `P1-009` Add representative graph JSON snapshots.
+  - Scope: snapshot empty graph JSON and sparse fixtures covering orphan
+    session, mux-only, repo-only, unresolved lineage, conflicts, and mux
+    candidates.
+  - Tests: `cargo test --all-targets --all-features`; `cargo nextest run
+    --all-targets --all-features`.
+  - Manual checks: review snapshots for stable ordering and public shape.
+  - Blockers: `P1-004`, `P1-005`, `P1-007`, `P1-008`.
+- [ ] `P1-010` Verify the Phase 1 end state.
+  - Scope: run the full Phase 1 automated and manual check set and record any
+    follow-up tasks instead of expanding Phase 1 scope.
+  - Tests: `just check`.
+  - Manual checks: `cargo run -- graph --format json` and inspect that output
+    distinguishes candidate links from resolved relationships.
+  - Blockers: `P1-007`, `P1-008`, `P1-009`.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
