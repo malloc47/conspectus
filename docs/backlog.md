@@ -223,7 +223,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Outcome: added current-directory and explicit scan-root context builders,
     canonicalization and deduplication for existing roots, missing-root errors,
     and local discovery over non-git roots without recursive scanning.
-- [ ] `P2-005` Add generic workspace inference.
+- [x] `P2-005` Add generic workspace inference.
   - Scope: infer generic workspace roots from configured roots or layout
     evidence and link participating repos/worktrees without fabricating
     workspaces for standalone repo-only cases.
@@ -232,6 +232,9 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Manual checks: inspect JSON for generic workspace fixtures and confirm
     workspace nodes appear only when there is workspace evidence.
   - Blockers: `P2-004`.
+  - Outcome: inferred generic workspaces only for explicit scan roots with
+    multiple immediate git repo children, linked those repos with convention
+    evidence, and kept standalone or single-repo roots repo-only.
 - [ ] `P2-006` Read Atelier workspace metadata.
   - Scope: parse `atelier.toml` enough to emit Atelier workspace context,
     workspace repo membership evidence, and related source metadata without
