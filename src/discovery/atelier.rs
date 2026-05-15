@@ -416,9 +416,117 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                 ));
             }
         }
+
+        for harness in &record.harness {
+            let metadata = harness_lineage_metadata(record, harness);
+
+            if let Some(parent_session) = &harness.source_session {
+                fragment.candidate_links.push(harness_lineage_link(
+                    fork.clone(),
+                    RelationKind::ParentSession,
+                    harness,
+                    parent_session,
+                    &record.root,
+                    metadata.clone(),
+                    "fork harness parent session",
+                ));
+            }
+
+            if let Some(child_session) = &harness.fork_session {
+                fragment.candidate_links.push(harness_lineage_link(
+                    fork.clone(),
+                    RelationKind::ChildSession,
+                    harness,
+                    child_session,
+                    &record.root,
+                    metadata,
+                    "fork harness child session",
+                ));
+            }
+        }
     }
 
     snapshot_fragment(fragment.into_snapshot())
+}
+
+fn harness_lineage_link(
+    fork: NodeId,
+    relation: RelationKind,
+    harness: &AtelierForkHarnessEntry,
+    session_id: &str,
+    fork_root: &Path,
+    fields: Metadata,
+    evidence: &str,
+) -> GraphLink {
+    let relation_name = relation_name(&relation);
+    GraphLink {
+        id: format!(
+            "atelier:{fork}:{relation_name}:{harness_key}:{session_id}",
+            harness_key = harness.key,
+        ),
+        source: fork,
+        target: LinkEndpoint::Unresolved {
+            evidence: UnresolvedEndpoint {
+                node_type: "agent_session".to_string(),
+                harness_key: Some(harness.key.clone()),
+                native_id: Some(session_id.to_string()),
+                state_scope: None,
+                path: Some(path_string(fork_root)),
+                metadata: fields.clone(),
+            },
+        },
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence: lineage_confidence(harness.capability),
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "atelier".to_string(),
+            evidence: Some(evidence.to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn lineage_confidence(capability: AtelierHarnessCapability) -> Confidence {
+    match capability {
+        AtelierHarnessCapability::Native => Confidence::High,
+        AtelierHarnessCapability::Approximate => Confidence::Medium,
+        AtelierHarnessCapability::Unsupported | AtelierHarnessCapability::Fresh => Confidence::Low,
+    }
+}
+
+fn harness_lineage_metadata(
+    record: &AtelierForkRecord,
+    harness: &AtelierForkHarnessEntry,
+) -> Metadata {
+    let mut fields = record_metadata(record, None);
+    fields.insert(
+        "harness_key".to_string(),
+        serde_json::Value::String(harness.key.clone()),
+    );
+    fields.insert(
+        "lineage_kind".to_string(),
+        serde_json::Value::String(lineage_kind_name(harness.capability).to_string()),
+    );
+
+    if let Some(warning) = &harness.degraded_warning {
+        fields.insert(
+            "degraded_warning".to_string(),
+            serde_json::Value::String(warning.clone()),
+        );
+    }
+
+    fields
+}
+
+fn lineage_kind_name(capability: AtelierHarnessCapability) -> &'static str {
+    match capability {
+        AtelierHarnessCapability::Native => "native",
+        AtelierHarnessCapability::Approximate => "approximate",
+        AtelierHarnessCapability::Unsupported => "unsupported",
+        AtelierHarnessCapability::Fresh => "fresh",
+    }
 }
 
 fn fork_capabilities(record: &AtelierForkRecord) -> Vec<String> {
@@ -796,6 +904,210 @@ parent-worktree = "/workspace/repo-c"
         assert_eq!(records[1].parent.as_deref(), Some("alpha"));
         assert_eq!(records[2].mode, AtelierForkMode::Research);
         assert_eq!(records[3].root, PathBuf::from("/tmp/standalone"));
+    }
+
+    #[test]
+    fn harness_lineage_emits_unresolved_parent_and_child_session_evidence() {
+        let workspace = NodeId::Workspace(WorkspaceId::new("/workspace"));
+        let record = AtelierForkRecord {
+            provider: "atelier".to_string(),
+            source_key: "alpha".to_string(),
+            name: "alpha".to_string(),
+            parent: None,
+            created_epoch: 1,
+            mode: AtelierForkMode::Worktree,
+            root: PathBuf::from("/workspace/.atelier/forks/alpha"),
+            read_only: false,
+            state: AtelierForkState::Isolated,
+            repos: Vec::new(),
+            harness: vec![AtelierForkHarnessEntry {
+                key: "codex".to_string(),
+                source_session: Some("parent-session".to_string()),
+                fork_session: Some("child-session".to_string()),
+                capability: AtelierHarnessCapability::Native,
+                degraded_warning: None,
+            }],
+        };
+
+        let fragment = fork_records_fragment(&workspace, &[record]);
+        let parent_link = lineage_link(&fragment, RelationKind::ParentSession);
+        let child_link = lineage_link(&fragment, RelationKind::ChildSession);
+
+        let parent_endpoint = unresolved_endpoint(parent_link);
+        assert_eq!(parent_endpoint.node_type, "agent_session");
+        assert_eq!(parent_endpoint.harness_key.as_deref(), Some("codex"));
+        assert_eq!(parent_endpoint.native_id.as_deref(), Some("parent-session"));
+        assert_eq!(
+            parent_endpoint.path.as_deref(),
+            Some("/workspace/.atelier/forks/alpha")
+        );
+        assert_eq!(
+            parent_endpoint.metadata.get("lineage_kind"),
+            Some(&serde_json::Value::String("native".to_string()))
+        );
+
+        assert_eq!(parent_link.confidence, Confidence::High);
+        assert_eq!(parent_link.provenance, Provenance::StrongDiscovered);
+
+        assert_eq!(
+            unresolved_endpoint(child_link).native_id.as_deref(),
+            Some("child-session")
+        );
+    }
+
+    #[test]
+    fn each_lineage_capability_maps_to_unresolved_endpoint() {
+        let workspace = NodeId::Workspace(WorkspaceId::new("/workspace"));
+        let cases = [
+            (AtelierHarnessCapability::Native, "native", Confidence::High),
+            (
+                AtelierHarnessCapability::Approximate,
+                "approximate",
+                Confidence::Medium,
+            ),
+            (
+                AtelierHarnessCapability::Unsupported,
+                "unsupported",
+                Confidence::Low,
+            ),
+            (AtelierHarnessCapability::Fresh, "fresh", Confidence::Low),
+        ];
+
+        for (capability, kind_name, expected_confidence) in cases {
+            let record = AtelierForkRecord {
+                provider: "atelier".to_string(),
+                source_key: format!("fork-{kind_name}"),
+                name: format!("fork-{kind_name}"),
+                parent: None,
+                created_epoch: 1,
+                mode: AtelierForkMode::Worktree,
+                root: PathBuf::from(format!("/workspace/.atelier/forks/fork-{kind_name}")),
+                read_only: false,
+                state: AtelierForkState::Inherit,
+                repos: Vec::new(),
+                harness: vec![AtelierForkHarnessEntry {
+                    key: "codex".to_string(),
+                    source_session: Some(format!("parent-{kind_name}")),
+                    fork_session: Some(format!("child-{kind_name}")),
+                    capability,
+                    degraded_warning: Some("provider degraded".to_string()),
+                }],
+            };
+            let fragment = fork_records_fragment(&workspace, &[record]);
+            let parent_link = lineage_link(&fragment, RelationKind::ParentSession);
+
+            assert_eq!(
+                parent_link.confidence, expected_confidence,
+                "capability {capability:?} should map to {expected_confidence:?}"
+            );
+            assert_eq!(
+                parent_link
+                    .source_metadata
+                    .fields
+                    .get("lineage_kind")
+                    .and_then(serde_json::Value::as_str),
+                Some(kind_name)
+            );
+            assert_eq!(
+                parent_link
+                    .source_metadata
+                    .fields
+                    .get("degraded_warning")
+                    .and_then(serde_json::Value::as_str),
+                Some("provider degraded")
+            );
+        }
+    }
+
+    #[test]
+    fn fresh_session_without_source_emits_only_child_link() {
+        let workspace = NodeId::Workspace(WorkspaceId::new("/workspace"));
+        let record = AtelierForkRecord {
+            provider: "atelier".to_string(),
+            source_key: "fresh-fork".to_string(),
+            name: "fresh-fork".to_string(),
+            parent: None,
+            created_epoch: 1,
+            mode: AtelierForkMode::Worktree,
+            root: PathBuf::from("/workspace/.atelier/forks/fresh"),
+            read_only: false,
+            state: AtelierForkState::Isolated,
+            repos: Vec::new(),
+            harness: vec![AtelierForkHarnessEntry {
+                key: "codex".to_string(),
+                source_session: None,
+                fork_session: Some("brand-new".to_string()),
+                capability: AtelierHarnessCapability::Fresh,
+                degraded_warning: None,
+            }],
+        };
+
+        let fragment = fork_records_fragment(&workspace, &[record]);
+
+        assert!(
+            fragment
+                .candidate_links
+                .iter()
+                .all(|link| link.relation != RelationKind::ParentSession),
+            "fresh sessions without source_session must not invent a parent link"
+        );
+
+        let child = lineage_link(&fragment, RelationKind::ChildSession);
+        assert_eq!(
+            unresolved_endpoint(child).metadata.get("lineage_kind"),
+            Some(&serde_json::Value::String("fresh".to_string()))
+        );
+    }
+
+    #[test]
+    fn harness_lineage_does_not_emit_placeholder_session_nodes() {
+        let workspace = NodeId::Workspace(WorkspaceId::new("/workspace"));
+        let record = AtelierForkRecord {
+            provider: "atelier".to_string(),
+            source_key: "alpha".to_string(),
+            name: "alpha".to_string(),
+            parent: None,
+            created_epoch: 1,
+            mode: AtelierForkMode::Worktree,
+            root: PathBuf::from("/workspace/.atelier/forks/alpha"),
+            read_only: false,
+            state: AtelierForkState::Isolated,
+            repos: Vec::new(),
+            harness: vec![AtelierForkHarnessEntry {
+                key: "codex".to_string(),
+                source_session: Some("parent-session".to_string()),
+                fork_session: Some("child-session".to_string()),
+                capability: AtelierHarnessCapability::Native,
+                degraded_warning: None,
+            }],
+        };
+
+        let fragment = fork_records_fragment(&workspace, &[record]);
+
+        assert!(
+            !fragment
+                .nodes
+                .iter()
+                .any(|node| matches!(node, GraphNode::AgentSession(_))),
+            "atelier must not fabricate AgentSession nodes from lineage evidence"
+        );
+    }
+
+    fn lineage_link(fragment: &GraphFragment, relation: RelationKind) -> &GraphLink {
+        fragment
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == relation)
+            .unwrap_or_else(|| panic!("expected lineage link with relation {relation:?}"))
+    }
+
+    fn unresolved_endpoint(link: &GraphLink) -> &UnresolvedEndpoint {
+        match &link.target {
+            LinkEndpoint::Unresolved { evidence } => evidence,
+            LinkEndpoint::Node { .. } => {
+                panic!("expected unresolved endpoint, got concrete node target")
+            }
+        }
     }
 
     #[test]

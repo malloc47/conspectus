@@ -362,7 +362,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     state-root harnesses pull their root via `harness_state_root`. Covered
     discovered sessions, missing state directories, malformed records, missing
     optional fields, and stable ID reproducibility for each adapter.
-- [ ] `P3-004` Preserve fork session lineage evidence.
+- [x] `P3-004` Preserve fork session lineage evidence.
   - Scope: map native, approximate, unsupported, fresh, and not-yet-discovered
     lineage evidence from provider metadata into candidate links or unresolved
     endpoints without fabricating placeholder session nodes.
@@ -371,6 +371,14 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Manual checks: inspect JSON for unresolved lineage evidence and confirm the
     evidence is preserved without fake nodes.
   - Blockers: `P2-008`, `P3-003`.
+  - Outcome: extended `fork_records_fragment` to emit `ParentSession` and
+    `ChildSession` candidate links with unresolved-endpoint evidence carrying
+    `harness_key`, `native_id`, fork root path, and a `lineage_kind` of
+    `native`/`approximate`/`unsupported`/`fresh` plus any
+    `degraded_warning`; capability maps to confidence (Native=High,
+    Approximate=Medium, Unsupported/Fresh=Low); fresh sessions without a
+    `source_session` omit the parent link rather than inventing one, and no
+    placeholder `AgentSession` nodes are emitted.
 - [ ] `P3-005` Add injectable tmux command execution.
   - Scope: introduce a small command-runner seam for tmux discovery so tests can
     use fake output and production discovery can call `tmux` read-only.
