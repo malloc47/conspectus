@@ -1070,7 +1070,7 @@ position Conspectus as the cross-workspace observability surface, and
 filing the cross-repo work in Atelier. No Atelier-side code lands in
 this repo.
 
-- [ ] `P6-001` Record an ADR for the Conspectus library API surface.
+- [x] `P6-001` Record an ADR for the Conspectus library API surface.
   - Scope: write an ADR that names the publicly stable modules
     (`model`, `output`, `resolve`, `config`, `declared`,
     `discovery::{git,tmux,forge,harness,atelier,workspace,declared,
@@ -1083,6 +1083,10 @@ this repo.
     `src/lib.rs`, the existing `pub` items in each module, and
     the migration plan in `docs/design.md`.
   - Blockers: `P5-012`.
+  - Outcome: accepted ADR 0015, which names the stable public modules,
+    commits to a semver discipline, keeps existing module paths
+    supported, marks CLI internals outside the library contract, and
+    requires a curated `conspectus::api` facade for common consumers.
 
 - [ ] `P6-002` Record an ADR for Conspectus distribution.
   - Scope: decide whether external consumers (Atelier today, possibly
