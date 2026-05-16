@@ -1053,6 +1053,157 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     repopulates the section, but a future task should prune empty
     sections so removed declarations don't leave dangling headers.
 
+## Phase 6: Atelier Delegation
+
+Source plan: `docs/implementation/phase-06-atelier-delegation.md`.
+Design framing: the "Migration Plan" section in `docs/design.md`.
+
+Conspectus has stabilized its graph, discovery, JSON, table, and
+declared-link surfaces (Phases 1–5). Phase 6 turns that surface into
+something Atelier (and any other future consumer) can rely on, and
+coordinates the Atelier-side deprecation/delegation work.
+
+The Conspectus crate has been library-first since ADR 0007, so this
+phase is mostly about stabilizing the *contract* (what's stable,
+where it lives, how to depend on it), refreshing user-facing docs to
+position Conspectus as the cross-workspace observability surface, and
+filing the cross-repo work in Atelier. No Atelier-side code lands in
+this repo.
+
+- [ ] `P6-001` Record an ADR for the Conspectus library API surface.
+  - Scope: write an ADR that names the publicly stable modules
+    (`model`, `output`, `resolve`, `config`, `declared`,
+    `discovery::{git,tmux,forge,harness,atelier,workspace,declared,
+    cross_link}`), declares the rest internal, and commits to a
+    semver discipline. Decide whether to surface a curated
+    `pub use` facade (e.g. `conspectus::api`) and how `#[doc(hidden)]`
+    is applied to internals.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: cross-check the proposed stable list against
+    `src/lib.rs`, the existing `pub` items in each module, and
+    the migration plan in `docs/design.md`.
+  - Blockers: `P5-012`.
+
+- [ ] `P6-002` Record an ADR for Conspectus distribution.
+  - Scope: decide whether external consumers (Atelier today, possibly
+    other tools later) depend on Conspectus via crates.io, a pinned
+    git revision, a path dependency, or all three. Capture the
+    versioning policy, MSRV story, and release cadence. The decision
+    must be compatible with the dev-shell's Nix toolchain pinning.
+  - Tests: docs-only.
+  - Manual checks: confirm any chosen distribution channel works
+    against the Phase 6 dev-shell.
+  - Blockers: `P6-001`.
+
+- [ ] `P6-003` Audit pure vs impure modules and produce a library API
+  inventory.
+  - Scope: walk every module under `src/` and tag it as either
+    pure (no `std::env`, `std::process`, `current_dir`, no global
+    state) or impure boundary code, and write the result up as
+    `docs/library-api.md`. Identify entry points consumers should
+    call (e.g. `discover_local_with`, `resolve_snapshot`,
+    `render_graph_json`, `output::table::render`, the declared-link
+    read/write helpers) and call out the impure seams
+    (`*::from_env`, the runners) so consumers know what they have to
+    inject to keep things testable.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: re-grep for `std::env`, `std::process`, and
+    `current_dir` after the audit and confirm the inventory matches.
+  - Blockers: `P6-001`.
+
+- [ ] `P6-004` Add a curated public re-export facade.
+  - Scope: add a small `conspectus::api` module (or top-level
+    `pub use` block in `src/lib.rs`) that re-exports the entry
+    points named in `P6-003`. Apply `#[doc(hidden)]` (or move to
+    `pub(crate)`) on items the ADR marks internal. Keep the existing
+    module paths working so current callers do not break.
+  - Tests: `cargo test --all-targets --all-features`; add a small
+    doctest under `conspectus::api` that demonstrates a minimal
+    library invocation (e.g. construct `LocalDiscoveryConfig::empty()`
+    + call `discover_local_with` on a temp dir).
+  - Manual checks: `cargo doc --no-deps --open` and confirm the
+    curated surface is the obvious entry point.
+  - Blockers: `P6-001`, `P6-003`.
+
+- [ ] `P6-005` Write the Atelier migration guide.
+  - Scope: add `docs/atelier-migration.md` mapping each overlapping
+    Atelier command to its Conspectus replacement
+    (`atelier session list` → `conspectus session`;
+    `atelier mux status` → `conspectus session --projection mux`;
+    forge status → `conspectus graph --format json` /
+    `conspectus session`; graph-heavy parts of `atelier status` →
+    `conspectus graph --format json`). Note the env toggles already
+    documented in `docs/operations.md` and any new ones introduced by
+    `P6-004`. Link the migration guide from `docs/index.md`.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: run the listed Conspectus commands and confirm
+    they cover the workflow described.
+  - Blockers: none (independent of code changes).
+
+- [ ] `P6-006` Add a representative comparison fixture.
+  - Scope: add an integration test that runs `discover_local_with`
+    on a temp-dir fixture mimicking an Atelier workspace (atelier
+    config + fork index + a fake harness session + a `FakeTmux`)
+    and snapshots the rendered graph JSON plus all three session
+    table projections. Path-normalize to `/fixture` for byte-stable
+    reruns. The intent is to give Atelier delegation a concrete
+    target to validate against during its own work.
+  - Tests: `cargo nextest run --all-targets --all-features`.
+  - Manual checks: review the new snapshots for stable ordering and
+    preserved evidence/ambiguity.
+  - Blockers: `P5-012`.
+
+- [ ] `P6-007` File the Atelier-side delegation work in the Atelier
+  repo.
+  - Scope: open the cross-repo tracker covering Atelier's deprecation
+    or delegation of `atelier session list`, `atelier mux status`,
+    forge status, and the graph-heavy parts of `atelier status`. The
+    code lives in the Atelier repo; this item is purely outbound
+    coordination, including pointing Atelier at `P6-004`'s curated
+    API and `P6-005`'s migration guide. Cite the Atelier issue or PR
+    URL in the outcome note so future readers can follow up.
+  - Tests: none (out-of-repo work).
+  - Manual checks: confirm an Atelier maintainer (or self, if dual
+    maintainer) has accepted the tracker.
+  - Blockers: `P6-004`, `P6-005`.
+
+- [ ] `P6-008` Refresh top-level docs to position Conspectus as the
+  cross-workspace observability surface.
+  - Scope: update `README.md` so it no longer reads "currently in
+    design"; describe what the CLI does today and link the
+    feature summary, ADR index, and migration guide. Update
+    `docs/index.md` if the table of contents shifted. Update the
+    "Migration Plan" section of `docs/design.md` to mark items 1–5
+    complete and reference Phase 6's ADRs for items 6–7.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: open the rendered Markdown and confirm the
+    framing matches the post-Phase-5 reality.
+  - Blockers: `P6-004`, `P6-005`, `P6-007`.
+
+- [ ] `P6-009` Decide whether to extract Conspectus into its own
+  repository.
+  - Scope: per migration-plan item 7, reassess whether Conspectus
+    should remain in this repository alongside its design ancestor
+    or move to a standalone repo now that the shared library surface
+    is stable. Record the conclusion in an ADR (and either schedule
+    the extraction as a Phase 7 task or note that the current
+    arrangement stays).
+  - Tests: docs-only.
+  - Manual checks: review the ADR against `docs/design.md` and
+    `docs/naming.md`.
+  - Blockers: `P6-001`, `P6-007`.
+
+- [ ] `P6-010` Verify the Phase 6 end state.
+  - Scope: run the full Phase 6 automated and manual check set and
+    record follow-up tasks instead of expanding Phase 6 scope.
+  - Tests: `just check`; `cargo doc --no-deps`.
+  - Manual checks: run the four `cargo run -- session` smoke commands
+    plus `cargo run -- graph --format json` on a real workspace and
+    confirm the output matches what Atelier users previously got from
+    the deprecated commands.
+  - Blockers: `P6-004`, `P6-005`, `P6-006`, `P6-007`, `P6-008`,
+    `P6-009`.
+
 ## Phase 5 Follow-Ups
 
 - [x] `P5-FU-001` Prune empty `[declared]` sections after the last
