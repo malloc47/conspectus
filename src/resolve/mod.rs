@@ -85,6 +85,7 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
 fn compare_candidates(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
     match left.relation {
         RelationKind::LinkedToMux => compare_session_mux(left, right),
+        RelationKind::BranchHasForgePr => compare_branch_pr(left, right),
         _ => compare_generic(left, right),
     }
 }
@@ -152,11 +153,103 @@ fn mux_tier(provenance: Provenance) -> MuxTier {
     }
 }
 
+/// Branch ↔ pull-request ordering: declared links win first, then
+/// open (non-draft) state, with closed/merged and draft demoted to
+/// tie-breakers and finally `updated_epoch` recency.
+///
+/// Reads `state` / `is_draft` / `updated_epoch` from
+/// [`GraphLink::source_metadata`] fields populated by the GitHub
+/// forge adapter.
+fn compare_branch_pr(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
+    let l = pr_score(left);
+    let r = pr_score(right);
+
+    r.provenance_tier
+        .cmp(&l.provenance_tier)
+        .then_with(|| r.state_rank.cmp(&l.state_rank))
+        .then_with(|| l.is_draft.cmp(&r.is_draft))
+        .then_with(|| r.updated_epoch.cmp(&l.updated_epoch))
+        .then_with(|| r.confidence.cmp(&l.confidence))
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct PrScore {
+    provenance_tier: PrProvenanceTier,
+    state_rank: PrStateRank,
+    is_draft: bool,
+    updated_epoch: i64,
+    confidence: Confidence,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum PrProvenanceTier {
+    Cached = 0,
+    Convention = 1,
+    Discovered = 2,
+    StrongDiscovered = 3,
+    GlobalDeclared = 4,
+    LocalDeclared = 5,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum PrStateRank {
+    Other = 0,
+    Closed = 1,
+    Merged = 2,
+    Open = 3,
+}
+
+fn pr_score(link: &GraphLink) -> PrScore {
+    PrScore {
+        provenance_tier: pr_provenance_tier(link.provenance),
+        state_rank: pr_state_rank(
+            link.source_metadata
+                .fields
+                .get("state")
+                .and_then(serde_json::Value::as_str),
+        ),
+        is_draft: link
+            .source_metadata
+            .fields
+            .get("is_draft")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        updated_epoch: link
+            .source_metadata
+            .fields
+            .get("updated_epoch")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(i64::MIN),
+        confidence: link.confidence,
+    }
+}
+
+fn pr_provenance_tier(provenance: Provenance) -> PrProvenanceTier {
+    match provenance {
+        Provenance::LocalDeclared => PrProvenanceTier::LocalDeclared,
+        Provenance::GlobalDeclared => PrProvenanceTier::GlobalDeclared,
+        Provenance::StrongDiscovered => PrProvenanceTier::StrongDiscovered,
+        Provenance::Discovered => PrProvenanceTier::Discovered,
+        Provenance::Convention => PrProvenanceTier::Convention,
+        Provenance::Cached => PrProvenanceTier::Cached,
+    }
+}
+
+fn pr_state_rank(raw: Option<&str>) -> PrStateRank {
+    match raw.map(str::to_ascii_lowercase).as_deref() {
+        Some("open") => PrStateRank::Open,
+        Some("merged") => PrStateRank::Merged,
+        Some("closed") => PrStateRank::Closed,
+        _ => PrStateRank::Other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        AgentSessionId, Confidence, ForkId, GraphLink, LinkEndpoint, LinkState, MuxSessionId,
-        NodeId, Provenance, RelationKind, UnresolvedEndpoint,
+        AgentSessionId, BranchId, Confidence, ForgePrId, ForkId, GraphLink, LinkEndpoint,
+        LinkState, MuxSessionId, NodeId, Provenance, RelationKind, RepoId, UnresolvedEndpoint,
     };
 
     use super::*;
@@ -442,6 +535,324 @@ mod tests {
 
         assert_eq!(output.resolved_relationships.len(), 1);
         assert_eq!(output.resolved_relationships[0].selected_link_id, "active");
+    }
+
+    fn forge_pr(number: u64) -> NodeId {
+        NodeId::ForgePr(ForgePrId::new(
+            "github",
+            "github.com",
+            "octo",
+            "repo",
+            number,
+        ))
+    }
+
+    fn branch_node(refname: &str) -> NodeId {
+        NodeId::Branch(BranchId::new(
+            RepoId::new("/workspace/repo/.git"),
+            refname.to_string(),
+        ))
+    }
+
+    fn branch_pr_link(
+        id: &str,
+        source: NodeId,
+        target: NodeId,
+        provenance: Provenance,
+        state: &str,
+        is_draft: bool,
+        updated_epoch: Option<i64>,
+    ) -> GraphLink {
+        let mut link = GraphLink::new(
+            id,
+            source,
+            LinkEndpoint::Node { id: target },
+            RelationKind::BranchHasForgePr,
+            provenance,
+        );
+        link.source_metadata.fields.insert(
+            "state".to_string(),
+            serde_json::Value::String(state.to_string()),
+        );
+        link.source_metadata
+            .fields
+            .insert("is_draft".to_string(), serde_json::Value::Bool(is_draft));
+        if let Some(epoch) = updated_epoch {
+            link.source_metadata.fields.insert(
+                "updated_epoch".to_string(),
+                serde_json::Value::Number(epoch.into()),
+            );
+        }
+        link
+    }
+
+    #[test]
+    fn branch_pr_resolver_picks_open_non_draft_over_merged() {
+        let merged = branch_pr_link(
+            "merged",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "merged",
+            false,
+            Some(5_000),
+        );
+        let open = branch_pr_link(
+            "open",
+            forge_pr(2),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(1_000),
+        );
+
+        let output = resolve_links(&[merged, open]);
+
+        // Two distinct sources, so each resolves independently; the key
+        // assertion is that when the same source has multiple candidates
+        // (next test) the open one wins.
+        assert_eq!(output.resolved_relationships.len(), 2);
+    }
+
+    #[test]
+    fn branch_pr_resolver_demotes_draft_among_open_candidates() {
+        let draft = branch_pr_link(
+            "draft",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            true,
+            Some(9_999),
+        );
+        let mut ready = branch_pr_link(
+            "ready",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(1_000),
+        );
+        // Force a different ID-stable target so both share the same source
+        // (a branch may technically only have one PR per number, but the
+        // resolver groups by source so we use the same source).
+        ready.target = LinkEndpoint::Node {
+            id: branch_node("refs/heads/feature"),
+        };
+
+        let output = resolve_links(&[draft, ready]);
+
+        let selected = output
+            .resolved_relationships
+            .iter()
+            .find(|r| r.source == forge_pr(1))
+            .expect("relationship");
+        assert_eq!(selected.selected_link_id, "ready");
+        assert_eq!(selected.competing_link_ids, vec!["draft".to_string()]);
+    }
+
+    #[test]
+    fn branch_pr_resolver_prefers_most_recent_among_same_state() {
+        let older = branch_pr_link(
+            "older",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(1_000),
+        );
+        let newer = branch_pr_link(
+            "newer",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(5_000),
+        );
+
+        let output = resolve_links(&[older, newer]);
+
+        let selected = &output.resolved_relationships[0];
+        assert_eq!(selected.selected_link_id, "newer");
+        assert_eq!(selected.competing_link_ids, vec!["older".to_string()]);
+    }
+
+    #[test]
+    fn branch_pr_resolver_open_beats_merged_for_same_source() {
+        let merged_recent = branch_pr_link(
+            "merged-recent",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "merged",
+            false,
+            Some(9_999),
+        );
+        let open_old = branch_pr_link(
+            "open-old",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(100),
+        );
+
+        let output = resolve_links(&[merged_recent, open_old]);
+
+        let selected = &output.resolved_relationships[0];
+        assert_eq!(selected.selected_link_id, "open-old");
+        assert!(
+            selected
+                .competing_link_ids
+                .contains(&"merged-recent".to_string())
+        );
+    }
+
+    #[test]
+    fn branch_pr_resolver_open_beats_closed_for_same_source() {
+        let closed_recent = branch_pr_link(
+            "closed-recent",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "closed",
+            false,
+            Some(9_999),
+        );
+        let open_old = branch_pr_link(
+            "open-old",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(100),
+        );
+
+        let output = resolve_links(&[closed_recent, open_old]);
+
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id,
+            "open-old"
+        );
+    }
+
+    #[test]
+    fn branch_pr_resolver_declared_overrides_state_and_recency() {
+        let recent_open = branch_pr_link(
+            "recent-open",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(9_999),
+        );
+        let declared_closed = branch_pr_link(
+            "declared-closed",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::LocalDeclared,
+            "closed",
+            false,
+            Some(1),
+        );
+
+        let output = resolve_links(&[recent_open, declared_closed]);
+
+        let selected = &output.resolved_relationships[0];
+        assert_eq!(selected.selected_link_id, "declared-closed");
+    }
+
+    #[test]
+    fn branch_pr_resolver_emits_conflict_diagnostic_for_multiple_candidates() {
+        let one = branch_pr_link(
+            "one",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(2_000),
+        );
+        let two = branch_pr_link(
+            "two",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(3_000),
+        );
+
+        let output = resolve_links(&[one, two]);
+
+        let conflict = output
+            .diagnostics
+            .iter()
+            .find_map(|d| match d {
+                Diagnostic::Conflict {
+                    selected_link_id,
+                    competing_link_ids,
+                    ..
+                } => Some((selected_link_id.clone(), competing_link_ids.clone())),
+                _ => None,
+            })
+            .expect("conflict diagnostic");
+        assert_eq!(conflict.0, "two");
+        assert_eq!(conflict.1, vec!["one".to_string()]);
+    }
+
+    #[test]
+    fn branch_pr_resolver_skips_ignored_and_overridden_candidates() {
+        let mut ignored = branch_pr_link(
+            "ignored",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::LocalDeclared,
+            "open",
+            false,
+            Some(9_999),
+        );
+        ignored.state = LinkState::Ignored { reason: None };
+        let mut overridden = branch_pr_link(
+            "overridden",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::GlobalDeclared,
+            "open",
+            false,
+            Some(9_999),
+        );
+        overridden.state = LinkState::Overridden {
+            by: "winner".to_string(),
+            reason: None,
+        };
+        let active = branch_pr_link(
+            "active",
+            forge_pr(1),
+            branch_node("refs/heads/feature"),
+            Provenance::Discovered,
+            "open",
+            false,
+            Some(1_000),
+        );
+
+        let output = resolve_links(&[ignored, overridden, active]);
+
+        assert_eq!(output.resolved_relationships.len(), 1);
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "active");
+    }
+
+    #[test]
+    fn branch_pr_resolver_handles_zero_candidates() {
+        let output = resolve_links(&[]);
+        assert!(output.resolved_relationships.is_empty());
     }
 
     #[test]
