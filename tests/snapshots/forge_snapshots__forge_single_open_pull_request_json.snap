@@ -1,0 +1,221 @@
+---
+source: tests/forge_snapshots.rs
+assertion_line: 44
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "repo",
+      "id": {
+        "common_dir": "/fixture/repo/.git"
+      },
+      "common_dir": "/fixture/repo/.git",
+      "source_paths": [
+        "/fixture/repo"
+      ],
+      "remotes": [
+        "origin=git@github.com:octo/repo.git"
+      ]
+    },
+    {
+      "type": "worktree",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo"
+      },
+      "root": "/fixture/repo",
+      "git_dir": "/fixture/repo/.git",
+      "current_branch": {
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      }
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
+    },
+    {
+      "type": "forge_pr",
+      "id": {
+        "provider": "github",
+        "host": "github.com",
+        "owner": "octo",
+        "repo": "repo",
+        "number": 7
+      },
+      "provider": "github",
+      "host": "github.com",
+      "owner": "octo",
+      "repo": "repo",
+      "number": 7,
+      "state": "open",
+      "url": "https://github.com/octo/repo/pull/7",
+      "updated_epoch": 1772714096
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:belongs_to_repo:repo:/fixture/repo/.git",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "repo",
+          "common_dir": "/fixture/repo/.git"
+        }
+      },
+      "relation": "belongs_to_repo",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "git common dir"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/main",
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "branch",
+          "repo": {
+            "common_dir": "/fixture/repo/.git"
+          },
+          "refname": "refs/heads/main"
+        }
+      },
+      "relation": "checked_out_branch",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "git",
+        "evidence": "symbolic HEAD"
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "github:repo:/fixture/repo/.git:branch_has_forge_pr:repo#7",
+      "source": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "octo",
+        "repo": "repo",
+        "number": 7
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "branch",
+          "repo": {
+            "common_dir": "/fixture/repo/.git"
+          },
+          "refname": "refs/heads/main"
+        }
+      },
+      "relation": "branch_has_forge_pr",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "github",
+        "evidence": "gh pr list head ref",
+        "fields": {
+          "head_ref": "main",
+          "is_draft": false,
+          "state": "open",
+          "updated_epoch": 1772714096
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo/.git"
+      },
+      "relation": "belongs_to_repo",
+      "selected_link_id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:belongs_to_repo:repo:/fixture/repo/.git"
+    },
+    {
+      "source": {
+        "type": "worktree",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo"
+      },
+      "target": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "relation": "checked_out_branch",
+      "selected_link_id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/main"
+    },
+    {
+      "source": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "octo",
+        "repo": "repo",
+        "number": 7
+      },
+      "target": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "relation": "branch_has_forge_pr",
+      "selected_link_id": "github:repo:/fixture/repo/.git:branch_has_forge_pr:repo#7"
+    }
+  ],
+  "diagnostics": []
+}
