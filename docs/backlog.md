@@ -1104,7 +1104,7 @@ this repo.
     to local development, and ties the effective MSRV to the stable
     toolchain validated by the Nix dev shell.
 
-- [ ] `P6-003` Audit pure vs impure modules and produce a library API
+- [x] `P6-003` Audit pure vs impure modules and produce a library API
   inventory.
   - Scope: walk every module under `src/` and tag it as either
     pure (no `std::env`, `std::process`, `current_dir`, no global
@@ -1119,6 +1119,13 @@ this repo.
   - Manual checks: re-grep for `std::env`, `std::process`, and
     `current_dir` after the audit and confirm the inventory matches.
   - Blockers: `P6-001`.
+  - Outcome: added `docs/library-api.md` with the stable consumer
+    workflow, pure-module inventory, impure boundary inventory,
+    injection guidance, stable entry points, and environment toggles.
+    The source audit found production process boundaries in git, tmux,
+    and gh runners, and current-directory/environment boundaries in CLI
+    helpers, `DiscoveryContext::from_current_dir`,
+    `LocalDiscoveryConfig::from_env`, and `ConfigLoader::from_env`.
 
 - [ ] `P6-004` Add a curated public re-export facade.
   - Scope: add a small `conspectus::api` module (or top-level
