@@ -13,6 +13,7 @@ use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
 pub mod atelier;
 pub mod cross_link;
+pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod tmux;
@@ -157,6 +158,11 @@ pub fn discover_local_with(
         providers = providers.with_provider(tmux::TmuxDiscovery::with_runner(runner));
     }
 
+    if let Some(runner) = config.forge_runner {
+        providers =
+            providers.with_provider(forge::github::GitHubForgeProvider::with_runner(runner));
+    }
+
     let mut snapshot = providers.discover(&context)?;
     cross_link::infer(&mut snapshot);
     Ok(snapshot)
@@ -166,6 +172,7 @@ pub fn discover_local_with(
 pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
     pub tmux_runner: Option<Box<dyn tmux::TmuxRunner>>,
+    pub forge_runner: Option<Box<dyn forge::GhRunner>>,
 }
 
 impl LocalDiscoveryConfig {
@@ -193,9 +200,17 @@ impl LocalDiscoveryConfig {
                 Some(Box::new(tmux::SystemTmux::new()))
             };
 
+        let forge_runner: Option<Box<dyn forge::GhRunner>> =
+            if env::var_os("CONSPECTUS_DISABLE_FORGE").is_some() {
+                None
+            } else {
+                Some(Box::new(forge::SystemGh::new()))
+            };
+
         Self {
             harness_state_roots,
             tmux_runner,
+            forge_runner,
         }
     }
 
@@ -203,6 +218,7 @@ impl LocalDiscoveryConfig {
         Self {
             harness_state_roots: BTreeMap::new(),
             tmux_runner: None,
+            forge_runner: None,
         }
     }
 
@@ -223,6 +239,16 @@ impl LocalDiscoveryConfig {
 
     pub fn without_tmux(mut self) -> Self {
         self.tmux_runner = None;
+        self
+    }
+
+    pub fn with_forge_runner(mut self, runner: impl forge::GhRunner + 'static) -> Self {
+        self.forge_runner = Some(Box::new(runner));
+        self
+    }
+
+    pub fn without_forge(mut self) -> Self {
+        self.forge_runner = None;
         self
     }
 }
@@ -459,6 +485,63 @@ mod tests {
                 .iter()
                 .any(|link| link.relation == RelationKind::LinkedToMux),
             "cross_link should infer at least one LinkedToMux candidate"
+        );
+    }
+
+    #[test]
+    fn discover_local_with_runs_forge_provider_for_github_repos() {
+        use crate::discovery::forge::FakeGh;
+        use std::process::Command as ProcessCommand;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let repo_root = temp.path().join("repo");
+        std::fs::create_dir(&repo_root).expect("repo dir");
+        let run_git = |args: &[&str]| {
+            let output = ProcessCommand::new("git")
+                .args(args)
+                .current_dir(&repo_root)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {} failed", args.join(" "));
+        };
+        run_git(&["init", "--initial-branch", "main"]);
+        run_git(&["config", "user.name", "Conspectus Test"]);
+        run_git(&["config", "user.email", "test@example.invalid"]);
+        run_git(&["remote", "add", "origin", "git@github.com:octo/repo.git"]);
+        std::fs::write(repo_root.join("README.md"), "fixture\n").expect("write fixture");
+        run_git(&["add", "README.md"]);
+        run_git(&["commit", "-m", "initial"]);
+
+        let body = r#"[{"number": 42, "state": "OPEN", "headRefName": "main"}]"#;
+        let config =
+            LocalDiscoveryConfig::empty().with_forge_runner(FakeGh::with_pull_requests(body));
+
+        let snapshot = discover_local_with([repo_root.as_path()], config).expect("discover");
+
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| matches!(node, GraphNode::ForgePr(_))),
+            "forge provider should emit a ForgePr node"
+        );
+    }
+
+    #[test]
+    fn discover_local_with_skips_forge_when_runner_absent() {
+        use crate::model::GraphNode;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+
+        let snapshot =
+            discover_local_with([temp.path()], LocalDiscoveryConfig::empty()).expect("discover");
+
+        assert!(
+            !snapshot
+                .nodes
+                .iter()
+                .any(|node| matches!(node, GraphNode::ForgePr(_))),
+            "no forge nodes should appear when forge runner is not configured"
         );
     }
 
