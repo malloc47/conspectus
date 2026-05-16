@@ -1,0 +1,113 @@
+---
+source: tests/declared_snapshots.rs
+expression: snapshot
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "harness_key": "codex",
+      "cwd": "/work"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:editor"
+      },
+      "backend": "tmux",
+      "native_id": "editor",
+      "cwd": "/work",
+      "activity_epoch": 1700000500,
+      "created_epoch": 1700000000
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:editor:exact_cwd_match",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:editor"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "exact_cwd_match",
+        "fields": {
+          "match_kind": "exact_cwd_match",
+          "mux_activity_epoch": 1700000500
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "declared:local:/fixture/project/.conspectus.toml:ignore-noisy",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "session-x"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:editor"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "local_declared",
+      "confidence": "high",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "declared",
+        "evidence": "project config",
+        "fields": {
+          "id": "ignore-noisy",
+          "path": "/fixture/project/.conspectus.toml",
+          "reason": "stale",
+          "store": "local"
+        }
+      },
+      "state": {
+        "state": "ignored",
+        "reason": "stale"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:editor"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:editor:exact_cwd_match"
+    }
+  ],
+  "diagnostics": []
+}

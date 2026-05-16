@@ -1,0 +1,49 @@
+---
+source: tests/declared_snapshots.rs
+expression: snapshot
+---
+{
+  "nodes": [],
+  "candidate_links": [
+    {
+      "id": "declared:local:/fixture/project/.conspectus.toml:orphan-link",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "session-x"
+      },
+      "target": {
+        "kind": "unresolved",
+        "evidence": {
+          "node_type": "mux_session",
+          "native_id": "tmux:editor"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "local_declared",
+      "confidence": "high",
+      "freshness": "unknown",
+      "source_metadata": {
+        "adapter": "declared",
+        "evidence": "project config",
+        "fields": {
+          "id": "orphan-link",
+          "path": "/fixture/project/.conspectus.toml",
+          "store": "local"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [],
+  "diagnostics": [
+    {
+      "kind": "unresolved_endpoint",
+      "link_id": "declared:local:/fixture/project/.conspectus.toml:orphan-link",
+      "relation": "linked_to_mux"
+    }
+  ]
+}
