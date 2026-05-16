@@ -1088,7 +1088,7 @@ this repo.
     supported, marks CLI internals outside the library contract, and
     requires a curated `conspectus::api` facade for common consumers.
 
-- [ ] `P6-002` Record an ADR for Conspectus distribution.
+- [x] `P6-002` Record an ADR for Conspectus distribution.
   - Scope: decide whether external consumers (Atelier today, possibly
     other tools later) depend on Conspectus via crates.io, a pinned
     git revision, a path dependency, or all three. Capture the
@@ -1098,6 +1098,11 @@ this repo.
   - Manual checks: confirm any chosen distribution channel works
     against the Phase 6 dev-shell.
   - Blockers: `P6-001`.
+  - Outcome: accepted ADR 0016, which makes crates.io the intended
+    steady-state distribution channel, allows pinned git revisions for
+    Atelier migration and release validation, limits path dependencies
+    to local development, and ties the effective MSRV to the stable
+    toolchain validated by the Nix dev shell.
 
 - [ ] `P6-003` Audit pure vs impure modules and produce a library API
   inventory.
