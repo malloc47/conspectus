@@ -1,12 +1,17 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use conspectus::config;
-use conspectus::declared::DeclaredEndpoint;
-use conspectus::model::RelationKind;
+use conspectus::declared::{
+    DeclaredEndpoint, DeclaredLink, DeclaredLinkState, parse_declared_document,
+};
+use conspectus::model::{Provenance, RelationKind};
 
 #[derive(Debug, Parser)]
 #[command(name = "conspectus", version, about = "AI work graph status tool")]
@@ -157,7 +162,70 @@ struct DeclaredListArgs {
 
 impl DeclaredListArgs {
     fn run(self) -> Result<()> {
-        let _ = (self.store, self.scan_roots);
+        let loader = config::ConfigLoader::from_env();
+        let cwd = std::env::current_dir()?;
+        let scan_roots = if self.scan_roots.is_empty() {
+            vec![cwd]
+        } else {
+            self.scan_roots
+        };
+
+        let mut records = Vec::new();
+        if matches!(self.store, DeclaredStoreFlag::All | DeclaredStoreFlag::User)
+            && let Some(path) = loader.user_config_path()
+        {
+            append_declared_records(
+                &mut records,
+                DeclaredStoreFlag::User,
+                Provenance::GlobalDeclared,
+                path,
+            );
+        }
+        if matches!(
+            self.store,
+            DeclaredStoreFlag::All | DeclaredStoreFlag::Project
+        ) {
+            let mut project_paths = BTreeSet::new();
+            for root in scan_roots {
+                if let Some(path) = loader.locate_project_config(root) {
+                    project_paths.insert(path);
+                }
+            }
+            for path in project_paths {
+                append_declared_records(
+                    &mut records,
+                    DeclaredStoreFlag::Project,
+                    Provenance::LocalDeclared,
+                    path,
+                );
+            }
+        }
+
+        records.sort_by(|left, right| {
+            (
+                store_label(left.store),
+                left.path.as_path(),
+                declared_record_id(left),
+            )
+                .cmp(&(
+                    store_label(right.store),
+                    right.path.as_path(),
+                    declared_record_id(right),
+                ))
+        });
+        for record in records {
+            match record.link {
+                Ok(link) => println!(
+                    "{}",
+                    render_declared_record(&record.path, record.store, record.provenance, &link)
+                ),
+                Err(message) => eprintln!(
+                    "conspectus: warning: {}: {}",
+                    record.path.display(),
+                    message
+                ),
+            }
+        }
         Ok(())
     }
 }
@@ -291,6 +359,114 @@ enum DeclaredStoreFlag {
     User,
 }
 
+#[derive(Debug)]
+struct DeclaredListRecord {
+    store: DeclaredStoreFlag,
+    provenance: Provenance,
+    path: PathBuf,
+    link: std::result::Result<DeclaredLink, String>,
+}
+
+fn declared_record_id(record: &DeclaredListRecord) -> &str {
+    match &record.link {
+        Ok(link) => &link.id,
+        Err(_) => "",
+    }
+}
+
+fn append_declared_records(
+    records: &mut Vec<DeclaredListRecord>,
+    store: DeclaredStoreFlag,
+    provenance: Provenance,
+    path: PathBuf,
+) {
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return,
+        Err(err) => {
+            records.push(DeclaredListRecord {
+                store,
+                provenance,
+                path,
+                link: Err(format!("failed to read declared config: {err}")),
+            });
+            return;
+        }
+    };
+
+    match parse_declared_document(&text) {
+        Ok(document) => {
+            records.extend(
+                document
+                    .links()
+                    .iter()
+                    .cloned()
+                    .map(|link| DeclaredListRecord {
+                        store,
+                        provenance,
+                        path: path.clone(),
+                        link: Ok(link),
+                    }),
+            )
+        }
+        Err(err) => records.push(DeclaredListRecord {
+            store,
+            provenance,
+            path,
+            link: Err(format!("failed to parse declared config: {err}")),
+        }),
+    }
+}
+
+fn render_declared_record(
+    path: &std::path::Path,
+    store: DeclaredStoreFlag,
+    provenance: Provenance,
+    link: &DeclaredLink,
+) -> String {
+    [
+        store_label(store).to_string(),
+        provenance_label(provenance).to_string(),
+        state_label(link.state).to_string(),
+        link.id.clone(),
+        relation_label(&link.relation).to_string(),
+        endpoint_label(&link.source),
+        endpoint_label(&link.target),
+        link.reason.clone().unwrap_or_default(),
+        link.overridden_by.clone().unwrap_or_default(),
+        link.label.clone().unwrap_or_default(),
+        path.display().to_string(),
+    ]
+    .join("\t")
+}
+
+fn store_label(store: DeclaredStoreFlag) -> &'static str {
+    match store {
+        DeclaredStoreFlag::All => "all",
+        DeclaredStoreFlag::Project => "project",
+        DeclaredStoreFlag::User => "user",
+    }
+}
+
+fn provenance_label(provenance: Provenance) -> &'static str {
+    match provenance {
+        Provenance::LocalDeclared => "local_declared",
+        Provenance::GlobalDeclared => "global_declared",
+        Provenance::StrongDiscovered => "strong_discovered",
+        Provenance::Discovered => "discovered",
+        Provenance::Convention => "convention",
+        Provenance::Cached => "cached",
+    }
+}
+
+fn state_label(state: DeclaredLinkState) -> &'static str {
+    match state {
+        DeclaredLinkState::Active => "active",
+        DeclaredLinkState::Ignored => "ignored",
+        DeclaredLinkState::Overridden => "overridden",
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DeclaredEndpointArg(DeclaredEndpoint);
 
@@ -324,6 +500,28 @@ fn parse_relation_kind(raw: &str) -> std::result::Result<RelationKind, String> {
         _ => Err(format!(
             "invalid relation `{raw}`; expected a declared relation such as linked_to_mux"
         )),
+    }
+}
+
+fn relation_label(relation: &RelationKind) -> &'static str {
+    match relation {
+        RelationKind::AssociatedWith => "associated_with",
+        RelationKind::BelongsToRepo => "belongs_to_repo",
+        RelationKind::CheckedOutBranch => "checked_out_branch",
+        RelationKind::WorkspaceContainsRepo => "workspace_contains_repo",
+        RelationKind::BranchHasForgePr => "branch_has_forge_pr",
+        RelationKind::LinkedToMux => "linked_to_mux",
+        RelationKind::RootedIn => "rooted_in",
+        RelationKind::ForksWorkspace => "forks_workspace",
+        RelationKind::ForksRepo => "forks_repo",
+        RelationKind::CreatedWorktree => "created_worktree",
+        RelationKind::ReferencedWorktree => "referenced_worktree",
+        RelationKind::ParentSession => "parent_session",
+        RelationKind::ChildSession => "child_session",
+        RelationKind::CreatedBranch => "created_branch",
+        RelationKind::AssociatedBranch => "associated_branch",
+        RelationKind::ParentFork => "parent_fork",
+        RelationKind::RootedAtPath => "rooted_at_path",
     }
 }
 
@@ -366,6 +564,57 @@ fn parse_endpoint(raw: &str) -> std::result::Result<DeclaredEndpoint, String> {
                 .map_err(|_| "endpoint field `number` must be an integer".to_string())?,
         }),
         _ => Err(endpoint_syntax_error()),
+    }
+}
+
+fn endpoint_label(endpoint: &DeclaredEndpoint) -> String {
+    match endpoint {
+        DeclaredEndpoint::Repo { common_dir } => {
+            format!("repo:common_dir={common_dir}")
+        }
+        DeclaredEndpoint::Worktree {
+            repo_common_dir,
+            root,
+        } => {
+            format!("worktree:repo_common_dir={repo_common_dir},root={root}")
+        }
+        DeclaredEndpoint::Workspace { root } => {
+            format!("workspace:root={root}")
+        }
+        DeclaredEndpoint::AgentSession {
+            harness_key,
+            state_scope,
+            session_key,
+        } => {
+            format!(
+                "agent_session:harness_key={harness_key},state_scope={state_scope},session_key={session_key}"
+            )
+        }
+        DeclaredEndpoint::MuxSession { native_id } => {
+            format!("mux_session:native_id={native_id}")
+        }
+        DeclaredEndpoint::Branch {
+            repo_common_dir,
+            refname,
+        } => {
+            format!("branch:repo_common_dir={repo_common_dir},refname={refname}")
+        }
+        DeclaredEndpoint::Fork {
+            provider_source_key,
+        } => {
+            format!("fork:provider_source_key={provider_source_key}")
+        }
+        DeclaredEndpoint::ForgePr {
+            provider,
+            host,
+            owner,
+            repo,
+            number,
+        } => {
+            format!(
+                "forge_pr:provider={provider},host={host},owner={owner},repo={repo},number={number}"
+            )
+        }
     }
 }
 

@@ -185,6 +185,95 @@ fn declared_list_empty_stores_prints_nothing() {
 }
 
 #[test]
+fn declared_list_renders_project_declared_links() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    fs::write(repo.path().join(".conspectus.toml"), declared_config()).expect("write config");
+
+    isolated_cmd(home.path())
+        .arg("declared")
+        .arg("list")
+        .arg("--scan-root")
+        .arg(repo.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "project\tlocal_declared\tactive\tdeclared-session-mux\tlinked_to_mux",
+        ))
+        .stdout(predicate::str::contains("agent_session:harness_key=codex"))
+        .stdout(predicate::str::contains(
+            "mux_session:native_id=tmux:missing",
+        ));
+}
+
+#[test]
+fn declared_list_renders_user_declared_links() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let user_config = home.path().join(".config/conspectus/config.toml");
+    fs::create_dir_all(user_config.parent().expect("parent")).expect("parent");
+    fs::write(&user_config, ignored_and_overridden_declared_config()).expect("write config");
+
+    isolated_cmd(home.path())
+        .arg("declared")
+        .arg("list")
+        .arg("--store")
+        .arg("user")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "user\tglobal_declared\tignored\tignored-link\tlinked_to_mux",
+        ))
+        .stdout(predicate::str::contains("stale"))
+        .stdout(predicate::str::contains(
+            "user\tglobal_declared\toverridden\told-link\tlinked_to_mux",
+        ))
+        .stdout(predicate::str::contains("replacement-link"));
+}
+
+#[test]
+fn declared_list_renders_project_before_user_deterministically() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    fs::write(repo.path().join(".conspectus.toml"), declared_config()).expect("write project");
+    let user_config = home.path().join(".config/conspectus/config.toml");
+    fs::create_dir_all(user_config.parent().expect("parent")).expect("parent");
+    fs::write(&user_config, ignored_and_overridden_declared_config()).expect("write user");
+
+    let assert = isolated_cmd(home.path())
+        .arg("declared")
+        .arg("list")
+        .arg("--scan-root")
+        .arg(repo.path())
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let project_index = output.find("project\t").expect("project row");
+    let user_index = output.find("user\t").expect("user row");
+    assert!(
+        project_index < user_index,
+        "project rows should sort before user rows:\n{output}"
+    );
+}
+
+#[test]
+fn declared_list_reports_malformed_config_diagnostics() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    fs::write(repo.path().join(".conspectus.toml"), "[declared\n").expect("write bad config");
+
+    isolated_cmd(home.path())
+        .arg("declared")
+        .arg("list")
+        .arg("--scan-root")
+        .arg(repo.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("failed to parse declared config"));
+}
+
+#[test]
 fn graph_json_discovers_plain_repo_from_scan_root() {
     let home = tempfile::TempDir::new().expect("home temp");
     let repo = temp_git_repo();
@@ -517,6 +606,28 @@ relation = "linked_to_mux"
 state = "active"
 source = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "s1" }
 target = { type = "mux_session", native_id = "tmux:missing" }
+"#
+}
+
+fn ignored_and_overridden_declared_config() -> &'static str {
+    r#"[declared]
+schema_version = 1
+
+[[declared.links]]
+id = "ignored-link"
+relation = "linked_to_mux"
+state = "ignored"
+source = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "ignored" }
+target = { type = "mux_session", native_id = "tmux:old" }
+reason = "stale"
+
+[[declared.links]]
+id = "old-link"
+relation = "linked_to_mux"
+state = "overridden"
+source = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "old" }
+target = { type = "mux_session", native_id = "tmux:old" }
+overridden_by = "replacement-link"
 "#
 }
 

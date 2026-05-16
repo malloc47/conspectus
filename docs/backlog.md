@@ -934,7 +934,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     values using declared TOML field names, and empty `declared list`
     succeeds without producing output.
 
-- [ ] `P5-008` Implement list and inspect commands for declared state.
+- [x] `P5-008` Implement list and inspect commands for declared state.
   - Scope: add read-only commands that render declared links from local
     and global stores, including active, ignored, and overridden
     entries, their selected store, provenance, relation, endpoints, and
@@ -945,6 +945,11 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: create hand-written local/global declared entries
     and inspect list output.
   - Blockers: `P5-003`, `P5-007`.
+  - Outcome: implemented read-only `declared list` output for user and
+    discovered project stores, including store, provenance, state, id,
+    relation, source/target endpoints, reason, override id, label, and
+    config path; output is deterministic, empty stores print nothing,
+    and malformed declared config emits a warning without mutating files.
 
 - [ ] `P5-009` Implement link and unlink commands.
   - Scope: add write commands that create and remove active declared
