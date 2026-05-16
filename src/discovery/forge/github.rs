@@ -2,7 +2,7 @@
 //!
 //! [`GhPullRequestParser`] turns the JSON body produced by
 //! `gh pr list --json <fields>` (see
-//! [`GH_PR_LIST_FIELDS`](super::GH_PR_LIST_FIELDS)) into
+//! [`GH_PR_LIST_FIELDS`]) into
 //! provider-neutral [`PullRequestRecord`]s. The parser is deliberately
 //! tolerant: rows missing the small set of required fields are skipped
 //! rather than failing the whole run, which keeps forge discovery

@@ -1127,7 +1127,7 @@ this repo.
     helpers, `DiscoveryContext::from_current_dir`,
     `LocalDiscoveryConfig::from_env`, and `ConfigLoader::from_env`.
 
-- [ ] `P6-004` Add a curated public re-export facade.
+- [x] `P6-004` Add a curated public re-export facade.
   - Scope: add a small `conspectus::api` module (or top-level
     `pub use` block in `src/lib.rs`) that re-exports the entry
     points named in `P6-003`. Apply `#[doc(hidden)]` (or move to
@@ -1140,6 +1140,12 @@ this repo.
   - Manual checks: `cargo doc --no-deps --open` and confirm the
     curated surface is the obvious entry point.
   - Blockers: `P6-001`, `P6-003`.
+  - Outcome: added `conspectus::api` as the curated facade for
+    discovery, resolution, graph JSON, table rendering, config,
+    declared-link helpers, and graph model types. The facade includes a
+    doctest that performs a minimal temp-dir discovery with
+    `LocalDiscoveryConfig::empty()`. Test-only fixture/fake helpers now
+    stay reachable but are hidden from generated docs.
 
 - [ ] `P6-005` Write the Atelier migration guide.
   - Scope: add `docs/atelier-migration.md` mapping each overlapping

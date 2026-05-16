@@ -21,6 +21,7 @@ use crate::model::GraphSnapshot;
 pub mod aider;
 pub mod claude_code;
 pub mod codex;
+#[doc(hidden)]
 pub mod fixtures;
 pub mod opencode;
 

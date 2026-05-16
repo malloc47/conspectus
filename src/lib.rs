@@ -1,5 +1,6 @@
 //! Core library for the Conspectus CLI.
 
+pub mod api;
 pub mod config;
 pub mod declared;
 pub mod discovery;

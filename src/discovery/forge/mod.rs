@@ -7,7 +7,8 @@
 //! their [`GraphFragment`]s.
 //!
 //! GitHub discovery delegates to the `gh` CLI through an injectable
-//! [`GhRunner`] seam, mirroring how tmux discovery uses [`TmuxRunner`].
+//! [`GhRunner`] seam, mirroring how tmux discovery uses
+//! [`TmuxRunner`](crate::discovery::tmux::TmuxRunner).
 //! Production runs use [`SystemGh`]; tests use [`FakeGh`] or any custom
 //! implementation so they never need a real `gh` install or network call.
 //! See ADR 0011 for the rationale.
@@ -209,6 +210,7 @@ fn looks_like_not_a_repo(stderr: &str) -> bool {
 /// Test runner that returns the same pre-canned outcome for every
 /// `cwd`. Tests that need cwd-aware behavior can implement
 /// [`GhRunner`] directly.
+#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct FakeGh {
     outcome: GhOutcome,

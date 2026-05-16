@@ -125,6 +125,7 @@ fn looks_like_no_server(stderr: &str) -> bool {
 }
 
 /// Test runner that returns pre-canned outcomes.
+#[doc(hidden)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FakeTmux {
     outcome: TmuxOutcome,
