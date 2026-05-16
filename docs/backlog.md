@@ -1167,7 +1167,7 @@ this repo.
     preservation, runtime knobs, and `conspectus::api` integration.
     Linked the guide from `docs/index.md`.
 
-- [ ] `P6-006` Add a representative comparison fixture.
+- [x] `P6-006` Add a representative comparison fixture.
   - Scope: add an integration test that runs `discover_local_with`
     on a temp-dir fixture mimicking an Atelier workspace (atelier
     config + fork index + a fake harness session + a `FakeTmux`)
@@ -1179,6 +1179,12 @@ this repo.
   - Manual checks: review the new snapshots for stable ordering and
     preserved evidence/ambiguity.
   - Blockers: `P5-012`.
+  - Outcome: added `tests/atelier_delegation_snapshots.rs`, which
+    builds an Atelier-style workspace with two git repos, a worktree
+    fork, unresolved codex lineage metadata, a fake codex session, and a
+    matching `FakeTmux` row. The test snapshots rendered graph JSON plus
+    agent, mux, and union session table projections with temp paths
+    normalized to `/fixture`.
 
 - [ ] `P6-007` File the Atelier-side delegation work in the Atelier
   repo.

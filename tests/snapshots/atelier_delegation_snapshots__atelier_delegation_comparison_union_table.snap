@@ -1,0 +1,8 @@
+---
+source: tests/atelier_delegation_snapshots.rs
+expression: "table::render(&table_snapshot, Projection::Union)"
+---
+KIND   ID                   CWD                                   RELATIONSHIP
+-----  -------------------  ------------------------------------  ---------------------
+agent  codex:session-alpha  /fixture/.atelier/forks/alpha/repo-a  mux=tmux:alpha [SD/H]
+mux    tmux:alpha           /fixture/.atelier/forks/alpha/repo-a  —
