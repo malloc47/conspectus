@@ -1147,7 +1147,7 @@ this repo.
     `LocalDiscoveryConfig::empty()`. Test-only fixture/fake helpers now
     stay reachable but are hidden from generated docs.
 
-- [ ] `P6-005` Write the Atelier migration guide.
+- [x] `P6-005` Write the Atelier migration guide.
   - Scope: add `docs/atelier-migration.md` mapping each overlapping
     Atelier command to its Conspectus replacement
     (`atelier session list` → `conspectus session`;
@@ -1161,6 +1161,11 @@ this repo.
   - Manual checks: run the listed Conspectus commands and confirm
     they cover the workflow described.
   - Blockers: none (independent of code changes).
+  - Outcome: added `docs/atelier-migration.md` with mappings from
+    Atelier session, mux, forge, and graph-heavy status workflows to
+    Conspectus commands; documented read-only behavior, ambiguity
+    preservation, runtime knobs, and `conspectus::api` integration.
+    Linked the guide from `docs/index.md`.
 
 - [ ] `P6-006` Add a representative comparison fixture.
   - Scope: add an integration test that runs `discover_local_with`
