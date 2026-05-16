@@ -951,7 +951,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     config path; output is deterministic, empty stores print nothing,
     and malformed declared config emits a warning without mutating files.
 
-- [ ] `P5-009` Implement link and unlink commands.
+- [x] `P5-009` Implement link and unlink commands.
   - Scope: add write commands that create and remove active declared
     relationships between supported endpoint types (`AgentSession`,
     `MuxSession`, `ForgePr`, `Workspace`, `Repo`, `Worktree`,
@@ -966,8 +966,20 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     remain visible, then unlink and confirm resolution returns to
     discovered evidence.
   - Blockers: `P5-006`, `P5-007`.
+  - Outcome: `conspectus declared create` builds a declared link with
+    state=Active, picks the target store via
+    `select_store_for_declaration` (auto), `--store {project|user}`
+    (explicit), or rejects `--store all`; `conspectus declared remove`
+    walks project (nearest, per `--scan-root` walk) then user stores
+    and removes the first match, reporting a clear error when no
+    store holds the id. Eight new CLI smoke tests cover repo-rooted
+    write to project config, orphan write to user config, explicit
+    `--store user` override, `--store all` rejection, idempotent
+    re-create (wrote → unchanged), remove from project config,
+    "no declared link" error path, and graph JSON showing the
+    newly created `local_declared` candidate.
 
-- [ ] `P5-010` Implement confirm, ignore, and override flows.
+- [x] `P5-010` Implement confirm, ignore, and override flows.
   - Scope: add mutation flows that mark a discovered candidate as
     confirmed declared evidence, record ignored candidates with optional
     reasons, and record explicit overrides that point to the replacing
@@ -980,8 +992,22 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     a competing candidate, and inspect `candidate_links`,
     `resolved_relationships`, and diagnostics.
   - Blockers: `P5-009`.
+  - Outcome: `conspectus declared confirm` and `declared ignore`
+    share a `run_confirm_or_ignore` helper that runs discovery, looks
+    up the candidate by id in `snapshot.candidate_links`, maps both
+    endpoints back to `DeclaredEndpoint` via a new
+    `declared_endpoint_from_node_id` helper, and writes a declared
+    link with state Active or Ignored (carrying the supplied
+    `--reason` for ignore). `declared override` uses a new
+    `load_declared_link_by_id` helper to read the existing declaration
+    from the same store, mutates state to Overridden plus
+    `overridden_by` + optional reason, and writes it back. Six new
+    CLI smoke tests cover confirm, ignore with reason, unknown
+    candidate id, override of an existing link, override missing id,
+    and a graph-JSON assertion that the discovered candidate stays
+    visible alongside the new local-declared one.
 
-- [ ] `P5-011` Add declared-link graph and table snapshots.
+- [x] `P5-011` Add declared-link graph and table snapshots.
   - Scope: add representative snapshots for local declared links,
     global declared links, local-over-global precedence, ignored
     discovered candidates, overridden candidates, unresolved declared
@@ -992,8 +1018,17 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: review snapshots for stable ordering, readable TOML
     provenance, and preserved discovered evidence.
   - Blockers: `P5-003`, `P5-010`.
+  - Outcome: added `tests/declared_snapshots.rs` with seven scenarios
+    driven by `discover_local_with` plus an injected `ConfigLoader`
+    and `FakeTmux`: local-declared with matched target, global
+    declared, local-over-global precedence (local wins resolution and
+    global stays as a competing link plus `Conflict` diagnostic),
+    ignored declared link, overridden declared link, unresolved
+    declared endpoint when no discovery providers run, and an
+    agent-projection table rendering the declared mux relationship.
+    Temp paths normalize to `/fixture` so reruns stay byte-stable.
 
-- [ ] `P5-012` Verify the Phase 5 end state.
+- [x] `P5-012` Verify the Phase 5 end state.
   - Scope: run the full Phase 5 automated and manual check set and
     record follow-up tasks instead of expanding Phase 5 scope.
   - Tests: `just check`.
@@ -1002,6 +1037,31 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     confirm declared precedence and evidence preservation, then unlink
     and confirm the generated TOML returns to the expected state.
   - Blockers: `P5-004`, `P5-008`, `P5-009`, `P5-010`, `P5-011`.
+  - Outcome: `nix develop --command just check` passed with 276 tests.
+    Manual smoke from a fresh temp git repo with isolated `$HOME`
+    confirmed: (a) `graph --format json` runs read-only and creates
+    no config files; (b) `declared create --store project --scan-root
+    .` writes a well-formed `.conspectus.toml`; (c) the new
+    `local_declared` candidate appears in graph JSON and the agent
+    session table renders cleanly; (d) `declared remove` strips the
+    link; (e) graph output returns to its pre-declare candidate set
+    (only the git-discovered links remain). Discovery stayed
+    read-only throughout.
+  - Follow-up: `declared remove` leaves an empty `[declared]\n
+    schema_version = 1` section behind when it strips the last
+    declared link. The file remains schema-valid and re-adding a link
+    repopulates the section, but a future task should prune empty
+    sections so removed declarations don't leave dangling headers.
+
+## Phase 5 Follow-Ups
+
+- [ ] `P5-FU-001` Prune empty `[declared]` sections after the last
+  declared link is removed.
+  - Scope: when `remove_declared_link` brings the link list to zero,
+    delete the `[declared]` table entirely (and the file when no
+    other top-level sections remain) so a fresh `declared list` from
+    that store prints nothing instead of showing a dangling header.
+  - Blockers: none.
 
 ## Phase 4 Follow-Ups
 
