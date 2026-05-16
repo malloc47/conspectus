@@ -343,6 +343,73 @@ fn session_output_is_deterministic_across_runs() {
     assert_eq!(first, second);
 }
 
+#[test]
+fn graph_and_session_do_not_create_config_files_in_clean_repo() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("session")
+        .assert()
+        .success();
+
+    assert!(!repo.path().join(".conspectus.toml").exists());
+    assert!(!home.path().join(".config/conspectus/config.toml").exists());
+}
+
+#[test]
+fn graph_does_not_mutate_existing_project_declared_config_from_scan_root() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let repo = temp_git_repo();
+    let config_path = repo.path().join(".conspectus.toml");
+    let original = declared_config();
+    fs::write(&config_path, original).expect("write project config");
+
+    isolated_cmd(home.path())
+        .current_dir(cwd.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .arg("--scan-root")
+        .arg(repo.path())
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&config_path).expect("read config"),
+        original
+    );
+}
+
+#[test]
+fn session_does_not_mutate_existing_project_declared_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    let config_path = repo.path().join(".conspectus.toml");
+    let original = declared_config();
+    fs::write(&config_path, original).expect("write project config");
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("session")
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&config_path).expect("read config"),
+        original
+    );
+}
+
 fn temp_git_repo() -> tempfile::TempDir {
     let temp = tempfile::TempDir::new().expect("temp dir");
     git(temp.path(), &["init", "--initial-branch", "main"]);
@@ -355,6 +422,22 @@ fn temp_git_repo() -> tempfile::TempDir {
     git(temp.path(), &["add", "README.md"]);
     git(temp.path(), &["commit", "-m", "initial"]);
     temp
+}
+
+fn declared_config() -> &'static str {
+    r#"[session]
+projection = "agent"
+
+[declared]
+schema_version = 1
+
+[[declared.links]]
+id = "declared-session-mux"
+relation = "linked_to_mux"
+state = "active"
+source = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "s1" }
+target = { type = "mux_session", native_id = "tmux:missing" }
+"#
 }
 
 fn git(root: &Path, args: &[&str]) {

@@ -863,7 +863,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     loading by default while tests can inject or disable the config
     loader explicitly.
 
-- [ ] `P5-004` Preserve read-only command invariants.
+- [x] `P5-004` Preserve read-only command invariants.
   - Scope: explicitly verify `conspectus graph` and `conspectus session`
     never create or mutate `.conspectus.toml`, user config files, or
     cache directories while loading declared evidence.
@@ -874,6 +874,10 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: `cargo run -- graph --format json`; `test ! -e
     .conspectus.toml`; repeat with `cargo run -- session`.
   - Blockers: `P5-003`.
+  - Outcome: added CLI smoke coverage proving `graph` and `session`
+    do not create `.conspectus.toml` or user config in a clean repo,
+    and do not mutate an existing project config with declared-link
+    state when run from either cwd or explicit `--scan-root`.
 
 - [ ] `P5-005` Implement nearest-store selection for writes.
   - Scope: add a pure store-selection helper that decides where a new
