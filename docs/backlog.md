@@ -1186,7 +1186,7 @@ this repo.
     agent, mux, and union session table projections with temp paths
     normalized to `/fixture`.
 
-- [ ] `P6-007` File the Atelier-side delegation work in the Atelier
+- [x] `P6-007` File the Atelier-side delegation work in the Atelier
   repo.
   - Scope: open the cross-repo tracker covering Atelier's deprecation
     or delegation of `atelier session list`, `atelier mux status`,
@@ -1199,6 +1199,14 @@ this repo.
   - Manual checks: confirm an Atelier maintainer (or self, if dual
     maintainer) has accepted the tracker.
   - Blockers: `P6-004`, `P6-005`.
+  - Outcome: added the Atelier-side tracker in
+    `/home/malloc47/src/atelier/docs/conspectus-delegation.md` and
+    linked it from Atelier docs in commit `b765c16` (`docs: track
+    Conspectus delegation work`). The tracker points Atelier at
+    Conspectus commits `46d31ac`, `652dd43`, and `49f170d`, covers
+    `atelier session list`, `atelier mux status`, `atelier pr status`,
+    and graph-heavy `atelier status` areas, and records acceptance
+    criteria for preserving existing workflows.
 
 - [ ] `P6-008` Refresh top-level docs to position Conspectus as the
   cross-workspace observability surface.
