@@ -105,6 +105,86 @@ fn graph_rejects_invalid_format() {
 }
 
 #[test]
+fn declared_help_lists_subcommands() {
+    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
+
+    cmd.arg("declared")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("create"))
+        .stdout(predicate::str::contains("remove"))
+        .stdout(predicate::str::contains("override"));
+}
+
+#[test]
+fn declared_create_rejects_invalid_relation() {
+    let home = tempfile::TempDir::new().expect("home temp");
+
+    isolated_cmd(home.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("alpha")
+        .arg("--relation")
+        .arg("not_a_relation")
+        .arg("--source")
+        .arg("mux_session:native_id=tmux:editor")
+        .arg("--target")
+        .arg("agent_session:harness_key=codex,state_scope=/state,session_key=s1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid relation"));
+}
+
+#[test]
+fn declared_create_rejects_invalid_endpoint_syntax() {
+    let home = tempfile::TempDir::new().expect("home temp");
+
+    isolated_cmd(home.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("alpha")
+        .arg("--relation")
+        .arg("linked_to_mux")
+        .arg("--source")
+        .arg("not-an-endpoint")
+        .arg("--target")
+        .arg("mux_session:native_id=tmux:editor")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid endpoint syntax"));
+}
+
+#[test]
+fn declared_create_requires_core_arguments() {
+    let home = tempfile::TempDir::new().expect("home temp");
+
+    isolated_cmd(home.path())
+        .arg("declared")
+        .arg("create")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn declared_list_empty_stores_prints_nothing() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("declared")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
 fn graph_json_discovers_plain_repo_from_scan_root() {
     let home = tempfile::TempDir::new().expect("home temp");
     let repo = temp_git_repo();

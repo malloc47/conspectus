@@ -915,7 +915,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     directories only on writes, and replace config files via
     temp-file-and-rename writes while leaving malformed files untouched.
 
-- [ ] `P5-007` Define the declared-link CLI surface.
+- [x] `P5-007` Define the declared-link CLI surface.
   - Scope: add the CLI command structure and help text for listing,
     creating, removing, confirming, ignoring, and overriding declared
     links without implementing every mutation path. Choose stable flag
@@ -927,6 +927,12 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: `cargo run -- --help` and declared-link subcommand
     help output.
   - Blockers: `P5-001`, `P5-006`.
+  - Outcome: added the `conspectus declared` command group with
+    `list`, `create`, `remove`, `confirm`, `ignore`, and `override`
+    subcommands; relation validation uses the existing snake_case graph
+    relation names, endpoint validation accepts `type:key=value,...`
+    values using declared TOML field names, and empty `declared list`
+    succeeds without producing output.
 
 - [ ] `P5-008` Implement list and inspect commands for declared state.
   - Scope: add read-only commands that render declared links from local
