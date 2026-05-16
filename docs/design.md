@@ -492,24 +492,33 @@ Mux-aware views should:
 
 ## Migration Plan
 
-1. Identify and isolate pure discovery/parsing code in atelier:
+1. Complete: identify and isolate pure discovery/parsing code in Conspectus:
    - harness session discovery
    - mux session discovery
    - workspace/fork metadata readers
    - git repo/worktree/branch probes
    - GitHub PR association
-2. Move reusable pieces behind library interfaces that do not depend on atelier
-   command modules.
-3. Add the standalone binary with read-only graph collection and JSON output.
-4. Add table rendering for sparse rows and fork lineage.
-5. Add local/global link stores plus manual link/unlink commands.
-6. Have atelier delegate or deprecate overlapping commands:
+2. Complete: expose reusable pieces through Conspectus library interfaces that
+   do not depend on Atelier command modules. ADR 0015 defines the stable library
+   surface and `docs/library-api.md` inventories pure and impure boundaries.
+3. Complete: add the standalone binary with read-only graph collection and JSON
+   output.
+4. Complete: add table rendering for sparse rows, mux projections, forge PR
+   context, and fork lineage.
+5. Complete: add local/global declared-link stores plus manual relationship
+   commands.
+6. In progress: have Atelier delegate or deprecate overlapping commands:
    - `atelier session list`
    - `atelier mux status`
    - forge-related status surfaces
    - graph-heavy parts of `atelier status`
-7. Reassess whether the standalone binary should stay in this repository or be
-   extracted once the shared library boundary stabilizes.
+   The Conspectus side is tracked by the Phase 6 backlog and
+   `docs/atelier-migration.md`; the Atelier side is tracked in Atelier commit
+   `b765c16`.
+7. Pending Phase 6 decision: reassess whether the standalone binary should stay
+   in this repository or be extracted once the shared library boundary
+   stabilizes. ADR 0015 defines the current API contract and ADR 0016 defines
+   the distribution policy that any extraction must preserve.
 
 ## Decisions
 
@@ -527,6 +536,11 @@ Mux-aware views should:
     creating placeholder `AgentSession` nodes.
   - ADR 0006: preserve many mux/session link candidates and let projections
     choose preferred links while exposing ambiguity.
+  - ADR 0015: stabilize the Conspectus library API surface and add a curated
+    facade for consumers.
+  - ADR 0016: prefer crates.io releases for steady-state distribution, allow
+    pinned git revisions for Atelier migration, and keep path dependencies
+    local-development only.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - worktrees use repo identity plus canonical worktree root

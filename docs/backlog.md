@@ -1208,7 +1208,7 @@ this repo.
     and graph-heavy `atelier status` areas, and records acceptance
     criteria for preserving existing workflows.
 
-- [ ] `P6-008` Refresh top-level docs to position Conspectus as the
+- [x] `P6-008` Refresh top-level docs to position Conspectus as the
   cross-workspace observability surface.
   - Scope: update `README.md` so it no longer reads "currently in
     design"; describe what the CLI does today and link the
@@ -1220,6 +1220,14 @@ this repo.
   - Manual checks: open the rendered Markdown and confirm the
     framing matches the post-Phase-5 reality.
   - Blockers: `P6-004`, `P6-005`, `P6-007`.
+  - Outcome: refreshed `README.md` so it describes the implemented CLI
+    and library instead of a design-only project, links the feature
+    summary, ADRs, operations, library API, and Atelier migration guide,
+    and updates development checks. Updated `docs/design.md` to mark
+    migration-plan items 1-5 complete, identify item 6 as tracked by
+    the Conspectus and Atelier Phase 6 coordination docs, and reference
+    ADRs 0015 and 0016 for the API/distribution decisions around items
+    6-7.
 
 - [ ] `P6-009` Decide whether to extract Conspectus into its own
   repository.
