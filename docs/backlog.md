@@ -1246,7 +1246,7 @@ this repo.
     and directs Atelier integration to use ADR 0016 distribution
     channels rather than repository colocation.
 
-- [ ] `P6-010` Verify the Phase 6 end state.
+- [x] `P6-010` Verify the Phase 6 end state.
   - Scope: run the full Phase 6 automated and manual check set and
     record follow-up tasks instead of expanding Phase 6 scope.
   - Tests: `just check`; `cargo doc --no-deps`.
@@ -1256,6 +1256,17 @@ this repo.
     the deprecated commands.
   - Blockers: `P6-004`, `P6-005`, `P6-006`, `P6-007`, `P6-008`,
     `P6-009`.
+  - Outcome: `nix develop --command just check` passed, including
+    formatting, clippy, `cargo test --all-targets --all-features`,
+    `cargo nextest run --all-targets --all-features` with 279 tests,
+    and `git diff --check`. `nix develop --command cargo doc --no-deps`
+    passed and generated docs for the curated API facade. Manual smoke
+    checks against the Conspectus workspace with tmux/forge disabled
+    passed for `cargo run -- session --scan-root .`,
+    `cargo run -- session --projection mux --scan-root .`,
+    `cargo run -- session --projection union --scan-root .`, and
+    `cargo run -- graph --format json --scan-root .`; outputs contained
+    45, 2, 45, and 588 lines respectively.
 
 ## Phase 5 Follow-Ups
 
