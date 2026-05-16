@@ -6,6 +6,8 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -131,6 +133,13 @@ pub enum DeclaredStoreKind {
     User,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredWriteOutcome {
+    pub path: PathBuf,
+    pub changed: bool,
+    pub link_count: usize,
+}
+
 pub fn select_store_for_declaration(
     source: &DeclaredEndpoint,
     target: &DeclaredEndpoint,
@@ -155,6 +164,39 @@ pub fn select_store_for_declaration(
             kind: DeclaredStoreKind::User,
             path,
         })
+}
+
+pub fn upsert_declared_link(
+    path: impl AsRef<Path>,
+    link: DeclaredLink,
+) -> Result<DeclaredWriteOutcome, DeclaredWriteError> {
+    let path = path.as_ref();
+    let (mut document, declared) = load_document_for_write(path)?;
+    let mut links = declared.links().to_vec();
+    let mut changed = true;
+
+    if let Some(existing) = links.iter_mut().find(|existing| existing.id == link.id) {
+        changed = existing != &link;
+        *existing = link;
+    } else {
+        links.push(link);
+    }
+
+    write_declared_links_if_changed(path, &mut document, links, changed)
+}
+
+pub fn remove_declared_link(
+    path: impl AsRef<Path>,
+    id: &str,
+) -> Result<DeclaredWriteOutcome, DeclaredWriteError> {
+    let path = path.as_ref();
+    let (mut document, declared) = load_document_for_write(path)?;
+    let mut links = declared.links().to_vec();
+    let original_len = links.len();
+    links.retain(|link| link.id != id);
+    let changed = links.len() != original_len;
+
+    write_declared_links_if_changed(path, &mut document, links, changed)
 }
 
 fn validate_document(document: &DeclaredDocument) -> Result<(), DeclaredParseError> {
@@ -182,6 +224,131 @@ fn validate_document(document: &DeclaredDocument) -> Result<(), DeclaredParseErr
     }
 
     Ok(())
+}
+
+fn load_document_for_write(
+    path: &Path,
+) -> Result<(toml_edit::DocumentMut, DeclaredDocument), DeclaredWriteError> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(err) => {
+            return Err(DeclaredWriteError::Read {
+                path: path.to_path_buf(),
+                source: err,
+            });
+        }
+    };
+
+    let edit_document = if text.trim().is_empty() {
+        toml_edit::DocumentMut::new()
+    } else {
+        text.parse::<toml_edit::DocumentMut>()
+            .map_err(|err| DeclaredWriteError::Parse {
+                path: path.to_path_buf(),
+                message: format!("malformed TOML: {err}"),
+            })?
+    };
+    let declared = parse_declared_document(&text).map_err(|err| DeclaredWriteError::Parse {
+        path: path.to_path_buf(),
+        message: err.to_string(),
+    })?;
+
+    Ok((edit_document, declared))
+}
+
+fn write_declared_links_if_changed(
+    path: &Path,
+    document: &mut toml_edit::DocumentMut,
+    mut links: Vec<DeclaredLink>,
+    changed: bool,
+) -> Result<DeclaredWriteOutcome, DeclaredWriteError> {
+    links.sort_by(|left, right| left.id.cmp(&right.id));
+    let link_count = links.len();
+
+    if changed {
+        replace_declared_section(document, links)?;
+        write_atomic(path, &document.to_string()).map_err(|err| DeclaredWriteError::Write {
+            path: path.to_path_buf(),
+            source: err,
+        })?;
+    }
+
+    Ok(DeclaredWriteOutcome {
+        path: path.to_path_buf(),
+        changed,
+        link_count,
+    })
+}
+
+fn replace_declared_section(
+    document: &mut toml_edit::DocumentMut,
+    links: Vec<DeclaredLink>,
+) -> Result<(), DeclaredWriteError> {
+    let declared_document = DeclaredDocument {
+        declared: Some(DeclaredSection {
+            schema_version: DECLARED_SCHEMA_VERSION,
+            links,
+        }),
+    };
+    let text = to_toml(&declared_document).map_err(|err| DeclaredWriteError::Serialize {
+        message: err.to_string(),
+    })?;
+    let mut replacement =
+        text.parse::<toml_edit::DocumentMut>()
+            .map_err(|err| DeclaredWriteError::Serialize {
+                message: format!("serialized declared section did not parse: {err}"),
+            })?;
+    document["declared"] = replacement
+        .as_table_mut()
+        .remove("declared")
+        .ok_or_else(|| DeclaredWriteError::Serialize {
+            message: "serialized declared section was missing".to_string(),
+        })?;
+    Ok(())
+}
+
+fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config");
+
+    for attempt in 0..100 {
+        let temp_path = parent.join(format!(".{file_name}.tmp-{}-{attempt}", std::process::id()));
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
+        };
+        if let Err(err) = file
+            .write_all(text.as_bytes())
+            .and_then(|_| file.sync_all())
+        {
+            let _ = fs::remove_file(&temp_path);
+            return Err(err);
+        }
+        drop(file);
+        if let Err(err) = fs::rename(&temp_path, path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(err);
+        }
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "could not allocate temporary file next to {}",
+            path.display()
+        ),
+    ))
 }
 
 fn endpoint_project_root(endpoint: &DeclaredEndpoint, snapshot: &GraphSnapshot) -> Option<PathBuf> {
@@ -358,6 +525,42 @@ impl fmt::Display for DeclaredSerializeError {
 }
 
 impl std::error::Error for DeclaredSerializeError {}
+
+#[derive(Debug)]
+pub enum DeclaredWriteError {
+    Read { path: PathBuf, source: io::Error },
+    Parse { path: PathBuf, message: String },
+    Serialize { message: String },
+    Write { path: PathBuf, source: io::Error },
+}
+
+impl fmt::Display for DeclaredWriteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read { path, source } => {
+                write!(f, "failed to read {}: {source}", path.display())
+            }
+            Self::Parse { path, message } => {
+                write!(f, "failed to parse {}: {message}", path.display())
+            }
+            Self::Serialize { message } => {
+                write!(f, "failed to serialize declared links: {message}")
+            }
+            Self::Write { path, source } => {
+                write!(f, "failed to write {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for DeclaredWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } | Self::Write { source, .. } => Some(source),
+            Self::Parse { .. } | Self::Serialize { .. } => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -857,6 +1060,144 @@ mod tests {
         .expect("selection");
 
         assert_eq!(selection.path, workspace.join(PROJECT_CONFIG_FILENAME));
+    }
+
+    #[test]
+    fn declared_write_creates_config_and_parent_dirs() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp
+            .path()
+            .join("xdg")
+            .join(crate::config::USER_CONFIG_RELATIVE);
+
+        let outcome = upsert_declared_link(&path, declared_link("alpha")).expect("write");
+
+        assert!(outcome.changed);
+        assert_eq!(outcome.link_count, 1);
+        let parsed =
+            parse_declared_document(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(parsed.links().len(), 1);
+        assert_eq!(parsed.links()[0].id, "alpha");
+    }
+
+    #[test]
+    fn declared_write_preserves_unrelated_config_sections() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        std::fs::write(&path, "[session]\nprojection = \"mux\"\n").expect("seed");
+
+        upsert_declared_link(&path, declared_link("alpha")).expect("write");
+
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(text.contains("[session]"));
+        assert!(text.contains("projection = \"mux\""));
+        assert!(text.contains("[declared]"));
+        assert!(text.contains("[[declared.links]]"));
+    }
+
+    #[test]
+    fn declared_write_sorts_links_by_id() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+
+        upsert_declared_link(&path, declared_link("zulu")).expect("write zulu");
+        upsert_declared_link(&path, declared_link("alpha")).expect("write alpha");
+
+        let parsed =
+            parse_declared_document(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        let ids: Vec<_> = parsed.links().iter().map(|link| link.id.as_str()).collect();
+        assert_eq!(ids, vec!["alpha", "zulu"]);
+    }
+
+    #[test]
+    fn declared_write_replaces_duplicate_id() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        upsert_declared_link(&path, declared_link("alpha")).expect("write");
+        let mut replacement = declared_link("alpha");
+        replacement.reason = Some("new reason".to_string());
+
+        let outcome = upsert_declared_link(&path, replacement).expect("replace");
+
+        assert!(outcome.changed);
+        let parsed =
+            parse_declared_document(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(parsed.links().len(), 1);
+        assert_eq!(parsed.links()[0].reason.as_deref(), Some("new reason"));
+    }
+
+    #[test]
+    fn declared_write_skips_unchanged_replacement() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        let link = declared_link("alpha");
+        upsert_declared_link(&path, link.clone()).expect("write");
+
+        let outcome = upsert_declared_link(&path, link).expect("same");
+
+        assert!(!outcome.changed);
+        assert_eq!(outcome.link_count, 1);
+    }
+
+    #[test]
+    fn declared_write_removes_link_by_id() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        upsert_declared_link(&path, declared_link("alpha")).expect("write alpha");
+        upsert_declared_link(&path, declared_link("zulu")).expect("write zulu");
+
+        let outcome = remove_declared_link(&path, "alpha").expect("remove");
+
+        assert!(outcome.changed);
+        assert_eq!(outcome.link_count, 1);
+        let parsed =
+            parse_declared_document(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(parsed.links().len(), 1);
+        assert_eq!(parsed.links()[0].id, "zulu");
+    }
+
+    #[test]
+    fn declared_write_reports_malformed_existing_toml_without_mutating() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        let original = "[declared\n";
+        std::fs::write(&path, original).expect("seed");
+
+        let err = upsert_declared_link(&path, declared_link("alpha")).expect_err("error");
+
+        assert!(matches!(err, DeclaredWriteError::Parse { .. }));
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), original);
+    }
+
+    #[test]
+    fn declared_remove_missing_link_does_not_create_file() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join("missing").join(PROJECT_CONFIG_FILENAME);
+
+        let outcome = remove_declared_link(&path, "missing").expect("remove missing");
+
+        assert!(!outcome.changed);
+        assert_eq!(outcome.link_count, 0);
+        assert!(!path.exists());
+    }
+
+    fn declared_link(id: &str) -> DeclaredLink {
+        DeclaredLink {
+            id: id.to_string(),
+            relation: RelationKind::LinkedToMux,
+            state: DeclaredLinkState::Active,
+            source: DeclaredEndpoint::AgentSession {
+                harness_key: "codex".to_string(),
+                state_scope: "/state".to_string(),
+                session_key: "s1".to_string(),
+            },
+            target: DeclaredEndpoint::MuxSession {
+                native_id: "tmux:editor".to_string(),
+            },
+            reason: None,
+            overridden_by: None,
+            label: None,
+        }
     }
 
     fn path_string(path: impl AsRef<Path>) -> String {

@@ -897,7 +897,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     fork-rooted relationships, and falls back to the user config for
     orphan relationships without touching cache or index storage.
 
-- [ ] `P5-006` Add atomic declared-link write helpers.
+- [x] `P5-006` Add atomic declared-link write helpers.
   - Scope: implement read-modify-write helpers for local
     `.conspectus.toml` and user config declared-link sections, creating
     parent directories only for explicit write commands, preserving
@@ -909,6 +909,11 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: inspect generated TOML and verify read-only
     commands still do not call these helpers.
   - Blockers: `P5-005`.
+  - Outcome: added explicit upsert/remove helpers that read and validate
+    existing config, preserve unrelated TOML sections, replace duplicate
+    declared IDs, sort links deterministically, create parent
+    directories only on writes, and replace config files via
+    temp-file-and-rename writes while leaving malformed files untouched.
 
 - [ ] `P5-007` Define the declared-link CLI surface.
   - Scope: add the CLI command structure and help text for listing,
