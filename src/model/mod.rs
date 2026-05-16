@@ -479,6 +479,10 @@ pub enum Diagnostic {
         link_id: String,
         relation: RelationKind,
     },
+    Config {
+        path: String,
+        message: String,
+    },
     Conflict {
         source: NodeId,
         relation: RelationKind,

@@ -9,10 +9,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
+use crate::config::ConfigLoader;
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
 pub mod atelier;
 pub mod cross_link;
+pub mod declared;
 pub mod forge;
 pub mod git;
 pub mod harness;
@@ -165,6 +167,9 @@ pub fn discover_local_with(
 
     let mut snapshot = providers.discover(&context)?;
     cross_link::infer(&mut snapshot);
+    if let Some(loader) = &config.declared_config_loader {
+        declared::apply_declared_links(&mut snapshot, &context, loader);
+    }
     Ok(snapshot)
 }
 
@@ -173,6 +178,7 @@ pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
     pub tmux_runner: Option<Box<dyn tmux::TmuxRunner>>,
     pub forge_runner: Option<Box<dyn forge::GhRunner>>,
+    pub declared_config_loader: Option<ConfigLoader>,
 }
 
 impl LocalDiscoveryConfig {
@@ -211,6 +217,7 @@ impl LocalDiscoveryConfig {
             harness_state_roots,
             tmux_runner,
             forge_runner,
+            declared_config_loader: Some(ConfigLoader::from_env()),
         }
     }
 
@@ -219,6 +226,7 @@ impl LocalDiscoveryConfig {
             harness_state_roots: BTreeMap::new(),
             tmux_runner: None,
             forge_runner: None,
+            declared_config_loader: None,
         }
     }
 
@@ -249,6 +257,16 @@ impl LocalDiscoveryConfig {
 
     pub fn without_forge(mut self) -> Self {
         self.forge_runner = None;
+        self
+    }
+
+    pub fn with_declared_config_loader(mut self, loader: ConfigLoader) -> Self {
+        self.declared_config_loader = Some(loader);
+        self
+    }
+
+    pub fn without_declared_config(mut self) -> Self {
+        self.declared_config_loader = None;
         self
     }
 }
@@ -560,6 +578,43 @@ mod tests {
                 .iter()
                 .any(|node| matches!(node, GraphNode::MuxSession(_))),
             "no mux nodes should appear when tmux runner is not configured"
+        );
+    }
+
+    #[test]
+    fn discover_local_with_loads_declared_project_links_when_configured() {
+        use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME};
+        use crate::model::Provenance;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project).expect("project dir");
+        std::fs::write(
+            project.join(PROJECT_CONFIG_FILENAME),
+            r#"
+            [declared]
+            schema_version = 1
+
+            [[declared.links]]
+            id = "declared-session-mux"
+            relation = "linked_to_mux"
+            state = "active"
+            source = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "s1" }
+            target = { type = "mux_session", native_id = "tmux:missing" }
+            "#,
+        )
+        .expect("write project config");
+        let config = LocalDiscoveryConfig::empty()
+            .with_declared_config_loader(ConfigLoader::new().with_home(temp.path()));
+
+        let snapshot = discover_local_with([project.as_path()], config).expect("discover");
+
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .any(|link| link.provenance == Provenance::LocalDeclared),
+            "declared project config should contribute a local declared candidate"
         );
     }
 }

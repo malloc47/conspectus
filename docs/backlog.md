@@ -838,7 +838,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     schema versions, duplicate IDs, and overridden links missing
     `overridden_by`.
 
-- [ ] `P5-003` Load local and global declared links into graph evidence.
+- [x] `P5-003` Load local and global declared links into graph evidence.
   - Scope: teach local discovery to read project `.conspectus.toml`
     and user config declared-link sections without writing either file,
     convert entries into `GraphLink` candidates with
@@ -853,6 +853,15 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     with hand-written `.conspectus.toml` declarations and inspect
     provenance, link state, diagnostics, and resolved relationships.
   - Blockers: `P5-002`.
+  - Outcome: added a read-only `discovery::declared` pass that loads
+    user config and per-root project config, maps entries into
+    `GraphLink` candidates with `LocalDeclared` / `GlobalDeclared`
+    provenance, resolves declared targets against the discovered node
+    set when present, preserves missing targets as unresolved endpoint
+    evidence, and emits config diagnostics for malformed declared
+    sections. `LocalDiscoveryConfig::from_env()` enables declared-link
+    loading by default while tests can inject or disable the config
+    loader explicitly.
 
 - [ ] `P5-004` Preserve read-only command invariants.
   - Scope: explicitly verify `conspectus graph` and `conspectus session`
