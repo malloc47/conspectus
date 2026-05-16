@@ -12,6 +12,7 @@ fn isolated_cmd(home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
     cmd.env("HOME", home);
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
+    cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
@@ -218,6 +219,128 @@ fn graph_json_emits_no_mux_nodes_when_tmux_disabled() {
         mux_nodes.is_empty(),
         "tmux discovery should be skipped when CONSPECTUS_DISABLE_TMUX is set"
     );
+}
+
+#[test]
+fn session_default_projection_renders_agent_table() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(
+        output.starts_with("AGENT"),
+        "agent table should be the default projection; got:\n{output}",
+    );
+}
+
+#[test]
+fn session_projection_flag_switches_to_mux() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .arg("--projection")
+        .arg("mux")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(
+        output.starts_with("MUX"),
+        "mux projection should print MUX header; got:\n{output}",
+    );
+}
+
+#[test]
+fn session_projection_flag_switches_to_union() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .arg("--projection")
+        .arg("union")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(
+        output.starts_with("KIND"),
+        "union projection should print KIND header; got:\n{output}",
+    );
+}
+
+#[test]
+fn session_rejects_invalid_projection() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .arg("--projection")
+        .arg("ledger")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}
+
+#[test]
+fn session_reads_default_projection_from_project_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = home.path().join("project");
+    fs::create_dir_all(&project).expect("project dir");
+    fs::write(
+        project.join(".conspectus.toml"),
+        "[session]\nprojection = \"union\"\n",
+    )
+    .expect("write project config");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(&project)
+        .arg("session")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(
+        output.starts_with("KIND"),
+        "project config should set default projection to union; got:\n{output}",
+    );
+}
+
+#[test]
+fn session_output_is_deterministic_across_runs() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let first = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(first, second);
 }
 
 fn temp_git_repo() -> tempfile::TempDir {
