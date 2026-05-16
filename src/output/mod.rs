@@ -4,6 +4,8 @@ use anyhow::Result;
 
 use crate::model::GraphSnapshot;
 
+pub mod table;
+
 pub fn render_graph_json(snapshot: &GraphSnapshot) -> Result<String> {
     Ok(serde_json::to_string_pretty(snapshot)?)
 }
