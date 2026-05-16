@@ -797,6 +797,166 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     authenticated `gh` belongs in a follow-up smoke test run by a
     user with credentials, not in Phase 4 scope.
 
+## Phase 5: Declared Links
+
+Source plan: `docs/implementation/phase-05-declared-links.md`.
+
+- [ ] `P5-001` Record the declared-link storage schema.
+  - Scope: add an ADR for durable declared relationship state in
+    `.conspectus.toml` and user config, covering link identity, endpoint
+    encoding, relation kinds, link state (`active`, `ignored`,
+    `overridden`), local-vs-global precedence, write ownership, and
+    compatibility rules for future schema changes.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: review the schema against `docs/design.md`, ADR
+    0002, ADR 0012, and the Phase 5 implementation plan.
+  - Blockers: `P4-013`.
+
+- [ ] `P5-002` Define declared-link file models and TOML round trips.
+  - Scope: extend `src/config.rs` or add a focused declared-link module
+    with serializable structs for project-local and user-level declared
+    links, ignored links, overrides, reasons, optional labels, and schema
+    versioning. Preserve unknown config sections and keep session
+    projection loading compatible with existing config files.
+  - Tests: unit tests for TOML decode/encode round trips, missing
+    sections, unknown keys, malformed declared-link tables, duplicate
+    declared IDs, and backwards-compatible files containing only
+    `[session]`.
+  - Manual checks: inspect representative `.conspectus.toml` and
+    user-config TOML snippets for readable shape.
+  - Blockers: `P5-001`, `P4-005`.
+
+- [ ] `P5-003` Load local and global declared links into graph evidence.
+  - Scope: teach local discovery to read project `.conspectus.toml`
+    and user config declared-link sections without writing either file,
+    convert entries into `GraphLink` candidates with
+    `LocalDeclared` / `GlobalDeclared` provenance, and preserve
+    unresolved endpoint evidence when a declared endpoint is not present
+    in the current graph.
+  - Tests: unit/library tests for local-only, global-only,
+    local-over-global, unresolved endpoints, ignored entries,
+    overridden entries, malformed files producing diagnostics, and
+    discovery over roots with no config files.
+  - Manual checks: run `cargo run -- graph --format json` in a repo
+    with hand-written `.conspectus.toml` declarations and inspect
+    provenance, link state, diagnostics, and resolved relationships.
+  - Blockers: `P5-002`.
+
+- [ ] `P5-004` Preserve read-only command invariants.
+  - Scope: explicitly verify `conspectus graph` and `conspectus session`
+    never create or mutate `.conspectus.toml`, user config files, or
+    cache directories while loading declared evidence.
+  - Tests: CLI integration tests for graph/session from a clean repo,
+    a repo with existing config, an orphan/non-repo cwd, and explicit
+    `--scan-root` values; assert filesystem mtimes/content stay
+    unchanged.
+  - Manual checks: `cargo run -- graph --format json`; `test ! -e
+    .conspectus.toml`; repeat with `cargo run -- session`.
+  - Blockers: `P5-003`.
+
+- [ ] `P5-005` Implement nearest-store selection for writes.
+  - Scope: add a pure store-selection helper that decides where a new
+    user-authored declaration belongs: project-local for relationships
+    rooted in a discovered repo/workspace/worktree, global for orphan or
+    user-wide relationships, and never in cache/index storage. Reuse the
+    config walk rules from ADR 0012.
+  - Tests: unit tests for repo-rooted, workspace-rooted,
+    worktree-rooted, branch/PR-rooted, mux-only, orphan-agent,
+    multi-root, missing-root, and outside-home scenarios.
+  - Manual checks: inspect selected paths for representative repos,
+    linked worktrees, and non-repo directories.
+  - Blockers: `P5-002`, `P5-003`.
+
+- [ ] `P5-006` Add atomic declared-link write helpers.
+  - Scope: implement read-modify-write helpers for local
+    `.conspectus.toml` and user config declared-link sections, creating
+    parent directories only for explicit write commands, preserving
+    unrelated config, sorting entries deterministically, and writing
+    atomically enough to avoid partial files on failure.
+  - Tests: unit tests for create, update, remove, preserve-unrelated
+    sections, deterministic ordering, duplicate replacement, malformed
+    existing TOML behavior, and global config parent creation.
+  - Manual checks: inspect generated TOML and verify read-only
+    commands still do not call these helpers.
+  - Blockers: `P5-005`.
+
+- [ ] `P5-007` Define the declared-link CLI surface.
+  - Scope: add the CLI command structure and help text for listing,
+    creating, removing, confirming, ignoring, and overriding declared
+    links without implementing every mutation path. Choose stable flag
+    names for source endpoint, relation, target endpoint, reason, and
+    store override if needed.
+  - Tests: CLI smoke tests for `--help`, invalid relation names,
+    invalid endpoint syntax, missing required arguments, and no-op list
+    output against empty stores.
+  - Manual checks: `cargo run -- --help` and declared-link subcommand
+    help output.
+  - Blockers: `P5-001`, `P5-006`.
+
+- [ ] `P5-008` Implement list and inspect commands for declared state.
+  - Scope: add read-only commands that render declared links from local
+    and global stores, including active, ignored, and overridden
+    entries, their selected store, provenance, relation, endpoints, and
+    reasons.
+  - Tests: CLI integration tests for empty stores, local declarations,
+    global declarations, both stores, ignored/overridden entries,
+    malformed config diagnostics, and deterministic output.
+  - Manual checks: create hand-written local/global declared entries
+    and inspect list output.
+  - Blockers: `P5-003`, `P5-007`.
+
+- [ ] `P5-009` Implement link and unlink commands.
+  - Scope: add write commands that create and remove active declared
+    relationships between supported endpoint types (`AgentSession`,
+    `MuxSession`, `ForgePr`, `Workspace`, `Repo`, `Worktree`,
+    `Branch`, and `Fork`), using nearest-store selection by default.
+    Link creation should not delete discovered evidence.
+  - Tests: CLI integration tests for session↔mux, branch↔PR,
+    workspace/repo/worktree/fork relationships, global orphan links,
+    unlink by declared ID, unlink idempotency, and graph output after
+    link/unlink.
+  - Manual checks: create a manual mux/session link, rerun graph JSON,
+    confirm the declared link wins resolution and discovered candidates
+    remain visible, then unlink and confirm resolution returns to
+    discovered evidence.
+  - Blockers: `P5-006`, `P5-007`.
+
+- [ ] `P5-010` Implement confirm, ignore, and override flows.
+  - Scope: add mutation flows that mark a discovered candidate as
+    confirmed declared evidence, record ignored candidates with optional
+    reasons, and record explicit overrides that point to the replacing
+    declared link while keeping original evidence visible.
+  - Tests: CLI integration and resolver tests for confirmed mux links,
+    ignored noisy candidates, overridden links, local-vs-global state,
+    optional reasons, and detailed graph JSON preserving all candidate
+    evidence.
+  - Manual checks: confirm one discovered session↔mux candidate, ignore
+    a competing candidate, and inspect `candidate_links`,
+    `resolved_relationships`, and diagnostics.
+  - Blockers: `P5-009`.
+
+- [ ] `P5-011` Add declared-link graph and table snapshots.
+  - Scope: add representative snapshots for local declared links,
+    global declared links, local-over-global precedence, ignored
+    discovered candidates, overridden candidates, unresolved declared
+    endpoints, and session-table rendering with declared mux/PR
+    relationships.
+  - Tests: `cargo test --all-targets --all-features`; `cargo nextest
+    run --all-targets --all-features`.
+  - Manual checks: review snapshots for stable ordering, readable TOML
+    provenance, and preserved discovered evidence.
+  - Blockers: `P5-003`, `P5-010`.
+
+- [ ] `P5-012` Verify the Phase 5 end state.
+  - Scope: run the full Phase 5 automated and manual check set and
+    record follow-up tasks instead of expanding Phase 5 scope.
+  - Tests: `just check`.
+  - Manual checks: run the Phase 5 plan's read-only invariant check,
+    create a manual mux/session link, rerun graph/session output,
+    confirm declared precedence and evidence preservation, then unlink
+    and confirm the generated TOML returns to the expected state.
+  - Blockers: `P5-004`, `P5-008`, `P5-009`, `P5-010`, `P5-011`.
+
 ## Phase 4 Follow-Ups
 
 - [x] `P4-FU-001` Document the `CONSPECTUS_DISABLE_FORGE`,
