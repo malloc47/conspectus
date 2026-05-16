@@ -500,7 +500,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
 
 ## Phase 3 Follow-Ups
 
-- [ ] `P3-FU-001` Align harness adapter parsers with real provider state.
+- [x] `P3-FU-001` Align harness adapter parsers with real provider state.
   - Scope: extend the Codex, Claude Code, and opencode adapters so the cwd
     and any activity/recency timestamps from real local state populate
     `AgentSessionNode.cwd` (and link metadata where applicable). The Phase 3
@@ -508,6 +508,29 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     matching cwds, but real harness JSONL/info.json layouts left
     `agent_session.cwd` empty during the Phase 3 smoke test.
   - Blockers: none.
+  - Outcome: codex now walks `sessions/` recursively (real Codex stores
+    rollouts under `sessions/YYYY/MM/DD/`), and the Claude Code adapter
+    scans up to 200 JSONL lines looking for the first event that carries
+    `cwd` (real sessions begin with a `permission-mode` envelope that lacks
+    `cwd`), falling back to a best-effort decode of the encoded project
+    directory name. Session ids are now taken from the file stem rather
+    than insisting on a first-line `sessionId`. A fresh smoke run from
+    inside the conspectus repo went from 16 cwd-less sessions to 34
+    sessions (17 codex + 17 claude-code) all carrying cwd, 12
+    `linked_to_mux` candidates, and 13 resolved relationships including
+    the live claude-code session attached to the `conspectus-smoke` tmux
+    session.
+- [ ] `P3-FU-002` Read opencode sessions from the SQLite store.
+  - Scope: modern opencode (≥ ~0.5) keeps sessions in
+    `~/.local/share/opencode/opencode.db` (table `session` with
+    `id`, `directory`, `title`, `time_created`, `time_updated`,
+    `parent_id`, etc.) rather than the legacy
+    `storage/session/<id>/info.json` layout the current adapter expects.
+    The legacy parser stays useful for older installs but finds nothing
+    on modern setups.
+  - Blockers: requires an ADR for the new SQLite read dependency
+    (`rusqlite` or similar) before introducing it; CLAUDE.md forbids
+    dependency additions without one.
 
 ## Later
 

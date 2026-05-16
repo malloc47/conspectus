@@ -1,12 +1,15 @@
 //! Claude Code harness discovery.
 //!
 //! Walks `$STATE_ROOT/projects/<encoded-cwd>/<session>.jsonl` and emits one
-//! `AgentSession` per discovered session. The first JSONL line is parsed to
-//! recover the `sessionId`, `cwd`, and optional `summary` fields; malformed
-//! files are skipped silently. Sessions whose first line is missing the
-//! `sessionId` field are also skipped to avoid emitting fabricated identities.
+//! `AgentSession` per discovered session. The session id is taken from the
+//! file stem; cwd is read from the first JSONL line that carries it (real
+//! Claude Code files commonly start with a `permission-mode` envelope that
+//! lacks `cwd`, with the cwd appearing on later user/assistant events).
+//! When no JSONL line carries a cwd, the encoded project directory name is
+//! decoded as a best-effort fallback. Malformed files yield no session.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::Result;
@@ -15,6 +18,11 @@ use serde::Deserialize;
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{AgentSessionId, AgentSessionNode, GraphNode};
+
+/// Maximum number of JSONL lines to scan when looking for `cwd` evidence.
+/// Real sessions almost always carry cwd within the first few user/assistant
+/// events; the cap keeps very long transcripts cheap.
+const MAX_HEADER_SCAN_LINES: usize = 200;
 
 pub const HARNESS_KEY: &str = "claude-code";
 
@@ -57,6 +65,11 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             continue;
         }
 
+        let fallback_cwd = project_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(decode_project_dir);
+
         for entry in fs::read_dir(&project_dir)? {
             let path = entry?.path();
             let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -67,7 +80,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                 continue;
             }
 
-            let Some(meta) = read_session_header(&path) else {
+            let Some(meta) = read_session_header(&path, fallback_cwd.as_deref()) else {
                 continue;
             };
 
@@ -87,20 +100,94 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     })
 }
 
-#[derive(Deserialize)]
 struct SessionHeader {
-    #[serde(rename = "sessionId")]
     session_id: String,
+    cwd: Option<String>,
+    summary: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ScannedLine {
+    #[serde(rename = "sessionId", default)]
+    session_id: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
     summary: Option<String>,
 }
 
-fn read_session_header(path: &Path) -> Option<SessionHeader> {
-    let body = fs::read_to_string(path).ok()?;
-    let first = body.lines().next()?;
-    serde_json::from_str(first).ok()
+fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<SessionHeader> {
+    let session_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)?;
+    let file = fs::File::open(path).ok()?;
+    let mut cwd: Option<String> = None;
+    let mut summary: Option<String> = None;
+    let mut saw_any_record = false;
+
+    for line in BufReader::new(file).lines().take(MAX_HEADER_SCAN_LINES) {
+        let Ok(line) = line else { continue };
+        let Ok(parsed) = serde_json::from_str::<ScannedLine>(&line) else {
+            continue;
+        };
+        saw_any_record = true;
+
+        if cwd.is_none() {
+            cwd = parsed.cwd;
+        }
+        if summary.is_none() {
+            summary = parsed.summary;
+        }
+        if cwd.is_some() && summary.is_some() {
+            break;
+        }
+        // sessionId from JSONL is informational; the filename is authoritative.
+        let _ = parsed.session_id;
+    }
+
+    if !saw_any_record {
+        return None;
+    }
+
+    if cwd.is_none() {
+        cwd = fallback_cwd.map(str::to_string);
+    }
+
+    Some(SessionHeader {
+        session_id,
+        cwd,
+        summary,
+    })
+}
+
+/// Best-effort inverse of Claude Code's project-directory encoding (`/` → `-`).
+/// Real encoding is lossy on paths that contain literal `-` or `.`, so this is
+/// only used as a last-resort fallback when no JSONL line carries `cwd`.
+fn decode_project_dir(name: &str) -> String {
+    let replaced: String = name
+        .chars()
+        .map(|ch| if ch == '-' { '/' } else { ch })
+        .collect();
+    coalesce_slashes(&replaced)
+}
+
+fn coalesce_slashes(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut last_slash = false;
+
+    for ch in path.chars() {
+        if ch == '/' {
+            if !last_slash {
+                out.push(ch);
+            }
+            last_slash = true;
+        } else {
+            out.push(ch);
+            last_slash = false;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -182,6 +269,118 @@ mod tests {
             .find(|s| s.id.session_key == "session-b")
             .expect("session-b");
         assert!(b.title.is_none(), "missing summary should leave title None");
+    }
+
+    #[test]
+    fn cwd_comes_from_later_jsonl_line_when_first_line_lacks_it() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let project_dir = fixture
+            .claude_code_state_root()
+            .join("projects")
+            .join("-work-conspectus");
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+        let session_id = "e83ded0a-b5a4-4a1c-b460-f83d49bd01ce";
+        std::fs::write(
+            project_dir.join(format!("{session_id}.jsonl")),
+            "{\"type\":\"permission-mode\",\"sessionId\":\"e83ded0a-b5a4-4a1c-b460-f83d49bd01ce\"}\n\
+             {\"type\":\"user\",\"cwd\":\"/work/conspectus\",\"sessionId\":\"e83ded0a-b5a4-4a1c-b460-f83d49bd01ce\"}\n",
+        )
+        .expect("write claude session");
+
+        let fragment = ClaudeCodeAdapter::new()
+            .discover(&context)
+            .expect("discover");
+        let sessions: Vec<_> = fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id.session_key, session_id);
+        assert_eq!(sessions[0].cwd.as_deref(), Some("/work/conspectus"));
+    }
+
+    #[test]
+    fn cwd_falls_back_to_decoded_project_directory_when_jsonl_lacks_cwd() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let project_dir = fixture
+            .claude_code_state_root()
+            .join("projects")
+            .join("-work-conspectus");
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+        std::fs::write(
+            project_dir.join("noop.jsonl"),
+            "{\"type\":\"permission-mode\",\"sessionId\":\"noop\"}\n",
+        )
+        .expect("write claude session");
+
+        let fragment = ClaudeCodeAdapter::new()
+            .discover(&context)
+            .expect("discover");
+        let sessions: Vec<_> = fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].cwd.as_deref(), Some("/work/conspectus"));
+    }
+
+    #[test]
+    fn session_id_comes_from_filename_not_first_line() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let project_dir = fixture
+            .claude_code_state_root()
+            .join("projects")
+            .join("-work-x");
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+        // The JSONL sessionId disagrees with the filename; filename should win
+        // so a discovered session can always be located on disk by id.
+        std::fs::write(
+            project_dir.join("real-name.jsonl"),
+            "{\"type\":\"user\",\"sessionId\":\"different-id\",\"cwd\":\"/work/x\"}\n",
+        )
+        .expect("write claude session");
+
+        let fragment = ClaudeCodeAdapter::new()
+            .discover(&context)
+            .expect("discover");
+        let sessions: Vec<_> = fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id.session_key, "real-name");
+    }
+
+    #[test]
+    fn decode_project_dir_coalesces_consecutive_slashes() {
+        assert_eq!(decode_project_dir("-work-repo"), "/work/repo");
+        // Claude Code's encoding is lossy: every `-` becomes `/`, so the
+        // decoder cannot tell a literal hyphen (`agent-deck`) from a path
+        // separator. Consecutive separators are coalesced into one `/` so the
+        // fallback at least produces a plausible absolute path. Callers should
+        // prefer the JSONL-derived cwd whenever it exists.
+        assert_eq!(
+            decode_project_dir("-home-malloc47--agent-deck"),
+            "/home/malloc47/agent/deck"
+        );
     }
 
     #[test]

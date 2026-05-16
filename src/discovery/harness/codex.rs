@@ -1,9 +1,12 @@
 //! Codex harness discovery.
 //!
 //! Reads the first JSONL line (`session_meta`) of each rollout file under
-//! `$STATE_ROOT/sessions/rollout-<id>.jsonl` and emits one `AgentSession` per
-//! discovered session. Malformed records and rollouts without a `session_meta`
-//! envelope are skipped silently so a single bad file cannot poison discovery.
+//! `$STATE_ROOT/sessions/**/rollout-*.jsonl` and emits one `AgentSession` per
+//! discovered session. Real Codex stores rollouts under
+//! `sessions/YYYY/MM/DD/`, so the scanner walks the tree recursively rather
+//! than only looking at the top-level directory. Malformed records and
+//! rollouts without a `session_meta` envelope are skipped silently so a single
+//! bad file cannot poison discovery.
 
 use std::fs;
 use std::path::Path;
@@ -49,18 +52,9 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     let state_scope = state_root.to_string_lossy().to_string();
     let mut nodes = Vec::new();
 
-    for entry in fs::read_dir(&sessions_dir)? {
-        let path = entry?.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-
-        if !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
-            continue;
-        }
-
-        let Some(meta) = read_session_meta(&path) else {
-            continue;
+    visit_rollouts(&sessions_dir, &mut |path| {
+        let Some(meta) = read_session_meta(path) else {
+            return;
         };
 
         nodes.push(GraphNode::AgentSession(AgentSessionNode {
@@ -69,13 +63,39 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             cwd: meta.cwd,
             title: None,
         }));
-    }
+    })?;
 
     Ok(GraphFragment {
         nodes,
         candidate_links: Vec::new(),
         diagnostics: Vec::new(),
     })
+}
+
+fn visit_rollouts(dir: &Path, on_rollout: &mut dyn FnMut(&Path)) -> Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            visit_rollouts(&path, on_rollout)?;
+            continue;
+        }
+
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if name.starts_with("rollout-") && name.ends_with(".jsonl") {
+            on_rollout(&path);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -187,6 +207,38 @@ mod tests {
             beta.cwd.is_none(),
             "missing optional cwd should remain None"
         );
+    }
+
+    #[test]
+    fn discovers_codex_sessions_in_nested_yyyy_mm_dd_subdirs() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let nested = fixture
+            .codex_state_root()
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("09");
+        fs::create_dir_all(&nested).expect("nested sessions dir");
+        fs::write(
+            nested.join("rollout-2026-05-09T00-07-57-nested-id.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"nested-id\",\"cwd\":\"/work/nested\"}}\n",
+        )
+        .expect("write nested rollout");
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let sessions: Vec<_> = fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id.session_key, "nested-id");
+        assert_eq!(sessions[0].cwd.as_deref(), Some("/work/nested"));
     }
 
     #[test]
