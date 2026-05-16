@@ -301,6 +301,10 @@ pub struct ForgePrNode {
     pub state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub is_draft: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
