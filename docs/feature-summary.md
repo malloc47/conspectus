@@ -4,124 +4,120 @@ A point-in-time snapshot of what Conspectus does today and what is planned
 next. Update this file as phases land so it stays a useful "what is this
 project, right now?" reference.
 
-## What Conspectus is
+## What Conspectus Is
 
-Conspectus is an early-stage Rust CLI that surveys the AI-coding-agent
-workflows alive on your local machine and emits the result as a single,
-deterministic JSON graph. Each invocation walks read-only data sources — git,
-the on-disk metadata that Atelier writes for its forks/worktrees, the local
-session state of common agent harnesses, and `tmux list-sessions` — merges
-everything into a provider-neutral model of repos, worktrees, branches,
-workspaces, forks, agent sessions, and mux sessions, then runs a small
-resolver to pick "preferred" relationships without throwing away the
-alternatives.
+Conspectus is an early-stage Rust CLI that surveys AI-coding-agent work
+alive on your local machine. It reads local state only: git repositories and
+worktrees, Atelier workspace and fork metadata, supported agent harness state,
+tmux sessions, and GitHub pull requests through the `gh` CLI.
 
-## What it does today (through Phase 3)
+The core output is a deterministic provider-neutral graph of repos,
+worktrees, branches, workspaces, forks, agent sessions, mux sessions, and
+forge PRs. Discovery records every plausible relationship as evidence first;
+the resolver then selects preferred relationships without discarding weaker,
+ambiguous, or unresolved candidates.
 
-- **One command, one graph.** `conspectus graph --format json` from a cwd
-  (or with `--scan-root`) produces a deterministic JSON document with
-  `nodes`, `candidate_links`, `resolved_relationships`, and `diagnostics`.
-- **Git discovery.** Recognises plain repos, linked worktrees, detached
-  HEAD, current branch, upstream, and remotes — without writing anything.
-- **Workspace inference.** Detects both generic multi-repo roots (a
-  directory containing several git repos) and Atelier workspaces (from
-  `atelier.toml`), without inventing workspaces for standalone repos.
+## Current CLI
+
+```sh
+conspectus graph --format json [--scan-root PATH]...
+conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
+```
+
+Without `--scan-root`, both commands discover from the current working
+directory. `session` defaults to the configured projection from
+`.conspectus.toml` or user config, falling back to `agent`.
+
+## What It Does Today
+
+- **Deterministic graph JSON.** `conspectus graph --format json` emits a
+  stable document with `nodes`, `candidate_links`,
+  `resolved_relationships`, and `diagnostics`.
+- **Session tables.** `conspectus session` renders human-readable table
+  projections: `agent` (one row per agent session), `mux` (one row per mux
+  session), and `union` (both node kinds with relationship status).
+- **Read-only git discovery.** Recognizes plain repos, linked worktrees,
+  detached HEADs, remotes, upstreams, current branch, and all local branches.
+  Non-current local branches are graph nodes too, which lets PRs for sibling
+  branches resolve to branch targets instead of staying unresolved.
+- **Workspace inference.** Detects generic multi-repo roots and Atelier
+  workspaces from `atelier.toml`, without fabricating workspaces for
+  standalone repos.
 - **Atelier fork awareness.** Parses `.atelier/forks/index.toml` into one
-  polymorphic `Fork` node per fork plus links for `forks_workspace`,
-  `forks_repo`, `created_worktree` / `referenced_worktree`,
-  `created_branch` / `associated_branch`, `rooted_at_path`, and
-  `parent_fork`.
-- **Agent session discovery.** Read-only adapters for `claude-code`,
-  `opencode`, `codex`, and `aider` enumerate local sessions and emit
-  `AgentSession` nodes carrying the real working directory. Codex walks
-  `sessions/YYYY/MM/DD/`; Claude Code scans up to 200 JSONL lines for the
-  first one with `cwd` (falling back to decoding the encoded project
-  directory name); aider treats every scan root with `.aider.*` markers as
-  a session. State roots come from `CONSPECTUS_<HARNESS>_STATE` overrides
-  or `$HOME`-relative defaults. opencode currently only handles its legacy
-  `storage/session/<id>/info.json` layout — modern installs use SQLite and
-  are tracked by `P3-FU-002`.
-- **tmux discovery.** Invokes `tmux list-sessions -F` through an injectable
-  runner (tests use a `FakeTmux`) and turns each row into a `MuxSession`
-  node with cwd plus activity/created epochs. `unavailable`, `no server`,
-  and `failed` outcomes degrade gracefully.
-- **Cross-provider link inference.** After every provider has contributed,
-  a single pass infers `LinkedToMux` candidates when an agent session and
-  a mux session share a working directory and `AssociatedWith` candidates
-  when a session cwd sits inside an Atelier fork root.
-- **Ambiguity-preserving resolver.** Implements ADR 0006: declared →
-  strong → exact-cwd → naming convention → recency. When several mux
-  sessions plausibly match one agent, every candidate stays in
-  `candidate_links`, the preferred one shows up in
-  `resolved_relationships`, and the rest are listed as
-  `competing_link_ids` plus a `Conflict` diagnostic.
-- **Lineage without placeholders.** Atelier harness lineage (parent/child
-  session evidence with `native` / `approximate` / `unsupported` / `fresh`
-  capability) is preserved as `ParentSession` / `ChildSession` candidate
-  links with unresolved-endpoint metadata; Conspectus refuses to fabricate
-  `AgentSession` nodes for evidence it has not actually discovered.
-- **Determinism by construction.** Output is canonicalised (sorted
-  nodes/links, stable ID shape) so the same machine state always renders
-  the same JSON; tests rely on this with insta snapshots.
-- **Tests instead of production-state coupling.** The harness fixture
-  builders and `FakeTmux` mean the entire test suite runs without
-  touching `~/.codex`, `~/.claude`, etc., and without needing a real tmux
-  server.
+  polymorphic `Fork` node per fork plus links for workspace/repo scope,
+  created or referenced worktrees, created or associated branches, fork roots,
+  parent forks, and unresolved session lineage evidence.
+- **Agent harness discovery.** Read-only adapters discover `codex`,
+  `claude-code`, `opencode`, and `aider` sessions. Codex walks nested
+  `sessions/YYYY/MM/DD/` state; Claude Code scans JSONL records for `cwd` and
+  falls back to decoded project paths; opencode reads modern `opencode.db`
+  SQLite state and the legacy `storage/session/<id>/info.json` layout; aider
+  treats scan roots with `.aider*` markers as sessions.
+- **tmux discovery.** Runs `tmux list-sessions -F` through an injectable
+  runner and emits `MuxSession` nodes with cwd plus activity/created epochs
+  when available. Missing tmux, no server, and failed commands degrade to
+  sparse output.
+- **GitHub PR discovery.** Runs `gh pr list --json ...` through an injectable
+  runner, emits `ForgePr` nodes, and links PRs to matching local branch nodes.
+  Missing `gh`, unauthenticated `gh`, non-GitHub remotes, and command
+  failures degrade to no PR rows for that repo.
+- **Cross-provider inference.** After provider discovery, Conspectus infers
+  session-to-mux candidates from matching cwd/root evidence and associates
+  sessions with Atelier forks when a session cwd sits under a fork root.
+- **Ambiguity-preserving resolution.** Resolver precedence handles declared,
+  strong discovered, convention, cached, session/mux, and branch/PR
+  candidates. Losing candidates remain visible and conflicts are recorded in
+  diagnostics.
+- **Configuration and operations docs.** Runtime knobs are documented in
+  `docs/operations.md`: provider toggles (`CONSPECTUS_DISABLE_TMUX`,
+  `CONSPECTUS_DISABLE_FORGE`), harness state overrides, config precedence,
+  and the current CLI surface.
+- **Offline tests.** Harness fixtures, `FakeTmux`, and `FakeGh` keep tests
+  independent of real home-directory state, live tmux servers, GitHub
+  credentials, or network access.
 
-## What's coming soon
+## Real Problems It Solves Today
 
-- **opencode SQLite reader (`P3-FU-002`).** Modern opencode keeps sessions
-  in `opencode.db` rather than the legacy `storage/session/<id>/info.json`
-  layout. Adding a SQLite read dependency needs an ADR first.
-- **Forge / PR awareness (Phase 4).** GitHub-style `ForgePr` nodes and
-  `branch_has_forge_pr` links, plus the first non-JSON output (a tabular
-  view of agent/mux/work state).
-- **Declared links and overrides (Phase 5).** User-authored TOML files
-  near a workspace/repo that pin a session to a mux, ignore a noisy
-  candidate, or rename a fork — federated with the discovered evidence
-  rather than replacing it.
-- **Atelier command delegation (Phase 6).** Calling out to Atelier for
-  fork operations so Conspectus stays the read-only "what's going on"
-  tool while Atelier remains the writer.
-- **Activity recency from real tmux/harness data.** The model already
-  carries `activity_epoch` / `created_epoch` and the resolver already
-  uses them as tie-breakers; once parsers populate them the recency
-  ordering becomes meaningful in production.
-- **Beyond JSON.** Agent/mux/union table projections that pick a default
-  mux per session while exposing the ambiguity, plus eventual MCP/agent
-  integrations.
+1. **Auditing local AI-agent sessions.** Conspectus lists Codex, Claude Code,
+   opencode, and aider session state in one model instead of one harness silo
+   at a time.
+2. **Joining sessions to terminal work.** When harness and tmux cwd evidence
+   line up, the graph and session table show the preferred mux relationship
+   while keeping ambiguous alternatives visible.
+3. **Inspecting Atelier fork state outside Atelier.** Forks, worktrees,
+   branches, roots, parent forks, and session-lineage evidence are normalized
+   into graph nodes and links without depending on Atelier command modules.
+4. **Seeing branch and PR context together.** GitHub PRs become graph nodes,
+   and PR head refs are matched against all local branches, not just the
+   currently checked-out branch.
+5. **Building higher-level tools.** The JSON graph is stable and explicit
+   about evidence, resolution, and diagnostics, so downstream tools can avoid
+   scraping every harness, mux backend, and forge provider independently.
 
-## Real problems it solves today
+## Current Limits
 
-Conspectus is most useful right now if you're doing any of the following:
+- Conspectus is still read-only. It does not start sessions, create forks,
+  edit provider metadata, or persist user-declared relationships.
+- Forge support is GitHub-only and delegates to `gh`; unauthenticated or
+  missing `gh` means no PR rows.
+- There is no MCP server, daemon, or caching layer yet.
+- There are no link/unlink commands yet; ignored, overridden, and declared
+  links exist in the model/resolver but do not have a user-facing persistence
+  workflow.
+- The session table is intentionally compact. It exposes preferred
+  relationships and ambiguity indicators, but richer filtering, sorting, and
+  interactive workflows are still future work.
 
-1. **Auditing what AI sessions you've actually started on a machine.**
-   Even with empty cwds, the tool lists every Codex/Claude/opencode/aider
-   session that has on-disk state across your harnesses in one document
-   — a question every existing harness only answers in its own silo.
-2. **Inspecting Atelier fork state from outside Atelier.** If you use
-   Atelier, you get a typed view of which forks exist, what
-   worktrees/branches they materialised, and what session lineage
-   Atelier intended (native vs approximate vs unsupported vs fresh)
-   — without parsing TOML by hand.
-3. **Locating tmux work.** `tmux list-sessions` is one command, but
-   Conspectus normalises it into the same graph as your repos and forks
-   and (once `P3-FU-001` lands) will join it to the agent sessions
-   you've actually run there.
-4. **Building higher-level tools.** Because the output is a stable,
-   schema-versioned JSON document with explicit `candidate_links` /
-   `resolved_relationships` / `diagnostics`, downstream tools
-   (an agent-deck-style picker, a status bar, a "resume the last session
-   in this repo" CLI) get a clean substrate instead of scraping each
-   harness themselves.
+## What's Coming Next
 
-## Known limitations
-
-- No writes anywhere. Conspectus is read-only by design today; there are
-  no commands to start work, persist preferred relationships, or edit
-  discovered metadata.
-- No forge/PR data and no table views — both land in Phase 4.
-- No MCP server, no daemon, no caching layer.
-- Harness adapters parse the synthetic fixture shapes; until
-  `P3-FU-001` they will miss cwds and recency information that real
-  Codex/Claude/opencode sessions actually carry.
+- **Declared links and overrides (Phase 5).** User-authored TOML near a
+  workspace or repo will pin preferred relationships, ignore noisy candidates,
+  and federate declared intent with discovered evidence.
+- **Atelier command delegation (Phase 6).** Conspectus should stay the
+  read-only "what is going on" tool while delegating write operations to
+  Atelier where appropriate.
+- **Operational integrations.** MCP/agent integrations, richer table views,
+  and possible cache/index support remain later-phase work.
+- **Backlog migration.** The only open backlog item is evaluating a move from
+  `docs/backlog.md` to a structured tracker once task volume or coordination
+  needs justify it.
