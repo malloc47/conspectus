@@ -22,11 +22,23 @@ ambiguous, or unresolved candidates.
 ```sh
 conspectus graph --format json [--scan-root PATH]...
 conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
+
+conspectus declared list   [--store {all|project|user}] [--scan-root PATH]...
+conspectus declared create --id ID --relation REL --source SRC --target TGT \
+                           [--reason R] [--label L] \
+                           [--store {project|user}] [--scan-root PATH]...
+conspectus declared remove --id ID [--store {all|project|user}] [--scan-root PATH]...
+conspectus declared confirm  --id CANDIDATE_ID [--store {project|user}] [--scan-root PATH]...
+conspectus declared ignore   --id CANDIDATE_ID [--reason R] [--store {project|user}] [--scan-root PATH]...
+conspectus declared override --id ID --overridden-by NEW_ID [--reason R] \
+                             [--store {project|user|all}] [--scan-root PATH]...
 ```
 
-Without `--scan-root`, both commands discover from the current working
+Without `--scan-root`, every command discovers from the current working
 directory. `session` defaults to the configured projection from
-`.conspectus.toml` or user config, falling back to `agent`.
+`.conspectus.toml` or user config, falling back to `agent`. The `declared`
+mutation commands auto-select the nearest project store when `--store` is
+omitted, falling back to user config for orphan relationships.
 
 ## What It Does Today
 
@@ -68,6 +80,17 @@ directory. `session` defaults to the configured projection from
   strong discovered, convention, cached, session/mux, and branch/PR
   candidates. Losing candidates remain visible and conflicts are recorded in
   diagnostics.
+- **Declared relationships.** A user-authored `[declared]` TOML section in
+  `.conspectus.toml` (project) or `$XDG_CONFIG_HOME/conspectus/config.toml`
+  (user) pins preferred relationships, suppresses noisy candidates, and
+  records explicit overrides. ADR 0014 fixes the schema; ADR 0012 fixes
+  precedence. Discovery loads both stores as `LocalDeclared` /
+  `GlobalDeclared` candidates with `Active` / `Ignored` / `Overridden`
+  state, preserving discovered evidence underneath. `conspectus declared`
+  exposes `list`, `create`, `remove`, `confirm`, `ignore`, and `override`
+  flows. Writes are atomic, sort links deterministically, preserve
+  unrelated config sections, and prune the `[declared]` section (and the
+  file itself) when the last link is removed.
 - **Configuration and operations docs.** Runtime knobs are documented in
   `docs/operations.md`: provider toggles (`CONSPECTUS_DISABLE_TMUX`,
   `CONSPECTUS_DISABLE_FORGE`), harness state overrides, config precedence,
@@ -93,29 +116,31 @@ directory. `session` defaults to the configured projection from
 5. **Building higher-level tools.** The JSON graph is stable and explicit
    about evidence, resolution, and diagnostics, so downstream tools can avoid
    scraping every harness, mux backend, and forge provider independently.
+6. **Persisting user intent across runs.** Declared links let users pin a
+   preferred session↔mux or branch↔PR mapping, ignore a noisy candidate, or
+   override one declaration with another — all stored as readable TOML next
+   to the relevant project (or in user config for orphan relationships)
+   without ever discarding the underlying discovered evidence.
 
 ## Current Limits
 
-- Conspectus is still read-only. It does not start sessions, create forks,
-  edit provider metadata, or persist user-declared relationships.
+- Conspectus does not start sessions, create forks, or edit provider
+  metadata. The only files it writes are the user-authored
+  `.conspectus.toml` / user-config TOML stores driven by the
+  `conspectus declared` mutation commands; discovery itself stays
+  read-only.
 - Forge support is GitHub-only and delegates to `gh`; unauthenticated or
   missing `gh` means no PR rows.
 - There is no MCP server, daemon, or caching layer yet.
-- There are no link/unlink commands yet; ignored, overridden, and declared
-  links exist in the model/resolver but do not have a user-facing persistence
-  workflow.
 - The session table is intentionally compact. It exposes preferred
   relationships and ambiguity indicators, but richer filtering, sorting, and
   interactive workflows are still future work.
 
 ## What's Coming Next
 
-- **Declared links and overrides (Phase 5).** User-authored TOML near a
-  workspace or repo will pin preferred relationships, ignore noisy candidates,
-  and federate declared intent with discovered evidence.
 - **Atelier command delegation (Phase 6).** Conspectus should stay the
-  read-only "what is going on" tool while delegating write operations to
-  Atelier where appropriate.
+  read-only "what is going on" tool for discovery while delegating richer
+  write operations (beyond declared-link TOML) to Atelier where appropriate.
 - **Operational integrations.** MCP/agent integrations, richer table views,
   and possible cache/index support remain later-phase work.
 - **Backlog migration.** The only open backlog item is evaluating a move from
