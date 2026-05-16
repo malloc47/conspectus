@@ -1,17 +1,19 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use conspectus::config;
+use conspectus::config::{self, ConfigLoader, PROJECT_CONFIG_FILENAME};
 use conspectus::declared::{
-    DeclaredEndpoint, DeclaredLink, DeclaredLinkState, parse_declared_document,
+    DeclaredEndpoint, DeclaredLink, DeclaredLinkState, DeclaredStoreKind, DeclaredStoreSelection,
+    declared_endpoint_from_node_id, load_declared_link_by_id, parse_declared_document,
+    remove_declared_link, select_store_for_declaration, upsert_declared_link,
 };
-use conspectus::model::{Provenance, RelationKind};
+use conspectus::model::{GraphLink, GraphSnapshot, LinkEndpoint, Provenance, RelationKind};
 
 #[derive(Debug, Parser)]
 #[command(name = "conspectus", version, about = "AI work graph status tool")]
@@ -126,8 +128,8 @@ impl DeclaredArgs {
         match self.command {
             DeclaredCommand::List(args) => args.run(),
             DeclaredCommand::Create(args) => args.run(),
-            DeclaredCommand::Remove(args) => args.run(),
-            DeclaredCommand::Confirm(args) => args.run(),
+            DeclaredCommand::Remove(args) => args.run_remove(),
+            DeclaredCommand::Confirm(args) => args.run_confirm(),
             DeclaredCommand::Ignore(args) => args.run(),
             DeclaredCommand::Override(args) => args.run(),
         }
@@ -253,20 +255,45 @@ struct DeclaredCreateArgs {
     /// Override automatic nearest-store selection.
     #[arg(long, value_enum)]
     store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local stores for nearest-store selection.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
 }
 
 impl DeclaredCreateArgs {
     fn run(self) -> Result<()> {
-        let _ = (
-            self.id,
-            self.relation,
-            self.source.0,
-            self.target.0,
-            self.reason,
-            self.label,
+        let link = DeclaredLink {
+            id: self.id,
+            relation: self.relation,
+            state: DeclaredLinkState::Active,
+            source: self.source.0,
+            target: self.target.0,
+            reason: self.reason,
+            overridden_by: None,
+            label: self.label,
+        };
+
+        let path = resolve_write_store(
             self.store,
-        );
-        anyhow::bail!("declared create is not implemented yet")
+            Some(&link.source),
+            Some(&link.target),
+            &self.scan_roots,
+        )?;
+
+        let outcome =
+            upsert_declared_link(&path, link.clone()).map_err(|err| anyhow!(err.to_string()))?;
+
+        let verb = if outcome.changed {
+            if outcome.link_count == 1 {
+                "wrote"
+            } else {
+                "updated"
+            }
+        } else {
+            "unchanged"
+        };
+        println!("{verb} declared link `{}` in {}", link.id, path.display());
+        Ok(())
     }
 }
 
@@ -275,16 +302,123 @@ struct DeclaredIdArgs {
     /// Declared-link id.
     #[arg(long)]
     id: String,
-    /// Override automatic nearest-store selection.
+    /// Restrict the operation to one store.
     #[arg(long, value_enum)]
     store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
 }
 
 impl DeclaredIdArgs {
-    fn run(self) -> Result<()> {
-        let _ = (self.id, self.store);
-        anyhow::bail!("declared mutation commands are not implemented yet")
+    fn run_remove(self) -> Result<()> {
+        let stores = candidate_store_paths(self.store, &self.scan_roots)?;
+        let mut removed_from = None;
+        for path in &stores {
+            if !path.is_file() {
+                continue;
+            }
+            let outcome =
+                remove_declared_link(path, &self.id).map_err(|err| anyhow!(err.to_string()))?;
+            if outcome.changed {
+                removed_from = Some(path.clone());
+                break;
+            }
+        }
+
+        match removed_from {
+            Some(path) => {
+                println!(
+                    "removed declared link `{}` from {}",
+                    self.id,
+                    path.display()
+                );
+                Ok(())
+            }
+            None => {
+                bail!(
+                    "no declared link `{}` found in {}",
+                    self.id,
+                    store_search_label(&stores)
+                );
+            }
+        }
     }
+
+    fn run_confirm(self) -> Result<()> {
+        run_confirm_or_ignore(
+            &self.id,
+            DeclaredLinkState::Active,
+            None,
+            self.store,
+            &self.scan_roots,
+        )
+    }
+}
+
+/// Shared implementation for `declared confirm` and `declared ignore`.
+///
+/// Both commands take a candidate-link id from the current discovered
+/// graph and produce a declared link whose source/target/relation
+/// mirror the candidate. They only differ in the link state and the
+/// optional reason string.
+fn run_confirm_or_ignore(
+    candidate_id: &str,
+    state: DeclaredLinkState,
+    reason: Option<String>,
+    store: Option<DeclaredStoreFlag>,
+    scan_roots: &[PathBuf],
+) -> Result<()> {
+    let snapshot = discover_for_store_selection(scan_roots)?;
+    let candidate = find_candidate_by_id(&snapshot, candidate_id)?;
+    let target_node = match &candidate.target {
+        LinkEndpoint::Node { id } => id.clone(),
+        LinkEndpoint::Unresolved { .. } => bail!(
+            "candidate `{candidate_id}` targets an unresolved endpoint; declare it directly with \
+             `conspectus declared create`"
+        ),
+    };
+
+    let source_endpoint = declared_endpoint_from_node_id(&candidate.source);
+    let target_endpoint = declared_endpoint_from_node_id(&target_node);
+
+    let link = DeclaredLink {
+        id: candidate_id.to_string(),
+        relation: candidate.relation.clone(),
+        state,
+        source: source_endpoint.clone(),
+        target: target_endpoint.clone(),
+        reason,
+        overridden_by: None,
+        label: None,
+    };
+
+    let path = resolve_write_store(
+        store,
+        Some(&source_endpoint),
+        Some(&target_endpoint),
+        scan_roots,
+    )?;
+
+    let outcome =
+        upsert_declared_link(&path, link.clone()).map_err(|err| anyhow!(err.to_string()))?;
+
+    let verb = match (state, outcome.changed) {
+        (DeclaredLinkState::Active, true) => "confirmed",
+        (DeclaredLinkState::Ignored, true) => "ignored",
+        (DeclaredLinkState::Overridden, true) => "overrode",
+        (_, false) => "unchanged",
+    };
+    println!("{verb} declared link `{}` in {}", link.id, path.display());
+    Ok(())
+}
+
+fn find_candidate_by_id<'a>(snapshot: &'a GraphSnapshot, id: &str) -> Result<&'a GraphLink> {
+    snapshot
+        .candidate_links
+        .iter()
+        .find(|link| link.id == id)
+        .ok_or_else(|| anyhow!("no candidate link with id `{id}` was discovered"))
 }
 
 #[derive(Debug, Args)]
@@ -295,15 +429,23 @@ struct DeclaredIgnoreArgs {
     /// Reason the declaration should be ignored.
     #[arg(long)]
     reason: Option<String>,
-    /// Override automatic nearest-store selection.
+    /// Restrict the operation to one store.
     #[arg(long, value_enum)]
     store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
 }
 
 impl DeclaredIgnoreArgs {
     fn run(self) -> Result<()> {
-        let _ = (self.id, self.reason, self.store);
-        anyhow::bail!("declared ignore is not implemented yet")
+        run_confirm_or_ignore(
+            &self.id,
+            DeclaredLinkState::Ignored,
+            self.reason,
+            self.store,
+            &self.scan_roots,
+        )
     }
 }
 
@@ -318,15 +460,48 @@ struct DeclaredOverrideArgs {
     /// Reason the old declaration was overridden.
     #[arg(long)]
     reason: Option<String>,
-    /// Override automatic nearest-store selection.
+    /// Restrict the operation to one store.
     #[arg(long, value_enum)]
     store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
 }
 
 impl DeclaredOverrideArgs {
     fn run(self) -> Result<()> {
-        let _ = (self.id, self.overridden_by, self.reason, self.store);
-        anyhow::bail!("declared override is not implemented yet")
+        let stores = candidate_store_paths(self.store, &self.scan_roots)?;
+        let (path, existing) = load_declared_link_by_id(&stores, &self.id)
+            .map_err(|err| anyhow!(err.to_string()))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "no declared link `{}` found in {}",
+                    self.id,
+                    store_search_label(&stores)
+                )
+            })?;
+
+        let mut replacement = existing;
+        replacement.state = DeclaredLinkState::Overridden;
+        replacement.overridden_by = Some(self.overridden_by);
+        if let Some(reason) = self.reason {
+            replacement.reason = Some(reason);
+        }
+
+        let outcome = upsert_declared_link(&path, replacement.clone())
+            .map_err(|err| anyhow!(err.to_string()))?;
+
+        let verb = if outcome.changed {
+            "overrode"
+        } else {
+            "unchanged"
+        };
+        println!(
+            "{verb} declared link `{}` in {}",
+            replacement.id,
+            path.display()
+        );
+        Ok(())
     }
 }
 
@@ -644,4 +819,143 @@ fn required_field(fields: &BTreeMap<&str, &str>, key: &str) -> std::result::Resu
 fn endpoint_syntax_error() -> String {
     "invalid endpoint syntax; expected type:key=value,... using declared TOML field names"
         .to_string()
+}
+
+/// Resolve which config file a write should target.
+///
+/// `Some(Project)` / `Some(User)` short-circuit the nearest-store walk;
+/// `Some(All)` is rejected because writes have to pick exactly one store.
+/// When `store` is `None`, run discovery from the scan roots and ask
+/// [`select_store_for_declaration`] to pick the nearest project store,
+/// falling back to user config.
+fn resolve_write_store(
+    store: Option<DeclaredStoreFlag>,
+    source: Option<&DeclaredEndpoint>,
+    target: Option<&DeclaredEndpoint>,
+    scan_roots: &[PathBuf],
+) -> Result<PathBuf> {
+    match store {
+        Some(DeclaredStoreFlag::All) => {
+            bail!("`--store all` is not valid for write commands; pick `project` or `user`")
+        }
+        Some(DeclaredStoreFlag::User) => {
+            let loader = ConfigLoader::from_env();
+            loader.user_config_path().ok_or_else(|| {
+                anyhow!("no user config path available; set $HOME or $XDG_CONFIG_HOME")
+            })
+        }
+        Some(DeclaredStoreFlag::Project) => project_store_path(scan_roots),
+        None => match (source, target) {
+            (Some(source), Some(target)) => {
+                let snapshot = discover_for_store_selection(scan_roots)?;
+                let loader = ConfigLoader::from_env();
+                let selection = select_store_for_declaration(source, target, &snapshot, &loader)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "could not pick a declared-link store; \
+                             pass --store user or --store project"
+                        )
+                    })?;
+                Ok(selection.path)
+            }
+            _ => bail!(
+                "automatic store selection requires both source and target endpoints; \
+                 use --store user or --store project"
+            ),
+        },
+    }
+}
+
+fn project_store_path(scan_roots: &[PathBuf]) -> Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    let loader = ConfigLoader::from_env();
+    let roots = effective_scan_roots(scan_roots, &cwd);
+
+    for root in &roots {
+        if let Some(path) = loader.locate_project_config(root) {
+            return Ok(path);
+        }
+    }
+    // No existing project config along any scan root: fall back to the
+    // first scan root (or cwd) and create one there.
+    let fallback = roots.first().cloned().unwrap_or(cwd);
+    Ok(fallback.join(PROJECT_CONFIG_FILENAME))
+}
+
+/// Effective list of roots used for nearest-store probing. If the caller
+/// did not pass any `--scan-root`, we default to the current working
+/// directory.
+fn effective_scan_roots(scan_roots: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
+    if scan_roots.is_empty() {
+        vec![cwd.to_path_buf()]
+    } else {
+        scan_roots.to_vec()
+    }
+}
+
+fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
+    let cwd = std::env::current_dir()?;
+    let roots = effective_scan_roots(scan_roots, &cwd);
+    conspectus::discovery::discover_local_at_roots(roots)
+}
+
+/// Candidate stores the read-modify-write helpers should look in when
+/// removing or mutating an existing declaration. Order matters: writes
+/// stop at the first store that holds a matching id.
+fn candidate_store_paths(
+    store: Option<DeclaredStoreFlag>,
+    scan_roots: &[PathBuf],
+) -> Result<Vec<PathBuf>> {
+    let loader = ConfigLoader::from_env();
+    let mut paths = Vec::new();
+
+    let include_project = matches!(
+        store,
+        None | Some(DeclaredStoreFlag::All) | Some(DeclaredStoreFlag::Project)
+    );
+    let include_user = matches!(
+        store,
+        None | Some(DeclaredStoreFlag::All) | Some(DeclaredStoreFlag::User)
+    );
+
+    if include_project {
+        let cwd = std::env::current_dir()?;
+        let roots = effective_scan_roots(scan_roots, &cwd);
+        let mut seen = BTreeSet::new();
+        for root in roots {
+            if let Some(path) = loader.locate_project_config(root)
+                && seen.insert(path.clone())
+            {
+                paths.push(path);
+            }
+        }
+    }
+
+    if include_user && let Some(path) = loader.user_config_path() {
+        paths.push(path);
+    }
+
+    Ok(paths)
+}
+
+fn store_search_label(paths: &[PathBuf]) -> String {
+    if paths.is_empty() {
+        "any declared-link store".to_string()
+    } else {
+        paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Borrow checker convenience: lets us reuse the existing
+/// [`DeclaredStoreSelection`] type for emitted CLI messages.
+fn _selection_display(selection: &DeclaredStoreSelection) -> String {
+    let kind = match selection.kind {
+        DeclaredStoreKind::Project => "project",
+        DeclaredStoreKind::User => "user",
+    };
+    format!("{kind} {}", selection.path.display())
 }

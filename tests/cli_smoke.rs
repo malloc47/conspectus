@@ -535,6 +535,420 @@ fn graph_and_session_do_not_create_config_files_in_clean_repo() {
 }
 
 #[test]
+fn declared_create_writes_project_config_for_repo_rooted_endpoint() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    let repo_root = repo.path().canonicalize().expect("canonicalize");
+    let common_dir = repo_root.join(".git");
+    let worktree_source = format!(
+        "worktree:repo_common_dir={},root={}",
+        common_dir.display(),
+        repo_root.display()
+    );
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("worktree-belongs")
+        .arg("--relation")
+        .arg("belongs_to_repo")
+        .arg("--source")
+        .arg(&worktree_source)
+        .arg("--target")
+        .arg(format!("repo:common_dir={}", common_dir.display()))
+        .arg("--scan-root")
+        .arg(repo.path())
+        .assert()
+        .success();
+
+    let config_path = repo.path().join(".conspectus.toml");
+    let text = fs::read_to_string(&config_path).expect("config exists");
+    assert!(text.contains("[declared]"), "config:\n{text}");
+    assert!(text.contains("worktree-belongs"), "config:\n{text}");
+    assert!(!home.path().join(".config/conspectus/config.toml").exists());
+}
+
+#[test]
+fn declared_create_writes_user_config_for_orphan_endpoint() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path())
+        .current_dir(cwd.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("orphan-session-mux")
+        .arg("--relation")
+        .arg("linked_to_mux")
+        .arg("--source")
+        .arg("agent_session:harness_key=codex,state_scope=/state,session_key=alpha")
+        .arg("--target")
+        .arg("mux_session:native_id=tmux:editor")
+        .assert()
+        .success();
+
+    let user_config = home.path().join(".config/conspectus/config.toml");
+    let text = fs::read_to_string(&user_config).expect("user config exists");
+    assert!(text.contains("orphan-session-mux"), "config:\n{text}");
+    assert!(!cwd.path().join(".conspectus.toml").exists());
+}
+
+#[test]
+fn declared_create_respects_explicit_store_user_override() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("explicit-user")
+        .arg("--relation")
+        .arg("linked_to_mux")
+        .arg("--source")
+        .arg("agent_session:harness_key=codex,state_scope=/state,session_key=alpha")
+        .arg("--target")
+        .arg("mux_session:native_id=tmux:editor")
+        .arg("--store")
+        .arg("user")
+        .assert()
+        .success();
+
+    assert!(!repo.path().join(".conspectus.toml").exists());
+    let user_config = home.path().join(".config/conspectus/config.toml");
+    let text = fs::read_to_string(&user_config).expect("user config exists");
+    assert!(text.contains("explicit-user"), "config:\n{text}");
+}
+
+#[test]
+fn declared_create_rejects_store_all() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path())
+        .current_dir(cwd.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("invalid")
+        .arg("--relation")
+        .arg("linked_to_mux")
+        .arg("--source")
+        .arg("agent_session:harness_key=codex,state_scope=/state,session_key=alpha")
+        .arg("--target")
+        .arg("mux_session:native_id=tmux:editor")
+        .arg("--store")
+        .arg("all")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not valid for write commands"));
+}
+
+#[test]
+fn declared_create_is_idempotent_for_identical_input() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    let run_create = || {
+        isolated_cmd(home.path())
+            .current_dir(cwd.path())
+            .arg("declared")
+            .arg("create")
+            .arg("--id")
+            .arg("dup")
+            .arg("--relation")
+            .arg("linked_to_mux")
+            .arg("--source")
+            .arg("agent_session:harness_key=codex,state_scope=/state,session_key=alpha")
+            .arg("--target")
+            .arg("mux_session:native_id=tmux:editor")
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+
+    let first = run_create();
+    let second = run_create();
+    let first_text = String::from_utf8(first).expect("utf8");
+    let second_text = String::from_utf8(second).expect("utf8");
+    assert!(first_text.starts_with("wrote"), "got: {first_text}");
+    assert!(second_text.starts_with("unchanged"), "got: {second_text}");
+}
+
+#[test]
+fn declared_remove_strips_link_from_project_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    fs::write(repo.path().join(".conspectus.toml"), declared_config()).expect("seed");
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("remove")
+        .arg("--id")
+        .arg("declared-session-mux")
+        .assert()
+        .success();
+
+    let text = fs::read_to_string(repo.path().join(".conspectus.toml")).expect("read");
+    assert!(!text.contains("declared-session-mux"), "config:\n{text}");
+}
+
+#[test]
+fn declared_remove_reports_missing_id() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path())
+        .current_dir(cwd.path())
+        .arg("declared")
+        .arg("remove")
+        .arg("--id")
+        .arg("nothing-here")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no declared link"));
+}
+
+#[test]
+fn declared_create_then_graph_shows_local_declared_candidate() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("create")
+        .arg("--id")
+        .arg("created-link")
+        .arg("--relation")
+        .arg("linked_to_mux")
+        .arg("--source")
+        .arg("agent_session:harness_key=codex,state_scope=/state,session_key=alpha")
+        .arg("--target")
+        .arg("mux_session:native_id=tmux:editor")
+        .arg("--store")
+        .arg("project")
+        .arg("--scan-root")
+        .arg(repo.path())
+        .assert()
+        .success();
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(&output).expect("valid json");
+
+    let has_local_declared = json["candidate_links"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .any(|link| link["provenance"] == "local_declared");
+    assert!(has_local_declared, "candidates:\n{}", output);
+}
+
+#[test]
+fn declared_confirm_promotes_discovered_candidate_to_declared_link() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    let candidate_id = discovered_belongs_to_repo_candidate_id(home.path(), &repo);
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("confirm")
+        .arg("--id")
+        .arg(&candidate_id)
+        .arg("--scan-root")
+        .arg(repo.path())
+        .arg("--store")
+        .arg("project")
+        .assert()
+        .success();
+
+    let text = fs::read_to_string(repo.path().join(".conspectus.toml")).expect("config");
+    assert!(text.contains("[declared]"), "config:\n{text}");
+    assert!(text.contains(&candidate_id), "config:\n{text}");
+    assert!(text.contains("state = \"active\""), "config:\n{text}");
+}
+
+#[test]
+fn declared_ignore_records_state_ignored_with_reason() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    let candidate_id = discovered_belongs_to_repo_candidate_id(home.path(), &repo);
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("ignore")
+        .arg("--id")
+        .arg(&candidate_id)
+        .arg("--reason")
+        .arg("not useful")
+        .arg("--scan-root")
+        .arg(repo.path())
+        .arg("--store")
+        .arg("project")
+        .assert()
+        .success();
+
+    let text = fs::read_to_string(repo.path().join(".conspectus.toml")).expect("config");
+    assert!(text.contains("state = \"ignored\""), "config:\n{text}");
+    assert!(text.contains("not useful"), "config:\n{text}");
+}
+
+#[test]
+fn declared_confirm_errors_when_candidate_id_unknown() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd");
+
+    isolated_cmd(home.path())
+        .current_dir(cwd.path())
+        .arg("declared")
+        .arg("confirm")
+        .arg("--id")
+        .arg("does-not-exist")
+        .arg("--store")
+        .arg("user")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "no candidate link with id `does-not-exist`",
+        ));
+}
+
+#[test]
+fn declared_override_marks_existing_link_overridden() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    fs::write(repo.path().join(".conspectus.toml"), declared_config()).expect("seed");
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("override")
+        .arg("--id")
+        .arg("declared-session-mux")
+        .arg("--overridden-by")
+        .arg("new-link")
+        .arg("--reason")
+        .arg("replaced by user")
+        .assert()
+        .success();
+
+    let text = fs::read_to_string(repo.path().join(".conspectus.toml")).expect("config");
+    assert!(text.contains("state = \"overridden\""), "config:\n{text}");
+    assert!(
+        text.contains("overridden_by = \"new-link\""),
+        "config:\n{text}"
+    );
+    assert!(text.contains("replaced by user"), "config:\n{text}");
+}
+
+#[test]
+fn declared_override_errors_when_id_missing() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let cwd = tempfile::TempDir::new().expect("cwd");
+
+    isolated_cmd(home.path())
+        .current_dir(cwd.path())
+        .arg("declared")
+        .arg("override")
+        .arg("--id")
+        .arg("nothing")
+        .arg("--overridden-by")
+        .arg("replacement")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no declared link `nothing`"));
+}
+
+#[test]
+fn declared_confirm_in_detailed_graph_preserves_discovered_candidate() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+    let candidate_id = discovered_belongs_to_repo_candidate_id(home.path(), &repo);
+
+    isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("declared")
+        .arg("confirm")
+        .arg("--id")
+        .arg(&candidate_id)
+        .arg("--scan-root")
+        .arg(repo.path())
+        .arg("--store")
+        .arg("project")
+        .assert()
+        .success();
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(&output).expect("valid json");
+
+    let provenances: Vec<&str> = json["candidate_links"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .filter_map(|link| link["provenance"].as_str())
+        .collect();
+    assert!(
+        provenances.contains(&"strong_discovered"),
+        "discovered candidate should remain visible: {provenances:?}"
+    );
+    assert!(
+        provenances.contains(&"local_declared"),
+        "confirmed candidate should be present: {provenances:?}"
+    );
+}
+
+/// Helper: run `conspectus graph --format json` from `repo` and return
+/// the id of the first `belongs_to_repo` candidate link, which is
+/// emitted by every plain repo and so makes a stable confirm/ignore
+/// target.
+fn discovered_belongs_to_repo_candidate_id(home: &Path, repo: &tempfile::TempDir) -> String {
+    let assert = isolated_cmd(home)
+        .current_dir(repo.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: serde_json::Value = serde_json::from_str(&output).expect("valid json");
+    json["candidate_links"]
+        .as_array()
+        .expect("candidates")
+        .iter()
+        .find_map(|link| {
+            if link["relation"] == "belongs_to_repo" {
+                link["id"].as_str().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .expect("belongs_to_repo candidate")
+}
+
+#[test]
 fn graph_does_not_mutate_existing_project_declared_config_from_scan_root() {
     let home = tempfile::TempDir::new().expect("home temp");
     let cwd = tempfile::TempDir::new().expect("cwd temp");

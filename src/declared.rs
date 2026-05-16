@@ -166,6 +166,70 @@ pub fn select_store_for_declaration(
         })
 }
 
+/// Convert a discovered [`NodeId`] back into a [`DeclaredEndpoint`].
+///
+/// Used by `conspectus declared confirm` / `ignore` to derive a
+/// declared link's endpoints from a candidate link's source / target
+/// in the current graph.
+pub fn declared_endpoint_from_node_id(id: &NodeId) -> DeclaredEndpoint {
+    match id {
+        NodeId::Repo(repo) => DeclaredEndpoint::Repo {
+            common_dir: repo.common_dir.clone(),
+        },
+        NodeId::Worktree(worktree) => DeclaredEndpoint::Worktree {
+            repo_common_dir: worktree.repo.common_dir.clone(),
+            root: worktree.root.clone(),
+        },
+        NodeId::Workspace(workspace) => DeclaredEndpoint::Workspace {
+            root: workspace.root.clone(),
+        },
+        NodeId::AgentSession(session) => DeclaredEndpoint::AgentSession {
+            harness_key: session.harness_key.clone(),
+            state_scope: session.state_scope.clone(),
+            session_key: session.session_key.clone(),
+        },
+        NodeId::MuxSession(mux) => DeclaredEndpoint::MuxSession {
+            native_id: mux.native_id.clone(),
+        },
+        NodeId::Branch(branch) => DeclaredEndpoint::Branch {
+            repo_common_dir: branch.repo.common_dir.clone(),
+            refname: branch.refname.clone(),
+        },
+        NodeId::Fork(fork) => DeclaredEndpoint::Fork {
+            provider_source_key: fork.provider_source_key.clone(),
+        },
+        NodeId::ForgePr(pr) => DeclaredEndpoint::ForgePr {
+            provider: pr.provider.clone(),
+            host: pr.host.clone(),
+            owner: pr.owner.clone(),
+            repo: pr.repo.clone(),
+            number: pr.number,
+        },
+    }
+}
+
+/// Load every declared link with `id` from `paths` and return the
+/// first match together with the file it came from. Used by `override`
+/// so it can read the existing declaration, flip its state, and write
+/// it back to the same store.
+pub fn load_declared_link_by_id(
+    paths: &[PathBuf],
+    id: &str,
+) -> Result<Option<(PathBuf, DeclaredLink)>, DeclaredParseError> {
+    for path in paths {
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => continue,
+        };
+        let document = parse_declared_document(&text)?;
+        if let Some(link) = document.links().iter().find(|link| link.id == id) {
+            return Ok(Some((path.clone(), link.clone())));
+        }
+    }
+    Ok(None)
+}
+
 pub fn upsert_declared_link(
     path: impl AsRef<Path>,
     link: DeclaredLink,
