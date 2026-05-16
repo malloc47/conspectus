@@ -1229,7 +1229,7 @@ this repo.
     ADRs 0015 and 0016 for the API/distribution decisions around items
     6-7.
 
-- [ ] `P6-009` Decide whether to extract Conspectus into its own
+- [x] `P6-009` Decide whether to extract Conspectus into its own
   repository.
   - Scope: per migration-plan item 7, reassess whether Conspectus
     should remain in this repository alongside its design ancestor
@@ -1241,6 +1241,10 @@ this repo.
   - Manual checks: review the ADR against `docs/design.md` and
     `docs/naming.md`.
   - Blockers: `P6-001`, `P6-007`.
+  - Outcome: accepted ADR 0017, which keeps Conspectus in the current
+    standalone repository, does not schedule a Phase 7 repository move,
+    and directs Atelier integration to use ADR 0016 distribution
+    channels rather than repository colocation.
 
 - [ ] `P6-010` Verify the Phase 6 end state.
   - Scope: run the full Phase 6 automated and manual check set and
