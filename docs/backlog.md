@@ -879,7 +879,7 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
     and do not mutate an existing project config with declared-link
     state when run from either cwd or explicit `--scan-root`.
 
-- [ ] `P5-005` Implement nearest-store selection for writes.
+- [x] `P5-005` Implement nearest-store selection for writes.
   - Scope: add a pure store-selection helper that decides where a new
     user-authored declaration belongs: project-local for relationships
     rooted in a discovered repo/workspace/worktree, global for orphan or
@@ -891,6 +891,11 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: inspect selected paths for representative repos,
     linked worktrees, and non-repo directories.
   - Blockers: `P5-002`, `P5-003`.
+  - Outcome: added a pure `select_store_for_declaration` helper that
+    resolves declared-link writes to the nearest project config for
+    repo, workspace, worktree, session cwd, mux cwd, branch/PR, and
+    fork-rooted relationships, and falls back to the user config for
+    orphan relationships without touching cache or index storage.
 
 - [ ] `P5-006` Add atomic declared-link write helpers.
   - Scope: implement read-modify-write helpers for local
