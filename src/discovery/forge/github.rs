@@ -521,12 +521,7 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
             repo,
         );
 
-        let mut short_refs = BTreeSet::new();
-        if let Some(branch_ref) = probe.branch_ref.as_deref()
-            && let Some(short) = branch_ref.strip_prefix("refs/heads/")
-        {
-            short_refs.insert(short.to_string());
-        }
+        let short_refs = probe.local_branches.iter().cloned().collect();
 
         Ok(fragment_for_repo(&context, &short_refs, &records))
     }
@@ -1056,6 +1051,26 @@ mod tests {
                 id: NodeId::Branch(_),
             } => {}
             other => panic!("expected branch node endpoint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_emits_branch_node_endpoint_when_head_ref_matches_sibling_local_branch() {
+        let temp = TempDir::new().expect("temp dir");
+        let root = make_git_repo(&temp, "git@github.com:octo/repo.git");
+        run_git(&root, &["branch", "feature/sibling"]);
+        let body = r#"[{"number": 2, "state": "OPEN", "headRefName": "feature/sibling"}]"#;
+        let provider = GitHubForgeProvider::with_runner(FakeGh::with_pull_requests(body));
+
+        let context = DiscoveryContext::from_roots([root]).expect("context");
+        let fragment = provider.discover(&context).expect("discover");
+
+        let link = &fragment.candidate_links[0];
+        match &link.target {
+            LinkEndpoint::Node {
+                id: NodeId::Branch(branch),
+            } => assert_eq!(branch.refname, "refs/heads/feature/sibling"),
+            other => panic!("expected sibling branch node endpoint, got {other:?}"),
         }
     }
 }

@@ -1,5 +1,6 @@
 ---
 source: tests/local_discovery_snapshots.rs
+assertion_line: 139
 expression: normalized
 ---
 {
@@ -40,6 +41,16 @@ expression: normalized
         "refname": "refs/heads/linked"
       },
       "refname": "refs/heads/linked"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
     }
   ],
   "candidate_links": [

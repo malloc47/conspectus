@@ -1,5 +1,6 @@
 //! Read-only git discovery probes.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -53,6 +54,7 @@ impl GitProbe {
             ],
         )?;
         let remotes = self.remotes(root)?;
+        let local_branches = self.local_branches(root)?;
 
         Ok(Some(GitProbeResult {
             common_dir: PathBuf::from(common_dir),
@@ -61,6 +63,7 @@ impl GitProbe {
             branch_ref,
             upstream,
             remotes,
+            local_branches,
         }))
     }
 
@@ -69,6 +72,30 @@ impl GitProbe {
             Some(value) => Ok(value == "true"),
             None => Ok(false),
         }
+    }
+
+    /// Enumerate local branch short refs (e.g. `main`,
+    /// `feature/login`). Empty when the repo has no commits yet or
+    /// `git for-each-ref` returns nothing. The forge adapter uses this
+    /// to map `gh pr list` head refs onto local `Branch` nodes even
+    /// when the branch is not the currently-checked-out one.
+    fn local_branches(&self, root: &Path) -> Result<Vec<String>> {
+        let Some(output) = self.optional(
+            root,
+            &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        )?
+        else {
+            return Ok(Vec::new());
+        };
+        let mut branches: Vec<String> = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect();
+        branches.sort();
+        branches.dedup();
+        Ok(branches)
     }
 
     fn remotes(&self, root: &Path) -> Result<Vec<GitRemote>> {
@@ -153,6 +180,7 @@ pub struct GitProbeResult {
     pub branch_ref: Option<String>,
     pub upstream: Option<String>,
     pub remotes: Vec<GitRemote>,
+    pub local_branches: Vec<String>,
 }
 
 impl GitProbeResult {
@@ -177,14 +205,22 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
         "git common dir",
     )];
 
-    if let Some(branch_ref) = &probe.branch_ref {
-        let branch_id = BranchId::new(repo_id, branch_ref.clone());
+    for branch_ref in branch_refs(probe) {
+        let branch_id = BranchId::new(repo_id.clone(), branch_ref.clone());
         nodes.push(GraphNode::Branch(BranchNode {
             id: branch_id.clone(),
             refname: branch_ref.clone(),
             current_commit: None,
-            upstream: probe.upstream.clone(),
+            upstream: if probe.branch_ref.as_deref() == Some(branch_ref.as_str()) {
+                probe.upstream.clone()
+            } else {
+                None
+            },
         }));
+    }
+
+    if let Some(branch_ref) = &probe.branch_ref {
+        let branch_id = BranchId::new(repo_id, branch_ref.clone());
         candidate_links.push(git_link(
             NodeId::Worktree(worktree_id),
             NodeId::Branch(branch_id),
@@ -220,6 +256,20 @@ fn worktree_node(worktree_id: WorktreeId, probe: &GitProbeResult) -> WorktreeNod
             BranchId::new(RepoId::new(path_string(&probe.common_dir)), branch.clone())
         }),
     }
+}
+
+fn branch_refs(probe: &GitProbeResult) -> Vec<String> {
+    let mut refs = BTreeSet::new();
+    if let Some(branch_ref) = &probe.branch_ref {
+        refs.insert(branch_ref.clone());
+    }
+    refs.extend(
+        probe
+            .local_branches
+            .iter()
+            .map(|short| format!("refs/heads/{short}")),
+    );
+    refs.into_iter().collect()
 }
 
 fn git_link(source: NodeId, target: NodeId, relation: RelationKind, evidence: &str) -> GraphLink {
@@ -324,6 +374,7 @@ mod tests {
         );
         assert_eq!(result.branch_ref.as_deref(), Some("refs/heads/feature"));
         assert_eq!(result.upstream.as_deref(), Some("origin/feature"));
+        assert_eq!(result.local_branches, vec!["feature", "main"]);
         assert_eq!(
             result.remotes,
             vec![GitRemote {
@@ -347,6 +398,7 @@ mod tests {
 
         assert_eq!(result.branch_ref, None);
         assert_eq!(result.upstream, None);
+        assert_eq!(result.local_branches, vec!["main"]);
     }
 
     #[test]
@@ -385,11 +437,12 @@ mod tests {
                 name: "origin".to_string(),
                 url: "git@example.com:owner/repo.git".to_string(),
             }],
+            local_branches: vec!["feature".to_string(), "main".to_string()],
         };
 
         let fragment = fragment_from_probe(&probe);
 
-        assert_eq!(fragment.nodes.len(), 3);
+        assert_eq!(fragment.nodes.len(), 4);
         assert_eq!(fragment.candidate_links.len(), 2);
     }
 

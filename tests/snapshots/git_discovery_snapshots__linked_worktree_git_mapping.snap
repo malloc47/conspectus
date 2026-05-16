@@ -1,5 +1,6 @@
 ---
 source: tests/git_discovery_snapshots.rs
+assertion_line: 65
 expression: rendered
 ---
 {
@@ -43,6 +44,16 @@ expression: rendered
         "refname": "refs/heads/feature"
       },
       "refname": "refs/heads/feature"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/workspace/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
     }
   ],
   "candidate_links": [

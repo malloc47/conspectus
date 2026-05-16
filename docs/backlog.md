@@ -799,17 +799,28 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
 
 ## Phase 4 Follow-Ups
 
-- [ ] `P4-FU-001` Document the `CONSPECTUS_DISABLE_FORGE`,
+- [x] `P4-FU-001` Document the `CONSPECTUS_DISABLE_FORGE`,
   `CONSPECTUS_DISABLE_TMUX`, and `CONSPECTUS_*_STATE` env vars
   in `docs/design.md` or a new `docs/operations.md` so users
   discover them without grepping source.
-- [ ] `P4-FU-002` Match PRs whose head ref is a non-current local
+  - Outcome: added `docs/operations.md` and linked it from
+    `docs/index.md`; the operations guide documents provider
+    toggles, harness state-root overrides, config precedence, current
+    CLI commands, and the no-cache-yet policy.
+- [x] `P4-FU-002` Match PRs whose head ref is a non-current local
   branch by enumerating all local refs in the git probe. The
   Phase 4 adapter only matches the currently-checked-out branch,
   so PRs for sibling branches end up as unresolved-endpoint
   candidate links rather than node-target links. The evidence is
   still preserved; the resolved relationship just goes
   unresolved.
+  - Outcome: `GitProbe` now enumerates local branch short refs via
+    read-only `git for-each-ref`, `fragment_from_probe` emits
+    non-current local branches as `Branch` nodes without adding
+    checked-out links, and the GitHub forge provider matches PR
+    `headRefName` values against the full local branch set. Added
+    provider coverage for a sibling branch PR and updated git
+    discovery snapshots for the newly visible branch nodes.
 
 ## Phase 3 Follow-Ups
 
@@ -833,7 +844,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     `linked_to_mux` candidates, and 13 resolved relationships including
     the live claude-code session attached to the `conspectus-smoke` tmux
     session.
-- [ ] `P3-FU-002` Read opencode sessions from the SQLite store.
+- [x] `P3-FU-002` Read opencode sessions from the SQLite store.
   - Scope: modern opencode (≥ ~0.5) keeps sessions in
     `~/.local/share/opencode/opencode.db` (table `session` with
     `id`, `directory`, `title`, `time_created`, `time_updated`,
@@ -844,6 +855,13 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
   - Blockers: requires an ADR for the new SQLite read dependency
     (`rusqlite` or similar) before introducing it; CLAUDE.md forbids
     dependency additions without one.
+  - Outcome: ADR 0013 records the `rusqlite` dependency decision.
+    The opencode adapter now opens `opencode.db` read-only, reads
+    `session.id`, `directory`, and `title` rows into `AgentSession`
+    nodes, preserves the legacy `storage/session/<id>/info.json`
+    parser, and lets SQLite rows win on duplicate session ids. Added
+    tests for SQLite discovery, duplicate precedence, and malformed
+    database degradation.
 
 ## Later
 

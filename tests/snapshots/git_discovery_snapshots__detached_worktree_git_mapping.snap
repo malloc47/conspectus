@@ -1,5 +1,6 @@
 ---
 source: tests/git_discovery_snapshots.rs
+assertion_line: 65
 expression: rendered
 ---
 {
@@ -24,6 +25,16 @@ expression: rendered
       },
       "root": "/workspace/repo",
       "git_dir": "/workspace/repo/.git"
+    },
+    {
+      "type": "branch",
+      "id": {
+        "repo": {
+          "common_dir": "/workspace/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "refname": "refs/heads/main"
     }
   ],
   "candidate_links": [
