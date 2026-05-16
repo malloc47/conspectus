@@ -6,7 +6,7 @@ project, right now?" reference.
 
 ## What Conspectus Is
 
-Conspectus is an early-stage Rust CLI that surveys AI-coding-agent work
+Conspectus is a Rust CLI and library that surveys AI-coding-agent work
 alive on your local machine. It reads local state only: git repositories and
 worktrees, Atelier workspace and fork metadata, supported agent harness state,
 tmux sessions, and GitHub pull requests through the `gh` CLI.
@@ -16,6 +16,10 @@ worktrees, branches, workspaces, forks, agent sessions, mux sessions, and
 forge PRs. Discovery records every plausible relationship as evidence first;
 the resolver then selects preferred relationships without discarding weaker,
 ambiguous, or unresolved candidates.
+
+Phase 6 stabilized the public library contract so Atelier and future tools can
+consume Conspectus deliberately instead of scraping CLI output or importing
+incidental internals. The curated entry point is `conspectus::api`.
 
 ## Current CLI
 
@@ -95,9 +99,27 @@ omitted, falling back to user config for orphan relationships.
   `docs/operations.md`: provider toggles (`CONSPECTUS_DISABLE_TMUX`,
   `CONSPECTUS_DISABLE_FORGE`), harness state overrides, config precedence,
   and the current CLI surface.
+- **Curated library API.** `conspectus::api` re-exports the common consumer
+  workflow: discovery configuration, `discover_local_with`, resolution,
+  graph JSON rendering, table rendering, config types, declared-link helpers,
+  and graph model types. ADR 0015 defines the stable public surface and
+  `docs/library-api.md` inventories pure modules, impure boundaries, and
+  injection seams.
+- **Distribution and repository policy.** ADR 0016 makes crates.io the
+  intended steady-state distribution path, allows pinned git revisions for
+  Atelier migration, and keeps path dependencies local-development only. ADR
+  0017 keeps Conspectus in the current standalone repository and does not
+  schedule a Phase 7 repository move.
+- **Atelier migration support.** `docs/atelier-migration.md` maps
+  `atelier session list`, `atelier mux status`, forge-related status
+  surfaces, and graph-heavy `atelier status` behavior to Conspectus commands
+  and library entry points. The Atelier-side work is tracked in Atelier's
+  `docs/conspectus-delegation.md`.
 - **Offline tests.** Harness fixtures, `FakeTmux`, and `FakeGh` keep tests
   independent of real home-directory state, live tmux servers, GitHub
-  credentials, or network access.
+  credentials, or network access. The Phase 6 Atelier delegation fixture
+  snapshots graph JSON plus all three session table projections for a
+  representative Atelier workspace with fork, harness, and mux evidence.
 
 ## Real Problems It Solves Today
 
@@ -121,6 +143,10 @@ omitted, falling back to user config for orphan relationships.
    override one declaration with another — all stored as readable TOML next
    to the relevant project (or in user config for orphan relationships)
    without ever discarding the underlying discovered evidence.
+7. **Giving Atelier a migration path.** Atelier can keep owning workspace and
+   fork mutation while Conspectus owns the read-only graph/session/mux/forge
+   observability contract. The migration guide, public API facade, and
+   comparison fixture give that delegation work concrete targets.
 
 ## Current Limits
 
@@ -131,6 +157,10 @@ omitted, falling back to user config for orphan relationships.
   read-only.
 - Forge support is GitHub-only and delegates to `gh`; unauthenticated or
   missing `gh` means no PR rows.
+- Atelier still needs to implement its command-level delegation or
+  deprecation work. Conspectus now provides the replacement surfaces and
+  tracker references, but it does not change Atelier command behavior by
+  itself.
 - There is no MCP server, daemon, or caching layer yet.
 - The session table is intentionally compact. It exposes preferred
   relationships and ambiguity indicators, but richer filtering, sorting, and
@@ -138,9 +168,10 @@ omitted, falling back to user config for orphan relationships.
 
 ## What's Coming Next
 
-- **Atelier command delegation (Phase 6).** Conspectus should stay the
-  read-only "what is going on" tool for discovery while delegating richer
-  write operations (beyond declared-link TOML) to Atelier where appropriate.
+- **Atelier command delegation.** Phase 6 completed the Conspectus-side
+  contract and opened the Atelier-side tracker. The remaining work is in
+  Atelier: decide whether overlapping commands delegate, deprecate, or stay
+  Atelier-owned.
 - **Operational integrations.** MCP/agent integrations, richer table views,
   and possible cache/index support remain later-phase work.
 - **Backlog migration.** The only open backlog item is evaluating a move from
