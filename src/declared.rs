@@ -331,11 +331,12 @@ fn write_declared_links_if_changed(
     let link_count = links.len();
 
     if changed {
-        replace_declared_section(document, links)?;
-        write_atomic(path, &document.to_string()).map_err(|err| DeclaredWriteError::Write {
-            path: path.to_path_buf(),
-            source: err,
-        })?;
+        if links.is_empty() {
+            document.as_table_mut().remove("declared");
+        } else {
+            replace_declared_section(document, links)?;
+        }
+        write_document(path, document)?;
     }
 
     Ok(DeclaredWriteOutcome {
@@ -343,6 +344,30 @@ fn write_declared_links_if_changed(
         changed,
         link_count,
     })
+}
+
+/// Persist `document` to `path`. If the document is empty (no
+/// top-level keys remain after `[declared]` was stripped), remove the
+/// file instead so the store leaves no dangling header behind.
+fn write_document(
+    path: &Path,
+    document: &toml_edit::DocumentMut,
+) -> Result<(), DeclaredWriteError> {
+    if document.as_table().is_empty() {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(DeclaredWriteError::Write {
+                path: path.to_path_buf(),
+                source: err,
+            }),
+        }
+    } else {
+        write_atomic(path, &document.to_string()).map_err(|err| DeclaredWriteError::Write {
+            path: path.to_path_buf(),
+            source: err,
+        })
+    }
 }
 
 fn replace_declared_section(
@@ -1218,6 +1243,49 @@ mod tests {
             parse_declared_document(&std::fs::read_to_string(&path).expect("read")).expect("parse");
         assert_eq!(parsed.links().len(), 1);
         assert_eq!(parsed.links()[0].id, "zulu");
+    }
+
+    #[test]
+    fn declared_remove_deletes_file_when_last_link_strips_section() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        upsert_declared_link(&path, declared_link("alpha")).expect("write");
+        assert!(path.is_file(), "file should be created by upsert");
+
+        let outcome = remove_declared_link(&path, "alpha").expect("remove");
+
+        assert!(outcome.changed);
+        assert_eq!(outcome.link_count, 0);
+        assert!(
+            !path.exists(),
+            "file should be deleted when the last declared link is removed",
+        );
+    }
+
+    #[test]
+    fn declared_remove_preserves_unrelated_sections_when_section_empties() {
+        let temp = TempDir::new().expect("temp");
+        let path = temp.path().join(PROJECT_CONFIG_FILENAME);
+        std::fs::write(&path, "[session]\nprojection = \"mux\"\n").expect("seed");
+        upsert_declared_link(&path, declared_link("alpha")).expect("write");
+
+        let outcome = remove_declared_link(&path, "alpha").expect("remove");
+
+        assert!(outcome.changed);
+        assert_eq!(outcome.link_count, 0);
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            text.contains("[session]"),
+            "session section preserved:\n{text}"
+        );
+        assert!(
+            text.contains("projection = \"mux\""),
+            "value preserved:\n{text}"
+        );
+        assert!(
+            !text.contains("[declared]"),
+            "declared section should be pruned:\n{text}",
+        );
     }
 
     #[test]
