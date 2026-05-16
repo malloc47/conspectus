@@ -801,7 +801,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
 
 Source plan: `docs/implementation/phase-05-declared-links.md`.
 
-- [ ] `P5-001` Record the declared-link storage schema.
+- [x] `P5-001` Record the declared-link storage schema.
   - Scope: add an ADR for durable declared relationship state in
     `.conspectus.toml` and user config, covering link identity, endpoint
     encoding, relation kinds, link state (`active`, `ignored`,
@@ -811,6 +811,11 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
   - Manual checks: review the schema against `docs/design.md`, ADR
     0002, ADR 0012, and the Phase 5 implementation plan.
   - Blockers: `P4-013`.
+  - Outcome: ADR 0014 defines the `[declared]` TOML schema,
+    `[[declared.links]]` entries, typed inline endpoint tables,
+    active/ignored/overridden states, local-vs-global provenance from
+    config location, nearest-store write ownership, and compatibility
+    behavior for unknown fields and schema versions.
 
 - [ ] `P5-002` Define declared-link file models and TOML round trips.
   - Scope: extend `src/config.rs` or add a focused declared-link module
