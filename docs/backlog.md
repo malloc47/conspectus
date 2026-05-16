@@ -498,6 +498,319 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
     JSONL/info.json layouts (and propagating cwd plus activity epochs)
     belongs in a Phase 4-or-later task rather than expanding Phase 3.
 
+## Phase 4: Forge And Table Views
+
+Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
+
+- [x] `P4-001` Define forge discovery boundaries and `gh` command runner.
+  - Scope: add a `ForgeAdapter` trait and `ForgeDiscovery` provider under
+    `src/discovery/forge/`, plus an injectable `gh` command runner that
+    mirrors the existing `TmuxRunner` seam (real `SystemGh` that shells
+    out, plus a `FakeGh` test runner). Outcomes are classified as
+    `PullRequests(String)`, `Unavailable` (binary missing / unauthenticated),
+    or `Failed { code, message }` so tests can drive each path
+    deterministically. Record an ADR if the choice to delegate to `gh`
+    (rather than calling the GitHub REST API directly) needs to outlive
+    the implementation plan.
+  - Tests: unit tests for missing `gh` binary, unauthenticated runs,
+    command failures, empty output, and stable diagnostic strings.
+  - Manual checks: confirm no test requires a real `gh` install or
+    network call; inspect the module layout for ADR 0007 alignment and
+    verify forge discovery performs no rendering.
+  - Blockers: `P3-011`.
+  - Outcome: added `discovery::forge` with a `ForgeAdapter` trait, a
+    `ForgeDiscovery` coordinator, and a `GhRunner` seam (`SystemGh`
+    shells out to `gh pr list --json`, `FakeGh` returns pre-canned
+    outcomes and records the spawn cwd). `GhOutcome` classifies runs
+    as `PullRequests`/`Unavailable`/`Failed`; `GhUnavailableReason`
+    covers binary-missing, unauthenticated, and not-a-repo cases.
+    ADR 0011 records the decision to delegate to `gh` rather than
+    adding an HTTP client. Nine new unit tests cover each path; no
+    test requires a real `gh` install or network.
+
+- [x] `P4-002` Discover GitHub pull requests for known repos.
+  - Scope: for each discovered repo, invoke
+    `gh pr list --json number,state,url,headRefName,baseRefName,
+    updatedAt,headRepositoryOwner,headRepository,isDraft` (or equivalent)
+    and parse the JSON array into provider-neutral PR records carrying
+    provider/host/owner/repo/number/state/url, the head ref name, draft
+    flag, and an updated-at timestamp. Skip rows missing required fields
+    rather than failing the run.
+  - Tests: fake-runner tests for zero PRs, one PR, multiple PRs,
+    malformed rows, missing optional fields, draft vs non-draft, and
+    unavailable `gh`.
+  - Manual checks: drive the adapter with a fixture-backed `gh` JSON
+    blob and inspect record shape; do not exercise real `gh` in tests.
+  - Blockers: `P4-001`.
+  - Outcome: added `discovery::forge::github` with a
+    `PullRequestRecord` / `PullRequestState` provider-neutral row
+    shape and a `GhPullRequestParser` for `gh pr list --json` output.
+    The parser is tolerant: empty, malformed, or row-level-invalid
+    input degrades to an empty list rather than failing. RFC 3339
+    `updatedAt` strings parse to a UTC epoch via a small embedded
+    civil-date converter so the resolver can rank by recency without
+    adding a chrono dependency. Ten new unit tests cover empty,
+    malformed, single, multi-row, draft, missing-optional,
+    unknown-state, and offset-vs-Z timestamp inputs.
+
+- [x] `P4-003` Map PR records into ForgePr nodes and branch candidate links.
+  - Scope: emit one `ForgePr` node per record (extending `ForgePrNode`
+    with an optional `updated_epoch` and `is_draft` so the resolver can
+    rank candidates by recency and draft state) and a `BranchHasForgePr`
+    candidate link from the matching `Branch` node — matched by repo
+    identity (host/owner/repo) and head ref. When the branch is not in
+    the graph, emit an unresolved-endpoint candidate link so the
+    evidence survives until later discovery resolves it.
+  - Tests: graph-fragment tests for PRs whose head ref matches a
+    discovered branch, PRs whose head ref is unknown to the graph, draft
+    vs non-draft PRs, closed vs merged vs open state, and stable node IDs
+    across repeated runs.
+  - Manual checks: inspect JSON from a fixture-backed adapter run for
+    readable provenance and identity shape.
+  - Blockers: `P4-002`.
+  - Outcome: extended `ForgePrNode` with `updated_epoch` and
+    `is_draft` (skipped from JSON when false / absent for sparse
+    output). Added `RepoContext` and `fragment_for_repo` in
+    `discovery::forge::github`: per record, emits a `ForgePr` node
+    plus a `BranchHasForgePr` candidate link targeting the discovered
+    `Branch` node when the short head ref is in the supplied set, or
+    an unresolved branch endpoint carrying host/owner/repo +
+    head_ref metadata otherwise. Eight new tests cover matched
+    branch, unknown ref, draft propagation, open/closed/merged
+    state, stable IDs, updated-epoch propagation, and the
+    empty-records case.
+
+- [x] `P4-004` Resolver scoring for branch ↔ pull request.
+  - Scope: add a `BranchHasForgePr`-specific comparator in
+    `src/resolve/mod.rs` so that, when a branch has multiple plausible
+    PRs, the preferred candidate is the most-recently-updated open
+    non-draft PR, with closed/merged/draft state demoted to tie-breakers.
+    Every losing candidate stays in `candidate_links` and is recorded as
+    a competing link plus a `Conflict` diagnostic. Ignored and
+    overridden candidates continue to be skipped.
+  - Tests: table-driven resolver tests for zero, one, and multiple PRs
+    per branch; open vs closed vs merged ranking; draft demotion;
+    ignored / overridden state handling.
+  - Manual checks: inspect resolved relationships for a branch with two
+    open PRs and confirm losers remain visible.
+  - Blockers: `P4-003`.
+  - Outcome: added `compare_branch_pr` in `src/resolve/mod.rs` with a
+    `PrScore` (provenance tier > state rank > non-draft > recency >
+    confidence > link id). State ranks open > merged > closed > other.
+    Reads `state` / `is_draft` / `updated_epoch` from the link's
+    `source_metadata.fields` (populated by the github fragment
+    builder). Nine new resolver tests cover open-vs-merged,
+    open-vs-closed, draft demotion, recency tie-break, declared
+    override, conflict diagnostic, ignored/overridden skip, and the
+    zero-candidate case.
+
+- [x] `P4-005` Add config loading for session projection defaults.
+  - Scope: write an ADR for the Conspectus config file layout (project
+    `.conspectus.toml` first, then `$XDG_CONFIG_HOME/conspectus/config.toml`
+    or `$HOME/.config/conspectus/config.toml`, plus precedence and
+    schema), then add a `config` module that loads
+    `[session] projection = "agent" | "mux" | "union"`. Update
+    `docs/design.md` if config introduces new model requirements.
+  - Tests: unit tests for default projection, project-local override,
+    user-level override, invalid projection values, malformed TOML, and
+    missing config files.
+  - Manual checks: verify the loader is read-only.
+  - Blockers: ADR for config layout (filed alongside this item).
+  - Outcome: ADR 0012 records the config layout, precedence, and the
+    minimal `[session] projection` schema. New `src/config.rs` module
+    exposes `Config`, `SessionConfig`, `Projection`, and a
+    `ConfigLoader` that takes explicit `$HOME` / `$XDG_CONFIG_HOME`
+    so tests don't mutate process state. Project config walks upward
+    from cwd and stops at the `$HOME` boundary. Missing files are
+    not errors; malformed TOML and invalid `projection` values emit
+    `ConfigDiagnostic`s and fall back to defaults. Ten new unit
+    tests cover defaults, project / user overrides, project >
+    user precedence, the home-boundary stop, invalid value, malformed
+    TOML, unknown-keys-ignored, `Projection::parse`/`as_str` round
+    trip, and `$XDG_CONFIG_HOME` overriding `$HOME/.config`.
+
+- [x] `P4-006` Define table output projection boundaries.
+  - Scope: extend `src/output/` with a `Projection` enum
+    (`Agent`/`Mux`/`Union`) and a render trait that takes a resolved
+    `GraphSnapshot` plus a projection and returns a deterministic
+    plain-text table. Define the compact provenance / confidence /
+    ambiguity indicator format up front (e.g. `LD/SD/D/C/$`,
+    `H/M/L`, and an `*` marker for ambiguous selections) so all three
+    renderers share it.
+  - Tests: unit tests for the indicator formatter and empty-graph
+    rendering for each projection.
+  - Manual checks: inspect indicator output for representative candidate
+    links.
+  - Blockers: `P3-011`.
+  - Outcome: added `output::table` with `Projection` (re-exported
+    from `config`), a single `render` entry point, and an
+    `indicator(provenance, confidence, ambiguous)` helper that emits
+    cells like `LD/H` / `SD/M*` / `$/L`. Codes are LD / GD / SD /
+    D / C / $ for provenance and H / M / L for confidence.
+
+- [x] `P4-007` Implement the agent projection table renderer.
+  - Scope: render one row per `AgentSession` with harness, cwd, preferred
+    mux, preferred PR, and ambiguity flags using the indicator format
+    from `P4-006`. Orphan sessions stay visible with empty mux/PR cells.
+  - Tests: snapshot tests for orphan sessions, sessions with a single
+    mux match, sessions with multiple mux candidates, fork-linked
+    sessions, and sessions whose branch has a forge PR.
+  - Manual checks: review snapshots for column alignment and readable
+    ambiguity indicators.
+  - Blockers: `P4-006`.
+  - Outcome: agent projection renders AGENT / CWD / MUX / MUX/CONF /
+    PR / PR/CONF columns. Mux cell shows the preferred mux session
+    label (or `—` for orphans). Ambiguity marker `*` appears when
+    the agent has multiple candidate mux links. PR cell shows the
+    first available BranchHasForgePr candidate. Unit tests cover
+    orphan, single-match, ambiguous mux, and branch-with-PR cases.
+
+- [x] `P4-008` Implement the mux projection table renderer.
+  - Scope: render one row per `MuxSession` with backend, cwd, attached
+    agent sessions (zero, one, or many), and ambiguity flags. Mux
+    sessions with no attached agent remain visible.
+  - Tests: snapshot tests for zero / one / many attached agents and
+    unavailable-tmux scenarios (no mux rows).
+  - Manual checks: review the snapshot output for alignment.
+  - Blockers: `P4-006`.
+  - Outcome: mux projection renders MUX / CWD / AGENTS columns;
+    AGENTS lists `session-label [indicator]` for every attached
+    session in stable order; mux sessions with no attached agent
+    still appear with an `—` cell.
+
+- [x] `P4-009` Implement the union projection table renderer.
+  - Scope: render a single table that preserves both agent and mux rows
+    plus their relationship status, with stable ordering so identical
+    snapshots reproduce byte-for-byte. Use one row per node with a
+    relationship column describing the preferred link and ambiguity.
+  - Tests: snapshot tests for empty graphs, sessions without a mux, mux
+    without sessions, and one-to-many mux candidates.
+  - Manual checks: confirm the union table makes ambiguity visible
+    without duplicating rows.
+  - Blockers: `P4-007`, `P4-008`.
+  - Outcome: union projection emits one row per node prefixed by
+    `agent` / `mux`. Agent rows carry a relationship column
+    formatted as `mux=<target> [indicator]` (`mux=—` when no
+    candidate exists). Mux rows have a `—` relationship cell since
+    attached sessions appear as their own agent rows. Unit tests
+    cover both kinds plus the empty-graph header-only case.
+
+- [x] `P4-010` Add the `conspectus session` CLI subcommand.
+  - Scope: add `session` to the CLI with a
+    `--projection {agent|mux|union}` flag that defaults to the value
+    from the loaded config (or `agent` when no config is present). The
+    command runs the existing local discovery + resolver and renders the
+    chosen projection. Reuse the env-based isolation used by the graph
+    command (`HOME`, `CONSPECTUS_DISABLE_TMUX`, future
+    `CONSPECTUS_DISABLE_FORGE`).
+  - Tests: CLI integration tests for the default projection, each
+    explicit flag value, invalid values, config-file defaulting, and
+    deterministic output across repeated runs.
+  - Manual checks: `cargo run -- session`,
+    `cargo run -- session --projection agent`,
+    `cargo run -- session --projection mux`,
+    `cargo run -- session --projection union`.
+  - Blockers: `P4-005`, `P4-007`, `P4-008`, `P4-009`.
+  - Outcome: added the `session` subcommand with an optional
+    `--projection {agent|mux|union}` flag and `--scan-root` re-using
+    the graph command's options. Without `--projection`, the CLI
+    loads `.conspectus.toml` / user config via
+    `config::ConfigLoader::from_env()` and falls back to `agent`.
+    Config diagnostics print to stderr but do not abort the run.
+    Six new CLI smoke tests cover the default projection,
+    `--projection {agent|mux|union}`, an invalid value, project
+    config defaulting to union, and deterministic output across
+    repeated runs.
+
+- [x] `P4-011` Wire forge discovery into local graph discovery.
+  - Scope: register the forge provider in `discover_local_with` behind
+    `LocalDiscoveryConfig::forge_runner` (mirroring the tmux pattern).
+    `from_env()` builds a real `SystemGh` runner unless
+    `CONSPECTUS_DISABLE_FORGE` is set. Discovery remains best-effort:
+    missing / unauthenticated `gh` degrades to no PR data instead of
+    failing the run. Cross-link inference passes PR evidence through
+    `cross_link::infer` so ambiguous branch ↔ PR matches remain visible.
+  - Tests: library tests for the wired path with a `FakeGh` runner;
+    CLI integration tests with the forge provider disabled and with
+    a fake `gh` output.
+  - Manual checks: run `cargo run -- graph --format json` from a repo
+    with an open PR and confirm the `ForgePr` node and link appear.
+  - Blockers: `P4-003`, `P4-004`.
+  - Outcome: added a `GitHubForgeProvider` that probes each scan
+    root with `GitProbe`, extracts host/owner/repo from a
+    GitHub-shaped git remote, runs `gh pr list --json` via the
+    injected `GhRunner`, parses the rows, and emits a
+    `fragment_for_repo`. A `parse_github_remote` helper covers
+    `https://`, `git@`, `ssh://`, and GitHub-Enterprise hosts and
+    rejects non-GitHub URLs. `LocalDiscoveryConfig` gained a
+    `forge_runner` slot mirroring `tmux_runner`; `from_env()`
+    builds a real `SystemGh` runner unless
+    `CONSPECTUS_DISABLE_FORGE` is set. Unavailable / failed `gh`
+    outcomes degrade silently. CLI smoke tests set
+    `CONSPECTUS_DISABLE_FORGE=1` to keep tests offline; new library
+    tests cover the wired path with `FakeGh` and the "no runner"
+    case.
+
+- [x] `P4-012` Add representative JSON and table snapshots.
+  - Scope: snapshot graph JSON for a repo with zero / one / multiple
+    open PRs and for one-to-many branch ↔ PR ambiguity. Add session-table
+    snapshots in each projection for orphan sessions, single-mux match,
+    one-to-many mux candidates, fork-associated sessions, and
+    branch-with-PR scenarios. All snapshots normalise temp paths to
+    `/fixture`.
+  - Tests: `cargo test --all-targets --all-features`; `cargo nextest run
+    --all-targets --all-features`.
+  - Manual checks: review snapshots for stable ordering, readable
+    provenance / confidence / ambiguity, and preserved competing-PR
+    evidence.
+  - Blockers: `P4-009`, `P4-010`, `P4-011`.
+  - Outcome: added `tests/forge_snapshots.rs` with six end-to-end
+    snapshots driven by `discover_local_with` + `FakeGh` against a
+    temp git repo: zero-PR JSON, one-open-PR JSON (matched
+    branch endpoint + resolved relationship), multi-PR JSON
+    (open + merged + closed), and three session-table projections
+    (agent with PR, mux empty, union with PR). Path normalization
+    rewrites the temp path to `/fixture` so reruns are byte-stable.
+
+- [x] `P4-013` Verify the Phase 4 end state.
+  - Scope: run the full Phase 4 automated and manual check set and
+    record follow-up tasks instead of expanding Phase 4 scope.
+  - Tests: `just check`.
+  - Manual checks: run the four `cargo run -- session` smoke commands
+    from `docs/implementation/phase-04-forge-and-table-views.md`, plus
+    `cargo run -- graph --format json` from a repo with a real open
+    PR. Confirm the PR node and `BranchHasForgePr` link appear in JSON
+    and surface in the session-table projection.
+  - Blockers: `P4-010`, `P4-011`, `P4-012`.
+  - Outcome: `nix develop --command just check` passed with 210 tests.
+    `cargo run -- session`, `--projection agent`, `--projection mux`,
+    and `--projection union` all rendered tables against live local
+    state (claude-code agent sessions, no mux/PR rows because the
+    local `gh` is unauthenticated and the smoke test had no tmux
+    server). `cargo run -- graph --format json` emitted repo /
+    worktree / branch / agent_session / mux_session nodes plus 14
+    resolved relationships. Discovery remained read-only.
+  - Follow-up: live `gh` was unauthenticated in the dev shell, so
+    the smoke run did not exercise real PR retrieval. The forge
+    code path is exercised by 14 unit/library tests and 3 JSON
+    snapshots using `FakeGh`; verifying against a real
+    authenticated `gh` belongs in a follow-up smoke test run by a
+    user with credentials, not in Phase 4 scope.
+
+## Phase 4 Follow-Ups
+
+- [ ] `P4-FU-001` Document the `CONSPECTUS_DISABLE_FORGE`,
+  `CONSPECTUS_DISABLE_TMUX`, and `CONSPECTUS_*_STATE` env vars
+  in `docs/design.md` or a new `docs/operations.md` so users
+  discover them without grepping source.
+- [ ] `P4-FU-002` Match PRs whose head ref is a non-current local
+  branch by enumerating all local refs in the git probe. The
+  Phase 4 adapter only matches the currently-checked-out branch,
+  so PRs for sibling branches end up as unresolved-endpoint
+  candidate links rather than node-target links. The evidence is
+  still preserved; the resolved relationship just goes
+  unresolved.
+
 ## Phase 3 Follow-Ups
 
 - [x] `P3-FU-001` Align harness adapter parsers with real provider state.
