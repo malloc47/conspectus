@@ -1756,19 +1756,19 @@ shape.
     writing into the same rollout file), so resume lineage is parked
     until codex publishes a distinguishable field — no upstream issue
     filed yet; reopen this item if codex changes the rollout format.
-- [ ] `H-LINEAGE-005` Surface session lineage in the session table.
-  - Scope: add a compact `LINEAGE` (or `PARENT`) column to the agent
-    projection that shows the immediate parent session's short id when
-    one exists, and a chain marker (`←`) for sessions with a longer
-    ancestry. Decide whether `conspectus session` should default to
-    hiding "leaf-only" rows (sessions superseded by a known
-    successor) behind a `--include-superseded` flag. Keep the JSON
-    output exhaustive.
-  - Tests: snapshot tests for one-level and multi-level chains, plus
-    a `--include-superseded` flag toggle.
-  - Blockers: `H-LINEAGE-002` (so there's lineage to show);
-    `H-OBS-003` should land first if it's already in flight, since
-    these are the same renderer.
+- [x] `H-LINEAGE-005` Surface session lineage in the session table.
+  - Resolution: `src/output/table.rs` now adds a `LINEAGE` column to
+    the agent projection. The cell shows the preferred
+    `parent_session`'s short id (full when ≤12 chars, else `…<last-8>`
+    for UUIDs), prefixes unresolved parents with `?`, and appends `←`
+    when the parent itself has a parent (chain ≥ 2). Unit tests cover
+    resolved-parent, multi-level chain, and unresolved-parent cases.
+    The `--include-superseded` flag was deferred: with fork-shaped
+    lineage (codex `forked_from_id`, atelier-style native forks) a
+    single parent can have multiple children and would silently
+    disappear from every default render, which is more surprising than
+    showing all rows. JSON output is already exhaustive. If a future
+    consumer needs a compressed view, add `--hide-superseded` then.
 
 ### Agent-Deck Multi-Repo Workspace Support
 

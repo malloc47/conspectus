@@ -177,10 +177,12 @@ fn forge_pr_label(pr: &ForgePrNode) -> String {
 fn render_agent(view: &SnapshotView<'_>) -> String {
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
-        ["AGENT", "CWD", "MUX", "MUX/CONF", "PR", "PR/CONF"]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect(),
+        [
+            "AGENT", "CWD", "MUX", "MUX/CONF", "PR", "PR/CONF", "LINEAGE",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect(),
     );
 
     for (node_id, session) in &view.agent_sessions {
@@ -206,6 +208,8 @@ fn render_agent(view: &SnapshotView<'_>) -> String {
 
         let (pr_cell, pr_indicator) = preferred_pr_for_session(view, node_id);
 
+        let lineage_cell = lineage_cell(view, node_id);
+
         rows.push(vec![
             agent_session_label(session),
             session.cwd.clone().unwrap_or_else(|| "—".to_string()),
@@ -213,10 +217,70 @@ fn render_agent(view: &SnapshotView<'_>) -> String {
             mux_indicator,
             pr_cell,
             pr_indicator,
+            lineage_cell,
         ]);
     }
 
     format_rows(rows)
+}
+
+/// Lineage cell for the agent projection (ADR 0018). Shows the preferred
+/// `parent_session` for the row:
+///
+/// - `—` when no parent_session candidate exists.
+/// - `<short>` when the parent is a discovered `AgentSession`.
+/// - `?<short>` when the parent is preserved as unresolved-endpoint evidence.
+/// - Trailing `←` when the parent itself has a parent, signalling a chain
+///   longer than one hop.
+fn lineage_cell(view: &SnapshotView<'_>, session_id: &NodeId) -> String {
+    let Some(link) = view.preferred_link(session_id, RelationKind::ParentSession) else {
+        return "—".to_string();
+    };
+
+    let (label, parent_node) = match &link.target {
+        LinkEndpoint::Node {
+            id: parent_id @ NodeId::AgentSession(agent_id),
+        } => (short_session_id(&agent_id.session_key), Some(parent_id)),
+        LinkEndpoint::Unresolved { evidence } => {
+            let label = evidence
+                .native_id
+                .as_deref()
+                .map(short_session_id)
+                .map(|short| format!("?{short}"))
+                .unwrap_or_else(|| "?".to_string());
+            (label, None)
+        }
+        _ => return "—".to_string(),
+    };
+
+    let has_grandparent = parent_node
+        .map(|parent| {
+            view.preferred_link(parent, RelationKind::ParentSession)
+                .is_some()
+        })
+        .unwrap_or(false);
+
+    if has_grandparent {
+        format!("{label}←")
+    } else {
+        label
+    }
+}
+
+/// Shorten a session id for human display: keep short ids whole, abbreviate
+/// long ones (typical UUIDs) to a `…<last-8>` suffix so adjacent rows stay
+/// distinguishable without dominating the table width.
+fn short_session_id(key: &str) -> String {
+    const FULL_MAX: usize = 12;
+    const TAIL: usize = 8;
+
+    if key.chars().count() <= FULL_MAX {
+        key.to_string()
+    } else {
+        let chars: Vec<char> = key.chars().collect();
+        let tail: String = chars[chars.len() - TAIL..].iter().collect();
+        format!("…{tail}")
+    }
 }
 
 /// Walk session → fork associations → branches → PRs to find the
@@ -669,6 +733,164 @@ mod tests {
             .expect("agent row");
         assert!(agent_row.contains("mux=tmux:editor"));
         assert!(agent_row.contains("SD/H"));
+    }
+
+    fn parent_session_link(id: &str, child: AgentSessionId, parent: AgentSessionId) -> GraphLink {
+        GraphLink {
+            id: id.to_string(),
+            source: NodeId::AgentSession(child),
+            target: LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent),
+            },
+            relation: RelationKind::ParentSession,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    fn unresolved_parent_session_link(
+        id: &str,
+        child: AgentSessionId,
+        parent_native_id: &str,
+    ) -> GraphLink {
+        GraphLink {
+            id: id.to_string(),
+            source: NodeId::AgentSession(child),
+            target: LinkEndpoint::Unresolved {
+                evidence: crate::model::UnresolvedEndpoint {
+                    node_type: "agent_session".to_string(),
+                    harness_key: Some("claude-code".to_string()),
+                    native_id: Some(parent_native_id.to_string()),
+                    state_scope: None,
+                    path: None,
+                    metadata: Default::default(),
+                },
+            },
+            relation: RelationKind::ParentSession,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn agent_projection_lineage_column_shows_resolved_parent_short_id() {
+        let parent_id = AgentSessionId::new("claude-code", "global", "parent");
+        let child_id = AgentSessionId::new("claude-code", "global", "child");
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("claude-code", "parent", Some("/work")),
+                agent_session("claude-code", "child", Some("/work")),
+            ],
+            candidate_links: vec![parent_session_link("lineage-1", child_id, parent_id)],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Agent);
+
+        assert!(rendered.contains("LINEAGE"));
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let child_row = body
+            .iter()
+            .find(|row| row.contains("claude-code:child"))
+            .expect("child row");
+        assert!(
+            child_row.contains("parent"),
+            "expected parent short id in child row:\n{child_row}",
+        );
+        let parent_row = body
+            .iter()
+            .find(|row| row.contains("claude-code:parent"))
+            .expect("parent row");
+        // Parent has no parent of its own, so it shows the empty lineage cell.
+        assert!(
+            parent_row.trim_end().ends_with("—"),
+            "expected empty lineage in parent row:\n{parent_row}",
+        );
+    }
+
+    #[test]
+    fn agent_projection_lineage_column_marks_chain_with_arrow() {
+        let grand_id = AgentSessionId::new("claude-code", "global", "grand");
+        let mid_id = AgentSessionId::new("claude-code", "global", "mid");
+        let leaf_id = AgentSessionId::new("claude-code", "global", "leaf");
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("claude-code", "grand", Some("/work")),
+                agent_session("claude-code", "mid", Some("/work")),
+                agent_session("claude-code", "leaf", Some("/work")),
+            ],
+            candidate_links: vec![
+                parent_session_link("link-mid", mid_id.clone(), grand_id),
+                parent_session_link("link-leaf", leaf_id, mid_id),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Agent);
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+
+        let leaf_row = body
+            .iter()
+            .find(|row| row.contains("claude-code:leaf"))
+            .expect("leaf row");
+        assert!(
+            leaf_row.contains("mid←"),
+            "leaf's lineage cell should mark longer ancestry with ←:\n{leaf_row}",
+        );
+
+        let mid_row = body
+            .iter()
+            .find(|row| row.contains("claude-code:mid"))
+            .expect("mid row");
+        // mid's parent (grand) has no parent itself, so no chain marker.
+        assert!(
+            mid_row.contains("grand") && !mid_row.contains("grand←"),
+            "mid's lineage cell should be `grand` without chain marker:\n{mid_row}",
+        );
+    }
+
+    #[test]
+    fn agent_projection_lineage_column_marks_unresolved_parent_with_question_prefix() {
+        let child_id = AgentSessionId::new("claude-code", "global", "child");
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("claude-code", "child", Some("/work"))],
+            candidate_links: vec![unresolved_parent_session_link(
+                "lineage-unresolved",
+                child_id,
+                "missing-parent",
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Agent);
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let child_row = body
+            .iter()
+            .find(|row| row.contains("claude-code:child"))
+            .expect("child row");
+        assert!(
+            child_row.contains("?missing-parent") || child_row.contains("?…"),
+            "unresolved parent should appear with `?` prefix:\n{child_row}",
+        );
+    }
+
+    #[test]
+    fn short_session_id_abbreviates_long_uuids() {
+        assert_eq!(short_session_id("alpha"), "alpha");
+        assert_eq!(short_session_id("session-1234"), "session-1234");
+        let uuid = "019e2454-8f7e-7543-aac5-b0d8ff75be49";
+        let abbr = short_session_id(uuid);
+        assert!(
+            abbr.starts_with('…') && abbr.len() < uuid.len(),
+            "expected abbreviation, got {abbr}",
+        );
+        assert!(abbr.ends_with(&uuid[uuid.len() - 8..]));
     }
 
     #[test]

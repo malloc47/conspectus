@@ -2,6 +2,6 @@
 source: tests/atelier_delegation_snapshots.rs
 expression: "table::render(&table_snapshot, Projection::Agent)"
 ---
-AGENT                CWD                                   MUX         MUX/CONF  PR  PR/CONF
--------------------  ------------------------------------  ----------  --------  --  -------
-codex:session-alpha  /fixture/.atelier/forks/alpha/repo-a  tmux:alpha  SD/H      —   —
+AGENT                CWD                                   MUX         MUX/CONF  PR  PR/CONF  LINEAGE
+-------------------  ------------------------------------  ----------  --------  --  -------  -------
+codex:session-alpha  /fixture/.atelier/forks/alpha/repo-a  tmux:alpha  SD/H      —   —        —

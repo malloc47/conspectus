@@ -2,6 +2,6 @@
 source: tests/declared_snapshots.rs
 expression: table
 ---
-AGENT            CWD    MUX          MUX/CONF  PR  PR/CONF
----------------  -----  -----------  --------  --  -------
-codex:session-x  /work  tmux:editor  SD/H      —   —
+AGENT            CWD    MUX          MUX/CONF  PR  PR/CONF  LINEAGE
+---------------  -----  -----------  --------  --  -------  -------
+codex:session-x  /work  tmux:editor  SD/H      —   —        —
