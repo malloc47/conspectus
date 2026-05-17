@@ -7,22 +7,41 @@
 //! lacks `cwd`, with the cwd appearing on later user/assistant events).
 //! When no JSONL line carries a cwd, the encoded project directory name is
 //! decoded as a best-effort fallback. Malformed files yield no session.
+//!
+//! Per ADR 0018 the adapter also extracts intra-harness session lineage from
+//! the `parentUuid` on the first record that carries one. When the parent
+//! uuid matches the leaf message of another discovered transcript in the
+//! same project directory the link resolves to a concrete `AgentSession`
+//! target; otherwise the parent uuid is preserved as unresolved endpoint
+//! evidence so later discovery can reconcile it.
 
+use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use anyhow::Result;
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::{DiscoveryContext, GraphFragment};
-use crate::model::{AgentSessionId, AgentSessionNode, GraphNode};
+use crate::model::{
+    AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
+    LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
+};
 
-/// Maximum number of JSONL lines to scan when looking for `cwd` evidence.
-/// Real sessions almost always carry cwd within the first few user/assistant
-/// events; the cap keeps very long transcripts cheap.
+/// Maximum number of JSONL lines to scan when looking for `cwd` evidence and
+/// the first cross-session `parentUuid`. Real sessions almost always carry
+/// both within the first few records; the cap keeps very long transcripts
+/// cheap.
 const MAX_HEADER_SCAN_LINES: usize = 200;
+
+/// Maximum number of bytes to read from the end of a transcript when looking
+/// for the leaf uuid. Claude-code lines are kilobytes at most, so a 32 KiB
+/// tail comfortably contains the last several messages without re-parsing
+/// the whole transcript.
+const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
 pub const HARNESS_KEY: &str = "claude-code";
 
@@ -57,6 +76,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 
     let state_scope = state_root.to_string_lossy().to_string();
     let mut nodes = Vec::new();
+    let mut candidate_links = Vec::new();
 
     for project in fs::read_dir(&projects)? {
         let project_dir = project?.path();
@@ -69,6 +89,8 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             .file_name()
             .and_then(|n| n.to_str())
             .map(decode_project_dir);
+
+        let mut entries: Vec<DiscoveredSession> = Vec::new();
 
         for entry in fs::read_dir(&project_dir)? {
             let path = entry?.path();
@@ -84,26 +106,67 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                 continue;
             };
 
-            nodes.push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new(HARNESS_KEY, &state_scope, &meta.session_id),
-                harness_key: HARNESS_KEY.to_string(),
-                cwd: meta.cwd,
-                title: meta.summary,
-            }));
+            let leaf_uuid = read_session_leaf_uuid(&path);
+
+            entries.push(DiscoveredSession {
+                node: AgentSessionNode {
+                    id: AgentSessionId::new(HARNESS_KEY, &state_scope, &meta.session_id),
+                    harness_key: HARNESS_KEY.to_string(),
+                    cwd: meta.cwd,
+                    title: meta.summary,
+                },
+                parent_uuid: meta.parent_uuid,
+                cross_session_record_type: meta.cross_session_record_type,
+                leaf_uuid,
+            });
+        }
+
+        let leaf_to_session: HashMap<&str, &str> = entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .leaf_uuid
+                    .as_deref()
+                    .map(|leaf| (leaf, entry.node.id.session_key.as_str()))
+            })
+            .collect();
+
+        for entry in &entries {
+            if let Some(parent_uuid) = entry.parent_uuid.as_deref() {
+                candidate_links.push(build_lineage_link(
+                    entry,
+                    parent_uuid,
+                    &state_scope,
+                    leaf_to_session.get(parent_uuid).copied(),
+                ));
+            }
+            nodes.push(GraphNode::AgentSession(entry.node.clone()));
         }
     }
 
     Ok(GraphFragment {
         nodes,
-        candidate_links: Vec::new(),
+        candidate_links,
         diagnostics: Vec::new(),
     })
+}
+
+struct DiscoveredSession {
+    node: AgentSessionNode,
+    parent_uuid: Option<String>,
+    cross_session_record_type: Option<String>,
+    leaf_uuid: Option<String>,
 }
 
 struct SessionHeader {
     session_id: String,
     cwd: Option<String>,
     summary: Option<String>,
+    parent_uuid: Option<String>,
+    /// `type` of the first record that carries a non-null `parentUuid`.
+    /// `Some("summary")` signals a compaction successor; anything else (or
+    /// `None`) is treated as a resume.
+    cross_session_record_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +177,12 @@ struct ScannedLine {
     cwd: Option<String>,
     #[serde(default)]
     summary: Option<String>,
+    #[serde(rename = "parentUuid", default)]
+    parent_uuid: Option<String>,
+    #[serde(rename = "type", default)]
+    record_type: Option<String>,
+    #[serde(default)]
+    uuid: Option<String>,
 }
 
 fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<SessionHeader> {
@@ -124,11 +193,16 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
     let file = fs::File::open(path).ok()?;
     let mut cwd: Option<String> = None;
     let mut summary: Option<String> = None;
+    let mut parent_uuid: Option<String> = None;
+    let mut cross_session_record_type: Option<String> = None;
     let mut saw_any_record = false;
+    let mut first_record = true;
 
     for line in BufReader::new(file).lines().take(MAX_HEADER_SCAN_LINES) {
         let Ok(line) = line else { continue };
         let Ok(parsed) = serde_json::from_str::<ScannedLine>(&line) else {
+            // Malformed lines do not advance the first-record flag: a bad
+            // header line should not silently demote a real first record.
             continue;
         };
         saw_any_record = true;
@@ -139,11 +213,21 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
         if summary.is_none() {
             summary = parsed.summary;
         }
+        // `parentUuid` on every later record points within the same session;
+        // only the very first record's parentUuid is the cross-session link.
+        if first_record {
+            parent_uuid = parsed.parent_uuid;
+            cross_session_record_type = parsed.record_type;
+            first_record = false;
+        }
         if cwd.is_some() && summary.is_some() {
             break;
         }
-        // sessionId from JSONL is informational; the filename is authoritative.
+        // sessionId / uuid from JSONL are informational; the filename is
+        // authoritative for the session id, and per-record uuids only matter
+        // for the tail scan below.
         let _ = parsed.session_id;
+        let _ = parsed.uuid;
     }
 
     if !saw_any_record {
@@ -158,7 +242,117 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
         session_id,
         cwd,
         summary,
+        parent_uuid,
+        cross_session_record_type,
     })
+}
+
+/// Returns the `uuid` of the last successfully parsed record in the
+/// transcript, or `None` if no record carries a `uuid`. Reads at most the
+/// trailing [`TAIL_SCAN_BYTES`] of the file so very long transcripts stay
+/// cheap.
+fn read_session_leaf_uuid(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+
+    if len == 0 {
+        return None;
+    }
+
+    let start = len.saturating_sub(TAIL_SCAN_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut buf).ok()?;
+
+    // If we started mid-file, the first partial line is unreliable — drop it.
+    let scan_start = if start > 0 {
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(idx) => idx + 1,
+            None => return None,
+        }
+    } else {
+        0
+    };
+
+    let mut last_uuid: Option<String> = None;
+    for line in buf[scan_start..].split(|&b| b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(parsed) = serde_json::from_slice::<ScannedLine>(line) else {
+            continue;
+        };
+        if let Some(uuid) = parsed.uuid {
+            last_uuid = Some(uuid);
+        }
+    }
+
+    last_uuid
+}
+
+fn build_lineage_link(
+    entry: &DiscoveredSession,
+    parent_uuid: &str,
+    state_scope: &str,
+    resolved_parent_session_key: Option<&str>,
+) -> GraphLink {
+    let lineage_kind = if entry.cross_session_record_type.as_deref() == Some("summary") {
+        "compaction"
+    } else {
+        "resume"
+    };
+
+    let mut fields: Metadata = Metadata::new();
+    fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
+    fields.insert("lineage_kind".to_string(), json!(lineage_kind));
+    fields.insert("parent_uuid".to_string(), json!(parent_uuid));
+
+    let child_session_key = entry.node.id.session_key.as_str();
+    let source = NodeId::AgentSession(entry.node.id.clone());
+
+    let (target, link_id) = match resolved_parent_session_key {
+        Some(parent_key) => {
+            let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
+            (
+                LinkEndpoint::Node {
+                    id: NodeId::AgentSession(parent_id),
+                },
+                format!("claude-code:lineage:{child_session_key}:parent_session:{parent_key}"),
+            )
+        }
+        None => {
+            let evidence = UnresolvedEndpoint {
+                node_type: "agent_session".to_string(),
+                harness_key: Some(HARNESS_KEY.to_string()),
+                native_id: Some(parent_uuid.to_string()),
+                state_scope: Some(state_scope.to_string()),
+                path: None,
+                metadata: fields.clone(),
+            };
+            (
+                LinkEndpoint::Unresolved { evidence },
+                format!(
+                    "claude-code:lineage:{child_session_key}:parent_session:unresolved:{parent_uuid}"
+                ),
+            )
+        }
+    };
+
+    GraphLink {
+        id: link_id,
+        source,
+        target,
+        relation: RelationKind::ParentSession,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: HARNESS_KEY.to_string(),
+            evidence: Some(format!("claude-code transcript {lineage_kind}")),
+            fields,
+        },
+        state: LinkState::Active,
+    }
 }
 
 /// Best-effort inverse of Claude Code's project-directory encoding (`/` → `-`).
@@ -381,6 +575,201 @@ mod tests {
             decode_project_dir("-home-malloc47--agent-deck"),
             "/home/malloc47/agent/deck"
         );
+    }
+
+    /// Builds a project directory at `<state_root>/projects/<project>` and
+    /// writes one transcript per record. Each record is `(filename_stem,
+    /// jsonl_body)`. The body is written verbatim, including newlines.
+    fn write_transcripts(
+        state_root: &Path,
+        project: &str,
+        transcripts: &[(&str, &str)],
+    ) -> std::path::PathBuf {
+        let project_dir = state_root.join("projects").join(project);
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+
+        for (name, body) in transcripts {
+            std::fs::write(project_dir.join(format!("{name}.jsonl")), body).expect("write");
+        }
+
+        project_dir
+    }
+
+    fn lineage_links(fragment: &GraphFragment) -> Vec<&GraphLink> {
+        fragment
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::ParentSession)
+            .collect()
+    }
+
+    #[test]
+    fn compaction_successor_links_to_parent_session_on_disk() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent\",\"cwd\":\"/work/repo\",\"uuid\":\"u-parent-1\"}\n\
+            {\"type\":\"assistant\",\"sessionId\":\"parent\",\"uuid\":\"u-parent-leaf\",\"parentUuid\":\"u-parent-1\"}\n";
+        let child_body = "\
+            {\"type\":\"summary\",\"parentUuid\":\"u-parent-leaf\",\"uuid\":\"u-child-1\",\"summary\":\"prior session summary\"}\n\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-2\",\"parentUuid\":\"u-child-1\"}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("parent", parent_body), ("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(lineage.len(), 1, "one parent_session candidate expected");
+        let link = lineage[0];
+        let target = match &link.target {
+            LinkEndpoint::Node { id } => id,
+            other => panic!("expected resolved parent endpoint, got {other:?}"),
+        };
+        let NodeId::AgentSession(parent_id) = target else {
+            panic!("expected AgentSession target, got {target:?}");
+        };
+        assert_eq!(parent_id.session_key, "parent");
+        assert_eq!(parent_id.harness_key, HARNESS_KEY);
+
+        let NodeId::AgentSession(child_id) = &link.source else {
+            panic!("expected AgentSession source");
+        };
+        assert_eq!(child_id.session_key, "child");
+
+        assert_eq!(
+            link.source_metadata.fields.get("lineage_kind"),
+            Some(&json!("compaction"))
+        );
+        assert_eq!(
+            link.source_metadata.fields.get("parent_uuid"),
+            Some(&json!("u-parent-leaf"))
+        );
+    }
+
+    #[test]
+    fn resume_successor_uses_resume_lineage_kind() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent\",\"cwd\":\"/work/repo\",\"uuid\":\"u-parent-leaf\"}\n";
+        // Resume transcripts start with a regular user message (no compaction
+        // summary) whose parentUuid points to the leaf of the prior session.
+        let child_body = "\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-1\",\"parentUuid\":\"u-parent-leaf\"}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("parent", parent_body), ("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(lineage.len(), 1);
+        assert_eq!(
+            lineage[0].source_metadata.fields.get("lineage_kind"),
+            Some(&json!("resume"))
+        );
+        assert!(matches!(lineage[0].target, LinkEndpoint::Node { .. }));
+    }
+
+    #[test]
+    fn lineage_preserves_unresolved_parent_when_predecessor_is_pruned() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let orphan_body = "\
+            {\"type\":\"summary\",\"parentUuid\":\"missing-leaf\",\"uuid\":\"u-orphan-1\",\"summary\":\"summary of pruned session\"}\n\
+            {\"type\":\"user\",\"sessionId\":\"orphan\",\"cwd\":\"/work/repo\",\"uuid\":\"u-orphan-2\",\"parentUuid\":\"u-orphan-1\"}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("orphan", orphan_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(lineage.len(), 1);
+        let evidence = match &lineage[0].target {
+            LinkEndpoint::Unresolved { evidence } => evidence,
+            other => panic!("expected unresolved endpoint, got {other:?}"),
+        };
+        assert_eq!(evidence.node_type, "agent_session");
+        assert_eq!(evidence.harness_key.as_deref(), Some(HARNESS_KEY));
+        assert_eq!(evidence.native_id.as_deref(), Some("missing-leaf"));
+        assert_eq!(
+            evidence.metadata.get("lineage_kind"),
+            Some(&json!("compaction"))
+        );
+    }
+
+    #[test]
+    fn sessions_without_parent_uuid_emit_no_lineage_link() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        fixture
+            .write_claude_code_session(&ClaudeCodeSessionRecord::new("standalone", "/work/repo"))
+            .expect("write");
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+
+        assert!(lineage_links(&fragment).is_empty());
+    }
+
+    #[test]
+    fn lineage_match_is_scoped_to_one_project_directory() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent\",\"cwd\":\"/work/alpha\",\"uuid\":\"shared-leaf\"}\n";
+        let child_body = "\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/beta\",\"uuid\":\"u-c\",\"parentUuid\":\"shared-leaf\"}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-alpha",
+            &[("parent", parent_body)],
+        );
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-beta",
+            &[("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(
+            lineage.len(),
+            1,
+            "cross-project leaf match must not resolve"
+        );
+        assert!(
+            matches!(lineage[0].target, LinkEndpoint::Unresolved { .. }),
+            "shared uuid across projects should not produce a concrete target"
+        );
+    }
+
+    #[test]
+    fn malformed_first_record_skips_session_entirely() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        // First record is unparseable; the second has a valid parentUuid. We
+        // currently bail when no record parses; if the first parses-but-skips
+        // pattern emerges, only this case needs to flip.
+        let body = "{not valid json\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("bad", body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+
+        assert!(fragment.nodes.is_empty());
+        assert!(lineage_links(&fragment).is_empty());
     }
 
     #[test]

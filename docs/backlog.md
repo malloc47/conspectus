@@ -1718,26 +1718,20 @@ shape.
     as the operation vocabulary (`compaction`, `resume`, `fork`,
     `fresh`, `unknown`); attribution fidelity moves to a separate
     `lineage_fidelity` field, which Atelier will adopt in H-LINEAGE-002.
-- [ ] `H-LINEAGE-002` Extract claude-code session lineage.
-  - Scope: extend the claude-code adapter to follow `parentUuid` from
-    the first user-visible message of each JSONL transcript. When that
-    `parentUuid` is the leaf message of another known session (same
-    project state-root), emit a `ParentSession` candidate from the new
-    session to the previous one with `lineage_kind = "compaction"` (or
-    `"resume"` if the first message is not a compaction summary). Keep
-    discovered evidence even when the parent session is no longer on
-    disk (preserve the `parentUuid` as unresolved endpoint metadata).
-    Reuse the existing JSONL scan budget (`MAX_HEADER_SCAN_LINES`) plus
-    a small tail scan for the leaf uuid; do not re-parse full
-    transcripts.
-  - Tests: fixture transcripts for (a) post-compaction successor whose
-    parent is on disk, (b) successor whose parent has been pruned, (c)
-    no-lineage sessions, (d) malformed first events. Snapshot test for
-    the agent projection showing the lineage column or marker.
-  - Manual checks: `cargo run -- session --projection agent` against
-    real `~/.claude` state and confirm compacted sessions point at
-    their predecessors.
-  - Blockers: `H-LINEAGE-001`.
+- [x] `H-LINEAGE-002` Extract claude-code session lineage.
+  - Resolution: `src/discovery/harness/claude_code.rs` now reads the
+    first record's `parentUuid` plus a bounded transcript tail to
+    extract the leaf uuid, then matches within each project directory.
+    Resolved matches emit a `ParentSession` candidate from child to
+    parent `AgentSession`; unresolved parents preserve `parentUuid`
+    under `UnresolvedEndpoint`. `lineage_kind` is `"compaction"` when
+    the first cross-session record has `type == "summary"` and
+    `"resume"` otherwise. Atelier's `lineage_kind` source-metadata
+    field was renamed to `lineage_fidelity` per ADR 0018, with the
+    new `lineage_kind` carrying the `fork` / `fresh` operation value;
+    `harness_mux_snapshots__fork_associated_session_and_unresolved_lineage`
+    and the atelier-delegation graph snapshot are updated. Manual
+    `~/.claude` validation pending.
 - [ ] `H-LINEAGE-003` Extract opencode session lineage from
   `session.parent_id`.
   - Scope: the opencode SQLite schema already exposes `parent_id`

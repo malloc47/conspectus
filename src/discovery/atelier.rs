@@ -507,7 +507,11 @@ fn harness_lineage_metadata(
     );
     fields.insert(
         "lineage_kind".to_string(),
-        serde_json::Value::String(lineage_kind_name(harness.capability).to_string()),
+        serde_json::Value::String(lineage_kind_name(harness).to_string()),
+    );
+    fields.insert(
+        "lineage_fidelity".to_string(),
+        serde_json::Value::String(lineage_fidelity_name(harness.capability).to_string()),
     );
 
     if let Some(warning) = &harness.degraded_warning {
@@ -520,7 +524,18 @@ fn harness_lineage_metadata(
     fields
 }
 
-fn lineage_kind_name(capability: AtelierHarnessCapability) -> &'static str {
+/// ADR 0018 operation vocabulary. Atelier lineage is fork-shaped unless the
+/// provider intentionally started the harness fresh.
+fn lineage_kind_name(harness: &AtelierForkHarnessEntry) -> &'static str {
+    match harness.capability {
+        AtelierHarnessCapability::Fresh => "fresh",
+        _ => "fork",
+    }
+}
+
+/// ADR 0018 attribution-fidelity vocabulary, derived from the per-harness
+/// capability Atelier records in the fork index.
+fn lineage_fidelity_name(capability: AtelierHarnessCapability) -> &'static str {
     match capability {
         AtelierHarnessCapability::Native => "native",
         AtelierHarnessCapability::Approximate => "approximate",
@@ -944,6 +959,10 @@ parent-worktree = "/workspace/repo-c"
         );
         assert_eq!(
             parent_endpoint.metadata.get("lineage_kind"),
+            Some(&serde_json::Value::String("fork".to_string()))
+        );
+        assert_eq!(
+            parent_endpoint.metadata.get("lineage_fidelity"),
             Some(&serde_json::Value::String("native".to_string()))
         );
 
@@ -960,21 +979,33 @@ parent-worktree = "/workspace/repo-c"
     fn each_lineage_capability_maps_to_unresolved_endpoint() {
         let workspace = NodeId::Workspace(WorkspaceId::new("/workspace"));
         let cases = [
-            (AtelierHarnessCapability::Native, "native", Confidence::High),
+            (
+                AtelierHarnessCapability::Native,
+                "fork",
+                "native",
+                Confidence::High,
+            ),
             (
                 AtelierHarnessCapability::Approximate,
+                "fork",
                 "approximate",
                 Confidence::Medium,
             ),
             (
                 AtelierHarnessCapability::Unsupported,
+                "fork",
                 "unsupported",
                 Confidence::Low,
             ),
-            (AtelierHarnessCapability::Fresh, "fresh", Confidence::Low),
+            (
+                AtelierHarnessCapability::Fresh,
+                "fresh",
+                "fresh",
+                Confidence::Low,
+            ),
         ];
 
-        for (capability, kind_name, expected_confidence) in cases {
+        for (capability, kind_name, fidelity_name, expected_confidence) in cases {
             let record = AtelierForkRecord {
                 provider: "atelier".to_string(),
                 source_key: format!("fork-{kind_name}"),
@@ -1008,6 +1039,14 @@ parent-worktree = "/workspace/repo-c"
                     .get("lineage_kind")
                     .and_then(serde_json::Value::as_str),
                 Some(kind_name)
+            );
+            assert_eq!(
+                parent_link
+                    .source_metadata
+                    .fields
+                    .get("lineage_fidelity")
+                    .and_then(serde_json::Value::as_str),
+                Some(fidelity_name)
             );
             assert_eq!(
                 parent_link
