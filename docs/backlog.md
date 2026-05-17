@@ -1732,20 +1732,18 @@ shape.
     `harness_mux_snapshots__fork_associated_session_and_unresolved_lineage`
     and the atelier-delegation graph snapshot are updated. Manual
     `~/.claude` validation pending.
-- [ ] `H-LINEAGE-003` Extract opencode session lineage from
+- [x] `H-LINEAGE-003` Extract opencode session lineage from
   `session.parent_id`.
-  - Scope: the opencode SQLite schema already exposes `parent_id`
-    (`src/discovery/harness/opencode.rs:340` schema test). Extend the
-    `SELECT` at line 97 to include `parent_id`, and emit a
-    `ParentSession` candidate whenever the row has a non-null
-    `parent_id`. Resolve to a concrete `AgentSession` endpoint when the
-    parent row is also present; otherwise preserve unresolved evidence
-    carrying `harness_key = "opencode"` and the parent native id.
-  - Tests: SQLite fixture rows for parent present, parent absent,
-    self-parent (skip / diagnose), and missing column (degrade).
-  - Manual checks: `cargo run -- session` against real opencode state
-    and confirm chained sessions show lineage.
-  - Blockers: `H-LINEAGE-001`.
+  - Resolution: `src/discovery/harness/opencode.rs` now selects
+    `parent_id` from the SQLite store and emits a `parent_session`
+    candidate per row carrying a non-empty parent. Parent rows present
+    in the same fragment resolve to concrete `AgentSession` endpoints;
+    missing parents become `UnresolvedEndpoint` evidence with
+    `harness_key = "opencode"` and the parent native id. Self-parent
+    rows are skipped. Older schemas without `parent_id` fall back to a
+    lineage-less SELECT rather than dropping every session.
+    `lineage_kind` is `"unknown"` until opencode publishes operation
+    semantics. Manual real-state validation pending.
 - [ ] `H-LINEAGE-004` Extract codex resume lineage.
   - Scope: investigate the codex rollout format for any pointer back to
     a prior rollout (resume id, parent timestamp, originating session,
