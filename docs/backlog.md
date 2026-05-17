@@ -1352,6 +1352,497 @@ this repo.
     tests for SQLite discovery, duplicate precedence, and malformed
     database degradation.
 
+## Hardening Backlog
+
+Deferred investments and opportunistic cleanups identified during the
+post-Phase-6 codebase review. Items here are not gated by a phase plan; pull
+them into a future phase or land them opportunistically when the surrounding
+area is already being touched. Group prefixes:
+
+- `H-REF-*` internal refactors and dedup
+- `H-OBS-*` observability, diagnostics, and CLI UX
+- `H-PROD-*` user-facing product surface gaps
+- `H-DIST-*` distribution, CI, and release plumbing
+- `H-DESIGN-*` open design questions to settle before they constrain
+  implementation
+- `H-FUTURE-*` provider/feature expansions deliberately deferred until needed
+
+### Refactors And Dedup
+
+- [ ] `H-REF-001` Extract a shared `DeclaredEndpoint` codec.
+  - Scope: collapse the mirrored `parse_endpoint` (`src/cli.rs:703`) and
+    `endpoint_label` (`src/cli.rs:745`) into one codec module (likely in
+    `src/declared.rs` or a new `src/declared/endpoint_codec.rs`) so adding an
+    endpoint variant requires one change. Reuse the same codec for declared
+    TOML field names and CLI surface so they cannot drift.
+  - Tests: round-trip property tests for every `DeclaredEndpoint` variant;
+    CLI integration tests for unknown fields and missing required fields.
+  - Blockers: none.
+- [ ] `H-REF-002` Share the relation-kind string codec.
+  - Scope: `parse_relation_kind` (`src/cli.rs:656`) and `relation_label`
+    (`src/cli.rs:681`) are exhaustive mirrors. Move the mapping next to
+    `RelationKind` in `src/model/mod.rs` (or derive via serde) so the CLI,
+    declared store, and table renderer all read one source of truth.
+  - Tests: round-trip unit tests for every variant; serde compatibility
+    test against existing JSON snapshots.
+  - Blockers: none.
+- [ ] `H-REF-003` Generalize the resolver scoring tier helpers.
+  - Scope: `MuxTier` / `mux_score` (`src/resolve/mod.rs:117`) and
+    `PrProvenanceTier` / `pr_score` (`src/resolve/mod.rs:177`) duplicate the
+    provenance-to-tier mapping. Introduce a `ProvenanceTier` ordering on
+    `Provenance` itself, then have each comparator add only its
+    relation-specific tie-breakers (recency, draft, state). Keeps relation
+    comparators short and consistent.
+  - Tests: existing resolver table-driven tests must continue to pass
+    byte-for-byte against current snapshots.
+  - Blockers: none.
+- [ ] `H-REF-004` Unify the external-tool runner seam.
+  - Scope: `TmuxRunner`/`SystemTmux`/`FakeTmux` (`src/discovery/tmux/mod.rs`)
+    and `GhRunner`/`SystemGh`/`FakeGh`
+    (`src/discovery/forge/mod.rs`) duplicate outcome enums, unavailable
+    classification, and fake-runner plumbing. Extract a generic
+    `ExternalCommand<O>` (or runner trait + outcome type) that both
+    backends specialize. New backends (zellij, GitLab) should not need to
+    re-derive the same seam.
+  - Tests: keep existing unit coverage for tmux and gh runners; add one
+    test that the shared abstraction classifies a missing binary the same
+    way across both adapters.
+  - Blockers: `H-FUTURE-001` is the obvious consumer but not a hard
+    dependency.
+- [ ] `H-REF-005` Split `src/declared.rs` (1338 lines) by concern.
+  - Scope: separate (a) TOML models + parse/validate, (b) read-modify-write
+    helpers and file I/O, and (c) snapshot-aware helpers
+    (`endpoint_project_root`, `declared_endpoint_from_node_id`,
+    `select_store_for_declaration`). The last group reaches into a
+    `GraphSnapshot` and should live near discovery, not next to the file
+    format.
+  - Tests: existing declared and CLI tests must continue to pass without
+    snapshot diffs.
+  - Blockers: `H-REF-001` is friendlier to do first.
+- [ ] `H-REF-006` Slim `src/cli.rs` (961 lines) into per-command modules.
+  - Scope: move the `declared` subcommand tree, endpoint/relation codec
+    helpers, and shared output formatting into a `src/cli/` module
+    hierarchy. Keep `main` and top-level dispatch in `cli.rs`.
+  - Tests: existing CLI smoke tests must continue to pass.
+  - Blockers: `H-REF-001`, `H-REF-002`.
+- [ ] `H-REF-007` Factor harness adapter state-root scanning.
+  - Scope: codex, claude-code, opencode, and aider adapters each
+    re-implement "look up state root from context, walk a known directory
+    layout, emit `AgentSessionNode`s, swallow malformed rows." Extract a
+    small shared helper that takes a parser closure so the per-adapter
+    files only describe the layout. Avoid changing the public adapter
+    trait shape.
+  - Tests: existing harness adapter tests; add one shared-helper test for
+    missing state roots.
+  - Blockers: none.
+- [ ] `H-REF-008` Replace string field names in `SourceMetadata.fields`.
+  - Scope: discovery providers populate `source_metadata.fields` with
+    stringly-typed keys (`mux_activity_epoch`, `updated_epoch`,
+    `match_kind`, `fork_root`, `lineage_kind`, …). Resolvers read those
+    keys back with the same strings. Introduce typed accessors (constants
+    or a small `SourceField` enum with `as_str`) so the producer and
+    consumer sides cannot drift silently.
+  - Tests: resolver tests still pass; add a compile-time check (or doc
+    test) that every known key has a constant.
+  - Blockers: `H-REF-003` benefits from this but is independent.
+- [ ] `H-REF-009` Centralize provider identifier constants.
+  - Scope: provider keys (`"github"`, `"atelier"`, `"codex"`, …) appear as
+    string literals across discovery, declared, model tests, and fixtures.
+    Most harness adapters already expose `HARNESS_KEY`; finish the pattern
+    for forge, mux, and atelier providers, and use the constants in
+    declared parsing and CLI matching.
+  - Tests: existing tests; add one assertion that the registry of harness
+    keys matches the adapters wired into `discover_local_at_roots`.
+  - Blockers: none.
+- [ ] `H-REF-010` Audit and shrink the curated `conspectus::api` surface.
+  - Scope: `api.rs` re-exports `DeclaredStoreKind`, `DeclaredStoreSelection`,
+    `DeclaredSection`, and similar persistence internals that consumers
+    likely should not reach for. Decide which are truly part of the
+    library contract (ADR 0015) and either `#[doc(hidden)]` the rest or
+    move them out of `api.rs`. Confirm every re-export has a doctest or
+    explanation.
+  - Tests: existing doctest; add one that asserts the public surface from
+    `api::*` for the cases consumers actually have.
+  - Blockers: none.
+
+### Observability And CLI UX
+
+- [ ] `H-OBS-001` Add a human-readable graph projection.
+  - Scope: `conspectus graph --format json` is the only graph output today.
+    Add `--format text` (or a separate `conspectus graph --tree`) that
+    renders nodes grouped by repo/workspace with linked sessions, mux, PR,
+    and fork lineage. This is the workflow `atelier status` used to cover.
+  - Tests: snapshot tests for empty, sparse, and dense fixtures.
+  - Blockers: none.
+- [ ] `H-OBS-002` Add `conspectus node show <id>`.
+  - Scope: a read-only command that prints every candidate link, resolved
+    relationship, source metadata, and diagnostic touching a given node
+    id. Useful for users debugging "why is this session orphaned?".
+  - Tests: CLI integration tests against the existing fixtures.
+  - Blockers: none.
+- [ ] `H-OBS-003` Add filter flags for the graph and session commands.
+  - Scope: `--only-ambiguous`, `--only-unresolved`, `--only-orphan`, and a
+    `--kind {agent_session|mux|repo|fork|pr}` filter. The graph today
+    forces consumers to do their own filtering on JSON.
+  - Tests: CLI integration tests against existing snapshots.
+  - Blockers: none.
+- [ ] `H-OBS-004` Add a `--explain` mode for resolved relationships.
+  - Scope: surface why the resolver picked a given winning candidate
+    (provenance tier, recency, state, conflict diagnostics). Both for the
+    JSON output and `session` table cells with the `*` ambiguity marker.
+  - Tests: snapshot tests for ambiguous mux and PR fixtures.
+  - Blockers: `H-REF-003` is friendlier to do first because the
+    explanation depends on a stable scoring shape.
+- [ ] `H-OBS-005` Improve discovery diagnostics for missing providers.
+  - Scope: when `gh` is unavailable, `tmux` is not installed, declared
+    config is malformed, or a harness state root is missing, surface a
+    `Diagnostic` row in the graph and a one-line stderr hint in CLI
+    commands. Today some of these degrade silently (forge unavailable,
+    missing state roots) while others (`ConfigDiagnostic`) only print to
+    stderr.
+  - Tests: CLI integration tests that capture stderr and JSON
+    diagnostics across each provider failure mode.
+  - Blockers: none.
+- [ ] `H-OBS-006` Surface activity/recency in the session tables.
+  - Scope: `AgentSessionNode` exposes some recency metadata (claude-code
+    cwd discovery propagates timestamps; mux activity epochs flow through
+    candidate metadata) but the table renders no recency column. Add a
+    "last activity" column derived from session, mux, and PR signals,
+    using a relative formatting helper (`2h`, `3d`).
+  - Tests: snapshot tests for representative fixtures with normalized
+    timestamps.
+  - Blockers: `H-REF-008` (typed source-metadata fields makes recency
+    extraction safer).
+
+### Product Surface Gaps
+
+- [ ] `H-PROD-001` Implement the bootstrap-roots flow described in the
+  design.
+  - Scope: `docs/design.md` "Discovery Strategy" mentions a future
+    bootstrap mode that prints suggested roots and links by default and
+    requires an explicit write flag to persist. Add `conspectus bootstrap`
+    (or `conspectus graph --suggest-roots`) that scans selected
+    directories and prints a TOML stanza, with `--write` controlling
+    persistence.
+  - Tests: CLI integration tests for suggested output, `--write` behavior,
+    and read-only defaults.
+  - Blockers: `H-DESIGN-001` for the persistence target.
+- [ ] `H-PROD-002` Cache layer for forge metadata, tmux, and harness scans.
+  - Scope: design.md commits to caches living under `$XDG_DATA_HOME` (and
+    keeping them outside project trees), but no cache code exists. Define
+    a cache schema, TTL policy, and `--no-cache` / `--refresh` flags.
+    Apply first to forge (`gh pr list` per repo is the most expensive
+    call) and reuse the seam for tmux and harness state.
+  - Tests: cache hit/miss, TTL expiry, schema-version mismatch, and
+    `--no-cache` flag behavior.
+  - Blockers: a new ADR for the cache layout and freshness rules.
+- [ ] `H-PROD-003` Batch `gh pr list` across repos sharing a host.
+  - Scope: `GitHubForgeProvider` runs `gh pr list --json` once per
+    discovered repo (`src/discovery/forge/mod.rs:67`). For workspaces
+    with several repos on the same host/owner this multiplies the spawn
+    cost. Investigate whether `gh search prs --owner` (or a parallelized
+    batch invocation) is appropriate, and keep the per-repo path as a
+    fallback.
+  - Tests: parser tests for the batched JSON; integration test with a
+    `FakeGh` that records spawn counts.
+  - Blockers: `H-PROD-002` (caching narrows the urgency).
+- [ ] `H-PROD-004` Add a graph-diff command.
+  - Scope: `conspectus graph diff <a.json> <b.json>` (or save snapshots
+    under `$XDG_DATA_HOME` and diff against the previous run). Useful for
+    explaining "what changed since the last fork" and for Atelier
+    delegation acceptance criteria.
+  - Tests: snapshot tests for added/removed nodes and links and changed
+    resolution.
+  - Blockers: `H-PROD-002` if diffs reuse the cache layer.
+
+### Distribution And CI
+
+- [ ] `H-DIST-001` Add a GitHub Actions CI workflow.
+  - Scope: ADR 0016 commits to crates.io distribution but there is no
+    `.github/workflows/` directory and the only check automation is local
+    (`justfile`, `flake.nix`). Add a CI job that runs
+    `cargo fmt --check`, `cargo clippy -- -D warnings`,
+    `cargo test --all-targets --all-features`, and
+    `cargo nextest run --all-targets --all-features` on PRs and main.
+  - Tests: CI run on the change itself.
+  - Blockers: none.
+- [ ] `H-DIST-002` Complete `Cargo.toml` metadata for crates.io.
+  - Scope: `Cargo.toml` is missing `authors`, `repository`, `homepage`,
+    `documentation`, `keywords`, `categories`, `readme`, and an
+    `exclude`/`include` pattern. Fill in for the first publish and verify
+    `cargo publish --dry-run` succeeds.
+  - Tests: `cargo publish --dry-run` in CI on tagged releases.
+  - Blockers: `H-DIST-001`.
+- [ ] `H-DIST-003` Pin and verify MSRV.
+  - Scope: ADR 0016 says the effective MSRV is the toolchain pinned by
+    the Nix dev shell. Make this explicit in `Cargo.toml`
+    (`rust-version = "1.85"` or similar) and add a CI job that builds
+    against the pinned stable to catch accidental MSRV bumps.
+  - Tests: dedicated CI job pinning the toolchain.
+  - Blockers: `H-DIST-001`.
+- [ ] `H-DIST-004` Define the release process.
+  - Scope: ADR 0016 names the validation steps but the repo has no
+    `CHANGELOG.md`, no release script, and no tagged-build workflow.
+    Decide whether to adopt `cargo release` or a hand-rolled checklist
+    and document it under `docs/operations.md` (or a new
+    `docs/releasing.md`).
+  - Tests: dry-run the release procedure end-to-end before tagging
+    `v0.1.0`.
+  - Blockers: `H-DIST-001`, `H-DIST-002`.
+
+### Design Closure
+
+- [ ] `H-DESIGN-001` Settle the workspace-detection threshold and provider
+  precedence.
+  - Scope: `docs/design.md` "Remaining Design Questions" calls out (a)
+    evidence threshold for inferring a generic `Workspace`, (b) handling
+    of nested workspaces / nested repos / symlinked repos, (c)
+    interaction with provider-specific metadata, and (d) precedence when
+    multiple providers claim the same path. Today
+    `src/discovery/workspace.rs` infers a workspace only when a scan root
+    has 2+ immediate git repo children; document the rule in an ADR or
+    refine it.
+  - Tests: fixture tests covering the chosen rule for nested, symlinked,
+    and provider-claimed roots.
+  - Blockers: none.
+- [ ] `H-DESIGN-002` Settle `ForgePr` identity and branch-association keys.
+  - Scope: `docs/design.md` "Remaining Design Questions" lists open
+    questions about provider-neutral ForgePr fields, branch-to-PR keying
+    (name vs upstream vs head ref), and multi-PR-per-branch
+    representation. Record decisions in an ADR; the GitHub adapter today
+    matches by short head ref against the full local branch set
+    (`P4-FU-002`) but the rule is undocumented.
+  - Tests: regression tests for fork-head PRs (different head repo) and
+    closed/historical PR handling.
+  - Blockers: none.
+- [ ] `H-DESIGN-003` Settle declared-link conflict and override semantics.
+  - Scope: `docs/design.md` "Remaining Design Questions" asks (a) whether
+    an override suppresses a single candidate, all candidates of a
+    relation kind, or all links between two nodes; (b) whether "ignored"
+    is node-level, link-level, or both; (c) the merge rule across local,
+    global, discovered, and cached evidence; (d) whether confirmation
+    creates a durable declared link even if the discovered evidence
+    disappears. Record the conclusions in a new ADR and tighten the
+    resolver tests.
+  - Tests: resolver tests for each conflict scenario.
+  - Blockers: none.
+- [ ] `H-DESIGN-004` Document the graph invariants and snapshot
+  canonicalization contract.
+  - Scope: callers (and the api facade) need to know when a
+    `GraphSnapshot` is canonical, when cross-link inference has run, and
+    what invariants hold after `discover_local_with` vs after
+    `resolve_snapshot`. Add a short contract section to
+    `docs/library-api.md` and consider asserting invariants in
+    `merge_fragments`.
+  - Tests: unit tests for the documented invariants.
+  - Blockers: none.
+
+### Deferred Provider And Workflow Expansions
+
+These items match the design guidance to *design for* additional providers
+without *implementing* them until needed. File them so the next consumer
+need does not surprise the project.
+
+- [ ] `H-FUTURE-001` Add a mux backend for zellij (and stub screen).
+  - Scope: introduce a `MuxRunner` abstraction shared with tmux
+    (depends on `H-REF-004`), add a zellij adapter behind it, and leave
+    screen as a documented extension point.
+  - Tests: parser tests against canned `zellij list-sessions` output.
+  - Blockers: `H-REF-004`.
+- [ ] `H-FUTURE-002` Add a forge adapter for GitLab or Gitea.
+  - Scope: validate the `ForgeAdapter` boundary against a second provider
+    once a user need surfaces. Reuse the shared external-runner seam.
+  - Tests: fixture-driven adapter tests with a canned `glab` (or REST)
+    payload.
+  - Blockers: `H-REF-004`, `H-DESIGN-002`.
+- [ ] `H-FUTURE-003` Add harness adapters for jujutsu and sapling sessions
+  if and when a user uses them with a supported harness.
+  - Scope: not on the roadmap until requested; track here so the request
+    has a home.
+  - Tests: TBD.
+  - Blockers: requires user demand.
+
+### Documentation
+
+- [ ] `H-DOC-001` Add a first-run walkthrough.
+  - Scope: `README.md` and `docs/index.md` jump straight into design and
+    operations. Add a short tutorial that walks through running
+    `conspectus graph` and `conspectus session` from a plain repo,
+    creating a declared link, and inspecting the result. Link it from the
+    README.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-DOC-002` Add a provider-adapter contributor guide.
+  - Scope: document the `HarnessAdapter`, `ForgeAdapter`, `TmuxRunner`,
+    and `DiscoveryProvider` contracts so a contributor adding a new
+    harness or forge knows where to plug in. Use the existing codex and
+    GitHub adapters as worked examples.
+  - Tests: docs-only.
+  - Blockers: `H-REF-004` (the boundary is simpler to document after the
+    shared seam exists).
+- [ ] `H-DOC-003` Add library-integration examples beyond the api doctest.
+  - Scope: `docs/library-api.md` names the entry points but provides no
+    worked example for embedding Conspectus in a TUI or test. Add at
+    least one end-to-end snippet (probably in `docs/library-api.md` and a
+    second doctest under `conspectus::api`).
+  - Tests: doctest run as part of `cargo test`.
+  - Blockers: none.
+
+### Intra-Harness Session Lineage
+
+`RelationKind::ParentSession` / `ChildSession` are wired through the model
+(ADR 0005) and the resolver, but today they are only emitted from
+atelier's fork-index metadata (`src/discovery/atelier.rs:423-440`). None
+of the harness adapters extract lineage from the harness's own state, so
+post-compaction, post-resume, and post-fork-by-the-harness sessions show
+up as independent rows even when one is a direct successor of another.
+With long-lived users, this means a large fraction of the
+`conspectus session` rows are legacy sessions whose link to a currently
+active session is silently dropped.
+
+ADR 0005 currently frames `ParentSession` / `ChildSession` as edges
+anchored at a `Fork` node. Intra-harness compaction/resume is *not* a
+fork (no context effect, no provider-recorded fork metadata). Decide
+during `H-LINEAGE-001` whether to (a) extend ADR 0005 to allow
+session→session edges without a Fork middle node, or (b) require a
+synthetic `Fork` node with provider `<harness>` and an explicit
+`lineage_kind` such as `compaction` or `resume`. The former is simpler
+for queries; the latter keeps lineage uniform with the fork-anchored
+shape.
+
+- [ ] `H-LINEAGE-001` Settle the data-model shape for intra-harness
+  lineage.
+  - Scope: write an ADR (or amend ADR 0005) that decides whether
+    intra-harness `ParentSession` / `ChildSession` links anchor at a
+    `Fork` node or attach directly between two `AgentSession`
+    endpoints. Define a `lineage_kind` vocabulary that distinguishes
+    `compaction`, `resume`, `fork`, and `unknown`. Confirm the resolver
+    behavior and unresolved-endpoint semantics match ADR 0005.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-LINEAGE-002` Extract claude-code session lineage.
+  - Scope: extend the claude-code adapter to follow `parentUuid` from
+    the first user-visible message of each JSONL transcript. When that
+    `parentUuid` is the leaf message of another known session (same
+    project state-root), emit a `ParentSession` candidate from the new
+    session to the previous one with `lineage_kind = "compaction"` (or
+    `"resume"` if the first message is not a compaction summary). Keep
+    discovered evidence even when the parent session is no longer on
+    disk (preserve the `parentUuid` as unresolved endpoint metadata).
+    Reuse the existing JSONL scan budget (`MAX_HEADER_SCAN_LINES`) plus
+    a small tail scan for the leaf uuid; do not re-parse full
+    transcripts.
+  - Tests: fixture transcripts for (a) post-compaction successor whose
+    parent is on disk, (b) successor whose parent has been pruned, (c)
+    no-lineage sessions, (d) malformed first events. Snapshot test for
+    the agent projection showing the lineage column or marker.
+  - Manual checks: `cargo run -- session --projection agent` against
+    real `~/.claude` state and confirm compacted sessions point at
+    their predecessors.
+  - Blockers: `H-LINEAGE-001`.
+- [ ] `H-LINEAGE-003` Extract opencode session lineage from
+  `session.parent_id`.
+  - Scope: the opencode SQLite schema already exposes `parent_id`
+    (`src/discovery/harness/opencode.rs:340` schema test). Extend the
+    `SELECT` at line 97 to include `parent_id`, and emit a
+    `ParentSession` candidate whenever the row has a non-null
+    `parent_id`. Resolve to a concrete `AgentSession` endpoint when the
+    parent row is also present; otherwise preserve unresolved evidence
+    carrying `harness_key = "opencode"` and the parent native id.
+  - Tests: SQLite fixture rows for parent present, parent absent,
+    self-parent (skip / diagnose), and missing column (degrade).
+  - Manual checks: `cargo run -- session` against real opencode state
+    and confirm chained sessions show lineage.
+  - Blockers: `H-LINEAGE-001`.
+- [ ] `H-LINEAGE-004` Extract codex resume lineage.
+  - Scope: investigate the codex rollout format for any pointer back to
+    a prior rollout (resume id, parent timestamp, originating session,
+    etc.). If present, emit `ParentSession` candidates analogous to
+    `H-LINEAGE-002`/`003`. If the format doesn't carry it, file a
+    follow-up to ask codex upstream rather than inventing lineage.
+  - Tests: fixture rollouts for resumed sessions; degrade gracefully
+    when the field is absent.
+  - Blockers: `H-LINEAGE-001`; depends on confirming the codex schema.
+- [ ] `H-LINEAGE-005` Surface session lineage in the session table.
+  - Scope: add a compact `LINEAGE` (or `PARENT`) column to the agent
+    projection that shows the immediate parent session's short id when
+    one exists, and a chain marker (`←`) for sessions with a longer
+    ancestry. Decide whether `conspectus session` should default to
+    hiding "leaf-only" rows (sessions superseded by a known
+    successor) behind a `--include-superseded` flag. Keep the JSON
+    output exhaustive.
+  - Tests: snapshot tests for one-level and multi-level chains, plus
+    a `--include-superseded` flag toggle.
+  - Blockers: `H-LINEAGE-002` (so there's lineage to show);
+    `H-OBS-003` should land first if it's already in flight, since
+    these are the same renderer.
+
+### Agent-Deck Multi-Repo Workspace Support
+
+agent-deck creates per-session directories under
+`~/.agent-deck/multi-repo-worktrees/<id>/` whose immediate children are
+symlinks into one or more real git repos (e.g. `cb355de8/atelier ->
+/home/malloc47/src/atelier` and `cb355de8/conspectus ->
+/home/malloc47/src/conspectus`). The agent runs from inside the combined
+directory and operates across every linked repo. Today Conspectus shows
+the combined directory as the session `CWD` and produces no link to the
+participating repos, so a row like
+`codex:… /home/malloc47/.agent-deck/multi-repo-worktrees/cb355de8` hides
+the fact that the session is working on both atelier and conspectus.
+
+- [ ] `H-AGENTDECK-001` Detect agent-deck multi-repo worktrees as a
+  workspace provider.
+  - Scope: add a workspace discovery adapter that recognizes
+    `~/.agent-deck/multi-repo-worktrees/<id>/` (path location +
+    immediate-child symlinks resolving to git common dirs) and emits a
+    `Workspace` node (with an `agent-deck` provider identifier and a
+    short label derived from `<id>`) plus `Workspace`→`Repo` membership
+    candidate links for each resolved symlink. Sessions and mux sessions
+    rooted at the worktree path should associate with the workspace via
+    the existing cross-link inference. Treat the symlink target's
+    canonical git common dir as the `Repo` identity so existing repo
+    nodes from other scan roots merge cleanly.
+  - Tests: fixture tests for a multi-repo worktree with two symlinks,
+    one symlink, broken symlinks, non-symlink children (skip), and a
+    nested directory layout. Snapshot test for the session table
+    confirming the workspace shows up and the participating repos are
+    listed somewhere reachable from the agent row.
+  - Manual checks: `cargo run -- graph --format json` from inside a
+    real agent-deck worktree; `cargo run -- session` and confirm the
+    new workspace/repo links appear.
+  - Blockers: `H-DESIGN-001` (workspace-provider precedence — agent-deck
+    workspaces should not conflict with generic-workspace inference
+    over the same path).
+- [ ] `H-AGENTDECK-002` Surface multi-repo participants in the session
+  table.
+  - Scope: extend the agent projection so the `CWD` column (or a new
+    "REPOS" column) shows the participating repo set when the session
+    is rooted in an agent-deck workspace. Decide whether to replace the
+    cwd with a short repo list (`atelier+conspectus`) or add a separate
+    column; either way preserve byte-stable ordering.
+  - Tests: snapshot tests for one-repo, two-repo, and many-repo
+    workspaces.
+  - Blockers: `H-AGENTDECK-001`, `H-OBS-006` (recency column work will
+    touch the same renderer).
+- [ ] `H-AGENTDECK-003` Read agent-deck profile state from `state.db`.
+  - Scope: agent-deck stores richer per-session metadata
+    (`~/.agent-deck/profiles/<profile>/state.db`, SQLite) including
+    active sessions, profile, and likely the
+    session-to-multi-repo-worktree mapping. Once the on-disk
+    convention adapter from `H-AGENTDECK-001` covers the basic graph
+    shape, read the SQLite state for any links that can't be inferred
+    from filesystem layout alone (e.g. session-to-worktree binding
+    when the agent has moved cwd, or labels/tags). Reuse the
+    `rusqlite` dependency added by ADR 0013.
+  - Tests: fixture tests over a temp SQLite file populated with
+    representative rows; missing-database degradation; malformed
+    schema degradation.
+  - Manual checks: confirm read-only access; confirm the adapter does
+    not lock the database while agent-deck is running.
+  - Blockers: `H-AGENTDECK-001`; requires inspecting agent-deck's
+    schema and recording the relevant tables/columns in an ADR (or an
+    extension of ADR 0013) before introducing the read code.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
