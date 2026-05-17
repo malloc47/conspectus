@@ -68,6 +68,7 @@ pub struct CodexSessionRecord {
     pub cwd: Option<String>,
     pub instructions: Option<String>,
     pub timestamp_rfc3339: Option<String>,
+    pub forked_from_id: Option<String>,
 }
 
 impl CodexSessionRecord {
@@ -92,6 +93,11 @@ impl CodexSessionRecord {
         self.timestamp_rfc3339 = Some(timestamp.into());
         self
     }
+
+    pub fn with_forked_from(mut self, parent_session_id: impl Into<String>) -> Self {
+        self.forked_from_id = Some(parent_session_id.into());
+        self
+    }
 }
 
 pub fn write_codex_session(state_root: &Path, record: &CodexSessionRecord) -> Result<PathBuf> {
@@ -112,6 +118,10 @@ pub fn write_codex_session(state_root: &Path, record: &CodexSessionRecord) -> Re
 
     if let Some(timestamp) = &record.timestamp_rfc3339 {
         payload.insert("timestamp".into(), json!(timestamp));
+    }
+
+    if let Some(parent_id) = &record.forked_from_id {
+        payload.insert("forked_from_id".into(), json!(parent_id));
     }
 
     let entry = json!({ "type": "session_meta", "payload": payload });

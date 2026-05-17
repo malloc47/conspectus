@@ -1744,15 +1744,18 @@ shape.
     lineage-less SELECT rather than dropping every session.
     `lineage_kind` is `"unknown"` until opencode publishes operation
     semantics. Manual real-state validation pending.
-- [ ] `H-LINEAGE-004` Extract codex resume lineage.
-  - Scope: investigate the codex rollout format for any pointer back to
-    a prior rollout (resume id, parent timestamp, originating session,
-    etc.). If present, emit `ParentSession` candidates analogous to
-    `H-LINEAGE-002`/`003`. If the format doesn't carry it, file a
-    follow-up to ask codex upstream rather than inventing lineage.
-  - Tests: fixture rollouts for resumed sessions; degrade gracefully
-    when the field is absent.
-  - Blockers: `H-LINEAGE-001`; depends on confirming the codex schema.
+- [x] `H-LINEAGE-004` Extract codex resume lineage.
+  - Resolution: real codex rollouts (cli 0.128) expose
+    `session_meta.payload.forked_from_id`, a true fork pointer (multiple
+    children can share one parent). The codex adapter now extracts that
+    field and emits a `parent_session` candidate per child rollout;
+    resolved when the parent rollout is on the same state root, otherwise
+    `UnresolvedEndpoint` evidence with `harness_key = "codex"` and the
+    parent native id. `lineage_kind = "fork"` per ADR 0018. Codex does
+    not currently expose a separate resume-only pointer (resume continues
+    writing into the same rollout file), so resume lineage is parked
+    until codex publishes a distinguishable field — no upstream issue
+    filed yet; reopen this item if codex changes the rollout format.
 - [ ] `H-LINEAGE-005` Surface session lineage in the session table.
   - Scope: add a compact `LINEAGE` (or `PARENT`) column to the agent
     projection that shows the immediate parent session's short id when
