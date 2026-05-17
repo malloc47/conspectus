@@ -257,6 +257,9 @@ Expected cardinality and sparsity:
 - A fork can have zero or one parent fork and many child forks.
 - Session-lineage endpoints may be unresolved. Parent or child session evidence
   can exist before the corresponding `AgentSession` node has been discovered.
+- Session lineage edges may be either fork-anchored (sourced at a `Fork` node,
+  as in ADR 0005) or directly between two `AgentSession` nodes for
+  intra-harness compaction/resume (ADR 0018).
 - An agent session can exist without any known repo, worktree, workspace, mux
   session, or PR.
 - A mux session can exist without any known agent session.
@@ -534,6 +537,9 @@ Mux-aware views should:
     `associated_branch`, `rooted_at_path`, and `parent_fork`.
   - ADR 0005: preserve unresolved session-lineage endpoint evidence without
     creating placeholder `AgentSession` nodes.
+  - ADR 0018: allow intra-harness `parent_session` / `child_session` links to
+    attach directly between two `AgentSession` nodes, and standardize a
+    `lineage_kind` operation vocabulary separate from `lineage_fidelity`.
   - ADR 0006: preserve many mux/session link candidates and let projections
     choose preferred links while exposing ambiguity.
   - ADR 0015: stabilize the Conspectus library API surface and add a curated

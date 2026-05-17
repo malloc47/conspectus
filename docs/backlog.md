@@ -1710,16 +1710,14 @@ synthetic `Fork` node with provider `<harness>` and an explicit
 for queries; the latter keeps lineage uniform with the fork-anchored
 shape.
 
-- [ ] `H-LINEAGE-001` Settle the data-model shape for intra-harness
+- [x] `H-LINEAGE-001` Settle the data-model shape for intra-harness
   lineage.
-  - Scope: write an ADR (or amend ADR 0005) that decides whether
-    intra-harness `ParentSession` / `ChildSession` links anchor at a
-    `Fork` node or attach directly between two `AgentSession`
-    endpoints. Define a `lineage_kind` vocabulary that distinguishes
-    `compaction`, `resume`, `fork`, and `unknown`. Confirm the resolver
-    behavior and unresolved-endpoint semantics match ADR 0005.
-  - Tests: docs-only; `git diff --check`.
-  - Blockers: none.
+  - Resolution: ADR 0018 extends ADR 0005 to allow intra-harness
+    `parent_session` / `child_session` candidates to attach directly
+    between two `AgentSession` endpoints. `lineage_kind` is standardized
+    as the operation vocabulary (`compaction`, `resume`, `fork`,
+    `fresh`, `unknown`); attribution fidelity moves to a separate
+    `lineage_fidelity` field, which Atelier will adopt in H-LINEAGE-002.
 - [ ] `H-LINEAGE-002` Extract claude-code session lineage.
   - Scope: extend the claude-code adapter to follow `parentUuid` from
     the first user-visible message of each JSONL transcript. When that
