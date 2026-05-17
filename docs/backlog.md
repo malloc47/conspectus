@@ -1769,24 +1769,33 @@ shape.
     disappear from every default render, which is more surprising than
     showing all rows. JSON output is already exhaustive. If a future
     consumer needs a compressed view, add `--hide-superseded` then.
-- [ ] `H-LINEAGE-006` Revisit claude-code lineage extraction — `/compact`
-  is in-place in claude-code 2.1.129.
-  - Context: H-LINEAGE-002 assumed compaction produces a successor
-    session jsonl whose first uuid-bearing record's `parentUuid` points
-    at the predecessor's leaf uuid. Manual validation against
-    `~/.claude/projects/` on 2026-05-17 (claude-code 2.1.129, 19
-    transcripts) found zero cross-session `parentUuid` pointers, and
-    `/compact` invoked mid-session kept appending to the same session
-    file rather than starting a new one. The current adapter is
-    functionally correct but has no signal to act on under this
+- [ ] `H-LINEAGE-006` Revisit claude-code lineage extraction — neither
+  `/compact` nor session fork records a cross-session pointer in
+  claude-code 2.1.129.
+  - Context: H-LINEAGE-002 assumed compaction (or a similar successor
+    operation) produces a new session jsonl whose first uuid-bearing
+    record's `parentUuid` points at the predecessor's leaf uuid.
+    Manual validation against `~/.claude/projects/` on 2026-05-17
+    (claude-code 2.1.129, 19 transcripts) found zero cross-session
+    `parentUuid` pointers. Two operations were exercised explicitly:
+    (a) `/compact` mid-session kept appending to the same session
+    file (no new jsonl created), and (b) IDE session fork (this
+    session forked into `926c6991-…`) created a fresh jsonl whose
+    first uuid-bearing user record carries `parentUuid = null` and
+    no other structural field references the source session id
+    `81f4a0ef-…` — searched for any `fork*`, `source*`, `prior*`
+    pointer field; only a textual AI-generated title hit. The current
+    adapter is functionally correct for a hypothetical cross-session
+    `parentUuid` but has no signal to act on under current claude-code
     behavior.
   - Scope: (1) determine which claude-code operations (if any) still
-    produce a successor session file with a cross-session `parentUuid`
-    — candidates include `--resume` / `/resume`, the IDE "fork session"
-    affordance, and future compaction redesigns. Record findings in an
-    ADR addendum or a follow-up ADR. (2) If in-place compaction is the
-    durable behavior, design within-session lineage: parse `type:
-    "summary"` records and treat the pre-summary leaf uuid and
+    produce a successor session file with any cross-session lineage
+    pointer — remaining candidates include `--resume` / `/resume`
+    from a TTY (not retried), the `--continue` flag, and future
+    releases that may reintroduce structural lineage. Record findings
+    in an ADR addendum or a follow-up ADR. (2) If in-place compaction
+    is the durable behavior, design within-session lineage: parse
+    `type: "summary"` records and treat the pre-summary leaf uuid and
     post-summary first user uuid as an intra-session compaction
     boundary, emitting a candidate that carries the operation under
     `lineage_kind = "compaction"` but with both endpoints resolving to
@@ -1794,7 +1803,10 @@ shape.
     a distinct logical session — pick during design). (3) Reconsider
     whether claude-code's lineage capability should be downgraded from
     `Approximate` to `Unsupported` until a real cross-session signal
-    exists.
+    exists. (4) For session fork specifically, evaluate whether
+    Conspectus should infer the parent link from other side-channel
+    evidence (sibling session directory listings, IDE state files,
+    or timing) since the transcript itself carries nothing.
   - Tests: a fixture transcript containing a `type: "summary"` record
     surrounded by user/assistant records exercises the in-place case;
     keep the existing
