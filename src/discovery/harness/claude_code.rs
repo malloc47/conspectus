@@ -196,13 +196,11 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
     let mut parent_uuid: Option<String> = None;
     let mut cross_session_record_type: Option<String> = None;
     let mut saw_any_record = false;
-    let mut first_record = true;
+    let mut saw_first_real_record = false;
 
     for line in BufReader::new(file).lines().take(MAX_HEADER_SCAN_LINES) {
         let Ok(line) = line else { continue };
         let Ok(parsed) = serde_json::from_str::<ScannedLine>(&line) else {
-            // Malformed lines do not advance the first-record flag: a bad
-            // header line should not silently demote a real first record.
             continue;
         };
         saw_any_record = true;
@@ -213,21 +211,24 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
         if summary.is_none() {
             summary = parsed.summary;
         }
-        // `parentUuid` on every later record points within the same session;
-        // only the very first record's parentUuid is the cross-session link.
-        if first_record {
+        // The cross-session parent pointer lives on the first uuid-bearing
+        // record. Real claude-code transcripts open with envelopes such as
+        // `permission-mode` or `file-history-snapshot` that carry no uuid
+        // or parentUuid; the first user/assistant/summary message after
+        // those is what records the link back to a prior session. Every
+        // record after that points within the same session, so we capture
+        // exactly once on the first real record.
+        if !saw_first_real_record && parsed.uuid.is_some() {
             parent_uuid = parsed.parent_uuid;
             cross_session_record_type = parsed.record_type;
-            first_record = false;
+            saw_first_real_record = true;
         }
-        if cwd.is_some() && summary.is_some() {
+        if cwd.is_some() && summary.is_some() && saw_first_real_record {
             break;
         }
-        // sessionId / uuid from JSONL are informational; the filename is
-        // authoritative for the session id, and per-record uuids only matter
-        // for the tail scan below.
+        // sessionId from JSONL is informational; the filename is authoritative
+        // for the session id.
         let _ = parsed.session_id;
-        let _ = parsed.uuid;
     }
 
     if !saw_any_record {
@@ -750,6 +751,44 @@ mod tests {
             matches!(lineage[0].target, LinkEndpoint::Unresolved { .. }),
             "shared uuid across projects should not produce a concrete target"
         );
+    }
+
+    #[test]
+    fn lineage_pointer_is_read_from_first_uuid_bearing_record_not_envelope() {
+        // Real claude-code transcripts open with envelope records
+        // (`permission-mode`, `file-history-snapshot`) that carry no
+        // `uuid` field. The cross-session parent pointer lives on the
+        // first real user/assistant/summary message after the envelopes.
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent\",\"cwd\":\"/work/repo\",\"uuid\":\"u-parent-leaf\"}\n";
+        let child_body = "\
+            {\"type\":\"permission-mode\",\"sessionId\":\"child\",\"permissionMode\":\"default\"}\n\
+            {\"type\":\"file-history-snapshot\",\"isSnapshotUpdate\":true,\"messageId\":\"m1\",\"snapshot\":{}}\n\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-1\",\"parentUuid\":\"u-parent-leaf\"}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("parent", parent_body), ("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(
+            lineage.len(),
+            1,
+            "envelope-prefixed transcript must still detect lineage",
+        );
+        let target = match &lineage[0].target {
+            LinkEndpoint::Node { id } => id,
+            other => panic!("expected resolved parent endpoint, got {other:?}"),
+        };
+        let NodeId::AgentSession(parent_id) = target else {
+            panic!("expected AgentSession target");
+        };
+        assert_eq!(parent_id.session_key, "parent");
     }
 
     #[test]
