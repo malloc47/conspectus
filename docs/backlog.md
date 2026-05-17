@@ -1769,6 +1769,38 @@ shape.
     disappear from every default render, which is more surprising than
     showing all rows. JSON output is already exhaustive. If a future
     consumer needs a compressed view, add `--hide-superseded` then.
+- [ ] `H-LINEAGE-006` Revisit claude-code lineage extraction — `/compact`
+  is in-place in claude-code 2.1.129.
+  - Context: H-LINEAGE-002 assumed compaction produces a successor
+    session jsonl whose first uuid-bearing record's `parentUuid` points
+    at the predecessor's leaf uuid. Manual validation against
+    `~/.claude/projects/` on 2026-05-17 (claude-code 2.1.129, 19
+    transcripts) found zero cross-session `parentUuid` pointers, and
+    `/compact` invoked mid-session kept appending to the same session
+    file rather than starting a new one. The current adapter is
+    functionally correct but has no signal to act on under this
+    behavior.
+  - Scope: (1) determine which claude-code operations (if any) still
+    produce a successor session file with a cross-session `parentUuid`
+    — candidates include `--resume` / `/resume`, the IDE "fork session"
+    affordance, and future compaction redesigns. Record findings in an
+    ADR addendum or a follow-up ADR. (2) If in-place compaction is the
+    durable behavior, design within-session lineage: parse `type:
+    "summary"` records and treat the pre-summary leaf uuid and
+    post-summary first user uuid as an intra-session compaction
+    boundary, emitting a candidate that carries the operation under
+    `lineage_kind = "compaction"` but with both endpoints resolving to
+    the same `AgentSession` node (or model the pre-compaction span as
+    a distinct logical session — pick during design). (3) Reconsider
+    whether claude-code's lineage capability should be downgraded from
+    `Approximate` to `Unsupported` until a real cross-session signal
+    exists.
+  - Tests: a fixture transcript containing a `type: "summary"` record
+    surrounded by user/assistant records exercises the in-place case;
+    keep the existing
+    `lineage_pointer_is_read_from_first_uuid_bearing_record_not_envelope`
+    regression test for the cross-session path so we do not regress if
+    a future claude-code release reintroduces successor files.
 
 ### Agent-Deck Multi-Repo Workspace Support
 
