@@ -1523,26 +1523,14 @@ width, making the default output unusable in narrow CLIs. JSON / graph
 output is not affected by this stream; the work is scoped to the text-table
 projection layer.
 
-- [ ] `H-TBL-001` ADR: width-aware table rendering library.
-  - Scope: research and evaluate Rust crates that render width-aware
-    tables out-of-the-box. Known candidates: `comfy-table`, `tabled`,
-    `cli-table`, `prettytable-rs`. Compare against the project's
-    constraints: minimal dependency surface (CLAUDE.md), no_std-friendly
-    not required, deterministic byte-for-byte output for snapshot tests,
-    support for truncation with ellipsis, and a path to multi-line / card
-    layouts (`H-TBL-004`). The chosen renderer must live in a shared
-    `src/output/` module so future text surfaces (`H-OBS-001`
-    `graph --format text` and any other tables) can reuse it without
-    re-rolling alignment. If every candidate is insufficient, evaluate the
-    level of effort for a minimal in-house width-aware renderer and record
-    that as the chosen path. Capture the decision (library or roll-our-own
-    + rationale) as a new ADR under `docs/adr/` per CLAUDE.md's
-    dependency-policy guidance.
-  - Tests: none directly; the ADR is the deliverable.
-  - Manual checks: prototype each finalist against a representative
-    `conspectus session` snapshot to confirm truncation, alignment, and
-    deterministic output before committing to a choice.
-  - Blockers: none.
+- [x] `H-TBL-001` ADR: width-aware table rendering library.
+  - Outcome: ADR 0020 records the decision to roll our own minimal
+    width-aware renderer under `src/output/`, depending only on
+    `unicode-width` and `terminal_size`. `comfy-table` (upstream feature
+    freeze, wraps rather than truncates), `tabled` (heavier surface, API
+    churn risk for snapshot tests), `cli-table`, and `prettytable-rs`
+    were considered and rejected. Both dependencies are runtime deps
+    added in `H-TBL-003`.
 
 - [ ] `H-TBL-002` Surface short, stable row identifiers in session tables.
   - Scope: add a row-identifier column (likely leftmost, e.g. `ID`) to
