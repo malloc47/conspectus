@@ -1608,29 +1608,23 @@ fork lineage, and worktree apply to any row whose node touches them.
     documents the accepted forms; CLI integration tests round-trip a
     short id from `conspectus session --wide` through `node show`.
 
-- [ ] `H-TBL-006` Rename `conspectus session` to `conspectus table <ROWS>`.
-  - Scope: replace the `session` subcommand with a `table` subcommand
-    tree whose first positional selects the row-type. Initial
-    row-types map 1:1 to the current projections so this story stays
-    purely structural: `conspectus table sessions`, `conspectus table
-    mux`, and `conspectus table union`. The existing `--wide`,
-    `--width`, and `--layout` flags carry over unchanged; the old
-    `--projection` flag disappears (the positional replaces it). The
-    config schema migrates from `[session]` to `[table]` with
-    per-row-type subsections (e.g. `[table.sessions]`); per CLAUDE.md
-    no backwards-compatibility shim — old keys stop being read.
-    Update `docs/operations.md` and every CLI test that drives the
-    binary. Existing renderer internals (`build_*_rows`,
-    `RenderOptions`, `node_short_id`) stay as-is; only the CLI shape
-    and config keys change.
-  - Tests: existing snapshot tests stay green (output bytes are
-    unchanged); CLI integration tests cover each `conspectus table
-    <ROWS>` subcommand, `--help` lists the row-types, and the new
-    `[table.sessions]` projection default is honored.
-  - Manual checks: `cargo run -- table sessions`,
-    `cargo run -- table mux`, `cargo run -- table union`,
-    `cargo run -- table --help`.
-  - Blockers: none.
+- [x] `H-TBL-006` Rename `conspectus session` to `conspectus table <ROWS>`.
+  - Outcome: ADR 0021 records the rename. The CLI grew a `table`
+    subcommand tree with `Sessions`, `Mux`, and `Union` subcommands;
+    each takes the existing `--wide`, `--width`, `--layout`, and
+    `--scan-root` flags via shared `TableRowsArgs`. The old
+    `session` subcommand and `--projection` flag are gone with no
+    alias (per CLAUDE.md). Config migrated from `[session].projection`
+    to `[table.<rows>]` per-row-type subsections — empty for H-TBL-006
+    but reserved for the column registry in H-TBL-007. A legacy
+    `[session]` section in user config now produces a stderr
+    diagnostic pointing at the new schema; the run still proceeds.
+    `Projection::parse` accepts both `agent` (legacy) and `sessions`
+    (new) for the agent-projection row-type. All 340 tests pass,
+    including the existing insta snapshots: the rename is
+    CLI-and-config-only, the renderer internals
+    (`build_*_rows`, `RenderOptions`, `node_short_id`) are
+    unchanged. `docs/operations.md` documents the new shape.
 
 - [ ] `H-TBL-007` Per-row-type column registry and `--columns` flag.
   - Scope: introduce a column registry in `src/output/table.rs` keyed
