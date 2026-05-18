@@ -1514,6 +1514,110 @@ area is already being touched. Group prefixes:
   - Blockers: `H-REF-008` (typed source-metadata fields makes recency
     extraction safer).
 
+### Table Output Modernization
+
+The current `conspectus session` tables (`src/output/table.rs`) hand-roll
+column alignment via a fixed 2-space padder. Cells like cwd, agent label,
+mux session, and PR identifier routinely blow past any reasonable terminal
+width, making the default output unusable in narrow CLIs. JSON / graph
+output is not affected by this stream; the work is scoped to the text-table
+projection layer.
+
+- [ ] `H-TBL-001` ADR: width-aware table rendering library.
+  - Scope: research and evaluate Rust crates that render width-aware
+    tables out-of-the-box. Known candidates: `comfy-table`, `tabled`,
+    `cli-table`, `prettytable-rs`. Compare against the project's
+    constraints: minimal dependency surface (CLAUDE.md), no_std-friendly
+    not required, deterministic byte-for-byte output for snapshot tests,
+    support for truncation with ellipsis, and a path to multi-line / card
+    layouts (`H-TBL-004`). The chosen renderer must live in a shared
+    `src/output/` module so future text surfaces (`H-OBS-001`
+    `graph --format text` and any other tables) can reuse it without
+    re-rolling alignment. If every candidate is insufficient, evaluate the
+    level of effort for a minimal in-house width-aware renderer and record
+    that as the chosen path. Capture the decision (library or roll-our-own
+    + rationale) as a new ADR under `docs/adr/` per CLAUDE.md's
+    dependency-policy guidance.
+  - Tests: none directly; the ADR is the deliverable.
+  - Manual checks: prototype each finalist against a representative
+    `conspectus session` snapshot to confirm truncation, alignment, and
+    deterministic output before committing to a choice.
+  - Blockers: none.
+
+- [ ] `H-TBL-002` Surface short, stable row identifiers in session tables.
+  - Scope: add a row-identifier column (likely leftmost, e.g. `ID`) to
+    each `conspectus session` projection. The identifier is a short
+    content-addressed prefix derived from the row's primary `NodeId` (the
+    agent session in agent projection, the mux session in mux projection,
+    the row node in union projection). Length should be the minimum
+    needed for uniqueness within the rendered snapshot, with a sensible
+    floor (e.g. 6 chars). The full `NodeId` continues to appear in JSON
+    output unchanged. The short id must remain stable across runs as
+    long as the row's identity inputs do not change, so users can paste
+    a copied id from a previous run into `conspectus node show` and have
+    it resolve (covered by `H-TBL-005`).
+  - Tests: snapshot tests covering single-row, multi-row, and
+    collision-disambiguation cases; unit tests verifying byte-stable id
+    generation against a fixed `NodeId` input.
+  - Manual checks: confirm short ids stay readable next to the AGENT /
+    MUX label column and do not visually compete with it.
+  - Blockers: none (can land before `H-TBL-001` if the column is added
+    to the existing renderer first, but is cleanest to land alongside
+    or after the renderer swap).
+
+- [ ] `H-TBL-003` Width-aware truncation default for session tables.
+  - Scope: render the session tables width-aware using the renderer
+    chosen in `H-TBL-001`. Truncate long cells (cwd, agent label, mux
+    session, PR identifier, lineage) with an ellipsis to fit the
+    detected terminal width. Behavior by environment:
+    - Interactive TTY: truncate to `$COLUMNS` (or detected width)
+      by default.
+    - Non-TTY (pipe, redirect): default to wide, untruncated output so
+      `conspectus session | grep` / `awk` stays useful.
+    - Add a `--wide` flag that forces wide / untruncated output even on
+      an interactive TTY.
+    - Optional `--width <N>` to override the detected width for
+      reproducible captures.
+    Do not introduce per-cell line wrapping; truncation is the only
+    width-fitting strategy in this story (multi-line layouts belong to
+    `H-TBL-004`).
+  - Tests: snapshot tests with explicit width inputs (narrow, typical,
+    wide); CLI integration tests covering `--wide` and the TTY-vs-pipe
+    default flip.
+  - Manual checks: `cargo run -- session` from a real workspace at
+    80, 120, and 200 columns; `cargo run -- session | cat` to confirm
+    the non-TTY wide default.
+  - Blockers: `H-TBL-001`.
+
+- [ ] `H-TBL-004` Opt-in card / multi-line row layout.
+  - Scope: add a row-vertical layout (one column per line per row, blank
+    line between rows, similar to `git log` default formatting) exposed
+    via a flag such as `--format card` or `--layout card` on
+    `conspectus session`. Useful when many columns are relevant and a
+    width-limited single-line row hides important data. Default layout
+    remains the tabular form from `H-TBL-003`. The layout should reuse
+    the renderer from `H-TBL-001` rather than re-rolling formatting.
+  - Tests: snapshot tests for the card layout across each projection;
+    CLI integration tests for the flag.
+  - Manual checks: confirm card output is readable for a row with a
+    long cwd and PR identifier where the tabular form would truncate.
+  - Blockers: `H-TBL-001`.
+
+- [ ] `H-TBL-005` Resolve table row identifiers in `conspectus node show`.
+  - Scope: teach the node-show command (introduced by `H-OBS-002`) to
+    accept any of: the short content-addressed row id from `H-TBL-002`,
+    the full `NodeId` from JSON output, and the existing
+    `harness:short-id` label currently shown in the agent projection's
+    AGENT cell. Prefix matching on the short id is acceptable as long as
+    the prefix is unambiguous within the active snapshot; ambiguous
+    prefixes should error with the matching candidates listed. Document
+    the accepted forms in `docs/operations.md`.
+  - Tests: CLI integration tests for each accepted form, prefix
+    matching, and an ambiguous-prefix error case.
+  - Manual checks: copy a short id from a `session` table run and feed
+    it to `node show`; repeat with the full `NodeId` from JSON.
+  - Blockers: `H-OBS-002`, `H-TBL-002`.
+
 ### Product Surface Gaps
 
 - [ ] `H-PROD-001` Implement the bootstrap-roots flow described in the
@@ -1557,7 +1661,7 @@ area is already being touched. Group prefixes:
 
 ### Distribution And CI
 
-- [ ] `H-DIST-001` Add a GitHub Actions CI workflow.
+- [x] `H-DIST-001` Add a GitHub Actions CI workflow.
   - Scope: ADR 0016 commits to crates.io distribution but there is no
     `.github/workflows/` directory and the only check automation is local
     (`justfile`, `flake.nix`). Add a CI job that runs
@@ -1566,6 +1670,11 @@ area is already being touched. Group prefixes:
     `cargo nextest run --all-targets --all-features` on PRs and main.
   - Tests: CI run on the change itself.
   - Blockers: none.
+  - Outcome: added `.github/workflows/ci.yml` for pull requests and pushes
+    to `main`. The workflow installs stable Rust with `clippy` and `rustfmt`,
+    caches Cargo artifacts, installs `cargo-nextest`, and runs the same
+    baseline checks as the local `justfile`: formatting, clippy with warnings
+    denied, cargo test, nextest, and `git diff --check`.
 - [ ] `H-DIST-002` Complete `Cargo.toml` metadata for crates.io.
   - Scope: `Cargo.toml` is missing `authors`, `repository`, `homepage`,
     `documentation`, `keywords`, `categories`, `readme`, and an
@@ -1863,71 +1972,418 @@ shape.
     regression test for the cross-session path so we do not regress if
     a future claude-code release reintroduces successor files.
 
-### Agent-Deck Multi-Repo Workspace Support
+### Agent-Mux Orchestrator Integrations
 
-agent-deck creates per-session directories under
-`~/.agent-deck/multi-repo-worktrees/<id>/` whose immediate children are
-symlinks into one or more real git repos (e.g. `cb355de8/atelier ->
-/home/malloc47/src/atelier` and `cb355de8/conspectus ->
-/home/malloc47/src/conspectus`). The agent runs from inside the combined
-directory and operates across every linked repo. Today Conspectus shows
-the combined directory as the session `CWD` and produces no link to the
-participating repos, so a row like
-`codex:… /home/malloc47/.agent-deck/multi-repo-worktrees/cb355de8` hides
-the fact that the session is working on both atelier and conspectus.
+A growing class of "agent-over-tmux" orchestrators — agent-deck, dmux,
+workmux, agent-of-empires, and others — maintain on-disk state that
+maps agent sessions to tmux sessions, worktrees, branches, and
+sometimes forks. Most of that state, however, overlaps with what the
+process-tree linker (`H-MUXPROC-*`) can derive directly from running
+processes inside each tmux pane: pane ↔ harness binary, pane PID,
+process cwd, and therefore pane ↔ `AgentSession` for live sessions.
+Conspectus should treat MUXPROC as the primary, tool-agnostic source
+of agent ↔ tmux evidence and only build per-orchestrator adapters
+when they expose evidence MUXPROC cannot — concretely: workspace
+composition, container-isolated agents, exited / paused sessions, or
+orchestrator-specific labels and lineage.
 
-- [ ] `H-AGENTDECK-001` Detect agent-deck multi-repo worktrees as a
+In-scope candidates (gated on the audit in `H-AGENTMUX-001`):
+agent-deck (~/.agent-deck/, SQLite), dmux (`standardagents/dmux`,
+~1.6k stars), workmux (`raine/workmux`, ~1.5k stars, per-worktree
+`.workmux/` plus `~/.local/state/workmux/`), agent-of-empires
+(`njbrake/agent-of-empires`, ~2.3k stars). Explicitly deferred:
+`cdknorow/coral` (~21 stars), `honeymux/honeymux` (~71 stars, runtime
+overlay rather than persistent state).
+
+- [ ] `H-AGENTMUX-001` Audit each candidate orchestrator's evidence
+  against MUXPROC and decide which adapters to build.
+  - Scope: with `H-MUXPROC-002` landed, enumerate for each candidate
+    tool (agent-deck, dmux, workmux, agent-of-empires) exactly what
+    evidence it produces beyond what MUXPROC already covers. For each
+    tool, classify findings into: (a) workspace composition the
+    process tree cannot see (e.g. multi-repo combined directories),
+    (b) container-isolated agents whose host process tree shows only
+    the runtime, (c) exited / paused / pre-spawn sessions, (d)
+    orchestrator-specific labels / lineage / profiles. Tools whose
+    evidence is fully a MUXPROC subset should be closed as won't-do.
+    For the survivors, design a single `AgentMuxAdapter` trait that
+    carries the surviving evidence types as provider-neutral
+    candidate links + `SourceMetadata.fields`. Record findings and
+    the trait shape as an ADR per CLAUDE.md.
+  - Tests: none directly; ADR + go/no-go decisions per tool are the
+    deliverable. A scaffold trait may land alongside as a compile
+    check.
+  - Blockers: `H-MUXPROC-002` (cannot audit "non-overlapping" until
+    MUXPROC exists). `H-REF-004` is friendlier to settle first if
+    both are in flight, since the runner seam may inform the adapter
+    surface.
+
+- [ ] `H-AGENTMUX-002` Detect agent-deck multi-repo worktrees as a
   workspace provider.
-  - Scope: add a workspace discovery adapter that recognizes
+  - Scope: implement the first concrete `AgentMuxAdapter` for
+    agent-deck. **Justification vs MUXPROC:** the unique evidence is
+    workspace composition — the process tree shows
+    `cwd=~/.agent-deck/multi-repo-worktrees/<id>/` but cannot reveal
+    that the directory is composed of N repo symlinks. The
+    pane ↔ harness link itself is redundant with MUXPROC. Recognize
     `~/.agent-deck/multi-repo-worktrees/<id>/` (path location +
-    immediate-child symlinks resolving to git common dirs) and emits a
+    immediate-child symlinks resolving to git common dirs) and emit a
     `Workspace` node (with an `agent-deck` provider identifier and a
-    short label derived from `<id>`) plus `Workspace`→`Repo` membership
-    candidate links for each resolved symlink. Sessions and mux sessions
-    rooted at the worktree path should associate with the workspace via
-    the existing cross-link inference. Treat the symlink target's
-    canonical git common dir as the `Repo` identity so existing repo
-    nodes from other scan roots merge cleanly.
+    short label derived from `<id>`) plus `Workspace`→`Repo`
+    membership candidate links for each resolved symlink. Sessions
+    and mux sessions rooted at the worktree path should associate
+    with the workspace via the existing cross-link inference. Treat
+    the symlink target's canonical git common dir as the `Repo`
+    identity so existing repo nodes from other scan roots merge
+    cleanly. Do not emit pane ↔ harness evidence from this adapter —
+    leave that to MUXPROC.
   - Tests: fixture tests for a multi-repo worktree with two symlinks,
     one symlink, broken symlinks, non-symlink children (skip), and a
     nested directory layout. Snapshot test for the session table
-    confirming the workspace shows up and the participating repos are
-    listed somewhere reachable from the agent row.
+    confirming the workspace shows up and the participating repos
+    are listed somewhere reachable from the agent row.
   - Manual checks: `cargo run -- graph --format json` from inside a
     real agent-deck worktree; `cargo run -- session` and confirm the
     new workspace/repo links appear.
-  - Blockers: `H-DESIGN-001` (workspace-provider precedence — agent-deck
-    workspaces should not conflict with generic-workspace inference
-    over the same path).
-- [ ] `H-AGENTDECK-002` Surface multi-repo participants in the session
+  - Blockers: `H-AGENTMUX-001` (must survive the audit), `H-DESIGN-001`
+    (workspace-provider precedence — agent-deck workspaces should not
+    conflict with generic-workspace inference over the same path).
+
+- [ ] `H-AGENTMUX-003` Surface multi-repo participants in the session
   table.
   - Scope: extend the agent projection so the `CWD` column (or a new
     "REPOS" column) shows the participating repo set when the session
-    is rooted in an agent-deck workspace. Decide whether to replace the
-    cwd with a short repo list (`atelier+conspectus`) or add a separate
-    column; either way preserve byte-stable ordering.
+    is rooted in an agent-deck workspace (or any future adapter that
+    emits a multi-repo `Workspace`). Decide whether to replace the
+    cwd with a short repo list (`atelier+conspectus`) or add a
+    separate column; either way preserve byte-stable ordering.
   - Tests: snapshot tests for one-repo, two-repo, and many-repo
     workspaces.
-  - Blockers: `H-AGENTDECK-001`, `H-OBS-006` (recency column work will
+  - Blockers: `H-AGENTMUX-002`, `H-OBS-006` (recency column work will
     touch the same renderer).
-- [ ] `H-AGENTDECK-003` Read agent-deck profile state from `state.db`.
+
+- [ ] `H-AGENTMUX-004` Read agent-deck profile state from `state.db`.
   - Scope: agent-deck stores richer per-session metadata
-    (`~/.agent-deck/profiles/<profile>/state.db`, SQLite) including
-    active sessions, profile, and likely the
-    session-to-multi-repo-worktree mapping. Once the on-disk
-    convention adapter from `H-AGENTDECK-001` covers the basic graph
-    shape, read the SQLite state for any links that can't be inferred
-    from filesystem layout alone (e.g. session-to-worktree binding
-    when the agent has moved cwd, or labels/tags). Reuse the
-    `rusqlite` dependency added by ADR 0013.
+    (`~/.agent-deck/profiles/<profile>/state.db`, SQLite). **This
+    item is gated on the audit in `H-AGENTMUX-001` confirming the
+    SQLite content includes evidence MUXPROC cannot supply** —
+    plausible candidates are profile labels / tags, agent lifecycle
+    state for exited or paused sessions, and session-to-multi-repo
+    binding when the agent has since changed cwd. If the audit shows
+    the SQLite content is only a snapshot of what MUXPROC already
+    sees live, close this item as won't-do. Otherwise read the
+    SQLite state read-only and emit only the surviving non-overlap
+    evidence. Reuse the `rusqlite` dependency added by ADR 0013.
   - Tests: fixture tests over a temp SQLite file populated with
     representative rows; missing-database degradation; malformed
     schema degradation.
-  - Manual checks: confirm read-only access; confirm the adapter does
-    not lock the database while agent-deck is running.
-  - Blockers: `H-AGENTDECK-001`; requires inspecting agent-deck's
-    schema and recording the relevant tables/columns in an ADR (or an
-    extension of ADR 0013) before introducing the read code.
+  - Manual checks: confirm read-only access; confirm the adapter
+    does not lock the database while agent-deck is running.
+  - Blockers: `H-AGENTMUX-001` (audit must justify the work),
+    `H-AGENTMUX-002`. Requires recording the agent-deck schema and
+    the surviving evidence set in an ADR (or an extension of ADR
+    0013) before introducing the read code.
+
+- [ ] `H-AGENTMUX-005` Add a dmux orchestrator adapter (audit-gated).
+  - Scope: **placeholder — may be closed as won't-do.** dmux's
+    on-disk state layout is not surfaced in its README, so the audit
+    in `H-AGENTMUX-001` is responsible for source-inspecting dmux
+    and determining whether it tracks anything beyond a MUXPROC
+    subset (task / feature metadata, agent lifecycle state, lineage
+    between dmux-spawned sessions, container isolation). If the
+    audit returns "MUXPROC subset," close this item. Otherwise
+    implement the adapter against the surviving non-overlap evidence
+    only — do not duplicate the pane ↔ harness link.
+  - Tests: deferred until the audit determines scope.
+  - Manual checks: run against a real dmux install if available;
+    otherwise rely on fixtures captured from upstream.
+  - Blockers: `H-AGENTMUX-001` (audit must justify the work and
+    define the evidence set).
+
+- [ ] `H-AGENTMUX-006` Add a workmux orchestrator adapter
+  (audit-gated, narrowed scope).
+  - Scope: workmux's runtime mapping (tmux window names + active
+    agent state) is largely a MUXPROC subset. The audit in
+    `H-AGENTMUX-001` should focus on workmux's two artifacts that
+    are plausibly non-overlapping: (a) per-worktree
+    `<worktree>/.workmux/` files — project-rooted intent / labels /
+    history that survive process exit and fit Conspectus's
+    persistence guardrails cleanly; (b) `~/.local/state/workmux/
+    agents/` resurrect state, which can describe sessions that
+    aren't currently running. If both turn out to be inert mappings
+    of what MUXPROC sees live, close the item. Otherwise implement
+    an adapter scoped to those two artifacts: walk `.workmux/`
+    during normal scan traversal, read the resurrect-state files,
+    and emit candidate links only for the surviving evidence (no
+    pane ↔ harness duplication).
+  - Tests: fixture tests over a tree containing `.workmux/`
+    directories plus a fake `~/.local/state/workmux/agents/`
+    layout; resurrect-state covering an exited session.
+  - Manual checks: run against a real workmux install if available.
+  - Blockers: `H-AGENTMUX-001`.
+
+- [ ] `H-AGENTMUX-007` Add an agent-of-empires orchestrator adapter
+  (audit-gated).
+  - Scope: **placeholder — may be closed as won't-do.** The
+    strongest theoretical edge over MUXPROC is container isolation:
+    when agent-of-empires runs the agent inside a container, the
+    host process tree shows only the runtime
+    (`docker`/`podman`/`bwrap`) and MUXPROC cannot identify the
+    harness. The audit in `H-AGENTMUX-001` should determine (a)
+    whether agent-of-empires actually tracks the in-container agent
+    identity in host-visible state, and (b) whether container
+    isolation is in Conspectus's near-term scope at all. If both
+    are yes, implement an adapter scoped to container-isolated
+    sessions and any other surviving non-overlap evidence; emit
+    `AgentSession` nodes carrying the orchestrator-known harness
+    key without pretending Conspectus's harness adapters can parse
+    their transcripts.
+  - Tests: deferred until the audit determines scope.
+  - Manual checks: run against a real agent-of-empires install if
+    available.
+  - Blockers: `H-AGENTMUX-001`.
+
+### Process-Tree Agent↔Pane Linking
+
+Independent of any orchestrator's state file, an agent process running
+inside a tmux pane can be identified by walking the pane's process
+tree and matching descendant command names against known agent
+harness binaries (claude / codex / opencode / aider). `tmux-agent`
+(`trentdavies/tmux-agent`) demonstrates this stateless approach: it
+takes a single `sysinfo` snapshot, then for each pane walks up to ~3
+levels of descendants from the shell PID and matches against a known
+binary-name set, with regex-over-pane-content and title heuristics as
+fallbacks. For Conspectus this would be a tool-agnostic, definitive
+session ↔ pane evidence source that works even when no orchestrator
+is installed — and a useful cross-check against agent-mux adapter
+output when one is.
+
+- [ ] `H-MUXPROC-001` ADR: process-tree linker design and dependency
+  choice.
+  - Scope: decide (1) whether to depend on the `sysinfo` crate or
+    read `/proc` directly on Linux and an equivalent on macOS (and
+    whether macOS is in scope at all for the first pass), (2) the
+    descendant-depth bound and the pane-PID acquisition path
+    (`tmux list-panes -F "#{pane_id} #{pane_pid}"`), (3) the
+    known-binary match set and how it extends as new harnesses are
+    added, (4) confidence and provenance assignment for the emitted
+    `AgentInPane` evidence (likely `Discovered` provenance, `High`
+    confidence for a direct command-name match, demoted for the
+    fallback heuristics), and (5) where the linker fits in the module
+    layout (peer of `discovery/tmux/`, or a sub-module that consumes
+    the existing tmux runner). Record as a new ADR per CLAUDE.md.
+  - Tests: none directly; ADR is the deliverable.
+  - Blockers: none.
+
+- [ ] `H-MUXPROC-002` Implement the process-tree linker as a
+  discovery source.
+  - Scope: build the linker per the `H-MUXPROC-001` ADR. Walk every
+    discovered pane's process tree, match descendant commands
+    against the harness binary set, and emit candidate links between
+    the matching `AgentSession` (when a corresponding session is
+    already in the graph) and the pane's `MuxSession`. When no
+    matching session exists, emit an unresolved-endpoint candidate
+    link carrying the harness key, pane id, and shell PID so the
+    evidence survives until later discovery (or a re-run) resolves
+    it. Best-effort: missing `/proc` access, an unreadable PID, or
+    an unrecognized binary degrade silently. Gate the provider
+    behind a `CONSPECTUS_DISABLE_PROCTREE` env var mirroring the
+    existing tmux / forge toggles.
+  - Tests: fixture-backed unit tests using an injected
+    process-snapshot trait (mirroring the `TmuxRunner` /
+    `GhRunner` seam) covering a direct match, a nested
+    shell-then-agent match, an unknown binary, a missing pid, and
+    a permission-denied path. Resolver tests confirming the new
+    evidence raises confidence on existing session ↔ mux candidates
+    rather than producing duplicate winning relationships.
+  - Manual checks: `cargo run -- graph --format json` inside a
+    tmux session running an agent; confirm the new evidence on the
+    `LinkedToMux` candidate links.
+  - Blockers: `H-MUXPROC-001`.
+
+## Phase 7: Continuous Operation And Snapshot Persistence
+
+Source plan: pending; this section is the workstream skeleton. See
+`docs/design.md` sections "Continuous Operation Mode" and "Graph
+Snapshot Persistence" for the high-level model. Phase goal: take
+Conspectus from a pure one-shot CLI to a tool that can persist its
+graph between invocations and optionally maintain it live in a
+long-running server.
+
+Dependency shape inside the phase:
+
+```
+P7-001 (snapshot ADR) ────┐
+                          ├──→ P7-003 (warm-start save/load) ─┐
+P7-002 (provenance/       │                                   │
+        freshness model)──┤──→ P7-005 (partial eviction) ─────┤
+                          │                                   │
+P7-004 (server ADR) ──────┴───────────────────────────────────┴──→ P7-006 (serve) ──→ P7-007 (CLI ↔ server)
+                                                                                 ├──→ P7-008 (status/inspection)
+                                                                                 └──→ P7-009 (event-driven, stretch)
+```
+
+P7-001 and P7-004 can land in parallel. P7-002 is foundational and
+should land before any persistence or eviction code.
+
+- [ ] `P7-001` ADR: graph snapshot persistence format and lifecycle.
+  - Scope: settle the on-disk snapshot format and lifecycle. Concrete
+    decisions: (a) the versioned JSON shape (resolved `GraphSnapshot`
+    plus schema version plus per-provider freshness map), (b) the
+    location under `$XDG_DATA_HOME/conspectus/snapshots/` and the
+    naming / rotation policy, (c) atomic-write semantics
+    (temp-file + rename within the same directory), (d) the schema-
+    version migration policy (drop and rebuild vs in-place upgrade vs
+    field-by-field), (e) the `--no-cache` / `--refresh` CLI flag
+    surface and their interaction with the warm-start path. Record
+    as a new ADR under `docs/adr/`.
+  - Tests: none directly; ADR is the deliverable. A scaffold
+    serializer / deserializer pair may land alongside as a compile
+    check that the chosen shape round-trips.
+  - Blockers: none.
+
+- [ ] `P7-002` Add provider provenance and freshness metadata to graph
+  nodes and candidate links.
+  - Scope: extend the core model so every node and candidate link
+    records (a) the producing provider's stable identifier (harness
+    key, mux backend, `git`, `gh`, declared store, agent-mux adapter
+    key, etc.) and (b) a per-provider freshness timestamp captured at
+    the time the producer ran. Wire the existing discovery providers
+    to populate these fields. Resolver output (resolved
+    relationships, diagnostics) inherits the freshest contributing
+    timestamp. Keep the change backwards compatible with existing
+    JSON snapshots: new fields default to absent / null. Defer
+    typing-the-key (`H-REF-009` constants) and typed source-metadata
+    fields (`H-REF-008`) as separate cleanups.
+  - Tests: unit tests verifying every existing provider populates
+    the new fields; resolver tests confirming freshness inheritance;
+    snapshot tests asserting the new fields appear in JSON.
+  - Blockers: none. `H-REF-009` is friendlier to settle first if both
+    are in flight, since constants reduce the chance of provider
+    identifiers drifting across modules.
+
+- [ ] `P7-003` Implement snapshot save/load for the one-shot CLI.
+  - Scope: after a successful run, persist the resolved graph per
+    `P7-001`. On subsequent CLI runs, load the most recent snapshot,
+    compare each provider's freshness timestamp against its
+    configured TTL, and re-run only providers whose TTL has expired.
+    Reuse the remaining slices verbatim. Re-resolve the merged
+    candidate set before rendering. Fall back to a cold rebuild when
+    no snapshot exists, the schema version differs, or `--no-cache`
+    / `--refresh` is requested. Snapshot writes must not dirty
+    project trees.
+  - Tests: integration tests covering cold start, warm start with
+    every provider fresh (no rebuild), warm start with one provider
+    expired (only that slice rebuilt), schema-version mismatch
+    fallback, malformed snapshot fallback, and `--refresh` forcing
+    a cold rebuild. Snapshot-rotation tests confirming retention.
+  - Manual checks: run `conspectus session` twice in quick
+    succession and observe the second run skipping expensive
+    providers; corrupt the snapshot file by hand and confirm the
+    next run recovers.
+  - Blockers: `P7-001`, `P7-002`.
+
+- [ ] `P7-004` ADR: continuous server mode architecture and transport.
+  - Scope: settle the architecture of `conspectus serve`. Concrete
+    decisions: (a) CLI ↔ server transport — Unix domain socket at
+    `$XDG_RUNTIME_DIR/conspectus/server.sock`, file-based snapshot
+    polling, or both — and the protocol (line-delimited JSON,
+    length-prefixed, or a small framing layer), (b) whether the
+    server reuses the one-shot discovery code path 1:1 or forks
+    into a coordinator with its own concurrency primitives, (c) the
+    `[server]` and `[server.intervals]` TOML config shape and
+    per-provider interval defaults, (d) provider failure isolation
+    (per-provider back-off, surfaced via diagnostics), (e) server
+    lifecycle expectations (user-managed; no auto-spawn from CLI;
+    documented systemd / launchd integrations later). Record as a
+    new ADR under `docs/adr/`.
+  - Tests: none directly; ADR is the deliverable.
+  - Blockers: none (parallel to `P7-001`).
+
+- [ ] `P7-005` Implement partial graph eviction at provider granularity.
+  - Scope: introduce a graph-merge primitive that, given an existing
+    graph and a single provider's new slice, evicts the prior slice
+    for that provider and merges the new slice in. The resolver
+    re-runs against the merged candidate-link set. Declared links,
+    other providers' slices, and the existing node identities
+    survive untouched. This is the core operation `P7-003` uses for
+    selective refresh and `P7-006` uses on every provider tick.
+  - Tests: unit tests covering empty-prior + new slice (insert
+    only), non-empty prior + new slice (replace + merge), eviction
+    when a provider returns zero results (correctly removes prior
+    nodes), eviction when only candidate links changed (nodes
+    survive), declared-link preservation across eviction, and
+    resolver consistency before and after a merge. Property tests
+    asserting that merging `prior` with provider P's slice equals a
+    cold rebuild that only ran provider P (for the node space P
+    owns).
+  - Blockers: `P7-002`.
+
+- [ ] `P7-006` Implement `conspectus serve`.
+  - Scope: long-running process that holds the in-memory graph,
+    schedules each provider's refresh on its configured interval per
+    `P7-004`, applies the merge primitive from `P7-005` on each
+    successful provider tick, persists snapshots to disk per
+    `P7-003`, and isolates provider failures so a broken provider
+    does not halt the loop. Implement the transport chosen by
+    `P7-004`. Logging and error reporting go to stderr (or a
+    user-configurable log path) and are surfaced via `P7-008`.
+  - Tests: integration tests with a fake clock and fake providers
+    covering interval scheduling, per-provider failure isolation,
+    graceful shutdown on SIGINT/SIGTERM, snapshot persistence on
+    change, and merging concurrent provider results.
+  - Manual checks: `conspectus serve &` from a real workspace;
+    confirm `conspectus session` returns near-instantly while the
+    server is running; kill the server and confirm the CLI falls
+    back to one-shot mode.
+  - Blockers: `P7-003`, `P7-004`, `P7-005`.
+
+- [ ] `P7-007` Implement CLI ↔ server snapshot read path.
+  - Scope: when a server is running (detected by an existing
+    transport endpoint), `conspectus session` / `conspectus graph`
+    / `conspectus node show` read the server's current snapshot
+    rather than performing in-process discovery. Without a server,
+    the CLI behaves as today (with the warm-start from `P7-003`).
+    The transition must be transparent to users; a stale-server or
+    schema-mismatch condition falls back to one-shot mode with a
+    one-line stderr hint.
+  - Tests: CLI integration tests covering server-present and
+    server-absent paths, schema-version mismatch fallback, and
+    transport-error fallback. End-to-end tests confirming a CLI
+    invocation against a running server returns the same JSON as
+    the equivalent one-shot run for the same graph state.
+  - Manual checks: confirm `conspectus session` latency drops
+    when a server is running.
+  - Blockers: `P7-006`.
+
+- [ ] `P7-008` Add server status and inspection subcommands.
+  - Scope: surface per-provider last-refresh timestamps, error
+    states, and back-off via a subcommand such as
+    `conspectus serve --status`. Add a `--refresh <provider>`
+    affordance for forcing a single provider's slice to re-run
+    immediately; add `--reload-config` for picking up TOML changes
+    without restarting the server. Format output for both human
+    consumption and JSON.
+  - Tests: CLI integration tests against a running fake server;
+    snapshot tests for the status output.
+  - Blockers: `P7-006`.
+
+- [ ] `P7-009` Event-driven refresh via filesystem watchers (stretch).
+  - Scope: replace polling for cheap local signals with
+    inotify / fsevents watchers where the OS supports them. Target
+    candidates: harness state directories (sessions appear /
+    disappear), git refs (branch updates), and `.conspectus.toml`
+    changes. Polling stays as the fallback when watchers are
+    unsupported or hit resource limits. The change should be
+    transparent to provider implementations: the seam is "when
+    does this provider get woken up?", not the provider code
+    itself. Requires an ADR for the watcher dependency choice
+    (e.g. `notify` crate vs hand-rolled).
+  - Tests: integration tests with a fake watcher driver covering
+    watcher-available, watcher-fallback, and watcher-saturation
+    paths.
+  - Blockers: `P7-006`; requires a new ADR for the watcher
+    dependency.
 
 ## Later
 

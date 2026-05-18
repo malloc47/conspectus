@@ -78,6 +78,11 @@ repo, or a worktree branch with an open PR and no known agent session.
 - Conspectus should expose a machine-readable graph for other tools to consume.
   Future consumers may include interactive TUIs that manage agent sessions,
   connect to mux sessions, or provide workflows similar to agent-deck.
+- Support both one-shot CLI invocations and a long-running continuous mode
+  that maintains a live graph in the background. The continuous mode is
+  optional; the one-shot CLI must remain useful without a server running.
+  Graph generation cost must not require the one-shot path to rebuild every
+  link from scratch on each invocation.
 
 ## Relationship To Atelier
 
@@ -346,6 +351,12 @@ Additive discovery:
 
 Avoid default behavior that recursively walks all of `$HOME`.
 
+In continuous operation mode (see below), each discovery source runs on
+its own refresh cadence rather than as a single end-to-end scan. Provider
+abstractions stay identical to the one-shot path; the difference is in
+how often each provider is invoked and how its output is merged into the
+existing graph.
+
 ## State And Persistence
 
 Track the minimum necessary state to tie entities together. Persist user intent;
@@ -493,6 +504,94 @@ Mux-aware views should:
 - show ambiguity when multiple non-ignored candidates remain
 - allow mux-oriented views to show zero, one, or many linked agent sessions
 
+## Continuous Operation Mode
+
+Conspectus supports two operation modes:
+
+- **One-shot CLI**: each invocation performs a fresh (or warm-started)
+  discovery pass, renders output, and exits. This is the default.
+- **Continuous server**: a long-running process maintains the graph in
+  memory and schedules per-provider refreshes on configurable intervals.
+  CLI invocations talk to the server when one is running and fall back
+  to one-shot discovery otherwise.
+
+The server avoids fully evented design as a starting point. Interval-based
+polling per discovery source is sufficient for the v1 of this mode.
+Filesystem watchers (inotify, fsevents) are a future optimization for
+cheap signals (harness state directories, git refs), not a prerequisite.
+
+Defaults skew toward "responsive but quiet": short intervals for cheap
+local sources, longer intervals for expensive ones. Concrete starting
+points (configurable per provider class):
+
+- harness state directories: a few seconds
+- mux backends: a few seconds
+- git repo/worktree probes: tens of seconds
+- forge metadata (e.g. `gh pr list`): minutes
+
+Provider failures are isolated. A broken `gh` binary, unreachable mux
+backend, or unreadable harness state directory must not halt unrelated
+providers. Each provider carries its own success/failure status,
+last-refresh timestamp, and back-off, all surfaced to the resolver and
+status views.
+
+The server lifecycle is user-managed (systemd user unit, launchd agent,
+or a manual `conspectus serve &`). The CLI must not auto-spawn a daemon
+on regular invocations; absence of a server is not an error.
+
+Transport between the CLI and the server is an open question (Unix
+domain socket, file-based snapshot polling, or both); the immediate
+constraint is that it work for a single user on a single machine.
+
+Configuration extends the existing TOML config with a `[server]` table
+plus per-provider interval keys; specific keys and defaults belong in
+the corresponding ADR.
+
+## Graph Snapshot Persistence
+
+Graph generation is cheap for small graphs but already perceptibly slow
+when discovery touches many harness state directories, many repos, or
+expensive forge calls. Both the continuous server and the one-shot CLI
+benefit from persisting the resolved graph between runs.
+
+- Snapshots live under `$XDG_DATA_HOME/conspectus/snapshots/`. They are
+  never written inside project trees.
+- Format is a versioned JSON document: the resolved `GraphSnapshot`
+  shape extended with a schema version and a per-provider freshness
+  map. JSON keeps snapshots hand-inspectable; a binary format may be
+  reconsidered later if size or load latency become real concerns.
+- Writes are atomic: write to a temp file in the same directory, then
+  rename. A crash mid-save must not corrupt the snapshot.
+- A small number of rotated snapshots are retained for debugging;
+  older snapshots are pruned on each save.
+
+Each node and candidate link in the persisted graph carries the
+provider that produced it and a freshness timestamp. This provenance
+is what makes partial eviction possible:
+
+- The unit of refresh is a single provider's slice of the graph.
+- Re-running a provider discards that provider's prior nodes and
+  candidate links and merges its new output back in; declared links,
+  other providers' slices, and the resolver's prior output remain.
+- The resolver re-runs against the merged candidate-link set whenever
+  any provider slice changes. Re-run cadence (eager, batched, or lazy)
+  is left to the implementing ADR.
+
+The one-shot CLI's warm-start path:
+
+1. Load the most recent snapshot if its schema version matches.
+2. For each provider, compare its freshness timestamp against its
+   configured TTL.
+3. Re-run only providers whose TTL has expired; reuse the rest.
+4. Re-resolve and render.
+
+If no snapshot exists, the schema version differs, or `--no-cache` /
+`--refresh` is requested, fall back to a cold rebuild.
+
+Snapshot persistence is independent of the server. Both modes share
+the same on-disk format. The server is the only writer when it is
+running; the one-shot CLI is the writer otherwise.
+
 ## Migration Plan
 
 1. Complete: identify and isolate pure discovery/parsing code in Conspectus:
@@ -575,6 +674,13 @@ Mux-aware views should:
 - The config key for selecting a session projection is `session.projection`.
 - Bootstrap scans should print suggested roots and links by default. Persisting
   them to global config should require an explicit write flag.
+- Conspectus supports an opt-in continuous server mode that maintains a live
+  graph via per-provider interval-based refreshes. The one-shot CLI remains
+  the default and works without a server.
+- Graph snapshots persist as versioned JSON under
+  `$XDG_DATA_HOME/conspectus/snapshots/`. Partial eviction operates at
+  provider granularity using node/link provenance and per-provider freshness
+  timestamps; both the server and the one-shot CLI use the same format.
 
 ## Remaining Design Questions
 
@@ -611,6 +717,24 @@ only when the answer materially changes implementation scope.
   cached links merged when they disagree?
 - Should confirmation of a discovered link create a durable declared link that
   remains valid even if the original discovered evidence disappears?
+
+### Continuous Operation And Snapshot Persistence
+
+- What is the right CLI ↔ server transport: Unix domain socket, file-based
+  snapshot polling, or both?
+- Should the server share its discovery code path 1:1 with the one-shot CLI,
+  or fork into a dedicated coordinator with different concurrency semantics?
+- What is the right resolver re-run cadence on partial updates: eager per
+  provider tick, debounced batches, or lazy on client read?
+- Is per-provider eviction granular enough, or should eviction also support
+  per-repo / per-scan-root / per-node-kind keys?
+- Should snapshot persistence be enabled by default once stable, or stay
+  opt-in alongside server mode?
+- What is the migration story when the snapshot schema version changes:
+  drop and rebuild, in-place upgrade, or both depending on the field?
+- What are the right default refresh intervals per provider class, and should
+  they adapt to recent activity (e.g. shorten after a session is observed to
+  change)?
 
 ## Deferred Design Questions
 
