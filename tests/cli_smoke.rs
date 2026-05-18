@@ -804,6 +804,30 @@ fn table_rejects_unknown_row_type() {
 }
 
 #[test]
+fn table_sessions_columns_supports_branch_repo_optional_columns() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--columns")
+        .arg("id,agent,worktree,branch,repo,fork,declared")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(
+        header_tokens,
+        vec![
+            "ID", "AGENT", "WORKTREE", "BRANCH", "REPO", "FORK", "DECLARED",
+        ],
+    );
+}
+
+#[test]
 fn table_forks_renders_fork_projection_header() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

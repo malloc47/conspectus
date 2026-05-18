@@ -222,12 +222,17 @@ fn confidence_code(confidence: Confidence) -> &'static str {
 /// A pre-computed view of one snapshot keyed by node id so the
 /// projection renderers don't each rebuild it.
 struct SnapshotView<'a> {
+    /// Underlying snapshot — kept so column extractors can walk
+    /// non-active links (`by_source_relation` filters those out).
+    snapshot: &'a GraphSnapshot,
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
     mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
     forge_prs: BTreeMap<NodeId, &'a ForgePrNode>,
     forks: BTreeMap<NodeId, &'a ForkNode>,
-    /// `(source_node_id, relation_kind)` → all candidate links for
-    /// that pair, in stable order.
+    /// `(source_node_id, relation_kind)` → all active candidate links
+    /// for that pair, in stable order. Non-active links (ignored /
+    /// overridden) are skipped; extractors that need them walk
+    /// `snapshot.candidate_links` directly.
     by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
     /// Pre-computed `mux_id → [(agent_label, preferred_link)]` map for
     /// the agents-attached-to-this-mux cell. Built once at view
@@ -292,6 +297,7 @@ impl<'a> SnapshotView<'a> {
         }
 
         Self {
+            snapshot,
             agent_sessions,
             mux_sessions,
             forge_prs,
@@ -401,6 +407,36 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         header: "LINEAGE",
         description: "Preferred parent-session, with a trailing ← when the chain extends past one hop.",
         default: true,
+    },
+    ColumnSpec {
+        key: "worktree",
+        header: "WORKTREE",
+        description: "Worktree root whose path matches the session's cwd.",
+        default: false,
+    },
+    ColumnSpec {
+        key: "branch",
+        header: "BRANCH",
+        description: "Branch checked out in the session's worktree (refs/heads/ stripped).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "repo",
+        header: "REPO",
+        description: "Repo identifier (common_dir path) for the session's worktree.",
+        default: false,
+    },
+    ColumnSpec {
+        key: "fork",
+        header: "FORK",
+        description: "Fork label when the session is the `child_session` target of a fork.",
+        default: false,
+    },
+    ColumnSpec {
+        key: "declared",
+        header: "DECLARED",
+        description: "State of the strongest declared candidate sourced from this session (declared / ignored / overridden).",
+        default: false,
     },
 ];
 
@@ -775,8 +811,129 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
         "pr" => preferred_pr_for_session(ctx.view, ctx.node_id).0,
         "pr-conf" => preferred_pr_for_session(ctx.view, ctx.node_id).1,
         "lineage" => lineage_cell(ctx.view, ctx.node_id),
+        "worktree" => {
+            session_worktree_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
+        }
+        "branch" => session_branch_label(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
+        "repo" => session_repo_identifier(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
+        "fork" => {
+            session_owning_fork_label(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
+        }
+        "declared" => {
+            session_declared_state(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
+        }
         _ => "—".to_string(),
     }
+}
+
+/// Find the worktree whose root matches the session's cwd. Walks
+/// `snapshot.nodes` once per call; row counts are bounded so the cost
+/// stays small.
+fn session_worktree_root(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
+    let cwd = session.cwd.as_deref()?;
+    // Worktrees aren't indexed on SnapshotView; do a linear scan of
+    // candidate_link sources for Worktree NodeIds whose root matches.
+    for (source, _relation) in view.by_source_relation.keys() {
+        if let NodeId::Worktree(worktree_id) = source
+            && worktree_id.root == cwd
+        {
+            return Some(worktree_id.root.clone());
+        }
+    }
+    None
+}
+
+/// Resolve the session's worktree and follow `CheckedOutBranch` to the
+/// branch, returning the refname with `refs/heads/` stripped.
+fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
+    let cwd = session.cwd.as_deref()?;
+    for ((source, relation), links) in &view.by_source_relation {
+        if *relation != RelationKind::CheckedOutBranch {
+            continue;
+        }
+        let NodeId::Worktree(worktree_id) = source else {
+            continue;
+        };
+        if worktree_id.root != cwd {
+            continue;
+        }
+        let preferred = pick_preferred(links)?;
+        if let LinkEndpoint::Node {
+            id: NodeId::Branch(branch_id),
+        } = &preferred.target
+        {
+            return Some(strip_branch_prefix(&branch_id.refname).to_string());
+        }
+    }
+    None
+}
+
+/// Resolve the session's worktree and return its repo identifier
+/// (`RepoId.common_dir`).
+fn session_repo_identifier(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
+    let cwd = session.cwd.as_deref()?;
+    for (source, _relation) in view.by_source_relation.keys() {
+        if let NodeId::Worktree(worktree_id) = source
+            && worktree_id.root == cwd
+        {
+            return Some(worktree_id.repo.common_dir.clone());
+        }
+    }
+    None
+}
+
+/// When a fork records this session as a `child_session` target, return
+/// the fork's display label.
+fn session_owning_fork_label(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
+    for ((source, relation), links) in &view.by_source_relation {
+        if *relation != RelationKind::ChildSession {
+            continue;
+        }
+        if !matches!(source, NodeId::Fork(_)) {
+            continue;
+        }
+        for link in links {
+            if let LinkEndpoint::Node { id } = &link.target
+                && id == session_id
+                && let Some(fork) = view.forks.get(source)
+            {
+                return Some(fork_label(fork));
+            }
+        }
+    }
+    None
+}
+
+/// Map the strongest declared candidate for `session_id` to a one-word
+/// state label. Walks `snapshot.candidate_links` directly so ignored
+/// and overridden declared links surface in the cell. Returns `None`
+/// when no declared candidate exists.
+fn session_declared_state(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
+    let mut best: Option<&GraphLink> = None;
+    for link in &view.snapshot.candidate_links {
+        if &link.source != session_id {
+            continue;
+        }
+        if !matches!(
+            link.provenance,
+            Provenance::LocalDeclared | Provenance::GlobalDeclared
+        ) {
+            continue;
+        }
+        match best {
+            None => best = Some(link),
+            Some(current) if link.provenance.precedence() > current.provenance.precedence() => {
+                best = Some(link);
+            }
+            _ => {}
+        }
+    }
+    let link = best?;
+    Some(match &link.state {
+        crate::model::LinkState::Active => "declared".to_string(),
+        crate::model::LinkState::Ignored { .. } => "ignored".to_string(),
+        crate::model::LinkState::Overridden { .. } => "overridden".to_string(),
+    })
 }
 
 struct MuxRowCtx<'view, 'snap> {
@@ -2157,6 +2314,122 @@ mod tests {
         assert_eq!(strip_branch_prefix("refs/heads/feature"), "feature");
         assert_eq!(strip_branch_prefix("main"), "main");
         assert_eq!(strip_branch_prefix("refs/tags/v1"), "refs/tags/v1");
+    }
+
+    #[test]
+    fn sessions_projection_optional_branch_repo_worktree_columns() {
+        use crate::model::{WorktreeId, WorktreeNode};
+
+        let repo_id = RepoId::new("/workspace/repo/.git");
+        let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature".to_string());
+        let worktree_id = WorktreeId::new(repo_id.clone(), "/workspace/repo");
+
+        let worktree_to_branch = GraphLink {
+            id: "wt-branch".to_string(),
+            source: NodeId::Worktree(worktree_id.clone()),
+            target: LinkEndpoint::Node {
+                id: NodeId::Branch(branch_id),
+            },
+            relation: RelationKind::CheckedOutBranch,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        };
+
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/workspace/repo")),
+                GraphNode::Worktree(WorktreeNode {
+                    id: worktree_id,
+                    root: "/workspace/repo".to_string(),
+                    git_dir: None,
+                    current_branch: None,
+                }),
+            ],
+            candidate_links: vec![worktree_to_branch],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "worktree", "branch", "repo"]),
+        );
+        let body = rendered.lines().nth(2).expect("body row");
+        assert!(body.contains("/workspace/repo"), "got:\n{body}");
+        assert!(body.contains("feature"), "got:\n{body}");
+        assert!(body.contains("/workspace/repo/.git"), "got:\n{body}");
+    }
+
+    #[test]
+    fn sessions_projection_fork_column_renders_owning_fork_label() {
+        // Match the AgentSessionId state_scope to the `agent_session`
+        // helper (which uses "global") so the fork's ChildSession
+        // candidate resolves to the discovered session node.
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let fork_id = crate::model::ForkId::new("atelier:alpha");
+
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                fork_node(Some("alpha"), "atelier", "alpha"),
+                agent_session("codex", "alpha", Some("/work")),
+            ],
+            candidate_links: vec![fork_lineage_link(
+                "child",
+                fork_id,
+                RelationKind::ChildSession,
+                session_id,
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "fork"]),
+        );
+        assert!(
+            rendered.contains("atelier:alpha"),
+            "fork column should label the owning fork:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn sessions_projection_declared_column_reflects_link_state() {
+        // The `agent_session` helper uses state_scope "global"; the
+        // declared link's source AgentSessionId must match for the
+        // extractor to find it.
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let mux_id = MuxSessionId::new("tmux:editor");
+
+        let mut declared_link = linked_to_mux_link(
+            "declared-link",
+            session_id.clone(),
+            mux_id,
+            Provenance::LocalDeclared,
+            Confidence::High,
+        );
+        declared_link.state = LinkState::Ignored {
+            reason: Some("stale".to_string()),
+        };
+
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work"))],
+            candidate_links: vec![declared_link],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "declared"]),
+        );
+        assert!(
+            rendered.contains("ignored"),
+            "declared column should reflect the link's state:\n{rendered}",
+        );
     }
 
     fn forge_pr(owner: &str, repo: &str, number: u64, state: &str, draft: bool) -> GraphNode {

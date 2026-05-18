@@ -1700,25 +1700,26 @@ fork lineage, and worktree apply to any row whose node touches them.
     rendering. One CLI integration test exercises the default
     header. All 370 tests pass.
 
-- [ ] `H-TBL-010` Expand the `sessions` column pool.
-  - Scope: register additional non-default columns on the `sessions`
-    row-type for users who want richer rows via `--columns`. Initial
-    additions: `branch` (preferred checked-out branch via
-    `worktree → branch`), `repo` (resolved repo identifier),
-    `worktree` (worktree root), `fork` (parent fork short label when
-    the session lives in a fork worktree),
-    `declared` (one of `—` / `declared` / `confirmed` / `overridden`
-    / `ignored` derived from the strongest declared candidate),
-    `activity` (relative recency — relies on H-OBS-006). Default set
-    is unchanged; this story only grows the pool reachable via
-    `--columns +<name>`.
-  - Tests: unit tests for each extractor against a representative
-    snapshot; one CLI integration test that adds two new columns via
-    `--columns +branch,+repo` and asserts they render.
-  - Manual checks: `conspectus table sessions --columns +branch,+repo`.
-  - Blockers: `H-TBL-007`. `H-OBS-006` is a soft blocker for the
-    `activity` column specifically; ship the other columns first if
-    H-OBS-006 has not landed.
+- [x] `H-TBL-010` Expand the `sessions` column pool.
+  - Outcome: `SESSIONS_COLUMNS` gained five opt-in columns
+    (`worktree`, `branch`, `repo`, `fork`, `declared`). Each
+    extractor walks the candidate-link graph to resolve the cell:
+    `worktree` matches a session's `cwd` against `WorktreeId.root`;
+    `branch` follows `CheckedOutBranch` from the matched worktree
+    and strips `refs/heads/`; `repo` returns the worktree's
+    `RepoId.common_dir`; `fork` finds the fork that records the
+    session as a `ChildSession` target and renders the fork label;
+    `declared` reports the strongest declared candidate's state
+    (`declared` / `ignored` / `overridden`) by walking the raw
+    `snapshot.candidate_links` (so ignored/overridden links surface
+    through the otherwise active-only `by_source_relation` index).
+    `SnapshotView` now retains a reference to the underlying
+    `GraphSnapshot` for that purpose. The default column set is
+    unchanged. The `activity` column is deferred per the H-OBS-006
+    soft-blocker note. Three new unit tests cover worktree/branch/
+    repo, the fork column, and the declared column's link-state
+    mapping; one CLI integration test exercises the seven-column
+    selection via `--columns`. All 374 tests pass.
 
 - [ ] `H-TBL-011` Expand the `mux` column pool.
   - Scope: register additional non-default columns on the `mux`
