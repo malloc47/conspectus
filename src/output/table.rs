@@ -465,6 +465,24 @@ const MUX_COLUMNS: &[ColumnSpec] = &[
         description: "Agent sessions attached to this mux session.",
         default: true,
     },
+    ColumnSpec {
+        key: "attached-count",
+        header: "ATTACHED",
+        description: "Count of agent sessions resolved as attached to this mux.",
+        default: false,
+    },
+    ColumnSpec {
+        key: "activity",
+        header: "ACTIVITY",
+        description: "Relative recency from `MuxSessionNode.activity_epoch` (e.g. `2h`, `3d`).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "created",
+        header: "CREATED",
+        description: "Relative age from `MuxSessionNode.created_epoch` (e.g. `2h`, `3d`).",
+        default: false,
+    },
 ];
 
 const UNION_COLUMNS: &[ColumnSpec] = &[
@@ -966,6 +984,29 @@ fn mux_cell(key: &str, ctx: &MuxRowCtx<'_, '_>) -> String {
                 .join(", "),
             _ => "—".to_string(),
         },
+        "attached-count" => {
+            let count = ctx
+                .view
+                .attached_to_mux
+                .get(ctx.mux_id)
+                .map(Vec::len)
+                .unwrap_or(0);
+            if count == 0 {
+                "—".to_string()
+            } else {
+                count.to_string()
+            }
+        }
+        "activity" => ctx
+            .mux
+            .activity_epoch
+            .map(|epoch| format_relative_age(epoch, current_epoch()))
+            .unwrap_or_else(|| "—".to_string()),
+        "created" => ctx
+            .mux
+            .created_epoch
+            .map(|epoch| format_relative_age(epoch, current_epoch()))
+            .unwrap_or_else(|| "—".to_string()),
         _ => "—".to_string(),
     }
 }
@@ -2203,7 +2244,20 @@ mod tests {
     #[test]
     fn parse_columns_all_resets_to_every_registered_column() {
         let result = parse_columns_spec(Projection::Mux, "all").expect("all");
-        assert_eq!(result, vec!["id", "mux", "cwd", "agents"]);
+        // `all` reflects every registered column in registry order;
+        // the mux registry is the smallest and the easiest to lock in.
+        assert_eq!(
+            result,
+            vec![
+                "id",
+                "mux",
+                "cwd",
+                "agents",
+                "attached-count",
+                "activity",
+                "created",
+            ],
+        );
     }
 
     #[test]
@@ -2314,6 +2368,127 @@ mod tests {
         assert_eq!(strip_branch_prefix("refs/heads/feature"), "feature");
         assert_eq!(strip_branch_prefix("main"), "main");
         assert_eq!(strip_branch_prefix("refs/tags/v1"), "refs/tags/v1");
+    }
+
+    fn mux_session_with_epochs(
+        backend: &str,
+        name: &str,
+        activity_epoch: Option<i64>,
+        created_epoch: Option<i64>,
+    ) -> GraphNode {
+        GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new(format!("{backend}:{name}")),
+            backend: backend.to_string(),
+            native_id: name.to_string(),
+            cwd: None,
+            activity_epoch,
+            created_epoch,
+        })
+    }
+
+    #[test]
+    fn mux_projection_attached_count_column() {
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let mux_id = MuxSessionId::new("tmux:editor");
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work")),
+                mux_session("tmux", "editor", Some("/work")),
+                mux_session("tmux", "lonely", Some("/work")),
+            ],
+            candidate_links: vec![linked_to_mux_link(
+                "link-1",
+                session_id,
+                mux_id,
+                Provenance::StrongDiscovered,
+                Confidence::High,
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_columns(vec!["id", "mux", "attached-count"]),
+        );
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        assert_eq!(body.len(), 2);
+        let editor_row = body
+            .iter()
+            .find(|line| line.contains("tmux:editor"))
+            .expect("editor row");
+        let lonely_row = body
+            .iter()
+            .find(|line| line.contains("tmux:lonely"))
+            .expect("lonely row");
+        // Editor has one attached agent; lonely has none.
+        assert!(
+            editor_row.split_whitespace().any(|t| t == "1"),
+            "editor row should show count 1:\n{editor_row}",
+        );
+        assert!(
+            lonely_row.trim_end().ends_with('—'),
+            "lonely row should show — for zero attached:\n{lonely_row}",
+        );
+    }
+
+    #[test]
+    fn mux_projection_activity_and_created_columns_format_relative_age() {
+        // Use the formatter directly to lock in the recency string;
+        // the actual rendered row passes the same value through.
+        let activity = 100;
+        let created = 0;
+        let now = activity + 7200; // 2h after activity, ~2h after created.
+        assert_eq!(format_relative_age(activity, now), "2h");
+        assert_eq!(format_relative_age(created, now), "2h");
+
+        // Render with explicit columns; verify the cells contain a unit
+        // suffix (the exact recency depends on SystemTime::now()).
+        let snapshot = GraphSnapshot {
+            nodes: vec![mux_session_with_epochs(
+                "tmux",
+                "editor",
+                Some(activity),
+                Some(created),
+            )],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_columns(vec!["id", "mux", "activity", "created"]),
+        );
+        let body = rendered.lines().nth(2).expect("body row");
+        // Recency for epoch 100 is many years; assert the cell ends in
+        // a recognized unit suffix.
+        let cells: Vec<&str> = body.split_whitespace().collect();
+        // [<short>, tmux:editor, <activity-cell>, <created-cell>]
+        assert!(cells.len() >= 4, "row should have 4 cells: {body:?}");
+        for cell in &cells[2..4] {
+            let last = cell.chars().last().expect("non-empty cell");
+            assert!(
+                matches!(last, 's' | 'm' | 'h' | 'd' | 'w'),
+                "expected recency suffix, got {cell:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn mux_projection_activity_and_created_dashes_when_epoch_is_none() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![mux_session_with_epochs("tmux", "editor", None, None)],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_columns(vec!["id", "mux", "activity", "created"]),
+        );
+        let body = rendered.lines().nth(2).expect("body row");
+        let cells: Vec<&str> = body.split_whitespace().collect();
+        assert_eq!(cells.len(), 4);
+        assert_eq!(cells[2], "—");
+        assert_eq!(cells[3], "—");
     }
 
     #[test]

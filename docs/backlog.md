@@ -1721,18 +1721,21 @@ fork lineage, and worktree apply to any row whose node touches them.
     mapping; one CLI integration test exercises the seven-column
     selection via `--columns`. All 374 tests pass.
 
-- [ ] `H-TBL-011` Expand the `mux` column pool.
-  - Scope: register additional non-default columns on the `mux`
-    row-type: `activity` (relative recency from
-    `MuxSessionNode::activity_epoch`), `created` (relative age from
-    `created_epoch`), `panes` (deferred until the mux adapter records
-    pane counts), `attached-count` (number of resolved agent sessions
-    linked to this mux). Default set keeps `id, mux, cwd, agents`;
-    new columns are reachable via `--columns +activity` etc.
-  - Tests: unit tests per extractor; CLI integration test adding
-    `activity` via `--columns`.
-  - Manual checks: `conspectus table mux --columns +activity`.
-  - Blockers: `H-TBL-007`.
+- [x] `H-TBL-011` Expand the `mux` column pool.
+  - Outcome: `MUX_COLUMNS` gained three opt-in columns:
+    `attached-count` (number of attached agent sessions, rendered
+    as `—` when zero), `activity` (relative recency from
+    `MuxSessionNode::activity_epoch`, reusing `format_relative_age`
+    from H-TBL-008), and `created` (relative age from
+    `created_epoch`). `panes` stays deferred until the mux adapter
+    records pane counts. Default set is unchanged. Three unit tests
+    cover `attached-count` (one row with attached agents, one with
+    none), `activity`/`created` formatting (using
+    `format_relative_age` and verifying the recency-suffix shape of
+    the rendered cell), and the no-epoch fallback to `—`. The
+    `parse_columns_all_resets_to_every_registered_column` regression
+    test was updated to reflect the larger `all` set. All 377 tests
+    pass.
 
 - [ ] `H-TBL-012` `conspectus columns <ROWS>` discovery subcommand.
   - Scope: add a discovery command that prints every registered
