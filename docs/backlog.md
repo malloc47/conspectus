@@ -1532,6 +1532,14 @@ width, making the default output unusable in narrow CLIs. JSON / graph
 output is not affected by this stream; the work is scoped to the text-table
 projection layer.
 
+H-TBL-001 through H-TBL-005 modernized the renderer itself (width-aware
+truncation, short row ids, card layout, `node show` integration).
+H-TBL-006 onward shifts the surface from `conspectus session
+[--projection ...]` to `conspectus table <ROWS>` so that growing row-types
+(PRs, forks, …) and per-row-type column customization stay first-class.
+The columns themselves stop being session-specific, since cells like PR,
+fork lineage, and worktree apply to any row whose node touches them.
+
 - [x] `H-TBL-001` ADR: width-aware table rendering library.
   - Outcome: ADR 0020 records the decision to roll our own minimal
     width-aware renderer under `src/output/`, depending only on
@@ -1599,6 +1607,154 @@ projection layer.
     error with the matching candidates listed. `docs/operations.md`
     documents the accepted forms; CLI integration tests round-trip a
     short id from `conspectus session --wide` through `node show`.
+
+- [ ] `H-TBL-006` Rename `conspectus session` to `conspectus table <ROWS>`.
+  - Scope: replace the `session` subcommand with a `table` subcommand
+    tree whose first positional selects the row-type. Initial
+    row-types map 1:1 to the current projections so this story stays
+    purely structural: `conspectus table sessions`, `conspectus table
+    mux`, and `conspectus table union`. The existing `--wide`,
+    `--width`, and `--layout` flags carry over unchanged; the old
+    `--projection` flag disappears (the positional replaces it). The
+    config schema migrates from `[session]` to `[table]` with
+    per-row-type subsections (e.g. `[table.sessions]`); per CLAUDE.md
+    no backwards-compatibility shim — old keys stop being read.
+    Update `docs/operations.md` and every CLI test that drives the
+    binary. Existing renderer internals (`build_*_rows`,
+    `RenderOptions`, `node_short_id`) stay as-is; only the CLI shape
+    and config keys change.
+  - Tests: existing snapshot tests stay green (output bytes are
+    unchanged); CLI integration tests cover each `conspectus table
+    <ROWS>` subcommand, `--help` lists the row-types, and the new
+    `[table.sessions]` projection default is honored.
+  - Manual checks: `cargo run -- table sessions`,
+    `cargo run -- table mux`, `cargo run -- table union`,
+    `cargo run -- table --help`.
+  - Blockers: none.
+
+- [ ] `H-TBL-007` Per-row-type column registry and `--columns` flag.
+  - Scope: introduce a column registry in `src/output/table.rs` keyed
+    by row-type. For each row-type, declare:
+    (a) the ordered list of available columns with stable string keys
+        (e.g. `id`, `label`, `cwd`, `mux`, `mux-conf`, `pr`, `pr-conf`,
+        `lineage`),
+    (b) a one-line description per column for `--help` /
+        discovery output,
+    (c) the default set rendered when no override is given,
+    (d) a value extractor that maps a row's source data (e.g. an
+        `AgentSessionNode` plus the `SnapshotView`) to a `String` cell.
+    Replace each `build_*_rows` function with a generic builder that
+    walks the chosen column list per row.
+
+    Add a `--columns LIST` flag to every `conspectus table <ROWS>`
+    subcommand. `LIST` is comma-separated; each token is one of:
+    - `default` — the registered default set
+    - `all` — every registered column
+    - `+<name>` — add to the running set (defaults to the default set
+      when the first non-`+`/`-` token is absent)
+    - `-<name>` — remove from the running set
+    - `<name>` — explicit-list mode: the running set becomes exactly
+      this list (later `+`/`-` tokens still apply)
+    Unknown column names error with a list of the registered names
+    for the active row-type.
+
+    Mirror the flag in config: `[table.<rows>].columns = [...]` (a
+    fixed list, no `+`/`-` semantics in config — keep config simple
+    and predictable).
+  - Tests: unit tests for the registry, the parser (every token
+    shape, mixed `+`/`-`, explicit list, unknowns), and per-row-type
+    defaults; CLI integration tests for `--columns` overrides and the
+    `[table.sessions].columns` config knob; snapshot fixtures
+    asserting at least one non-default column selection per row-type.
+  - Manual checks: `conspectus table sessions --columns
+    id,label,cwd,mux`, `conspectus table sessions --columns
+    +lineage`, `conspectus table sessions --columns -mux-conf,-pr-conf`.
+  - Blockers: `H-TBL-006`.
+
+- [ ] `H-TBL-008` `conspectus table prs` row-type.
+  - Scope: rows = `ForgePrNode`. Register columns:
+    `id`, `pr` (`{owner}/{repo}#{n}`), `state`, `draft`, `branch`
+    (head-ref shortname), `repo` (resolved repo identifier),
+    `updated` (relative recency from `updated_epoch` when set),
+    `attached` (preferred resolved agent session(s) attached via the
+    branch the PR points at, comma-joined; renders `—` when none).
+    Default set: `id, pr, state, branch, attached`.
+    Surface row counts the same way as `sessions` (one PR per row,
+    ordered by `ForgePrNode::Ord`).
+  - Tests: snapshot tests against the existing forge fixtures (open
+    PR, multiple PRs, sibling-branch PR); CLI integration test
+    invoking `conspectus table prs` end-to-end.
+  - Manual checks: `cargo run -- table prs` from a repo with at
+    least one open GitHub PR.
+  - Blockers: `H-TBL-007`.
+
+- [ ] `H-TBL-009` `conspectus table forks` row-type.
+  - Scope: rows = `ForkNode`. Register columns:
+    `id`, `fork` (`{provider}:{name}` or `{provider_source_key}` when
+    `name` is absent), `provider`, `scope`, `parent` (preferred
+    `parent_session` short id when present), `children` (number of
+    sessions whose `associated_with_fork` candidate resolves to this
+    fork; renders `—` when zero), `capabilities` (joined, may be
+    trimmed by the truncator).
+    Default set: `id, fork, provider, parent, children`.
+  - Tests: snapshot tests against the existing atelier-fork fixtures;
+    CLI integration test invoking `conspectus table forks` end-to-end.
+  - Manual checks: `cargo run -- table forks` from a workspace with
+    at least one atelier fork.
+  - Blockers: `H-TBL-007`.
+
+- [ ] `H-TBL-010` Expand the `sessions` column pool.
+  - Scope: register additional non-default columns on the `sessions`
+    row-type for users who want richer rows via `--columns`. Initial
+    additions: `branch` (preferred checked-out branch via
+    `worktree → branch`), `repo` (resolved repo identifier),
+    `worktree` (worktree root), `fork` (parent fork short label when
+    the session lives in a fork worktree),
+    `declared` (one of `—` / `declared` / `confirmed` / `overridden`
+    / `ignored` derived from the strongest declared candidate),
+    `activity` (relative recency — relies on H-OBS-006). Default set
+    is unchanged; this story only grows the pool reachable via
+    `--columns +<name>`.
+  - Tests: unit tests for each extractor against a representative
+    snapshot; one CLI integration test that adds two new columns via
+    `--columns +branch,+repo` and asserts they render.
+  - Manual checks: `conspectus table sessions --columns +branch,+repo`.
+  - Blockers: `H-TBL-007`. `H-OBS-006` is a soft blocker for the
+    `activity` column specifically; ship the other columns first if
+    H-OBS-006 has not landed.
+
+- [ ] `H-TBL-011` Expand the `mux` column pool.
+  - Scope: register additional non-default columns on the `mux`
+    row-type: `activity` (relative recency from
+    `MuxSessionNode::activity_epoch`), `created` (relative age from
+    `created_epoch`), `panes` (deferred until the mux adapter records
+    pane counts), `attached-count` (number of resolved agent sessions
+    linked to this mux). Default set keeps `id, mux, cwd, agents`;
+    new columns are reachable via `--columns +activity` etc.
+  - Tests: unit tests per extractor; CLI integration test adding
+    `activity` via `--columns`.
+  - Manual checks: `conspectus table mux --columns +activity`.
+  - Blockers: `H-TBL-007`.
+
+- [ ] `H-TBL-012` `conspectus columns <ROWS>` discovery subcommand.
+  - Scope: add a discovery command that prints every registered
+    column for a row-type along with its one-line description and
+    a `(default)` marker. Useful when users do not remember exact
+    column names. Output is plain text; `--format json` could come
+    later but is not required by this story.
+  - Tests: CLI integration tests that list `sessions`, `mux`, `prs`,
+    `forks`, and `union` columns; verifies the `(default)` marker
+    appears on the default set.
+  - Manual checks: `cargo run -- columns sessions`,
+    `cargo run -- columns prs`.
+  - Blockers: `H-TBL-007`.
+
+Deferred under this cluster (no story yet, file when needed):
+
+- `conspectus table repos` / `conspectus table worktrees`. Both node
+  kinds already appear as related-context columns under
+  `H-TBL-010`. Promote to their own row-type only when a user
+  workflow requires a repos-first or worktrees-first table.
 
 ### Product Surface Gaps
 
