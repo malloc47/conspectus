@@ -8,12 +8,28 @@
 //! When no JSONL line carries a cwd, the encoded project directory name is
 //! decoded as a best-effort fallback. Malformed files yield no session.
 //!
-//! Per ADR 0018 the adapter also extracts intra-harness session lineage from
-//! the `parentUuid` on the first record that carries one. When the parent
-//! uuid matches the leaf message of another discovered transcript in the
-//! same project directory the link resolves to a concrete `AgentSession`
-//! target; otherwise the parent uuid is preserved as unresolved endpoint
-//! evidence so later discovery can reconcile it.
+//! Per ADR 0018 the adapter also extracts intra-harness session lineage. Two
+//! signals coexist:
+//!
+//! * **Fork** — claude-code's IDE "fork from here" affordance copies the
+//!   parent's records into the child file and tags each copied record with
+//!   `forkedFrom = { sessionId, messageUuid }`. The first uuid-bearing record
+//!   carries this envelope, so if it is present the parent session id is
+//!   structural — no leaf-uuid matching needed. Emitted as
+//!   `lineage_kind = "fork"`.
+//! * **parentUuid** — legacy/hypothetical path for compaction or resume
+//!   successors that would write a new session jsonl whose first uuid-bearing
+//!   record carries a cross-session `parentUuid`. claude-code 2.1.129 does
+//!   not currently produce this for `/compact` (in-place) or the IDE bare
+//!   fork (no envelope at all); see backlog H-LINEAGE-006. The code is
+//!   preserved for future releases and resolves by matching the parentUuid
+//!   against the leaf message of another discovered transcript in the same
+//!   project directory.
+//!
+//! When `forkedFrom` is present it takes precedence: it is the explicit,
+//! provider-recorded fork pointer and supersedes any speculative parentUuid
+//! match. Unresolved parent endpoints in either path are preserved as
+//! unresolved evidence so later discovery can reconcile them.
 
 use std::collections::HashMap;
 use std::fs;
@@ -117,6 +133,8 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                 },
                 parent_uuid: meta.parent_uuid,
                 cross_session_record_type: meta.cross_session_record_type,
+                forked_from_session_id: meta.forked_from_session_id,
+                forked_from_message_uuid: meta.forked_from_message_uuid,
                 leaf_uuid,
             });
         }
@@ -131,8 +149,28 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             })
             .collect();
 
+        let session_keys: HashMap<&str, ()> = entries
+            .iter()
+            .map(|entry| (entry.node.id.session_key.as_str(), ()))
+            .collect();
+
         for entry in &entries {
-            if let Some(parent_uuid) = entry.parent_uuid.as_deref() {
+            // forkedFrom is the explicit provider-recorded fork pointer and
+            // wins over any speculative parentUuid match. Skip self-fork rows
+            // defensively even though current claude-code does not produce
+            // them.
+            if let Some(parent_session_id) = entry.forked_from_session_id.as_deref() {
+                if !parent_session_id.is_empty() && parent_session_id != entry.node.id.session_key {
+                    let resolved = session_keys.contains_key(parent_session_id);
+                    candidate_links.push(build_fork_lineage_link(
+                        entry,
+                        parent_session_id,
+                        entry.forked_from_message_uuid.as_deref(),
+                        &state_scope,
+                        resolved,
+                    ));
+                }
+            } else if let Some(parent_uuid) = entry.parent_uuid.as_deref() {
                 candidate_links.push(build_lineage_link(
                     entry,
                     parent_uuid,
@@ -155,6 +193,8 @@ struct DiscoveredSession {
     node: AgentSessionNode,
     parent_uuid: Option<String>,
     cross_session_record_type: Option<String>,
+    forked_from_session_id: Option<String>,
+    forked_from_message_uuid: Option<String>,
     leaf_uuid: Option<String>,
 }
 
@@ -167,6 +207,13 @@ struct SessionHeader {
     /// `Some("summary")` signals a compaction successor; anything else (or
     /// `None`) is treated as a resume.
     cross_session_record_type: Option<String>,
+    /// `forkedFrom.sessionId` on the first uuid-bearing record, when present.
+    /// Identifies the parent session of an IDE fork.
+    forked_from_session_id: Option<String>,
+    /// `forkedFrom.messageUuid` on the first uuid-bearing record. For a fork
+    /// this is the uuid of the corresponding first message in the parent
+    /// session; it is preserved as evidence rather than used for resolution.
+    forked_from_message_uuid: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -183,6 +230,16 @@ struct ScannedLine {
     record_type: Option<String>,
     #[serde(default)]
     uuid: Option<String>,
+    #[serde(rename = "forkedFrom", default)]
+    forked_from: Option<ForkedFrom>,
+}
+
+#[derive(Deserialize)]
+struct ForkedFrom {
+    #[serde(rename = "sessionId", default)]
+    session_id: Option<String>,
+    #[serde(rename = "messageUuid", default)]
+    message_uuid: Option<String>,
 }
 
 fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<SessionHeader> {
@@ -195,6 +252,8 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
     let mut summary: Option<String> = None;
     let mut parent_uuid: Option<String> = None;
     let mut cross_session_record_type: Option<String> = None;
+    let mut forked_from_session_id: Option<String> = None;
+    let mut forked_from_message_uuid: Option<String> = None;
     let mut saw_any_record = false;
     let mut saw_first_real_record = false;
 
@@ -211,16 +270,20 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
         if summary.is_none() {
             summary = parsed.summary;
         }
-        // The cross-session parent pointer lives on the first uuid-bearing
+        // The cross-session lineage pointers live on the first uuid-bearing
         // record. Real claude-code transcripts open with envelopes such as
-        // `permission-mode` or `file-history-snapshot` that carry no uuid
-        // or parentUuid; the first user/assistant/summary message after
-        // those is what records the link back to a prior session. Every
-        // record after that points within the same session, so we capture
-        // exactly once on the first real record.
+        // `permission-mode` or `file-history-snapshot` that carry no uuid;
+        // the first user/assistant/summary message after those carries
+        // either `forkedFrom` (IDE fork) or `parentUuid` (hypothetical
+        // compaction/resume successor). Records after that point within the
+        // same session, so we capture exactly once on the first real record.
         if !saw_first_real_record && parsed.uuid.is_some() {
             parent_uuid = parsed.parent_uuid;
             cross_session_record_type = parsed.record_type;
+            if let Some(forked_from) = parsed.forked_from {
+                forked_from_session_id = forked_from.session_id;
+                forked_from_message_uuid = forked_from.message_uuid;
+            }
             saw_first_real_record = true;
         }
         if cwd.is_some() && summary.is_some() && saw_first_real_record {
@@ -245,6 +308,8 @@ fn read_session_header(path: &Path, fallback_cwd: Option<&str>) -> Option<Sessio
         summary,
         parent_uuid,
         cross_session_record_type,
+        forked_from_session_id,
+        forked_from_message_uuid,
     })
 }
 
@@ -289,6 +354,66 @@ fn read_session_leaf_uuid(path: &Path) -> Option<String> {
     }
 
     last_uuid
+}
+
+fn build_fork_lineage_link(
+    entry: &DiscoveredSession,
+    parent_session_id: &str,
+    forked_from_message_uuid: Option<&str>,
+    state_scope: &str,
+    resolved: bool,
+) -> GraphLink {
+    let mut fields: Metadata = Metadata::new();
+    fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
+    fields.insert("lineage_kind".to_string(), json!("fork"));
+    fields.insert("parent_session_id".to_string(), json!(parent_session_id));
+    if let Some(uuid) = forked_from_message_uuid {
+        fields.insert("forked_from_message_uuid".to_string(), json!(uuid));
+    }
+
+    let child_session_key = entry.node.id.session_key.as_str();
+    let source = NodeId::AgentSession(entry.node.id.clone());
+
+    let (target, link_id) = if resolved {
+        let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_session_id);
+        (
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent_id),
+            },
+            format!("claude-code:lineage:{child_session_key}:parent_session:{parent_session_id}"),
+        )
+    } else {
+        let evidence = UnresolvedEndpoint {
+            node_type: "agent_session".to_string(),
+            harness_key: Some(HARNESS_KEY.to_string()),
+            native_id: Some(parent_session_id.to_string()),
+            state_scope: Some(state_scope.to_string()),
+            path: None,
+            metadata: fields.clone(),
+        };
+        (
+            LinkEndpoint::Unresolved { evidence },
+            format!(
+                "claude-code:lineage:{child_session_key}:parent_session:unresolved:{parent_session_id}"
+            ),
+        )
+    };
+
+    GraphLink {
+        id: link_id,
+        source,
+        target,
+        relation: RelationKind::ParentSession,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: HARNESS_KEY.to_string(),
+            evidence: Some("claude-code transcript fork".to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
 }
 
 fn build_lineage_link(
@@ -789,6 +914,175 @@ mod tests {
             panic!("expected AgentSession target");
         };
         assert_eq!(parent_id.session_key, "parent");
+    }
+
+    #[test]
+    fn ide_fork_with_forked_from_resolves_to_parent_session() {
+        // claude-code 2.1.129's "fork with history" affordance copies the
+        // parent's records into the child file. Each copied record carries
+        // a `forkedFrom = {sessionId, messageUuid}` envelope. The first
+        // uuid-bearing record's `forkedFrom.sessionId` is the parent.
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent\",\"cwd\":\"/work/repo\",\"uuid\":\"u-parent-1\"}\n";
+        let child_body = "\
+            {\"type\":\"permission-mode\",\"sessionId\":\"child\",\"permissionMode\":\"default\"}\n\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-1\",\"parentUuid\":null,\"forkedFrom\":{\"sessionId\":\"parent\",\"messageUuid\":\"u-parent-1\"}}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("parent", parent_body), ("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(lineage.len(), 1, "one fork lineage candidate expected");
+        let link = lineage[0];
+        let target = match &link.target {
+            LinkEndpoint::Node { id } => id,
+            other => panic!("expected resolved parent endpoint, got {other:?}"),
+        };
+        let NodeId::AgentSession(parent_id) = target else {
+            panic!("expected AgentSession target");
+        };
+        assert_eq!(parent_id.session_key, "parent");
+        assert_eq!(parent_id.harness_key, HARNESS_KEY);
+
+        let NodeId::AgentSession(child_id) = &link.source else {
+            panic!("expected AgentSession source");
+        };
+        assert_eq!(child_id.session_key, "child");
+
+        assert_eq!(
+            link.source_metadata.fields.get("lineage_kind"),
+            Some(&json!("fork"))
+        );
+        assert_eq!(
+            link.source_metadata.fields.get("parent_session_id"),
+            Some(&json!("parent"))
+        );
+        assert_eq!(
+            link.source_metadata.fields.get("forked_from_message_uuid"),
+            Some(&json!("u-parent-1"))
+        );
+    }
+
+    #[test]
+    fn ide_fork_with_missing_parent_session_is_unresolved() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let child_body = "\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-1\",\"forkedFrom\":{\"sessionId\":\"ghost-parent\",\"messageUuid\":\"u-ghost-1\"}}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage = lineage_links(&fragment);
+
+        assert_eq!(lineage.len(), 1);
+        let evidence = match &lineage[0].target {
+            LinkEndpoint::Unresolved { evidence } => evidence,
+            other => panic!("expected unresolved endpoint, got {other:?}"),
+        };
+        assert_eq!(evidence.node_type, "agent_session");
+        assert_eq!(evidence.harness_key.as_deref(), Some(HARNESS_KEY));
+        assert_eq!(evidence.native_id.as_deref(), Some("ghost-parent"));
+        assert_eq!(evidence.metadata.get("lineage_kind"), Some(&json!("fork")));
+        assert_eq!(
+            evidence.metadata.get("parent_session_id"),
+            Some(&json!("ghost-parent"))
+        );
+    }
+
+    #[test]
+    fn fork_variant_without_forked_from_emits_no_lineage() {
+        // A second observed claude-code fork variant ("fresh session from
+        // here", 926c6991-… on the 2026-05-17 validation) creates a child
+        // jsonl with no `forkedFrom` envelope and no cross-session
+        // `parentUuid` either. With no on-disk signal we emit no lineage
+        // candidate; side-channel inference is tracked in H-LINEAGE-006.
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent\",\"cwd\":\"/work/repo\",\"uuid\":\"u-parent-1\"}\n";
+        let child_body = "\
+            {\"type\":\"permission-mode\",\"sessionId\":\"child\",\"permissionMode\":\"default\"}\n\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-1\",\"parentUuid\":null}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("parent", parent_body), ("child", child_body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+
+        assert!(
+            lineage_links(&fragment).is_empty(),
+            "child without forkedFrom or parentUuid must not emit lineage"
+        );
+        let session_count = fragment
+            .nodes
+            .iter()
+            .filter(|n| matches!(n, GraphNode::AgentSession(_)))
+            .count();
+        assert_eq!(session_count, 2, "both sessions still surface as nodes");
+    }
+
+    #[test]
+    fn forked_from_takes_precedence_over_parent_uuid() {
+        // Defensive: if a future release happens to set both forkedFrom
+        // (structural) and parentUuid (speculative leaf match), the
+        // structural pointer wins so we never emit two parent_session
+        // candidates that disagree.
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let parent_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent-fork\",\"cwd\":\"/work/repo\",\"uuid\":\"u-pf-1\"}\n";
+        // u-decoy-leaf names a hypothetical other parent that the speculative
+        // parentUuid heuristic would have matched; the fork pointer must
+        // override.
+        let decoy_body = "\
+            {\"type\":\"user\",\"sessionId\":\"parent-decoy\",\"cwd\":\"/work/repo\",\"uuid\":\"u-decoy-leaf\"}\n";
+        let child_body = "\
+            {\"type\":\"user\",\"sessionId\":\"child\",\"cwd\":\"/work/repo\",\"uuid\":\"u-child-1\",\"parentUuid\":\"u-decoy-leaf\",\"forkedFrom\":{\"sessionId\":\"parent-fork\",\"messageUuid\":\"u-pf-1\"}}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[
+                ("parent-fork", parent_body),
+                ("parent-decoy", decoy_body),
+                ("child", child_body),
+            ],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+        let lineage: Vec<_> = lineage_links(&fragment)
+            .into_iter()
+            .filter(|l| matches!(&l.source, NodeId::AgentSession(id) if id.session_key == "child"))
+            .collect();
+
+        assert_eq!(
+            lineage.len(),
+            1,
+            "exactly one lineage candidate from the child"
+        );
+        let target = match &lineage[0].target {
+            LinkEndpoint::Node { id } => id,
+            other => panic!("expected resolved target, got {other:?}"),
+        };
+        let NodeId::AgentSession(parent_id) = target else {
+            panic!("expected AgentSession target");
+        };
+        assert_eq!(parent_id.session_key, "parent-fork");
+        assert_eq!(
+            lineage[0].source_metadata.fields.get("lineage_kind"),
+            Some(&json!("fork"))
+        );
     }
 
     #[test]

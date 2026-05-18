@@ -1769,9 +1769,28 @@ shape.
     disappear from every default render, which is more surprising than
     showing all rows. JSON output is already exhaustive. If a future
     consumer needs a compressed view, add `--hide-superseded` then.
-- [ ] `H-LINEAGE-006` Retarget claude-code lineage extraction — fork
+- [~] `H-LINEAGE-006` Retarget claude-code lineage extraction — fork
   uses a `forkedFrom` envelope object, not `parentUuid`; `/compact`
   is in-place.
+  - Progress: scope item (1) and (5) landed. The claude-code adapter
+    now reads `forkedFrom` from the first uuid-bearing record. When
+    `forkedFrom.sessionId` matches another discovered session in the
+    same project directory the link resolves to a concrete
+    `AgentSession` target with `lineage_kind = "fork"`; otherwise it
+    is preserved as `UnresolvedEndpoint` evidence keyed by parent
+    session id. `forked_from_message_uuid` is carried in source
+    metadata for future point-in-time use. `forkedFrom` wins over
+    `parentUuid` when both are present. Regression tests cover the
+    resolved-parent, unresolved-parent, no-`forkedFrom` (bare fork),
+    and forkedFrom-vs-parentUuid precedence cases. Validated on live
+    state 2026-05-17: `332aa87b-…` (fork-with-history of
+    `81f4a0ef-…`) now renders `LINEAGE = …50b40572`; `926c6991-…`
+    (bare fork variant with no `forkedFrom`) still shows `—`, as
+    expected.
+  - Remaining: (2) decide how to surface the bare-fork variant
+    (side-channel inference vs leave as `—`), (3) design in-place
+    compaction lineage from `type: "summary"` records, and (4) the
+    `Approximate` → `Native` capability bump for the fork case.
   - Context: H-LINEAGE-002 assumed compaction (or a similar successor
     operation) produces a new session jsonl whose first uuid-bearing
     record's `parentUuid` points at the predecessor's leaf uuid.
