@@ -1474,12 +1474,21 @@ area is already being touched. Group prefixes:
     and fork lineage. This is the workflow `atelier status` used to cover.
   - Tests: snapshot tests for empty, sparse, and dense fixtures.
   - Blockers: none.
-- [ ] `H-OBS-002` Add `conspectus node show <id>`.
-  - Scope: a read-only command that prints every candidate link, resolved
-    relationship, source metadata, and diagnostic touching a given node
-    id. Useful for users debugging "why is this session orphaned?".
-  - Tests: CLI integration tests against the existing fixtures.
-  - Blockers: none.
+- [x] `H-OBS-002` Add `conspectus node show <id>`.
+  - Outcome: new `src/output/node_show.rs` module exposes
+    `resolve_node_id` (with `NodeResolveError::{NotFound, Ambiguous}`)
+    and `render_node_show`. The `conspectus node show <id>` subcommand
+    accepts the short content-addressed prefix from the session table
+    (H-TBL-005), the full `NodeId` `Display` form, or the harness/mux
+    label, and prints the node plus every outgoing/incoming candidate
+    link (with source-metadata adapter, evidence, and fields), every
+    resolved relationship touching the node, and every diagnostic
+    referencing it. Unit tests cover each accepted form, ambiguous
+    prefixes, and the rendered output shape; four CLI integration
+    tests exercise the full discovery → resolve → render path
+    including the round-trip from `session --wide` to `node show`.
+    `docs/operations.md` documents the new command and the accepted
+    `<id>` forms.
 - [ ] `H-OBS-003` Add filter flags for the graph and session commands.
   - Scope: `--only-ambiguous`, `--only-unresolved`, `--only-orphan`, and a
     `--kind {agent_session|mux|repo|fork|pr}` filter. The graph today
@@ -1581,20 +1590,15 @@ projection layer.
     and width-aware truncation, plus a CLI integration test for
     `--layout card`.
 
-- [ ] `H-TBL-005` Resolve table row identifiers in `conspectus node show`.
-  - Scope: teach the node-show command (introduced by `H-OBS-002`) to
-    accept any of: the short content-addressed row id from `H-TBL-002`,
-    the full `NodeId` from JSON output, and the existing
-    `harness:short-id` label currently shown in the agent projection's
-    AGENT cell. Prefix matching on the short id is acceptable as long as
-    the prefix is unambiguous within the active snapshot; ambiguous
-    prefixes should error with the matching candidates listed. Document
-    the accepted forms in `docs/operations.md`.
-  - Tests: CLI integration tests for each accepted form, prefix
-    matching, and an ambiguous-prefix error case.
-  - Manual checks: copy a short id from a `session` table run and feed
-    it to `node show`; repeat with the full `NodeId` from JSON.
-  - Blockers: `H-OBS-002`, `H-TBL-002`.
+- [x] `H-TBL-005` Resolve table row identifiers in `conspectus node show`.
+  - Outcome: implemented together with H-OBS-002. The `node show <id>`
+    resolver accepts (a) the short content-addressed prefix from the
+    session table's `ID` column, prefix-matched (floor 4 hex chars),
+    (b) the full `NodeId` `Display` form, and (c) the harness/mux
+    label when it uniquely identifies one node. Ambiguous prefixes
+    error with the matching candidates listed. `docs/operations.md`
+    documents the accepted forms; CLI integration tests round-trip a
+    short id from `conspectus session --wide` through `node show`.
 
 ### Product Surface Gaps
 

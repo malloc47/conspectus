@@ -539,6 +539,153 @@ fn session_piped_output_defaults_to_wide() {
 }
 
 #[test]
+fn node_show_resolves_full_display_form() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    fs::write(
+        codex_state.join("rollout-node-show.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"node-show-test\",\"cwd\":\"/work/show\"}}\n",
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    // First, locate the discovered session's full id via `graph --format json`.
+    let graph_assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let graph = String::from_utf8(graph_assert.get_output().stdout.clone()).expect("utf8 stdout");
+    let json: serde_json::Value = serde_json::from_str(&graph).expect("valid json");
+    let agent_session = json["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .find(|n| n["type"] == "agent_session")
+        .expect("agent session node");
+    let state_scope = agent_session["id"]["state_scope"].as_str().unwrap();
+    let session_key = agent_session["id"]["session_key"].as_str().unwrap();
+    let display = format!("agent_session:codex:{state_scope}:{session_key}");
+
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("node")
+        .arg("show")
+        .arg(&display)
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(output.contains("kind: agent_session"), "got:\n{output}");
+    assert!(
+        output.contains("session_key: node-show-test"),
+        "got:\n{output}"
+    );
+    assert!(output.contains("cwd:"), "got:\n{output}");
+}
+
+#[test]
+fn node_show_resolves_harness_label() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    fs::write(
+        codex_state.join("rollout-label.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"label-test\",\"cwd\":\"/work/label\"}}\n",
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("node")
+        .arg("show")
+        .arg("codex:label-test")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(output.contains("kind: agent_session"), "got:\n{output}");
+    assert!(output.contains("session_key: label-test"), "got:\n{output}");
+}
+
+#[test]
+fn node_show_resolves_short_id_from_session_table() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    fs::write(
+        codex_state.join("rollout-short.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"short-id-test\",\"cwd\":\"/work/short\"}}\n",
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    // Pull the short id off the session table.
+    let session_assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("session")
+        .arg("--wide")
+        .assert()
+        .success();
+    let session_out =
+        String::from_utf8(session_assert.get_output().stdout.clone()).expect("utf8 stdout");
+    let body_row = session_out
+        .lines()
+        .skip(2)
+        .find(|line| line.contains("codex:short-id-test"))
+        .expect("body row with session");
+    let short_id: String = body_row
+        .chars()
+        .take_while(|c| !c.is_whitespace())
+        .collect();
+    assert!(
+        !short_id.is_empty() && short_id.chars().all(|c| c.is_ascii_hexdigit()),
+        "short id from session table was {short_id:?}",
+    );
+
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("node")
+        .arg("show")
+        .arg(&short_id)
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(output.contains("kind: agent_session"), "got:\n{output}");
+    assert!(
+        output.contains("session_key: short-id-test"),
+        "got:\n{output}",
+    );
+}
+
+#[test]
+fn node_show_errors_on_unknown_id() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+
+    isolated_cmd(home.path())
+        .current_dir(scan_root.path())
+        .arg("node")
+        .arg("show")
+        .arg("does-not-exist")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no node matches"));
+}
+
+#[test]
 fn session_layout_card_emits_keyed_lines() {
     let home = tempfile::TempDir::new().expect("home temp");
     let scan_root = tempfile::TempDir::new().expect("scan temp");

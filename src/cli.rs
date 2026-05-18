@@ -28,6 +28,7 @@ impl Cli {
             Command::Graph(args) => args.run(),
             Command::Session(args) => args.run(),
             Command::Declared(args) => args.run(),
+            Command::Node(args) => args.run(),
         }
     }
 }
@@ -40,6 +41,64 @@ enum Command {
     Session(SessionArgs),
     /// Inspect or author declared graph links.
     Declared(Box<DeclaredArgs>),
+    /// Inspect a single node and its surrounding links.
+    Node(NodeArgs),
+}
+
+#[derive(Debug, Args)]
+struct NodeArgs {
+    #[command(subcommand)]
+    command: NodeCommand,
+}
+
+impl NodeArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            NodeCommand::Show(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum NodeCommand {
+    /// Print a single node, its candidate links, resolved relationships,
+    /// source metadata, and any diagnostics touching it.
+    Show(NodeShowArgs),
+}
+
+#[derive(Debug, Args)]
+struct NodeShowArgs {
+    /// Node id. Accepts the short content-addressed prefix from the
+    /// session table's `ID` column, the full `NodeId` display form
+    /// (e.g. `agent_session:codex:/state:session-x`), or the harness/mux
+    /// label (e.g. `codex:session-x`, `tmux:editor`).
+    id: String,
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl NodeShowArgs {
+    fn run(self) -> Result<()> {
+        let cwd = std::env::current_dir()?;
+        let snapshot = if self.scan_roots.is_empty() {
+            conspectus::discovery::discover_local_at_roots([cwd])?
+        } else {
+            conspectus::discovery::discover_local_at_roots(self.scan_roots)?
+        };
+        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        let id = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+            Ok(id) => id,
+            Err(err) => {
+                eprint!("conspectus: {err}");
+                std::process::exit(2);
+            }
+        };
+        print!(
+            "{}",
+            conspectus::output::node_show::render_node_show(&snapshot, &id)
+        );
+        Ok(())
+    }
 }
 
 #[derive(Debug, Args)]

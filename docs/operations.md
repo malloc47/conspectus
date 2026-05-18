@@ -71,13 +71,40 @@ stderr but do not abort the run.
 
 ```sh
 conspectus graph --format json [--scan-root PATH]...
-conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
+conspectus session [--projection {agent|mux|union}] [--layout {columnar|card}]
+                   [--wide | --width N] [--scan-root PATH]...
+conspectus node show <id> [--scan-root PATH]...
+conspectus declared ...
 ```
 
 `session` without `--projection` uses the value loaded from
-`.conspectus.toml` / user config (defaulting to `agent`). Both
-commands run from the current working directory by default; passing
-one or more `--scan-root` flags overrides that with explicit roots.
+`.conspectus.toml` / user config (defaulting to `agent`). Width
+detection: when stdout is a TTY the table truncates to the detected
+terminal width; pipes default to wide so `conspectus session | grep`
+remains useful. `--wide` forces untruncated output even on a TTY, and
+`--width N` pins an exact width for reproducible captures. `--layout
+card` renders one column per line per row with blank-line separators,
+useful when the columnar form would truncate (long `CWD`, long PR
+identifier).
+
+`node show <id>` accepts any of:
+
+- The short content-addressed prefix from the session table's `ID`
+  column. Any prefix length ≥ 4 hex chars is accepted; an ambiguous
+  prefix errors with the matching candidates listed.
+- The full `NodeId` display form, e.g.
+  `agent_session:codex:/state:session-x` or `mux_session:tmux:editor`.
+- The harness/mux label that appears in the session table's `AGENT`
+  or `MUX` column, e.g. `codex:session-x` or `tmux:editor` — when the
+  label uniquely identifies one node.
+
+The command prints the node itself plus every candidate link (outgoing
+and incoming), resolved relationship, source metadata, and diagnostic
+that touches the resolved node.
+
+All commands run from the current working directory by default;
+passing one or more `--scan-root` flags overrides that with explicit
+roots.
 
 ## Caches
 
