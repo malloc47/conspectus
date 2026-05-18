@@ -78,15 +78,15 @@ contents are ignored.
 
 ```sh
 conspectus graph --format json [--scan-root PATH]...
-conspectus table {sessions|mux|union} [--layout {columnar|card}]
-                                       [--wide | --width N]
-                                       [--columns LIST]
-                                       [--scan-root PATH]...
+conspectus table {sessions|mux|union|prs} [--layout {columnar|card}]
+                                           [--wide | --width N]
+                                           [--columns LIST]
+                                           [--scan-root PATH]...
 conspectus node show <id> [--scan-root PATH]...
 conspectus declared ...
 ```
 
-The row-type (`sessions`, `mux`, `union`) is a required positional;
+The row-type (`sessions`, `mux`, `union`, `prs`) is a required positional;
 there is no implicit default. Width detection: when stdout is a TTY
 the table truncates to the detected terminal width; pipes default to
 wide so `conspectus table sessions | grep` remains useful. `--wide`

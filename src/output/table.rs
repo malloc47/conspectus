@@ -181,6 +181,7 @@ pub fn render_with(
         Projection::Agent => build_agent_rows(&view, &columns),
         Projection::Mux => build_mux_rows(&view, &columns),
         Projection::Union => build_union_rows(&view, &columns),
+        Projection::Pr => build_pr_rows(&view, &columns),
     };
     render_rows(rows, options)
 }
@@ -456,12 +457,64 @@ const UNION_COLUMNS: &[ColumnSpec] = &[
     },
 ];
 
+const PRS_COLUMNS: &[ColumnSpec] = &[
+    ColumnSpec {
+        key: "id",
+        header: "ID",
+        description: "Short content-addressed row identifier.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "pr",
+        header: "PR",
+        description: "Forge identifier (`{owner}/{repo}#{number}`) with state/draft suffix.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "state",
+        header: "STATE",
+        description: "Forge-reported PR state (open, closed, merged, …).",
+        default: true,
+    },
+    ColumnSpec {
+        key: "draft",
+        header: "DRAFT",
+        description: "`draft` when the PR is a draft; `—` otherwise.",
+        default: false,
+    },
+    ColumnSpec {
+        key: "branch",
+        header: "BRANCH",
+        description: "Head branch (refs/heads/ prefix stripped).",
+        default: true,
+    },
+    ColumnSpec {
+        key: "repo",
+        header: "REPO",
+        description: "Forge repository slug (`{owner}/{repo}`).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "updated",
+        header: "UPDATED",
+        description: "Relative recency from `updated_epoch` (e.g. `2h`, `3d`).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "attached",
+        header: "ATTACHED",
+        description: "Agent sessions whose worktree has the PR's branch checked out.",
+        default: true,
+    },
+];
+
 /// Registry slice for `projection`.
 pub fn columns_for(projection: Projection) -> &'static [ColumnSpec] {
     match projection {
         Projection::Agent => SESSIONS_COLUMNS,
         Projection::Mux => MUX_COLUMNS,
         Projection::Union => UNION_COLUMNS,
+        Projection::Pr => PRS_COLUMNS,
     }
 }
 
@@ -479,6 +532,7 @@ fn projection_row_type(projection: Projection) -> &'static str {
         Projection::Agent => "sessions",
         Projection::Mux => "mux",
         Projection::Union => "union",
+        Projection::Pr => "prs",
     }
 }
 
@@ -774,6 +828,162 @@ fn forge_pr_label(pr: &ForgePrNode) -> String {
     let state = pr.state.as_deref().unwrap_or("?");
     let draft = if pr.is_draft { " draft" } else { "" };
     format!("{}/{}#{} ({state}{draft})", pr.owner, pr.repo, pr.number)
+}
+
+struct PrRowCtx<'view, 'snap> {
+    view: &'view SnapshotView<'snap>,
+    pr_id: &'view NodeId,
+    pr: &'view ForgePrNode,
+    short_id: &'view str,
+}
+
+fn pr_cell(key: &str, ctx: &PrRowCtx<'_, '_>) -> String {
+    match key {
+        "id" => ctx.short_id.to_string(),
+        "pr" => forge_pr_label(ctx.pr),
+        "state" => ctx.pr.state.clone().unwrap_or_else(|| "—".to_string()),
+        "draft" => if ctx.pr.is_draft { "draft" } else { "—" }.to_string(),
+        "branch" => pr_branch_label(ctx.view, ctx.pr_id).unwrap_or_else(|| "—".to_string()),
+        "repo" => format!("{}/{}", ctx.pr.owner, ctx.pr.repo),
+        "updated" => ctx
+            .pr
+            .updated_epoch
+            .map(|epoch| format_relative_age(epoch, current_epoch()))
+            .unwrap_or_else(|| "—".to_string()),
+        "attached" => {
+            let sessions = pr_attached_session_labels(ctx.view, ctx.pr_id);
+            if sessions.is_empty() {
+                "—".to_string()
+            } else {
+                sessions.join(", ")
+            }
+        }
+        _ => "—".to_string(),
+    }
+}
+
+/// Look up the preferred branch this PR points at.
+fn pr_preferred_branch_id(
+    view: &SnapshotView<'_>,
+    pr_id: &NodeId,
+) -> Option<crate::model::BranchId> {
+    let links = view
+        .by_source_relation
+        .get(&(pr_id.clone(), RelationKind::BranchHasForgePr))?;
+    let preferred = pick_preferred(links)?;
+    match preferred.target_node_id()? {
+        NodeId::Branch(branch_id) => Some(branch_id.clone()),
+        _ => None,
+    }
+}
+
+fn pr_branch_label(view: &SnapshotView<'_>, pr_id: &NodeId) -> Option<String> {
+    let branch = pr_preferred_branch_id(view, pr_id)?;
+    Some(strip_branch_prefix(&branch.refname).to_string())
+}
+
+fn strip_branch_prefix(refname: &str) -> &str {
+    refname.strip_prefix("refs/heads/").unwrap_or(refname)
+}
+
+/// Find agent-session labels whose worktree has this PR's branch
+/// checked out. Walks `CheckedOutBranch` candidate links to locate
+/// worktrees, then matches `AgentSession.cwd == worktree.root`.
+fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<String> {
+    let Some(branch_id) = pr_preferred_branch_id(view, pr_id) else {
+        return Vec::new();
+    };
+    let branch_node_id = NodeId::Branch(branch_id);
+
+    // Worktrees whose CheckedOutBranch link points at this branch.
+    let worktree_roots: Vec<&str> = view
+        .by_source_relation
+        .iter()
+        .flat_map(|((_, relation), links)| {
+            if *relation != RelationKind::CheckedOutBranch {
+                return Vec::new();
+            }
+            links
+                .iter()
+                .filter(|link| {
+                    matches!(
+                        &link.target,
+                        LinkEndpoint::Node { id } if id == &branch_node_id
+                    )
+                })
+                .filter_map(|link| match &link.source {
+                    NodeId::Worktree(w) => Some(w.root.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let mut labels: Vec<String> = Vec::new();
+    for session in view.agent_sessions.values() {
+        let Some(cwd) = session.cwd.as_deref() else {
+            continue;
+        };
+        if worktree_roots.contains(&cwd) {
+            labels.push(agent_session_label(session));
+        }
+    }
+    labels
+}
+
+/// Format `then_epoch` relative to `now_epoch` as a compact recency
+/// string (`12s`, `5m`, `2h`, `3d`, `4w`). Future-dated values render
+/// as `now`.
+fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
+    let delta = now_epoch.saturating_sub(then_epoch);
+    if delta < 0 {
+        return "now".to_string();
+    }
+    let secs = delta as u64;
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h", secs / 3600)
+    } else if secs < 7 * 86_400 {
+        format!("{}d", secs / 86_400)
+    } else {
+        format!("{}w", secs / (7 * 86_400))
+    }
+}
+
+fn current_epoch() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn build_pr_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
+    let body_full_ids: Vec<String> = view.forge_prs.keys().map(node_short_id).collect();
+    let id_len = unique_prefix_len(&body_full_ids);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    rows.push(
+        columns
+            .iter()
+            .map(|key| header_label(PRS_COLUMNS, key))
+            .collect(),
+    );
+
+    for ((pr_id, pr), full_short) in view.forge_prs.iter().zip(body_full_ids.iter()) {
+        let short_id = &full_short[..id_len];
+        let ctx = PrRowCtx {
+            view,
+            pr_id,
+            pr,
+            short_id,
+        };
+        rows.push(columns.iter().map(|key| pr_cell(key, &ctx)).collect());
+    }
+
+    rows
 }
 
 fn build_agent_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
@@ -1763,6 +1973,166 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].starts_with("ID:"));
         assert!(lines[1].starts_with("AGENT:"));
+    }
+
+    #[test]
+    fn format_relative_age_picks_largest_unit_under_threshold() {
+        assert_eq!(format_relative_age(100, 100), "0s");
+        assert_eq!(format_relative_age(100, 159), "59s");
+        assert_eq!(format_relative_age(100, 160), "1m");
+        assert_eq!(format_relative_age(100, 100 + 3600), "1h");
+        assert_eq!(format_relative_age(100, 100 + 86_400), "1d");
+        assert_eq!(format_relative_age(100, 100 + 7 * 86_400), "1w");
+    }
+
+    #[test]
+    fn format_relative_age_future_value_renders_as_now() {
+        assert_eq!(format_relative_age(2_000_000_000, 1_000_000_000), "now");
+    }
+
+    #[test]
+    fn strip_branch_prefix_drops_refs_heads_only() {
+        assert_eq!(strip_branch_prefix("refs/heads/feature"), "feature");
+        assert_eq!(strip_branch_prefix("main"), "main");
+        assert_eq!(strip_branch_prefix("refs/tags/v1"), "refs/tags/v1");
+    }
+
+    fn forge_pr(owner: &str, repo: &str, number: u64, state: &str, draft: bool) -> GraphNode {
+        GraphNode::ForgePr(ForgePrNode {
+            id: ForgePrId::new("github", "github.com", owner, repo, number),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            number,
+            state: Some(state.to_string()),
+            url: None,
+            updated_epoch: None,
+            is_draft: draft,
+        })
+    }
+
+    fn branch_has_pr_link(
+        id: &str,
+        pr: ForgePrId,
+        branch: BranchId,
+        provenance: Provenance,
+    ) -> GraphLink {
+        GraphLink {
+            id: id.to_string(),
+            source: NodeId::ForgePr(pr),
+            target: LinkEndpoint::Node {
+                id: NodeId::Branch(branch),
+            },
+            relation: RelationKind::BranchHasForgePr,
+            provenance,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn prs_projection_default_renders_id_pr_state_branch_attached() {
+        let pr_id = ForgePrId::new("github", "github.com", "octo", "repo", 7);
+        let branch_id = BranchId::new(
+            RepoId::new("/workspace/repo/.git"),
+            "refs/heads/feature".to_string(),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![forge_pr("octo", "repo", 7, "open", false)],
+            candidate_links: vec![branch_has_pr_link(
+                "pr-link",
+                pr_id,
+                branch_id,
+                Provenance::StrongDiscovered,
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Pr);
+        let header_tokens: Vec<&str> = rendered
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(
+            header_tokens,
+            vec!["ID", "PR", "STATE", "BRANCH", "ATTACHED"]
+        );
+
+        let body_line = rendered.lines().nth(2).expect("body row");
+        assert!(body_line.contains("octo/repo#7"), "got:\n{body_line}");
+        assert!(body_line.contains("open"), "got:\n{body_line}");
+        assert!(body_line.contains("feature"), "got:\n{body_line}");
+    }
+
+    #[test]
+    fn prs_projection_attached_shows_agent_with_matching_cwd() {
+        // PR -> branch (BranchHasForgePr) -> worktree (CheckedOutBranch
+        // reversed) -> agent_session with matching cwd. Renders the
+        // agent label in the ATTACHED column.
+        use crate::model::{WorktreeId, WorktreeNode};
+
+        let repo_id = RepoId::new("/workspace/repo/.git");
+        let pr_id = ForgePrId::new("github", "github.com", "octo", "repo", 7);
+        let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature".to_string());
+        let worktree_id = WorktreeId::new(repo_id.clone(), "/workspace/repo");
+
+        let worktree_node = GraphNode::Worktree(WorktreeNode {
+            id: worktree_id.clone(),
+            root: "/workspace/repo".to_string(),
+            git_dir: None,
+            current_branch: None,
+        });
+        let agent_node = agent_session("codex", "alpha", Some("/workspace/repo"));
+        let pr_node = forge_pr("octo", "repo", 7, "open", false);
+
+        let mut pr_to_branch = branch_has_pr_link(
+            "pr-link",
+            pr_id.clone(),
+            branch_id.clone(),
+            Provenance::StrongDiscovered,
+        );
+        pr_to_branch.confidence = Confidence::High;
+
+        let worktree_to_branch = GraphLink {
+            id: "wt-branch".to_string(),
+            source: NodeId::Worktree(worktree_id),
+            target: LinkEndpoint::Node {
+                id: NodeId::Branch(branch_id),
+            },
+            relation: RelationKind::CheckedOutBranch,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        };
+
+        let snapshot = GraphSnapshot {
+            nodes: vec![pr_node, worktree_node, agent_node],
+            candidate_links: vec![pr_to_branch, worktree_to_branch],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Pr);
+        assert!(
+            rendered.contains("codex:alpha"),
+            "attached column should list codex:alpha:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn prs_projection_empty_snapshot_renders_header_only() {
+        let snapshot = GraphSnapshot::empty();
+        let rendered = render(&snapshot, Projection::Pr);
+        let lines: Vec<&str> = rendered.lines().collect();
+        // Header + dash separator only, no body rows.
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("ID"));
     }
 
     #[test]

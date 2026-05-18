@@ -36,6 +36,7 @@ pub struct TableConfig {
     pub sessions: TableRowConfig,
     pub mux: TableRowConfig,
     pub union: TableRowConfig,
+    pub prs: TableRowConfig,
 }
 
 /// Settings for one row-type.
@@ -56,6 +57,7 @@ pub enum Projection {
     Agent,
     Mux,
     Union,
+    Pr,
 }
 
 impl Projection {
@@ -64,6 +66,7 @@ impl Projection {
             Self::Agent => "agent",
             Self::Mux => "mux",
             Self::Union => "union",
+            Self::Pr => "prs",
         }
     }
 
@@ -72,8 +75,9 @@ impl Projection {
             "agent" | "sessions" => Ok(Self::Agent),
             "mux" => Ok(Self::Mux),
             "union" => Ok(Self::Union),
+            "pr" | "prs" => Ok(Self::Pr),
             other => Err(anyhow!(
-                "invalid table row-type `{other}`; expected one of sessions, mux, union"
+                "invalid table row-type `{other}`; expected one of sessions, mux, union, prs"
             )),
         }
     }
@@ -100,6 +104,8 @@ struct TableFile {
     mux: Option<TableRowFile>,
     #[serde(default)]
     union: Option<TableRowFile>,
+    #[serde(default)]
+    prs: Option<TableRowFile>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -258,6 +264,7 @@ fn merge_table(config: &mut TableConfig, file: TableFile) {
     merge_table_row(&mut config.sessions, file.sessions);
     merge_table_row(&mut config.mux, file.mux);
     merge_table_row(&mut config.union, file.union);
+    merge_table_row(&mut config.prs, file.prs);
 }
 
 fn merge_table_row(config: &mut TableRowConfig, file: Option<TableRowFile>) {
@@ -421,12 +428,19 @@ mod tests {
 
     #[test]
     fn projection_round_trips_through_parse_and_as_str() {
-        for variant in [Projection::Agent, Projection::Mux, Projection::Union] {
+        for variant in [
+            Projection::Agent,
+            Projection::Mux,
+            Projection::Union,
+            Projection::Pr,
+        ] {
             assert_eq!(Projection::parse(variant.as_str()).unwrap(), variant);
         }
         // The `sessions` alias resolves to the same projection as the
         // historical `agent` token; both back the same row-type.
         assert_eq!(Projection::parse("sessions").unwrap(), Projection::Agent);
+        // `pr` (singular) and `prs` (plural) both reach the Pr variant.
+        assert_eq!(Projection::parse("pr").unwrap(), Projection::Pr);
         assert!(Projection::parse("garbage").is_err());
     }
 

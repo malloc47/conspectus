@@ -804,6 +804,48 @@ fn table_rejects_unknown_row_type() {
 }
 
 #[test]
+fn table_prs_renders_pr_projection_header() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("prs")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(
+        header_tokens,
+        vec!["ID", "PR", "STATE", "BRANCH", "ATTACHED"],
+    );
+}
+
+#[test]
+fn table_prs_supports_columns_flag_with_optional_columns() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("prs")
+        .arg("--columns")
+        .arg("id,pr,state,draft,branch,repo")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(
+        header_tokens,
+        vec!["ID", "PR", "STATE", "DRAFT", "BRANCH", "REPO"],
+    );
+}
+
+#[test]
 fn table_sessions_columns_flag_overrides_default_set() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

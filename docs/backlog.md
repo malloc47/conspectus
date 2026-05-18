@@ -1659,22 +1659,26 @@ fork lineage, and worktree apply to any row whose node touches them.
     the prior hard-coded headers and extractors. `docs/operations.md`
     documents the flag and config knob.
 
-- [ ] `H-TBL-008` `conspectus table prs` row-type.
-  - Scope: rows = `ForgePrNode`. Register columns:
-    `id`, `pr` (`{owner}/{repo}#{n}`), `state`, `draft`, `branch`
-    (head-ref shortname), `repo` (resolved repo identifier),
-    `updated` (relative recency from `updated_epoch` when set),
-    `attached` (preferred resolved agent session(s) attached via the
-    branch the PR points at, comma-joined; renders `—` when none).
-    Default set: `id, pr, state, branch, attached`.
-    Surface row counts the same way as `sessions` (one PR per row,
-    ordered by `ForgePrNode::Ord`).
-  - Tests: snapshot tests against the existing forge fixtures (open
-    PR, multiple PRs, sibling-branch PR); CLI integration test
-    invoking `conspectus table prs` end-to-end.
-  - Manual checks: `cargo run -- table prs` from a repo with at
-    least one open GitHub PR.
-  - Blockers: `H-TBL-007`.
+- [x] `H-TBL-008` `conspectus table prs` row-type.
+  - Outcome: `Projection::Pr` joins the row-type enum; the registry
+    `PRS_COLUMNS` declares `id`, `pr`, `state`, `draft`, `branch`,
+    `repo`, `updated`, and `attached`, with the default set
+    `id, pr, state, branch, attached`. `PrRowCtx` + `pr_cell` extract
+    cells: the `branch` column walks `BranchHasForgePr` and strips
+    the `refs/heads/` prefix; `attached` finds worktrees via
+    `CheckedOutBranch` candidates and joins agent sessions whose
+    `cwd` matches the worktree root; `updated` formats
+    `updated_epoch` via the new `format_relative_age` helper
+    (`12s`, `5m`, `2h`, `3d`, `4w`). Config grew `[table.prs]`. CLI
+    subcommand `conspectus table prs` honors the existing `--wide`,
+    `--width`, `--layout`, `--scan-root`, and `--columns` flags.
+    Eight new unit tests cover `format_relative_age`,
+    `strip_branch_prefix`, the default header, the `attached`
+    discovery via the BranchHasForgePr → CheckedOutBranch path,
+    optional-column rendering, and the empty-snapshot case. Two
+    CLI integration tests cover the default projection header and
+    the optional-columns flag. All 365 tests pass; existing
+    snapshots stay byte-for-byte stable.
 
 - [ ] `H-TBL-009` `conspectus table forks` row-type.
   - Scope: rows = `ForkNode`. Register columns:
