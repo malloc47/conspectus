@@ -71,6 +71,58 @@ pub enum Layout {
     Columnar,
 }
 
+/// Minimum length for the short, content-addressed row identifier emitted
+/// in the leftmost `ID` column of each session-table projection. The
+/// renderer grows the prefix beyond this floor only to break collisions
+/// within the rendered snapshot.
+const SHORT_ID_FLOOR: usize = 6;
+
+/// FNV-1a 64-bit over the bytes of [`NodeId`]'s `Display` form. Used to
+/// derive a stable short row identifier for table output (H-TBL-002).
+/// The function is fully deterministic and architecture-independent.
+/// Exposed for `node show` (H-TBL-005), which accepts a copy-pasted
+/// short id and resolves it to a `NodeId`.
+pub fn node_short_id(node_id: &NodeId) -> String {
+    const OFFSET: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+    let mut hash = OFFSET;
+    for &byte in node_id.to_string().as_bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("{hash:016x}")
+}
+
+/// Shortest prefix length that uniquely identifies every id in
+/// `full_ids` against the others, floored at [`SHORT_ID_FLOOR`]. All
+/// inputs are expected to be the 16-char hex output of
+/// [`node_short_id`]; the cap is therefore 16.
+fn unique_prefix_len(full_ids: &[String]) -> usize {
+    if full_ids.len() <= 1 {
+        return SHORT_ID_FLOOR;
+    }
+    let cap = full_ids
+        .iter()
+        .map(|s| s.len())
+        .max()
+        .unwrap_or(SHORT_ID_FLOOR);
+    for len in SHORT_ID_FLOOR..=cap {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut unique = true;
+        for id in full_ids {
+            let prefix = &id[..len.min(id.len())];
+            if !seen.insert(prefix) {
+                unique = false;
+                break;
+            }
+        }
+        if unique {
+            return len;
+        }
+    }
+    cap
+}
+
 /// Render `snapshot` as an untruncated plain-text table using `projection`.
 ///
 /// Convenience wrapper for [`render_with`] with [`RenderOptions::wide`].
@@ -232,17 +284,20 @@ fn forge_pr_label(pr: &ForgePrNode) -> String {
 }
 
 fn build_agent_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
+    let body_full_ids: Vec<String> = view.agent_sessions.keys().map(node_short_id).collect();
+    let id_len = unique_prefix_len(&body_full_ids);
+
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
         [
-            "AGENT", "CWD", "MUX", "MUX/CONF", "PR", "PR/CONF", "LINEAGE",
+            "ID", "AGENT", "CWD", "MUX", "MUX/CONF", "PR", "PR/CONF", "LINEAGE",
         ]
         .iter()
         .map(|s| (*s).to_string())
         .collect(),
     );
 
-    for (node_id, session) in &view.agent_sessions {
+    for ((node_id, session), full_short) in view.agent_sessions.iter().zip(body_full_ids.iter()) {
         let mux_link = view.preferred_link(node_id, RelationKind::LinkedToMux);
         let mux_count = view
             .candidates_for(node_id, RelationKind::LinkedToMux)
@@ -268,6 +323,7 @@ fn build_agent_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
         let lineage_cell = lineage_cell(view, node_id);
 
         rows.push(vec![
+            full_short[..id_len].to_string(),
             agent_session_label(session),
             session.cwd.clone().unwrap_or_else(|| "—".to_string()),
             mux_cell,
@@ -380,9 +436,12 @@ fn preferred_pr_for_session(view: &SnapshotView<'_>, session_id: &NodeId) -> (St
 }
 
 fn build_mux_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
+    let body_full_ids: Vec<String> = view.mux_sessions.keys().map(node_short_id).collect();
+    let id_len = unique_prefix_len(&body_full_ids);
+
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
-        ["MUX", "CWD", "AGENTS"]
+        ["ID", "MUX", "CWD", "AGENTS"]
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
@@ -409,7 +468,7 @@ fn build_mux_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
         }
     }
 
-    for (mux_id, mux) in &view.mux_sessions {
+    for ((mux_id, mux), full_short) in view.mux_sessions.iter().zip(body_full_ids.iter()) {
         let entries = attached.get(mux_id);
         let count = entries.map(Vec::len).unwrap_or(0);
         let agents_cell = if let Some(entries) = entries {
@@ -433,6 +492,7 @@ fn build_mux_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
         let _ = count;
 
         rows.push(vec![
+            full_short[..id_len].to_string(),
             mux_session_label(mux),
             mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
             agents_cell,
@@ -443,15 +503,31 @@ fn build_mux_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
 }
 
 fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
+    // The union projection mixes agent and mux rows; compute one prefix
+    // length across the combined id set so collisions across kinds are
+    // disambiguated too.
+    let body_full_ids: Vec<String> = view
+        .agent_sessions
+        .keys()
+        .chain(view.mux_sessions.keys())
+        .map(node_short_id)
+        .collect();
+    let id_len = unique_prefix_len(&body_full_ids);
+    let agent_count = view.agent_sessions.len();
+
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
-        ["KIND", "ID", "CWD", "RELATIONSHIP"]
+        ["ID", "KIND", "LABEL", "CWD", "RELATIONSHIP"]
             .iter()
             .map(|s| (*s).to_string())
             .collect(),
     );
 
-    for (node_id, session) in &view.agent_sessions {
+    for ((node_id, session), full_short) in view
+        .agent_sessions
+        .iter()
+        .zip(body_full_ids.iter().take(agent_count))
+    {
         let mux_link = view.preferred_link(node_id, RelationKind::LinkedToMux);
         let mux_count = view
             .candidates_for(node_id, RelationKind::LinkedToMux)
@@ -471,6 +547,7 @@ fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
             None => "mux=—".to_string(),
         };
         rows.push(vec![
+            full_short[..id_len].to_string(),
             "agent".to_string(),
             agent_session_label(session),
             session.cwd.clone().unwrap_or_else(|| "—".to_string()),
@@ -478,8 +555,13 @@ fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
         ]);
     }
 
-    for mux in view.mux_sessions.values() {
+    for (mux, full_short) in view
+        .mux_sessions
+        .values()
+        .zip(body_full_ids.iter().skip(agent_count))
+    {
         rows.push(vec![
+            full_short[..id_len].to_string(),
             "mux".to_string(),
             mux_session_label(mux),
             mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
@@ -864,8 +946,10 @@ mod tests {
 
         let body: Vec<&str> = rendered.lines().skip(2).collect();
         assert_eq!(body.len(), 2);
-        assert!(body.iter().any(|row| row.starts_with("agent ")));
-        assert!(body.iter().any(|row| row.starts_with("mux ")));
+        // The leftmost column is now the short ID; the kind cell follows
+        // a column gap.
+        assert!(body.iter().any(|row| row.contains("  agent ")));
+        assert!(body.iter().any(|row| row.contains("  mux ")));
     }
 
     #[test]
@@ -891,7 +975,7 @@ mod tests {
         let body: Vec<&str> = rendered.lines().skip(2).collect();
         let agent_row = body
             .iter()
-            .find(|row| row.starts_with("agent "))
+            .find(|row| row.contains("  agent "))
             .expect("agent row");
         assert!(agent_row.contains("mux=tmux:editor"));
         assert!(agent_row.contains("SD/H"));
@@ -1217,6 +1301,115 @@ mod tests {
         assert!(
             rendered.contains("SD/H"),
             "indicator should survive truncation:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn node_short_id_is_deterministic_for_a_given_node_id() {
+        // Lock in the FNV-1a-over-Display contract: this string must not
+        // change without a deliberate decision, because users paste short
+        // ids into `node show` between runs (H-TBL-005).
+        let id = NodeId::AgentSession(AgentSessionId::new("codex", "global", "alpha"));
+        let short = node_short_id(&id);
+        assert_eq!(short.len(), 16);
+        assert!(short.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(short, node_short_id(&id), "must be deterministic");
+    }
+
+    #[test]
+    fn node_short_id_distinguishes_different_node_ids() {
+        let alpha = NodeId::AgentSession(AgentSessionId::new("codex", "global", "alpha"));
+        let beta = NodeId::AgentSession(AgentSessionId::new("codex", "global", "beta"));
+        assert_ne!(node_short_id(&alpha), node_short_id(&beta));
+    }
+
+    #[test]
+    fn unique_prefix_len_returns_floor_for_one_row() {
+        let ids = vec!["0123456789abcdef".to_string()];
+        assert_eq!(unique_prefix_len(&ids), SHORT_ID_FLOOR);
+    }
+
+    #[test]
+    fn unique_prefix_len_returns_floor_when_prefixes_already_unique() {
+        let ids = vec![
+            "aaaaaa1111".to_string(),
+            "bbbbbb1111".to_string(),
+            "cccccc1111".to_string(),
+        ];
+        assert_eq!(unique_prefix_len(&ids), SHORT_ID_FLOOR);
+    }
+
+    #[test]
+    fn unique_prefix_len_grows_past_floor_to_break_collisions() {
+        // First six chars collide; the seventh resolves them.
+        let ids = vec!["abcdefXone".to_string(), "abcdefYone".to_string()];
+        assert_eq!(unique_prefix_len(&ids), 7);
+    }
+
+    #[test]
+    fn agent_projection_prepends_id_column() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work/a")),
+                agent_session("codex", "beta", Some("/work/b")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Agent);
+        let header = rendered.lines().next().expect("header");
+        // ID is leftmost.
+        assert!(
+            header.starts_with("ID"),
+            "agent projection header should start with ID:\n{header}",
+        );
+
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        assert_eq!(body.len(), 2);
+        for row in &body {
+            let leading: String = row.chars().take_while(|c| !c.is_whitespace()).collect();
+            assert_eq!(
+                leading.len(),
+                SHORT_ID_FLOOR,
+                "short id should be at the floor for an uncolliding pair: {row:?}",
+            );
+            assert!(
+                leading.chars().all(|c| c.is_ascii_hexdigit()),
+                "short id should be hex: {row:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn agent_projection_short_ids_are_stable_across_renders() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
+            ..GraphSnapshot::empty()
+        };
+        let first = render(&snapshot, Projection::Agent);
+        let second = render(&snapshot, Projection::Agent);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn mux_projection_prepends_id_column() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![mux_session("tmux", "editor", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Mux);
+        let header = rendered.lines().next().expect("header");
+        assert!(header.starts_with("ID"), "header was: {header:?}");
+    }
+
+    #[test]
+    fn union_projection_header_renames_existing_id_to_label() {
+        let snapshot = GraphSnapshot::empty();
+        let rendered = render(&snapshot, Projection::Union);
+        let header = rendered.lines().next().expect("header");
+        assert!(
+            header.starts_with("ID  KIND  LABEL"),
+            "union header should be ID KIND LABEL …; got: {header:?}",
         );
     }
 

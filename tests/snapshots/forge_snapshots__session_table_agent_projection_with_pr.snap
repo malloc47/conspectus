@@ -1,7 +1,6 @@
 ---
 source: tests/forge_snapshots.rs
-assertion_line: 70
 expression: rendered
 ---
-AGENT  CWD  MUX  MUX/CONF  PR  PR/CONF  LINEAGE
------  ---  ---  --------  --  -------  -------
+ID  AGENT  CWD  MUX  MUX/CONF  PR  PR/CONF  LINEAGE
+--  -----  ---  ---  --------  --  -------  -------

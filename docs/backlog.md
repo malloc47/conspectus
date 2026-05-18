@@ -1532,26 +1532,22 @@ projection layer.
     were considered and rejected. Both dependencies are runtime deps
     added in `H-TBL-003`.
 
-- [ ] `H-TBL-002` Surface short, stable row identifiers in session tables.
-  - Scope: add a row-identifier column (likely leftmost, e.g. `ID`) to
-    each `conspectus session` projection. The identifier is a short
-    content-addressed prefix derived from the row's primary `NodeId` (the
-    agent session in agent projection, the mux session in mux projection,
-    the row node in union projection). Length should be the minimum
-    needed for uniqueness within the rendered snapshot, with a sensible
-    floor (e.g. 6 chars). The full `NodeId` continues to appear in JSON
-    output unchanged. The short id must remain stable across runs as
-    long as the row's identity inputs do not change, so users can paste
-    a copied id from a previous run into `conspectus node show` and have
-    it resolve (covered by `H-TBL-005`).
-  - Tests: snapshot tests covering single-row, multi-row, and
-    collision-disambiguation cases; unit tests verifying byte-stable id
-    generation against a fixed `NodeId` input.
-  - Manual checks: confirm short ids stay readable next to the AGENT /
-    MUX label column and do not visually compete with it.
-  - Blockers: none (can land before `H-TBL-001` if the column is added
-    to the existing renderer first, but is cleanest to land alongside
-    or after the renderer swap).
+- [x] `H-TBL-002` Surface short, stable row identifiers in session tables.
+  - Outcome: every `conspectus session` projection now emits a leftmost
+    `ID` column carrying a short, content-addressed prefix derived from
+    the row's primary `NodeId`. The hash is FNV-1a 64-bit over the
+    `Display` form of the NodeId (`pub fn node_short_id` in
+    `src/output/table.rs`), exposed so `node show` (H-TBL-005) can
+    resolve a pasted id back to a node. Prefix length is the minimum
+    needed for uniqueness within the rendered snapshot, floored at six
+    hex chars. The union projection's existing `ID` header (which held
+    the harness label) was renamed to `LABEL` to free the `ID` slot for
+    the new short id. JSON output is unchanged. New unit tests pin the
+    hash determinism, prefix-growth-on-collision, and per-projection
+    header changes; the atelier-delegation and declared-snapshots
+    fixtures gained per-snapshot `state_scope` path normalization so
+    the rendered short id stays stable across runs.
+  - Blockers: none.
 
 - [x] `H-TBL-003` Width-aware truncation default for session tables.
   - Outcome: `src/output/table.rs` now exposes `RenderOptions { width,

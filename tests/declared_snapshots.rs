@@ -15,6 +15,7 @@ use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
 use conspectus::discovery::tmux::FakeTmux;
 use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
+use conspectus::model::{GraphNode, GraphSnapshot, LinkEndpoint, NodeId};
 use conspectus::output::render_graph_json;
 use conspectus::output::table::{self, Projection};
 use conspectus::resolve::resolve_snapshot;
@@ -139,7 +140,8 @@ fn run(fixture: &DeclaredFixture) -> String {
 
 fn run_table(fixture: &DeclaredFixture, projection: Projection) -> String {
     let snapshot = discover_local_with([fixture.path()], fixture.config()).expect("discover");
-    let resolved = resolve_snapshot(snapshot);
+    let mut resolved = resolve_snapshot(snapshot);
+    fixture.normalize_snapshot_paths(&mut resolved);
     let rendered = table::render(&resolved, projection);
     fixture.normalize(&rendered)
 }
@@ -224,5 +226,29 @@ impl DeclaredFixture {
             out = out.replace(name, "fixture");
         }
         out
+    }
+
+    /// Rewrite path-derived fields on the snapshot so the rendered short
+    /// row identifier (H-TBL-002) — which hashes the full `NodeId`,
+    /// including `AgentSessionId.state_scope` — is stable across runs.
+    fn normalize_snapshot_paths(&self, snapshot: &mut GraphSnapshot) {
+        for node in &mut snapshot.nodes {
+            if let GraphNode::AgentSession(node) = node {
+                node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));
+                node.id.state_scope = self.normalize(&node.id.state_scope);
+            }
+        }
+        for link in &mut snapshot.candidate_links {
+            self.normalize_node_id(&mut link.source);
+            if let LinkEndpoint::Node { id } = &mut link.target {
+                self.normalize_node_id(id);
+            }
+        }
+    }
+
+    fn normalize_node_id(&self, id: &mut NodeId) {
+        if let NodeId::AgentSession(agent_id) = id {
+            agent_id.state_scope = self.normalize(&agent_id.state_scope);
+        }
     }
 }

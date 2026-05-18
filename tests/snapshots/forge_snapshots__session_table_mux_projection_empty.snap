@@ -1,7 +1,6 @@
 ---
 source: tests/forge_snapshots.rs
-assertion_line: 81
 expression: rendered
 ---
-MUX  CWD  AGENTS
----  ---  ------
+ID  MUX  CWD  AGENTS
+--  ---  ---  ------

@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use conspectus::api::{
-    GraphNode, LocalDiscoveryConfig, Projection, discover_local_with, render_graph_json,
-    resolve_snapshot, table,
+    GraphNode, LinkEndpoint, LocalDiscoveryConfig, NodeId, Projection, discover_local_with,
+    render_graph_json, resolve_snapshot, table,
 };
 use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
@@ -183,12 +183,25 @@ impl AtelierDelegationFixture {
                 }
                 GraphNode::AgentSession(node) => {
                     node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));
+                    node.id.state_scope = self.normalize(&node.id.state_scope);
                 }
                 GraphNode::MuxSession(node) => {
                     node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));
                 }
                 GraphNode::Branch(_) | GraphNode::Fork(_) | GraphNode::ForgePr(_) => {}
             }
+        }
+        for link in &mut snapshot.candidate_links {
+            self.normalize_node_id(&mut link.source);
+            if let LinkEndpoint::Node { id } = &mut link.target {
+                self.normalize_node_id(id);
+            }
+        }
+    }
+
+    fn normalize_node_id(&self, id: &mut NodeId) {
+        if let NodeId::AgentSession(agent_id) = id {
+            agent_id.state_scope = self.normalize(&agent_id.state_scope);
         }
     }
 }

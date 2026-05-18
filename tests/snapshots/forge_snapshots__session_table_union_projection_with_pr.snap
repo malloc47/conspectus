@@ -1,7 +1,6 @@
 ---
 source: tests/forge_snapshots.rs
-assertion_line: 92
 expression: rendered
 ---
-KIND  ID  CWD  RELATIONSHIP
-----  --  ---  ------------
+ID  KIND  LABEL  CWD  RELATIONSHIP
+--  ----  -----  ---  ------------

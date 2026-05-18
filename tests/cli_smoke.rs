@@ -403,7 +403,7 @@ fn session_default_projection_renders_agent_table() {
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
     assert!(
-        output.starts_with("AGENT"),
+        output.starts_with("ID") && output.contains("AGENT"),
         "agent table should be the default projection; got:\n{output}",
     );
 }
@@ -423,7 +423,7 @@ fn session_projection_flag_switches_to_mux() {
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
     assert!(
-        output.starts_with("MUX"),
+        output.starts_with("ID") && output.contains("MUX"),
         "mux projection should print MUX header; got:\n{output}",
     );
 }
@@ -568,7 +568,7 @@ fn session_projection_flag_switches_to_union() {
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
     assert!(
-        output.starts_with("KIND"),
+        output.starts_with("ID") && output.contains("KIND"),
         "union projection should print KIND header; got:\n{output}",
     );
 }
@@ -607,7 +607,7 @@ fn session_reads_default_projection_from_project_config() {
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
     assert!(
-        output.starts_with("KIND"),
+        output.starts_with("ID") && output.contains("KIND"),
         "project config should set default projection to union; got:\n{output}",
     );
 }
