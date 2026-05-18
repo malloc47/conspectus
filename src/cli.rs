@@ -408,10 +408,26 @@ fn print_paged(content: &str, options: PagerOptions) {
 }
 
 /// Resolve the ordered list of pager commands to try.
+///
+/// For bare `less` invocations (whether from `$PAGER=less` or the
+/// internal fallback) Conspectus passes `-F -R -X` explicitly as
+/// command-line arguments. The flags need to apply even when the
+/// user has a `$LESS` env value of their own, so setting `LESS=FRX`
+/// only when `$LESS` is unset (the original implementation) silently
+/// fell back to "no quit-if-one-screen" for users with any `$LESS`
+/// set. Command-line args merge cleanly with `$LESS`, so existing
+/// `LESS=-R` setups keep their `R` and gain the `F` they need.
 fn pager_candidates() -> Vec<ProcCommand> {
+    pager_candidates_with_env(std::env::var("PAGER").ok())
+}
+
+/// Pure version of [`pager_candidates`] for unit testing — takes the
+/// `$PAGER` value explicitly so tests don't need to mutate
+/// process-wide environment.
+fn pager_candidates_with_env(pager_env: Option<String>) -> Vec<ProcCommand> {
     let mut candidates = Vec::new();
 
-    if let Some(pager) = std::env::var("PAGER").ok().filter(|s| !s.trim().is_empty()) {
+    if let Some(pager) = pager_env.filter(|s| !s.trim().is_empty()) {
         // Crude tokenization on whitespace (no shell-quoting support).
         // Git itself runs PAGER through `sh -c`, but that pulls in a
         // shell dependency we'd rather avoid. Users with quoted args
@@ -419,23 +435,95 @@ fn pager_candidates() -> Vec<ProcCommand> {
         let parts: Vec<&str> = pager.split_whitespace().collect();
         if let Some((prog, args)) = parts.split_first() {
             let mut cmd = ProcCommand::new(prog);
-            cmd.args(args);
+            if *prog == "less" && args.is_empty() {
+                cmd.args(LESS_DEFAULT_ARGS);
+            } else {
+                cmd.args(args);
+            }
             candidates.push(cmd);
         }
     }
 
     let mut less = ProcCommand::new("less");
-    if std::env::var_os("LESS").is_none() {
-        // F = quit-if-one-screen; R = pass raw control chars
-        // (so future color support is friendly); X = no init/deinit
-        // (don't clear the screen on exit).
-        less.env("LESS", "FRX");
-    }
+    less.args(LESS_DEFAULT_ARGS);
     candidates.push(less);
 
     candidates.push(ProcCommand::new("more"));
 
     candidates
+}
+
+/// Default args Conspectus passes to `less` when the user has not
+/// supplied any of their own via `$PAGER`.
+///
+/// - `-F` quit if the entire output fits on one screen.
+/// - `-R` pass raw ANSI control sequences through (forward-compatible
+///   with any future color story; harmless on plain text).
+/// - `-X` skip the terminal init/deinit so the rendered output stays
+///   on the user's scrollback instead of being cleared on exit.
+const LESS_DEFAULT_ARGS: &[&str] = &["-F", "-R", "-X"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn program(cmd: &ProcCommand) -> String {
+        cmd.get_program().to_string_lossy().into_owned()
+    }
+
+    fn args(cmd: &ProcCommand) -> Vec<String> {
+        cmd.get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn pager_candidates_when_pager_env_is_unset_starts_with_less_plus_defaults() {
+        let candidates = pager_candidates_with_env(None);
+        assert!(candidates.len() >= 2);
+        assert_eq!(program(&candidates[0]), "less");
+        assert_eq!(args(&candidates[0]), vec!["-F", "-R", "-X"]);
+        assert_eq!(program(&candidates[1]), "more");
+    }
+
+    #[test]
+    fn pager_candidates_when_pager_is_bare_less_adds_default_flags() {
+        // Regression for the original bug: the user had `PAGER=less`
+        // (no args) plus `LESS=-R` set, so the original implementation
+        // left less without `-F` and dropped into the pager even for
+        // short, single-screen tables. The fix passes `-F -R -X` on
+        // the command line whenever the resolved pager is plain
+        // `less`, so the flags merge with the user's `$LESS` instead
+        // of being silently skipped.
+        let candidates = pager_candidates_with_env(Some("less".to_string()));
+        assert_eq!(program(&candidates[0]), "less");
+        assert_eq!(args(&candidates[0]), vec!["-F", "-R", "-X"]);
+    }
+
+    #[test]
+    fn pager_candidates_when_pager_is_less_with_explicit_args_respects_user_choice() {
+        let candidates = pager_candidates_with_env(Some("less -X".to_string()));
+        assert_eq!(program(&candidates[0]), "less");
+        // Explicit args are kept verbatim; we do not silently append
+        // `-F` because the user opted in to their own less flag set.
+        assert_eq!(args(&candidates[0]), vec!["-X"]);
+    }
+
+    #[test]
+    fn pager_candidates_passes_non_less_pager_through_unchanged() {
+        let candidates = pager_candidates_with_env(Some("bat --paging=always".to_string()));
+        assert_eq!(program(&candidates[0]), "bat");
+        assert_eq!(args(&candidates[0]), vec!["--paging=always"]);
+    }
+
+    #[test]
+    fn pager_candidates_empty_pager_env_falls_back_to_internal_defaults() {
+        let candidates = pager_candidates_with_env(Some("   ".to_string()));
+        // Whitespace-only `$PAGER` falls back to the internal `less`
+        // with default flags.
+        assert_eq!(program(&candidates[0]), "less");
+        assert_eq!(args(&candidates[0]), vec!["-F", "-R", "-X"]);
+    }
 }
 
 #[derive(Debug, Args)]
