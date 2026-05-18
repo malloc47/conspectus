@@ -29,6 +29,7 @@ impl Cli {
             Command::Table(args) => args.run(),
             Command::Declared(args) => args.run(),
             Command::Node(args) => args.run(),
+            Command::Columns(args) => args.run(),
         }
     }
 }
@@ -43,6 +44,33 @@ enum Command {
     Declared(Box<DeclaredArgs>),
     /// Inspect a single node and its surrounding links.
     Node(NodeArgs),
+    /// List registered columns for a `conspectus table <ROWS>` row-type.
+    Columns(ColumnsArgs),
+}
+
+#[derive(Debug, Args)]
+struct ColumnsArgs {
+    /// Row-type whose registered columns to list. Accepts the same
+    /// tokens as `conspectus table <ROWS>` (sessions, mux, union,
+    /// prs, forks).
+    row_type: String,
+}
+
+impl ColumnsArgs {
+    fn run(self) -> Result<()> {
+        let projection = match config::Projection::parse(&self.row_type) {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("conspectus: {err}");
+                std::process::exit(2);
+            }
+        };
+        print!(
+            "{}",
+            conspectus::output::table::render_columns_listing(projection)
+        );
+        Ok(())
+    }
 }
 
 #[derive(Debug, Args)]

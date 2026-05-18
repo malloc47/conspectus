@@ -828,6 +828,60 @@ fn table_sessions_columns_supports_branch_repo_optional_columns() {
 }
 
 #[test]
+fn columns_lists_every_row_type_with_default_marker() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    for (row_type, expected_default, expected_optional) in [
+        ("sessions", "id ", "worktree "),
+        ("mux", "id ", "activity "),
+        ("union", "id ", "label "),
+        ("prs", "id ", "draft "),
+        ("forks", "id ", "scope "),
+    ] {
+        let assert = isolated_cmd(home.path())
+            .current_dir(temp.path())
+            .arg("columns")
+            .arg(row_type)
+            .assert()
+            .success();
+        let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+        let default_line = output
+            .lines()
+            .find(|line| line.starts_with(expected_default))
+            .unwrap_or_else(|| panic!("missing {expected_default} line for {row_type}:\n{output}"));
+        assert!(
+            default_line.contains("(default)"),
+            "expected (default) marker for {row_type} {expected_default:?}: {default_line:?}",
+        );
+
+        // Optional/expected non-default column key should appear in
+        // the listing.
+        assert!(
+            output
+                .lines()
+                .any(|line| line.starts_with(expected_optional)),
+            "missing {expected_optional} column for {row_type}:\n{output}",
+        );
+    }
+}
+
+#[test]
+fn columns_rejects_unknown_row_type() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("columns")
+        .arg("ledger")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid table row-type"));
+}
+
+#[test]
 fn table_forks_renders_fork_projection_header() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

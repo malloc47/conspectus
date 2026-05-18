@@ -773,6 +773,34 @@ pub fn resolve_explicit_columns(
         .collect()
 }
 
+/// Render a human-readable listing of the registered columns for
+/// `projection`. Each line is `<key>  <description>` with `(default)`
+/// appended for columns in the default set. The leading key column is
+/// padded so descriptions line up. Used by `conspectus columns <ROWS>`
+/// (H-TBL-012).
+pub fn render_columns_listing(projection: Projection) -> String {
+    let registry = columns_for(projection);
+    let key_width = registry
+        .iter()
+        .map(|spec| spec.key.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut out = String::new();
+    for spec in registry {
+        let key_pad = key_width.saturating_sub(spec.key.chars().count());
+        out.push_str(spec.key);
+        for _ in 0..(key_pad + 2) {
+            out.push(' ');
+        }
+        out.push_str(spec.description);
+        if spec.default {
+            out.push_str("  (default)");
+        }
+        out.push('\n');
+    }
+    out
+}
+
 fn header_label(registry: &[ColumnSpec], key: &str) -> String {
     registry
         .iter()
@@ -2195,6 +2223,54 @@ mod tests {
             rendered.contains("octo/repo#7"),
             "expected PR label in:\n{rendered}",
         );
+    }
+
+    #[test]
+    fn render_columns_listing_marks_default_columns() {
+        let listing = render_columns_listing(Projection::Agent);
+        // ID is in the default set.
+        let id_line = listing
+            .lines()
+            .find(|line| line.starts_with("id "))
+            .expect("id line");
+        assert!(id_line.ends_with("(default)"), "got: {id_line}");
+
+        // `worktree` was added as opt-in by H-TBL-010, so its line
+        // should not carry the (default) marker.
+        let worktree_line = listing
+            .lines()
+            .find(|line| line.starts_with("worktree "))
+            .expect("worktree line");
+        assert!(
+            !worktree_line.contains("(default)"),
+            "worktree should not be marked default: {worktree_line}",
+        );
+        assert!(
+            worktree_line.contains("matches the session's cwd"),
+            "worktree line should include the description: {worktree_line}",
+        );
+    }
+
+    #[test]
+    fn render_columns_listing_includes_every_registered_key() {
+        for projection in [
+            Projection::Agent,
+            Projection::Mux,
+            Projection::Union,
+            Projection::Pr,
+            Projection::Fork,
+        ] {
+            let listing = render_columns_listing(projection);
+            for spec in columns_for(projection) {
+                assert!(
+                    listing
+                        .lines()
+                        .any(|line| line.starts_with(&format!("{} ", spec.key))),
+                    "listing for {projection:?} missing column {key}:\n{listing}",
+                    key = spec.key,
+                );
+            }
+        }
     }
 
     #[test]

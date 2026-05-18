@@ -83,6 +83,7 @@ conspectus table {sessions|mux|union|prs|forks} [--layout {columnar|card}]
                                                  [--columns LIST]
                                                  [--scan-root PATH]...
 conspectus node show <id> [--scan-root PATH]...
+conspectus columns {sessions|mux|union|prs|forks}
 conspectus declared ...
 ```
 
@@ -111,6 +112,11 @@ Unknown column names error with the registered names for the
 row-type listed. `[table.<rows>].columns` in `.conspectus.toml` /
 user config provides a fixed default column list; CLI `--columns`
 overrides config when both are present.
+
+`conspectus columns <ROWS>` prints every registered column for the
+row-type along with its one-line description, marking each column
+in the default set with `(default)`. Useful when you don't remember
+exact column names or want to see which columns are opt-in.
 
 `node show <id>` accepts any of:
 

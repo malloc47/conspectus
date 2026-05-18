@@ -1737,18 +1737,21 @@ fork lineage, and worktree apply to any row whose node touches them.
     test was updated to reflect the larger `all` set. All 377 tests
     pass.
 
-- [ ] `H-TBL-012` `conspectus columns <ROWS>` discovery subcommand.
-  - Scope: add a discovery command that prints every registered
-    column for a row-type along with its one-line description and
-    a `(default)` marker. Useful when users do not remember exact
-    column names. Output is plain text; `--format json` could come
-    later but is not required by this story.
-  - Tests: CLI integration tests that list `sessions`, `mux`, `prs`,
-    `forks`, and `union` columns; verifies the `(default)` marker
-    appears on the default set.
-  - Manual checks: `cargo run -- columns sessions`,
-    `cargo run -- columns prs`.
-  - Blockers: `H-TBL-007`.
+- [x] `H-TBL-012` `conspectus columns <ROWS>` discovery subcommand.
+  - Outcome: new `render_columns_listing(projection)` helper in
+    `src/output/table.rs` prints each registered column as
+    `<key>  <description>  (default)?` with the key column padded
+    for alignment. The CLI gained a top-level `conspectus columns
+    <ROWS>` subcommand that resolves the positional via
+    `config::Projection::parse` (so the same `sessions`/`mux`/
+    `union`/`prs`/`forks` tokens accepted by `conspectus table`
+    work here). Two new unit tests pin the `(default)` marker on a
+    default column and verify every registered key appears in the
+    listing for every projection. Two CLI integration tests cover
+    the listing across all five row-types (asserting both a
+    default-marked column and an opt-in column appear) and the
+    unknown-row-type error path. `docs/operations.md` documents
+    the new command. All 381 tests pass.
 
 Deferred under this cluster (no story yet, file when needed):
 
