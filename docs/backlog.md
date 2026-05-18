@@ -1769,28 +1769,45 @@ shape.
     disappear from every default render, which is more surprising than
     showing all rows. JSON output is already exhaustive. If a future
     consumer needs a compressed view, add `--hide-superseded` then.
-- [~] `H-LINEAGE-006` Retarget claude-code lineage extraction — fork
+- [x] `H-LINEAGE-006` Retarget claude-code lineage extraction — fork
   uses a `forkedFrom` envelope object, not `parentUuid`; `/compact`
   is in-place.
-  - Progress: scope item (1) and (5) landed. The claude-code adapter
-    now reads `forkedFrom` from the first uuid-bearing record. When
-    `forkedFrom.sessionId` matches another discovered session in the
-    same project directory the link resolves to a concrete
-    `AgentSession` target with `lineage_kind = "fork"`; otherwise it
-    is preserved as `UnresolvedEndpoint` evidence keyed by parent
-    session id. `forked_from_message_uuid` is carried in source
-    metadata for future point-in-time use. `forkedFrom` wins over
-    `parentUuid` when both are present. Regression tests cover the
-    resolved-parent, unresolved-parent, no-`forkedFrom` (bare fork),
-    and forkedFrom-vs-parentUuid precedence cases. Validated on live
-    state 2026-05-17: `332aa87b-…` (fork-with-history of
-    `81f4a0ef-…`) now renders `LINEAGE = …50b40572`; `926c6991-…`
-    (bare fork variant with no `forkedFrom`) still shows `—`, as
-    expected.
-  - Remaining: (2) decide how to surface the bare-fork variant
-    (side-channel inference vs leave as `—`), (3) design in-place
-    compaction lineage from `type: "summary"` records, and (4) the
-    `Approximate` → `Native` capability bump for the fork case.
+  - Resolution (1, 5): the claude-code adapter now reads `forkedFrom`
+    from the first uuid-bearing record. When `forkedFrom.sessionId`
+    matches another discovered session in the same project directory
+    the link resolves to a concrete `AgentSession` target with
+    `lineage_kind = "fork"`; otherwise it is preserved as
+    `UnresolvedEndpoint` evidence keyed by parent session id.
+    `forked_from_message_uuid` is carried in source metadata for
+    future point-in-time use. `forkedFrom` wins over `parentUuid`
+    when both are present. Regression tests cover resolved fork,
+    unresolved fork, bare fork (no envelope, no lineage), and
+    forkedFrom-vs-parentUuid precedence. Validated on live state
+    2026-05-17: `332aa87b-…` (fork-with-history of `81f4a0ef-…`)
+    renders `LINEAGE = …50b40572`; `926c6991-…` (bare fork) shows
+    `—`.
+  - Resolution (2): the bare-fork variant stays as `—`. The
+    transcript carries no on-disk signal, and side-channel inference
+    (IDE state files, fork-time proximity, sibling session listings)
+    is high-effort for a UI gesture that may not even be reachable
+    from current claude-code releases. Revisit only if the gesture
+    becomes common or claude-code publishes a structural pointer.
+  - Resolution (3): in-place `/compact` is **not** modeled. ADR 0018
+    keeps `AgentSession` at session-file granularity, so a within-
+    session `type: "summary"` record cannot be a `parent_session`
+    edge — both endpoints would resolve to the same node. A
+    regression test (`in_place_compaction_summary_record_emits_no_lineage`)
+    locks this in: a transcript with a mid-stream summary record
+    produces one `AgentSession` and zero lineage candidates. The
+    adapter's module-level doc comment documents the policy.
+  - Resolution (4): no capability constant changes. The standalone
+    claude-code adapter does not emit a `lineage_fidelity` field —
+    that lives in atelier's per-fork TOML and is interpreted by the
+    delegation flow. The fork lineage emitted here is already
+    `Provenance::StrongDiscovered` / `Confidence::High`, which is
+    the strongest tier available. If a future atelier fork record
+    advertises claude-code as Native for fork lineage, no Conspectus
+    code change is needed.
   - Context: H-LINEAGE-002 assumed compaction (or a similar successor
     operation) produces a new session jsonl whose first uuid-bearing
     record's `parentUuid` points at the predecessor's leaf uuid.

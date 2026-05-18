@@ -20,16 +20,29 @@
 //! * **parentUuid** — legacy/hypothetical path for compaction or resume
 //!   successors that would write a new session jsonl whose first uuid-bearing
 //!   record carries a cross-session `parentUuid`. claude-code 2.1.129 does
-//!   not currently produce this for `/compact` (in-place) or the IDE bare
-//!   fork (no envelope at all); see backlog H-LINEAGE-006. The code is
-//!   preserved for future releases and resolves by matching the parentUuid
-//!   against the leaf message of another discovered transcript in the same
-//!   project directory.
+//!   not currently produce this shape, but the code is preserved for future
+//!   releases. Resolves by matching the parentUuid against the leaf message
+//!   of another discovered transcript in the same project directory.
 //!
 //! When `forkedFrom` is present it takes precedence: it is the explicit,
 //! provider-recorded fork pointer and supersedes any speculative parentUuid
 //! match. Unresolved parent endpoints in either path are preserved as
 //! unresolved evidence so later discovery can reconcile them.
+//!
+//! Two claude-code 2.1.129 behaviors are intentionally **not** modeled:
+//!
+//! * **In-place `/compact`** keeps appending to the same session jsonl
+//!   rather than starting a successor file, and emits a `type: "summary"`
+//!   record at the compaction boundary. Conspectus preserves
+//!   `AgentSession` at session-file granularity rather than splitting on
+//!   summary records, so an in-place compaction produces no
+//!   `parent_session` edge — both endpoints would be the same node. Tests
+//!   lock in that summary records inside a transcript do not cause a
+//!   spurious lineage candidate.
+//! * **Bare fork** (e.g. the "fresh session" affordance) writes a new
+//!   session jsonl with no `forkedFrom` envelope and no cross-session
+//!   `parentUuid`. With no on-disk signal we emit no lineage candidate.
+//!   See backlog `H-LINEAGE-006` for the closure notes.
 
 use std::collections::HashMap;
 use std::fs;
@@ -996,6 +1009,49 @@ mod tests {
         assert_eq!(
             evidence.metadata.get("parent_session_id"),
             Some(&json!("ghost-parent"))
+        );
+    }
+
+    #[test]
+    fn in_place_compaction_summary_record_emits_no_lineage() {
+        // claude-code 2.1.129's `/compact` appends to the same session
+        // jsonl rather than starting a successor file, dropping a
+        // `type: "summary"` record at the compaction boundary. ADR 0018
+        // keeps `AgentSession` at session-file granularity, so within-
+        // session compaction must not produce a `parent_session`
+        // candidate — both endpoints would be the same node.
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        // First uuid-bearing record carries no cross-session pointer (this
+        // session is a fresh start). A summary record then appears mid-
+        // stream as the compaction marker, followed by post-compact
+        // messages that chain within the session.
+        let body = "\
+            {\"type\":\"permission-mode\",\"sessionId\":\"compacted\",\"permissionMode\":\"default\"}\n\
+            {\"type\":\"user\",\"sessionId\":\"compacted\",\"cwd\":\"/work/repo\",\"uuid\":\"u-pre-1\",\"parentUuid\":null}\n\
+            {\"type\":\"assistant\",\"sessionId\":\"compacted\",\"uuid\":\"u-pre-2\",\"parentUuid\":\"u-pre-1\"}\n\
+            {\"type\":\"summary\",\"sessionId\":\"compacted\",\"uuid\":\"u-summary\",\"parentUuid\":\"u-pre-2\",\"summary\":\"compaction marker\"}\n\
+            {\"type\":\"user\",\"sessionId\":\"compacted\",\"uuid\":\"u-post-1\",\"parentUuid\":\"u-summary\"}\n";
+        write_transcripts(
+            &fixture.claude_code_state_root(),
+            "-work-repo",
+            &[("compacted", body)],
+        );
+
+        let fragment = ClaudeCodeAdapter::new().discover(&context).expect("disc");
+
+        assert!(
+            lineage_links(&fragment).is_empty(),
+            "in-place compaction must not emit a parent_session candidate"
+        );
+        let session_count = fragment
+            .nodes
+            .iter()
+            .filter(|n| matches!(n, GraphNode::AgentSession(_)))
+            .count();
+        assert_eq!(
+            session_count, 1,
+            "session-file granularity: one AgentSession per jsonl regardless of internal summary records"
         );
     }
 
