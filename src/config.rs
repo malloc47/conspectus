@@ -38,11 +38,14 @@ pub struct TableConfig {
     pub union: TableRowConfig,
 }
 
-/// Settings for one row-type. H-TBL-006 reserves the struct without
-/// declaring fields yet; H-TBL-007 adds `columns: Option<Vec<String>>`
-/// and future row-type-specific knobs append here.
+/// Settings for one row-type.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TableRowConfig {}
+pub struct TableRowConfig {
+    /// Explicit column list for this row-type. `None` falls back to
+    /// the row-type's registered default columns. The CLI `--columns`
+    /// flag overrides this when both are present.
+    pub columns: Option<Vec<String>>,
+}
 
 /// Table row-type. Matches the `conspectus table <ROWS>` positional
 /// (ADR 0021) and the [`crate::output::table`] renderer's row-type
@@ -89,9 +92,6 @@ struct ConfigFile {
     session: Option<toml::Value>,
 }
 
-// Fields are deserialized to validate the schema; H-TBL-007 will read
-// them. `#[allow(dead_code)]` suppresses the unused-warning until then.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, Deserialize)]
 struct TableFile {
     #[serde(default)]
@@ -103,7 +103,10 @@ struct TableFile {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct TableRowFile {}
+struct TableRowFile {
+    #[serde(default)]
+    columns: Option<Vec<String>>,
+}
 
 /// Result of a single load attempt.
 #[derive(Clone, Debug, Default)]
@@ -251,11 +254,17 @@ fn merge_from_file(config: &mut Config, path: &Path, diagnostics: &mut Vec<Confi
     }
 }
 
-fn merge_table(_config: &mut TableConfig, _file: TableFile) {
-    // H-TBL-006: the per-row-type subsections exist in the schema but
-    // carry no settable fields yet. H-TBL-007 will populate
-    // `TableRowConfig::columns` here. Keeping the function in place
-    // documents the merge seam.
+fn merge_table(config: &mut TableConfig, file: TableFile) {
+    merge_table_row(&mut config.sessions, file.sessions);
+    merge_table_row(&mut config.mux, file.mux);
+    merge_table_row(&mut config.union, file.union);
+}
+
+fn merge_table_row(config: &mut TableRowConfig, file: Option<TableRowFile>) {
+    let Some(file) = file else { return };
+    if let Some(columns) = file.columns {
+        config.columns = Some(columns);
+    }
 }
 
 fn env_path(key: &str) -> Option<PathBuf> {

@@ -804,6 +804,110 @@ fn table_rejects_unknown_row_type() {
 }
 
 #[test]
+fn table_sessions_columns_flag_overrides_default_set() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--columns")
+        .arg("id,agent,cwd")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(header_tokens, vec!["ID", "AGENT", "CWD"]);
+    assert!(!output.contains("MUX"), "got:\n{output}");
+    assert!(!output.contains("LINEAGE"), "got:\n{output}");
+}
+
+#[test]
+fn table_sessions_columns_flag_supports_delta_tokens() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--columns=-cwd,-mux-conf,-pr-conf")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(header_tokens, vec!["ID", "AGENT", "MUX", "PR", "LINEAGE"]);
+}
+
+#[test]
+fn table_sessions_columns_flag_rejects_unknown_column() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--columns")
+        .arg("+nope")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown column"))
+        .stderr(predicate::str::contains("sessions"));
+}
+
+#[test]
+fn table_sessions_columns_config_drives_default_when_flag_absent() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = home.path().join("project");
+    fs::create_dir_all(&project).expect("project dir");
+    fs::write(
+        project.join(".conspectus.toml"),
+        "[table.sessions]\ncolumns = [\"id\", \"agent\", \"cwd\"]\n",
+    )
+    .expect("write project config");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(&project)
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(header_tokens, vec!["ID", "AGENT", "CWD"]);
+}
+
+#[test]
+fn table_sessions_columns_cli_overrides_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let project = home.path().join("project");
+    fs::create_dir_all(&project).expect("project dir");
+    fs::write(
+        project.join(".conspectus.toml"),
+        "[table.sessions]\ncolumns = [\"id\", \"agent\"]\n",
+    )
+    .expect("write project config");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(&project)
+        .arg("table")
+        .arg("sessions")
+        .arg("--columns")
+        .arg("id,cwd")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(header_tokens, vec!["ID", "CWD"]);
+}
+
+#[test]
 fn legacy_session_config_section_emits_stderr_warning() {
     let home = tempfile::TempDir::new().expect("home temp");
     let project = home.path().join("project");

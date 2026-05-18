@@ -179,6 +179,13 @@ struct TableRowsArgs {
     /// rows, similar to `git log` default formatting.
     #[arg(long, value_enum, default_value_t = LayoutFlag::Columnar)]
     layout: LayoutFlag,
+    /// Comma-separated column selection. Tokens: `default` / `all`
+    /// reset the running set; `+name` adds; `-name` removes; bare
+    /// names switch to explicit-list mode. Unknown names error with
+    /// the registered list for the row-type. Overrides the
+    /// `[table.<rows>].columns` config when both are present.
+    #[arg(long, value_name = "LIST")]
+    columns: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -201,6 +208,19 @@ impl TableRowsArgs {
             );
         }
 
+        let columns = resolve_columns_selection(
+            projection,
+            self.columns.as_deref(),
+            row_config(projection, &outcome.config).columns.as_deref(),
+        );
+        let columns = match columns {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("conspectus: {err}");
+                std::process::exit(2);
+            }
+        };
+
         let snapshot = if self.scan_roots.is_empty() {
             conspectus::discovery::discover_local_at_roots([cwd])?
         } else {
@@ -208,7 +228,7 @@ impl TableRowsArgs {
         };
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
-        let options = match (self.layout, render_width) {
+        let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {
                 conspectus::output::table::RenderOptions::columnar_width(w)
             }
@@ -216,9 +236,37 @@ impl TableRowsArgs {
             (LayoutFlag::Card, Some(w)) => conspectus::output::table::RenderOptions::card_width(w),
             (LayoutFlag::Card, None) => conspectus::output::table::RenderOptions::card(),
         };
+        if let Some(columns) = columns {
+            options = options.with_columns(columns);
+        }
         let table = conspectus::output::table::render_with(&snapshot, projection, &options);
         print!("{table}");
         Ok(())
+    }
+}
+
+/// Resolve which column set to render, with CLI overriding config.
+/// Returns `Ok(None)` when neither source is set, signalling "use the
+/// row-type's registered default set".
+fn resolve_columns_selection(
+    projection: config::Projection,
+    cli_spec: Option<&str>,
+    config_names: Option<&[String]>,
+) -> Result<Option<Vec<&'static str>>, conspectus::output::table::ColumnsError> {
+    if let Some(spec) = cli_spec {
+        return conspectus::output::table::parse_columns_spec(projection, spec).map(Some);
+    }
+    if let Some(names) = config_names {
+        return conspectus::output::table::resolve_explicit_columns(projection, names).map(Some);
+    }
+    Ok(None)
+}
+
+fn row_config(projection: config::Projection, config: &config::Config) -> &config::TableRowConfig {
+    match projection {
+        config::Projection::Agent => &config.table.sessions,
+        config::Projection::Mux => &config.table.mux,
+        config::Projection::Union => &config.table.union,
     }
 }
 

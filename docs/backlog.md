@@ -1626,44 +1626,38 @@ fork lineage, and worktree apply to any row whose node touches them.
     (`build_*_rows`, `RenderOptions`, `node_short_id`) are
     unchanged. `docs/operations.md` documents the new shape.
 
-- [ ] `H-TBL-007` Per-row-type column registry and `--columns` flag.
-  - Scope: introduce a column registry in `src/output/table.rs` keyed
-    by row-type. For each row-type, declare:
-    (a) the ordered list of available columns with stable string keys
-        (e.g. `id`, `label`, `cwd`, `mux`, `mux-conf`, `pr`, `pr-conf`,
-        `lineage`),
-    (b) a one-line description per column for `--help` /
-        discovery output,
-    (c) the default set rendered when no override is given,
-    (d) a value extractor that maps a row's source data (e.g. an
-        `AgentSessionNode` plus the `SnapshotView`) to a `String` cell.
-    Replace each `build_*_rows` function with a generic builder that
-    walks the chosen column list per row.
-
-    Add a `--columns LIST` flag to every `conspectus table <ROWS>`
-    subcommand. `LIST` is comma-separated; each token is one of:
-    - `default` — the registered default set
-    - `all` — every registered column
-    - `+<name>` — add to the running set (defaults to the default set
-      when the first non-`+`/`-` token is absent)
-    - `-<name>` — remove from the running set
-    - `<name>` — explicit-list mode: the running set becomes exactly
-      this list (later `+`/`-` tokens still apply)
-    Unknown column names error with a list of the registered names
-    for the active row-type.
-
-    Mirror the flag in config: `[table.<rows>].columns = [...]` (a
-    fixed list, no `+`/`-` semantics in config — keep config simple
-    and predictable).
-  - Tests: unit tests for the registry, the parser (every token
-    shape, mixed `+`/`-`, explicit list, unknowns), and per-row-type
-    defaults; CLI integration tests for `--columns` overrides and the
-    `[table.sessions].columns` config knob; snapshot fixtures
-    asserting at least one non-default column selection per row-type.
-  - Manual checks: `conspectus table sessions --columns
-    id,label,cwd,mux`, `conspectus table sessions --columns
-    +lineage`, `conspectus table sessions --columns -mux-conf,-pr-conf`.
-  - Blockers: `H-TBL-006`.
+- [x] `H-TBL-007` Per-row-type column registry and `--columns` flag.
+  - Outcome: `src/output/table.rs` grew a column registry keyed by
+    row-type. `ColumnSpec` records each column's stable `key`,
+    header label, one-line description, and `default` flag. The
+    `sessions`, `mux`, and `union` row-types each have their
+    registry slice plus a typed row-context struct
+    (`AgentRowCtx` / `MuxRowCtx` / `UnionRowCtx`) and a cell
+    extractor (`agent_cell` / `mux_cell` / `union_cell`). The three
+    `build_*_rows` functions now walk a `&[&'static str]` column
+    list and dispatch per cell. `RenderOptions::columns:
+    Option<Vec<&'static str>>` carries the selection; `None` falls
+    back to `default_columns(projection)`. `parse_columns_spec`
+    handles the `default` / `all` / `+name` / `-name` / explicit-list
+    token grammar from the backlog; `resolve_explicit_columns`
+    backs the config side. The `conspectus table <ROWS>` subcommands
+    gained `--columns LIST`. Config grew
+    `[table.<rows>].columns = [...]` (loaded via
+    `TableRowConfig::columns`); CLI flag overrides config when both
+    are present. Unknown columns error with the registered list
+    surfaced on stderr. Cached `attached_to_mux` on `SnapshotView` so
+    the mux "agents" cell stays O(1) per row. New unit tests cover
+    the parser (`default`/`all`/`+`/`-`/explicit-list/unknown/empty
+    tokens), `resolve_explicit_columns` validation, registry
+    defaults, and `render_with`/`with_columns` for both columnar
+    and card layouts. CLI integration tests cover `--columns`
+    override of defaults, delta tokens (with the
+    `--columns=-name,...` equals form so clap accepts the leading
+    dash), unknown-column errors, config-driven defaults, and CLI
+    overriding config. All 357 tests pass; existing snapshots stay
+    byte-for-byte stable because the registry's default sets match
+    the prior hard-coded headers and extractors. `docs/operations.md`
+    documents the flag and config knob.
 
 - [ ] `H-TBL-008` `conspectus table prs` row-type.
   - Scope: rows = `ForgePrNode`. Register columns:

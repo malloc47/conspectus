@@ -43,6 +43,10 @@ pub struct RenderOptions {
     /// Body layout: `Columnar` (default tabular) or `Card` (one column
     /// per line per row).
     pub layout: Layout,
+    /// Selected column keys, in render order. `None` falls back to the
+    /// row-type's [`default_columns`] set. Use [`parse_columns_spec`] to
+    /// translate a `--columns LIST` string into a value for this field.
+    pub columns: Option<Vec<&'static str>>,
 }
 
 impl RenderOptions {
@@ -51,6 +55,7 @@ impl RenderOptions {
         Self {
             width: None,
             layout: Layout::Columnar,
+            columns: None,
         }
     }
 
@@ -59,6 +64,7 @@ impl RenderOptions {
         Self {
             width: Some(width),
             layout: Layout::Columnar,
+            columns: None,
         }
     }
 
@@ -67,6 +73,7 @@ impl RenderOptions {
         Self {
             width: None,
             layout: Layout::Card,
+            columns: None,
         }
     }
 
@@ -75,7 +82,16 @@ impl RenderOptions {
         Self {
             width: Some(width),
             layout: Layout::Card,
+            columns: None,
         }
+    }
+
+    /// Builder helper: render exactly `columns` (in this order). Pass
+    /// keys obtained from [`parse_columns_spec`] or
+    /// [`resolve_explicit_columns`].
+    pub fn with_columns(mut self, columns: Vec<&'static str>) -> Self {
+        self.columns = Some(columns);
+        self
     }
 }
 
@@ -157,10 +173,14 @@ pub fn render_with(
     options: &RenderOptions,
 ) -> String {
     let view = SnapshotView::new(snapshot);
+    let columns: Vec<&'static str> = options
+        .columns
+        .clone()
+        .unwrap_or_else(|| default_columns(projection));
     let rows = match projection {
-        Projection::Agent => build_agent_rows(&view),
-        Projection::Mux => build_mux_rows(&view),
-        Projection::Union => build_union_rows(&view),
+        Projection::Agent => build_agent_rows(&view, &columns),
+        Projection::Mux => build_mux_rows(&view, &columns),
+        Projection::Union => build_union_rows(&view, &columns),
     };
     render_rows(rows, options)
 }
@@ -206,6 +226,10 @@ struct SnapshotView<'a> {
     /// `(source_node_id, relation_kind)` → all candidate links for
     /// that pair, in stable order.
     by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
+    /// Pre-computed `mux_id → [(agent_label, preferred_link)]` map for
+    /// the agents-attached-to-this-mux cell. Built once at view
+    /// construction so per-row column extractors don't each rebuild it.
+    attached_to_mux: BTreeMap<NodeId, Vec<(String, &'a GraphLink)>>,
 }
 
 impl<'a> SnapshotView<'a> {
@@ -241,11 +265,31 @@ impl<'a> SnapshotView<'a> {
                 .push(link);
         }
 
+        let mut attached_to_mux: BTreeMap<NodeId, Vec<(String, &GraphLink)>> = BTreeMap::new();
+        for ((source, relation), links) in &by_source_relation {
+            if *relation != RelationKind::LinkedToMux {
+                continue;
+            }
+            let Some(preferred) = pick_preferred(links) else {
+                continue;
+            };
+            let Some(target_id) = preferred.target_node_id() else {
+                continue;
+            };
+            if let Some(session) = agent_sessions.get(source) {
+                attached_to_mux
+                    .entry(target_id.clone())
+                    .or_default()
+                    .push((agent_session_label(session), preferred));
+            }
+        }
+
         Self {
             agent_sessions,
             mux_sessions,
             forge_prs,
             by_source_relation,
+            attached_to_mux,
         }
     }
 
@@ -284,6 +328,436 @@ fn pick_preferred<'a>(links: &[&'a GraphLink]) -> Option<&'a GraphLink> {
     ranked.into_iter().next()
 }
 
+// -----------------------------------------------------------------------------
+// Column registry (H-TBL-007)
+// -----------------------------------------------------------------------------
+
+/// One column in a row-type's column registry.
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnSpec {
+    /// Stable token used in `--columns LIST` and `[table.<rows>].columns`.
+    pub key: &'static str,
+    /// Header label rendered in the columnar table and as the key in card layout.
+    pub header: &'static str,
+    /// One-line description for the column-discovery surface (H-TBL-012).
+    pub description: &'static str,
+    /// `true` when the column is part of the row-type's default set.
+    pub default: bool,
+}
+
+const SESSIONS_COLUMNS: &[ColumnSpec] = &[
+    ColumnSpec {
+        key: "id",
+        header: "ID",
+        description: "Short content-addressed row identifier.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "agent",
+        header: "AGENT",
+        description: "Harness key and session key (or title when set).",
+        default: true,
+    },
+    ColumnSpec {
+        key: "cwd",
+        header: "CWD",
+        description: "Working directory recorded by the harness.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "mux",
+        header: "MUX",
+        description: "Preferred mux session attached to this agent session.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "mux-conf",
+        header: "MUX/CONF",
+        description: "Provenance/confidence indicator for the mux cell.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "pr",
+        header: "PR",
+        description: "Preferred forge PR attached via the worktree branch.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "pr-conf",
+        header: "PR/CONF",
+        description: "Provenance/confidence indicator for the PR cell.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "lineage",
+        header: "LINEAGE",
+        description: "Preferred parent-session, with a trailing ← when the chain extends past one hop.",
+        default: true,
+    },
+];
+
+const MUX_COLUMNS: &[ColumnSpec] = &[
+    ColumnSpec {
+        key: "id",
+        header: "ID",
+        description: "Short content-addressed row identifier.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "mux",
+        header: "MUX",
+        description: "Backend and native session id.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "cwd",
+        header: "CWD",
+        description: "Working directory recorded by the mux backend.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "agents",
+        header: "AGENTS",
+        description: "Agent sessions attached to this mux session.",
+        default: true,
+    },
+];
+
+const UNION_COLUMNS: &[ColumnSpec] = &[
+    ColumnSpec {
+        key: "id",
+        header: "ID",
+        description: "Short content-addressed row identifier.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "kind",
+        header: "KIND",
+        description: "Node kind (`agent` or `mux`).",
+        default: true,
+    },
+    ColumnSpec {
+        key: "label",
+        header: "LABEL",
+        description: "Harness/mux label for the node.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "cwd",
+        header: "CWD",
+        description: "Working directory recorded for the node.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "relationship",
+        header: "RELATIONSHIP",
+        description: "Preferred relationship cell for agent rows; — for mux rows.",
+        default: true,
+    },
+];
+
+/// Registry slice for `projection`.
+pub fn columns_for(projection: Projection) -> &'static [ColumnSpec] {
+    match projection {
+        Projection::Agent => SESSIONS_COLUMNS,
+        Projection::Mux => MUX_COLUMNS,
+        Projection::Union => UNION_COLUMNS,
+    }
+}
+
+/// Default column key set for `projection`, in registry order.
+pub fn default_columns(projection: Projection) -> Vec<&'static str> {
+    columns_for(projection)
+        .iter()
+        .filter(|spec| spec.default)
+        .map(|spec| spec.key)
+        .collect()
+}
+
+fn projection_row_type(projection: Projection) -> &'static str {
+    match projection {
+        Projection::Agent => "sessions",
+        Projection::Mux => "mux",
+        Projection::Union => "union",
+    }
+}
+
+/// Errors produced when resolving a user-supplied column selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnsError {
+    UnknownColumn {
+        name: String,
+        row_type: &'static str,
+        available: Vec<&'static str>,
+    },
+    EmptyToken,
+}
+
+impl std::fmt::Display for ColumnsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnsError::UnknownColumn {
+                name,
+                row_type,
+                available,
+            } => write!(
+                f,
+                "unknown column `{name}` for row-type `{row_type}`; available: {}",
+                available.join(", "),
+            ),
+            ColumnsError::EmptyToken => write!(f, "empty column token in --columns spec"),
+        }
+    }
+}
+
+impl std::error::Error for ColumnsError {}
+
+/// Resolve a `--columns LIST` spec for `projection` to an ordered list
+/// of column keys.
+///
+/// Tokens (comma-separated, whitespace-trimmed):
+/// - `default` — reset to the registered default set.
+/// - `all` — reset to every registered column.
+/// - `+name` — add the column if not already present.
+/// - `-name` — remove the column if present.
+/// - `name` — explicit-list mode: clears the running set on the first bare
+///   token, then appends.
+///
+/// Unknown column names error with the registered names listed.
+pub fn parse_columns_spec(
+    projection: Projection,
+    spec: &str,
+) -> Result<Vec<&'static str>, ColumnsError> {
+    let registry = columns_for(projection);
+    let row_type = projection_row_type(projection);
+    let available: Vec<&'static str> = registry.iter().map(|spec| spec.key).collect();
+
+    let lookup = |name: &str| -> Result<&'static str, ColumnsError> {
+        registry
+            .iter()
+            .find(|spec| spec.key == name)
+            .map(|spec| spec.key)
+            .ok_or_else(|| ColumnsError::UnknownColumn {
+                name: name.to_string(),
+                row_type,
+                available: available.clone(),
+            })
+    };
+
+    let mut current: Vec<&'static str> = default_columns(projection);
+    let mut explicit_started = false;
+
+    for raw in spec.split(',') {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(ColumnsError::EmptyToken);
+        }
+        if let Some(rest) = trimmed.strip_prefix('+') {
+            let key = lookup(rest.trim())?;
+            if !current.contains(&key) {
+                current.push(key);
+            }
+        } else if let Some(rest) = trimmed.strip_prefix('-') {
+            let key = lookup(rest.trim())?;
+            current.retain(|k| *k != key);
+        } else if trimmed == "default" {
+            current = default_columns(projection);
+            explicit_started = true;
+        } else if trimmed == "all" {
+            current = available.clone();
+            explicit_started = true;
+        } else {
+            let key = lookup(trimmed)?;
+            if !explicit_started {
+                current.clear();
+                explicit_started = true;
+            }
+            if !current.contains(&key) {
+                current.push(key);
+            }
+        }
+    }
+
+    Ok(current)
+}
+
+/// Resolve an explicit list of column names (no `+`/`-` semantics) — the
+/// config-file variant for `[table.<rows>].columns`. Unknown names error.
+pub fn resolve_explicit_columns(
+    projection: Projection,
+    names: &[String],
+) -> Result<Vec<&'static str>, ColumnsError> {
+    let registry = columns_for(projection);
+    let row_type = projection_row_type(projection);
+    let available: Vec<&'static str> = registry.iter().map(|spec| spec.key).collect();
+
+    names
+        .iter()
+        .map(|name| {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return Err(ColumnsError::EmptyToken);
+            }
+            registry
+                .iter()
+                .find(|spec| spec.key == trimmed)
+                .map(|spec| spec.key)
+                .ok_or_else(|| ColumnsError::UnknownColumn {
+                    name: trimmed.to_string(),
+                    row_type,
+                    available: available.clone(),
+                })
+        })
+        .collect()
+}
+
+fn header_label(registry: &[ColumnSpec], key: &str) -> String {
+    registry
+        .iter()
+        .find(|spec| spec.key == key)
+        .map(|spec| spec.header.to_string())
+        .unwrap_or_else(|| key.to_uppercase())
+}
+
+// -----------------------------------------------------------------------------
+// Per-row-type column extractors
+// -----------------------------------------------------------------------------
+
+struct AgentRowCtx<'view, 'snap> {
+    view: &'view SnapshotView<'snap>,
+    node_id: &'view NodeId,
+    session: &'view AgentSessionNode,
+    short_id: &'view str,
+}
+
+fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
+    match key {
+        "id" => ctx.short_id.to_string(),
+        "agent" => agent_session_label(ctx.session),
+        "cwd" => ctx.session.cwd.clone().unwrap_or_else(|| "—".to_string()),
+        "mux" => {
+            let link = ctx
+                .view
+                .preferred_link(ctx.node_id, RelationKind::LinkedToMux);
+            link.and_then(|link| match &link.target {
+                LinkEndpoint::Node {
+                    id: NodeId::MuxSession(_),
+                } => ctx
+                    .view
+                    .mux_sessions
+                    .get(link.target_node_id()?)
+                    .map(|mux| mux_session_label(mux)),
+                _ => None,
+            })
+            .unwrap_or_else(|| "—".to_string())
+        }
+        "mux-conf" => {
+            let link = ctx
+                .view
+                .preferred_link(ctx.node_id, RelationKind::LinkedToMux);
+            let count = ctx
+                .view
+                .candidates_for(ctx.node_id, RelationKind::LinkedToMux)
+                .len();
+            match link {
+                Some(link) => indicator(link.provenance, link.confidence, count > 1),
+                None => "—".to_string(),
+            }
+        }
+        "pr" => preferred_pr_for_session(ctx.view, ctx.node_id).0,
+        "pr-conf" => preferred_pr_for_session(ctx.view, ctx.node_id).1,
+        "lineage" => lineage_cell(ctx.view, ctx.node_id),
+        _ => "—".to_string(),
+    }
+}
+
+struct MuxRowCtx<'view, 'snap> {
+    view: &'view SnapshotView<'snap>,
+    mux_id: &'view NodeId,
+    mux: &'view MuxSessionNode,
+    short_id: &'view str,
+}
+
+fn mux_cell(key: &str, ctx: &MuxRowCtx<'_, '_>) -> String {
+    match key {
+        "id" => ctx.short_id.to_string(),
+        "mux" => mux_session_label(ctx.mux),
+        "cwd" => ctx.mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
+        "agents" => match ctx.view.attached_to_mux.get(ctx.mux_id) {
+            Some(entries) if !entries.is_empty() => entries
+                .iter()
+                .map(|(label, link)| {
+                    let ambiguous = ctx
+                        .view
+                        .candidates_for(&link.source, RelationKind::LinkedToMux)
+                        .len()
+                        > 1;
+                    format!(
+                        "{label} [{ind}]",
+                        ind = indicator(link.provenance, link.confidence, ambiguous)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+            _ => "—".to_string(),
+        },
+        _ => "—".to_string(),
+    }
+}
+
+enum UnionRowSource<'a> {
+    Agent {
+        node_id: &'a NodeId,
+        session: &'a AgentSessionNode,
+    },
+    Mux {
+        mux: &'a MuxSessionNode,
+    },
+}
+
+struct UnionRowCtx<'view, 'snap> {
+    view: &'view SnapshotView<'snap>,
+    source: UnionRowSource<'view>,
+    short_id: &'view str,
+}
+
+fn union_cell(key: &str, ctx: &UnionRowCtx<'_, '_>) -> String {
+    match (key, &ctx.source) {
+        ("id", _) => ctx.short_id.to_string(),
+        ("kind", UnionRowSource::Agent { .. }) => "agent".to_string(),
+        ("kind", UnionRowSource::Mux { .. }) => "mux".to_string(),
+        ("label", UnionRowSource::Agent { session, .. }) => agent_session_label(session),
+        ("label", UnionRowSource::Mux { mux }) => mux_session_label(mux),
+        ("cwd", UnionRowSource::Agent { session, .. }) => {
+            session.cwd.clone().unwrap_or_else(|| "—".to_string())
+        }
+        ("cwd", UnionRowSource::Mux { mux }) => mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
+        ("relationship", UnionRowSource::Agent { node_id, .. }) => {
+            let mux_link = ctx.view.preferred_link(node_id, RelationKind::LinkedToMux);
+            let mux_count = ctx
+                .view
+                .candidates_for(node_id, RelationKind::LinkedToMux)
+                .len();
+            match mux_link {
+                Some(link) => {
+                    let target = link
+                        .target_node_id()
+                        .and_then(|id| ctx.view.mux_sessions.get(id))
+                        .map(|mux| mux_session_label(mux))
+                        .unwrap_or_else(|| "—".to_string());
+                    format!(
+                        "mux={target} [{ind}]",
+                        ind = indicator(link.provenance, link.confidence, mux_count > 1)
+                    )
+                }
+                None => "mux=—".to_string(),
+            }
+        }
+        ("relationship", UnionRowSource::Mux { .. }) => "—".to_string(),
+        _ => "—".to_string(),
+    }
+}
+
 fn agent_session_label(session: &AgentSessionNode) -> String {
     if let Some(title) = &session.title {
         format!("{}:{}", session.harness_key, title)
@@ -302,55 +776,27 @@ fn forge_pr_label(pr: &ForgePrNode) -> String {
     format!("{}/{}#{} ({state}{draft})", pr.owner, pr.repo, pr.number)
 }
 
-fn build_agent_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
+fn build_agent_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
     let body_full_ids: Vec<String> = view.agent_sessions.keys().map(node_short_id).collect();
     let id_len = unique_prefix_len(&body_full_ids);
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
-        [
-            "ID", "AGENT", "CWD", "MUX", "MUX/CONF", "PR", "PR/CONF", "LINEAGE",
-        ]
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect(),
+        columns
+            .iter()
+            .map(|key| header_label(SESSIONS_COLUMNS, key))
+            .collect(),
     );
 
     for ((node_id, session), full_short) in view.agent_sessions.iter().zip(body_full_ids.iter()) {
-        let mux_link = view.preferred_link(node_id, RelationKind::LinkedToMux);
-        let mux_count = view
-            .candidates_for(node_id, RelationKind::LinkedToMux)
-            .len();
-        let mux_cell = mux_link
-            .and_then(|link| match &link.target {
-                LinkEndpoint::Node {
-                    id: NodeId::MuxSession(_),
-                } => view
-                    .mux_sessions
-                    .get(link.target_node_id()?)
-                    .map(|mux| mux_session_label(mux)),
-                _ => None,
-            })
-            .unwrap_or_else(|| "—".to_string());
-        let mux_indicator = match mux_link {
-            Some(link) => indicator(link.provenance, link.confidence, mux_count > 1),
-            None => "—".to_string(),
+        let short_id = &full_short[..id_len];
+        let ctx = AgentRowCtx {
+            view,
+            node_id,
+            session,
+            short_id,
         };
-
-        let (pr_cell, pr_indicator) = preferred_pr_for_session(view, node_id);
-
-        let lineage_cell = lineage_cell(view, node_id);
-
-        rows.push(vec![
-            full_short[..id_len].to_string(),
-            agent_session_label(session),
-            session.cwd.clone().unwrap_or_else(|| "—".to_string()),
-            mux_cell,
-            mux_indicator,
-            pr_cell,
-            pr_indicator,
-            lineage_cell,
-        ]);
+        rows.push(columns.iter().map(|key| agent_cell(key, &ctx)).collect());
     }
 
     rows
@@ -454,74 +900,33 @@ fn preferred_pr_for_session(view: &SnapshotView<'_>, session_id: &NodeId) -> (St
     ("—".to_string(), "—".to_string())
 }
 
-fn build_mux_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
+fn build_mux_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
     let body_full_ids: Vec<String> = view.mux_sessions.keys().map(node_short_id).collect();
     let id_len = unique_prefix_len(&body_full_ids);
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
-        ["ID", "MUX", "CWD", "AGENTS"]
+        columns
             .iter()
-            .map(|s| (*s).to_string())
+            .map(|key| header_label(MUX_COLUMNS, key))
             .collect(),
     );
 
-    // Build mux → [agent labels] by walking active LinkedToMux links.
-    let mut attached: BTreeMap<NodeId, Vec<(String, &GraphLink)>> = BTreeMap::new();
-    for ((source, relation), links) in &view.by_source_relation {
-        if *relation != RelationKind::LinkedToMux {
-            continue;
-        }
-        let preferred = match pick_preferred(links) {
-            Some(link) => link,
-            None => continue,
-        };
-        let Some(target_id) = preferred.target_node_id() else {
-            continue;
-        };
-        if let Some(session) = view.agent_sessions.get(source) {
-            attached
-                .entry(target_id.clone())
-                .or_default()
-                .push((agent_session_label(session), preferred));
-        }
-    }
-
     for ((mux_id, mux), full_short) in view.mux_sessions.iter().zip(body_full_ids.iter()) {
-        let entries = attached.get(mux_id);
-        let count = entries.map(Vec::len).unwrap_or(0);
-        let agents_cell = if let Some(entries) = entries {
-            entries
-                .iter()
-                .map(|(label, link)| {
-                    let ambiguous = view
-                        .candidates_for(&link.source, RelationKind::LinkedToMux)
-                        .len()
-                        > 1;
-                    format!(
-                        "{label} [{ind}]",
-                        ind = indicator(link.provenance, link.confidence, ambiguous)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        } else {
-            "—".to_string()
+        let short_id = &full_short[..id_len];
+        let ctx = MuxRowCtx {
+            view,
+            mux_id,
+            mux,
+            short_id,
         };
-        let _ = count;
-
-        rows.push(vec![
-            full_short[..id_len].to_string(),
-            mux_session_label(mux),
-            mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
-            agents_cell,
-        ]);
+        rows.push(columns.iter().map(|key| mux_cell(key, &ctx)).collect());
     }
 
     rows
 }
 
-fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
+fn build_union_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
     // The union projection mixes agent and mux rows; compute one prefix
     // length across the combined id set so collisions across kinds are
     // disambiguated too.
@@ -536,9 +941,9 @@ fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
-        ["ID", "KIND", "LABEL", "CWD", "RELATIONSHIP"]
+        columns
             .iter()
-            .map(|s| (*s).to_string())
+            .map(|key| header_label(UNION_COLUMNS, key))
             .collect(),
     );
 
@@ -547,31 +952,13 @@ fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
         .iter()
         .zip(body_full_ids.iter().take(agent_count))
     {
-        let mux_link = view.preferred_link(node_id, RelationKind::LinkedToMux);
-        let mux_count = view
-            .candidates_for(node_id, RelationKind::LinkedToMux)
-            .len();
-        let relationship = match mux_link {
-            Some(link) => {
-                let target = link
-                    .target_node_id()
-                    .and_then(|id| view.mux_sessions.get(id))
-                    .map(|mux| mux_session_label(mux))
-                    .unwrap_or_else(|| "—".to_string());
-                format!(
-                    "mux={target} [{ind}]",
-                    ind = indicator(link.provenance, link.confidence, mux_count > 1)
-                )
-            }
-            None => "mux=—".to_string(),
+        let short_id = &full_short[..id_len];
+        let ctx = UnionRowCtx {
+            view,
+            source: UnionRowSource::Agent { node_id, session },
+            short_id,
         };
-        rows.push(vec![
-            full_short[..id_len].to_string(),
-            "agent".to_string(),
-            agent_session_label(session),
-            session.cwd.clone().unwrap_or_else(|| "—".to_string()),
-            relationship,
-        ]);
+        rows.push(columns.iter().map(|key| union_cell(key, &ctx)).collect());
     }
 
     for (mux, full_short) in view
@@ -579,13 +966,13 @@ fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
         .values()
         .zip(body_full_ids.iter().skip(agent_count))
     {
-        rows.push(vec![
-            full_short[..id_len].to_string(),
-            "mux".to_string(),
-            mux_session_label(mux),
-            mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
-            "—".to_string(),
-        ]);
+        let short_id = &full_short[..id_len];
+        let ctx = UnionRowCtx {
+            view,
+            source: UnionRowSource::Mux { mux },
+            short_id,
+        };
+        rows.push(columns.iter().map(|key| union_cell(key, &ctx)).collect());
     }
 
     rows
@@ -1238,6 +1625,144 @@ mod tests {
             rendered.contains("octo/repo#7"),
             "expected PR label in:\n{rendered}",
         );
+    }
+
+    #[test]
+    fn default_columns_for_each_projection_matches_registry() {
+        for projection in [Projection::Agent, Projection::Mux, Projection::Union] {
+            let registry: Vec<&str> = columns_for(projection)
+                .iter()
+                .filter(|c| c.default)
+                .map(|c| c.key)
+                .collect();
+            assert_eq!(default_columns(projection), registry);
+        }
+    }
+
+    #[test]
+    fn parse_columns_empty_spec_returns_default_set() {
+        // An empty string yields an empty-token error; the harness-side
+        // default (no flag at all) is to keep defaults — tested in
+        // CLI integration. Here we just check that ".." returns default.
+        let result = parse_columns_spec(Projection::Agent, "default").expect("default token");
+        assert_eq!(result, default_columns(Projection::Agent));
+    }
+
+    #[test]
+    fn parse_columns_explicit_list_resets_running_set() {
+        let result = parse_columns_spec(Projection::Agent, "id,agent,cwd").expect("explicit list");
+        assert_eq!(result, vec!["id", "agent", "cwd"]);
+    }
+
+    #[test]
+    fn parse_columns_plus_appends_to_defaults() {
+        // Default already contains "lineage", so adding it is a no-op
+        // but should still succeed.
+        let result = parse_columns_spec(Projection::Agent, "+lineage").expect("plus lineage");
+        assert_eq!(result, default_columns(Projection::Agent));
+    }
+
+    #[test]
+    fn parse_columns_minus_removes_from_defaults() {
+        let result = parse_columns_spec(Projection::Agent, "-cwd,-mux-conf").expect("minus tokens");
+        assert_eq!(
+            result,
+            vec!["id", "agent", "mux", "pr", "pr-conf", "lineage"]
+        );
+    }
+
+    #[test]
+    fn parse_columns_all_resets_to_every_registered_column() {
+        let result = parse_columns_spec(Projection::Mux, "all").expect("all");
+        assert_eq!(result, vec!["id", "mux", "cwd", "agents"]);
+    }
+
+    #[test]
+    fn parse_columns_mixed_explicit_list_then_plus() {
+        // Bare token resets, then `+` appends after.
+        let result = parse_columns_spec(Projection::Agent, "id,agent,+cwd").expect("mixed");
+        assert_eq!(result, vec!["id", "agent", "cwd"]);
+    }
+
+    #[test]
+    fn parse_columns_unknown_name_errors_with_available_listed() {
+        let err = parse_columns_spec(Projection::Agent, "+nope").unwrap_err();
+        match err {
+            ColumnsError::UnknownColumn {
+                name,
+                row_type,
+                available,
+            } => {
+                assert_eq!(name, "nope");
+                assert_eq!(row_type, "sessions");
+                assert!(available.contains(&"agent"));
+            }
+            other => panic!("expected UnknownColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_columns_empty_token_errors() {
+        let err = parse_columns_spec(Projection::Agent, "id,,agent").unwrap_err();
+        assert!(matches!(err, ColumnsError::EmptyToken));
+    }
+
+    #[test]
+    fn resolve_explicit_columns_validates_each_name() {
+        let names: Vec<String> = vec!["id".into(), "agent".into(), "lineage".into()];
+        let result = resolve_explicit_columns(Projection::Agent, &names).expect("resolve explicit");
+        assert_eq!(result, vec!["id", "agent", "lineage"]);
+
+        let bad: Vec<String> = vec!["id".into(), "nope".into()];
+        let err = resolve_explicit_columns(Projection::Agent, &bad).unwrap_err();
+        assert!(matches!(err, ColumnsError::UnknownColumn { .. }));
+    }
+
+    #[test]
+    fn render_with_explicit_columns_emits_only_those_cells() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
+            ..GraphSnapshot::empty()
+        };
+        let options = RenderOptions::wide().with_columns(vec!["id", "agent", "cwd"]);
+        let rendered = render_with(&snapshot, Projection::Agent, &options);
+        let header_tokens: Vec<&str> = rendered
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        // Three columns, no MUX/PR/LINEAGE.
+        assert_eq!(header_tokens, vec!["ID", "AGENT", "CWD"]);
+        assert!(!rendered.contains("MUX"));
+        assert!(!rendered.contains("PR"));
+        assert!(!rendered.contains("LINEAGE"));
+
+        let body_tokens: Vec<&str> = rendered
+            .lines()
+            .nth(2)
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        // [<short>, codex:alpha, /work/a]
+        assert_eq!(body_tokens.len(), 3);
+        assert_eq!(body_tokens[1], "codex:alpha");
+        assert_eq!(body_tokens[2], "/work/a");
+    }
+
+    #[test]
+    fn render_with_card_layout_honors_column_selection() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
+            ..GraphSnapshot::empty()
+        };
+        let options = RenderOptions::card().with_columns(vec!["id", "agent"]);
+        let rendered = render_with(&snapshot, Projection::Agent, &options);
+        let lines: Vec<&str> = rendered.lines().filter(|l| !l.is_empty()).collect();
+        // Card emits one `KEY: value` line per selected column.
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with("ID:"));
+        assert!(lines[1].starts_with("AGENT:"));
     }
 
     #[test]

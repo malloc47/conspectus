@@ -80,6 +80,7 @@ contents are ignored.
 conspectus graph --format json [--scan-root PATH]...
 conspectus table {sessions|mux|union} [--layout {columnar|card}]
                                        [--wide | --width N]
+                                       [--columns LIST]
                                        [--scan-root PATH]...
 conspectus node show <id> [--scan-root PATH]...
 conspectus declared ...
@@ -93,6 +94,23 @@ forces untruncated output even on a TTY, and `--width N` pins an
 exact width for reproducible captures. `--layout card` renders one
 column per line per row with blank-line separators, useful when the
 columnar form would truncate (long `CWD`, long PR identifier).
+
+`--columns LIST` selects which columns to render. `LIST` is
+comma-separated; each token is:
+
+- `default` — the row-type's registered default set.
+- `all` — every registered column for the row-type.
+- `+name` — add to the running set.
+- `-name` — remove from the running set. Use the equals form
+  (`--columns=-name,...`) so the shell does not interpret a leading
+  dash as a flag.
+- `name` — explicit-list mode: clears the running set on the first
+  bare token, then appends.
+
+Unknown column names error with the registered names for the
+row-type listed. `[table.<rows>].columns` in `.conspectus.toml` /
+user config provides a fixed default column list; CLI `--columns`
+overrides config when both are present.
 
 `node show <id>` accepts any of:
 
