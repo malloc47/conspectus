@@ -26,7 +26,7 @@ impl Cli {
     pub fn run(self) -> Result<()> {
         match self.command.unwrap_or(Command::Graph(GraphArgs::default())) {
             Command::Graph(args) => args.run(),
-            Command::Session(args) => args.run(),
+            Command::Table(args) => args.run(),
             Command::Declared(args) => args.run(),
             Command::Node(args) => args.run(),
         }
@@ -37,8 +37,8 @@ impl Cli {
 enum Command {
     /// Emit the current work graph.
     Graph(GraphArgs),
-    /// Render the resolved session table.
-    Session(SessionArgs),
+    /// Render a tabular projection of the resolved graph.
+    Table(TableArgs),
     /// Inspect or author declared graph links.
     Declared(Box<DeclaredArgs>),
     /// Inspect a single node and its surrounding links.
@@ -136,12 +136,34 @@ impl GraphArgs {
     }
 }
 
+#[derive(Debug, Args)]
+struct TableArgs {
+    #[command(subcommand)]
+    command: TableCommand,
+}
+
+impl TableArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            TableCommand::Sessions(args) => args.run(config::Projection::Agent),
+            TableCommand::Mux(args) => args.run(config::Projection::Mux),
+            TableCommand::Union(args) => args.run(config::Projection::Union),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum TableCommand {
+    /// Agent sessions, one per row.
+    Sessions(TableRowsArgs),
+    /// Mux (terminal multiplexer) sessions, one per row.
+    Mux(TableRowsArgs),
+    /// Mixed projection: one row per node, preserving relationship status.
+    Union(TableRowsArgs),
+}
+
 #[derive(Debug, Args, Default)]
-struct SessionArgs {
-    /// Table projection to render. Defaults to the value loaded from
-    /// `.conspectus.toml` / user config, falling back to `agent`.
-    #[arg(long, value_enum)]
-    projection: Option<ProjectionFlag>,
+struct TableRowsArgs {
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
     /// Force untruncated output even when stdout is a TTY. Conflicts
@@ -166,8 +188,8 @@ enum LayoutFlag {
     Card,
 }
 
-impl SessionArgs {
-    fn run(self) -> Result<()> {
+impl TableRowsArgs {
+    fn run(self, projection: config::Projection) -> Result<()> {
         let cwd = std::env::current_dir()?;
         let loader = config::ConfigLoader::from_env();
         let outcome = loader.load_from(&cwd);
@@ -179,18 +201,13 @@ impl SessionArgs {
             );
         }
 
-        let projection = self
-            .projection
-            .map(ProjectionFlag::into_config)
-            .unwrap_or(outcome.config.session.projection);
-
         let snapshot = if self.scan_roots.is_empty() {
             conspectus::discovery::discover_local_at_roots([cwd])?
         } else {
             conspectus::discovery::discover_local_at_roots(self.scan_roots)?
         };
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
-        let render_width = resolve_session_width(self.wide, self.width, &io::stdout());
+        let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {
                 conspectus::output::table::RenderOptions::columnar_width(w)
@@ -205,13 +222,13 @@ impl SessionArgs {
     }
 }
 
-/// Decide the render width for `conspectus session`.
+/// Decide the render width for `conspectus table <ROWS>`.
 ///
 /// - `--wide` forces `None` (untruncated).
 /// - `--width N` forces `Some(N)`.
 /// - Otherwise: detect the terminal width when stdout is a TTY, else
 ///   leave untruncated so piped output stays grep/awk-friendly.
-fn resolve_session_width(
+fn resolve_table_width(
     wide: bool,
     width: Option<usize>,
     stdout: &impl IsTerminal,
@@ -619,23 +636,6 @@ impl DeclaredOverrideArgs {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum OutputFormat {
     Json,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum ProjectionFlag {
-    Agent,
-    Mux,
-    Union,
-}
-
-impl ProjectionFlag {
-    fn into_config(self) -> config::Projection {
-        match self {
-            Self::Agent => config::Projection::Agent,
-            Self::Mux => config::Projection::Mux,
-            Self::Union => config::Projection::Union,
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]

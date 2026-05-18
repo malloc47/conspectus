@@ -1,10 +1,12 @@
 //! Conspectus configuration loading.
 //!
-//! See ADR 0012 for the layout and precedence rules. The CLI typically
-//! calls [`load_from_cwd`], which walks the current directory upward
-//! looking for `.conspectus.toml` and merges that on top of the
-//! user-level config. Tests usually construct a [`ConfigLoader`]
-//! directly so they can inject paths and a fake `$HOME` boundary.
+//! See ADR 0012 for the layout and precedence rules and ADR 0021 for the
+//! `[table.<rows>]` schema introduced alongside `conspectus table
+//! <ROWS>`. The CLI typically calls [`load_from_cwd`], which walks the
+//! current directory upward looking for `.conspectus.toml` and merges
+//! that on top of the user-level config. Tests usually construct a
+//! [`ConfigLoader`] directly so they can inject paths and a fake
+//! `$HOME` boundary.
 
 use std::fs;
 use std::io;
@@ -23,15 +25,28 @@ pub const USER_CONFIG_RELATIVE: &str = "conspectus/config.toml";
 /// Resolved configuration after project + user + defaults are merged.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
-    pub session: SessionConfig,
+    pub table: TableConfig,
 }
 
+/// Per-row-type settings under `[table.<rows>]`. Each row-type gets
+/// its own [`TableRowConfig`] so H-TBL-007 column registries land in a
+/// single, predictable slot.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SessionConfig {
-    pub projection: Projection,
+pub struct TableConfig {
+    pub sessions: TableRowConfig,
+    pub mux: TableRowConfig,
+    pub union: TableRowConfig,
 }
 
-/// Session-table projection. Matches the CLI `--projection` flag.
+/// Settings for one row-type. H-TBL-006 reserves the struct without
+/// declaring fields yet; H-TBL-007 adds `columns: Option<Vec<String>>`
+/// and future row-type-specific knobs append here.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TableRowConfig {}
+
+/// Table row-type. Matches the `conspectus table <ROWS>` positional
+/// (ADR 0021) and the [`crate::output::table`] renderer's row-type
+/// discriminator (ADR 0006).
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum Projection {
     #[default]
@@ -51,11 +66,11 @@ impl Projection {
 
     pub fn parse(raw: &str) -> Result<Self> {
         match raw {
-            "agent" => Ok(Self::Agent),
+            "agent" | "sessions" => Ok(Self::Agent),
             "mux" => Ok(Self::Mux),
             "union" => Ok(Self::Union),
             other => Err(anyhow!(
-                "invalid session.projection value `{other}`; expected one of agent, mux, union"
+                "invalid table row-type `{other}`; expected one of sessions, mux, union"
             )),
         }
     }
@@ -66,14 +81,29 @@ impl Projection {
 #[derive(Clone, Debug, Default, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
-    session: Option<SessionFile>,
+    table: Option<TableFile>,
+    /// Legacy `[session]` key from before ADR 0021. Its presence
+    /// triggers a diagnostic so users discover the schema migrated;
+    /// its contents are not read.
+    #[serde(default)]
+    session: Option<toml::Value>,
+}
+
+// Fields are deserialized to validate the schema; H-TBL-007 will read
+// them. `#[allow(dead_code)]` suppresses the unused-warning until then.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TableFile {
+    #[serde(default)]
+    sessions: Option<TableRowFile>,
+    #[serde(default)]
+    mux: Option<TableRowFile>,
+    #[serde(default)]
+    union: Option<TableRowFile>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct SessionFile {
-    #[serde(default)]
-    projection: Option<String>,
-}
+struct TableRowFile {}
 
 /// Result of a single load attempt.
 #[derive(Clone, Debug, Default)]
@@ -208,17 +238,24 @@ fn merge_from_file(config: &mut Config, path: &Path, diagnostics: &mut Vec<Confi
         }
     };
 
-    if let Some(session) = parsed.session
-        && let Some(raw) = session.projection
-    {
-        match Projection::parse(&raw) {
-            Ok(projection) => config.session.projection = projection,
-            Err(err) => diagnostics.push(ConfigDiagnostic {
-                path: path.to_path_buf(),
-                message: err.to_string(),
-            }),
-        }
+    if parsed.session.is_some() {
+        diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: "unknown section `session`; the schema moved to `[table.<rows>]` per ADR 0021"
+                .to_string(),
+        });
     }
+
+    if let Some(table) = parsed.table {
+        merge_table(&mut config.table, table);
+    }
+}
+
+fn merge_table(_config: &mut TableConfig, _file: TableFile) {
+    // H-TBL-006: the per-row-type subsections exist in the schema but
+    // carry no settable fields yet. H-TBL-007 will populate
+    // `TableRowConfig::columns` here. Keeping the function in place
+    // documents the merge seam.
 }
 
 fn env_path(key: &str) -> Option<PathBuf> {
@@ -249,72 +286,30 @@ mod tests {
 
         let outcome = loader.load_from(temp.path());
 
-        assert_eq!(outcome.config.session.projection, Projection::Agent);
+        assert_eq!(outcome.config, Config::default());
         assert!(outcome.diagnostics.is_empty());
         assert!(outcome.project_path.is_none());
         assert!(outcome.user_path.is_none());
     }
 
     #[test]
-    fn project_config_overrides_default() {
+    fn project_config_parses_empty_table_subsections() {
         let temp = TempDir::new().expect("temp dir");
         let project = temp.path().join("project");
         fs::create_dir(&project).expect("create project dir");
         write_file(
             &project.join(PROJECT_CONFIG_FILENAME),
-            "[session]\nprojection = \"mux\"\n",
+            "[table.sessions]\n[table.mux]\n[table.union]\n",
         );
 
         let loader = ConfigLoader::new().with_home(temp.path());
         let outcome = loader.load_from(&project);
 
-        assert_eq!(outcome.config.session.projection, Projection::Mux);
+        assert!(outcome.diagnostics.is_empty());
         assert_eq!(
             outcome.project_path.as_deref(),
             Some(project.join(PROJECT_CONFIG_FILENAME).as_path())
         );
-    }
-
-    #[test]
-    fn user_config_overrides_default_when_no_project_config() {
-        let temp = TempDir::new().expect("temp dir");
-        let xdg = temp.path().join("xdg");
-        write_file(
-            &xdg.join(USER_CONFIG_RELATIVE),
-            "[session]\nprojection = \"union\"\n",
-        );
-
-        let loader = ConfigLoader::new()
-            .with_home(temp.path())
-            .with_xdg_config_home(&xdg);
-        let outcome = loader.load_from(temp.path());
-
-        assert_eq!(outcome.config.session.projection, Projection::Union);
-        assert!(outcome.project_path.is_none());
-        assert!(outcome.user_path.is_some());
-    }
-
-    #[test]
-    fn project_config_wins_over_user_config() {
-        let temp = TempDir::new().expect("temp dir");
-        let xdg = temp.path().join("xdg");
-        write_file(
-            &xdg.join(USER_CONFIG_RELATIVE),
-            "[session]\nprojection = \"mux\"\n",
-        );
-        let project = temp.path().join("project");
-        fs::create_dir(&project).expect("create project dir");
-        write_file(
-            &project.join(PROJECT_CONFIG_FILENAME),
-            "[session]\nprojection = \"agent\"\n",
-        );
-
-        let loader = ConfigLoader::new()
-            .with_home(temp.path())
-            .with_xdg_config_home(&xdg);
-        let outcome = loader.load_from(&project);
-
-        assert_eq!(outcome.config.session.projection, Projection::Agent);
     }
 
     #[test]
@@ -323,15 +318,12 @@ mod tests {
         let project = temp.path().join("project");
         let nested = project.join("nested").join("deep");
         fs::create_dir_all(&nested).expect("create nested");
-        write_file(
-            &project.join(PROJECT_CONFIG_FILENAME),
-            "[session]\nprojection = \"mux\"\n",
-        );
+        write_file(&project.join(PROJECT_CONFIG_FILENAME), "[table.sessions]\n");
 
         let loader = ConfigLoader::new().with_home(temp.path());
         let outcome = loader.load_from(&nested);
 
-        assert_eq!(outcome.config.session.projection, Projection::Mux);
+        assert!(outcome.diagnostics.is_empty());
         assert_eq!(
             outcome.project_path.as_deref(),
             Some(project.join(PROJECT_CONFIG_FILENAME).as_path())
@@ -347,32 +339,37 @@ mod tests {
         // didn't stop. The loader must not pick it up.
         write_file(
             &temp.path().join(PROJECT_CONFIG_FILENAME),
-            "[session]\nprojection = \"mux\"\n",
+            "[table.sessions]\n",
         );
 
         let loader = ConfigLoader::new().with_home(&home);
         let outcome = loader.load_from(&home);
 
         assert!(outcome.project_path.is_none());
-        assert_eq!(outcome.config.session.projection, Projection::Agent);
     }
 
     #[test]
-    fn invalid_projection_value_yields_diagnostic_and_default() {
+    fn legacy_session_section_emits_diagnostic_but_does_not_abort() {
         let temp = TempDir::new().expect("temp dir");
         let project = temp.path().join("project");
         fs::create_dir(&project).expect("create project");
         write_file(
             &project.join(PROJECT_CONFIG_FILENAME),
-            "[session]\nprojection = \"ledger\"\n",
+            "[session]\nprojection = \"mux\"\n",
         );
 
         let loader = ConfigLoader::new().with_home(temp.path());
         let outcome = loader.load_from(&project);
 
-        assert_eq!(outcome.config.session.projection, Projection::Agent);
         assert_eq!(outcome.diagnostics.len(), 1);
-        assert!(outcome.diagnostics[0].message.contains("invalid"));
+        assert!(
+            outcome.diagnostics[0].message.contains("session"),
+            "diagnostic should mention the legacy section: {:?}",
+            outcome.diagnostics[0].message,
+        );
+        assert!(outcome.diagnostics[0].message.contains("table"),);
+        // Defaults still apply; the run is not aborted.
+        assert_eq!(outcome.config, Config::default());
     }
 
     #[test]
@@ -388,7 +385,7 @@ mod tests {
         let loader = ConfigLoader::new().with_home(temp.path());
         let outcome = loader.load_from(&project);
 
-        assert_eq!(outcome.config.session.projection, Projection::Agent);
+        assert_eq!(outcome.config, Config::default());
         assert!(
             outcome
                 .diagnostics
@@ -404,13 +401,12 @@ mod tests {
         fs::create_dir(&project).expect("create project");
         write_file(
             &project.join(PROJECT_CONFIG_FILENAME),
-            "[session]\nprojection = \"mux\"\nfuture_key = 1\n\n[unknown]\nx = \"y\"\n",
+            "[table.sessions]\nfuture_key = 1\n\n[unknown]\nx = \"y\"\n",
         );
 
         let loader = ConfigLoader::new().with_home(temp.path());
         let outcome = loader.load_from(&project);
 
-        assert_eq!(outcome.config.session.projection, Projection::Mux);
         assert!(outcome.diagnostics.is_empty());
     }
 
@@ -419,6 +415,9 @@ mod tests {
         for variant in [Projection::Agent, Projection::Mux, Projection::Union] {
             assert_eq!(Projection::parse(variant.as_str()).unwrap(), variant);
         }
+        // The `sessions` alias resolves to the same projection as the
+        // historical `agent` token; both back the same row-type.
+        assert_eq!(Projection::parse("sessions").unwrap(), Projection::Agent);
         assert!(Projection::parse("garbage").is_err());
     }
 
@@ -426,10 +425,7 @@ mod tests {
     fn xdg_config_home_overrides_home_fallback() {
         let temp = TempDir::new().expect("temp dir");
         let xdg = temp.path().join("xdg");
-        write_file(
-            &xdg.join(USER_CONFIG_RELATIVE),
-            "[session]\nprojection = \"union\"\n",
-        );
+        write_file(&xdg.join(USER_CONFIG_RELATIVE), "[table.sessions]\n");
         // Also place a colliding file under $HOME/.config that
         // should be ignored when XDG_CONFIG_HOME is set.
         write_file(
@@ -442,6 +438,9 @@ mod tests {
             .with_xdg_config_home(&xdg);
         let outcome = loader.load_from(temp.path());
 
-        assert_eq!(outcome.config.session.projection, Projection::Union);
+        // No diagnostic because the legacy file under $HOME/.config
+        // was never opened (XDG took priority).
+        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(outcome.user_path.unwrap(), xdg.join(USER_CONFIG_RELATIVE));
     }
 }

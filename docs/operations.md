@@ -56,46 +56,55 @@ See ADR 0012 for the layout and precedence rules. Briefly:
 Project values win over user values, which win over built-in
 defaults. Both files are TOML and entirely optional.
 
-The current schema is small:
+The schema is keyed on the `[table]` parent with one subsection per
+row-type rendered by `conspectus table <ROWS>` (see ADR 0021):
 
 ```toml
-[session]
-projection = "agent"  # one of "agent" | "mux" | "union"; default "agent"
+[table.sessions]
+# Per-row-type knobs land here; H-TBL-007 adds `columns = [...]`.
+
+[table.mux]
+
+[table.union]
 ```
 
-Unknown sections and unknown keys are ignored. Malformed TOML and
-invalid values for known keys surface as `ConfigDiagnostic`s on
-stderr but do not abort the run.
+Unknown sections and unknown keys are ignored. Malformed TOML
+surfaces as a `ConfigDiagnostic` on stderr but does not abort the
+run. The legacy `[session]` section (pre-ADR 0021) is recognized
+solely to emit a one-line diagnostic pointing at the new schema; its
+contents are ignored.
 
 ## CLI Surface
 
 ```sh
 conspectus graph --format json [--scan-root PATH]...
-conspectus session [--projection {agent|mux|union}] [--layout {columnar|card}]
-                   [--wide | --width N] [--scan-root PATH]...
+conspectus table {sessions|mux|union} [--layout {columnar|card}]
+                                       [--wide | --width N]
+                                       [--scan-root PATH]...
 conspectus node show <id> [--scan-root PATH]...
 conspectus declared ...
 ```
 
-`session` without `--projection` uses the value loaded from
-`.conspectus.toml` / user config (defaulting to `agent`). Width
-detection: when stdout is a TTY the table truncates to the detected
-terminal width; pipes default to wide so `conspectus session | grep`
-remains useful. `--wide` forces untruncated output even on a TTY, and
-`--width N` pins an exact width for reproducible captures. `--layout
-card` renders one column per line per row with blank-line separators,
-useful when the columnar form would truncate (long `CWD`, long PR
-identifier).
+The row-type (`sessions`, `mux`, `union`) is a required positional;
+there is no implicit default. Width detection: when stdout is a TTY
+the table truncates to the detected terminal width; pipes default to
+wide so `conspectus table sessions | grep` remains useful. `--wide`
+forces untruncated output even on a TTY, and `--width N` pins an
+exact width for reproducible captures. `--layout card` renders one
+column per line per row with blank-line separators, useful when the
+columnar form would truncate (long `CWD`, long PR identifier).
 
 `node show <id>` accepts any of:
 
-- The short content-addressed prefix from the session table's `ID`
-  column. Any prefix length ≥ 4 hex chars is accepted; an ambiguous
-  prefix errors with the matching candidates listed.
+- The short content-addressed prefix from any `conspectus table
+  <ROWS>` projection's `ID` column. Any prefix length ≥ 4 hex chars
+  is accepted; an ambiguous prefix errors with the matching
+  candidates listed.
 - The full `NodeId` display form, e.g.
   `agent_session:codex:/state:session-x` or `mux_session:tmux:editor`.
-- The harness/mux label that appears in the session table's `AGENT`
-  or `MUX` column, e.g. `codex:session-x` or `tmux:editor` — when the
+- The harness/mux label that appears in the `AGENT` column of
+  `conspectus table sessions` (e.g. `codex:session-x`) or the `MUX`
+  column of `conspectus table mux` (e.g. `tmux:editor`), when the
   label uniquely identifies one node.
 
 The command prints the node itself plus every candidate link (outgoing

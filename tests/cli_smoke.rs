@@ -391,32 +391,32 @@ fn graph_json_emits_no_mux_nodes_when_tmux_disabled() {
 }
 
 #[test]
-fn session_default_projection_renders_agent_table() {
+fn table_sessions_renders_agent_projection() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     let assert = isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
         .success();
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
     assert!(
         output.starts_with("ID") && output.contains("AGENT"),
-        "agent table should be the default projection; got:\n{output}",
+        "`table sessions` should render the agent projection header; got:\n{output}",
     );
 }
 
 #[test]
-fn session_projection_flag_switches_to_mux() {
+fn table_mux_renders_mux_projection() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     let assert = isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
-        .arg("--projection")
+        .arg("table")
         .arg("mux")
         .assert()
         .success();
@@ -424,12 +424,39 @@ fn session_projection_flag_switches_to_mux() {
 
     assert!(
         output.starts_with("ID") && output.contains("MUX"),
-        "mux projection should print MUX header; got:\n{output}",
+        "`table mux` should render the mux projection header; got:\n{output}",
     );
 }
 
 #[test]
-fn session_width_flag_truncates_long_cells_within_target() {
+fn table_help_lists_row_types() {
+    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
+
+    cmd.arg("table")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sessions"))
+        .stdout(predicate::str::contains("mux"))
+        .stdout(predicate::str::contains("union"));
+}
+
+#[test]
+fn table_requires_a_row_type() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    // `conspectus table` with no positional should error out and point
+    // at the available row-type subcommands.
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn table_sessions_width_flag_truncates_long_cells_within_target() {
     let home = tempfile::TempDir::new().expect("home temp");
     let scan_root = tempfile::TempDir::new().expect("scan temp");
     let codex_state = home.path().join(".codex").join("sessions");
@@ -447,7 +474,8 @@ fn session_width_flag_truncates_long_cells_within_target() {
     let assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .arg("--width")
         .arg("80")
         .assert()
@@ -472,7 +500,7 @@ fn session_width_flag_truncates_long_cells_within_target() {
 }
 
 #[test]
-fn session_wide_flag_emits_untruncated_output() {
+fn table_sessions_wide_flag_emits_untruncated_output() {
     let home = tempfile::TempDir::new().expect("home temp");
     let scan_root = tempfile::TempDir::new().expect("scan temp");
     let codex_state = home.path().join(".codex").join("sessions");
@@ -490,7 +518,8 @@ fn session_wide_flag_emits_untruncated_output() {
     let assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .arg("--wide")
         .assert()
         .success();
@@ -507,7 +536,7 @@ fn session_wide_flag_emits_untruncated_output() {
 }
 
 #[test]
-fn session_piped_output_defaults_to_wide() {
+fn table_sessions_piped_output_defaults_to_wide() {
     // assert_cmd's captured stdout is never a TTY, so the default
     // behavior should leave output untruncated for grep/awk friendliness.
     let home = tempfile::TempDir::new().expect("home temp");
@@ -527,7 +556,8 @@ fn session_piped_output_defaults_to_wide() {
     let assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
         .success();
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
@@ -618,7 +648,7 @@ fn node_show_resolves_harness_label() {
 }
 
 #[test]
-fn node_show_resolves_short_id_from_session_table() {
+fn node_show_resolves_short_id_from_table_sessions() {
     let home = tempfile::TempDir::new().expect("home temp");
     let scan_root = tempfile::TempDir::new().expect("scan temp");
     let codex_state = home.path().join(".codex").join("sessions");
@@ -634,7 +664,8 @@ fn node_show_resolves_short_id_from_session_table() {
     let session_assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .arg("--wide")
         .assert()
         .success();
@@ -686,7 +717,7 @@ fn node_show_errors_on_unknown_id() {
 }
 
 #[test]
-fn session_layout_card_emits_keyed_lines() {
+fn table_sessions_layout_card_emits_keyed_lines() {
     let home = tempfile::TempDir::new().expect("home temp");
     let scan_root = tempfile::TempDir::new().expect("scan temp");
     let codex_state = home.path().join(".codex").join("sessions");
@@ -701,7 +732,8 @@ fn session_layout_card_emits_keyed_lines() {
     let assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .arg("--layout")
         .arg("card")
         .assert()
@@ -724,13 +756,14 @@ fn session_layout_card_emits_keyed_lines() {
 }
 
 #[test]
-fn session_wide_and_width_flags_conflict() {
+fn table_sessions_wide_and_width_flags_conflict() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .arg("--wide")
         .arg("--width")
         .arg("80")
@@ -739,14 +772,13 @@ fn session_wide_and_width_flags_conflict() {
 }
 
 #[test]
-fn session_projection_flag_switches_to_union() {
+fn table_union_renders_union_projection() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     let assert = isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
-        .arg("--projection")
+        .arg("table")
         .arg("union")
         .assert()
         .success();
@@ -754,27 +786,25 @@ fn session_projection_flag_switches_to_union() {
 
     assert!(
         output.starts_with("ID") && output.contains("KIND"),
-        "union projection should print KIND header; got:\n{output}",
+        "`table union` should render the union projection header; got:\n{output}",
     );
 }
 
 #[test]
-fn session_rejects_invalid_projection() {
+fn table_rejects_unknown_row_type() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
-        .arg("--projection")
+        .arg("table")
         .arg("ledger")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("invalid value"));
+        .failure();
 }
 
 #[test]
-fn session_reads_default_projection_from_project_config() {
+fn legacy_session_config_section_emits_stderr_warning() {
     let home = tempfile::TempDir::new().expect("home temp");
     let project = home.path().join("project");
     fs::create_dir_all(&project).expect("project dir");
@@ -784,27 +814,25 @@ fn session_reads_default_projection_from_project_config() {
     )
     .expect("write project config");
 
-    let assert = isolated_cmd(home.path())
+    isolated_cmd(home.path())
         .current_dir(&project)
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
-        .success();
-    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
-
-    assert!(
-        output.starts_with("ID") && output.contains("KIND"),
-        "project config should set default projection to union; got:\n{output}",
-    );
+        .success()
+        .stderr(predicate::str::contains("session"))
+        .stderr(predicate::str::contains("table"));
 }
 
 #[test]
-fn session_output_is_deterministic_across_runs() {
+fn table_sessions_output_is_deterministic_across_runs() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     let first = isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
         .success()
         .get_output()
@@ -812,7 +840,8 @@ fn session_output_is_deterministic_across_runs() {
         .clone();
     let second = isolated_cmd(home.path())
         .current_dir(temp.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
         .success()
         .get_output()
@@ -823,7 +852,7 @@ fn session_output_is_deterministic_across_runs() {
 }
 
 #[test]
-fn graph_and_session_do_not_create_config_files_in_clean_repo() {
+fn graph_and_table_do_not_create_config_files_in_clean_repo() {
     let home = tempfile::TempDir::new().expect("home temp");
     let repo = temp_git_repo();
 
@@ -836,7 +865,8 @@ fn graph_and_session_do_not_create_config_files_in_clean_repo() {
         .success();
     isolated_cmd(home.path())
         .current_dir(repo.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
         .success();
 
@@ -1284,7 +1314,7 @@ fn graph_does_not_mutate_existing_project_declared_config_from_scan_root() {
 }
 
 #[test]
-fn session_does_not_mutate_existing_project_declared_config() {
+fn table_sessions_does_not_mutate_existing_project_declared_config() {
     let home = tempfile::TempDir::new().expect("home temp");
     let repo = temp_git_repo();
     let config_path = repo.path().join(".conspectus.toml");
@@ -1293,7 +1323,8 @@ fn session_does_not_mutate_existing_project_declared_config() {
 
     isolated_cmd(home.path())
         .current_dir(repo.path())
-        .arg("session")
+        .arg("table")
+        .arg("sessions")
         .assert()
         .success();
 
