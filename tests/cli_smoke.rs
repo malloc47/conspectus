@@ -828,6 +828,113 @@ fn table_sessions_columns_supports_branch_repo_optional_columns() {
 }
 
 #[test]
+fn table_sessions_pager_flag_routes_through_pager_command() {
+    // `PAGER=cat` + `--pager` (which forces paging even on non-TTY)
+    // round-trips the rendered output through cat, so stdout matches
+    // the direct-print version. Verifies the pager spawn path works
+    // end-to-end.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let direct = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let paged = isolated_cmd(home.path())
+        .env("PAGER", "cat")
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--pager")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(
+        String::from_utf8(direct).unwrap(),
+        String::from_utf8(paged).unwrap(),
+        "cat as the pager should pass content through unchanged",
+    );
+}
+
+#[test]
+fn table_sessions_no_pager_flag_disables_pager_even_when_forced_pager_env_present() {
+    // Setting PAGER=false would normally fail (false exits non-zero),
+    // but with --no-pager we should skip the pager entirely and emit
+    // output directly. The success exit and non-empty stdout confirm
+    // the pager was bypassed.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .env("PAGER", "false")
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--no-pager")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(output.starts_with("ID"), "got:\n{output}");
+}
+
+#[test]
+fn table_sessions_pager_and_no_pager_flags_conflict() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--pager")
+        .arg("--no-pager")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn columns_pager_flag_routes_through_pager_command() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let direct = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("columns")
+        .arg("sessions")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let paged = isolated_cmd(home.path())
+        .env("PAGER", "cat")
+        .current_dir(temp.path())
+        .arg("columns")
+        .arg("sessions")
+        .arg("--pager")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    assert_eq!(
+        String::from_utf8(direct).unwrap(),
+        String::from_utf8(paged).unwrap(),
+    );
+}
+
+#[test]
 fn columns_lists_every_row_type_with_default_marker() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

@@ -82,8 +82,9 @@ conspectus table {sessions|mux|union|prs|forks} [--layout {columnar|card}]
                                                  [--wide | --width N]
                                                  [--columns LIST]
                                                  [--scan-root PATH]...
-conspectus node show <id> [--scan-root PATH]...
-conspectus columns {sessions|mux|union|prs|forks}
+                                                 [--pager | --no-pager]
+conspectus node show <id> [--scan-root PATH]... [--pager | --no-pager]
+conspectus columns {sessions|mux|union|prs|forks} [--pager | --no-pager]
 conspectus declared ...
 ```
 
@@ -117,6 +118,32 @@ overrides config when both are present.
 row-type along with its one-line description, marking each column
 in the default set with `(default)`. Useful when you don't remember
 exact column names or want to see which columns are opt-in.
+
+## Paging
+
+`conspectus table <ROWS>`, `conspectus columns <ROWS>`, and
+`conspectus node show <id>` pipe their output through a pager when
+stdout is a TTY (git-log style). Resolution order:
+
+1. `$PAGER` (when set and non-empty; whitespace-split into program +
+   args).
+2. `less` — Conspectus sets `LESS=FRX` by default when `$LESS` is
+   unset: `F` quits if the content fits on one screen so short
+   tables print inline, `R` passes raw control characters through,
+   `X` skips the screen init/deinit sequences.
+3. `more`.
+4. Direct print, if none of the above can spawn.
+
+Non-TTY output (pipes, redirects) prints directly so
+`conspectus table sessions | grep …` keeps working. `--no-pager`
+disables paging even on a TTY; `--pager` forces paging even when
+stdout is not a TTY (useful for `PAGER=cat` captures). `--pager` and
+`--no-pager` conflict.
+
+`conspectus graph --format json` and `conspectus declared list` do
+not page; JSON output is machine-consumable and the declared listing
+is short-lived tab-separated text. Pipe either through a pager
+manually if needed.
 
 `node show <id>` accepts any of:
 

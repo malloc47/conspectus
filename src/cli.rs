@@ -3,8 +3,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::{self, IsTerminal};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command as ProcCommand, Stdio};
 use std::str::FromStr;
 
 use conspectus::config::{self, ConfigLoader, PROJECT_CONFIG_FILENAME};
@@ -54,6 +55,12 @@ struct ColumnsArgs {
     /// tokens as `conspectus table <ROWS>` (sessions, mux, union,
     /// prs, forks).
     row_type: String,
+    /// Skip the pager even when stdout is a TTY.
+    #[arg(long)]
+    no_pager: bool,
+    /// Force output through a pager even when stdout is not a TTY.
+    #[arg(long, conflicts_with = "no_pager")]
+    pager: bool,
 }
 
 impl ColumnsArgs {
@@ -65,9 +72,10 @@ impl ColumnsArgs {
                 std::process::exit(2);
             }
         };
-        print!(
-            "{}",
-            conspectus::output::table::render_columns_listing(projection)
+        let listing = conspectus::output::table::render_columns_listing(projection);
+        print_paged(
+            &listing,
+            PagerOptions::from_flags(self.pager, self.no_pager),
         );
         Ok(())
     }
@@ -103,6 +111,12 @@ struct NodeShowArgs {
     id: String,
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
+    /// Skip the pager even when stdout is a TTY.
+    #[arg(long)]
+    no_pager: bool,
+    /// Force output through a pager even when stdout is not a TTY.
+    #[arg(long, conflicts_with = "no_pager")]
+    pager: bool,
 }
 
 impl NodeShowArgs {
@@ -121,9 +135,10 @@ impl NodeShowArgs {
                 std::process::exit(2);
             }
         };
-        print!(
-            "{}",
-            conspectus::output::node_show::render_node_show(&snapshot, &id)
+        let rendered = conspectus::output::node_show::render_node_show(&snapshot, &id);
+        print_paged(
+            &rendered,
+            PagerOptions::from_flags(self.pager, self.no_pager),
         );
         Ok(())
     }
@@ -220,6 +235,13 @@ struct TableRowsArgs {
     /// `[table.<rows>].columns` config when both are present.
     #[arg(long, value_name = "LIST")]
     columns: Option<String>,
+    /// Skip the pager even when stdout is a TTY.
+    #[arg(long)]
+    no_pager: bool,
+    /// Force output through a pager even when stdout is not a TTY.
+    /// Conflicts with `--no-pager`.
+    #[arg(long, conflicts_with = "no_pager")]
+    pager: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -274,7 +296,7 @@ impl TableRowsArgs {
             options = options.with_columns(columns);
         }
         let table = conspectus::output::table::render_with(&snapshot, projection, &options);
-        print!("{table}");
+        print_paged(&table, PagerOptions::from_flags(self.pager, self.no_pager));
         Ok(())
     }
 }
@@ -327,6 +349,93 @@ fn resolve_table_width(
         return None;
     }
     terminal_size::terminal_size().map(|(w, _)| usize::from(w.0))
+}
+
+/// Whether and how to page rendered output (H-TBL-013).
+#[derive(Debug, Clone, Copy)]
+struct PagerOptions {
+    /// `--pager` forces pager even when stdout is not a TTY (useful
+    /// for `PAGER=cat` integration tests).
+    force_on: bool,
+    /// `--no-pager` skips pager even on a TTY.
+    force_off: bool,
+}
+
+impl PagerOptions {
+    fn from_flags(pager: bool, no_pager: bool) -> Self {
+        Self {
+            force_on: pager,
+            force_off: no_pager,
+        }
+    }
+
+    fn should_page(self, stdout: &impl IsTerminal) -> bool {
+        if self.force_off {
+            return false;
+        }
+        if self.force_on {
+            return true;
+        }
+        stdout.is_terminal()
+    }
+}
+
+/// Print `content` to stdout, optionally through a pager. Falls back
+/// to direct print when no pager is configured/available or when
+/// `options` disables paging. Git-style behavior: `$PAGER` (when set
+/// and non-empty) wins; otherwise `less` (with `LESS=FRX` defaults
+/// when the env var is not already set so a single-screen output
+/// prints inline and ANSI passes through); otherwise `more`;
+/// otherwise direct.
+fn print_paged(content: &str, options: PagerOptions) {
+    if !options.should_page(&io::stdout()) {
+        print!("{content}");
+        return;
+    }
+    for mut cmd in pager_candidates() {
+        match cmd.stdin(Stdio::piped()).spawn() {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(content.as_bytes());
+                }
+                let _ = child.wait();
+                return;
+            }
+            Err(_) => continue,
+        }
+    }
+    print!("{content}");
+}
+
+/// Resolve the ordered list of pager commands to try.
+fn pager_candidates() -> Vec<ProcCommand> {
+    let mut candidates = Vec::new();
+
+    if let Some(pager) = std::env::var("PAGER").ok().filter(|s| !s.trim().is_empty()) {
+        // Crude tokenization on whitespace (no shell-quoting support).
+        // Git itself runs PAGER through `sh -c`, but that pulls in a
+        // shell dependency we'd rather avoid. Users with quoted args
+        // can set $PAGER to a wrapper script.
+        let parts: Vec<&str> = pager.split_whitespace().collect();
+        if let Some((prog, args)) = parts.split_first() {
+            let mut cmd = ProcCommand::new(prog);
+            cmd.args(args);
+            candidates.push(cmd);
+        }
+    }
+
+    let mut less = ProcCommand::new("less");
+    if std::env::var_os("LESS").is_none() {
+        // F = quit-if-one-screen; R = pass raw control chars
+        // (so future color support is friendly); X = no init/deinit
+        // (don't clear the screen on exit).
+        less.env("LESS", "FRX");
+    }
+    candidates.push(less);
+
+    candidates.push(ProcCommand::new("more"));
+
+    candidates
 }
 
 #[derive(Debug, Args)]
