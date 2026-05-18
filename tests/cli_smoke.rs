@@ -539,6 +539,44 @@ fn session_piped_output_defaults_to_wide() {
 }
 
 #[test]
+fn session_layout_card_emits_keyed_lines() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    fs::write(
+        codex_state.join("rollout-card-test.jsonl"),
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"card-test\",\"cwd\":\"/work/card\"}}\n",
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("session")
+        .arg("--layout")
+        .arg("card")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    // Card format puts each column on its own `KEY: value` line.
+    assert!(
+        output.contains("AGENT:"),
+        "card layout should label each cell with its column key:\n{output}",
+    );
+    assert!(
+        output.contains("CWD:"),
+        "card layout should include CWD key:\n{output}",
+    );
+    assert!(
+        output.contains("/work/card"),
+        "card layout should include the cwd value:\n{output}",
+    );
+}
+
+#[test]
 fn session_wide_and_width_flags_conflict() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

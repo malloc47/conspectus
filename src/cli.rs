@@ -93,6 +93,18 @@ struct SessionArgs {
     /// captures and snapshot tests.
     #[arg(long, value_name = "N")]
     width: Option<usize>,
+    /// Row layout. `columnar` (default) renders one row per line;
+    /// `card` renders one column per line with blank lines between
+    /// rows, similar to `git log` default formatting.
+    #[arg(long, value_enum, default_value_t = LayoutFlag::Columnar)]
+    layout: LayoutFlag,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum LayoutFlag {
+    #[default]
+    Columnar,
+    Card,
 }
 
 impl SessionArgs {
@@ -120,9 +132,13 @@ impl SessionArgs {
         };
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
         let render_width = resolve_session_width(self.wide, self.width, &io::stdout());
-        let options = match render_width {
-            Some(w) => conspectus::output::table::RenderOptions::columnar_width(w),
-            None => conspectus::output::table::RenderOptions::wide(),
+        let options = match (self.layout, render_width) {
+            (LayoutFlag::Columnar, Some(w)) => {
+                conspectus::output::table::RenderOptions::columnar_width(w)
+            }
+            (LayoutFlag::Columnar, None) => conspectus::output::table::RenderOptions::wide(),
+            (LayoutFlag::Card, Some(w)) => conspectus::output::table::RenderOptions::card_width(w),
+            (LayoutFlag::Card, None) => conspectus::output::table::RenderOptions::card(),
         };
         let table = conspectus::output::table::render_with(&snapshot, projection, &options);
         print!("{table}");

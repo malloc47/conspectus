@@ -40,13 +40,13 @@ pub struct RenderOptions {
     /// Target total width in display columns. `None` means unbounded; the
     /// renderer uses each column's natural width.
     pub width: Option<usize>,
-    /// Body layout. Only `Layout::Columnar` is wired today; `Layout::Card`
-    /// is reserved for `H-TBL-004`.
+    /// Body layout: `Columnar` (default tabular) or `Card` (one column
+    /// per line per row).
     pub layout: Layout,
 }
 
 impl RenderOptions {
-    /// Untruncated, columnar layout. Matches the pre-`H-TBL-003` renderer.
+    /// Untruncated, columnar layout. Matches the pre-H-TBL-003 renderer.
     pub fn wide() -> Self {
         Self {
             width: None,
@@ -61,6 +61,22 @@ impl RenderOptions {
             layout: Layout::Columnar,
         }
     }
+
+    /// Card layout (one column per line per row, blank line between rows).
+    pub fn card() -> Self {
+        Self {
+            width: None,
+            layout: Layout::Card,
+        }
+    }
+
+    /// Card layout truncated to the given display width.
+    pub fn card_width(width: usize) -> Self {
+        Self {
+            width: Some(width),
+            layout: Layout::Card,
+        }
+    }
 }
 
 /// Body layout for the renderer. See [`RenderOptions`].
@@ -69,6 +85,9 @@ pub enum Layout {
     /// One row per record, columns aligned to per-column budgets.
     #[default]
     Columnar,
+    /// One column per line per row, blank line between rows. Useful when
+    /// many columns are relevant and the columnar layout would truncate.
+    Card,
 }
 
 /// Minimum length for the short, content-addressed row identifier emitted
@@ -583,7 +602,44 @@ const MIN_COLUMN_BUDGET: usize = 4;
 fn render_rows(rows: Vec<Vec<String>>, options: &RenderOptions) -> String {
     match options.layout {
         Layout::Columnar => render_columnar(rows, options.width),
+        Layout::Card => render_card(rows, options.width),
     }
+}
+
+/// Render `rows` (header row at index 0) as a stack of cards: one block
+/// per body row, with `KEY: value` lines aligned to the longest key and
+/// blank lines separating blocks. The header row contributes the key
+/// names but is not itself emitted as a card.
+fn render_card(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
+    if rows.len() < 2 {
+        return String::new();
+    }
+    let header = &rows[0];
+    let key_width = header.iter().map(|s| display_width(s)).max().unwrap_or(0);
+    let value_budget = target_width.map(|w| w.saturating_sub(key_width + 2));
+
+    let mut out = String::new();
+    for (row_idx, row) in rows.iter().enumerate().skip(1) {
+        if row_idx > 1 {
+            out.push('\n');
+        }
+        for (col_idx, cell) in row.iter().enumerate() {
+            let key = header.get(col_idx).map(String::as_str).unwrap_or("");
+            let key_pad = key_width.saturating_sub(display_width(key));
+            out.push_str(key);
+            out.push(':');
+            for _ in 0..(key_pad + 1) {
+                out.push(' ');
+            }
+            let value = match value_budget {
+                Some(budget) => truncate_to_width(cell, budget),
+                None => cell.clone(),
+            };
+            out.push_str(&value);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn render_columnar(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
@@ -1411,6 +1467,91 @@ mod tests {
             header.starts_with("ID  KIND  LABEL"),
             "union header should be ID KIND LABEL …; got: {header:?}",
         );
+    }
+
+    #[test]
+    fn card_layout_emits_one_block_per_body_row() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work/a")),
+                agent_session("codex", "beta", Some("/work/b")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(&snapshot, Projection::Agent, &RenderOptions::card());
+
+        // Two body rows produce two card blocks separated by a blank line.
+        // Each block has one line per header column (8 in the agent
+        // projection: ID, AGENT, CWD, MUX, MUX/CONF, PR, PR/CONF, LINEAGE).
+        let blocks: Vec<&str> = rendered.split("\n\n").collect();
+        assert_eq!(blocks.len(), 2);
+        for block in &blocks {
+            let non_empty_lines = block.lines().filter(|line| !line.is_empty()).count();
+            assert_eq!(
+                non_empty_lines, 8,
+                "card block should have 8 lines: {block:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn card_layout_uses_keys_with_aligned_colons() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(&snapshot, Projection::Agent, &RenderOptions::card());
+
+        // Keys (ID, AGENT, CWD, MUX, MUX/CONF, PR, PR/CONF, LINEAGE) have
+        // the longest as MUX/CONF and PR/CONF at 8 chars. Every line's
+        // value should start at the same column.
+        let lines: Vec<&str> = rendered.lines().filter(|l| !l.is_empty()).collect();
+        let mut value_starts: Vec<usize> = Vec::new();
+        for line in &lines {
+            let colon = line.find(':').expect("each card line has a colon");
+            // After the colon, padding goes up to the longest key width,
+            // then a single space, then the value.
+            let value_col = line[colon + 1..]
+                .chars()
+                .position(|c| !c.is_whitespace())
+                .map(|i| colon + 1 + i)
+                .unwrap_or(line.len());
+            value_starts.push(value_col);
+        }
+        let first = value_starts[0];
+        for start in &value_starts {
+            assert_eq!(
+                *start, first,
+                "value columns should align across keys: starts={value_starts:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn card_layout_empty_snapshot_renders_empty_string() {
+        let snapshot = GraphSnapshot::empty();
+        let rendered = render_with(&snapshot, Projection::Agent, &RenderOptions::card());
+        assert!(rendered.is_empty(), "got: {rendered:?}");
+    }
+
+    #[test]
+    fn card_layout_truncates_values_when_width_is_set() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session(
+                "codex",
+                "alpha",
+                Some("/very/long/workspace/path/that/will/not/fit"),
+            )],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(&snapshot, Projection::Agent, &RenderOptions::card_width(30));
+        assert!(
+            rendered.contains('…'),
+            "long cwd should have been truncated in:\n{rendered}",
+        );
+        for line in rendered.lines() {
+            assert!(display_width(line) <= 30, "line exceeded 30 cols: {line:?}",);
+        }
     }
 
     #[test]

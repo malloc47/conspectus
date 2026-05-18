@@ -1568,19 +1568,18 @@ projection layer.
     Dependencies recorded by ADR 0020: `unicode-width = "0.2"` and
     `terminal_size = "0.4"`.
 
-- [ ] `H-TBL-004` Opt-in card / multi-line row layout.
-  - Scope: add a row-vertical layout (one column per line per row, blank
-    line between rows, similar to `git log` default formatting) exposed
-    via a flag such as `--format card` or `--layout card` on
-    `conspectus session`. Useful when many columns are relevant and a
-    width-limited single-line row hides important data. Default layout
-    remains the tabular form from `H-TBL-003`. The layout should reuse
-    the renderer from `H-TBL-001` rather than re-rolling formatting.
-  - Tests: snapshot tests for the card layout across each projection;
-    CLI integration tests for the flag.
-  - Manual checks: confirm card output is readable for a row with a
-    long cwd and PR identifier where the tabular form would truncate.
-  - Blockers: `H-TBL-001`.
+- [x] `H-TBL-004` Opt-in card / multi-line row layout.
+  - Outcome: `Layout::Card` joins `Layout::Columnar` in `RenderOptions`,
+    with `RenderOptions::card()` and `RenderOptions::card_width(n)`
+    convenience constructors. The new `render_card` path emits one
+    `KEY: value` line per column with keys aligned on the colon and a
+    blank line between rows. Width-aware mode truncates long values
+    (using the same `truncate_to_width` helper as columnar) so a
+    `--width N` budget is honored. The `session` subcommand gained a
+    `--layout {columnar|card}` flag (default columnar). Added four unit
+    tests covering empty snapshots, block separation, colon alignment,
+    and width-aware truncation, plus a CLI integration test for
+    `--layout card`.
 
 - [ ] `H-TBL-005` Resolve table row identifiers in `conspectus node show`.
   - Scope: teach the node-show command (introduced by `H-OBS-002`) to
