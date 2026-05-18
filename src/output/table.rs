@@ -25,8 +25,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub use crate::config::Projection;
 use crate::model::{
-    AgentSessionNode, Confidence, ForgePrNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
-    MuxSessionNode, NodeId, Provenance, RelationKind,
+    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphLink, GraphNode, GraphSnapshot,
+    LinkEndpoint, MuxSessionNode, NodeId, Provenance, RelationKind,
 };
 
 /// Rendering knobs for the text-table projections.
@@ -182,6 +182,7 @@ pub fn render_with(
         Projection::Mux => build_mux_rows(&view, &columns),
         Projection::Union => build_union_rows(&view, &columns),
         Projection::Pr => build_pr_rows(&view, &columns),
+        Projection::Fork => build_fork_rows(&view, &columns),
     };
     render_rows(rows, options)
 }
@@ -224,6 +225,7 @@ struct SnapshotView<'a> {
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
     mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
     forge_prs: BTreeMap<NodeId, &'a ForgePrNode>,
+    forks: BTreeMap<NodeId, &'a ForkNode>,
     /// `(source_node_id, relation_kind)` → all candidate links for
     /// that pair, in stable order.
     by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
@@ -238,6 +240,7 @@ impl<'a> SnapshotView<'a> {
         let mut agent_sessions = BTreeMap::new();
         let mut mux_sessions = BTreeMap::new();
         let mut forge_prs = BTreeMap::new();
+        let mut forks = BTreeMap::new();
 
         for node in &snapshot.nodes {
             match node {
@@ -249,6 +252,9 @@ impl<'a> SnapshotView<'a> {
                 }
                 GraphNode::ForgePr(pr) => {
                     forge_prs.insert(node.id(), pr);
+                }
+                GraphNode::Fork(fork) => {
+                    forks.insert(node.id(), fork);
                 }
                 _ => {}
             }
@@ -289,6 +295,7 @@ impl<'a> SnapshotView<'a> {
             agent_sessions,
             mux_sessions,
             forge_prs,
+            forks,
             by_source_relation,
             attached_to_mux,
         }
@@ -508,6 +515,51 @@ const PRS_COLUMNS: &[ColumnSpec] = &[
     },
 ];
 
+const FORKS_COLUMNS: &[ColumnSpec] = &[
+    ColumnSpec {
+        key: "id",
+        header: "ID",
+        description: "Short content-addressed row identifier.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "fork",
+        header: "FORK",
+        description: "Fork label: `{provider}:{name}` (falls back to `provider_source_key` when `name` is absent).",
+        default: true,
+    },
+    ColumnSpec {
+        key: "provider",
+        header: "PROVIDER",
+        description: "Provider that recorded the fork (e.g. `atelier`).",
+        default: true,
+    },
+    ColumnSpec {
+        key: "scope",
+        header: "SCOPE",
+        description: "Provider-defined scope or workspace name (when set).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "parent",
+        header: "PARENT",
+        description: "Preferred `parent_session` short id when the fork records one.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "children",
+        header: "CHILDREN",
+        description: "Number of `child_session` candidates pointing at agent sessions.",
+        default: true,
+    },
+    ColumnSpec {
+        key: "capabilities",
+        header: "CAPABILITIES",
+        description: "Comma-joined `capabilities` from the fork metadata.",
+        default: false,
+    },
+];
+
 /// Registry slice for `projection`.
 pub fn columns_for(projection: Projection) -> &'static [ColumnSpec] {
     match projection {
@@ -515,6 +567,7 @@ pub fn columns_for(projection: Projection) -> &'static [ColumnSpec] {
         Projection::Mux => MUX_COLUMNS,
         Projection::Union => UNION_COLUMNS,
         Projection::Pr => PRS_COLUMNS,
+        Projection::Fork => FORKS_COLUMNS,
     }
 }
 
@@ -533,6 +586,7 @@ fn projection_row_type(projection: Projection) -> &'static str {
         Projection::Mux => "mux",
         Projection::Union => "union",
         Projection::Pr => "prs",
+        Projection::Fork => "forks",
     }
 }
 
@@ -828,6 +882,114 @@ fn forge_pr_label(pr: &ForgePrNode) -> String {
     let state = pr.state.as_deref().unwrap_or("?");
     let draft = if pr.is_draft { " draft" } else { "" };
     format!("{}/{}#{} ({state}{draft})", pr.owner, pr.repo, pr.number)
+}
+
+struct ForkRowCtx<'view, 'snap> {
+    view: &'view SnapshotView<'snap>,
+    fork_id: &'view NodeId,
+    fork: &'view ForkNode,
+    short_id: &'view str,
+}
+
+fn fork_cell(key: &str, ctx: &ForkRowCtx<'_, '_>) -> String {
+    match key {
+        "id" => ctx.short_id.to_string(),
+        "fork" => fork_label(ctx.fork),
+        "provider" => ctx.fork.provider.clone(),
+        "scope" => ctx.fork.scope.clone().unwrap_or_else(|| "—".to_string()),
+        "parent" => {
+            fork_parent_session_label(ctx.view, ctx.fork_id).unwrap_or_else(|| "—".to_string())
+        }
+        "children" => {
+            let count = fork_child_session_count(ctx.view, ctx.fork_id);
+            if count == 0 {
+                "—".to_string()
+            } else {
+                count.to_string()
+            }
+        }
+        "capabilities" => {
+            if ctx.fork.capabilities.is_empty() {
+                "—".to_string()
+            } else {
+                ctx.fork.capabilities.join(", ")
+            }
+        }
+        _ => "—".to_string(),
+    }
+}
+
+fn fork_label(fork: &ForkNode) -> String {
+    match &fork.name {
+        Some(name) => format!("{}:{}", fork.provider, name),
+        None => fork.provider_source_key.clone(),
+    }
+}
+
+/// Render the preferred `parent_session` target as a short label.
+/// Returns `Some` only when the candidate resolves to an
+/// `AgentSession` endpoint; unresolved or non-session targets render
+/// as `None` so the cell falls back to `—`.
+fn fork_parent_session_label(view: &SnapshotView<'_>, fork_id: &NodeId) -> Option<String> {
+    let link = view.preferred_link(fork_id, RelationKind::ParentSession)?;
+    match &link.target {
+        LinkEndpoint::Node {
+            id: NodeId::AgentSession(agent_id),
+        } => Some(short_session_id(&agent_id.session_key)),
+        LinkEndpoint::Unresolved { evidence } => evidence
+            .native_id
+            .as_deref()
+            .map(short_session_id)
+            .map(|short| format!("?{short}")),
+        _ => None,
+    }
+}
+
+/// Number of `child_session` candidates from this fork that target
+/// agent-session endpoints (resolved or unresolved).
+fn fork_child_session_count(view: &SnapshotView<'_>, fork_id: &NodeId) -> usize {
+    view.by_source_relation
+        .get(&(fork_id.clone(), RelationKind::ChildSession))
+        .map(|links| {
+            links
+                .iter()
+                .filter(|link| {
+                    matches!(
+                        &link.target,
+                        LinkEndpoint::Node {
+                            id: NodeId::AgentSession(_)
+                        } | LinkEndpoint::Unresolved { .. }
+                    )
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn build_fork_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
+    let body_full_ids: Vec<String> = view.forks.keys().map(node_short_id).collect();
+    let id_len = unique_prefix_len(&body_full_ids);
+
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    rows.push(
+        columns
+            .iter()
+            .map(|key| header_label(FORKS_COLUMNS, key))
+            .collect(),
+    );
+
+    for ((fork_id, fork), full_short) in view.forks.iter().zip(body_full_ids.iter()) {
+        let short_id = &full_short[..id_len];
+        let ctx = ForkRowCtx {
+            view,
+            fork_id,
+            fork,
+            short_id,
+        };
+        rows.push(columns.iter().map(|key| fork_cell(key, &ctx)).collect());
+    }
+
+    rows
 }
 
 struct PrRowCtx<'view, 'snap> {
@@ -2122,6 +2284,147 @@ mod tests {
         assert!(
             rendered.contains("codex:alpha"),
             "attached column should list codex:alpha:\n{rendered}",
+        );
+    }
+
+    fn fork_node(name: Option<&str>, provider: &str, key: &str) -> GraphNode {
+        GraphNode::Fork(ForkNode {
+            id: crate::model::ForkId::new(format!("{provider}:{key}")),
+            provider: provider.to_string(),
+            provider_source_key: key.to_string(),
+            name: name.map(str::to_string),
+            scope: None,
+            capabilities: Vec::new(),
+        })
+    }
+
+    fn fork_lineage_link(
+        id: &str,
+        fork_id: crate::model::ForkId,
+        relation: RelationKind,
+        target_session: crate::model::AgentSessionId,
+    ) -> GraphLink {
+        GraphLink {
+            id: id.to_string(),
+            source: NodeId::Fork(fork_id),
+            target: LinkEndpoint::Node {
+                id: NodeId::AgentSession(target_session),
+            },
+            relation,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn forks_projection_default_renders_id_fork_provider_parent_children() {
+        let fork_node = fork_node(Some("alpha"), "atelier", "alpha");
+        let snapshot = GraphSnapshot {
+            nodes: vec![fork_node],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Fork);
+        let header_tokens: Vec<&str> = rendered
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(
+            header_tokens,
+            vec!["ID", "FORK", "PROVIDER", "PARENT", "CHILDREN"],
+        );
+        let body = rendered.lines().nth(2).expect("body row");
+        assert!(body.contains("atelier:alpha"), "got:\n{body}");
+        assert!(body.contains("atelier"), "got:\n{body}");
+    }
+
+    #[test]
+    fn forks_projection_fork_label_falls_back_to_source_key_without_name() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![fork_node(None, "atelier", "raw-source")],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Fork);
+        assert!(
+            rendered.contains("raw-source"),
+            "fork label should fall back to provider_source_key:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn forks_projection_parent_and_children_count() {
+        let fork_id = crate::model::ForkId::new("atelier:alpha");
+        let parent_session_id = crate::model::AgentSessionId::new("codex", "/state", "parent");
+        let child_one_id = crate::model::AgentSessionId::new("codex", "/state", "child-one");
+        let child_two_id = crate::model::AgentSessionId::new("codex", "/state", "child-two");
+
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                fork_node(Some("alpha"), "atelier", "alpha"),
+                agent_session("codex", "parent", Some("/work")),
+                agent_session("codex", "child-one", Some("/work")),
+                agent_session("codex", "child-two", Some("/work")),
+            ],
+            candidate_links: vec![
+                fork_lineage_link(
+                    "parent",
+                    fork_id.clone(),
+                    RelationKind::ParentSession,
+                    parent_session_id,
+                ),
+                fork_lineage_link(
+                    "child-1",
+                    fork_id.clone(),
+                    RelationKind::ChildSession,
+                    child_one_id,
+                ),
+                fork_lineage_link("child-2", fork_id, RelationKind::ChildSession, child_two_id),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render(&snapshot, Projection::Fork);
+        let body = rendered
+            .lines()
+            .nth(2)
+            .expect("at least one body row")
+            .to_string();
+        // Parent cell shows the parent session's short id.
+        assert!(body.contains("parent"), "got:\n{body}");
+        // Children cell counts the two child_session candidates; it's the
+        // last cell on the line, so check the trailing token.
+        let last_token = body
+            .split_whitespace()
+            .next_back()
+            .expect("at least one cell");
+        assert_eq!(last_token, "2", "expected children count of 2:\n{body}");
+    }
+
+    #[test]
+    fn forks_projection_capabilities_optional_column() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![GraphNode::Fork(ForkNode {
+                id: crate::model::ForkId::new("atelier:alpha"),
+                provider: "atelier".to_string(),
+                provider_source_key: "alpha".to_string(),
+                name: Some("alpha".to_string()),
+                scope: None,
+                capabilities: vec!["native_lineage".to_string(), "compaction".to_string()],
+            })],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Fork,
+            &RenderOptions::wide().with_columns(vec!["id", "fork", "capabilities"]),
+        );
+        assert!(
+            rendered.contains("native_lineage, compaction"),
+            "capabilities cell should join the list:\n{rendered}",
         );
     }
 

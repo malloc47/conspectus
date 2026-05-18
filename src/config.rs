@@ -37,6 +37,7 @@ pub struct TableConfig {
     pub mux: TableRowConfig,
     pub union: TableRowConfig,
     pub prs: TableRowConfig,
+    pub forks: TableRowConfig,
 }
 
 /// Settings for one row-type.
@@ -58,6 +59,7 @@ pub enum Projection {
     Mux,
     Union,
     Pr,
+    Fork,
 }
 
 impl Projection {
@@ -67,6 +69,7 @@ impl Projection {
             Self::Mux => "mux",
             Self::Union => "union",
             Self::Pr => "prs",
+            Self::Fork => "forks",
         }
     }
 
@@ -76,8 +79,9 @@ impl Projection {
             "mux" => Ok(Self::Mux),
             "union" => Ok(Self::Union),
             "pr" | "prs" => Ok(Self::Pr),
+            "fork" | "forks" => Ok(Self::Fork),
             other => Err(anyhow!(
-                "invalid table row-type `{other}`; expected one of sessions, mux, union, prs"
+                "invalid table row-type `{other}`; expected one of sessions, mux, union, prs, forks"
             )),
         }
     }
@@ -106,6 +110,8 @@ struct TableFile {
     union: Option<TableRowFile>,
     #[serde(default)]
     prs: Option<TableRowFile>,
+    #[serde(default)]
+    forks: Option<TableRowFile>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -265,6 +271,7 @@ fn merge_table(config: &mut TableConfig, file: TableFile) {
     merge_table_row(&mut config.mux, file.mux);
     merge_table_row(&mut config.union, file.union);
     merge_table_row(&mut config.prs, file.prs);
+    merge_table_row(&mut config.forks, file.forks);
 }
 
 fn merge_table_row(config: &mut TableRowConfig, file: Option<TableRowFile>) {
@@ -433,6 +440,7 @@ mod tests {
             Projection::Mux,
             Projection::Union,
             Projection::Pr,
+            Projection::Fork,
         ] {
             assert_eq!(Projection::parse(variant.as_str()).unwrap(), variant);
         }
@@ -441,6 +449,8 @@ mod tests {
         assert_eq!(Projection::parse("sessions").unwrap(), Projection::Agent);
         // `pr` (singular) and `prs` (plural) both reach the Pr variant.
         assert_eq!(Projection::parse("pr").unwrap(), Projection::Pr);
+        // Same alias pattern for forks.
+        assert_eq!(Projection::parse("fork").unwrap(), Projection::Fork);
         assert!(Projection::parse("garbage").is_err());
     }
 

@@ -1680,20 +1680,25 @@ fork lineage, and worktree apply to any row whose node touches them.
     the optional-columns flag. All 365 tests pass; existing
     snapshots stay byte-for-byte stable.
 
-- [ ] `H-TBL-009` `conspectus table forks` row-type.
-  - Scope: rows = `ForkNode`. Register columns:
-    `id`, `fork` (`{provider}:{name}` or `{provider_source_key}` when
-    `name` is absent), `provider`, `scope`, `parent` (preferred
-    `parent_session` short id when present), `children` (number of
-    sessions whose `associated_with_fork` candidate resolves to this
-    fork; renders `—` when zero), `capabilities` (joined, may be
-    trimmed by the truncator).
-    Default set: `id, fork, provider, parent, children`.
-  - Tests: snapshot tests against the existing atelier-fork fixtures;
-    CLI integration test invoking `conspectus table forks` end-to-end.
-  - Manual checks: `cargo run -- table forks` from a workspace with
-    at least one atelier fork.
-  - Blockers: `H-TBL-007`.
+- [x] `H-TBL-009` `conspectus table forks` row-type.
+  - Outcome: `Projection::Fork` joins the row-type enum; the registry
+    `FORKS_COLUMNS` declares `id`, `fork`, `provider`, `scope`,
+    `parent`, `children`, and `capabilities`, with the default set
+    `id, fork, provider, parent, children`. `ForkRowCtx` +
+    `fork_cell` extract cells: `fork` renders `{provider}:{name}` or
+    falls back to `provider_source_key` when no name is set;
+    `parent` follows the fork's preferred `ParentSession` candidate
+    to a short session id (unresolved parents prefixed with `?`);
+    `children` counts `ChildSession` candidates from the fork that
+    target agent-session endpoints (resolved or unresolved). Forks
+    are now indexed on `SnapshotView` alongside the other typed
+    node maps. Config grew `[table.forks]`. CLI subcommand
+    `conspectus table forks` honors the existing `--wide`,
+    `--width`, `--layout`, `--scan-root`, and `--columns` flags.
+    Four unit tests cover the default header, fork-label fallback,
+    parent/children extraction, and capabilities-as-optional-column
+    rendering. One CLI integration test exercises the default
+    header. All 370 tests pass.
 
 - [ ] `H-TBL-010` Expand the `sessions` column pool.
   - Scope: register additional non-default columns on the `sessions`

@@ -149,6 +149,7 @@ impl TableArgs {
             TableCommand::Mux(args) => args.run(config::Projection::Mux),
             TableCommand::Union(args) => args.run(config::Projection::Union),
             TableCommand::Prs(args) => args.run(config::Projection::Pr),
+            TableCommand::Forks(args) => args.run(config::Projection::Fork),
         }
     }
 }
@@ -163,6 +164,8 @@ enum TableCommand {
     Union(TableRowsArgs),
     /// Forge pull requests, one per row.
     Prs(TableRowsArgs),
+    /// Forks recorded by Atelier or other fork-tracking providers.
+    Forks(TableRowsArgs),
 }
 
 #[derive(Debug, Args, Default)]
@@ -271,6 +274,7 @@ fn row_config(projection: config::Projection, config: &config::Config) -> &confi
         config::Projection::Mux => &config.table.mux,
         config::Projection::Union => &config.table.union,
         config::Projection::Pr => &config.table.prs,
+        config::Projection::Fork => &config.table.forks,
     }
 }
 

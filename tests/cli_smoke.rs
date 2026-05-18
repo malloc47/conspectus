@@ -804,6 +804,26 @@ fn table_rejects_unknown_row_type() {
 }
 
 #[test]
+fn table_forks_renders_fork_projection_header() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("forks")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let header_tokens: Vec<&str> = output.lines().next().unwrap().split_whitespace().collect();
+    assert_eq!(
+        header_tokens,
+        vec!["ID", "FORK", "PROVIDER", "PARENT", "CHILDREN"],
+    );
+}
+
+#[test]
 fn table_prs_renders_pr_projection_header() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
