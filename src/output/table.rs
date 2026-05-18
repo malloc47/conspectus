@@ -21,20 +21,77 @@
 
 use std::collections::BTreeMap;
 
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 pub use crate::config::Projection;
 use crate::model::{
     AgentSessionNode, Confidence, ForgePrNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
     MuxSessionNode, NodeId, Provenance, RelationKind,
 };
 
-/// Render `snapshot` as a plain-text table using `projection`.
-pub fn render(snapshot: &GraphSnapshot, projection: Projection) -> String {
-    let view = SnapshotView::new(snapshot);
-    match projection {
-        Projection::Agent => render_agent(&view),
-        Projection::Mux => render_mux(&view),
-        Projection::Union => render_union(&view),
+/// Rendering knobs for the text-table projections.
+///
+/// `width = None` renders untruncated (the historical behavior) and is the
+/// default for callers that just want a wide table — pipes, JSON-adjacent
+/// tooling, or tests that want byte-for-byte stable output independent of
+/// the developer's terminal size.
+#[derive(Debug, Clone, Default)]
+pub struct RenderOptions {
+    /// Target total width in display columns. `None` means unbounded; the
+    /// renderer uses each column's natural width.
+    pub width: Option<usize>,
+    /// Body layout. Only `Layout::Columnar` is wired today; `Layout::Card`
+    /// is reserved for `H-TBL-004`.
+    pub layout: Layout,
+}
+
+impl RenderOptions {
+    /// Untruncated, columnar layout. Matches the pre-`H-TBL-003` renderer.
+    pub fn wide() -> Self {
+        Self {
+            width: None,
+            layout: Layout::Columnar,
+        }
     }
+
+    /// Columnar layout truncated to the given display width.
+    pub fn columnar_width(width: usize) -> Self {
+        Self {
+            width: Some(width),
+            layout: Layout::Columnar,
+        }
+    }
+}
+
+/// Body layout for the renderer. See [`RenderOptions`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Layout {
+    /// One row per record, columns aligned to per-column budgets.
+    #[default]
+    Columnar,
+}
+
+/// Render `snapshot` as an untruncated plain-text table using `projection`.
+///
+/// Convenience wrapper for [`render_with`] with [`RenderOptions::wide`].
+/// Callers that need width-aware truncation should use [`render_with`].
+pub fn render(snapshot: &GraphSnapshot, projection: Projection) -> String {
+    render_with(snapshot, projection, &RenderOptions::wide())
+}
+
+/// Render `snapshot` as a plain-text table using `projection` and `options`.
+pub fn render_with(
+    snapshot: &GraphSnapshot,
+    projection: Projection,
+    options: &RenderOptions,
+) -> String {
+    let view = SnapshotView::new(snapshot);
+    let rows = match projection {
+        Projection::Agent => build_agent_rows(&view),
+        Projection::Mux => build_mux_rows(&view),
+        Projection::Union => build_union_rows(&view),
+    };
+    render_rows(rows, options)
 }
 
 /// Compact `provenance/confidence[*]` cell, e.g. `LD/H*`. Used in
@@ -174,7 +231,7 @@ fn forge_pr_label(pr: &ForgePrNode) -> String {
     format!("{}/{}#{} ({state}{draft})", pr.owner, pr.repo, pr.number)
 }
 
-fn render_agent(view: &SnapshotView<'_>) -> String {
+fn build_agent_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
         [
@@ -221,7 +278,7 @@ fn render_agent(view: &SnapshotView<'_>) -> String {
         ]);
     }
 
-    format_rows(rows)
+    rows
 }
 
 /// Lineage cell for the agent projection (ADR 0018). Shows the preferred
@@ -322,7 +379,7 @@ fn preferred_pr_for_session(view: &SnapshotView<'_>, session_id: &NodeId) -> (St
     ("—".to_string(), "—".to_string())
 }
 
-fn render_mux(view: &SnapshotView<'_>) -> String {
+fn build_mux_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
         ["MUX", "CWD", "AGENTS"]
@@ -382,10 +439,10 @@ fn render_mux(view: &SnapshotView<'_>) -> String {
         ]);
     }
 
-    format_rows(rows)
+    rows
 }
 
-fn render_union(view: &SnapspotViewAlias<'_>) -> String {
+fn build_union_rows(view: &SnapshotView<'_>) -> Vec<Vec<String>> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
         ["KIND", "ID", "CWD", "RELATIONSHIP"]
@@ -430,51 +487,60 @@ fn render_union(view: &SnapspotViewAlias<'_>) -> String {
         ]);
     }
 
-    format_rows(rows)
+    rows
 }
 
-// Alias so we can call render_union with the same view type but
-// keep the signature distinct in the source. (Workaround for the
-// borrow-checker not allowing the same name with different scopes
-// when the function is recursive.)
-type SnapspotViewAlias<'a> = SnapshotView<'a>;
+const COLUMN_GAP: &str = "  ";
+const COLUMN_GAP_WIDTH: usize = 2;
+/// Floor on a column's minimum budget before truncation. Header width is
+/// also considered: a column with a wider header keeps the header's width
+/// as its floor when its natural content is wider than this constant. Set
+/// to 4 so a column can still emit `xxx…` after truncation.
+const MIN_COLUMN_BUDGET: usize = 4;
 
-fn format_rows(rows: Vec<Vec<String>>) -> String {
+fn render_rows(rows: Vec<Vec<String>>, options: &RenderOptions) -> String {
+    match options.layout {
+        Layout::Columnar => render_columnar(rows, options.width),
+    }
+}
+
+fn render_columnar(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
     if rows.is_empty() {
         return String::new();
     }
     let columns = rows[0].len();
-    let mut widths = vec![0usize; columns];
-    for row in &rows {
-        for (idx, cell) in row.iter().enumerate() {
-            if idx >= widths.len() {
-                continue;
-            }
-            widths[idx] = widths[idx].max(cell.chars().count());
-        }
-    }
+    let naturals = natural_widths(&rows, columns);
+    let budgets = match target_width {
+        None => naturals,
+        Some(target) => fit_to_width(&naturals, &rows[0], target),
+    };
 
     let mut out = String::new();
     for (row_idx, row) in rows.iter().enumerate() {
         for (idx, cell) in row.iter().enumerate() {
             if idx > 0 {
-                out.push_str("  ");
+                out.push_str(COLUMN_GAP);
             }
-            out.push_str(cell);
-            // Pad to column width unless this is the last cell on the
-            // row (avoid trailing whitespace).
+            let budget = budgets[idx];
+            let truncated = truncate_to_width(cell, budget);
             if idx + 1 < columns {
-                let pad = widths[idx].saturating_sub(cell.chars().count());
+                let truncated_width = display_width(&truncated);
+                let pad = budget.saturating_sub(truncated_width);
+                out.push_str(&truncated);
                 for _ in 0..pad {
                     out.push(' ');
                 }
+            } else {
+                // Last cell: truncate but skip padding so the line has no
+                // trailing whitespace.
+                out.push_str(&truncated);
             }
         }
         out.push('\n');
         if row_idx == 0 {
-            for (idx, width) in widths.iter().enumerate() {
+            for (idx, width) in budgets.iter().enumerate() {
                 if idx > 0 {
-                    out.push_str("  ");
+                    out.push_str(COLUMN_GAP);
                 }
                 for _ in 0..*width {
                     out.push('-');
@@ -483,6 +549,102 @@ fn format_rows(rows: Vec<Vec<String>>) -> String {
             out.push('\n');
         }
     }
+    out
+}
+
+fn natural_widths(rows: &[Vec<String>], columns: usize) -> Vec<usize> {
+    let mut widths = vec![0usize; columns];
+    for row in rows {
+        for (idx, cell) in row.iter().enumerate() {
+            if idx >= widths.len() {
+                continue;
+            }
+            widths[idx] = widths[idx].max(display_width(cell));
+        }
+    }
+    widths
+}
+
+/// Greedily shrink column budgets toward `target` total width, never below
+/// each column's floor. When the floor sum already exceeds the target the
+/// columns settle at their floors; the final row may exceed `target`, which
+/// is intentional — narrow terminals get a best-effort fit rather than
+/// degenerate output.
+fn fit_to_width(naturals: &[usize], header: &[String], target: usize) -> Vec<usize> {
+    let columns = naturals.len();
+    if columns == 0 {
+        return Vec::new();
+    }
+    let gap_total = COLUMN_GAP_WIDTH.saturating_mul(columns.saturating_sub(1));
+
+    let floors: Vec<usize> = naturals
+        .iter()
+        .enumerate()
+        .map(|(idx, &natural)| {
+            let header_width = header
+                .get(idx)
+                .map(|s| display_width(s))
+                .unwrap_or(MIN_COLUMN_BUDGET);
+            natural.min(header_width.max(MIN_COLUMN_BUDGET))
+        })
+        .collect();
+
+    let mut budgets = naturals.to_vec();
+    loop {
+        let used: usize = budgets.iter().sum::<usize>().saturating_add(gap_total);
+        if used <= target {
+            break;
+        }
+        let mut best: Option<(usize, usize)> = None;
+        for (idx, &budget) in budgets.iter().enumerate() {
+            let margin = budget.saturating_sub(floors[idx]);
+            if margin == 0 {
+                continue;
+            }
+            match best {
+                None => best = Some((idx, margin)),
+                Some((_, current)) if margin > current => best = Some((idx, margin)),
+                _ => {}
+            }
+        }
+        match best {
+            Some((idx, _)) => budgets[idx] -= 1,
+            None => break, // every column at its floor; live with overflow
+        }
+    }
+    budgets
+}
+
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Truncate `s` to fit within `budget` display columns, appending `…` when
+/// truncation actually happens. `budget == 0` yields an empty string;
+/// `budget == 1` yields a bare `…`.
+fn truncate_to_width(s: &str, budget: usize) -> String {
+    if budget == 0 {
+        return String::new();
+    }
+    if display_width(s) <= budget {
+        return s.to_string();
+    }
+    if budget == 1 {
+        return "…".to_string();
+    }
+    // Reserve one column for the ellipsis.
+    let limit = budget - 1;
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in s.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w > limit {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
     out
 }
 
@@ -936,5 +1098,151 @@ mod tests {
             rendered.contains("octo/repo#7"),
             "expected PR label in:\n{rendered}",
         );
+    }
+
+    #[test]
+    fn truncate_to_width_appends_ellipsis_only_when_string_overflows() {
+        assert_eq!(truncate_to_width("alpha", 5), "alpha");
+        assert_eq!(truncate_to_width("alpha", 10), "alpha");
+        assert_eq!(truncate_to_width("alphabetagamma", 8), "alphabe…");
+        assert_eq!(truncate_to_width("", 5), "");
+    }
+
+    #[test]
+    fn truncate_to_width_degenerate_budgets_emit_ellipsis_or_empty() {
+        assert_eq!(truncate_to_width("abc", 0), "");
+        assert_eq!(truncate_to_width("abc", 1), "…");
+        assert_eq!(truncate_to_width("a", 1), "a");
+    }
+
+    #[test]
+    fn truncate_to_width_respects_wide_unicode_columns() {
+        // CJK characters are two columns wide; budget=4 fits exactly one
+        // CJK char plus the ellipsis (1 column reserved → 3-column limit,
+        // first wide char fits, second would overflow).
+        let cjk = "東京駅前";
+        assert_eq!(truncate_to_width(cjk, 4), "東…");
+    }
+
+    #[test]
+    fn render_with_unbounded_width_matches_render() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work/a")),
+                agent_session("codex", "beta", None),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        assert_eq!(
+            render(&snapshot, Projection::Agent),
+            render_with(&snapshot, Projection::Agent, &RenderOptions::wide()),
+        );
+    }
+
+    #[test]
+    fn narrow_width_truncates_cwd_with_ellipsis() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session(
+                "codex",
+                "alpha",
+                Some("/very/long/workspace/path/that/will/not/fit/in/eighty/columns"),
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::columnar_width(80),
+        );
+        let body_rows: Vec<&str> = rendered.lines().skip(2).collect();
+        assert_eq!(body_rows.len(), 1);
+        assert!(
+            body_rows[0].contains('…'),
+            "expected ellipsis after truncation in:\n{rendered}",
+        );
+        for line in rendered.lines() {
+            assert!(
+                display_width(line) <= 80,
+                "line width {} exceeds 80 columns: {line:?}",
+                display_width(line),
+            );
+        }
+    }
+
+    #[test]
+    fn wide_width_passes_through_untruncated() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session(
+                "codex",
+                "alpha",
+                Some("/some/workspace/path"),
+            )],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::columnar_width(500),
+        );
+        assert!(rendered.contains("/some/workspace/path"));
+        assert!(!rendered.contains('…'));
+    }
+
+    #[test]
+    fn narrow_width_keeps_short_columns_at_natural_width() {
+        // The MUX/CONF and PR/CONF indicator columns are 4-6 chars wide and
+        // should never get truncated to "…" — the floor protects them.
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let mux_id = MuxSessionId::new("tmux:editor");
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work/aaaaaaaaaaaaaaaaaaa")),
+                mux_session("tmux", "editor", Some("/work/aaaaaaaaaaaaaaaaaaa")),
+            ],
+            candidate_links: vec![linked_to_mux_link(
+                "link-1",
+                session_id,
+                mux_id,
+                Provenance::StrongDiscovered,
+                Confidence::High,
+            )],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::columnar_width(60),
+        );
+        assert!(
+            rendered.contains("SD/H"),
+            "indicator should survive truncation:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn fit_to_width_settles_at_floors_when_target_is_impossible() {
+        // Seven columns at floor 4 + 6 gaps × 2 = 40 minimum. Asking for 10
+        // forces every column down to its floor and stops; the resulting
+        // line may exceed the target but doesn't degenerate.
+        let header = vec![
+            "AGENT".to_string(),
+            "CWD".to_string(),
+            "MUX".to_string(),
+            "MUX/CONF".to_string(),
+            "PR".to_string(),
+            "PR/CONF".to_string(),
+            "LINEAGE".to_string(),
+        ];
+        let naturals = vec![20, 60, 20, 5, 30, 5, 12];
+        let budgets = fit_to_width(&naturals, &header, 10);
+        for (idx, &budget) in budgets.iter().enumerate() {
+            let header_width = display_width(&header[idx]);
+            let expected_floor = naturals[idx].min(header_width.max(MIN_COLUMN_BUDGET));
+            assert_eq!(
+                budget, expected_floor,
+                "column {idx} should be at floor; got {budget} expected {expected_floor}",
+            );
+        }
     }
 }

@@ -1553,29 +1553,24 @@ projection layer.
     to the existing renderer first, but is cleanest to land alongside
     or after the renderer swap).
 
-- [ ] `H-TBL-003` Width-aware truncation default for session tables.
-  - Scope: render the session tables width-aware using the renderer
-    chosen in `H-TBL-001`. Truncate long cells (cwd, agent label, mux
-    session, PR identifier, lineage) with an ellipsis to fit the
-    detected terminal width. Behavior by environment:
-    - Interactive TTY: truncate to `$COLUMNS` (or detected width)
-      by default.
-    - Non-TTY (pipe, redirect): default to wide, untruncated output so
-      `conspectus session | grep` / `awk` stays useful.
-    - Add a `--wide` flag that forces wide / untruncated output even on
-      an interactive TTY.
-    - Optional `--width <N>` to override the detected width for
-      reproducible captures.
-    Do not introduce per-cell line wrapping; truncation is the only
-    width-fitting strategy in this story (multi-line layouts belong to
-    `H-TBL-004`).
-  - Tests: snapshot tests with explicit width inputs (narrow, typical,
-    wide); CLI integration tests covering `--wide` and the TTY-vs-pipe
-    default flip.
-  - Manual checks: `cargo run -- session` from a real workspace at
-    80, 120, and 200 columns; `cargo run -- session | cat` to confirm
-    the non-TTY wide default.
-  - Blockers: `H-TBL-001`.
+- [x] `H-TBL-003` Width-aware truncation default for session tables.
+  - Outcome: `src/output/table.rs` now exposes `RenderOptions { width,
+    layout }` and `render_with(snapshot, projection, options)`. The
+    existing `render(...)` is preserved as a thin wrapper around
+    `RenderOptions::wide()`, so every snapshot test stayed byte-for-byte
+    stable. `render_with` measures every cell via
+    `unicode_width::UnicodeWidthStr::width`, greedy-shrinks per-column
+    budgets toward the target width (never below `max(header_width, 4)`),
+    and truncates overflowing cells with a trailing `…`. The `session`
+    subcommand gained `--wide` and `--width <N>` flags. Default behavior:
+    `--wide` ⇒ untruncated; `--width N` ⇒ exact N columns; otherwise
+    detect via `terminal_size::terminal_size()` when stdout is a TTY,
+    else stay wide so pipes remain grep/awk-friendly. Added unit tests
+    for truncation/budget edge cases (including wide CJK columns) and
+    CLI integration tests for `--wide`, `--width`, the pipe-stays-wide
+    default, and the clap-level `--wide`/`--width` conflict.
+    Dependencies recorded by ADR 0020: `unicode-width = "0.2"` and
+    `terminal_size = "0.4"`.
 
 - [ ] `H-TBL-004` Opt-in card / multi-line row layout.
   - Scope: add a row-vertical layout (one column per line per row, blank

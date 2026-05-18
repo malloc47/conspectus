@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io;
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -85,6 +85,14 @@ struct SessionArgs {
     projection: Option<ProjectionFlag>,
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
+    /// Force untruncated output even when stdout is a TTY. Conflicts
+    /// with `--width`.
+    #[arg(long, conflicts_with = "width")]
+    wide: bool,
+    /// Render at exactly this many columns. Useful for reproducible
+    /// captures and snapshot tests.
+    #[arg(long, value_name = "N")]
+    width: Option<usize>,
 }
 
 impl SessionArgs {
@@ -111,10 +119,38 @@ impl SessionArgs {
             conspectus::discovery::discover_local_at_roots(self.scan_roots)?
         };
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
-        let table = conspectus::output::table::render(&snapshot, projection);
+        let render_width = resolve_session_width(self.wide, self.width, &io::stdout());
+        let options = match render_width {
+            Some(w) => conspectus::output::table::RenderOptions::columnar_width(w),
+            None => conspectus::output::table::RenderOptions::wide(),
+        };
+        let table = conspectus::output::table::render_with(&snapshot, projection, &options);
         print!("{table}");
         Ok(())
     }
+}
+
+/// Decide the render width for `conspectus session`.
+///
+/// - `--wide` forces `None` (untruncated).
+/// - `--width N` forces `Some(N)`.
+/// - Otherwise: detect the terminal width when stdout is a TTY, else
+///   leave untruncated so piped output stays grep/awk-friendly.
+fn resolve_session_width(
+    wide: bool,
+    width: Option<usize>,
+    stdout: &impl IsTerminal,
+) -> Option<usize> {
+    if wide {
+        return None;
+    }
+    if let Some(w) = width {
+        return Some(w);
+    }
+    if !stdout.is_terminal() {
+        return None;
+    }
+    terminal_size::terminal_size().map(|(w, _)| usize::from(w.0))
 }
 
 #[derive(Debug, Args)]

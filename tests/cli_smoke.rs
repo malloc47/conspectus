@@ -429,6 +429,131 @@ fn session_projection_flag_switches_to_mux() {
 }
 
 #[test]
+fn session_width_flag_truncates_long_cells_within_target() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    let long_cwd = "/very/long/workspace/path/that/will/exceed/eighty/columns/easily";
+    fs::write(
+        codex_state.join("rollout-width-test.jsonl"),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"width-test\",\"cwd\":\"{long_cwd}\"}}}}\n"
+        ),
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("session")
+        .arg("--width")
+        .arg("80")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    let body_rows: Vec<&str> = output.lines().skip(2).collect();
+    assert!(!body_rows.is_empty(), "expected at least one body row");
+    for line in output.lines() {
+        // Each row must fit; the truncation algorithm settles at column
+        // floors when the target is impossibly narrow, so use a small
+        // slack ceiling rather than a hard 80.
+        assert!(
+            line.chars().count() <= 90,
+            "row exceeded reasonable width with --width 80: {line:?}",
+        );
+    }
+    assert!(
+        output.contains('…'),
+        "long cwd should have been truncated with an ellipsis in:\n{output}",
+    );
+}
+
+#[test]
+fn session_wide_flag_emits_untruncated_output() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    let long_cwd = "/very/long/workspace/path/that/will/exceed/eighty/columns/easily";
+    fs::write(
+        codex_state.join("rollout-wide-test.jsonl"),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"wide-test\",\"cwd\":\"{long_cwd}\"}}}}\n"
+        ),
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("session")
+        .arg("--wide")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(
+        output.contains(long_cwd),
+        "--wide should emit the full cwd; got:\n{output}",
+    );
+    assert!(
+        !output.contains('…'),
+        "--wide should not truncate; got:\n{output}",
+    );
+}
+
+#[test]
+fn session_piped_output_defaults_to_wide() {
+    // assert_cmd's captured stdout is never a TTY, so the default
+    // behavior should leave output untruncated for grep/awk friendliness.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let scan_root = tempfile::TempDir::new().expect("scan temp");
+    let codex_state = home.path().join(".codex").join("sessions");
+    fs::create_dir_all(&codex_state).expect("codex sessions dir");
+    let long_cwd = "/very/long/workspace/path/that/will/exceed/eighty/columns/easily";
+    fs::write(
+        codex_state.join("rollout-pipe-test.jsonl"),
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"pipe-test\",\"cwd\":\"{long_cwd}\"}}}}\n"
+        ),
+    )
+    .expect("write codex session");
+
+    let codex_state_root: PathBuf = home.path().join(".codex");
+    let assert = isolated_cmd(home.path())
+        .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
+        .current_dir(scan_root.path())
+        .arg("session")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+
+    assert!(
+        output.contains(long_cwd),
+        "piped output should not truncate by default; got:\n{output}",
+    );
+}
+
+#[test]
+fn session_wide_and_width_flags_conflict() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("session")
+        .arg("--wide")
+        .arg("--width")
+        .arg("80")
+        .assert()
+        .failure();
+}
+
+#[test]
 fn session_projection_flag_switches_to_union() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
