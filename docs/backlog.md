@@ -2280,13 +2280,22 @@ render time.
     capped via the shared helper. All 440 tests pass.
   - Blockers: `H-PREVIEW-001`.
 
-- [ ] `H-PREVIEW-005` Aider last-message extraction.
-  - Scope: extend the aider adapter to parse the chat history file
-    and surface the last user/assistant turn. Defer if extraction
-    proves brittle for aider's free-form markdown chat layout —
-    record the rationale in the outcome and reopen when motivated.
-  - Tests: fixture chat history with last assistant turn / last
-    user turn / empty file.
+- [x] `H-PREVIEW-005` Aider last-message extraction.
+  - Outcome: deferred per the story's escape clause. Two reasons:
+    (1) aider's `.aider.chat.history.md` is free-form markdown
+    with no formally-specified turn-delimiter, and the format
+    changes between aider versions, so a heuristic parser would
+    silently emit nonsense previews on any future-version
+    transcript; (2) `.aider.input.history` only carries user
+    inputs and would leave the preview misleading (no assistant
+    text). A `TODO(H-PREVIEW-005)` comment in
+    `src/discovery/harness/aider.rs` pins the adapter on
+    `last_message_preview: None` and points at this entry.
+    Reopen this story when either (a) aider publishes a stable
+    structural marker for assistant turns or (b) a fixture
+    corpus is available to validate a heuristic parser against.
+    Aider sessions continue to discover with all other metadata;
+    the preview cell simply renders `—`.
   - Blockers: `H-PREVIEW-001`.
 
 ### Agent-Mux Orchestrator Integrations

@@ -44,6 +44,14 @@ impl HarnessAdapter for AiderAdapter {
                 harness_key: HARNESS_KEY.to_string(),
                 cwd: Some(scope),
                 title: None,
+                // TODO(H-PREVIEW-005): aider's `.aider.chat.history.md`
+                // is free-form markdown with no formally-specified
+                // delimiter, and `.aider.input.history` only carries
+                // user inputs (no assistant text). H-PREVIEW-005 was
+                // deferred per ADR 0023 until either a stable
+                // structural marker for assistant turns lands
+                // upstream or a fixture corpus is available to
+                // validate a heuristic parser against.
                 last_message_preview: None,
             }));
         }
