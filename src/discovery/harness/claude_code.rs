@@ -58,6 +58,7 @@ use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
+    normalize_last_message_preview,
 };
 
 /// Maximum number of JSONL lines to scan when looking for `cwd` evidence and
@@ -136,6 +137,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             };
 
             let leaf_uuid = read_session_leaf_uuid(&path);
+            let last_message_preview = read_session_last_message_preview(&path);
 
             entries.push(DiscoveredSession {
                 node: AgentSessionNode {
@@ -143,7 +145,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                     harness_key: HARNESS_KEY.to_string(),
                     cwd: meta.cwd,
                     title: meta.summary,
-                    last_message_preview: None,
+                    last_message_preview,
                 },
                 parent_uuid: meta.parent_uuid,
                 cross_session_record_type: meta.cross_session_record_type,
@@ -368,6 +370,143 @@ fn read_session_leaf_uuid(path: &Path) -> Option<String> {
     }
 
     last_uuid
+}
+
+/// Extract the session's most recent user/assistant text message as a
+/// preview (ADR 0023). Walks the trailing [`TAIL_SCAN_BYTES`] of the
+/// transcript backward, skipping `tool_use`, `tool_result`, `thinking`,
+/// system records, and the `isCompactSummary` synthetic summary user
+/// message. Returns the first matching text content, normalized via
+/// [`normalize_last_message_preview`].
+///
+/// Returns `None` when the transcript is empty, contains no usable text
+/// in its tail window, or fails to parse. Discovery is best-effort —
+/// errors degrade to `None`.
+fn read_session_last_message_preview(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len == 0 {
+        return None;
+    }
+
+    let start = len.saturating_sub(TAIL_SCAN_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut buf).ok()?;
+
+    // Drop the first partial line if we started mid-file.
+    let scan_start = if start > 0 {
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(idx) => idx + 1,
+            None => return None,
+        }
+    } else {
+        0
+    };
+
+    // Walk lines in reverse so we hit the most recent message first.
+    let lines: Vec<&[u8]> = buf[scan_start..]
+        .split(|&b| b == b'\n')
+        .filter(|l| !l.is_empty())
+        .collect();
+    for line in lines.iter().rev() {
+        let Ok(parsed) = serde_json::from_slice::<MessageScan>(line) else {
+            continue;
+        };
+        if let Some(text) = extract_message_preview_text(&parsed)
+            && let Some(preview) = normalize_last_message_preview(&text)
+        {
+            return Some(preview);
+        }
+    }
+    None
+}
+
+#[derive(Deserialize)]
+struct MessageScan {
+    #[serde(rename = "type", default)]
+    record_type: Option<String>,
+    #[serde(default)]
+    message: Option<MessageBody>,
+    #[serde(rename = "isCompactSummary", default)]
+    is_compact_summary: bool,
+}
+
+#[derive(Deserialize)]
+struct MessageBody {
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    content: Option<MessageContent>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MessageContent {
+    /// Some pre-content-block transcripts (and a few synthetic
+    /// records) carry `content` as a plain string.
+    String(String),
+    /// Modern transcripts emit a list of typed content blocks.
+    Blocks(Vec<ContentBlock>),
+}
+
+#[derive(Deserialize)]
+struct ContentBlock {
+    #[serde(rename = "type", default)]
+    block_type: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// Pull a candidate preview string out of one parsed line. Returns
+/// `None` for non-message records, tool results / tool uses /
+/// thinking blocks, and compaction summary records.
+fn extract_message_preview_text(line: &MessageScan) -> Option<String> {
+    if line.is_compact_summary {
+        return None;
+    }
+    let record_type = line.record_type.as_deref()?;
+    if record_type != "user" && record_type != "assistant" {
+        return None;
+    }
+    let message = line.message.as_ref()?;
+    // Honor message.role when present; some transcripts elide it.
+    if let Some(role) = message.role.as_deref()
+        && role != "user"
+        && role != "assistant"
+    {
+        return None;
+    }
+    let content = message.content.as_ref()?;
+    match content {
+        MessageContent::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(text.clone())
+            }
+        }
+        MessageContent::Blocks(blocks) => {
+            // Take the last `text` block in the message so the
+            // preview reflects the trailing prose rather than an
+            // intermediate lead-in. Tool-use, tool-result, and
+            // thinking blocks are skipped.
+            for block in blocks.iter().rev() {
+                if block.block_type.as_deref() != Some("text") {
+                    continue;
+                }
+                let Some(text) = block.text.as_ref() else {
+                    continue;
+                };
+                if text.trim().is_empty() {
+                    continue;
+                }
+                return Some(text.clone());
+            }
+            None
+        }
+    }
 }
 
 fn build_fork_lineage_link(
@@ -1189,5 +1328,191 @@ mod tests {
             })
             .collect();
         assert_eq!(sessions, vec!["good".to_string()]);
+    }
+
+    fn write_transcript(state_root: &Path, project: &str, session_id: &str, body: &str) {
+        let project_dir = state_root.join("projects").join(project);
+        std::fs::create_dir_all(&project_dir).expect("project dir");
+        std::fs::write(project_dir.join(format!("{session_id}.jsonl")), body)
+            .expect("write claude session");
+    }
+
+    fn discover_one_session(context: &DiscoveryContext) -> AgentSessionNode {
+        let fragment = ClaudeCodeAdapter::new()
+            .discover(context)
+            .expect("discover");
+        fragment
+            .nodes
+            .into_iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .next()
+            .expect("one agent session")
+    }
+
+    /// Plain user→assistant exchange: the assistant's text wins.
+    #[test]
+    fn last_message_preview_returns_last_assistant_text() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let body = concat!(
+            r#"{"type":"permission-mode","sessionId":"plain"}"#,
+            "\n",
+            r#"{"type":"user","sessionId":"plain","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","sessionId":"plain","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"hello back"}]}}"#,
+            "\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "plain", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(session.last_message_preview.as_deref(), Some("hello back"));
+    }
+
+    /// Tool-use blocks at the tail are ignored; the most recent text
+    /// content wins even when it sits before a chain of tool calls.
+    #[test]
+    fn last_message_preview_skips_tool_use_and_tool_result_blocks() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let body = concat!(
+            r#"{"type":"user","sessionId":"s","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"start"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","sessionId":"s","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"working on it"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","sessionId":"s","uuid":"a2","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read"}]}}"#,
+            "\n",
+            r#"{"type":"user","sessionId":"s","uuid":"u2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file body"}]}}"#,
+            "\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "s", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("working on it"),
+        );
+    }
+
+    /// `thinking` blocks at the tail are also skipped — they are not
+    /// visible message content.
+    #[test]
+    fn last_message_preview_skips_thinking_blocks() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let body = concat!(
+            r#"{"type":"assistant","sessionId":"s","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"final answer"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","sessionId":"s","uuid":"a2","message":{"role":"assistant","content":[{"type":"thinking","thinking":"reasoning..."}]}}"#,
+            "\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "s", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("final answer"),
+        );
+    }
+
+    /// `isCompactSummary: true` records carry a synthetic
+    /// post-compaction summary, not a real user message. The preview
+    /// should come from a real user/assistant message after the
+    /// boundary when one exists.
+    #[test]
+    fn last_message_preview_skips_compact_summary_records() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let body = concat!(
+            r#"{"type":"user","sessionId":"s","uuid":"u1","isCompactSummary":true,"message":{"role":"user","content":[{"type":"text","text":"synthetic compaction summary"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","sessionId":"s","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"first real reply after compaction"}]}}"#,
+            "\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "s", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("first real reply after compaction"),
+        );
+    }
+
+    /// A transcript whose tail is entirely tool-use / tool-result
+    /// activity (with no text in the scan window) yields `None`. The
+    /// renderer falls back to `—`.
+    #[test]
+    fn last_message_preview_returns_none_for_tool_only_transcript() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let body = concat!(
+            r#"{"type":"assistant","sessionId":"s","uuid":"a1","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read"}]}}"#,
+            "\n",
+            r#"{"type":"user","sessionId":"s","uuid":"u1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file body"}]}}"#,
+            "\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "s", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(session.last_message_preview, None);
+    }
+
+    /// Empty/malformed transcripts must degrade silently to `None`.
+    #[test]
+    fn last_message_preview_returns_none_for_empty_or_corrupt_transcript() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        // Empty body — discovery skips the file (`read_session_header`
+        // returns None for fully-empty files), so the easier case is a
+        // single corrupt-JSON line plus a permission-mode header that
+        // succeeds at the header scan but yields no text in the tail.
+        let body = concat!(
+            r#"{"type":"permission-mode","sessionId":"corrupt"}"#,
+            "\n",
+            "this is not json\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "corrupt", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(session.last_message_preview, None);
+    }
+
+    /// Long messages are capped at 200 chars by
+    /// `normalize_last_message_preview`.
+    #[test]
+    fn last_message_preview_is_capped_at_two_hundred_chars() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let long = "a".repeat(500);
+        let body = format!(
+            "{{\"type\":\"assistant\",\"sessionId\":\"s\",\"uuid\":\"a1\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"{long}\"}}]}}}}\n"
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "s", &body);
+
+        let session = discover_one_session(&context);
+        let preview = session.last_message_preview.expect("non-empty");
+        assert_eq!(preview.chars().count(), 200);
+        assert!(preview.ends_with('…'));
+    }
+
+    /// Multi-line messages get whitespace-collapsed before capping.
+    #[test]
+    fn last_message_preview_collapses_whitespace() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        // JSON-encoded newline and tab.
+        let body = concat!(
+            r#"{"type":"assistant","sessionId":"s","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"line one\n\nline two\twith\ttabs"}]}}"#,
+            "\n",
+        );
+        write_transcript(&fixture.claude_code_state_root(), "-work", "s", body);
+
+        let session = discover_one_session(&context);
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("line one line two with tabs"),
+        );
     }
 }

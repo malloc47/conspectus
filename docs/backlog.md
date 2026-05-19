@@ -2214,22 +2214,28 @@ render time.
     and grapheme-boundary safety on multibyte content. All 421
     tests pass; no insta snapshot moved.
 
-- [ ] `H-PREVIEW-002` Claude Code last-message extraction.
-  - Scope: extend `src/discovery/harness/claude_code.rs` to scan the
-    session JSONL backward, find the most recent user/assistant
-    message with a non-empty text content block, normalize
-    whitespace to single spaces, and cap at 200 chars per ADR 0023.
-    Skip tool-use and tool-result events, system messages, and the
-    compaction summary record. Empty/malformed transcripts emit
-    `None`. Live state validation should observe the preview appear
-    on the current claude-code project's sessions.
-  - Tests: fixture transcripts covering (a) plain user→assistant
-    exchange (assistant's last text wins), (b) tool-use block
-    followed by a text continuation (text wins), (c) compaction
-    boundary followed by post-compaction assistant text (post-
-    compaction wins), (d) empty / tool-only / corrupt transcripts
-    (None).
-  - Blockers: `H-PREVIEW-001`.
+- [x] `H-PREVIEW-002` Claude Code last-message extraction.
+  - Outcome: `read_session_last_message_preview` walks the trailing
+    `TAIL_SCAN_BYTES` (32 KiB) of each Claude Code JSONL transcript
+    backward, dropping the partial first line when the seek lands
+    mid-file, and returns the first user/assistant text content it
+    finds. Tool-use, tool-result, and thinking blocks are skipped;
+    so are `system` records and any user/assistant record with
+    `isCompactSummary: true`. The result goes through
+    `normalize_last_message_preview` so the cell is whitespace-
+    normalized and capped at 200 chars with a trailing `…`. The
+    extractor short-reads through `serde_json::from_slice` against
+    a minimal `MessageScan` / `MessageBody` / `MessageContent`
+    grammar (untagged enum covers both string content and the
+    modern content-block array). Discovery stays best-effort:
+    corrupt JSON / empty transcripts / tool-only tails yield
+    `None`. Eight unit tests pin the plain exchange, the
+    skip-tool-blocks path, thinking-skip, compaction-summary skip,
+    tool-only None, empty/corrupt None, the 200-char cap, and the
+    whitespace collapse. Live validation: running
+    `conspectus table sessions --columns id,agent,preview` against
+    `~/.claude/projects/` surfaces meaningful one-line previews
+    for every session that has any text in its tail window.
 
 - [ ] `H-PREVIEW-003` Codex last-message extraction.
   - Scope: extend `src/discovery/harness/codex.rs` similarly for
@@ -2667,6 +2673,214 @@ should land before any persistence or eviction code.
     paths.
   - Blockers: `P7-006`; requires a new ADR for the watcher
     dependency.
+
+## Phase 8: Interactive TUI
+
+Source plan: `docs/implementation/phase-08-interactive-tui.md`.
+
+Phase goal: add `conspectus tui`, a keyboard-first terminal UI for
+searching, selecting, inspecting, and attaching/resuming the graph rows
+already exposed by `conspectus table <ROWS>` and `conspectus node show`.
+
+Dependency shape inside the phase:
+
+```
+P8-001 ─┬─→ P8-002 ─→ P8-003 ─┬─→ P8-004 ─┬─→ P8-006 ─┐
+        │                     │           │           │
+        │                     │           └─→ P8-005 ─┤
+        │                     │                       ├─→ P8-008 ─→ P8-013
+        │                     └─→ P8-007 ─────────────┤
+        │                                             │
+        └─→ P8-009 ─→ P8-010 ─→ P8-011 ───────────────┘
+                          └─→ P8-012 ─────────────────┘
+```
+
+P8-001 and P8-002 should land first. P8-004 through P8-007 can be
+implemented in parallel once the app shell exists. P8-009 through
+P8-011 depend on the same UI shell but should remain isolated from
+pure browsing/rendering work.
+
+- [ ] `P8-001` Close v1 TUI product decisions.
+  - Scope: answer the open questions in
+    `docs/implementation/phase-08-interactive-tui.md`: default action for
+    un-muxed agent sessions, mux target granularity, definition of
+    "project" grouping, whether global search includes transcript
+    contents, minimum PR detail depth, live-preview default, mouse support,
+    one-shot discovery vs Phase 7 server dependency, unsupported-action
+    presentation, and ambiguous mux-link behavior. Record the answers in
+    the implementation document and promote any architectural answers to
+    ADRs if they constrain later work.
+  - Tests: none directly; documentation update is the deliverable.
+  - Blockers: none.
+
+- [ ] `P8-002` ADR: TUI runtime, app architecture, and dependency policy.
+  - Scope: evaluate Ratatui + crossterm, Ratatui + tui-realm, Cursive,
+    and raw crossterm/termion for Conspectus's needs: two-panel layout,
+    tree/list navigation, searchable rows, scrollable detail panes,
+    semi-live mux previews, testable rendering, terminal cleanup, and
+    future server-backed refresh. Decide the runtime dependency,
+    backend feature set, event-loop shape, async/background-work
+    strategy, render-test strategy, and whether fuzzy search starts
+    in-tree or with a dependency. Record as a new ADR under
+    `docs/adr/`.
+  - Tests: none directly; ADR is the deliverable. A tiny compile-only
+    spike may land alongside if needed to validate the dependency shape.
+  - Blockers: `P8-001`.
+
+- [ ] `P8-003` Add `conspectus tui` CLI shell and terminal lifecycle.
+  - Scope: add the `tui` subcommand with `--scan-root`, `--view`,
+    `--refresh-interval`, `--no-live-preview`, and `--color` flags per
+    the Phase 8 plan. Wire a minimal TUI runtime that enters alternate
+    screen/raw mode, renders a placeholder shell, handles `q` and Ctrl-C,
+    restores the terminal on normal/error exits, and keeps all discovery
+    and rendering behavior behind `src/tui/` module boundaries. Do not
+    implement graph browsing yet.
+  - Tests: CLI smoke test for `conspectus tui --help`; unit tests for
+    flag parsing and color-option resolution reuse where applicable.
+    Add a terminal-lifecycle test seam if the chosen runtime supports
+    a fake backend.
+  - Manual checks: `cargo run -- tui --help`; `cargo run -- tui` then
+    quit with `q` and Ctrl-C, confirming terminal state is restored.
+  - Blockers: `P8-002`.
+
+- [ ] `P8-004` Build TUI row tree view-models for every table row-type.
+  - Scope: add pure row-tree builders for `sessions`, `mux`, `union`,
+    `prs`, and `forks`. The builders consume a resolved `GraphSnapshot`
+    and produce stable row ids, labels, depth, row kind, primary node id,
+    sort keys, and compact status fields. Sessions view groups by the
+    v1 "project" answer from P8-001 and nests known lineage/fork history.
+    Mux view groups by mux session and nests attached agent sessions.
+    PR/fork/union views preserve parity with the existing table row-types
+    without scraping rendered table text.
+  - Tests: unit tests with existing fixtures covering empty graph,
+    orphan session, mux-only, attached session, fork lineage, PR-linked
+    branch, and ambiguous links. Snapshot the pure row-tree structures
+    rather than terminal output.
+  - Blockers: `P8-003`.
+
+- [ ] `P8-005` Build selected-node detail view-models.
+  - Scope: extract or share the non-string data behind
+    `conspectus node show <id>` so the TUI right panel can render selected
+    node attributes, resolved relationships, candidate links, ambiguity,
+    diagnostics, adjacent nodes, and source metadata. Preserve content
+    parity with `node show` while allowing the TUI renderer to control
+    wrapping, scrolling, and styling.
+  - Tests: unit tests proving selected-node detail data includes the same
+    relationship/diagnostic categories as `render_node_show`; snapshot
+    tests for representative agent, mux, PR, fork, and unresolved-lineage
+    nodes.
+  - Blockers: `P8-003`.
+
+- [ ] `P8-006` Implement selection, focus, navigation, and filtering state.
+  - Scope: add the TUI app state machine for active view, focused panel,
+    selected row, expanded/collapsed row ids, scroll offsets, filters, and
+    command/status messages. Implement navigation keys (`j/k`, arrows,
+    PageUp/PageDown, Home/End, `g`/`G`), focus cycling, view switching
+    (`1`-`5`), `/` in-view search, `r` refresh command intent, `?` help
+    overlay intent, and stable selection retention across a new row tree.
+  - Tests: pure reducer/state-machine tests for every navigation key,
+    view switching, filter application, search query updates, selection
+    retention after refresh, and deleted-selected-row fallback.
+  - Blockers: `P8-004`, `P8-005`.
+
+- [ ] `P8-007` Render the two-panel Ratatui UI.
+  - Scope: implement the visible layout: left tree/list panel, right
+    detail panel, status bar, search overlay, help overlay, and empty/error
+    states. Use fixed-dimension Ratatui buffer snapshots for desktop-ish
+    and narrow terminal sizes. The renderer must truncate/wrap text
+    coherently, show row depth and selected state, and avoid blocking on
+    discovery or preview capture.
+  - Tests: Ratatui buffer snapshot tests for sessions, mux, PR, narrow
+    terminal, search overlay, help overlay, provider-error status, and
+    empty graph. Keep snapshots deterministic by using fixture graphs and
+    fixed terminal sizes.
+  - Manual checks: `cargo run -- tui --view sessions`,
+    `cargo run -- tui --view mux`, and terminal resize while running.
+  - Blockers: `P8-003`; friendlier after `P8-004` and `P8-005`.
+
+- [ ] `P8-008` Add non-blocking graph refresh data adapter.
+  - Scope: implement a data adapter that runs initial discovery, feeds the
+    resolved graph into the app state, and refreshes on `r` or the
+    configured interval without blocking input. Preserve provider
+    diagnostics and stale/error status in the UI. Keep the adapter shaped
+    so Phase 7 server snapshots can replace in-process discovery later.
+  - Tests: unit/integration tests with fake discovery covering initial
+    load, refresh success, refresh failure preserving prior graph, refresh
+    replacing the selected row while retaining selection, and disabled or
+    long refresh intervals.
+  - Manual checks: run `cargo run -- tui`, change local graph inputs, press
+    `r`, and verify rows update without losing usable terminal state.
+  - Blockers: `P8-006`, `P8-007`.
+
+- [ ] `P8-009` Add mux live-preview capture adapter.
+  - Scope: add a preview adapter over the existing tmux runner seam that
+    can capture the selected mux session/window/pane content, throttle
+    refresh independently from full graph discovery, and degrade to an
+    unavailable/disabled message on missing tmux, missing target,
+    permission failure, or `--no-live-preview`. Rendering code must only
+    consume preview state, never shell out directly.
+  - Tests: fake tmux runner tests for capture success, empty capture,
+    missing pane/session, command failure, disabled preview, and throttled
+    refresh. Ratatui snapshot covering a selected mux row with preview.
+  - Manual checks: run inside tmux, select a mux row, and confirm the
+    preview updates semi-live without blocking navigation.
+  - Blockers: `P8-003`; integrates into `P8-007`/`P8-008`.
+
+- [ ] `P8-010` Implement attach-to-existing-mux action.
+  - Scope: add an action picker/default action that attaches to the
+    selected mux target or the mux attached to the selected agent session.
+    Resolve ambiguous mux candidates according to the P8-001 decision.
+    Use tmux command construction behind a testable adapter; never invoke
+    attach from rendering code. Surface clear disabled/error states when
+    no mux target exists or tmux is unavailable.
+  - Tests: unit tests for action availability across mux row, attached
+    agent row, un-muxed agent row, ambiguous links, and tmux unavailable;
+    fake tmux command tests for the selected target string.
+  - Manual checks: from inside and outside tmux, select an attached mux
+    row and verify attach reaches the expected session/window/pane.
+  - Blockers: `P8-006`, `P8-009`.
+
+- [ ] `P8-011` Implement resume un-muxed agent session into mux.
+  - Scope: model harness-specific resume command support for the
+    discovered harnesses Conspectus can safely resume. Add a confirmation
+    flow that creates or selects the mux target per the P8-001 answer,
+    launches the resume command, and refreshes the graph afterward.
+    Unsupported harnesses must show a disabled action with the reason.
+  - Tests: fake harness-action tests for supported/unsupported harnesses,
+    command construction, missing transcript/session state, mux creation
+    failure, launch failure, and refresh-after-success. Include one
+    integration-style test that verifies no resume command is offered when
+    the graph evidence is ambiguous.
+  - Manual checks: select an un-muxed test session for each supported
+    harness and verify it resumes in the expected mux target.
+  - Blockers: `P8-010`; may require follow-up ADR if resume semantics
+    differ materially by harness.
+
+- [ ] `P8-012` Add PR, fork, and transcript/history detail enrichments.
+  - Scope: enrich the right panel beyond node-show parity: PR status/check
+    summary/comment recency per the P8-001 answer, fork parent/child
+    lineage and context effects, and recent transcript/history preview
+    for un-muxed sessions using ADR 0019-compatible raw-state semantics.
+    Keep expensive transcript or forge reads behind the data/preview
+    adapters and visibly mark stale/unavailable data.
+  - Tests: fake forge/detail tests for PR status/check/comment states;
+    fixture transcript tests for recent-history extraction including
+    compacted Claude Code history; Ratatui snapshots for PR, fork, and
+    un-muxed agent detail panels.
+  - Blockers: `P8-005`, `P8-008`; transcript behavior should align with
+    ADR 0019 before broadening beyond a minimal preview.
+
+- [ ] `P8-013` Document and verify the v1 TUI workflow.
+  - Scope: update `docs/operations.md` and README-level command listings
+    with `conspectus tui`, keybindings, privacy/performance notes for live
+    preview, supported actions, unsupported actions, and troubleshooting
+    for terminal cleanup. Run the full automated suite and the manual
+    checks from the Phase 8 implementation document.
+  - Tests: `just check`; targeted TUI snapshot tests; CLI smoke tests.
+  - Manual checks: all commands listed in
+    `docs/implementation/phase-08-interactive-tui.md`.
+  - Blockers: `P8-008`, `P8-010`; `P8-011` and `P8-012` if included in
+    the v1 release boundary.
 
 ## Later
 
