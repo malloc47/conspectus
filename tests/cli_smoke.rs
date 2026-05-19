@@ -828,6 +828,134 @@ fn table_sessions_columns_supports_branch_repo_optional_columns() {
 }
 
 #[test]
+fn table_sessions_color_always_emits_ansi_even_when_piped() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--color")
+        .arg("always")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(
+        output.contains('\u{1b}'),
+        "expected ANSI escape (ESC) in --color=always output:\n{output:?}",
+    );
+    assert!(output.contains("ID"), "still contains the ID header");
+}
+
+#[test]
+fn table_sessions_color_never_emits_no_ansi() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .env("CLICOLOR_FORCE", "1")
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--color")
+        .arg("never")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(
+        !output.contains('\u{1b}'),
+        "--color=never must skip ANSI even when CLICOLOR_FORCE is set",
+    );
+}
+
+#[test]
+fn table_sessions_color_auto_defaults_to_no_color_on_pipe() {
+    // assert_cmd's captured stdout is non-TTY, so auto resolves to
+    // "no color". This locks the convention that piped output stays
+    // grep/awk-friendly.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(
+        !output.contains('\u{1b}'),
+        "auto color must stay off when piped:\n{output:?}",
+    );
+}
+
+#[test]
+fn table_sessions_no_color_env_overrides_color_auto() {
+    // NO_COLOR is meant to override auto. We set --color=always to
+    // confirm it does NOT override that explicit user flag (per the
+    // ADR-0022 precedence), then drop --color so auto applies and
+    // NO_COLOR wins.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let still_colored = isolated_cmd(home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--color")
+        .arg("always")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert!(
+        String::from_utf8(still_colored).unwrap().contains('\u{1b}'),
+        "explicit --color=always wins over NO_COLOR",
+    );
+
+    let auto = isolated_cmd(home.path())
+        .env("NO_COLOR", "1")
+        .current_dir(temp.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--color")
+        .arg("auto")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let auto = String::from_utf8(auto).unwrap();
+    assert!(
+        !auto.contains('\u{1b}'),
+        "NO_COLOR must override auto:\n{auto:?}",
+    );
+}
+
+#[test]
+fn columns_color_always_emits_ansi() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("columns")
+        .arg("sessions")
+        .arg("--color")
+        .arg("always")
+        .assert()
+        .success();
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(
+        output.contains('\u{1b}'),
+        "columns --color=always should emit ANSI:\n{output:?}",
+    );
+}
+
+#[test]
 fn table_sessions_pager_flag_routes_through_pager_command() {
     // `PAGER=cat` + `--pager` (which forces paging even on non-TTY)
     // round-trips the rendered output through cat, so stdout matches

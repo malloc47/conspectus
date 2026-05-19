@@ -20,7 +20,9 @@
 //!   among multiple plausible candidates for that source/relation.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
+use anstyle::{AnsiColor, Effects, Reset, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub use crate::config::Projection;
@@ -47,6 +49,11 @@ pub struct RenderOptions {
     /// row-type's [`default_columns`] set. Use [`parse_columns_spec`] to
     /// translate a `--columns LIST` string into a value for this field.
     pub columns: Option<Vec<&'static str>>,
+    /// When true, the renderer wraps headers and selected cell content
+    /// in ANSI escape codes per the palette described in ADR 0022.
+    /// Defaults to `false` so existing snapshot tests stay
+    /// byte-for-byte stable.
+    pub color: bool,
 }
 
 impl RenderOptions {
@@ -56,6 +63,7 @@ impl RenderOptions {
             width: None,
             layout: Layout::Columnar,
             columns: None,
+            color: false,
         }
     }
 
@@ -65,6 +73,7 @@ impl RenderOptions {
             width: Some(width),
             layout: Layout::Columnar,
             columns: None,
+            color: false,
         }
     }
 
@@ -74,6 +83,7 @@ impl RenderOptions {
             width: None,
             layout: Layout::Card,
             columns: None,
+            color: false,
         }
     }
 
@@ -83,6 +93,7 @@ impl RenderOptions {
             width: Some(width),
             layout: Layout::Card,
             columns: None,
+            color: false,
         }
     }
 
@@ -91,6 +102,12 @@ impl RenderOptions {
     /// [`resolve_explicit_columns`].
     pub fn with_columns(mut self, columns: Vec<&'static str>) -> Self {
         self.columns = Some(columns);
+        self
+    }
+
+    /// Builder helper: enable ANSI color escapes per ADR 0022.
+    pub fn with_color(mut self, color: bool) -> Self {
+        self.color = color;
         self
     }
 }
@@ -184,7 +201,7 @@ pub fn render_with(
         Projection::Pr => build_pr_rows(&view, &columns),
         Projection::Fork => build_fork_rows(&view, &columns),
     };
-    render_rows(rows, options)
+    render_rows(rows, &columns, options)
 }
 
 /// Compact `provenance/confidence[*]` cell, e.g. `LD/H*`. Used in
@@ -778,23 +795,26 @@ pub fn resolve_explicit_columns(
 /// appended for columns in the default set. The leading key column is
 /// padded so descriptions line up. Used by `conspectus columns <ROWS>`
 /// (H-TBL-012).
-pub fn render_columns_listing(projection: Projection) -> String {
+pub fn render_columns_listing(projection: Projection, color: bool) -> String {
     let registry = columns_for(projection);
     let key_width = registry
         .iter()
         .map(|spec| spec.key.chars().count())
         .max()
         .unwrap_or(0);
+    let dim = Style::new().effects(Effects::DIMMED);
     let mut out = String::new();
     for spec in registry {
         let key_pad = key_width.saturating_sub(spec.key.chars().count());
-        out.push_str(spec.key);
+        // Bold the column key so it pops out of the description text.
+        push_styled(&mut out, spec.key, header_style(), color);
         for _ in 0..(key_pad + 2) {
             out.push(' ');
         }
         out.push_str(spec.description);
         if spec.default {
-            out.push_str("  (default)");
+            out.push_str("  ");
+            push_styled(&mut out, "(default)", dim, color);
         }
         out.push('\n');
     }
@@ -807,6 +827,87 @@ fn header_label(registry: &[ColumnSpec], key: &str) -> String {
         .find(|spec| spec.key == key)
         .map(|spec| spec.header.to_string())
         .unwrap_or_else(|| key.to_uppercase())
+}
+
+// -----------------------------------------------------------------------------
+// Color palette (ADR 0022)
+// -----------------------------------------------------------------------------
+
+/// Style applied to header-row cells (and section headers in
+/// `node show`) when color is enabled.
+pub(crate) fn header_style() -> Style {
+    Style::new().effects(Effects::BOLD)
+}
+
+/// Style applied to card-layout key labels (`KEY:`) when color is on.
+fn card_key_style() -> Style {
+    Style::new().effects(Effects::BOLD)
+}
+
+/// Style for a body-row cell given the column key and the cell text.
+/// Returns an empty style when no rule matches; callers should skip
+/// the ANSI envelope in that case via [`Style::is_plain`].
+fn cell_style(column_key: &str, cell_text: &str) -> Style {
+    let dim = Style::new().effects(Effects::DIMMED);
+    if cell_text == "—" {
+        return dim;
+    }
+    match column_key {
+        "id" => dim,
+        "mux-conf" | "pr-conf" => indicator_style(cell_text),
+        "state" => pr_state_style(cell_text),
+        "draft" => {
+            if cell_text == "draft" {
+                Style::new().fg_color(Some(AnsiColor::Yellow.into()))
+            } else {
+                Style::new()
+            }
+        }
+        "declared" => declared_state_style(cell_text),
+        _ => Style::new(),
+    }
+}
+
+/// Map a `<tier>/<conf>[*]` indicator cell to its tier color.
+fn indicator_style(text: &str) -> Style {
+    let tier = text.split('/').next().unwrap_or("");
+    match tier {
+        "LD" | "GD" => Style::new().fg_color(Some(AnsiColor::Green.into())),
+        "SD" => Style::new().fg_color(Some(AnsiColor::Cyan.into())),
+        "C" | "$" => Style::new().effects(Effects::DIMMED),
+        _ => Style::new(),
+    }
+}
+
+fn pr_state_style(text: &str) -> Style {
+    match text {
+        "open" => Style::new().fg_color(Some(AnsiColor::Green.into())),
+        "closed" => Style::new().fg_color(Some(AnsiColor::Red.into())),
+        "merged" => Style::new().fg_color(Some(AnsiColor::Magenta.into())),
+        _ => Style::new(),
+    }
+}
+
+fn declared_state_style(text: &str) -> Style {
+    match text {
+        "declared" => Style::new().fg_color(Some(AnsiColor::Green.into())),
+        "ignored" => Style::new().effects(Effects::DIMMED),
+        "overridden" => Style::new().fg_color(Some(AnsiColor::Yellow.into())),
+        _ => Style::new(),
+    }
+}
+
+/// Write `text` to `out`, wrapping it in `style`'s ANSI escapes when
+/// `color` is true and the style isn't plain. Otherwise emit `text`
+/// verbatim. Used by both columnar and card layouts (and by
+/// `output::node_show` for section headers) so the wrapping rule is
+/// consistent.
+pub(crate) fn push_styled(out: &mut String, text: &str, style: Style, color: bool) {
+    if color && !style.is_plain() {
+        let _ = write!(out, "{style}{text}{Reset}");
+    } else {
+        out.push_str(text);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -1584,10 +1685,14 @@ const COLUMN_GAP_WIDTH: usize = 2;
 /// to 4 so a column can still emit `xxx…` after truncation.
 const MIN_COLUMN_BUDGET: usize = 4;
 
-fn render_rows(rows: Vec<Vec<String>>, options: &RenderOptions) -> String {
+fn render_rows(
+    rows: Vec<Vec<String>>,
+    columns: &[&'static str],
+    options: &RenderOptions,
+) -> String {
     match options.layout {
-        Layout::Columnar => render_columnar(rows, options.width),
-        Layout::Card => render_card(rows, options.width),
+        Layout::Columnar => render_columnar(rows, columns, options),
+        Layout::Card => render_card(rows, columns, options),
     }
 }
 
@@ -1595,13 +1700,17 @@ fn render_rows(rows: Vec<Vec<String>>, options: &RenderOptions) -> String {
 /// per body row, with `KEY: value` lines aligned to the longest key and
 /// blank lines separating blocks. The header row contributes the key
 /// names but is not itself emitted as a card.
-fn render_card(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
+fn render_card(
+    rows: Vec<Vec<String>>,
+    columns: &[&'static str],
+    options: &RenderOptions,
+) -> String {
     if rows.len() < 2 {
         return String::new();
     }
     let header = &rows[0];
     let key_width = header.iter().map(|s| display_width(s)).max().unwrap_or(0);
-    let value_budget = target_width.map(|w| w.saturating_sub(key_width + 2));
+    let value_budget = options.width.map(|w| w.saturating_sub(key_width + 2));
 
     let mut out = String::new();
     for (row_idx, row) in rows.iter().enumerate().skip(1) {
@@ -1611,7 +1720,8 @@ fn render_card(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
         for (col_idx, cell) in row.iter().enumerate() {
             let key = header.get(col_idx).map(String::as_str).unwrap_or("");
             let key_pad = key_width.saturating_sub(display_width(key));
-            out.push_str(key);
+            // `KEY:` is the label half — bolded when color is on.
+            push_styled(&mut out, key, card_key_style(), options.color);
             out.push(':');
             for _ in 0..(key_pad + 1) {
                 out.push(' ');
@@ -1620,20 +1730,30 @@ fn render_card(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
                 Some(budget) => truncate_to_width(cell, budget),
                 None => cell.clone(),
             };
-            out.push_str(&value);
+            let column_key = columns.get(col_idx).copied().unwrap_or("");
+            push_styled(
+                &mut out,
+                &value,
+                cell_style(column_key, &value),
+                options.color,
+            );
             out.push('\n');
         }
     }
     out
 }
 
-fn render_columnar(rows: Vec<Vec<String>>, target_width: Option<usize>) -> String {
+fn render_columnar(
+    rows: Vec<Vec<String>>,
+    columns: &[&'static str],
+    options: &RenderOptions,
+) -> String {
     if rows.is_empty() {
         return String::new();
     }
-    let columns = rows[0].len();
-    let naturals = natural_widths(&rows, columns);
-    let budgets = match target_width {
+    let column_count = rows[0].len();
+    let naturals = natural_widths(&rows, column_count);
+    let budgets = match options.width {
         None => naturals,
         Some(target) => fit_to_width(&naturals, &rows[0], target),
     };
@@ -1646,17 +1766,19 @@ fn render_columnar(rows: Vec<Vec<String>>, target_width: Option<usize>) -> Strin
             }
             let budget = budgets[idx];
             let truncated = truncate_to_width(cell, budget);
-            if idx + 1 < columns {
+            let style = if row_idx == 0 {
+                header_style()
+            } else {
+                let column_key = columns.get(idx).copied().unwrap_or("");
+                cell_style(column_key, &truncated)
+            };
+            push_styled(&mut out, &truncated, style, options.color);
+            if idx + 1 < column_count {
                 let truncated_width = display_width(&truncated);
                 let pad = budget.saturating_sub(truncated_width);
-                out.push_str(&truncated);
                 for _ in 0..pad {
                     out.push(' ');
                 }
-            } else {
-                // Last cell: truncate but skip padding so the line has no
-                // trailing whitespace.
-                out.push_str(&truncated);
             }
         }
         out.push('\n');
@@ -2227,7 +2349,7 @@ mod tests {
 
     #[test]
     fn render_columns_listing_marks_default_columns() {
-        let listing = render_columns_listing(Projection::Agent);
+        let listing = render_columns_listing(Projection::Agent, false);
         // ID is in the default set.
         let id_line = listing
             .lines()
@@ -2260,7 +2382,7 @@ mod tests {
             Projection::Pr,
             Projection::Fork,
         ] {
-            let listing = render_columns_listing(projection);
+            let listing = render_columns_listing(projection, false);
             for spec in columns_for(projection) {
                 assert!(
                     listing
@@ -2407,6 +2529,86 @@ mod tests {
         assert_eq!(body_tokens.len(), 3);
         assert_eq!(body_tokens[1], "codex:alpha");
         assert_eq!(body_tokens[2], "/work/a");
+    }
+
+    #[test]
+    fn render_color_disabled_is_byte_identical_to_plain_text() {
+        // Regression: turning the `color` knob on/off must not perturb
+        // the bytes when color is off. This guards every `insta`
+        // snapshot from silently growing ANSI escapes.
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
+            ..GraphSnapshot::empty()
+        };
+        let plain = render(&snapshot, Projection::Agent);
+        let off = render_with(&snapshot, Projection::Agent, &RenderOptions::wide());
+        let off_with_color_false = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_color(false),
+        );
+        assert_eq!(plain, off);
+        assert_eq!(plain, off_with_color_false);
+        assert!(!plain.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn render_color_enabled_wraps_header_and_id_cells_in_ansi() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_color(true),
+        );
+        // Header row gets the bold envelope.
+        assert!(
+            colored.contains("\u{1b}[1m"),
+            "expected bold escape for header:\n{colored:?}",
+        );
+        // The dash placeholder gets dim styling for cells like MUX
+        // that have no value in this minimal snapshot.
+        assert!(
+            colored.contains("\u{1b}[2m"),
+            "expected dim escape (for `—` placeholder or id col):\n{colored:?}",
+        );
+        // Every opened escape closes with the reset sequence.
+        assert!(
+            colored.contains("\u{1b}[0m"),
+            "expected reset escape in:\n{colored:?}",
+        );
+    }
+
+    #[test]
+    fn render_color_enabled_colors_pr_state_cell() {
+        let pr_id = ForgePrId::new("github", "github.com", "octo", "repo", 7);
+        let snapshot = GraphSnapshot {
+            nodes: vec![GraphNode::ForgePr(ForgePrNode {
+                id: pr_id,
+                provider: "github".to_string(),
+                host: "github.com".to_string(),
+                owner: "octo".to_string(),
+                repo: "repo".to_string(),
+                number: 7,
+                state: Some("open".to_string()),
+                url: None,
+                updated_epoch: None,
+                is_draft: false,
+            })],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Pr,
+            &RenderOptions::wide().with_color(true),
+        );
+        // Green is `\x1b[32m` in ANSI 16-color.
+        assert!(
+            colored.contains("\u{1b}[32m"),
+            "expected green for PR state `open`:\n{colored:?}",
+        );
     }
 
     #[test]

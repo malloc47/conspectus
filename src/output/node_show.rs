@@ -23,7 +23,7 @@ use crate::model::{
     GraphSnapshot, LinkEndpoint, MuxSessionNode, NodeId, RelationKind, RepoNode,
     ResolvedRelationship, WorkspaceNode, WorktreeNode,
 };
-use crate::output::table::{indicator, node_short_id};
+use crate::output::table::{header_style, indicator, node_short_id, push_styled};
 
 /// Outcome of resolving an `<id>` argument to a [`NodeId`] against a
 /// [`GraphSnapshot`].
@@ -112,21 +112,26 @@ fn label_matches(node: &GraphNode, input: &str) -> bool {
 }
 
 /// Render the resolved node `id` against `snapshot` as plain text.
-pub fn render_node_show(snapshot: &GraphSnapshot, id: &NodeId) -> String {
+pub fn render_node_show(snapshot: &GraphSnapshot, id: &NodeId, color: bool) -> String {
     let Some(node) = snapshot.nodes.iter().find(|n| n.id() == *id) else {
         return format!("node {id} not found in snapshot\n");
     };
     let mut out = String::new();
-    write_node_summary(&mut out, node);
-    write_candidate_links(&mut out, snapshot, id);
-    write_resolved(&mut out, snapshot, id);
-    write_diagnostics(&mut out, snapshot, id);
+    write_node_summary(&mut out, node, color);
+    write_candidate_links(&mut out, snapshot, id, color);
+    write_resolved(&mut out, snapshot, id, color);
+    write_diagnostics(&mut out, snapshot, id, color);
     out
 }
 
-fn write_node_summary(out: &mut String, node: &GraphNode) {
+fn write_section_header(out: &mut String, text: &str, color: bool) {
+    push_styled(out, text, header_style(), color);
+    out.push('\n');
+}
+
+fn write_node_summary(out: &mut String, node: &GraphNode, color: bool) {
     let id = node.id();
-    let _ = writeln!(out, "node {}", node_short_id(&id));
+    write_section_header(out, &format!("node {}", node_short_id(&id)), color);
     let _ = writeln!(out, "  kind: {}", node_kind_label(node));
     let _ = writeln!(out, "  id:   {id}");
     match node {
@@ -225,7 +230,7 @@ fn write_forge_pr(out: &mut String, node: &ForgePrNode) {
     }
 }
 
-fn write_candidate_links(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId) {
+fn write_candidate_links(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color: bool) {
     let outgoing: Vec<&GraphLink> = snapshot
         .candidate_links
         .iter()
@@ -237,11 +242,21 @@ fn write_candidate_links(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId
         .filter(|link| matches!(&link.target, LinkEndpoint::Node { id: target } if target == id))
         .collect();
 
-    let _ = writeln!(out, "\noutgoing candidate links: {}", outgoing.len());
+    out.push('\n');
+    write_section_header(
+        out,
+        &format!("outgoing candidate links: {}", outgoing.len()),
+        color,
+    );
     for link in &outgoing {
         write_link(out, link, LinkDirection::Outgoing);
     }
-    let _ = writeln!(out, "\nincoming candidate links: {}", incoming.len());
+    out.push('\n');
+    write_section_header(
+        out,
+        &format!("incoming candidate links: {}", incoming.len()),
+        color,
+    );
     for link in &incoming {
         write_link(out, link, LinkDirection::Incoming);
     }
@@ -309,13 +324,18 @@ fn link_state_label(state: &crate::model::LinkState) -> &'static str {
     }
 }
 
-fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId) {
+fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color: bool) {
     let resolved: Vec<&ResolvedRelationship> = snapshot
         .resolved_relationships
         .iter()
         .filter(|rel| rel.source == *id || rel.target == *id)
         .collect();
-    let _ = writeln!(out, "\nresolved relationships: {}", resolved.len());
+    out.push('\n');
+    write_section_header(
+        out,
+        &format!("resolved relationships: {}", resolved.len()),
+        color,
+    );
     for rel in resolved {
         let _ = writeln!(
             out,
@@ -335,13 +355,14 @@ fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId) {
     }
 }
 
-fn write_diagnostics(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId) {
+fn write_diagnostics(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color: bool) {
     let touching: Vec<&Diagnostic> = snapshot
         .diagnostics
         .iter()
         .filter(|d| diagnostic_touches(d, id, snapshot))
         .collect();
-    let _ = writeln!(out, "\ndiagnostics: {}", touching.len());
+    out.push('\n');
+    write_section_header(out, &format!("diagnostics: {}", touching.len()), color);
     for diag in touching {
         match diag {
             Diagnostic::UnresolvedEndpoint { link_id, relation } => {
@@ -528,7 +549,7 @@ mod tests {
             }],
             ..GraphSnapshot::empty()
         };
-        let rendered = render_node_show(&snapshot, &agent_id);
+        let rendered = render_node_show(&snapshot, &agent_id, false);
         assert!(rendered.contains("kind: agent_session"));
         assert!(rendered.contains("outgoing candidate links: 1"));
         assert!(rendered.contains("linked_to_mux"));

@@ -61,6 +61,12 @@ struct ColumnsArgs {
     /// Force output through a pager even when stdout is not a TTY.
     #[arg(long, conflicts_with = "no_pager")]
     pager: bool,
+    /// When to colorize the output. `auto` (default) emits ANSI only
+    /// when stdout is a TTY (and respects `NO_COLOR`, `CLICOLOR`,
+    /// `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces color on;
+    /// `never` forces it off.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
 }
 
 impl ColumnsArgs {
@@ -72,7 +78,8 @@ impl ColumnsArgs {
                 std::process::exit(2);
             }
         };
-        let listing = conspectus::output::table::render_columns_listing(projection);
+        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
+        let listing = conspectus::output::table::render_columns_listing(projection, color);
         print_paged(
             &listing,
             PagerOptions::from_flags(self.pager, self.no_pager),
@@ -117,6 +124,10 @@ struct NodeShowArgs {
     /// Force output through a pager even when stdout is not a TTY.
     #[arg(long, conflicts_with = "no_pager")]
     pager: bool,
+    /// When to colorize the output. See `conspectus table --help` for
+    /// the resolution rules.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
 }
 
 impl NodeShowArgs {
@@ -135,7 +146,8 @@ impl NodeShowArgs {
                 std::process::exit(2);
             }
         };
-        let rendered = conspectus::output::node_show::render_node_show(&snapshot, &id);
+        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
+        let rendered = conspectus::output::node_show::render_node_show(&snapshot, &id, color);
         print_paged(
             &rendered,
             PagerOptions::from_flags(self.pager, self.no_pager),
@@ -242,6 +254,12 @@ struct TableRowsArgs {
     /// Conflicts with `--no-pager`.
     #[arg(long, conflicts_with = "no_pager")]
     pager: bool,
+    /// When to colorize the output. `auto` (default) emits ANSI only
+    /// when stdout is a TTY (and respects `NO_COLOR`, `CLICOLOR`,
+    /// `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces color on;
+    /// `never` forces it off.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -295,6 +313,8 @@ impl TableRowsArgs {
         if let Some(columns) = columns {
             options = options.with_columns(columns);
         }
+        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
+        options = options.with_color(color);
         let table = conspectus::output::table::render_with(&snapshot, projection, &options);
         print_paged(&table, PagerOptions::from_flags(self.pager, self.no_pager));
         Ok(())
@@ -326,6 +346,84 @@ fn row_config(projection: config::Projection, config: &config::Config) -> &confi
         config::Projection::Pr => &config.table.prs,
         config::Projection::Fork => &config.table.forks,
     }
+}
+
+/// `--color` flag value. The renderer ultimately consumes a `bool`;
+/// the value enum exists to give clap a stable parse surface and so
+/// we can document the per-token semantics in `--help`.
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum ColorFlag {
+    /// Auto-detect: color when stdout is a TTY and no env opt-out
+    /// is set. See [`resolve_color`] for the full precedence table.
+    #[default]
+    Auto,
+    /// Force color on, even when stdout is not a TTY. Overrides
+    /// `NO_COLOR`, matching the cargo/git/ripgrep convention that an
+    /// explicit user flag wins over passive env signals.
+    Always,
+    /// Force color off, regardless of TTY / env.
+    Never,
+}
+
+/// Pull the env vars [`resolve_color`] cares about from the process
+/// environment and dispatch. `stdout_is_tty` lets callers pass an
+/// explicit boolean (typically `io::stdout().is_terminal()`) so this
+/// function stays trivially testable.
+fn resolve_color_from_env(flag: ColorFlag, stdout_is_tty: bool) -> bool {
+    resolve_color(
+        flag,
+        std::env::var("NO_COLOR").ok(),
+        std::env::var("CLICOLOR_FORCE").ok(),
+        std::env::var("CLICOLOR").ok(),
+        std::env::var("TERM").ok(),
+        stdout_is_tty,
+    )
+}
+
+/// Resolve `--color` to a boolean per ADR 0022:
+///
+/// 1. `--color=never`  ⇒ `false`.
+/// 2. `--color=always` ⇒ `true`.
+/// 3. `NO_COLOR` set to any non-empty value ⇒ `false`
+///    (<https://no-color.org>).
+/// 4. `CLICOLOR_FORCE` set to a non-zero value ⇒ `true` (BSD-style
+///    force-on; matches the role of `--color=always` for env
+///    signals).
+/// 5. `TERM=dumb` ⇒ `false`.
+/// 6. `CLICOLOR=0` ⇒ `false` (BSD-style opt-out).
+/// 7. Otherwise: color iff stdout is a TTY.
+///
+/// Pure function over its arguments so unit tests can pin every
+/// permutation without mutating process-wide env.
+fn resolve_color(
+    flag: ColorFlag,
+    no_color: Option<String>,
+    cli_color_force: Option<String>,
+    cli_color: Option<String>,
+    term: Option<String>,
+    stdout_is_tty: bool,
+) -> bool {
+    match flag {
+        ColorFlag::Never => return false,
+        ColorFlag::Always => return true,
+        ColorFlag::Auto => {}
+    }
+    if no_color.as_deref().is_some_and(|s| !s.is_empty()) {
+        return false;
+    }
+    if cli_color_force
+        .as_deref()
+        .is_some_and(|s| !s.is_empty() && s != "0")
+    {
+        return true;
+    }
+    if term.as_deref() == Some("dumb") {
+        return false;
+    }
+    if cli_color.as_deref() == Some("0") {
+        return false;
+    }
+    stdout_is_tty
 }
 
 /// Decide the render width for `conspectus table <ROWS>`.
@@ -514,6 +612,119 @@ mod tests {
         let candidates = pager_candidates_with_env(Some("bat --paging=always".to_string()));
         assert_eq!(program(&candidates[0]), "bat");
         assert_eq!(args(&candidates[0]), vec!["--paging=always"]);
+    }
+
+    #[test]
+    fn resolve_color_never_wins_against_every_env_signal() {
+        assert!(!resolve_color(
+            ColorFlag::Never,
+            Some("1".into()),
+            Some("1".into()),
+            Some("1".into()),
+            Some("xterm".into()),
+            true,
+        ));
+    }
+
+    #[test]
+    fn resolve_color_always_overrides_no_color_and_dumb_term() {
+        assert!(resolve_color(
+            ColorFlag::Always,
+            Some("1".into()),
+            None,
+            None,
+            Some("dumb".into()),
+            false,
+        ));
+    }
+
+    #[test]
+    fn resolve_color_auto_honors_no_color() {
+        assert!(!resolve_color(
+            ColorFlag::Auto,
+            Some("1".into()),
+            None,
+            None,
+            None,
+            true,
+        ));
+        // Empty NO_COLOR is treated as unset (per the spec — value
+        // matters, not just presence).
+        assert!(resolve_color(
+            ColorFlag::Auto,
+            Some(String::new()),
+            None,
+            None,
+            None,
+            true,
+        ));
+    }
+
+    #[test]
+    fn resolve_color_auto_honors_clicolor_force_even_on_non_tty() {
+        assert!(resolve_color(
+            ColorFlag::Auto,
+            None,
+            Some("1".into()),
+            None,
+            None,
+            false,
+        ));
+        // CLICOLOR_FORCE=0 is *not* "force on".
+        assert!(!resolve_color(
+            ColorFlag::Auto,
+            None,
+            Some("0".into()),
+            None,
+            None,
+            false,
+        ));
+    }
+
+    #[test]
+    fn resolve_color_auto_dumb_term_opts_out() {
+        assert!(!resolve_color(
+            ColorFlag::Auto,
+            None,
+            None,
+            None,
+            Some("dumb".into()),
+            true,
+        ));
+    }
+
+    #[test]
+    fn resolve_color_auto_clicolor_zero_opts_out() {
+        assert!(!resolve_color(
+            ColorFlag::Auto,
+            None,
+            None,
+            Some("0".into()),
+            None,
+            true,
+        ));
+    }
+
+    #[test]
+    fn resolve_color_auto_falls_back_to_isatty() {
+        assert!(resolve_color(ColorFlag::Auto, None, None, None, None, true));
+        assert!(!resolve_color(
+            ColorFlag::Auto,
+            None,
+            None,
+            None,
+            None,
+            false
+        ));
+    }
+
+    #[test]
+    fn resolve_color_from_env_uses_supplied_tty_signal() {
+        // The wrapper pulls env vars from the real process; we can
+        // only safely pin behavior under the flag values that
+        // short-circuit before any env lookup.
+        assert!(!resolve_color_from_env(ColorFlag::Never, true));
+        assert!(resolve_color_from_env(ColorFlag::Always, false));
     }
 
     #[test]
