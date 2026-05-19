@@ -2917,6 +2917,25 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `cargo run -- tui --view mux`, `cargo run -- tui --no-live-preview`,
     and terminal resize while running.
   - Blockers: `P8-003`; friendlier after `P8-004` and `P8-005`.
+  - **v1 slice landed**: two-panel render with header bar, left
+    row tree (depth-indented disclosure glyphs, mux indicator
+    glyph with color, inline preview for selected + top-N session
+    rows), right detail (title line + header fields + preview
+    block), status bar. Empty-/loading-frame placeholders cover
+    the no-data case. Remaining work for full P8-007 (filed as
+    follow-ons):
+    - `T8-003`: full empty/loading/error frame matrix per the
+      phase-08 "Empty, Loading, And Error States" table —
+      `--no-live-preview` zone message, tmux-unavailable banner,
+      provider-error chips, refresh-failed stale marker.
+    - `T8-004`: responsive layout — narrow-terminal stacked
+      panels (< 100 cols) and wide-terminal all-rows-inline
+      preview switch.
+    - `T8-005`: `updated Ns ago` header indicator (requires
+      `loaded_at_epoch` on `Msg::SetData` and `App`).
+    - `T8-006`: snapshot test coverage matrix beyond the v1
+      sessions-render smoke test (mux/PR/narrow/overlays/empty/
+      error/selection-retention).
 
 - [ ] `P8-008` Add non-blocking graph refresh data adapter.
   - Scope: implement a data adapter that runs initial discovery, feeds the
@@ -2931,6 +2950,17 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Manual checks: run `cargo run -- tui`, change local graph inputs, press
     `r`, and verify rows update without losing usable terminal state.
   - Blockers: `P8-006`, `P8-007`.
+  - **v1 slice landed**: synchronous initial discovery + `r`
+    refresh wired in the runtime. Discovery runs on the main
+    thread, briefly blocking input during the call. Selection
+    retention across refresh comes from the existing reducer
+    (`P8-006`). Remaining work (filed as follow-on):
+    - `T8-007`: move discovery onto a background thread with
+      mpsc back-channel so input never blocks; add timer-driven
+      auto-refresh on the configured `refresh_interval`;
+      preserve provider diagnostics for the status-bar chips;
+      shape so a Phase 7 server snapshot transport can swap in
+      without UI changes.
 
 - [ ] `P8-009` Add mux live-preview capture adapter.
   - Scope: add a preview adapter over the existing tmux runner seam that
@@ -3145,6 +3175,73 @@ work. `P8-014` is post-v1 polish that does not block the release.
     row.
   - Blockers: `P8-004` (the row-tree builder this story refines).
     Does not block the v1 release; the duplication is cosmetic.
+
+- [ ] `T8-003` Fill out the TUI empty/loading/error frame matrix.
+  - Scope: render the full set of empty/loading/error frames
+    documented in
+    `docs/implementation/phase-08-interactive-tui.md` —
+    `--no-live-preview` preview-zone message, tmux-disabled
+    mux-view banner, tmux-unavailable mux-view banner, provider
+    error chips on the status bar, refresh-failure stale marker.
+  - Tests: Ratatui buffer snapshots for each state. Reuse the
+    `render_to_buffer` / `buffer_to_string` helpers already in
+    `src/tui/ui.rs`.
+  - Blockers: `P8-007` v1 slice (the render shell is there); a
+    `Msg::SetError` reducer addition may be needed.
+
+- [ ] `T8-004` Responsive TUI layout (narrow stack + wide
+    all-rows-inline preview).
+  - Scope: when terminal width is below ~100 cols, stack the
+    panels vertically (left-on-top, right-below) per the
+    phase-08 layout note. When terminal width fits the row plus
+    a preview cell on the same line, switch the inline preview
+    to all-visible-rows-on-same-line mode per the locked
+    decision. The threshold should be computed from column
+    widths + a minimum preview budget.
+  - Tests: snapshot pair (narrow 60-col, wide 160-col).
+  - Blockers: `P8-007` v1 slice.
+
+- [ ] `T8-005` Header `updated Ns ago` freshness indicator.
+  - Scope: thread `loaded_at_epoch` through `Msg::SetData` /
+    `App` / the renderer so the header shows
+    `updated Ns ago · counts` per the locked decision. The
+    builder uses the same clock the row tree's recency uses.
+  - Tests: extend the v1 render snapshot test to assert the
+    header includes a recency indicator when an epoch is
+    threaded through.
+  - Blockers: `P8-007` v1 slice.
+
+- [ ] `T8-006` Expand TUI buffer-snapshot test coverage.
+  - Scope: add `insta`-backed snapshot tests covering the
+    sessions-view default render at 80×24, the
+    ambiguous-mux-expanded variant, the mux view (once
+    `P8-004` mux builder lands), the PR view (once `P8-004`
+    prs builder lands), a narrow 60-col terminal (depends on
+    `T8-004`), the search overlay (depends on `/`-key wiring),
+    the help overlay, the empty-graph frame, the
+    `--no-live-preview` frame, and the
+    selection-retention-after-refresh frame. Keep snapshots
+    deterministic with fixed fixtures.
+  - Blockers: `P8-007` v1 slice; individual snapshot variants
+    depend on the corresponding feature stories.
+
+- [ ] `T8-007` Move TUI discovery onto a background thread with
+    timer-driven refresh.
+  - Scope: replace the synchronous `discover_local_at_roots`
+    call in `src/tui/runtime.rs::refresh` with a background
+    discovery worker. Use `std::thread::spawn` + `mpsc` per ADR
+    0024 (no async runtime). Add a timer that fires
+    `Action::Refresh` on `config.refresh_interval`. Preserve
+    provider diagnostics for the status-bar chips (depends on
+    `T8-003` exposing the chip slot). Shape so a future Phase 7
+    server snapshot can replace the worker without touching
+    `app.rs`.
+  - Tests: unit/integration tests with a fake discovery handle
+    covering initial load, refresh on `r`, refresh failure
+    preserving prior graph, and selection retention across the
+    refresh.
+  - Blockers: `P8-008` v1 slice (the sync path), `T8-003` for
+    diagnostic surfacing.
 
 - [ ] `T8-002` Align `conspectus table sessions` columns with the
     TUI sessions row tree once view-models converge.
