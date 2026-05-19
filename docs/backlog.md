@@ -2317,6 +2317,27 @@ render time.
     Four new unit tests cover bare-marker skip, marker+body strip
     for both known tags, and unknown-tag verbatim preservation.
 
+- [x] `H-TBL-015` Move title out of AGENT label into its own column.
+  - Outcome: `agent_session_label` no longer consults
+    `AgentSessionNode.title`. Every row renders
+    `harness:<session_key>`, with `agent_session_key_for_label`
+    deferring to `short_session_id` only when the key exceeds 32
+    chars. UUIDs (claude-code, codex) collapse to `…<last-8>`;
+    shorter human-readable keys
+    (`session-alpha`, opencode `ses_…`) pass through verbatim, so
+    every existing insta snapshot stayed byte-stable. A new
+    `title` column is registered on the `sessions` and `union`
+    row-types as opt-in; the extractor reads
+    `AgentSessionNode.title` directly. Union row-type renders `—`
+    for mux rows. Live verification on this workspace: opencode
+    rows that used to render
+    `opencode:tmux clipboard not syncing over SSH (fork #1)` in
+    AGENT now show `opencode:ses_204a14312…` with the chat topic
+    moving to the new `TITLE` column. Four new unit tests cover
+    the AGENT-cell label without title, UUID truncation, short-
+    key verbatim, and the new `title` column for both sessions and
+    union row-types. 449 tests pass.
+
 ### Agent-Mux Orchestrator Integrations
 
 A growing class of "agent-over-tmux" orchestrators — agent-deck, dmux,

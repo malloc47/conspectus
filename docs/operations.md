@@ -124,6 +124,13 @@ row-type along with its one-line description, marking each column
 in the default set with `(default)`. Useful when you don't remember
 exact column names or want to see which columns are opt-in.
 
+The `title` column (registered on `sessions` and `union`, opt-in)
+surfaces `AgentSessionNode.title` — opencode's chat topic, claude-code's
+compaction summary — separately from the `AGENT` cell. As of H-TBL-015
+the `AGENT` cell always renders `harness:<session_key>` (UUIDs
+collapse to `…<last-8>`; shorter human-readable session keys pass
+through verbatim) regardless of whether the adapter set `title`.
+
 The `preview` column (registered on `sessions`, `mux`, and `union`)
 shows a one-line snippet of the agent session's most recent
 user/assistant text message, mimicking Claude Code's `/resume` view.

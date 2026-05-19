@@ -461,6 +461,12 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         description: "One-line snippet of the session's most recent user/assistant message (capped at 200 chars, ADR 0023).",
         default: false,
     },
+    ColumnSpec {
+        key: "title",
+        header: "TITLE",
+        description: "Adapter-populated session title (opencode chat topic, claude-code compaction summary). `—` when unset.",
+        default: false,
+    },
 ];
 
 const MUX_COLUMNS: &[ColumnSpec] = &[
@@ -549,6 +555,12 @@ const UNION_COLUMNS: &[ColumnSpec] = &[
         key: "preview",
         header: "PREVIEW",
         description: "Last-message preview for agent rows; — for mux rows (ADR 0023).",
+        default: false,
+    },
+    ColumnSpec {
+        key: "title",
+        header: "TITLE",
+        description: "Adapter-populated agent session title; — for mux rows.",
         default: false,
     },
 ];
@@ -1102,6 +1114,7 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
             .last_message_preview
             .clone()
             .unwrap_or_else(|| "—".to_string()),
+        "title" => ctx.session.title.clone().unwrap_or_else(|| "—".to_string()),
         _ => "—".to_string(),
     }
 }
@@ -1347,15 +1360,43 @@ fn union_cell(key: &str, ctx: &UnionRowCtx<'_, '_>) -> String {
             .clone()
             .unwrap_or_else(|| "—".to_string()),
         ("preview", UnionRowSource::Mux { .. }) => "—".to_string(),
+        ("title", UnionRowSource::Agent { session, .. }) => {
+            session.title.clone().unwrap_or_else(|| "—".to_string())
+        }
+        ("title", UnionRowSource::Mux { .. }) => "—".to_string(),
         _ => "—".to_string(),
     }
 }
 
+/// Render the AGENT-cell label as `harness:<short-or-full session-key>`.
+/// The harness adapter's session key is the stable identifier; long
+/// UUIDs (claude-code, codex) collapse to `…<last-8>` via
+/// [`agent_session_key_for_label`] so the column stays scannable.
+/// Shorter human-readable session keys
+/// (atelier-style `session-alpha`, opencode short ids) pass through
+/// verbatim. The `AgentSessionNode.title` field is intentionally
+/// **not** part of the label — opencode (and post-compaction
+/// claude-code) populate it with a long conversation topic that
+/// doesn't fit a leading cell. Title surfaces through the opt-in
+/// `title` column instead (H-TBL-015).
 fn agent_session_label(session: &AgentSessionNode) -> String {
-    if let Some(title) = &session.title {
-        format!("{}:{}", session.harness_key, title)
+    format!(
+        "{}:{}",
+        session.harness_key,
+        agent_session_key_for_label(&session.id.session_key)
+    )
+}
+
+/// Truncation threshold for AGENT-label session keys. UUIDs (32
+/// hex chars + 4 dashes = 36) sit above this and collapse via
+/// [`short_session_id`]; anything ≤ 32 chars renders verbatim so
+/// human-readable session keys aren't truncated unnecessarily.
+fn agent_session_key_for_label(key: &str) -> String {
+    const UUID_THRESHOLD: usize = 32;
+    if key.chars().count() <= UUID_THRESHOLD {
+        key.to_string()
     } else {
-        format!("{}:{}", session.harness_key, session.id.session_key)
+        short_session_id(key)
     }
 }
 
@@ -3804,6 +3845,146 @@ mod tests {
         for line in rendered.lines() {
             assert!(display_width(line) <= 30, "line exceeded 30 cols: {line:?}",);
         }
+    }
+
+    #[test]
+    fn agent_label_uses_session_key_not_title() {
+        // Regression for H-TBL-015: the AGENT cell used to fall back
+        // to `harness:title` when the adapter populated `title`. That
+        // surfaced opencode's long chat topics in the leading cell.
+        // The label now always renders `harness:session_key` (with
+        // the UUID truncator) and title belongs to the opt-in
+        // `title` column.
+        let node = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "global", "ses_abc123"),
+            harness_key: "opencode".to_string(),
+            cwd: Some("/work".to_string()),
+            title: Some("a very long conversation topic".to_string()),
+            last_message_preview: None,
+        });
+        let snapshot = GraphSnapshot {
+            nodes: vec![node],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Agent);
+        let body = rendered.lines().nth(2).expect("body row");
+        assert!(
+            body.contains("opencode:ses_abc123"),
+            "AGENT cell should show session_key:\n{body}",
+        );
+        assert!(
+            !body.contains("a very long conversation topic"),
+            "AGENT cell must not fall back to title:\n{body}",
+        );
+    }
+
+    #[test]
+    fn agent_label_truncates_uuid_session_keys_to_short_form() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session(
+                "claude-code",
+                "0b34e59c-14d0-4d04-be79-4dc1d4c120c2",
+                Some("/work"),
+            )],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Agent);
+        let body = rendered.lines().nth(2).expect("body row");
+        // UUID collapses to the last-8-chars form.
+        assert!(
+            body.contains("claude-code:…d4c120c2"),
+            "AGENT cell should truncate UUID session_key:\n{body}",
+        );
+    }
+
+    #[test]
+    fn agent_label_preserves_short_session_keys_verbatim() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("codex", "session-alpha", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Agent);
+        let body = rendered.lines().nth(2).expect("body row");
+        assert!(
+            body.contains("codex:session-alpha"),
+            "AGENT cell should render short session_key verbatim:\n{body}",
+        );
+    }
+
+    #[test]
+    fn sessions_title_column_renders_set_value_or_dash() {
+        let with_title = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "global", "ses_a"),
+            harness_key: "opencode".to_string(),
+            cwd: Some("/work".to_string()),
+            title: Some("clipboard sync over SSH".to_string()),
+            last_message_preview: None,
+        });
+        let without = agent_session("codex", "no-title", Some("/work"));
+        let snapshot = GraphSnapshot {
+            nodes: vec![with_title, without],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "title"]),
+        );
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let titled = body
+            .iter()
+            .find(|line| line.contains("opencode:ses_a"))
+            .expect("titled row");
+        assert!(
+            titled.contains("clipboard sync over SSH"),
+            "title row missing content:\n{titled}",
+        );
+        let untitled = body
+            .iter()
+            .find(|line| line.contains("codex:no-title"))
+            .expect("untitled row");
+        assert!(
+            untitled.trim_end().ends_with('—'),
+            "untitled row should show — in TITLE column:\n{untitled}",
+        );
+    }
+
+    #[test]
+    fn union_title_column_renders_only_for_agent_rows() {
+        let titled_agent = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "global", "ses_a"),
+            harness_key: "opencode".to_string(),
+            cwd: Some("/work".to_string()),
+            title: Some("agent title".to_string()),
+            last_message_preview: None,
+        });
+        let mux = mux_session("tmux", "editor", Some("/work"));
+        let snapshot = GraphSnapshot {
+            nodes: vec![titled_agent, mux],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Union,
+            &RenderOptions::wide().with_columns(vec!["id", "kind", "label", "title"]),
+        );
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let agent = body
+            .iter()
+            .find(|line| line.contains(" agent "))
+            .expect("agent row");
+        assert!(
+            agent.contains("agent title"),
+            "agent row should carry title:\n{agent}",
+        );
+        let mux_row = body
+            .iter()
+            .find(|line| line.contains(" mux "))
+            .expect("mux row");
+        assert!(
+            mux_row.trim_end().ends_with('—'),
+            "mux row should render — for title:\n{mux_row}",
+        );
     }
 
     #[test]
