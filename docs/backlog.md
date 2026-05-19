@@ -2768,18 +2768,20 @@ P8-001 ──→ P8-001a ──→ P8-002 ──→ P8-003 ──→ P8-004 ─�
                                                        └─→ P8-008 ┼─→ P8-013
                                                                   │
                                             P8-009 ─→ P8-010 ─→ P8-011 ───┤
+                                                              └─→ P8-014 ─┤
                                                                   │
                                             P8-012a ──────────────┤
                                             P8-012b ──────────────┤
                                             P8-012c ──────────────┘
 ```
 
-`P8-001` is already closed (v1 product-vision decisions locked). The
-remaining v1-blocking product questions live in `P8-001a` and must land
-before the ADR (`P8-002`). `P8-004` through `P8-007` can be implemented
-in parallel once the app shell exists. `P8-009` through `P8-011` and
-the `P8-012*` enrichments depend on the same UI shell but should
-remain isolated from pure browsing/rendering work.
+`P8-001` and `P8-001a` are both closed (v1 product vision and
+v1-blocking decisions locked). `P8-002` (the runtime/architecture
+ADR) is the next blocker. `P8-004` through `P8-007` can be
+implemented in parallel once the app shell exists. `P8-009` through
+`P8-011`, `P8-014`, and the `P8-012*` enrichments depend on the same
+UI shell but should remain isolated from pure browsing/rendering
+work. `P8-014` is post-v1 polish that does not block the release.
 
 - [x] `P8-001` Lock v1 TUI product decisions (operator-journey core).
   - Outcome: the implementation doc records the primary persona
@@ -2795,20 +2797,30 @@ remain isolated from pure browsing/rendering work.
     v1-deferrable questions move to a "Locked v1 Decisions" /
     "Open Product Questions (v1-deferrable)" section.
 
-- [ ] `P8-001a` Settle remaining v1-blocking product questions.
-  - Scope: pick the answer for each blocker called out under "Open
-    Product Questions (v1-blocking)" in
-    `docs/implementation/phase-08-interactive-tui.md`:
-    1. What "project" grouping means in the sessions tree.
-    2. Mux target granularity (session / window / pane).
-    3. Ambiguous mux-link behavior on attach.
-    4. PR right-panel depth for v1.
-    Update the implementation doc with the chosen answers; promote
-    architectural answers (e.g. pane-level mux modeling) to ADRs
-    when they constrain downstream stories. Each blocker that needs
-    its own ADR gets a follow-up; this story just decides.
-  - Tests: none directly; documentation update is the deliverable.
-  - Blockers: none.
+- [x] `P8-001a` Settle remaining v1-blocking product questions.
+  - Outcome: every v1-blocking question is now answered in the
+    "Locked v1 Decisions → From the P8-001a walkthrough" section of
+    `docs/implementation/phase-08-interactive-tui.md`. Headlines:
+    (1) sessions-tree grouping is configurable from day one via
+    `--sessions-grouping` / `[tui].sessions_grouping`, defaulting
+    to `graph` (workspace → repo → worktree → session derived from
+    existing graph relationships); other values are `repo`,
+    `worktree`, `scan-root`. Orphan sessions land in an
+    `Ungrouped` bucket. (2) Mux target granularity is session-only
+    for v1; window/pane targeting waits on a future mux-discovery
+    expansion. (3) Ambiguous `LinkedToMux` candidates resolve to
+    the resolver's preferred target on `a`/`Enter`; the `*` marker
+    stays visible, the status bar surfaces "N candidates", and the
+    `m` key is reserved (unbound in v1) for a future inline
+    mux-picker — see `P8-014`. (4) PR right-panel depth is
+    enriched with `gh pr view` checks/reviews data, but rendered
+    in two stages so navigation never blocks: the first frame uses
+    graph-only fields, an async background fetch fills the
+    enrichment slice, and the result is cached per PR id for the
+    TUI session. `P8-012a` carries that async-cache implementation
+    scope. The phase-08 doc also gained a "Sources of mux
+    ambiguity" subsection explaining where the `*` marker comes
+    from today and what future evidence sources will add to it.
 
 - [ ] `P8-002` ADR: TUI runtime, app architecture, and dependency policy.
   - Scope: evaluate Ratatui + crossterm, Ratatui + tui-realm, Cursive,
@@ -2966,17 +2978,44 @@ remain isolated from pure browsing/rendering work.
   - Blockers: `P8-010`; may require follow-up ADR if resume semantics
     differ materially by harness.
 
-- [ ] `P8-012a` PR right-panel enrichment (state, checks, reviews).
-  - Scope: enrich the right panel for a selected PR row beyond
-    `node show` parity. Minimum surface per the v1 PR-depth decision
-    in P8-001a: state, draft/merge, branch head ref, and the linked
-    branch / worktree / session rows. Stretch (only if P8-001a opts
-    in): check summary, review comment count, comment recency.
-    Forge reads go through the data adapter so they degrade like any
-    other provider on error.
-  - Tests: fake forge tests covering the chosen PR-detail depth;
-    Ratatui snapshots for an open PR, a closed PR, a merged PR, a
-    draft PR, and a PR row whose forge fetch failed.
+- [ ] `P8-012a` PR right-panel enrichment with async `gh` fetch + cache.
+  - Scope: render the right panel for a selected PR row in two
+    stages so navigation never blocks on a `gh` call.
+    1. **Immediate stage** (synchronous, graph-only): owner/repo,
+       PR number, state, draft, head ref shortname, and the linked
+       branch / worktree / session rows that discovery already
+       attached to the `ForgePr` node. Renders on the first frame
+       the PR row is selected.
+    2. **Enriched stage** (async, cached): once the row is
+       selected, the data adapter spawns a background `gh pr view`
+       (e.g. `--json statusCheckRollup,reviewDecision,
+       latestReviews,updatedAt`) and surfaces a dim
+       "loading checks…" placeholder until the call returns. On
+       success the panel re-renders with check summary, review
+       activity, and latest update time. Cache the parsed result
+       in-memory keyed by `ForgePrId` for the lifetime of the TUI
+       session. `r` manual refresh invalidates the cache.
+    3. **Error path**: a one-line "gh: <reason>" note appears next
+       to the enriched section without losing the immediate-stage
+       content. The next selection retries on its own background
+       task; the cache does not store error states for v1.
+    4. **Navigation safety**: if the operator moves to another row
+       before the fetch returns, the background task either
+       finishes silently into the cache or is dropped, but the UI
+       never waits. Concurrency is bounded by an in-flight-per-PR
+       guard so rapid up/down navigation does not stack identical
+       fetches.
+    The enrichment fields are minimal in v1 (check pass/fail/pending
+    counts, review-decision status, recent-update relative time).
+    Adding comment threads, inline-comment counts, or timeline
+    items is a follow-up.
+  - Tests: fake `gh` runner tests for the immediate frame, the
+    enriched frame on success, error fallback, cache hits on
+    re-selection, cache invalidation on refresh, and bounded
+    in-flight behavior across rapid selection changes. Ratatui
+    snapshots for an open PR (immediate + enriched), a closed PR,
+    a merged PR, a draft PR, and a PR whose enrichment fetch
+    failed.
   - Blockers: `P8-005`, `P8-008`, `P8-001a`.
 
 - [ ] `P8-012b` Fork right-panel enrichment (lineage, context, children).
@@ -3018,6 +3057,28 @@ remain isolated from pure browsing/rendering work.
     `docs/implementation/phase-08-interactive-tui.md`.
   - Blockers: `P8-008`, `P8-010`; `P8-011`, `P8-012a`, `P8-012b`, and
     `P8-012c` if included in the v1 release boundary.
+
+- [ ] `P8-014` Inline mux-picker for ambiguous `LinkedToMux` candidates.
+  - Scope: bind the `m` key (reserved in v1, see the
+    keybindings table in
+    `docs/implementation/phase-08-interactive-tui.md`) so it opens
+    an inline picker listing every active mux candidate for the
+    selected agent session — but only when ambiguity is real
+    (more than one active `LinkedToMux` candidate). Pressing `m`
+    on a row with a single resolved candidate is a no-op surfaced
+    as a one-line status-bar reason. Picker selection drives the
+    next attach action and does not mutate declared links; a
+    `c` (already reserved) can confirm the picker's choice as a
+    declared link in a later story. The picker uses the same
+    j/k navigation and Enter/Esc semantics as the existing
+    search overlay so the muscle memory carries over.
+  - Tests: state-machine tests for picker open / pick / cancel /
+    no-op-on-single-candidate; Ratatui snapshots for an
+    ambiguous-mux picker over an agent row; a regression test
+    confirming `a` continues to attach to the resolver's
+    preferred candidate when `m` is never pressed.
+  - Blockers: `P8-010` (attach action) and the v1 keybinding
+    surface from `P8-006`.
 
 ## Later
 

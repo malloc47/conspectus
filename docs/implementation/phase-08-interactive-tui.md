@@ -159,6 +159,17 @@ conspectus tui [--scan-root PATH]... [--view sessions|mux|union|prs|forks]
   within each level). `recency` re-orders within each group by the
   freshest contained agent session's activity. Configurable via
   `[tui].default_sort`; the flag overrides.
+- `--sessions-grouping` controls the top-level grouping in the
+  sessions tree. Default **`graph`** — derive group hierarchy from
+  the existing graph relationships (workspace →
+  `WorkspaceContainsRepo` → repo → `WorktreeOfRepo` → worktree →
+  cwd-matched agent session). Other values: `repo` (collapse
+  workspace, group by repo common-dir), `worktree` (group by
+  worktree root, no workspace/repo nesting), `scan-root` (group by
+  the configured discovery scan root). Configurable via
+  `[tui].sessions_grouping`; the flag overrides. Orphan sessions
+  (no resolved repo/worktree) fall into a single "Ungrouped" bucket
+  regardless of mode.
 - `--no-live-preview` disables both mux capture and transcript-history
   rendering for privacy and performance. `last_message_preview` row-
   level snippets continue to render because they come from the resolved
@@ -231,8 +242,27 @@ toggling and no tabs in v1**:
      `last_message_preview` rendered with soft wrapping, and an
      "open transcript" affordance for the future transcript viewer
      (ADR 0019). No transcript reading at render time in v1.
-   - **PR** row: PR state, draft/merge, branch, head ref, optional
-     check / review summary if the v1 PR-detail decision opts in.
+   - **PR** row: rendered in two stages so navigation never blocks
+     on a `gh` call.
+     - *Immediate stage* (synchronous, graph-only): the PR header
+       fields the discovery pass already collected — owner/repo,
+       number, state, draft, head ref shortname, the linked branch
+       / worktree / session rows from the graph. Renders the first
+       frame the row is selected.
+     - *Enriched stage* (async, cached): once the row is selected,
+       the data adapter kicks off a background `gh pr view` to
+       fetch the v1 enrichment slice (check summary, review-comment
+       count, latest activity). The right panel shows
+       "loading checks…" until the call returns, then re-renders
+       with the enriched fields. The result is cached in-memory
+       keyed by PR id for the lifetime of the TUI session; `r`
+       manual refresh invalidates the cache. Errors fall back to a
+       single-line "gh: <reason>" note next to the enriched-stage
+       section without losing the immediate-stage content.
+     - The operator can move on to the next row before the
+       enrichment returns; the background task is cancelled or
+       allowed to complete-and-cache silently. Either way the UI
+       stays responsive.
    - **fork** row: parent / child lineage, context effects, related
      worktrees and child sessions.
    - Empty/unavailable: a single dim line ("no preview available"
@@ -282,14 +312,15 @@ selected row doesn't support a key, the status bar shows a one-line
 
 #### Reserved for later phases (do not bind in v1)
 
-| Key   | Future action                                                |
-| ----- | ------------------------------------------------------------ |
-| `f`   | Fork the selected session (agent-deck style)                 |
-| `n`   | New agent / new mux session                                  |
-| `c`   | Confirm a discovered candidate as a declared link            |
-| `d`   | Delete (mux session, worktree, declared link, …)             |
-| `m`   | Merge (branch, worktree, fork)                               |
-| `R`   | Resume an un-muxed agent session into a chosen mux target    |
+| Key   | Future action                                                       |
+| ----- | ------------------------------------------------------------------- |
+| `f`   | Fork the selected session (agent-deck style)                        |
+| `n`   | New agent / new mux session                                         |
+| `c`   | Confirm a discovered candidate as a declared link                   |
+| `d`   | Delete (mux session, worktree, declared link, …)                    |
+| `m`   | Inline mux-picker when the selected agent has ambiguous LinkedToMux |
+| `M`   | Merge (branch, worktree, fork)                                      |
+| `R`   | Resume an un-muxed agent session into a chosen mux target           |
 
 These keys are deliberately unbound in v1 so muscle memory can map to
 their final actions in later phases without rebinding. v1 is
@@ -430,7 +461,9 @@ Run inside and outside tmux. Verify:
 ## Locked v1 Decisions
 
 These were open product questions; the answers are now part of the v1
-contract:
+contract.
+
+### From the first PM walkthrough
 
 - **Primary persona**: Returning Operator (sessions-first workflow).
 - **Default view**: `sessions`, configurable via `--view` flag and
@@ -452,23 +485,65 @@ contract:
 - **Resume an un-muxed agent**: deferred to its own story (`P8-011`)
   with the `R` key reserved.
 
-## Open Product Questions (v1-blocking)
+### From the P8-001a walkthrough
 
-These still need answers before P8-001 closes out and the dependent
-stories can move:
+- **"Project" grouping** in the sessions tree: configurable from
+  day one. Default `graph` (derives the tree from
+  `WorkspaceContainsRepo` / `WorktreeOfRepo` / cwd-match
+  relationships); other values `repo`, `worktree`, `scan-root`.
+  Configurable via `[tui].sessions_grouping` and the
+  `--sessions-grouping` flag. Orphan sessions always land in a
+  single "Ungrouped" bucket.
+- **Mux target granularity**: session-only in v1. The graph models
+  `MuxSession` and nothing finer, and `tmux attach -t <session>`
+  drops the operator at the session's last-active window. Window
+  / pane targeting waits on a future story that expands mux
+  discovery (likely after `H-MUXPROC-*` lands).
+- **Ambiguous mux links**: `a` attaches to the resolver's preferred
+  candidate. The `*` ambiguity marker stays visible in the row,
+  the status bar surfaces a one-line "N candidates" note, and the
+  right panel's `node show` view enumerates every candidate for
+  diagnosis. The `m` key is **reserved** for a future inline
+  mux-picker that opens only when ambiguity is real; v1 does not
+  bind it. See "Sources of mux ambiguity" below for the scenarios
+  this decision covers.
+- **PR right-panel depth**: enriched. PR rows render in two stages
+  so navigation never blocks on a `gh` call. The immediate stage
+  uses only graph-resident PR data (state, draft, head ref,
+  linked rows); the async stage runs `gh pr view` in the
+  background and caches the result per PR id for the lifetime of
+  the TUI session. `r` manual refresh invalidates the cache.
 
-- **What is "project" grouping in the sessions tree** — repo
-  common-dir, atelier workspace, the configured scan root, or a
-  user-configurable grouping? P8-004's row-tree builder needs this.
-- **Mux target granularity** — tmux session, window, or pane?
-  P8-009 (preview capture) and P8-010 (attach) both depend on
-  this; a "session-only" v1 is the smallest path.
-- **Ambiguous mux links** — when an agent session has more than one
-  candidate `LinkedToMux`, does `a` attach to the resolver's
-  preferred target, prompt for disambiguation, or show "ambiguous —
-  see node show" and refuse?
-- **PR right-panel depth** for v1 — state + branch only, or state +
-  checks summary + review comment count?
+### Sources of mux ambiguity
+
+Conspectus never invents agent ↔ mux links — every candidate comes
+from an evidence source. Multiple sources can disagree, which is
+what produces the ambiguity marker:
+
+- **Multiple agent-mux orchestrators** (agent-deck, dmux, workmux,
+  …). If two orchestrator state files reference the same agent
+  session with different mux targets, Conspectus sees both as
+  candidates. Common when experimenting with orchestrators
+  side-by-side.
+- **CWD-based heuristic matches multiple muxes**. The
+  `cross_link::infer` pass correlates agent and mux sessions by
+  shared cwd. Two tmux sessions opened in the same worktree both
+  become candidates for any agent session running there. This is
+  the most common cause in practice today.
+- **Declared override + discovered**. A `conspectus declared`
+  binding points at mux X while a discovered candidate also
+  points at mux Y. The resolver gives declared links higher
+  provenance, so it picks X — but Y survives as an active
+  candidate that surfaces the `*` marker.
+- **Future**: cached vs fresh (once `H-PROD-002` caching lands)
+  and the process-tree linker (`H-MUXPROC-*`) will each add new
+  evidence sources that can disagree with cwd inference.
+
+The resolver picks deterministically by provenance tier →
+confidence → id, so "preferred" is stable across runs and matches
+what `node show` already exposes. v1's "attach to preferred"
+behavior is the right call most of the time; the reserved `m` key
+covers the edge case explicitly when it matters.
 
 ## Open Product Questions (v1-deferrable)
 
