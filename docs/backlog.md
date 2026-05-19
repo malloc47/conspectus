@@ -2775,9 +2775,11 @@ P8-001 ──→ P8-001a ──→ P8-002 ──→ P8-003 ──→ P8-004 ─�
                                             P8-012c ──────────────┘
 ```
 
-`P8-001` and `P8-001a` are both closed (v1 product vision and
-v1-blocking decisions locked). `P8-002` (the runtime/architecture
-ADR) is the next blocker. `P8-004` through `P8-007` can be
+`P8-001`, `P8-001a`, and `P8-002` are closed (v1 product vision,
+v1-blocking decisions, and the runtime/architecture ADR all
+locked). `P8-003` (the `conspectus tui` shell + terminal lifecycle
+with the runtime dep added per ADR 0024) is the next blocker.
+`P8-004` through `P8-007` can be
 implemented in parallel once the app shell exists. `P8-009` through
 `P8-011`, `P8-014`, and the `P8-012*` enrichments depend on the same
 UI shell but should remain isolated from pure browsing/rendering
@@ -2824,19 +2826,13 @@ work. `P8-014` is post-v1 polish that does not block the release.
     ambiguity" subsection explaining where the `*` marker comes
     from today and what future evidence sources will add to it.
 
-- [ ] `P8-002` ADR: TUI runtime, app architecture, and dependency policy.
-  - Scope: evaluate Ratatui + crossterm, Ratatui + tui-realm, Cursive,
-    and raw crossterm/termion for Conspectus's needs: two-panel layout,
-    tree/list navigation, searchable rows, scrollable detail panes,
-    semi-live mux previews, testable rendering, terminal cleanup, and
-    future server-backed refresh. Decide the runtime dependency,
-    backend feature set, event-loop shape, async/background-work
-    strategy, render-test strategy, and whether fuzzy search starts
-    in-tree or with a dependency. Record as a new ADR under
-    `docs/adr/`.
-  - Tests: none directly; ADR is the deliverable. A tiny compile-only
-    spike may land alongside if needed to validate the dependency shape.
-  - Blockers: `P8-001a`.
+- [x] `P8-002` ADR: TUI runtime, app architecture, and dependency policy.
+  - Outcome: recorded as ADR 0024. Ratatui + crossterm with an
+    in-tree Elm-style app loop; pure reducer and view-models;
+    `std::thread::spawn` + `mpsc` for background work (no async
+    runtime in v1); buffer-snapshot tests via `insta`. Dependency
+    policy narrows what later TUI work can pull in without a
+    follow-on ADR.
 
 - [ ] `P8-003` Add `conspectus tui` CLI shell and terminal lifecycle.
   - Scope: add the `tui` subcommand with `--scan-root`, `--view`,
