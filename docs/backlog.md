@@ -2762,31 +2762,51 @@ already exposed by `conspectus table <ROWS>` and `conspectus node show`.
 Dependency shape inside the phase:
 
 ```
-P8-001 ─┬─→ P8-002 ─→ P8-003 ─┬─→ P8-004 ─┬─→ P8-006 ─┐
-        │                     │           │           │
-        │                     │           └─→ P8-005 ─┤
-        │                     │                       ├─→ P8-008 ─→ P8-013
-        │                     └─→ P8-007 ─────────────┤
-        │                                             │
-        └─→ P8-009 ─→ P8-010 ─→ P8-011 ───────────────┘
-                          └─→ P8-012 ─────────────────┘
+P8-001 ──→ P8-001a ──→ P8-002 ──→ P8-003 ──→ P8-004 ─┬─→ P8-006 ─┐
+                                            ├─→ P8-005 ┤         │
+                                            └─→ P8-007 ┤         │
+                                                       └─→ P8-008 ┼─→ P8-013
+                                                                  │
+                                            P8-009 ─→ P8-010 ─→ P8-011 ───┤
+                                                                  │
+                                            P8-012a ──────────────┤
+                                            P8-012b ──────────────┤
+                                            P8-012c ──────────────┘
 ```
 
-P8-001 and P8-002 should land first. P8-004 through P8-007 can be
-implemented in parallel once the app shell exists. P8-009 through
-P8-011 depend on the same UI shell but should remain isolated from
-pure browsing/rendering work.
+`P8-001` is already closed (v1 product-vision decisions locked). The
+remaining v1-blocking product questions live in `P8-001a` and must land
+before the ADR (`P8-002`). `P8-004` through `P8-007` can be implemented
+in parallel once the app shell exists. `P8-009` through `P8-011` and
+the `P8-012*` enrichments depend on the same UI shell but should
+remain isolated from pure browsing/rendering work.
 
-- [ ] `P8-001` Close v1 TUI product decisions.
-  - Scope: answer the open questions in
-    `docs/implementation/phase-08-interactive-tui.md`: default action for
-    un-muxed agent sessions, mux target granularity, definition of
-    "project" grouping, whether global search includes transcript
-    contents, minimum PR detail depth, live-preview default, mouse support,
-    one-shot discovery vs Phase 7 server dependency, unsupported-action
-    presentation, and ambiguous mux-link behavior. Record the answers in
-    the implementation document and promote any architectural answers to
-    ADRs if they constrain later work.
+- [x] `P8-001` Lock v1 TUI product decisions (operator-journey core).
+  - Outcome: the implementation doc records the primary persona
+    (Returning Operator), the v1 default view (`sessions`),
+    configuration knobs for default view and sort, hierarchy-first
+    sort default, 30 s / 2 s refresh defaults, agent-deck-style
+    direct-row-key action UX (no modal picker, no command palette),
+    right-panel header+preview composition (no tabs), in-process
+    polling for v1 with Phase 7 server mode reserved, and the
+    `Enter` / `a` / `R` semantics. The remaining v1-blocking
+    decisions (project grouping, mux target granularity, ambiguous
+    mux-link behavior, PR detail depth) move to P8-001a; the
+    v1-deferrable questions move to a "Locked v1 Decisions" /
+    "Open Product Questions (v1-deferrable)" section.
+
+- [ ] `P8-001a` Settle remaining v1-blocking product questions.
+  - Scope: pick the answer for each blocker called out under "Open
+    Product Questions (v1-blocking)" in
+    `docs/implementation/phase-08-interactive-tui.md`:
+    1. What "project" grouping means in the sessions tree.
+    2. Mux target granularity (session / window / pane).
+    3. Ambiguous mux-link behavior on attach.
+    4. PR right-panel depth for v1.
+    Update the implementation doc with the chosen answers; promote
+    architectural answers (e.g. pane-level mux modeling) to ADRs
+    when they constrain downstream stories. Each blocker that needs
+    its own ADR gets a follow-up; this story just decides.
   - Tests: none directly; documentation update is the deliverable.
   - Blockers: none.
 
@@ -2802,7 +2822,7 @@ pure browsing/rendering work.
     `docs/adr/`.
   - Tests: none directly; ADR is the deliverable. A tiny compile-only
     spike may land alongside if needed to validate the dependency shape.
-  - Blockers: `P8-001`.
+  - Blockers: `P8-001a`.
 
 - [ ] `P8-003` Add `conspectus tui` CLI shell and terminal lifecycle.
   - Scope: add the `tui` subcommand with `--scan-root`, `--view`,
@@ -2861,18 +2881,31 @@ pure browsing/rendering work.
   - Blockers: `P8-004`, `P8-005`.
 
 - [ ] `P8-007` Render the two-panel Ratatui UI.
-  - Scope: implement the visible layout: left tree/list panel, right
-    detail panel, status bar, search overlay, help overlay, and empty/error
-    states. Use fixed-dimension Ratatui buffer snapshots for desktop-ish
-    and narrow terminal sizes. The renderer must truncate/wrap text
-    coherently, show row depth and selected state, and avoid blocking on
-    discovery or preview capture.
-  - Tests: Ratatui buffer snapshot tests for sessions, mux, PR, narrow
-    terminal, search overlay, help overlay, provider-error status, and
-    empty graph. Keep snapshots deterministic by using fixture graphs and
-    fixed terminal sizes.
+  - Scope: implement the visible layout per the wireframe and panel
+    composition in `docs/implementation/phase-08-interactive-tui.md`:
+    50/50 left/right split at wide widths, stacked layout below
+    ~100 columns, single-line status bar with action hints on the
+    left and provider status chips on the right. Right panel is
+    fixed header + fixed preview (no tabs in v1). Implement the
+    distinct empty/loading/error frames described in the
+    "Empty, Loading, And Error States" table — including the
+    "discovery in flight" placeholder, the "no sessions discovered"
+    empty graph, the `tmux disabled` / `tmux unavailable` mux-view
+    fallbacks, the `--no-live-preview` preview-zone message, the
+    refresh-failure stale marker, and the selection-snap-on-removed-
+    row behavior. Use fixed-dimension Ratatui buffer snapshots for
+    desktop-ish and narrow terminal sizes; truncate/wrap text
+    coherently, show row depth and selected state, and avoid
+    blocking on discovery or preview capture.
+  - Tests: Ratatui buffer snapshot tests for sessions, mux, PR,
+    narrow terminal, search overlay, help overlay, provider-error
+    status, empty graph, `--no-live-preview`, and selection
+    retention after a refresh that removes the selected row. Keep
+    snapshots deterministic by using fixture graphs and fixed
+    terminal sizes.
   - Manual checks: `cargo run -- tui --view sessions`,
-    `cargo run -- tui --view mux`, and terminal resize while running.
+    `cargo run -- tui --view mux`, `cargo run -- tui --no-live-preview`,
+    and terminal resize while running.
   - Blockers: `P8-003`; friendlier after `P8-004` and `P8-005`.
 
 - [ ] `P8-008` Add non-blocking graph refresh data adapter.
@@ -2933,19 +2966,46 @@ pure browsing/rendering work.
   - Blockers: `P8-010`; may require follow-up ADR if resume semantics
     differ materially by harness.
 
-- [ ] `P8-012` Add PR, fork, and transcript/history detail enrichments.
-  - Scope: enrich the right panel beyond node-show parity: PR status/check
-    summary/comment recency per the P8-001 answer, fork parent/child
-    lineage and context effects, and recent transcript/history preview
-    for un-muxed sessions using ADR 0019-compatible raw-state semantics.
-    Keep expensive transcript or forge reads behind the data/preview
-    adapters and visibly mark stale/unavailable data.
-  - Tests: fake forge/detail tests for PR status/check/comment states;
-    fixture transcript tests for recent-history extraction including
-    compacted Claude Code history; Ratatui snapshots for PR, fork, and
-    un-muxed agent detail panels.
-  - Blockers: `P8-005`, `P8-008`; transcript behavior should align with
-    ADR 0019 before broadening beyond a minimal preview.
+- [ ] `P8-012a` PR right-panel enrichment (state, checks, reviews).
+  - Scope: enrich the right panel for a selected PR row beyond
+    `node show` parity. Minimum surface per the v1 PR-depth decision
+    in P8-001a: state, draft/merge, branch head ref, and the linked
+    branch / worktree / session rows. Stretch (only if P8-001a opts
+    in): check summary, review comment count, comment recency.
+    Forge reads go through the data adapter so they degrade like any
+    other provider on error.
+  - Tests: fake forge tests covering the chosen PR-detail depth;
+    Ratatui snapshots for an open PR, a closed PR, a merged PR, a
+    draft PR, and a PR row whose forge fetch failed.
+  - Blockers: `P8-005`, `P8-008`, `P8-001a`.
+
+- [ ] `P8-012b` Fork right-panel enrichment (lineage, context, children).
+  - Scope: enrich the right panel for a selected fork row beyond
+    `node show` parity: parent-fork lineage, fork context effects
+    (recorded via the atelier discovery provider), related worktrees,
+    and resolved child agent sessions. Keep the rendering bounded —
+    long fork lineages truncate with a "+N more" marker rather than
+    scroll independently.
+  - Tests: snapshot tests against the existing atelier fork fixtures;
+    a regression for the truncation marker on a deep fork lineage.
+  - Blockers: `P8-005`, `P8-008`.
+
+- [ ] `P8-012c` Un-muxed agent transcript preview.
+  - Scope: extend the un-muxed-agent right-panel preview beyond the
+    single-line `last_message_preview` to a short recent-history
+    rendering. Read transcript state through an adapter aligned with
+    ADR 0019 so the future transcript viewer can share the same
+    backing types. The preview stays bounded (a few recent
+    user/assistant turns; honors `--no-live-preview`) and
+    visibly marks stale or unavailable data.
+  - Tests: fixture transcript tests for recent-history extraction
+    across each supported harness, including compacted Claude Code
+    history; Ratatui snapshots for an un-muxed-agent preview panel
+    that has transcript data and one that doesn't.
+  - Blockers: `P8-012a` or `P8-012b` are not blockers; this story
+    is parallel. Transcript behavior should align with ADR 0019
+    before broadening beyond a minimal preview, so coordinate with
+    that ADR's resolution if it lands first.
 
 - [ ] `P8-013` Document and verify the v1 TUI workflow.
   - Scope: update `docs/operations.md` and README-level command listings
@@ -2956,8 +3016,8 @@ pure browsing/rendering work.
   - Tests: `just check`; targeted TUI snapshot tests; CLI smoke tests.
   - Manual checks: all commands listed in
     `docs/implementation/phase-08-interactive-tui.md`.
-  - Blockers: `P8-008`, `P8-010`; `P8-011` and `P8-012` if included in
-    the v1 release boundary.
+  - Blockers: `P8-008`, `P8-010`; `P8-011`, `P8-012a`, `P8-012b`, and
+    `P8-012c` if included in the v1 release boundary.
 
 ## Later
 

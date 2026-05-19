@@ -2,28 +2,66 @@
 
 ## Summary
 
-Add `conspectus tui`: an interactive, keyboard-first terminal UI for searching,
-selecting, inspecting, and attaching to Conspectus graph rows.
+Add `conspectus tui`: an interactive, keyboard-first terminal UI for
+searching, selecting, inspecting, and attaching to Conspectus graph rows.
 
-The TUI is not a separate discovery model. It is a live projection over the
-same resolved graph that backs `conspectus graph --format json`,
-`conspectus table <ROWS>`, and `conspectus node show <id>`.
+The TUI is a periodically-refreshed projection over the same resolved
+graph that backs `conspectus graph --format json`,
+`conspectus table <ROWS>`, and `conspectus node show <id>`. Refresh is
+polling-based in v1; later phases may layer a Phase 7 server-backed
+push transport behind the same data adapter.
+
+## Personas And Primary User Journey
+
+### Primary persona (v1): Returning Operator
+
+You closed your laptop yesterday with three or four agent sessions still
+running across two repos. You open `conspectus tui` this morning and want
+to know, within a few seconds:
+
+1. Which agent sessions are still alive, and which mux session each is
+   attached to.
+2. What each session was last doing, well enough to remember whether to
+   resume, abandon, or merge.
+3. How to reattach to the right tmux pane without typing a long ad-hoc
+   command.
+
+The v1 TUI optimizes for this journey. Defaults flow from it: sessions
+view first, hierarchy-first tree with `last_message_preview` visible at
+the row level, recency-aware grouping, single-key attach.
+
+### Secondary personas (informed but not optimized for v1)
+
+- **Fork Inspector**: works in atelier-style forked workspaces; needs the
+  forks view and fork-lineage detail in the right panel. The TUI shell
+  serves this persona via `--view forks`, but defaults are tuned for the
+  operator.
+- **PR Reviewer**: scans `prs` view for which agent owns which branch.
+  Same shell, default-overridable via `--view prs`.
+
+The v1 plan does not invent new row-types for these personas; they reuse
+the existing `forks` / `prs` projections.
 
 ## Product Goals
 
-- Find existing agent sessions quickly across harnesses, projects, worktrees,
-  forks, mux sessions, and PRs.
-- Reattach to the selected mux session or create a mux attachment for an
-  un-muxed agent session when Conspectus has enough evidence to do so.
+Goals derive from the returning-operator journey above:
+
+- Find an existing agent session in under five keystrokes from launch.
+- Show enough context per session (cwd, mux attachment, PR, last
+  message) that the operator can decide attach / resume / leave in one
+  glance.
+- Reattach to the selected mux session in one keystroke when there is
+  no ambiguity.
 - Inspect the selected node with the same relationship context as
   `conspectus node show`, without leaving the TUI.
-- Preview live mux window contents where available and show recent transcript
-  history for un-muxed agent sessions.
+- Preview the selected mux session/window/pane on a slow refresh and
+  surface the agent's last-message snippet on the same panel for
+  un-muxed sessions.
 - Preserve the existing table row-types as first-class TUI views:
   `sessions`, `mux`, `union`, `prs`, and `forks`.
-- Leave room for substantial future growth: additional row-types, actions,
-  filters, transcript viewers, forge providers, and continuous-refresh
-  behavior should not require a rewrite.
+- Leave room for substantial future growth: additional row-types,
+  actions, filters, transcript viewers, forge providers, and
+  continuous-refresh behavior should not require a rewrite.
 
 ## Prior Art Notes
 
@@ -100,110 +138,232 @@ References:
 
 ```sh
 conspectus tui [--scan-root PATH]... [--view sessions|mux|union|prs|forks]
-               [--refresh-interval DURATION] [--no-live-preview]
+               [--refresh-interval DURATION] [--mux-preview-interval DURATION]
+               [--sort hierarchy|recency] [--no-live-preview]
                [--color auto|always|never]
 ```
 
 - `--view` selects the initial left-panel organization. Default:
-  `sessions`.
+  `sessions`. Configurable via `[tui].default_view` in `.conspectus.toml`
+  or user config; the flag overrides.
 - `--scan-root` matches existing discovery commands.
-- `--refresh-interval` controls background graph refresh until Phase 7 server
-  mode can provide push or snapshot updates. Default should be conservative
-  enough to avoid hammering `gh` and transcript state.
-- `--no-live-preview` disables mux capture/transcript tailing for privacy and
-  performance.
-- `--color` reuses the ADR 0022 resolution rules where possible.
+- `--refresh-interval` controls background graph refresh. Default
+  **30 seconds**. The interval applies to all providers in v1; per-
+  provider tuning is a later refinement.
+- `--mux-preview-interval` controls how often the selected mux row's
+  pane capture refreshes. Default **2 seconds**. Faster than the graph
+  refresh because tmux capture is cheap and the operator-journey use
+  case wants the preview to feel responsive.
+- `--sort` controls the row-tree ordering inside each group. Default
+  **`hierarchy`** (project → repo → worktree → session, alphabetical
+  within each level). `recency` re-orders within each group by the
+  freshest contained agent session's activity. Configurable via
+  `[tui].default_sort`; the flag overrides.
+- `--no-live-preview` disables both mux capture and transcript-history
+  rendering for privacy and performance. `last_message_preview` row-
+  level snippets continue to render because they come from the resolved
+  graph, not from re-reading transcripts.
+- `--color` reuses the ADR 0022 resolution rules.
 
 ### Layout
 
-The initial TUI has two primary panels:
+Two primary panels split roughly 50/50 by default, with a single-line
+status bar at the bottom. On terminals narrower than ~100 columns the
+panels stack vertically (left panel on top, right panel below). The
+80×24 wireframe below shows the v1 target shape:
 
-- **Left navigation panel**: list/tree-like row browser.
-- **Right detail panel**: expanded selected-node view with relationships,
-  lineage, preview/history, and action affordances.
+```
+┌─Conspectus TUI [sessions] ────────────────────────────────────────────────┐
+│ ▼ conspectus/                       │ NODE                                 │
+│   ▼ /home/me/src/conspectus         │ codex:…b4fdee8                       │
+│     ● codex:…b4fdee8   hello…       │ harness  codex                       │
+│     ○ codex:…c700fe7   # plan…      │ cwd      /home/me/src/conspectus     │
+│   ▶ /home/me/src/conspectus-fork    │ mux      tmux:editor [SD/H]          │
+│ ▶ oss/worktrunk                     │ pr       octo/repo#7 (open)          │
+│                                     │                                      │
+│                                     │ PREVIEW                              │
+│                                     │ hello world from session — this is   │
+│                                     │ the last user-or-assistant message   │
+│                                     │ captured by the harness adapter…     │
+├─────────────────────────────────────┴──────────────────────────────────────┤
+│ / search  1-5 view  a attach  r refresh  ? help  q quit                    │
+└────────────────────────────────────────────────────────────────────────────┘
+```
 
-The left panel supports these modes:
+#### Left panel: hierarchical row browser
 
-- `sessions`: projects/repos/worktrees as parents, agent sessions as children,
-  and fork/session history nested under each session where lineage is known.
-- `mux`: mux sessions as parents, attached/nested agent sessions underneath,
-  with pane/window labels and live preview metadata where known.
-- `union`: graph-row view equivalent to `conspectus table union`.
-- `prs`: PR rows equivalent to `conspectus table prs`, grouped by repo or
-  state when the user toggles grouping.
+The left panel renders one of the registered row-tree views:
+
+- `sessions` (**v1 default**): project (repo common-dir) → worktree →
+  agent session. Fork lineage nests under the parent session when known.
+- `mux`: mux session → attached agent sessions, with pane/window labels
+  when the mux adapter records them.
+- `union`: agent + mux rows side by side, equivalent to
+  `conspectus table union`.
+- `prs`: PR rows equivalent to `conspectus table prs`, grouped by
+  repo. Future toggles may regroup by state.
 - `forks`: fork rows equivalent to `conspectus table forks`, grouped by
-  workspace or provider.
+  workspace/provider.
 
-The right panel starts as a TUI rendering of `conspectus node show <id>`:
+Default ordering inside each group is **hierarchy-first** (alphabetical
+within each level). `--sort recency` re-orders so the group containing
+the freshest agent session bubbles to the top within its parent.
 
-- selected node attributes
-- resolved relationships
-- candidate links and ambiguity
-- adjacent nodes grouped by relationship kind
-- diagnostics touching the selected node
-- source metadata where useful
+#### Right panel: header + preview
 
-It then layers richer previews:
+The right panel is split top-to-bottom into two zones with **no
+toggling and no tabs in v1**:
 
-- selected mux: semi-live capture of the selected tmux session/window/pane
-- selected agent session with mux: live mux preview plus linked session
-  metadata
-- selected agent session without mux: recent transcript/history preview using
-  the same raw-state semantics that ADR 0019 requires
-- selected PR: latest status, draft/merge state, checks summary, review/comment
-  recency, linked branch/worktree/session rows
-- selected fork: parent/child lineage, context effects, related worktrees, and
-  child sessions
+1. **Header** (top): the equivalent of `conspectus node show <id>` for
+   the selected row — node kind, primary identifier, key attributes,
+   resolved relationships, candidate links, ambiguity markers, source
+   metadata. Compact form: one row attribute per line, dim placeholders
+   for missing values, no excessive whitespace.
+2. **Preview** (bottom): the last known state of the selected row. The
+   exact "last known state" depends on the row kind:
+   - **mux** row: tmux `capture-pane` snapshot of the selected session
+     (or window / pane when the v1 mux-target decision lands). Refreshes
+     on the `--mux-preview-interval` cadence; does **not** live-scroll.
+   - **agent session with attached mux**: same capture as the row's
+     attached mux, plus the session's `last_message_preview` as a
+     single-line caption above it.
+   - **agent session without mux**: the session's
+     `last_message_preview` rendered with soft wrapping, and an
+     "open transcript" affordance for the future transcript viewer
+     (ADR 0019). No transcript reading at render time in v1.
+   - **PR** row: PR state, draft/merge, branch, head ref, optional
+     check / review summary if the v1 PR-detail decision opts in.
+   - **fork** row: parent / child lineage, context effects, related
+     worktrees and child sessions.
+   - Empty/unavailable: a single dim line ("no preview available"
+     plus the reason — disabled by flag, no tmux, no transcript,
+     etc.).
 
-### Search And Navigation
+The preview does **not** scroll on its own. The user can scroll it
+manually with `J` / `K` (uppercase to distinguish from row navigation)
+or PageUp/PageDown when focus is on the right panel.
 
-- `/` opens in-view fuzzy search across visible rows.
-- `g` / `G`, arrow keys, PageUp/PageDown, Home/End navigate the left panel.
-- Tab cycles focus between navigation, detail, preview, and command/status
-  regions.
-- `1`-`5` switch row modes: sessions, mux, union, PRs, forks.
-- `Enter` opens the default action for the selected row:
-  - mux row: attach to mux session
-  - agent row with attached mux: attach to that mux
-  - agent row without mux: open an action picker for resume/attach choices
-  - PR row: open details; forge browser action is a later story
-- `r` refreshes graph discovery immediately.
-- `?` opens a keybinding/help overlay.
-- `q` exits after restoring the terminal.
+### Keybindings
 
-### Actions
+The v1 keybinding model follows agent-deck's posture: **direct row-
+action keys**, not a modal picker or command palette. Each key acts on
+the current selection — the key's meaning depends on the selected
+row's kind, and unavailable actions are visibly disabled in the status
+bar rather than offered through a separate menu.
 
-The v1 action surface is intentionally narrow:
+#### Navigation (v1)
 
-- Attach to existing mux session.
-- Attach to selected mux window/pane if tmux metadata is available.
-- Resume an un-muxed agent session inside a new or selected mux window when the
-  harness adapter supports a deterministic resume command.
-- Copy or print the selected node id / short id for use with `node show`.
-- Toggle grouping and visibility filters.
+| Key                | Action                                       |
+| ------------------ | -------------------------------------------- |
+| `j` / `k` / arrows | Move down / up in the left panel             |
+| PageDown / PageUp  | Page through the left panel                  |
+| Home / End         | First / last visible row                     |
+| `g` / `G`          | First / last row in the current view         |
+| `Enter`            | Expand / collapse a parent row               |
+| `Tab`              | Cycle focus: left panel → right panel → left |
+| `J` / `K` (focus right) | Scroll preview down / up                |
+| `1`–`5`            | Switch view: sessions, mux, union, prs, forks |
+| `/`                | Open in-view fuzzy search overlay            |
+| `r`                | Refresh discovery now                        |
+| `?`                | Help overlay                                 |
+| `q` / Ctrl-C       | Quit (restores terminal)                     |
 
-Destructive or workflow-changing operations are deferred:
+#### Actions on the selected row (v1)
 
+| Key   | Acts on                          | Meaning                                                |
+| ----- | -------------------------------- | ------------------------------------------------------ |
+| `a`   | mux row, or agent row with mux   | Attach to the mux target                               |
+| `i`   | any row                          | Copy the node's short id to the clipboard for `node show` |
+| `o`   | PR row                           | Open the PR URL in `$BROWSER` (if available)           |
+
+Single keystroke; status bar reflects the action's outcome. When the
+selected row doesn't support a key, the status bar shows a one-line
+"disabled because …" reason rather than swallowing the keystroke.
+
+#### Reserved for later phases (do not bind in v1)
+
+| Key   | Future action                                                |
+| ----- | ------------------------------------------------------------ |
+| `f`   | Fork the selected session (agent-deck style)                 |
+| `n`   | New agent / new mux session                                  |
+| `c`   | Confirm a discovered candidate as a declared link            |
+| `d`   | Delete (mux session, worktree, declared link, …)             |
+| `m`   | Merge (branch, worktree, fork)                               |
+| `R`   | Resume an un-muxed agent session into a chosen mux target    |
+
+These keys are deliberately unbound in v1 so muscle memory can map to
+their final actions in later phases without rebinding. v1 is
+read-mostly + attach.
+
+### Actions (v1 scope)
+
+The v1 action surface is intentionally narrow and read-only-with-attach:
+
+- **Attach to existing mux session** (`a` / `Enter` on mux row).
+- **Attach to the mux session linked to an agent row** (`a` / `Enter`
+  on an agent row whose preferred `LinkedToMux` resolves).
+- **Copy the selected node's short id** (`i`).
+- **Open the selected PR in `$BROWSER`** (`o`).
+
+Explicit non-goals for v1:
+
+- creating mux sessions, windows, or panes
+- starting new agent sessions (`n`)
+- resuming an un-muxed agent into a new or existing mux (`R`)
 - creating worktrees
-- starting new agents
 - merging branches
-- creating PRs
-- deleting sessions, panes, or worktrees
+- creating or commenting on PRs
 - mutating declared links
+- deleting any state
+
+Resume of un-muxed agents sounds like an obvious v1 inclusion but is
+deferred because it requires harness-specific resume-command modeling
+(claude-code's `claude --resume`, codex's rollout-id reattach,
+opencode's session-id reopen) plus a confirmation/launch flow. Doing it
+correctly across the supported harnesses is its own story (see
+`P8-011` in the backlog).
 
 ### Semi-Live Data
 
-The TUI needs periodic refresh, but its initial implementation should stay
-compatible with today's one-shot discovery:
+The TUI is **polling-based** in v1 — not push, not streaming. The
+initial implementation stays compatible with today's one-shot
+discovery:
 
-- Poll graph discovery on a configurable interval.
-- Poll tmux capture for the selected mux row more frequently than full graph
-  discovery.
-- Never block input handling on discovery, `gh`, tmux capture, or transcript
-  reads.
-- Show stale/error state in the status bar when a provider fails.
-- When Phase 7 server mode lands, add a server-backed data source that replaces
-  in-process polling without changing UI components.
+- Poll graph discovery on the `--refresh-interval` cadence (default
+  30 seconds).
+- Poll tmux capture for the selected mux row on the
+  `--mux-preview-interval` cadence (default 2 seconds). Pause capture
+  when the right panel isn't showing a mux row.
+- Never block input handling on discovery, `gh`, tmux capture, or
+  transcript reads. Run them on background tasks; surface their
+  outcomes via the data adapter.
+- On a provider failure, retain the prior good slice (per Phase 7's
+  per-provider eviction model). Surface the failure in the status bar
+  as a single-line "<provider>: <one-line reason>" string and apply
+  exponential backoff up to a cap before retrying. Never spin.
+- The data adapter is shaped so a Phase 7 server snapshot/push transport
+  can replace in-process polling later without changing UI components.
+
+### Empty, Loading, And Error States
+
+Each state must have a defined visible presentation so the v1
+implementation can be specified, snapshot-tested, and shipped without
+ambiguity.
+
+| Situation                            | Left panel                                      | Right panel                              | Status bar                              |
+| ------------------------------------ | ----------------------------------------------- | ---------------------------------------- | --------------------------------------- |
+| First-launch, discovery in flight    | "Loading…" centered, dim                        | empty                                    | "discovering…"                          |
+| Discovery complete, no sessions      | "No sessions discovered. `?` for help."         | empty                                    | counts: `0 agents · 0 mux · 0 PRs`      |
+| `CONSPECTUS_DISABLE_TMUX=1`          | mux view shows "tmux discovery disabled"        | for a selected agent: "no preview (tmux disabled)" | provider warning chip               |
+| `--no-live-preview`                  | rendered normally                               | "preview disabled (`--no-live-preview`)" | unchanged                               |
+| tmux missing / unreachable           | mux view rows degrade to "tmux unavailable"     | "no preview (tmux unavailable)"          | error chip with one-line reason         |
+| `gh` provider error                  | prs view shows last good slice with stale marker | normal                                  | error chip "gh: <reason>"               |
+| Refresh failed, prior data retained  | normal (stale marker on title bar)              | normal                                   | "last refresh failed; using …s ago snapshot" |
+| Selected row removed by refresh      | selection snaps to nearest sibling              | re-renders against new selection         | "previous selection removed"            |
+
+The status bar uses two zones: action hints on the left, status / error
+chips on the right. Chips are colour-coded per ADR 0022 (error red,
+warning yellow, info default).
 
 ## Implementation Changes
 
@@ -267,30 +427,60 @@ Run inside and outside tmux. Verify:
 - unsupported resume actions are visibly disabled
 - terminal state is restored after `q`, Ctrl-C, and provider errors
 
-## Open Product Questions
+## Locked v1 Decisions
 
-These should be answered before implementing behavior that would be expensive
-to change:
+These were open product questions; the answers are now part of the v1
+contract:
 
-- Should `Enter` on an un-muxed agent session create a new mux session/window by
-  default, or should all resume/attach paths go through an action picker?
-- Which mux targets are in v1 scope: tmux sessions only, tmux windows, tmux
-  panes, or backend-neutral mux targets?
-- What should "project" mean in the sessions tree: repo common-dir, workspace,
-  Atelier project, configured scan root, or a user-configurable grouping?
-- Should global search include transcript contents in v1, or only node/table
-  metadata and previews?
-- How much PR data is required in the right panel for v1: status only, checks,
-  review comments, inline comments, or timeline?
-- Should live previews default on even though they may surface sensitive mux or
-  transcript content?
-- Should mouse support be included in v1, deferred, or explicitly out of scope?
-- Should the TUI read directly from one-shot discovery in v1, or should Phase 7
-  snapshot/server work land first?
-- Should unsupported action attempts be hidden, disabled, or visible with
-  explanatory failure messages?
-- What is the expected behavior when several candidate mux links exist for one
-  agent session?
+- **Primary persona**: Returning Operator (sessions-first workflow).
+- **Default view**: `sessions`, configurable via `--view` flag and
+  `[tui].default_view` config.
+- **Default sort**: `hierarchy`, configurable via `--sort` flag and
+  `[tui].default_sort` config.
+- **Refresh interval**: 30 s graph / 2 s mux capture, both
+  flag-overridable.
+- **Action UX**: direct single-key actions on the selected row
+  (agent-deck style). No modal picker, no command palette in v1.
+- **Right panel composition**: fixed header + fixed preview, no tabs,
+  no panel toggles. Preview is polled, not live-scrolled.
+- **Unsupported actions**: visibly disabled with a one-line "disabled
+  because …" reason in the status bar.
+- **Source of graph data in v1**: in-process polling; Phase 7 server
+  mode replaces it later without UI changes.
+- **`Enter` on a row**: expand / collapse parent rows. Attach is `a`
+  (or `Enter` on a leaf row that has a single resolved mux target).
+- **Resume an un-muxed agent**: deferred to its own story (`P8-011`)
+  with the `R` key reserved.
+
+## Open Product Questions (v1-blocking)
+
+These still need answers before P8-001 closes out and the dependent
+stories can move:
+
+- **What is "project" grouping in the sessions tree** — repo
+  common-dir, atelier workspace, the configured scan root, or a
+  user-configurable grouping? P8-004's row-tree builder needs this.
+- **Mux target granularity** — tmux session, window, or pane?
+  P8-009 (preview capture) and P8-010 (attach) both depend on
+  this; a "session-only" v1 is the smallest path.
+- **Ambiguous mux links** — when an agent session has more than one
+  candidate `LinkedToMux`, does `a` attach to the resolver's
+  preferred target, prompt for disambiguation, or show "ambiguous —
+  see node show" and refuse?
+- **PR right-panel depth** for v1 — state + branch only, or state +
+  checks summary + review comment count?
+
+## Open Product Questions (v1-deferrable)
+
+These can be answered later without invalidating in-flight work:
+
+- Should global search include `last_message_preview` content, full
+  transcripts, or only structural fields?
+- Should `--no-live-preview` also suppress `last_message_preview`
+  rendering in the row tree, or only the right-panel preview?
+- Should mouse support land in v1 or wait?
+- Should an in-TUI provider-toggle key let the operator disable a
+  noisy provider for the rest of the session?
 
 ## Assumptions
 
