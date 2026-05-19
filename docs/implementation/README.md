@@ -13,8 +13,6 @@ end-state behavior, test strategy, and manual checks for that milestone.
 5. [Phase 04: Forge And Table Views](phase-04-forge-and-table-views.md)
 6. [Phase 05: Declared Links](phase-05-declared-links.md)
 7. [Phase 06: Atelier Delegation](phase-06-atelier-delegation.md)
-8. Phase 07: Continuous Operation And Snapshot Persistence (pending)
-9. [Phase 08: Interactive TUI](phase-08-interactive-tui.md)
 
 ## Defaults Chosen
 
