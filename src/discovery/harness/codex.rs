@@ -351,9 +351,43 @@ fn extract_rollout_preview_text(line: &RolloutLine) -> Option<String> {
         if text.trim().is_empty() {
             continue;
         }
-        return Some(text.clone());
+        // Codex wraps a handful of system-flavor turns in XML-style
+        // channel markers (`<turn_aborted>`, `<proposed_plan>`, …).
+        // Drop the marker prefix when present so the preview shows
+        // the actual body; when the body is empty after stripping,
+        // return None and let the outer backward walk pick the
+        // previous message instead.
+        return apply_codex_channel_marker_filter(text);
     }
     None
+}
+
+/// Channel-marker tag names codex wraps system-flavor turns in.
+/// Conservative on purpose: only listed tags are stripped, so a
+/// legitimate `<html>` or `<foo>` in user content is left alone.
+const CODEX_CHANNEL_MARKERS: &[&str] = &["turn_aborted", "proposed_plan"];
+
+/// If `text` opens with a known codex channel marker (`<marker>` or
+/// `<marker> body`), drop the marker (and a matching `</marker>`
+/// closing tag if present), trim, and return the body when
+/// non-empty. A bare `<marker>` with nothing after returns `None`
+/// so the caller's backward walk skips this message and tries an
+/// earlier one. Text without a known marker is returned verbatim.
+fn apply_codex_channel_marker_filter(text: &str) -> Option<String> {
+    let trimmed = text.trim_start();
+    for marker in CODEX_CHANNEL_MARKERS {
+        let open_tag = format!("<{marker}>");
+        if let Some(after_open) = trimmed.strip_prefix(&open_tag) {
+            let body = after_open.trim_start();
+            let close_tag = format!("</{marker}>");
+            let body = body.strip_suffix(&close_tag).unwrap_or(body).trim();
+            if body.is_empty() {
+                return None;
+            }
+            return Some(body.to_string());
+        }
+    }
+    Some(text.to_string())
 }
 
 #[cfg(test)]
@@ -737,5 +771,108 @@ mod tests {
 
         let session = discover_session(&context, "corrupt");
         assert_eq!(session.last_message_preview, None);
+    }
+
+    /// `<turn_aborted>` markers wrap the canned interrupt message
+    /// codex emits when the user cancels mid-turn. The preview
+    /// should reflect the body of that message, not the marker.
+    #[test]
+    fn last_message_preview_strips_turn_aborted_marker_prefix() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("aborted").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<turn_aborted> The user interrupted the previous turn on purpose."}]}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "aborted");
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("The user interrupted the previous turn on purpose."),
+        );
+    }
+
+    /// `<proposed_plan>` markers wrap a longer plan body. The
+    /// marker is stripped and the plan content survives the
+    /// preview pipeline.
+    #[test]
+    fn last_message_preview_strips_proposed_plan_marker_prefix() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("plan").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<proposed_plan> # Atelier Profiles V1 introduce declarative profiles"}]}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "plan");
+        let preview = session.last_message_preview.expect("preview present");
+        assert!(
+            preview.starts_with("# Atelier Profiles V1"),
+            "unexpected preview content: {preview:?}",
+        );
+        assert!(!preview.contains("proposed_plan"));
+    }
+
+    /// A bare `<turn_aborted>` with no body should be skipped so the
+    /// preview reflects the previous real text message instead of
+    /// rendering an empty cell.
+    #[test]
+    fn last_message_preview_skips_bare_turn_aborted_message() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("bare-marker").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"earlier real reply"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"<turn_aborted>"}]}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "bare-marker");
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("earlier real reply"),
+        );
+    }
+
+    /// Unknown XML-shaped tags are *not* stripped — only the
+    /// known-codex-marker list is honored, so legitimate user
+    /// content like `<html>` or `<foo>` survives untouched.
+    #[test]
+    fn last_message_preview_leaves_unknown_xml_tags_alone() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("unknown").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<html>this is not a marker</html>"}]}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "unknown");
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("<html>this is not a marker</html>"),
+        );
     }
 }
