@@ -170,10 +170,12 @@ conspectus tui [--scan-root PATH]... [--view sessions|mux|union|prs|forks]
   `[tui].sessions_grouping`; the flag overrides. Orphan sessions
   (no resolved repo/worktree) fall into a single "Ungrouped" bucket
   regardless of mode.
-- `--no-live-preview` disables both mux capture and transcript-history
-  rendering for privacy and performance. `last_message_preview` row-
-  level snippets continue to render because they come from the resolved
-  graph, not from re-reading transcripts.
+- `--no-live-preview` disables the live extras only: mux pane
+  capture and the transcript-tail read that the right-panel preview
+  uses to fill space beyond the graph-resident snippet. Inline
+  previews in the row tree and the graph-resident right-panel
+  preview keep rendering, because both come from the resolved
+  graph rather than from live re-reads.
 - `--color` reuses the ADR 0022 resolution rules.
 
 ### Layout
@@ -184,22 +186,28 @@ panels stack vertically (left panel on top, right panel below). The
 80×24 wireframe below shows the v1 target shape:
 
 ```
-┌─Conspectus TUI [sessions] ────────────────────────────────────────────────┐
-│ ▼ conspectus/                       │ NODE                                 │
-│   ▼ /home/me/src/conspectus         │ codex:…b4fdee8                       │
-│     ● codex:…b4fdee8   hello…       │ harness  codex                       │
-│     ○ codex:…c700fe7   # plan…      │ cwd      /home/me/src/conspectus     │
-│   ▶ /home/me/src/conspectus-fork    │ mux      tmux:editor [SD/H]          │
-│ ▶ oss/worktrunk                     │ pr       octo/repo#7 (open)          │
-│                                     │                                      │
-│                                     │ PREVIEW                              │
-│                                     │ hello world from session — this is   │
-│                                     │ the last user-or-assistant message   │
-│                                     │ captured by the harness adapter…     │
+┌─ Conspectus · sessions ─ updated 12s ago · 24 agents · 3 mux ─────────────┐
+│ ▼ ~/src/conspectus                  │ codex:…b4fdee8                       │
+│   ▼ ~/src/conspectus                │ harness  codex                       │
+│     4e90b4 codex:…b4fdee8  2m  ◐    │ cwd      ~/src/conspectus            │
+│       could you give me a bit mo…   │ title    fork lineage q&a            │
+│     f9f3cc claude:…6b6346f  17m ◉   │ mux      — (2 candidates) ⚠          │
+│   ▶ ~/.agent-deck/multi-repo-…      │ pr       octo/repo#7 (open) ⟳        │
+│ ▼ ~/src/atelier                     │ lineage  — (no parent)               │
+│     73566c codex:…b4fdee8  5m  ◯    │                                      │
+│ ▶ ~/src/oss/worktrunk               │ ─ preview ─────────────────────────  │
+│                                     │ Could you give me a bit more context │
+│                                     │ ? "The fork didn't seem to work"     │
+│                                     │ could mean a few different things    │
+│                                     │ given recent work … ▲ scroll: J/K    │
 ├─────────────────────────────────────┴──────────────────────────────────────┤
-│ / search  1-5 view  a attach  r refresh  ? help  q quit                    │
+│ / search  1-5 view  a attach  i copy id  r refresh  ? help  q quit │ gh ⟳  │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
+
+See [`docs/tui-sessions-mockup.md`](../tui-sessions-mockup.md) for an
+annotated walk-through of this layout, the ambiguous-mux expansion,
+and the responsive-width inline-preview behavior.
 
 #### Left panel: hierarchical row browser
 
@@ -235,13 +243,18 @@ toggling and no tabs in v1**:
    - **mux** row: tmux `capture-pane` snapshot of the selected session
      (or window / pane when the v1 mux-target decision lands). Refreshes
      on the `--mux-preview-interval` cadence; does **not** live-scroll.
-   - **agent session with attached mux**: same capture as the row's
-     attached mux, plus the session's `last_message_preview` as a
-     single-line caption above it.
+   - **agent session with attached mux**: tmux `capture-pane`
+     snapshot of the attached mux session. The mockup-review
+     decision drops the `last_message_preview` caption that earlier
+     drafts stacked above the capture; the header's `mux` row
+     already carries the attachment context.
    - **agent session without mux**: the session's
-     `last_message_preview` rendered with soft wrapping, and an
-     "open transcript" affordance for the future transcript viewer
-     (ADR 0019). No transcript reading at render time in v1.
+     `last_message_preview` rendered with soft wrapping. When the
+     preview pane has space beyond the ADR-0023 graph-resident
+     snippet (200-char cap) and `--no-live-preview` is not set, the
+     data adapter does a transcript-tail read on selection to fill
+     the additional space, and an "open transcript" affordance for
+     the future transcript viewer (ADR 0019) remains as a follow-on.
    - **PR** row: rendered in two stages so navigation never blocks
      on a `gh` call.
      - *Immediate stage* (synchronous, graph-only): the PR header
@@ -514,6 +527,73 @@ contract.
   background and caches the result per PR id for the lifetime of
   the TUI session. `r` manual refresh invalidates the cache.
 
+### From the sessions-view mockup review
+
+These pin the visible behavior of the v1 default sessions view
+(`docs/tui-sessions-mockup.md`):
+
+- **Path rendering**: every path shown in the TUI uses `~`
+  shortening for `$HOME`. No raw `/home/<user>/…` strings in the
+  tree, right panel, or status bar.
+- **Worktree-level depth**: render the worktree level only when a
+  project has ≥ 2 worktrees. Projects with a single worktree
+  collapse to one level (sessions hang directly off the project
+  row).
+- **Ambiguous-mux row expansion**: when a session has ≥ 2
+  `LinkedToMux` candidates, the row becomes expandable; expanding
+  reveals one child row per candidate, with the resolver-preferred
+  candidate marked. Sessions with a single, definitive mux link
+  (or no mux link at all) remain leaves. Selecting a candidate
+  child row navigates the right panel to that mux; pressing `a`
+  on a candidate child attaches to that specific candidate,
+  overriding the resolver's pick. This is a passive tree view of
+  the same `LinkedToMux` evidence; the reserved `m` modal
+  (`P8-014`) remains the explicit picker for the same scenario.
+- **Activity indicator dropped**: the recency column carries the
+  "which one was I in" signal already; no per-row `●`/`○` prefix
+  in v1.
+- **Inline preview density**: the row tree shows a dim inline
+  preview for the selected row plus the N globally-most-recent
+  sessions (default N = 3, configurable via
+  `[tui].inline_preview_rows`). When the terminal is wide enough
+  to fit the preview on the same line as the row without crowding
+  the columns, the renderer switches to all-rows-inline mode.
+  Layout must be responsive to terminal width, not pinned to 80
+  columns.
+- **Mux indicator**: `◉`/`◐`/`◯` glyphs carrying color signal
+  (green attached / yellow ambiguous / dim un-muxed). Color is the
+  primary differentiator; the glyph stays small.
+- **Header bar freshness**: show `updated Ns ago` (time since the
+  most recent successful refresh) alongside the discovery counts.
+  Refresh cadences move into `?` help and out of the header.
+- **Right-panel header field set**: the five existing fields
+  (harness, cwd, mux, pr, lineage) stay, and a `title` row is
+  added when the session has a non-empty title (opencode chat
+  topics today, other harnesses later). Sessions without a title
+  omit the row rather than render `—`.
+- **Right-panel preview content**:
+  - Un-muxed agent session: render `last_message_preview` from
+    the graph. When the preview pane has space for more than the
+    ADR-0023 graph-resident snippet (200-char cap) and
+    `--no-live-preview` is not set, the data adapter does a
+    transcript-tail read on selection and renders the fuller
+    message. The inline previews in the tree always use the
+    graph-resident snippet — only the right-panel preview
+    expands.
+  - Muxed agent session: render the tmux `capture-pane` snapshot
+    of the attached mux, polled at the mux-preview cadence. Do
+    *not* duplicate `last_message_preview` in the preview zone
+    when a pane capture is available; the header's mux row
+    carries the attachment context, and the pane capture is the
+    "what was it doing" answer.
+  - Standalone mux row: pane capture, same as above.
+- **Inline preview vs `--no-live-preview`**: `--no-live-preview`
+  does **not** suppress inline previews or the graph-resident
+  right-panel preview. It only suppresses live extras — mux pane
+  capture and the transcript-tail read that fills the right-panel
+  preview beyond the graph-resident snippet. The v1-deferrable
+  question on this topic is now resolved.
+
 ### Sources of mux ambiguity
 
 Conspectus never invents agent ↔ mux links — every candidate comes
@@ -551,8 +631,6 @@ These can be answered later without invalidating in-flight work:
 
 - Should global search include `last_message_preview` content, full
   transcripts, or only structural fields?
-- Should `--no-live-preview` also suppress `last_message_preview`
-  rendering in the row tree, or only the right-panel preview?
 - Should mouse support land in v1 or wait?
 - Should an in-TUI provider-toggle key let the operator disable a
   noisy provider for the rest of the session?

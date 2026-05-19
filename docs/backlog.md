@@ -2782,6 +2782,8 @@ implemented in parallel once the app shell exists. `P8-009` through
 `P8-011`, `P8-014`, and the `P8-012*` enrichments depend on the same
 UI shell but should remain isolated from pure browsing/rendering
 work. `P8-014` is post-v1 polish that does not block the release.
+`P8-015` is a post-v1 sessions-tree refinement layered onto
+`P8-004` and `H-TBL-015`; it does not block the v1 release either.
 
 - [x] `P8-001` Lock v1 TUI product decisions (operator-journey core).
   - Outcome: the implementation doc records the primary persona
@@ -3079,6 +3081,36 @@ work. `P8-014` is post-v1 polish that does not block the release.
     preferred candidate when `m` is never pressed.
   - Blockers: `P8-010` (attach action) and the v1 keybinding
     surface from `P8-006`.
+
+- [ ] `P8-015` Surface session `title` in the sessions row tree when it
+    uniquely distinguishes siblings.
+  - Scope: extend the sessions row-tree builder so that when a
+    project group contains multiple agent sessions of the same
+    harness (current "harness:…id" label collides), and a non-empty
+    `title` attribute is present on the candidates, the row label
+    incorporates the title for disambiguation. Sessions without a
+    title, or sessions whose harness label already distinguishes
+    them, render unchanged. The right-panel header `title` row
+    (locked in the mockup review) remains the canonical surface;
+    the tree treatment is purely a disambiguation aid. Behavior
+    must stay deterministic across refreshes — title-or-no-title
+    must not reorder rows, and the disambiguation rule must be
+    stable when the colliding set changes shape.
+  - Tests: row-tree builder unit tests covering: (1) single session
+    per harness in a group — no title shown in tree, (2) two
+    sessions of the same harness, both with distinct titles —
+    titles shown for both, (3) two same-harness sessions where
+    only one has a title — only that one gains the title suffix
+    while the other keeps its plain label, (4) refresh-stability:
+    adding a new same-harness session in a later refresh causes
+    the existing rows to gain titles deterministically without
+    reordering.
+  - Blockers: `H-TBL-015` (AGENT-cell cleanup that moved `title`
+    out of the row label originally) and `P8-004` (the row-tree
+    builder this story extends). Should not land until
+    `P8-007`/`P8-008` have a stable render path so the new label
+    shape can be snapshot-tested without churning unrelated
+    fixtures.
 
 ## Later
 
