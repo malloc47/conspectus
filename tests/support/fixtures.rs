@@ -16,6 +16,7 @@ pub fn orphan_session_graph() -> GraphSnapshot {
             harness_key: "codex".to_string(),
             cwd: None,
             title: Some("orphan session".to_string()),
+            last_message_preview: None,
         })],
         ..GraphSnapshot::empty()
     })
@@ -108,6 +109,7 @@ pub fn conflict_graph() -> GraphSnapshot {
                 harness_key: "codex".to_string(),
                 cwd: Some("/workspace".to_string()),
                 title: None,
+                last_message_preview: None,
             }),
             first,
             second,
@@ -160,6 +162,7 @@ pub fn mux_candidates_graph() -> GraphSnapshot {
                 harness_key: "codex".to_string(),
                 cwd: Some("/workspace".to_string()),
                 title: None,
+                last_message_preview: None,
             }),
             convention,
             strong,

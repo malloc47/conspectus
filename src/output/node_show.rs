@@ -418,6 +418,7 @@ mod tests {
             harness_key: harness.to_string(),
             cwd: Some("/work".to_string()),
             title: None,
+            last_message_preview: None,
         })
     }
 

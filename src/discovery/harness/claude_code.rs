@@ -143,6 +143,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                     harness_key: HARNESS_KEY.to_string(),
                     cwd: meta.cwd,
                     title: meta.summary,
+                    last_message_preview: None,
                 },
                 parent_uuid: meta.parent_uuid,
                 cross_session_record_type: meta.cross_session_record_type,

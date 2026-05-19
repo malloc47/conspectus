@@ -124,6 +124,7 @@ mod tests {
                     harness_key: "state-aware".to_string(),
                     cwd: None,
                     title: None,
+                    last_message_preview: None,
                 })],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
@@ -199,12 +200,14 @@ mod tests {
             harness_key: "codex".to_string(),
             cwd: None,
             title: None,
+            last_message_preview: None,
         });
         let session_beta = GraphNode::AgentSession(AgentSessionNode {
             id: AgentSessionId::new("codex", "scope", "beta"),
             harness_key: "codex".to_string(),
             cwd: None,
             title: None,
+            last_message_preview: None,
         });
 
         let fragment = HarnessDiscovery::new()

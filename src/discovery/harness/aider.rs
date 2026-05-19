@@ -44,6 +44,7 @@ impl HarnessAdapter for AiderAdapter {
                 harness_key: HARNESS_KEY.to_string(),
                 cwd: Some(scope),
                 title: None,
+                last_message_preview: None,
             }));
         }
 

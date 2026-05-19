@@ -455,6 +455,12 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         description: "State of the strongest declared candidate sourced from this session (declared / ignored / overridden).",
         default: false,
     },
+    ColumnSpec {
+        key: "preview",
+        header: "PREVIEW",
+        description: "One-line snippet of the session's most recent user/assistant message (capped at 200 chars, ADR 0023).",
+        default: false,
+    },
 ];
 
 const MUX_COLUMNS: &[ColumnSpec] = &[
@@ -481,6 +487,12 @@ const MUX_COLUMNS: &[ColumnSpec] = &[
         header: "AGENTS",
         description: "Agent sessions attached to this mux session.",
         default: true,
+    },
+    ColumnSpec {
+        key: "preview",
+        header: "PREVIEW",
+        description: "Last-message preview of the first attached agent (ADR 0023).",
+        default: false,
     },
     ColumnSpec {
         key: "attached-count",
@@ -532,6 +544,12 @@ const UNION_COLUMNS: &[ColumnSpec] = &[
         header: "RELATIONSHIP",
         description: "Preferred relationship cell for agent rows; — for mux rows.",
         default: true,
+    },
+    ColumnSpec {
+        key: "preview",
+        header: "PREVIEW",
+        description: "Last-message preview for agent rows; — for mux rows (ADR 0023).",
+        default: false,
     },
 ];
 
@@ -1079,6 +1097,11 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
         "declared" => {
             session_declared_state(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
         }
+        "preview" => ctx
+            .session
+            .last_message_preview
+            .clone()
+            .unwrap_or_else(|| "—".to_string()),
         _ => "—".to_string(),
     }
 }
@@ -1246,8 +1269,28 @@ fn mux_cell(key: &str, ctx: &MuxRowCtx<'_, '_>) -> String {
             .created_epoch
             .map(|epoch| format_relative_age(epoch, current_epoch()))
             .unwrap_or_else(|| "—".to_string()),
+        "preview" => {
+            first_attached_agent_preview(ctx.view, ctx.mux_id).unwrap_or_else(|| "—".to_string())
+        }
         _ => "—".to_string(),
     }
+}
+
+/// Read the `last_message_preview` of the first agent session
+/// resolved as attached to this mux. The mux projection's `preview`
+/// column shows this lone preview rather than joining all attached
+/// agents' previews — per ADR 0023, joining would push the cell
+/// past any reasonable width budget.
+fn first_attached_agent_preview(view: &SnapshotView<'_>, mux_id: &NodeId) -> Option<String> {
+    let entries = view.attached_to_mux.get(mux_id)?;
+    for (_label, link) in entries {
+        if let Some(session) = view.agent_sessions.get(&link.source)
+            && let Some(preview) = &session.last_message_preview
+        {
+            return Some(preview.clone());
+        }
+    }
+    None
 }
 
 enum UnionRowSource<'a> {
@@ -1299,6 +1342,11 @@ fn union_cell(key: &str, ctx: &UnionRowCtx<'_, '_>) -> String {
             }
         }
         ("relationship", UnionRowSource::Mux { .. }) => "—".to_string(),
+        ("preview", UnionRowSource::Agent { session, .. }) => session
+            .last_message_preview
+            .clone()
+            .unwrap_or_else(|| "—".to_string()),
+        ("preview", UnionRowSource::Mux { .. }) => "—".to_string(),
         _ => "—".to_string(),
     }
 }
@@ -2012,6 +2060,22 @@ mod tests {
             harness_key: harness.to_string(),
             cwd: cwd.map(str::to_string),
             title: None,
+            last_message_preview: None,
+        })
+    }
+
+    fn agent_session_with_preview(
+        harness: &str,
+        key: &str,
+        cwd: Option<&str>,
+        preview: &str,
+    ) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new(harness, "global", key),
+            harness_key: harness.to_string(),
+            cwd: cwd.map(str::to_string),
+            title: None,
+            last_message_preview: Some(preview.to_string()),
         })
     }
 
@@ -2555,6 +2619,7 @@ mod tests {
                 "mux",
                 "cwd",
                 "agents",
+                "preview",
                 "attached-count",
                 "activity",
                 "created",
@@ -3739,6 +3804,172 @@ mod tests {
         for line in rendered.lines() {
             assert!(display_width(line) <= 30, "line exceeded 30 cols: {line:?}",);
         }
+    }
+
+    #[test]
+    fn sessions_preview_column_renders_set_value_or_dash() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session_with_preview("codex", "alpha", Some("/work"), "wired up the column"),
+                agent_session("codex", "beta", Some("/work")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "preview"]),
+        );
+        let header: Vec<&str> = rendered
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(header, vec!["ID", "AGENT", "PREVIEW"]);
+
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let alpha = body
+            .iter()
+            .find(|line| line.contains("codex:alpha"))
+            .expect("alpha row");
+        assert!(
+            alpha.contains("wired up the column"),
+            "alpha row preview missing:\n{alpha}",
+        );
+        let beta = body
+            .iter()
+            .find(|line| line.contains("codex:beta"))
+            .expect("beta row");
+        assert!(
+            beta.trim_end().ends_with('—'),
+            "beta row should show — for missing preview:\n{beta}",
+        );
+    }
+
+    #[test]
+    fn mux_preview_column_shows_first_attached_agent_preview() {
+        let session_alpha = AgentSessionId::new("codex", "global", "alpha");
+        let session_beta = AgentSessionId::new("codex", "global", "beta");
+        let editor = MuxSessionId::new("tmux:editor");
+
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                mux_session("tmux", "editor", Some("/work")),
+                agent_session_with_preview("codex", "alpha", Some("/work"), "alpha preview"),
+                agent_session_with_preview("codex", "beta", Some("/work"), "beta preview"),
+            ],
+            candidate_links: vec![
+                linked_to_mux_link(
+                    "link-a",
+                    session_alpha,
+                    editor.clone(),
+                    Provenance::StrongDiscovered,
+                    Confidence::High,
+                ),
+                linked_to_mux_link(
+                    "link-b",
+                    session_beta,
+                    editor,
+                    Provenance::StrongDiscovered,
+                    Confidence::High,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_columns(vec!["id", "mux", "preview"]),
+        );
+        let body = rendered.lines().nth(2).expect("body row");
+        // `alpha preview` should win — it's the first attached agent
+        // in `attached_to_mux` (BTreeMap-ordered by source NodeId).
+        assert!(
+            body.contains("alpha preview"),
+            "mux row should show first attached agent's preview:\n{body}",
+        );
+        assert!(
+            !body.contains("beta preview"),
+            "mux row should not include the second attached agent's preview:\n{body}",
+        );
+    }
+
+    #[test]
+    fn mux_preview_column_renders_dash_when_no_agents_attached_have_preview() {
+        // A mux with no attached agents at all.
+        let snapshot = GraphSnapshot {
+            nodes: vec![mux_session("tmux", "lonely", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_columns(vec!["id", "mux", "preview"]),
+        );
+        let body = rendered.lines().nth(2).expect("body row");
+        assert!(
+            body.trim_end().ends_with('—'),
+            "lonely mux row should render — for preview:\n{body}",
+        );
+    }
+
+    #[test]
+    fn union_preview_column_only_populates_for_agent_rows() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session_with_preview("codex", "alpha", Some("/work"), "agent preview"),
+                mux_session("tmux", "editor", Some("/work")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render_with(
+            &snapshot,
+            Projection::Union,
+            &RenderOptions::wide().with_columns(vec!["id", "kind", "label", "preview"]),
+        );
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let agent_row = body
+            .iter()
+            .find(|line| line.contains("agent "))
+            .expect("agent row");
+        assert!(
+            agent_row.contains("agent preview"),
+            "union agent row should carry the preview:\n{agent_row}",
+        );
+        let mux_row = body
+            .iter()
+            .find(|line| line.contains("mux "))
+            .expect("mux row");
+        assert!(
+            mux_row.trim_end().ends_with('—'),
+            "union mux row should render — for preview:\n{mux_row}",
+        );
+    }
+
+    #[test]
+    fn preview_column_is_opt_in_not_default() {
+        // Default snapshots stay byte-stable when the preview field
+        // is populated — the column has to be requested explicitly.
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session_with_preview(
+                "codex",
+                "alpha",
+                Some("/work"),
+                "should not appear in default render",
+            )],
+            ..GraphSnapshot::empty()
+        };
+        let rendered = render(&snapshot, Projection::Agent);
+        assert!(
+            !rendered.contains("should not appear"),
+            "default sessions render must not include preview content:\n{rendered}",
+        );
+        assert!(
+            !rendered.contains("PREVIEW"),
+            "default sessions render must not include the PREVIEW header:\n{rendered}",
+        );
     }
 
     #[test]

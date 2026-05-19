@@ -977,6 +977,7 @@ mod tests {
                     harness_key: "codex".to_string(),
                     cwd: Some(path_string(&child)),
                     title: None,
+                    last_message_preview: None,
                 }),
             ],
             ..GraphSnapshot::empty()

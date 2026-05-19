@@ -72,6 +72,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             harness_key: HARNESS_KEY.to_string(),
             cwd: info.directory.clone(),
             title: info.title.clone(),
+            last_message_preview: None,
         }));
     }
 

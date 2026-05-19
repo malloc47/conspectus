@@ -369,6 +369,7 @@ mod tests {
             harness_key: "codex".to_string(),
             cwd: Some("/work".to_string()),
             title: None,
+            last_message_preview: None,
         })
     }
 

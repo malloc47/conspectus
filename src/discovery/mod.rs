@@ -361,6 +361,7 @@ mod tests {
                     harness_key: "codex".to_string(),
                     cwd: None,
                     title: None,
+                    last_message_preview: None,
                 })],
                 candidate_links: vec![link.clone()],
                 diagnostics: Vec::new(),

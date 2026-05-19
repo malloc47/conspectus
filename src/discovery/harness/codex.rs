@@ -80,6 +80,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             harness_key: HARNESS_KEY.to_string(),
             cwd: meta.cwd.clone(),
             title: None,
+            last_message_preview: None,
         }));
 
         let Some(parent_id) = meta.forked_from_id.as_deref() else {

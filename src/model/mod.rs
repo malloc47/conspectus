@@ -251,6 +251,12 @@ pub struct AgentSessionNode {
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Single-line preview of the session's most recent
+    /// user/assistant text message, populated best-effort by the
+    /// harness adapter. Capped at 200 chars with a trailing `…`
+    /// when the source is longer. See ADR 0023.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_message_preview: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -516,6 +522,50 @@ fn stable_json_key<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("graph model values serialize")
 }
 
+/// Maximum [`AgentSessionNode::last_message_preview`] length (chars,
+/// not bytes) per ADR 0023. Adapters cap their extracted previews
+/// at this length.
+pub const LAST_MESSAGE_PREVIEW_CAP: usize = 200;
+
+/// Normalize an extracted message into the shape adapters store in
+/// [`AgentSessionNode::last_message_preview`] (ADR 0023): collapse
+/// every run of whitespace to a single space, trim the ends, return
+/// `None` for empty results, otherwise cap to
+/// [`LAST_MESSAGE_PREVIEW_CAP`] chars with a trailing `…`.
+pub fn normalize_last_message_preview(raw: &str) -> Option<String> {
+    let mut collapsed = String::with_capacity(raw.len().min(LAST_MESSAGE_PREVIEW_CAP * 4));
+    let mut last_was_space = true; // leading-trim
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            if !last_was_space {
+                collapsed.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            collapsed.push(ch);
+            last_was_space = false;
+        }
+    }
+    // Trim trailing space that the collapse may have left behind.
+    if collapsed.ends_with(' ') {
+        collapsed.pop();
+    }
+    if collapsed.is_empty() {
+        return None;
+    }
+    let char_count = collapsed.chars().count();
+    if char_count <= LAST_MESSAGE_PREVIEW_CAP {
+        return Some(collapsed);
+    }
+    // Take the first cap-1 chars, append the ellipsis. Char-based
+    // iteration so we don't slice mid-grapheme on non-ASCII content.
+    let truncated: String = collapsed
+        .chars()
+        .take(LAST_MESSAGE_PREVIEW_CAP - 1)
+        .collect();
+    Some(format!("{truncated}…"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -617,5 +667,54 @@ mod tests {
                 .expect("serialize overridden link")
                 .contains("overridden")
         );
+    }
+
+    #[test]
+    fn normalize_last_message_preview_collapses_whitespace_and_trims() {
+        assert_eq!(
+            normalize_last_message_preview("  hello\n\tworld  "),
+            Some("hello world".to_string())
+        );
+        assert_eq!(
+            normalize_last_message_preview("multiple    spaces"),
+            Some("multiple spaces".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_last_message_preview_returns_none_for_empty_inputs() {
+        assert_eq!(normalize_last_message_preview(""), None);
+        assert_eq!(normalize_last_message_preview("   "), None);
+        assert_eq!(normalize_last_message_preview("\n\t \r"), None);
+    }
+
+    #[test]
+    fn normalize_last_message_preview_caps_long_inputs_with_ellipsis() {
+        let body = "a".repeat(LAST_MESSAGE_PREVIEW_CAP + 50);
+        let preview = normalize_last_message_preview(&body).expect("non-empty");
+        let chars: Vec<char> = preview.chars().collect();
+        assert_eq!(chars.len(), LAST_MESSAGE_PREVIEW_CAP);
+        assert_eq!(*chars.last().unwrap(), '…');
+        // The body before the ellipsis is the first cap-1 chars of
+        // the input (all `a`s here).
+        assert!(chars[..chars.len() - 1].iter().all(|c| *c == 'a'));
+    }
+
+    #[test]
+    fn normalize_last_message_preview_preserves_short_unicode() {
+        let preview = normalize_last_message_preview("hi 👋 there").expect("non-empty");
+        assert_eq!(preview, "hi 👋 there");
+    }
+
+    #[test]
+    fn normalize_last_message_preview_caps_on_grapheme_boundary_not_byte() {
+        // String of CJK characters (each is 3 bytes in UTF-8). Capping
+        // by chars must not split bytes mid-codepoint.
+        let body = "東".repeat(LAST_MESSAGE_PREVIEW_CAP + 5);
+        let preview = normalize_last_message_preview(&body).expect("non-empty");
+        // All chars are valid (no partial codepoints would mean
+        // Rust would refuse to construct the String at all).
+        assert_eq!(preview.chars().count(), LAST_MESSAGE_PREVIEW_CAP);
+        assert!(preview.ends_with('…'));
     }
 }
