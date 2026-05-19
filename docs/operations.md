@@ -83,8 +83,13 @@ conspectus table {sessions|mux|union|prs|forks} [--layout {columnar|card}]
                                                  [--columns LIST]
                                                  [--scan-root PATH]...
                                                  [--pager | --no-pager]
-conspectus node show <id> [--scan-root PATH]... [--pager | --no-pager]
-conspectus columns {sessions|mux|union|prs|forks} [--pager | --no-pager]
+                                                 [--color {auto|always|never}]
+conspectus node show <id> [--scan-root PATH]...
+                          [--pager | --no-pager]
+                          [--color {auto|always|never}]
+conspectus columns {sessions|mux|union|prs|forks}
+                   [--pager | --no-pager]
+                   [--color {auto|always|never}]
 conspectus declared ...
 ```
 
@@ -144,6 +149,35 @@ stdout is not a TTY (useful for `PAGER=cat` captures). `--pager` and
 not page; JSON output is machine-consumable and the declared listing
 is short-lived tab-separated text. Pipe either through a pager
 manually if needed.
+
+## Color
+
+`conspectus table <ROWS>`, `conspectus columns <ROWS>`, and
+`conspectus node show <id>` emit ANSI color/styling when stdout
+supports it. See ADR 0022 for the full palette; in short, headers
+are bold, the `—` placeholder and short-ID column are dim,
+provenance tiers are colored by indicator (`LD`/`GD`=green,
+`SD`=cyan, `C`/`$`=dim), the ambiguity `*` and unresolved-lineage
+`?` prefixes are yellow, PR states use `open`=green / `closed`=red
+/ `merged`=magenta / draft yellow, and DECLARED cells use
+`declared`=green / `ignored`=dim / `overridden`=yellow.
+
+`--color {auto|always|never}` controls when ANSI is emitted.
+Resolution rules (highest priority first):
+
+1. `--color=never` → off.
+2. `--color=always` → on (overrides every env signal below).
+3. `NO_COLOR` set to a non-empty value → off
+   (<https://no-color.org>; respected for `auto` only).
+4. `CLICOLOR_FORCE` set to a non-zero value → on (BSD-style force).
+5. `TERM=dumb` → off.
+6. `CLICOLOR=0` → off.
+7. Otherwise `auto`: color iff stdout is a TTY.
+
+Pipes resolve to "no color" under `auto`, so
+`conspectus table sessions | grep` keeps text plain unless you pass
+`--color=always`. The pager respects ANSI (`less -R` is one of the
+default flags), so paged output retains color.
 
 `node show <id>` accepts any of:
 
