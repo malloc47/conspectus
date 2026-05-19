@@ -2873,17 +2873,22 @@ work. `P8-014` is post-v1 polish that does not block the release.
     the immediate-stage label. Mux/PR/fork detail will gain richer
     fields as the enrichment stories land.
 
-- [ ] `P8-006` Implement selection, focus, navigation, and filtering state.
-  - Scope: add the TUI app state machine for active view, focused panel,
-    selected row, expanded/collapsed row ids, scroll offsets, filters, and
-    command/status messages. Implement navigation keys (`j/k`, arrows,
-    PageUp/PageDown, Home/End, `g`/`G`), focus cycling, view switching
-    (`1`-`5`), `/` in-view search, `r` refresh command intent, `?` help
-    overlay intent, and stable selection retention across a new row tree.
-  - Tests: pure reducer/state-machine tests for every navigation key,
-    view switching, filter application, search query updates, selection
-    retention after refresh, and deleted-selected-row fallback.
-  - Blockers: `P8-004`, `P8-005`.
+- [x] `P8-006` Implement selection, focus, navigation, and filtering state.
+  - Outcome (v1 slice): `App` carries the row tree, snapshot,
+    expanded-set, selection by `RowId`, panel focus, and preview
+    scroll. Reducer handles `j/k/arrows`, `PageDown/PageUp`,
+    `Home/End/g/G`, `Enter` (expand/collapse), `Tab` (focus
+    cycle), and `J/K` (preview scroll). `Msg::SetData` retains
+    selection by `RowId` across refreshes and falls back to the
+    nearest visible row by index when the previously-selected id
+    disappears. Detail view-model recomputes eagerly on every
+    selection change. Group rows auto-expand on first sight so
+    sessions are visible immediately.
+  - Deferred to follow-on stories (not v1 through-line blockers):
+    view switching `1`–`5` (waits on the other row-tree builders
+    from P8-004 parts 2-5), `/` in-view search overlay,
+    `r` refresh-intent dispatch (waits on P8-008 to have
+    something to refresh), `?` help overlay.
 
 - [ ] `P8-007` Render the two-panel Ratatui UI.
   - Scope: implement the visible layout per the wireframe and panel

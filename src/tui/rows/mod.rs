@@ -26,9 +26,9 @@ use std::path::Path;
 use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
-mod sessions;
+pub mod sessions;
 
-pub use sessions::build_sessions_tree;
+pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
 /// Stable, hashable row identity. Used by the selection state
 /// machine in `P8-006` to retain selection across refreshes — two
