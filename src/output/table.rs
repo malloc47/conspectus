@@ -975,10 +975,16 @@ pub(crate) fn push_styled(out: &mut String, text: &str, style: Style, color: boo
 /// Render a body cell, applying any per-segment styling the column
 /// asks for. Most columns just call back to [`push_styled`] with
 /// [`cell_style`]'s single style. Columns that contain multi-segment
-/// content (the sessions projection's `agent` cell, the mux
-/// projection's `agents` cell) take a dispatch below so the
-/// `harness:` prefix can be coloured independently of the
-/// session-key tail and the `[indicator]` suffix.
+/// content take a dispatch below so the `harness:` prefix can be
+/// coloured independently of the session-key tail and the
+/// `[indicator]` suffix:
+///
+/// - `agent`: sessions projection's `harness:session_key` cell.
+/// - `agents`: mux projection's joined `label [indicator], …` cell.
+/// - `label`: union projection's per-row label. Agent rows render
+///   `harness:session_key` (coloured); mux rows render
+///   `backend:native_id` and fall through to plain text because
+///   the mux backend is not in [`harness_style`]'s palette.
 ///
 /// The emitted text's *visible* width equals `text.chars()` width
 /// in every branch — the ANSI envelope adds zero display columns —
@@ -987,7 +993,7 @@ pub(crate) fn push_styled(out: &mut String, text: &str, style: Style, color: boo
 fn push_cell(out: &mut String, column_key: &str, text: &str, color: bool) {
     if color {
         match column_key {
-            "agent" => {
+            "agent" | "label" => {
                 push_agent_label(out, text);
                 return;
             }
@@ -2852,6 +2858,44 @@ mod tests {
         assert!(colored.contains("\u{1b}[94m"), "codex = bright blue");
         assert!(colored.contains("\u{1b}[92m"), "opencode = bright green");
         assert!(colored.contains("\u{1b}[91m"), "aider = bright red");
+    }
+
+    #[test]
+    fn render_color_enabled_union_label_colors_agent_harness_prefix() {
+        // The union projection's LABEL column should carry the same
+        // harness-prefix colouring as the sessions projection's
+        // AGENT cell. Agent rows show coloured `harness:`; mux
+        // rows render `backend:native_id` as plain text because
+        // the mux backend is not in the harness palette.
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work")),
+                mux_session("tmux", "editor", Some("/work")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Union,
+            &RenderOptions::wide().with_color(true),
+        );
+        // Codex prefix gets bright blue; the `:alpha` tail stays
+        // plain (no fresh escape after the reset).
+        assert!(
+            colored.contains("\u{1b}[94mcodex\u{1b}[0m:alpha"),
+            "union LABEL should colour the codex prefix:\n{colored:?}",
+        );
+        // Mux label has no harness palette slot — `tmux` falls
+        // through to plain text, no bright-color escape adjacent
+        // to it.
+        let mux_line = colored
+            .lines()
+            .find(|line| line.contains("tmux:editor"))
+            .expect("mux row");
+        assert!(
+            !mux_line.contains("\u{1b}[9"),
+            "mux row LABEL should not have a bright-color escape:\n{mux_line:?}",
+        );
     }
 
     #[test]
