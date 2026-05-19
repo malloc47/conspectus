@@ -2260,12 +2260,24 @@ render time.
     `~/.codex/sessions/**` rollouts produce meaningful previews
     in `conspectus table sessions`.
 
-- [ ] `H-PREVIEW-004` Opencode last-message extraction.
-  - Scope: extend `src/discovery/harness/opencode.rs` to read the
-    most recent message-text row from the SQLite store
-    (schema-tolerant: opencode has moved between table layouts).
-  - Tests: SQLite fixture covering populated and empty session
-    rows.
+- [x] `H-PREVIEW-004` Opencode last-message extraction.
+  - Outcome: `src/discovery/harness/opencode.rs` populates
+    `last_message_preview` by reading the modern `part` table
+    alongside the existing `session` query. A
+    `read_last_message_previews` helper runs a single
+    `ROW_NUMBER()`-windowed SQL query that pulls the most recent
+    `type: "text"` row per session via `json_extract`, ordered by
+    `(time_created DESC, id DESC)`, filtered to non-empty text. The
+    `bundled` rusqlite feature guarantees JSON1 is available;
+    schemas without the `part` table (or any row that fails to
+    parse) degrade to `None` so legacy stores still discover their
+    sessions without lineage or preview. Each non-empty text passes
+    through `normalize_last_message_preview` for whitespace
+    collapse and the 200-char cap. Five new SQLite-backed unit
+    tests cover (a) the most-recent-text-part wins, (b) empty/
+    missing-text rows are skipped, (c) per-session attribution,
+    (d) absent-`part`-table degrades to `None`, (e) long text is
+    capped via the shared helper. All 440 tests pass.
   - Blockers: `H-PREVIEW-001`.
 
 - [ ] `H-PREVIEW-005` Aider last-message extraction.

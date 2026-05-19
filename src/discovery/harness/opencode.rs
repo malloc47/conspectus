@@ -25,6 +25,7 @@ use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
+    normalize_last_message_preview,
 };
 
 pub const HARNESS_KEY: &str = "opencode";
@@ -72,7 +73,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             harness_key: HARNESS_KEY.to_string(),
             cwd: info.directory.clone(),
             title: info.title.clone(),
-            last_message_preview: None,
+            last_message_preview: info.last_message_preview.clone(),
         }));
     }
 
@@ -114,6 +115,12 @@ struct SessionInfo {
     /// Legacy filesystem records do not expose lineage and leave this `None`.
     #[serde(default)]
     parent_id: Option<String>,
+    /// Sourced from the most recent `type: "text"` row in the `part`
+    /// table when present. Capped/normalized via
+    /// [`normalize_last_message_preview`]. Legacy filesystem records
+    /// and older schemas without the table leave this `None`.
+    #[serde(default)]
+    last_message_preview: Option<String>,
 }
 
 fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
@@ -154,20 +161,68 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
             } else {
                 None
             },
+            last_message_preview: None,
         })
     }) else {
         return Vec::new();
     };
 
-    rows.filter_map(|row| {
-        let info = row.ok()?;
-        if info.id.trim().is_empty() {
-            None
-        } else {
-            Some(info)
+    let mut sessions: Vec<SessionInfo> = rows
+        .filter_map(|row| {
+            let info = row.ok()?;
+            if info.id.trim().is_empty() {
+                None
+            } else {
+                Some(info)
+            }
+        })
+        .collect();
+
+    // Attach the most recent text-part preview per session. Best-effort:
+    // schemas that don't carry the `part` table (or lack JSON1 support
+    // in this rusqlite build, which the `bundled` feature ensures we
+    // have) degrade to `None`.
+    let previews = read_last_message_previews(&connection);
+    for session in sessions.iter_mut() {
+        if let Some(text) = previews.get(&session.id) {
+            session.last_message_preview = normalize_last_message_preview(text);
         }
-    })
-    .collect()
+    }
+
+    sessions
+}
+
+/// Build a `session_id → most-recent-text` map by walking the `part`
+/// table backward. Skips non-text parts (`step-start`, `step-finish`,
+/// `reasoning`, `tool-call`, etc.) and empty text fields. The whole
+/// query is best-effort — returns an empty map if the table is
+/// missing, JSON1 isn't compiled in (it is under `bundled`), or any
+/// row fails to parse.
+fn read_last_message_previews(connection: &Connection) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let sql = "WITH ranked AS ( \
+        SELECT session_id, json_extract(data, '$.text') AS text, \
+               ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY time_created DESC, id DESC) AS rn \
+        FROM part \
+        WHERE json_extract(data, '$.type') = 'text' \
+          AND json_extract(data, '$.text') IS NOT NULL \
+          AND length(json_extract(data, '$.text')) > 0 \
+    ) \
+    SELECT session_id, text FROM ranked WHERE rn = 1";
+    let Ok(mut statement) = connection.prepare(sql) else {
+        return out;
+    };
+    let Ok(rows) = statement.query_map([], |row| {
+        let session_id: String = row.get(0)?;
+        let text: String = row.get(1)?;
+        Ok((session_id, text))
+    }) else {
+        return out;
+    };
+    for row in rows.flatten() {
+        out.insert(row.0, row.1);
+    }
+    out
 }
 
 fn build_lineage_link(
@@ -642,5 +697,213 @@ mod tests {
             lineage_links(&fragment).is_empty(),
             "schemas without parent_id must not emit lineage"
         );
+    }
+
+    /// Build a minimal `part` table next to the session row so the
+    /// preview extractor can find a text row.
+    fn write_part_table(connection: &Connection, parts: &[(&str, &str, i64, &str)]) {
+        connection
+            .execute(
+                "CREATE TABLE part (\
+                    id TEXT, \
+                    message_id TEXT, \
+                    session_id TEXT, \
+                    time_created INTEGER, \
+                    time_updated INTEGER, \
+                    data TEXT \
+                )",
+                [],
+            )
+            .expect("create part table");
+        for (id, session_id, time_created, data) in parts {
+            connection
+                .execute(
+                    "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    (id, "msg-x", session_id, time_created, time_created, data),
+                )
+                .expect("insert part");
+        }
+    }
+
+    fn discover_session(context: &DiscoveryContext, id: &str) -> AgentSessionNode {
+        let fragment = OpenCodeAdapter::new().discover(context).expect("discover");
+        fragment
+            .nodes
+            .into_iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .find(|s| s.id.session_key == id)
+            .expect("session present")
+    }
+
+    /// The most recent `type: "text"` part wins; non-text parts
+    /// (`step-start`, `step-finish`, `reasoning`, `tool-call`, …)
+    /// are skipped via the SQL `WHERE` clause.
+    #[test]
+    fn last_message_preview_returns_most_recent_text_part() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let db = fixture.opencode_state_root().join("opencode.db");
+        if let Some(parent) = db.parent() {
+            fs::create_dir_all(parent).expect("parent dir");
+        }
+        let connection = Connection::open(&db).expect("open db");
+        connection
+            .execute(
+                "CREATE TABLE session (\
+                    id TEXT, directory TEXT, title TEXT, parent_id TEXT)",
+                [],
+            )
+            .expect("session table");
+        connection
+            .execute(
+                "INSERT INTO session (id, directory, title, parent_id) VALUES ('s1', '/work', 't', NULL)",
+                [],
+            )
+            .expect("session row");
+        write_part_table(
+            &connection,
+            &[
+                ("p1", "s1", 100, r#"{"type":"step-start"}"#),
+                ("p2", "s1", 200, r#"{"type":"text","text":"first answer"}"#),
+                (
+                    "p3",
+                    "s1",
+                    300,
+                    r#"{"type":"reasoning","text":"thinking aloud"}"#,
+                ),
+                ("p4", "s1", 400, r#"{"type":"text","text":"final answer"}"#),
+                ("p5", "s1", 500, r#"{"type":"step-finish","reason":"stop"}"#),
+            ],
+        );
+        drop(connection);
+
+        let session = discover_session(&context, "s1");
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("final answer")
+        );
+    }
+
+    /// Empty `text` strings and missing `text` fields are filtered by
+    /// the SQL `length` / `IS NOT NULL` guards.
+    #[test]
+    fn last_message_preview_skips_empty_text_parts() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let db = fixture.opencode_state_root().join("opencode.db");
+        if let Some(parent) = db.parent() {
+            fs::create_dir_all(parent).expect("parent dir");
+        }
+        let connection = Connection::open(&db).expect("open db");
+        connection
+            .execute(
+                "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, parent_id TEXT)",
+                [],
+            )
+            .expect("session table");
+        connection
+            .execute("INSERT INTO session VALUES ('s1', '/work', 't', NULL)", [])
+            .expect("session row");
+        write_part_table(
+            &connection,
+            &[
+                ("p1", "s1", 100, r#"{"type":"text","text":"valid"}"#),
+                ("p2", "s1", 200, r#"{"type":"text","text":""}"#),
+                ("p3", "s1", 300, r#"{"type":"text"}"#), // missing text
+            ],
+        );
+        drop(connection);
+
+        let session = discover_session(&context, "s1");
+        assert_eq!(session.last_message_preview.as_deref(), Some("valid"));
+    }
+
+    /// Multi-session DBs surface a preview per session independently.
+    #[test]
+    fn last_message_preview_is_per_session() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let db = fixture.opencode_state_root().join("opencode.db");
+        if let Some(parent) = db.parent() {
+            fs::create_dir_all(parent).expect("parent dir");
+        }
+        let connection = Connection::open(&db).expect("open db");
+        connection
+            .execute(
+                "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, parent_id TEXT)",
+                [],
+            )
+            .expect("session table");
+        connection
+            .execute("INSERT INTO session VALUES ('a', '/w', 't', NULL)", [])
+            .expect("a");
+        connection
+            .execute("INSERT INTO session VALUES ('b', '/w', 't', NULL)", [])
+            .expect("b");
+        write_part_table(
+            &connection,
+            &[
+                ("p1", "a", 100, r#"{"type":"text","text":"hello from a"}"#),
+                ("p2", "b", 100, r#"{"type":"text","text":"hello from b"}"#),
+            ],
+        );
+        drop(connection);
+
+        let a = discover_session(&context, "a");
+        let b = discover_session(&context, "b");
+        assert_eq!(a.last_message_preview.as_deref(), Some("hello from a"));
+        assert_eq!(b.last_message_preview.as_deref(), Some("hello from b"));
+    }
+
+    /// Schemas without the `part` table degrade silently — sessions
+    /// still discover, previews are `None`.
+    #[test]
+    fn last_message_preview_returns_none_without_part_table() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        write_sqlite_session(
+            &fixture.opencode_state_root().join("opencode.db"),
+            "s1",
+            Some("/work"),
+            Some("t"),
+        );
+
+        let session = discover_session(&context, "s1");
+        assert_eq!(session.last_message_preview, None);
+    }
+
+    /// Long text values are normalized and capped through the shared
+    /// helper.
+    #[test]
+    fn last_message_preview_is_capped_at_two_hundred_chars() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let db = fixture.opencode_state_root().join("opencode.db");
+        if let Some(parent) = db.parent() {
+            fs::create_dir_all(parent).expect("parent dir");
+        }
+        let connection = Connection::open(&db).expect("open db");
+        connection
+            .execute(
+                "CREATE TABLE session (id TEXT, directory TEXT, title TEXT, parent_id TEXT)",
+                [],
+            )
+            .expect("session table");
+        connection
+            .execute("INSERT INTO session VALUES ('s1', '/w', 't', NULL)", [])
+            .expect("session row");
+        let long = "a".repeat(500);
+        let data = format!(r#"{{"type":"text","text":"{long}"}}"#);
+        write_part_table(&connection, &[("p1", "s1", 100, &data)]);
+        drop(connection);
+
+        let session = discover_session(&context, "s1");
+        let preview = session.last_message_preview.expect("non-empty");
+        assert_eq!(preview.chars().count(), 200);
+        assert!(preview.ends_with('…'));
     }
 }
