@@ -7,6 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use std::str::FromStr;
+use std::time::Duration;
 
 use conspectus::config::{self, ConfigLoader, PROJECT_CONFIG_FILENAME};
 use conspectus::declared::{
@@ -31,6 +32,7 @@ impl Cli {
             Command::Declared(args) => args.run(),
             Command::Node(args) => args.run(),
             Command::Columns(args) => args.run(),
+            Command::Tui(args) => args.run(),
         }
     }
 }
@@ -47,6 +49,8 @@ enum Command {
     Node(NodeArgs),
     /// List registered columns for a `conspectus table <ROWS>` row-type.
     Columns(ColumnsArgs),
+    /// Open the interactive terminal UI.
+    Tui(TuiArgs),
 }
 
 #[derive(Debug, Args)]
@@ -561,6 +565,146 @@ fn pager_candidates_with_env(pager_env: Option<String>) -> Vec<ProcCommand> {
 ///   on the user's scrollback instead of being cleared on exit.
 const LESS_DEFAULT_ARGS: &[&str] = &["-F", "-R", "-X"];
 
+#[derive(Debug, Args, Default)]
+struct TuiArgs {
+    /// Discovery scan root. Repeatable. Defaults to the current
+    /// working directory when omitted.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+    /// Initial left-panel organization.
+    #[arg(long, value_enum, default_value_t = ViewFlag::Sessions)]
+    view: ViewFlag,
+    /// Top-level grouping in the sessions tree. See
+    /// `docs/implementation/phase-08-interactive-tui.md` for
+    /// semantics of each value.
+    #[arg(long = "sessions-grouping", value_enum, default_value_t = SessionsGroupingFlag::Graph)]
+    sessions_grouping: SessionsGroupingFlag,
+    /// Row sort within each group.
+    #[arg(long, value_enum, default_value_t = SortFlag::Hierarchy)]
+    sort: SortFlag,
+    /// Background graph refresh cadence (e.g. `30s`, `1m`, `500ms`).
+    #[arg(
+        long = "refresh-interval",
+        value_name = "DURATION",
+        default_value = "30s"
+    )]
+    refresh_interval: String,
+    /// Selected mux pane capture cadence.
+    #[arg(
+        long = "mux-preview-interval",
+        value_name = "DURATION",
+        default_value = "2s"
+    )]
+    mux_preview_interval: String,
+    /// Suppress live extras: mux pane capture and transcript-tail
+    /// reads. Graph-resident previews continue to render.
+    #[arg(long = "no-live-preview")]
+    no_live_preview: bool,
+    /// When to colorize the output. `auto` (default) emits ANSI
+    /// only when stdout is a TTY (and respects `NO_COLOR`,
+    /// `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces
+    /// color on; `never` forces it off.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum ViewFlag {
+    #[default]
+    Sessions,
+    Mux,
+    Union,
+    Prs,
+    Forks,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum SortFlag {
+    #[default]
+    Hierarchy,
+    Recency,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum SessionsGroupingFlag {
+    #[default]
+    Graph,
+    Repo,
+    Worktree,
+    ScanRoot,
+}
+
+impl TuiArgs {
+    fn run(self) -> Result<()> {
+        let refresh_interval = parse_tui_duration(&self.refresh_interval).map_err(|err| {
+            anyhow!(
+                "invalid --refresh-interval `{}`: {err}",
+                self.refresh_interval
+            )
+        })?;
+        let mux_preview_interval =
+            parse_tui_duration(&self.mux_preview_interval).map_err(|err| {
+                anyhow!(
+                    "invalid --mux-preview-interval `{}`: {err}",
+                    self.mux_preview_interval
+                )
+            })?;
+        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
+
+        let config = conspectus::tui::RunConfig {
+            scan_roots: self.scan_roots,
+            default_view: match self.view {
+                ViewFlag::Sessions => conspectus::tui::View::Sessions,
+                ViewFlag::Mux => conspectus::tui::View::Mux,
+                ViewFlag::Union => conspectus::tui::View::Union,
+                ViewFlag::Prs => conspectus::tui::View::Prs,
+                ViewFlag::Forks => conspectus::tui::View::Forks,
+            },
+            default_sort: match self.sort {
+                SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
+                SortFlag::Recency => conspectus::tui::Sort::Recency,
+            },
+            sessions_grouping: match self.sessions_grouping {
+                SessionsGroupingFlag::Graph => conspectus::tui::SessionsGrouping::Graph,
+                SessionsGroupingFlag::Repo => conspectus::tui::SessionsGrouping::Repo,
+                SessionsGroupingFlag::Worktree => conspectus::tui::SessionsGrouping::Worktree,
+                SessionsGroupingFlag::ScanRoot => conspectus::tui::SessionsGrouping::ScanRoot,
+            },
+            refresh_interval,
+            mux_preview_interval,
+            live_preview_enabled: !self.no_live_preview,
+            color,
+        };
+
+        conspectus::tui::run(config)
+    }
+}
+
+/// Parse a small subset of duration strings: `<integer><ms|s|m|h>`.
+/// Kept in-tree to avoid pulling in `humantime` for the TUI flag
+/// surface; revisit if more formats are needed.
+fn parse_tui_duration(input: &str) -> Result<Duration, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("empty duration".into());
+    }
+    let split = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| "missing unit (expected ms/s/m/h)".to_string())?;
+    let (num_str, suffix) = trimmed.split_at(split);
+    let value: u64 = num_str
+        .parse()
+        .map_err(|_| format!("not a non-negative integer: `{num_str}`"))?;
+    let dur = match suffix {
+        "ms" => Duration::from_millis(value),
+        "s" => Duration::from_secs(value),
+        "m" => Duration::from_secs(value.saturating_mul(60)),
+        "h" => Duration::from_secs(value.saturating_mul(3600)),
+        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h)")),
+    };
+    Ok(dur)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,6 +717,43 @@ mod tests {
         cmd.get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn parse_tui_duration_accepts_each_supported_unit() {
+        assert_eq!(parse_tui_duration("500ms"), Ok(Duration::from_millis(500)));
+        assert_eq!(parse_tui_duration("30s"), Ok(Duration::from_secs(30)));
+        assert_eq!(parse_tui_duration("2m"), Ok(Duration::from_secs(120)));
+        assert_eq!(parse_tui_duration("1h"), Ok(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn parse_tui_duration_trims_surrounding_whitespace() {
+        assert_eq!(parse_tui_duration("  10s  "), Ok(Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn parse_tui_duration_rejects_missing_unit() {
+        let err = parse_tui_duration("30").unwrap_err();
+        assert!(err.contains("missing unit"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_tui_duration_rejects_unknown_unit() {
+        let err = parse_tui_duration("30d").unwrap_err();
+        assert!(err.contains("unknown unit"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_tui_duration_rejects_empty_string() {
+        assert!(parse_tui_duration("").is_err());
+        assert!(parse_tui_duration("   ").is_err());
+    }
+
+    #[test]
+    fn parse_tui_duration_rejects_negative_or_non_integer() {
+        assert!(parse_tui_duration("-5s").is_err());
+        assert!(parse_tui_duration("1.5s").is_err());
     }
 
     #[test]

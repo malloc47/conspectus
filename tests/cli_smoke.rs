@@ -1879,3 +1879,49 @@ fn git(root: &Path, args: &[&str]) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn tui_help_describes_subcommand_and_flags() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["tui", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("interactive terminal UI"))
+        .stdout(predicate::str::contains("--scan-root"))
+        .stdout(predicate::str::contains("--view"))
+        .stdout(predicate::str::contains("--refresh-interval"))
+        .stdout(predicate::str::contains("--mux-preview-interval"))
+        .stdout(predicate::str::contains("--no-live-preview"))
+        .stdout(predicate::str::contains("--sessions-grouping"));
+}
+
+#[test]
+fn tui_rejects_unknown_view_value() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["tui", "--view", "nope"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}
+
+#[test]
+fn tui_rejects_malformed_refresh_interval() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["tui", "--refresh-interval", "abc"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid --refresh-interval"));
+}
+
+#[test]
+fn tui_rejects_unknown_sessions_grouping_value() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["tui", "--sessions-grouping", "potato"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value"));
+}

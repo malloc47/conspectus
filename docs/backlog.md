@@ -2775,11 +2775,10 @@ P8-001 ──→ P8-001a ──→ P8-002 ──→ P8-003 ──→ P8-004 ─�
                                             P8-012c ──────────────┘
 ```
 
-`P8-001`, `P8-001a`, and `P8-002` are closed (v1 product vision,
-v1-blocking decisions, and the runtime/architecture ADR all
-locked). `P8-003` (the `conspectus tui` shell + terminal lifecycle
-with the runtime dep added per ADR 0024) is the next blocker.
-`P8-004` through `P8-007` can be
+`P8-001`, `P8-001a`, `P8-002`, and `P8-003` are closed (v1 product
+vision, v1-blocking decisions, the runtime/architecture ADR, and
+the `conspectus tui` shell with terminal lifecycle are all in
+place). `P8-004` through `P8-007` can be
 implemented in parallel once the app shell exists. `P8-009` through
 `P8-011`, `P8-014`, and the `P8-012*` enrichments depend on the same
 UI shell but should remain isolated from pure browsing/rendering
@@ -2834,21 +2833,18 @@ work. `P8-014` is post-v1 polish that does not block the release.
     policy narrows what later TUI work can pull in without a
     follow-on ADR.
 
-- [ ] `P8-003` Add `conspectus tui` CLI shell and terminal lifecycle.
-  - Scope: add the `tui` subcommand with `--scan-root`, `--view`,
-    `--refresh-interval`, `--no-live-preview`, and `--color` flags per
-    the Phase 8 plan. Wire a minimal TUI runtime that enters alternate
-    screen/raw mode, renders a placeholder shell, handles `q` and Ctrl-C,
-    restores the terminal on normal/error exits, and keeps all discovery
-    and rendering behavior behind `src/tui/` module boundaries. Do not
-    implement graph browsing yet.
-  - Tests: CLI smoke test for `conspectus tui --help`; unit tests for
-    flag parsing and color-option resolution reuse where applicable.
-    Add a terminal-lifecycle test seam if the chosen runtime supports
-    a fake backend.
-  - Manual checks: `cargo run -- tui --help`; `cargo run -- tui` then
-    quit with `q` and Ctrl-C, confirming terminal state is restored.
-  - Blockers: `P8-002`.
+- [x] `P8-003` Add `conspectus tui` CLI shell and terminal lifecycle.
+  - Outcome: `conspectus tui` subcommand registered with the full
+    locked flag surface (`--scan-root`, `--view`,
+    `--sessions-grouping`, `--sort`, `--refresh-interval`,
+    `--mux-preview-interval`, `--no-live-preview`, `--color`).
+    `src/tui/` module skeleton in place per ADR 0024: `mod.rs`
+    exposes `RunConfig` + `run`; `app.rs` carries the pure
+    reducer; `runtime.rs` owns the alt-screen / raw-mode lifecycle
+    and the event loop; `ui.rs` renders a placeholder frame for
+    downstream stories to replace. Pure reducer and event-
+    translation are unit-tested without a terminal. Integration
+    smoke tests cover `tui --help` and flag validation.
 
 - [ ] `P8-004` Build TUI row tree view-models for every table row-type.
   - Scope: add pure row-tree builders for `sessions`, `mux`, `union`,
