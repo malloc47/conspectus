@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use anyhow::Result;
@@ -28,7 +29,13 @@ use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
     LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
+    normalize_last_message_preview,
 };
+
+/// Maximum number of bytes to read from the tail of a rollout when
+/// looking for the most recent message preview. Codex rollouts can
+/// be many MB, so a bounded tail keeps the scan cheap.
+const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
 pub const HARNESS_KEY: &str = "codex";
 
@@ -64,8 +71,13 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     let state_scope = state_root.to_string_lossy().to_string();
     let mut metas: Vec<SessionMetaPayload> = Vec::new();
 
+    let mut previews: HashMap<String, String> = HashMap::new();
+
     visit_rollouts(&sessions_dir, &mut |path| {
         if let Some(meta) = read_session_meta(path) {
+            if let Some(preview) = read_rollout_last_message_preview(path) {
+                previews.insert(meta.id.clone(), preview);
+            }
             metas.push(meta);
         }
     })?;
@@ -80,7 +92,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             harness_key: HARNESS_KEY.to_string(),
             cwd: meta.cwd.clone(),
             title: None,
-            last_message_preview: None,
+            last_message_preview: previews.get(&meta.id).cloned(),
         }));
 
         let Some(parent_id) = meta.forked_from_id.as_deref() else {
@@ -234,6 +246,114 @@ fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
     }
 
     Some(envelope.payload)
+}
+
+/// Extract the rollout's most recent user/assistant text content as a
+/// preview (ADR 0023). Walks the trailing [`TAIL_SCAN_BYTES`] of the
+/// JSONL file backward, dropping the partial first line when the
+/// seek lands mid-file. Only `response_item` records with
+/// `payload.type == "message"` and a `user`/`assistant` role
+/// contribute; `reasoning`, `function_call`, `function_call_output`,
+/// and `event_msg` records are skipped. Within a message the
+/// extractor returns the last `input_text`/`output_text` block with
+/// non-empty content.
+///
+/// The result is normalized via [`normalize_last_message_preview`]
+/// (whitespace collapsed, capped at 200 chars with `…`). Discovery
+/// stays best-effort: corrupt JSON, empty rollouts, and rollouts
+/// whose tail contains only tool / reasoning payloads yield `None`.
+fn read_rollout_last_message_preview(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    if len == 0 {
+        return None;
+    }
+
+    let start = len.saturating_sub(TAIL_SCAN_BYTES);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    file.read_to_end(&mut buf).ok()?;
+
+    // Drop the first partial line if we started mid-file.
+    let scan_start = if start > 0 {
+        match buf.iter().position(|&b| b == b'\n') {
+            Some(idx) => idx + 1,
+            None => return None,
+        }
+    } else {
+        0
+    };
+
+    let lines: Vec<&[u8]> = buf[scan_start..]
+        .split(|&b| b == b'\n')
+        .filter(|l| !l.is_empty())
+        .collect();
+    for line in lines.iter().rev() {
+        let Ok(parsed) = serde_json::from_slice::<RolloutLine>(line) else {
+            continue;
+        };
+        if let Some(text) = extract_rollout_preview_text(&parsed)
+            && let Some(preview) = normalize_last_message_preview(&text)
+        {
+            return Some(preview);
+        }
+    }
+    None
+}
+
+#[derive(Deserialize)]
+struct RolloutLine {
+    #[serde(rename = "type", default)]
+    record_type: Option<String>,
+    #[serde(default)]
+    payload: Option<RolloutPayload>,
+}
+
+#[derive(Deserialize)]
+struct RolloutPayload {
+    #[serde(rename = "type", default)]
+    payload_type: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    content: Option<Vec<RolloutContent>>,
+}
+
+#[derive(Deserialize)]
+struct RolloutContent {
+    #[serde(rename = "type", default)]
+    block_type: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+fn extract_rollout_preview_text(line: &RolloutLine) -> Option<String> {
+    if line.record_type.as_deref() != Some("response_item") {
+        return None;
+    }
+    let payload = line.payload.as_ref()?;
+    if payload.payload_type.as_deref() != Some("message") {
+        return None;
+    }
+    let role = payload.role.as_deref()?;
+    if role != "user" && role != "assistant" {
+        return None;
+    }
+    let blocks = payload.content.as_ref()?;
+    for block in blocks.iter().rev() {
+        let block_type = block.block_type.as_deref()?;
+        if block_type != "input_text" && block_type != "output_text" {
+            continue;
+        }
+        let Some(text) = block.text.as_ref() else {
+            continue;
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        return Some(text.clone());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -471,5 +591,151 @@ mod tests {
             })
             .collect();
         assert_eq!(sessions, vec!["good".to_string()]);
+    }
+
+    /// Helper: append response_item lines to an existing rollout
+    /// (the fixture only writes the session_meta header).
+    fn append_rollout_lines(path: &Path, lines: &[&str]) {
+        let mut body = fs::read_to_string(path).expect("read rollout");
+        for line in lines {
+            body.push_str(line);
+            body.push('\n');
+        }
+        fs::write(path, body).expect("rewrite rollout");
+    }
+
+    fn discover_session(context: &DiscoveryContext, id: &str) -> AgentSessionNode {
+        let fragment = CodexAdapter::new().discover(context).expect("discover");
+        fragment
+            .nodes
+            .into_iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .find(|s| s.id.session_key == id)
+            .expect("matching session")
+    }
+
+    /// Plain assistant `output_text` at the tail wins.
+    #[test]
+    fn last_message_preview_returns_last_assistant_output_text() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("plain").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello back"}]}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "plain");
+        assert_eq!(session.last_message_preview.as_deref(), Some("hello back"));
+    }
+
+    /// Tool / reasoning / event records at the tail are skipped; the
+    /// preceding text message wins.
+    #[test]
+    fn last_message_preview_skips_tool_reasoning_and_event_records() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("mixed").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"running checks"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"function_call","name":"shell"}}"#,
+                r#"{"type":"response_item","payload":{"type":"function_call_output","output":"ok"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"token_count","input":42}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "mixed");
+        assert_eq!(
+            session.last_message_preview.as_deref(),
+            Some("running checks"),
+        );
+    }
+
+    /// Empty `text` strings should not win — the extractor keeps
+    /// walking until a non-empty block is found.
+    #[test]
+    fn last_message_preview_skips_empty_text_blocks() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("empty-text").with_cwd("/work"))
+            .expect("write session");
+
+        append_rollout_lines(
+            &path,
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"valid"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":""}]}}"#,
+            ],
+        );
+
+        let session = discover_session(&context, "empty-text");
+        assert_eq!(session.last_message_preview.as_deref(), Some("valid"));
+    }
+
+    /// A rollout with only the session_meta header yields no preview.
+    #[test]
+    fn last_message_preview_returns_none_when_tail_has_no_messages() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("meta-only").with_cwd("/work"))
+            .expect("write session");
+
+        let session = discover_session(&context, "meta-only");
+        assert_eq!(session.last_message_preview, None);
+    }
+
+    /// Long messages are capped via the shared normalizer.
+    #[test]
+    fn last_message_preview_is_capped_at_two_hundred_chars() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("long").with_cwd("/work"))
+            .expect("write session");
+        let long_text = "a".repeat(500);
+        let line = format!(
+            r#"{{"type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"{long_text}"}}]}}}}"#
+        );
+        append_rollout_lines(&path, &[&line]);
+
+        let session = discover_session(&context, "long");
+        let preview = session.last_message_preview.expect("non-empty");
+        assert_eq!(preview.chars().count(), 200);
+        assert!(preview.ends_with('…'));
+    }
+
+    /// Discovery degrades silently on corrupt body bytes inside the
+    /// tail — preview returns None, the session still discovers.
+    #[test]
+    fn last_message_preview_returns_none_when_tail_is_corrupt() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        let path = fixture
+            .write_codex_session(&CodexSessionRecord::new("corrupt").with_cwd("/work"))
+            .expect("write session");
+        // Append non-JSON garbage as the rollout's tail.
+        let mut body = fs::read_to_string(&path).expect("read");
+        body.push_str("this is not json\n");
+        fs::write(&path, body).expect("rewrite");
+
+        let session = discover_session(&context, "corrupt");
+        assert_eq!(session.last_message_preview, None);
     }
 }
