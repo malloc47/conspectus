@@ -124,6 +124,22 @@ row-type along with its one-line description, marking each column
 in the default set with `(default)`. Useful when you don't remember
 exact column names or want to see which columns are opt-in.
 
+The `preview` column (registered on `sessions`, `mux`, and `union`)
+shows a one-line snippet of the agent session's most recent
+user/assistant text message, mimicking Claude Code's `/resume` view.
+The snippet is sourced from `AgentSessionNode.last_message_preview`
+in the resolved graph (see ADR 0023 — capped at 200 chars,
+whitespace-normalized) rather than re-read at render time. The
+column is opt-in (default off) for two reasons: previews can
+surface user-typed text that you may not want in a default-on
+status table, and the 200-char cap is wider than the other defaults
+fit alongside in a typical terminal. Opt in with `--columns
++preview` or `[table.<rows>].columns = [..., "preview"]`. On the
+`mux` row-type the cell shows the first attached agent's preview,
+which keeps the cell scannable when several agents share a mux. On
+the `union` row-type the preview shows for agent rows only; mux
+rows render `—`.
+
 ## Paging
 
 `conspectus table <ROWS>`, `conspectus columns <ROWS>`, and

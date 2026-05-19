@@ -2176,6 +2176,85 @@ shape.
     regression test for the cross-session path so we do not regress if
     a future claude-code release reintroduces successor files.
 
+### Agent Session Last-Message Preview
+
+Claude Code's `/resume` view shows each historical session with a short
+snippet of its most recent message. Conspectus's table output benefits
+from the same: scanning a column of `claude-code:alpha`,
+`codex:beta`, `opencode:gamma` rows is far more useful when each
+carries a one-line "what was it doing?" preview alongside the harness
+label, cwd, mux, and PR cells. Per ADR 0023 the preview lives on
+`AgentSessionNode` as `last_message_preview: Option<String>`,
+populated best-effort by each harness adapter; the table renderer
+sources it like any other cell rather than re-reading transcripts at
+render time.
+
+- [x] `H-PREVIEW-001` Model field + opt-in preview column registration.
+  - Outcome: ADR 0023 records the design (single-line, 200-char
+    cap, adapter-populated, default-off column). `AgentSessionNode`
+    grew `last_message_preview: Option<String>`; the field is
+    `#[serde(default, skip_serializing_if = "Option::is_none")]` so
+    existing JSON fixtures stay byte-stable. A shared
+    `model::normalize_last_message_preview` helper (plus
+    `LAST_MESSAGE_PREVIEW_CAP = 200`) gives every adapter a
+    consistent collapse-whitespace-trim-cap-with-ellipsis routine.
+    The `preview` column is registered on `sessions`, `mux`, and
+    `union` row-types, default off. Extractors: sessions reads the
+    row's session preview; union shows it for agent rows and `—`
+    for mux rows; mux looks up the first attached agent's preview
+    via `attached_to_mux` (BTreeMap order) and renders `—` when
+    none is set. All harness adapters still emit `None`; follow-up
+    stories H-PREVIEW-002..005 populate per harness.
+    `docs/operations.md` documents the column and its privacy
+    posture. Five renderer unit tests cover Some/None for sessions,
+    first-attached lookup for mux, empty mux fall-through, the
+    union agent-vs-mux split, and the byte-stable default render.
+    Five normalizer unit tests cover whitespace collapse, empty
+    input, char-based capping with ellipsis, unicode preservation,
+    and grapheme-boundary safety on multibyte content. All 421
+    tests pass; no insta snapshot moved.
+
+- [ ] `H-PREVIEW-002` Claude Code last-message extraction.
+  - Scope: extend `src/discovery/harness/claude_code.rs` to scan the
+    session JSONL backward, find the most recent user/assistant
+    message with a non-empty text content block, normalize
+    whitespace to single spaces, and cap at 200 chars per ADR 0023.
+    Skip tool-use and tool-result events, system messages, and the
+    compaction summary record. Empty/malformed transcripts emit
+    `None`. Live state validation should observe the preview appear
+    on the current claude-code project's sessions.
+  - Tests: fixture transcripts covering (a) plain user→assistant
+    exchange (assistant's last text wins), (b) tool-use block
+    followed by a text continuation (text wins), (c) compaction
+    boundary followed by post-compaction assistant text (post-
+    compaction wins), (d) empty / tool-only / corrupt transcripts
+    (None).
+  - Blockers: `H-PREVIEW-001`.
+
+- [ ] `H-PREVIEW-003` Codex last-message extraction.
+  - Scope: extend `src/discovery/harness/codex.rs` similarly for
+    codex rollout JSONL. Codex's content-block shape differs from
+    claude-code; this story owns the codex-side parser.
+  - Tests: fixture rollouts mirroring H-PREVIEW-002's shape set.
+  - Blockers: `H-PREVIEW-001`.
+
+- [ ] `H-PREVIEW-004` Opencode last-message extraction.
+  - Scope: extend `src/discovery/harness/opencode.rs` to read the
+    most recent message-text row from the SQLite store
+    (schema-tolerant: opencode has moved between table layouts).
+  - Tests: SQLite fixture covering populated and empty session
+    rows.
+  - Blockers: `H-PREVIEW-001`.
+
+- [ ] `H-PREVIEW-005` Aider last-message extraction.
+  - Scope: extend the aider adapter to parse the chat history file
+    and surface the last user/assistant turn. Defer if extraction
+    proves brittle for aider's free-form markdown chat layout —
+    record the rationale in the outcome and reopen when motivated.
+  - Tests: fixture chat history with last assistant turn / last
+    user turn / empty file.
+  - Blockers: `H-PREVIEW-001`.
+
 ### Agent-Mux Orchestrator Integrations
 
 A growing class of "agent-over-tmux" orchestrators — agent-deck, dmux,
