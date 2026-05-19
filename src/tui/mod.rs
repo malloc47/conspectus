@@ -22,6 +22,7 @@ use std::time::Duration;
 use anyhow::Result;
 
 mod app;
+pub mod rows;
 mod runtime;
 mod ui;
 

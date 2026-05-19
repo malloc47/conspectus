@@ -3104,6 +3104,61 @@ work. `P8-014` is post-v1 polish that does not block the release.
     shape can be snapshot-tested without churning unrelated
     fixtures.
 
+- [ ] `H-AGENT-EPOCH` Populate `AgentSessionNode.last_active_epoch`
+    across harness adapters.
+  - Scope: extend `AgentSessionNode` with an optional
+    `last_active_epoch: Option<i64>` field (Unix seconds) and
+    populate it from each supported harness adapter
+    (`claude-code`, `codex`, `opencode`) using the freshest of
+    transcript mtime, session-file mtime, or harness-recorded
+    activity timestamp. The TUI sessions row-tree builder and the
+    `conspectus table sessions` projection both consume this when
+    present; without it, the row's recency column is blank and
+    sessions sort alphabetically inside a group instead of
+    recency-first.
+  - Tests: per-adapter unit tests for epoch extraction;
+    snapshot test that the sessions row tree's `activity_epoch`
+    / `recency` cells are populated for at least one harness
+    fixture; an integration test that the resolver and JSON
+    output round-trip the new field.
+  - Blockers: none; can land independently of further P8 stories,
+    but P8-008's discovery refresh path benefits when this lands
+    before snapshot tests on the rendered v1 TUI freeze.
+
+- [ ] `T8-001` Collapse duplicate repo group rows when a project
+    appears across multiple worktree buckets in the TUI sessions
+    row tree.
+  - Scope: when `SessionsGrouping::Graph` produces multiple group
+    keys with the same `(workspace, repo)` but different
+    `worktree` values, the v1 builder emits the repo group row
+    once per worktree bucket. The display shows the repo header
+    repeated above each worktree subtree, which is correct but
+    wastes vertical space. Refactor `emit_group` to group sibling
+    `worktree` buckets under a single repo row.
+  - Tests: extend the existing
+    `two_worktrees_in_same_repo_show_worktree_level` test in
+    `src/tui/rows/sessions.rs` to assert exactly one repo group
+    row.
+  - Blockers: `P8-004` (the row-tree builder this story refines).
+    Does not block the v1 release; the duplication is cosmetic.
+
+- [ ] `T8-002` Align `conspectus table sessions` columns with the
+    TUI sessions row tree once view-models converge.
+  - Scope: today `output::table` builds its own per-projection
+    extractors; the TUI sessions row tree introduces a stable
+    pure view-model. Wire the table renderer to consume the same
+    view-model (or a shared subset) so a single change to the
+    sessions sort/grouping rules updates both surfaces. Decide
+    whether the TUI's `~`-shortening and harness label
+    collapsing should also apply to the CLI table by default,
+    behind a `--paths short|full` knob.
+  - Tests: snapshot parity tests showing TUI row tree and
+    `table sessions` produce consistent labels for the same
+    snapshot.
+  - Blockers: `P8-004` (all five view-models present) and
+    `P8-005` (detail view-models) so the shared API surface is
+    settled.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
