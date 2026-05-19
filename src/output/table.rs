@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use anstyle::{AnsiColor, Effects, Reset, Style};
+use anstyle::{Ansi256Color, AnsiColor, Effects, Reset, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub use crate::config::Projection;
@@ -848,12 +848,11 @@ fn card_key_style() -> Style {
 /// Returns an empty style when no rule matches; callers should skip
 /// the ANSI envelope in that case via [`Style::is_plain`].
 fn cell_style(column_key: &str, cell_text: &str) -> Style {
-    let dim = Style::new().effects(Effects::DIMMED);
     if cell_text == "—" {
-        return dim;
+        return placeholder_style();
     }
     match column_key {
-        "id" => dim,
+        "id" => id_style(),
         "mux-conf" | "pr-conf" => indicator_style(cell_text),
         "state" => pr_state_style(cell_text),
         "draft" => {
@@ -866,6 +865,39 @@ fn cell_style(column_key: &str, cell_text: &str) -> Style {
         "declared" => declared_state_style(cell_text),
         _ => Style::new(),
     }
+}
+
+/// Style for the leftmost short-row-id column. Uses a steady blue so
+/// the id stays scannable down a column of varying widths without
+/// competing with green/cyan/yellow used elsewhere in the palette.
+fn id_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Blue.into()))
+}
+
+/// Style for the `—` placeholder cell. Uses a 256-color mid-gray
+/// (xterm 244) so the dash sinks visually below the rest of the row
+/// rather than just losing intensity. Falls back gracefully on
+/// 16-color terminals (anstyle downgrades the value).
+fn placeholder_style() -> Style {
+    Style::new().fg_color(Some(Ansi256Color(244).into()))
+}
+
+/// Resolve a colour for an agent harness key. Each known harness
+/// gets a stable, distinct hue so a column full of `claude-code:…`,
+/// `codex:…`, and `opencode:…` rows is easy to scan. Unknown
+/// harnesses fall back to the default colour.
+///
+/// Choices use bright ANSI variants so the harness prefix stands out
+/// from the regular-intensity palette used for state/indicator cells.
+fn harness_style(harness: &str) -> Style {
+    let color = match harness {
+        "claude-code" => AnsiColor::BrightYellow,
+        "codex" => AnsiColor::BrightBlue,
+        "opencode" => AnsiColor::BrightGreen,
+        "aider" => AnsiColor::BrightRed,
+        _ => return Style::new(),
+    };
+    Style::new().fg_color(Some(color.into()))
 }
 
 /// Map a `<tier>/<conf>[*]` indicator cell to its tier color.
@@ -908,6 +940,35 @@ pub(crate) fn push_styled(out: &mut String, text: &str, style: Style, color: boo
     } else {
         out.push_str(text);
     }
+}
+
+/// Render a body cell, applying any per-segment styling the column
+/// asks for. Most columns just call back to [`push_styled`] with
+/// [`cell_style`]'s single style. The `agent` column on the sessions
+/// projection has multi-segment coloring (the `harness:` prefix is
+/// hued per harness; the rest is uncolored) so it gets a special
+/// path below.
+///
+/// The emitted text's *visible* width equals `text.chars()` width
+/// in every branch — the ANSI envelope adds zero display columns —
+/// so this function is safe to call after width-aware truncation
+/// has already trimmed `text` to fit the column budget.
+fn push_cell(out: &mut String, column_key: &str, text: &str, color: bool) {
+    if column_key == "agent"
+        && color
+        && let Some((harness, rest)) = text.split_once(':')
+    {
+        // The placeholder cell (`—`) doesn't contain `:`, so this
+        // branch only fires on real harness-prefixed values.
+        let style = harness_style(harness);
+        if style.is_plain() {
+            out.push_str(text);
+        } else {
+            let _ = write!(out, "{style}{harness}{Reset}:{rest}");
+        }
+        return;
+    }
+    push_styled(out, text, cell_style(column_key, text), color);
 }
 
 // -----------------------------------------------------------------------------
@@ -1731,12 +1792,7 @@ fn render_card(
                 None => cell.clone(),
             };
             let column_key = columns.get(col_idx).copied().unwrap_or("");
-            push_styled(
-                &mut out,
-                &value,
-                cell_style(column_key, &value),
-                options.color,
-            );
+            push_cell(&mut out, column_key, &value, options.color);
             out.push('\n');
         }
     }
@@ -1766,13 +1822,12 @@ fn render_columnar(
             }
             let budget = budgets[idx];
             let truncated = truncate_to_width(cell, budget);
-            let style = if row_idx == 0 {
-                header_style()
+            if row_idx == 0 {
+                push_styled(&mut out, &truncated, header_style(), options.color);
             } else {
                 let column_key = columns.get(idx).copied().unwrap_or("");
-                cell_style(column_key, &truncated)
-            };
-            push_styled(&mut out, &truncated, style, options.color);
+                push_cell(&mut out, column_key, &truncated, options.color);
+            }
             if idx + 1 < column_count {
                 let truncated_width = display_width(&truncated);
                 let pad = budget.saturating_sub(truncated_width);
@@ -2553,7 +2608,7 @@ mod tests {
     }
 
     #[test]
-    fn render_color_enabled_wraps_header_and_id_cells_in_ansi() {
+    fn render_color_enabled_wraps_header_and_styled_cells_in_ansi() {
         let snapshot = GraphSnapshot {
             nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
             ..GraphSnapshot::empty()
@@ -2568,16 +2623,102 @@ mod tests {
             colored.contains("\u{1b}[1m"),
             "expected bold escape for header:\n{colored:?}",
         );
-        // The dash placeholder gets dim styling for cells like MUX
-        // that have no value in this minimal snapshot.
+        // The ID column is colored blue.
         assert!(
-            colored.contains("\u{1b}[2m"),
-            "expected dim escape (for `—` placeholder or id col):\n{colored:?}",
+            colored.contains("\u{1b}[34m"),
+            "expected blue escape for ID column:\n{colored:?}",
+        );
+        // The `—` placeholder uses 256-color 244 (faded gray); the
+        // standard sequence is `\x1b[38;5;244m`.
+        assert!(
+            colored.contains("\u{1b}[38;5;244m"),
+            "expected 256-color 244 for `—` placeholder:\n{colored:?}",
         );
         // Every opened escape closes with the reset sequence.
         assert!(
             colored.contains("\u{1b}[0m"),
             "expected reset escape in:\n{colored:?}",
+        );
+    }
+
+    #[test]
+    fn render_color_enabled_colors_agent_harness_prefix_only() {
+        // The agent cell should colorize the `claude-code` portion of
+        // `claude-code:alpha` but leave the `:alpha` suffix
+        // uncolored. The bright-yellow escape sequence appears, the
+        // session-key portion does not get a fresh escape introduced
+        // (the prefix's escape is followed by reset, then plain
+        // text).
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("claude-code", "alpha", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_color(true),
+        );
+        // Bright yellow = `\x1b[93m`.
+        let bright_yellow = "\u{1b}[93m";
+        assert!(
+            colored.contains(bright_yellow),
+            "expected bright yellow for claude-code harness:\n{colored:?}",
+        );
+        // The styled span is just the harness name; the body looks
+        // like `<esc>[93m claude-code <reset>:alpha` (no surrounding
+        // escapes around `:alpha`).
+        assert!(
+            colored.contains(&format!("{bright_yellow}claude-code\u{1b}[0m:alpha")),
+            "expected claude-code prefix wrapped, suffix plain:\n{colored:?}",
+        );
+    }
+
+    #[test]
+    fn render_color_enabled_uses_distinct_color_per_harness() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_session("claude-code", "a", Some("/w/a")),
+                agent_session("codex", "b", Some("/w/b")),
+                agent_session("opencode", "c", Some("/w/c")),
+                agent_session("aider", "d", Some("/w/d")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_color(true),
+        );
+        // Each harness has its own bright-color escape.
+        assert!(
+            colored.contains("\u{1b}[93m"),
+            "claude-code = bright yellow"
+        );
+        assert!(colored.contains("\u{1b}[94m"), "codex = bright blue");
+        assert!(colored.contains("\u{1b}[92m"), "opencode = bright green");
+        assert!(colored.contains("\u{1b}[91m"), "aider = bright red");
+    }
+
+    #[test]
+    fn render_color_enabled_unknown_harness_stays_uncolored() {
+        // A novel harness key should fall through to no styling so
+        // the cell still reads cleanly until a palette slot is
+        // chosen for it.
+        let snapshot = GraphSnapshot {
+            nodes: vec![agent_session("future-tool", "x", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_color(true),
+        );
+        // No bright-color escape should appear adjacent to
+        // `future-tool` — the cell renders verbatim.
+        let needle = "future-tool:x";
+        assert!(
+            colored.contains(needle),
+            "expected verbatim agent cell for unknown harness:\n{colored:?}",
         );
     }
 

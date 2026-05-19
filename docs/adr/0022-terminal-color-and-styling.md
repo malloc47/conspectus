@@ -107,8 +107,13 @@ follow-up story):
 | Cell content                       | Style                       |
 | ---------------------------------- | --------------------------- |
 | Header row (column names)          | **bold**                    |
-| Dash placeholder (`—`)             | dim                         |
-| Short ID column value              | dim                         |
+| Dash placeholder (`—`)             | 256-color 244 (faded gray)  |
+| Short ID column value              | blue                        |
+| Agent harness prefix `claude-code:`| bright yellow               |
+| Agent harness prefix `codex:`      | bright blue                 |
+| Agent harness prefix `opencode:`   | bright green                |
+| Agent harness prefix `aider:`      | bright red                  |
+| Agent harness prefix (unknown)     | default                     |
 | Indicator `LD`/`GD` (declared)     | green                       |
 | Indicator `SD` (strong discovered) | cyan                        |
 | Indicator `D`  (discovered)        | default                     |
@@ -126,8 +131,12 @@ follow-up story):
 | Declared state `overridden`        | yellow                      |
 | Card-layout key (`KEY:` prefix)    | **bold**                    |
 
-These are 16-color/256-color-safe choices using `anstyle`'s
-`AnsiColor` palette; we do not require truecolor support.
+These are 16-color and 256-color-safe choices using `anstyle`'s
+`AnsiColor` / `Ansi256Color` palettes; we do not require truecolor
+support. The agent harness prefix is the only multi-segment cell
+today: only the `harness:` token is colored, leaving the
+session-key suffix uncolored so a session id stays readable in its
+own right.
 
 ## Consequences
 

@@ -155,8 +155,11 @@ manually if needed.
 `conspectus table <ROWS>`, `conspectus columns <ROWS>`, and
 `conspectus node show <id>` emit ANSI color/styling when stdout
 supports it. See ADR 0022 for the full palette; in short, headers
-are bold, the `—` placeholder and short-ID column are dim,
-provenance tiers are colored by indicator (`LD`/`GD`=green,
+are bold, the `—` placeholder is a faded gray (256-color 244),
+the short ID column is blue, the `agent` cell's harness prefix
+gets a stable color per harness (`claude-code` bright yellow,
+`codex` bright blue, `opencode` bright green, `aider` bright
+red), provenance tiers are colored by indicator (`LD`/`GD`=green,
 `SD`=cyan, `C`/`$`=dim), the ambiguity `*` and unresolved-lineage
 `?` prefixes are yellow, PR states use `open`=green / `closed`=red
 / `merged`=magenta / draft yellow, and DECLARED cells use
