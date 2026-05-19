@@ -944,31 +944,80 @@ pub(crate) fn push_styled(out: &mut String, text: &str, style: Style, color: boo
 
 /// Render a body cell, applying any per-segment styling the column
 /// asks for. Most columns just call back to [`push_styled`] with
-/// [`cell_style`]'s single style. The `agent` column on the sessions
-/// projection has multi-segment coloring (the `harness:` prefix is
-/// hued per harness; the rest is uncolored) so it gets a special
-/// path below.
+/// [`cell_style`]'s single style. Columns that contain multi-segment
+/// content (the sessions projection's `agent` cell, the mux
+/// projection's `agents` cell) take a dispatch below so the
+/// `harness:` prefix can be coloured independently of the
+/// session-key tail and the `[indicator]` suffix.
 ///
 /// The emitted text's *visible* width equals `text.chars()` width
 /// in every branch — the ANSI envelope adds zero display columns —
 /// so this function is safe to call after width-aware truncation
 /// has already trimmed `text` to fit the column budget.
 fn push_cell(out: &mut String, column_key: &str, text: &str, color: bool) {
-    if column_key == "agent"
-        && color
-        && let Some((harness, rest)) = text.split_once(':')
-    {
-        // The placeholder cell (`—`) doesn't contain `:`, so this
-        // branch only fires on real harness-prefixed values.
+    if color {
+        match column_key {
+            "agent" => {
+                push_agent_label(out, text);
+                return;
+            }
+            "agents" => {
+                push_agents_cell(out, text);
+                return;
+            }
+            _ => {}
+        }
+    }
+    push_styled(out, text, cell_style(column_key, text), color);
+}
+
+/// Style a `harness:session_key` agent label, colouring only the
+/// harness prefix. Falls back to the placeholder style for `—` and
+/// to plain text for unknown harness keys so a future tool slots in
+/// without requiring a palette edit first.
+fn push_agent_label(out: &mut String, label: &str) {
+    if label == "—" {
+        push_styled(out, label, placeholder_style(), true);
+        return;
+    }
+    if let Some((harness, rest)) = label.split_once(':') {
         let style = harness_style(harness);
         if style.is_plain() {
-            out.push_str(text);
+            out.push_str(label);
         } else {
             let _ = write!(out, "{style}{harness}{Reset}:{rest}");
         }
+    } else {
+        out.push_str(label);
+    }
+}
+
+/// Style the mux projection's `agents` cell. [`mux_cell`] builds the
+/// cell as `label [indicator], label [indicator]`; the styler splits
+/// on the comma boundary, then on the ` [` boundary inside each
+/// entry, so only the `harness:` prefix of each label is wrapped in
+/// its per-harness colour. The trailing `[indicator]` suffix stays
+/// uncoloured by this story; if it grows indicator-tier styling
+/// later, this is the seam.
+fn push_agents_cell(out: &mut String, text: &str) {
+    if text == "—" {
+        push_styled(out, text, placeholder_style(), true);
         return;
     }
-    push_styled(out, text, cell_style(column_key, text), color);
+    for (idx, entry) in text.split(", ").enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        match entry.split_once(" [") {
+            Some((label, indicator_tail)) => {
+                push_agent_label(out, label);
+                out.push(' ');
+                out.push('[');
+                out.push_str(indicator_tail);
+            }
+            None => push_agent_label(out, entry),
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -2719,6 +2768,79 @@ mod tests {
         assert!(
             colored.contains(needle),
             "expected verbatim agent cell for unknown harness:\n{colored:?}",
+        );
+    }
+
+    #[test]
+    fn render_color_enabled_colors_each_harness_in_mux_agents_cell() {
+        // The mux projection's AGENTS column joins multiple agents
+        // into one cell. Each agent's harness prefix should be
+        // colored separately, the `:session-key` tail stays plain,
+        // and the trailing `[indicator]` suffix stays uncolored.
+        let editor = MuxSessionId::new("tmux:editor");
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                mux_session("tmux", "editor", Some("/work")),
+                agent_session("codex", "alpha", Some("/work")),
+                agent_session("claude-code", "beta", Some("/work")),
+            ],
+            candidate_links: vec![
+                linked_to_mux_link(
+                    "link-c",
+                    AgentSessionId::new("codex", "global", "alpha"),
+                    editor.clone(),
+                    Provenance::StrongDiscovered,
+                    Confidence::High,
+                ),
+                linked_to_mux_link(
+                    "link-cc",
+                    AgentSessionId::new("claude-code", "global", "beta"),
+                    editor,
+                    Provenance::StrongDiscovered,
+                    Confidence::High,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_color(true),
+        );
+        // Bright blue = codex; bright yellow = claude-code.
+        assert!(
+            colored.contains("\u{1b}[94mcodex\u{1b}[0m:alpha "),
+            "expected codex prefix coloured inside agents cell:\n{colored:?}",
+        );
+        assert!(
+            colored.contains("\u{1b}[93mclaude-code\u{1b}[0m:beta "),
+            "expected claude-code prefix coloured inside agents cell:\n{colored:?}",
+        );
+        // The comma separator between entries should be plain (no
+        // escape immediately after `]`).
+        assert!(
+            colored.contains("], \u{1b}[94mcodex") || colored.contains("], \u{1b}[93mclaude-code"),
+            "expected plain `, ` separator between coloured entries:\n{colored:?}",
+        );
+    }
+
+    #[test]
+    fn render_color_enabled_dash_in_mux_agents_cell_uses_placeholder_style() {
+        // A mux with no attached agents renders the cell as `—`,
+        // which should pick up the faded-gray placeholder style
+        // (256-color 244) rather than dropping out as plain text.
+        let snapshot = GraphSnapshot {
+            nodes: vec![mux_session("tmux", "lonely", Some("/work"))],
+            ..GraphSnapshot::empty()
+        };
+        let colored = render_with(
+            &snapshot,
+            Projection::Mux,
+            &RenderOptions::wide().with_color(true),
+        );
+        assert!(
+            colored.contains("\u{1b}[38;5;244m—\u{1b}[0m"),
+            "expected faded `—` for empty agents cell:\n{colored:?}",
         );
     }
 
