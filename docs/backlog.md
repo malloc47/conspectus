@@ -2861,18 +2861,17 @@ work. `P8-014` is post-v1 polish that does not block the release.
     rather than terminal output.
   - Blockers: `P8-003`.
 
-- [ ] `P8-005` Build selected-node detail view-models.
-  - Scope: extract or share the non-string data behind
-    `conspectus node show <id>` so the TUI right panel can render selected
-    node attributes, resolved relationships, candidate links, ambiguity,
-    diagnostics, adjacent nodes, and source metadata. Preserve content
-    parity with `node show` while allowing the TUI renderer to control
-    wrapping, scrolling, and styling.
-  - Tests: unit tests proving selected-node detail data includes the same
-    relationship/diagnostic categories as `render_node_show`; snapshot
-    tests for representative agent, mux, PR, fork, and unresolved-lineage
-    nodes.
-  - Blockers: `P8-003`.
+- [x] `P8-005` Build selected-node detail view-models.
+  - Outcome: `src/tui/detail.rs` exposes `NodeDetail` with
+    per-kind `header_fields`, candidate-link summaries (outgoing +
+    incoming), resolved relationships, and diagnostics — same
+    content categories as `render_node_show` but as plain data.
+    Agent-session header rows are the locked five (harness, cwd,
+    title-when-set, mux, pr, lineage); the mux row carries the
+    ambiguous-candidate count + `⚠` annotation, and the pr row
+    walks worktree → branch → PR in the resolved graph to surface
+    the immediate-stage label. Mux/PR/fork detail will gain richer
+    fields as the enrichment stories land.
 
 - [ ] `P8-006` Implement selection, focus, navigation, and filtering state.
   - Scope: add the TUI app state machine for active view, focused panel,
