@@ -3403,8 +3403,25 @@ work. `P8-014` is post-v1 polish that does not block the release.
     detach, repeat from a different row.
   - Blockers: `P8-010` v1 slice.
 
-- [ ] `T8-019` Auto-scroll the left tree to keep the selected row
+- [x] `T8-019` Auto-scroll the left tree to keep the selected row
     visible.
+  - Outcome: `App` gained a `Cell<u16>` left-panel scroll offset
+    and an `adjust_left_scroll(selected_line, viewport_height)`
+    method that nudges the offset only when the selected row
+    falls outside the viewport (above the top edge or at/below
+    the bottom edge). The renderer tracks which line index the
+    selected row's primary line lands at, biases the target one
+    line further when an inline preview follows so both stay
+    visible together, then asks `App::adjust_left_scroll` for
+    the offset and passes it to `Paragraph::scroll`. Three
+    reducer-level tests plus a render-level test (20 sessions
+    in an 80×12 frame, `End`, assert the last short id is
+    visible and the top group has scrolled off) cover the
+    behavior. PageUp/PageDown already drive the viewport via
+    the existing reducer; this story just keeps the rendered
+    view in sync. Open: pixel-precise centering on first focus
+    and a manual-scroll keymap remain follow-ons under
+    `T8-006`'s broader snapshot matrix.
   - Scope: today the left panel renders all visible rows into a
     single `Paragraph` with no viewport awareness, so once the
     selection moves past the rendered area the user can keep

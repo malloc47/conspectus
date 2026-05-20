@@ -209,9 +209,16 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let inline_preview_ids = inline_preview_session_ids(app, INLINE_PREVIEW_DEFAULT);
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
+    // The selected row may render as one (primary) or two (primary
+    // + inline preview) lines. Track the line index of the primary
+    // line so we can scroll to keep it visible.
+    let mut selected_primary_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
         let primary = render_left_row(row, app, is_selected);
+        if is_selected {
+            selected_primary_line = Some(lines.len());
+        }
         lines.push(primary);
 
         // Inline preview line below the row when applicable.
@@ -231,7 +238,31 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         }
     }
 
-    let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
+    // Pick the line range the selected row needs (primary + the
+    // following preview line if there is one) and ask the App to
+    // adjust the per-frame scroll offset so it stays visible.
+    let scroll = if let Some(line_idx) = selected_primary_line {
+        // If the inline preview line follows, target the preview
+        // line — that ensures the renderer scrolls enough to show
+        // both the row and its inline preview together.
+        let target = if line_idx + 1 < lines.len()
+            && app
+                .selection()
+                .and_then(|sel| visible.iter().find(|r| &r.id == sel))
+                .is_some_and(|r| matches!(&r.kind, RowKind::AgentSession(s) if s.preview.is_some()))
+        {
+            line_idx + 1
+        } else {
+            line_idx
+        };
+        app.adjust_left_scroll(target, inner.height)
+    } else {
+        0
+    };
+
+    let widget = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
     frame.render_widget(widget, inner);
 }
 
@@ -1153,5 +1184,80 @@ mod tests {
     fn crop_bottom_lines_keeps_latest_lines() {
         assert_eq!(crop_bottom_lines("a\nb\nc\nd", 2), "c\nd");
         assert_eq!(crop_bottom_lines("a\nb", 3), "a\nb");
+    }
+
+    #[test]
+    fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
+        // Build a snapshot with one repo and twenty sessions so
+        // the rendered tree spills well past a small viewport.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
+            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        for i in 0..20 {
+            snapshot
+                .nodes
+                .push(GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                    harness_key: "codex".to_string(),
+                    cwd: Some("/home/op/src/proj".to_string()),
+                    title: None,
+                    last_message_preview: None,
+                }));
+        }
+        let snapshot = crate::resolve::resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+        });
+
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: Arc::new(snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+        });
+
+        // Jump to the last visible row — it lives well below the
+        // viewport for a 10-tall window.
+        app.update(Msg::End);
+
+        // Render into a narrow 80x12 window — body is 10 tall after
+        // header/status bars. The selected session's short id must
+        // appear in the rendered buffer.
+        let area = Rect::new(0, 0, 80, 12);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+
+        // The last row should be visible. Confirm via the short
+        // id of the last session pushed (s19).
+        let visible = app.visible_rows();
+        let last_id = match &visible.last().unwrap().kind {
+            RowKind::AgentSession(s) => s.short_id.clone(),
+            other => panic!("expected last row to be a session, got {other:?}"),
+        };
+        assert!(
+            text.contains(&last_id),
+            "selected row's short id ({last_id}) should be visible after End; got:\n{text}"
+        );
+
+        // The first row (the repo group) should now be scrolled
+        // off the top.
+        assert!(
+            !text.contains("~/src/proj"),
+            "top-of-tree group should be scrolled away when selection is at End; got:\n{text}"
+        );
     }
 }

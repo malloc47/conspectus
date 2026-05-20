@@ -14,6 +14,7 @@
 //! - `P8-008` onward: background data loader dispatches
 //!   `Msg::SetData` results into the reducer.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -63,6 +64,11 @@ pub struct App {
     /// renderer reads this for the right-panel preview when the
     /// selection points at a muxed agent session or a mux node.
     preview_store: PreviewStore,
+    /// Left-panel vertical scroll offset, in rendered lines. The
+    /// renderer reads/updates this via [`App::adjust_left_scroll`]
+    /// each frame so the selected row stays visible without the
+    /// renderer needing `&mut self`.
+    left_scroll: Cell<u16>,
 }
 
 /// Which panel currently consumes navigation keys.
@@ -137,6 +143,7 @@ impl App {
             loaded_at_epoch: None,
             status_message: None,
             preview_store: PreviewStore::new(),
+            left_scroll: Cell::new(0),
         }
     }
 
@@ -204,6 +211,42 @@ impl App {
     /// hasn't been captured yet.
     pub fn mux_preview(&self, mux: &MuxSessionId) -> Option<&PreviewEntry> {
         self.preview_store.get(mux)
+    }
+
+    /// Adjust the left-panel scroll so `selected_line` is visible
+    /// inside a viewport of `viewport_height` lines, then return
+    /// the resulting offset. Pure with respect to selection — no
+    /// reducer state changes — but mutates the per-frame scroll
+    /// cell through interior mutability. Called by the renderer
+    /// each draw.
+    ///
+    /// Rules:
+    /// - If the selection is above the current top, the top edge
+    ///   moves up to bring it into view.
+    /// - If the selection is at or below the current bottom, the
+    ///   bottom edge moves down (and the offset advances).
+    /// - Otherwise the offset is left alone — incidental cursor
+    ///   movement inside the viewport doesn't reshuffle the view.
+    pub fn adjust_left_scroll(&self, selected_line: usize, viewport_height: u16) -> u16 {
+        let vh = viewport_height as usize;
+        if vh == 0 {
+            return self.left_scroll.get();
+        }
+        let mut offset = self.left_scroll.get() as usize;
+        if selected_line < offset {
+            offset = selected_line;
+        } else if selected_line >= offset + vh {
+            offset = selected_line + 1 - vh;
+        }
+        let clamped = offset.min(u16::MAX as usize) as u16;
+        self.left_scroll.set(clamped);
+        clamped
+    }
+
+    /// Test-only accessor for the current scroll offset.
+    #[cfg(test)]
+    pub fn left_scroll(&self) -> u16 {
+        self.left_scroll.get()
     }
 
     /// Iterate the row tree, skipping rows whose ancestors are
@@ -545,6 +588,41 @@ mod tests {
         app.update(Msg::ScrollPreviewUp);
         app.update(Msg::ScrollPreviewUp);
         assert_eq!(app.preview_scroll(), 0);
+    }
+
+    #[test]
+    fn adjust_left_scroll_keeps_selection_above_top() {
+        let app = App::new(RunConfig::defaults());
+        // Selection at line 0 with viewport 5: offset is 0.
+        assert_eq!(app.adjust_left_scroll(0, 5), 0);
+        // Walk the selection down to line 10; offset advances so
+        // the selection is on the bottom edge of the viewport.
+        assert_eq!(app.adjust_left_scroll(10, 5), 6);
+        // Walk back up to line 4 — selection moved above the top
+        // edge, so the offset retreats to it.
+        assert_eq!(app.adjust_left_scroll(4, 5), 4);
+    }
+
+    #[test]
+    fn adjust_left_scroll_holds_when_selection_inside_viewport() {
+        let app = App::new(RunConfig::defaults());
+        // Prime offset by scrolling to line 10 in a 5-tall viewport.
+        app.adjust_left_scroll(10, 5);
+        assert_eq!(app.left_scroll(), 6);
+        // Move selection within [6, 10] — offset should not change.
+        assert_eq!(app.adjust_left_scroll(8, 5), 6);
+        assert_eq!(app.adjust_left_scroll(7, 5), 6);
+        assert_eq!(app.adjust_left_scroll(10, 5), 6);
+    }
+
+    #[test]
+    fn adjust_left_scroll_with_zero_viewport_does_nothing() {
+        let app = App::new(RunConfig::defaults());
+        app.adjust_left_scroll(10, 5);
+        let before = app.left_scroll();
+        let returned = app.adjust_left_scroll(99, 0);
+        assert_eq!(returned, before);
+        assert_eq!(app.left_scroll(), before);
     }
 
     #[test]
