@@ -48,6 +48,10 @@ pub struct App {
     /// Vertical scroll offset for the right-panel preview, in
     /// rendered rows.
     preview_scroll: u16,
+    /// Unix-epoch seconds at which the current snapshot was
+    /// loaded. `None` before the first `SetData`. The renderer
+    /// turns this into the header's `updated Ns ago` indicator.
+    loaded_at_epoch: Option<i64>,
 }
 
 /// Which panel currently consumes navigation keys.
@@ -67,10 +71,13 @@ pub enum Msg {
     /// Background data loader produced a new snapshot + row tree.
     /// The reducer retains current selection by `RowId` when the
     /// same id is present in the new tree, otherwise it snaps to
-    /// the nearest visible row by index.
+    /// the nearest visible row by index. `loaded_at_epoch` is the
+    /// Unix-epoch second at which the snapshot completed loading,
+    /// used by the header's `updated Ns ago` indicator.
     SetData {
         snapshot: Arc<GraphSnapshot>,
         tree: RowTree,
+        loaded_at_epoch: i64,
     },
     /// Left panel: move selection down/up one visible row.
     NavDown,
@@ -106,6 +113,7 @@ impl App {
             detail: None,
             focus: Focus::Left,
             preview_scroll: 0,
+            loaded_at_epoch: None,
         }
     }
 
@@ -156,6 +164,12 @@ impl App {
         self.snapshot.as_ref()
     }
 
+    /// Unix-epoch seconds at which the latest snapshot was loaded.
+    /// `None` until the first `SetData` arrives.
+    pub fn loaded_at_epoch(&self) -> Option<i64> {
+        self.loaded_at_epoch
+    }
+
     /// Iterate the row tree, skipping rows whose ancestors are
     /// collapsed. Iteration order matches display order.
     pub fn visible_rows(&self) -> Vec<&Row> {
@@ -183,7 +197,11 @@ impl App {
     pub fn update(&mut self, msg: Msg) {
         match msg {
             Msg::Quit => self.should_quit = true,
-            Msg::SetData { snapshot, tree } => self.set_data(snapshot, tree),
+            Msg::SetData {
+                snapshot,
+                tree,
+                loaded_at_epoch,
+            } => self.set_data(snapshot, tree, loaded_at_epoch),
             Msg::NavDown => self.move_selection(1),
             Msg::NavUp => self.move_selection(-1),
             Msg::PageDown(viewport) => self.move_selection(i32::from(viewport.max(1))),
@@ -206,7 +224,8 @@ impl App {
         }
     }
 
-    fn set_data(&mut self, snapshot: Arc<GraphSnapshot>, tree: RowTree) {
+    fn set_data(&mut self, snapshot: Arc<GraphSnapshot>, tree: RowTree, loaded_at_epoch: i64) {
+        self.loaded_at_epoch = Some(loaded_at_epoch);
         // Auto-expand every group row on first arrival of a tree
         // segment so the operator sees their sessions immediately.
         // Already-expanded rows are kept expanded; collapsed rows
@@ -382,6 +401,7 @@ mod tests {
         app.update(Msg::SetData {
             snapshot: snap,
             tree,
+            loaded_at_epoch: 1_700_000_000,
         });
         app
     }
@@ -392,6 +412,7 @@ mod tests {
         app.update(Msg::SetData {
             snapshot: Arc::new(GraphSnapshot::empty()),
             tree: RowTree::default(),
+            loaded_at_epoch: 1_700_000_000,
         });
         assert!(app.selection().is_none());
         assert!(app.detail().is_none());
@@ -496,6 +517,7 @@ mod tests {
         app.update(Msg::SetData {
             snapshot: snap,
             tree,
+            loaded_at_epoch: 1_700_000_000,
         });
         assert_eq!(app.selection().cloned().unwrap(), saved);
     }
@@ -512,6 +534,7 @@ mod tests {
         app.update(Msg::SetData {
             snapshot: snap,
             tree,
+            loaded_at_epoch: 1_700_000_000,
         });
 
         let new_selection = app.selection().cloned().unwrap();

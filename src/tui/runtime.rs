@@ -73,6 +73,7 @@ fn refresh(app: &mut App, config: &RunConfig) {
             app.update(Msg::SetData {
                 snapshot: Arc::new(snapshot),
                 tree,
+                loaded_at_epoch: current_unix_epoch().unwrap_or(0),
             });
         }
         Err(_err) => {

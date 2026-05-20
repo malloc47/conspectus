@@ -10,16 +10,20 @@
 //!   detail view-models; the renderer just lays them out.
 //! - Mux glyphs `◉` / `◐` / `◯` with color carrying the primary
 //!   signal (green attached / yellow ambiguous / dim un-muxed).
-//! - Header reports `N agents · M mux` from the current snapshot
-//!   counts; the `updated Ns ago` slot is filled by P8-007's
-//!   follow-on once the runtime threads `loaded_at_epoch` through
-//!   the reducer.
+//! - Header reports `updated Ns ago · N agents · M mux`; the
+//!   freshness slot uses [`format_recency`] over
+//!   `App::loaded_at_epoch`.
 //! - Sessions row inline preview lights up for the selected row and
 //!   for the N most-recent visible session rows
 //!   (`[tui].inline_preview_rows`, default 3).
+//! - Body switches from side-by-side to a vertical stack when the
+//!   terminal is narrower than ~100 columns (T8-004).
+//! - Muxed-session right-panel preview shows the
+//!   `--no-live-preview` banner when live extras are suppressed,
+//!   while inline tree previews remain (locked decision).
 //! - Empty/loading frames render minimal copy when no row tree is
-//!   loaded yet; richer empty/error states land in the P8-007
-//!   follow-on after P8-008's full data adapter ships.
+//!   loaded yet; the rest of the error/empty matrix lands with
+//!   `T8-003`.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -31,10 +35,16 @@ use crate::model::{GraphNode, GraphSnapshot};
 use crate::tui::View;
 use crate::tui::app::{App, Focus};
 use crate::tui::detail::{HeaderField, NodeDetail};
-use crate::tui::rows::{AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind};
+use crate::tui::rows::{
+    AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency,
+};
 
 const INLINE_PREVIEW_DEFAULT: usize = 3;
 const SELECTED_BG: Color = Color::Indexed(238);
+/// Terminal width threshold below which the body switches from a
+/// side-by-side split to a vertical stack (left-on-top per the
+/// phase-08 layout note).
+const NARROW_LAYOUT_THRESHOLD: u16 = 100;
 
 /// Render one frame. Pure with respect to `app`; the runtime calls
 /// this on every loop iteration.
@@ -61,9 +71,58 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
 fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let view_label = view_label(app.config().default_view);
     let (agents, mux) = snapshot_counts(app.snapshot().map(|s| s.as_ref()));
-    let title = format!("Conspectus · {view_label} ─ {agents} agents · {mux} mux",);
+    let freshness = header_freshness(app);
+    let title = format!("Conspectus · {view_label} ─ {freshness}{agents} agents · {mux} mux",);
     let widget = Paragraph::new(title).style(Style::default().add_modifier(Modifier::BOLD));
     frame.render_widget(widget, area);
+}
+
+/// Build the `updated Ns ago · ` slice of the header, or an empty
+/// string when no snapshot has loaded yet. The trailing separator
+/// is part of the returned slice so callers don't have to special-
+/// case the empty form.
+fn header_freshness(app: &App) -> String {
+    let Some(loaded_at) = app.loaded_at_epoch() else {
+        return String::new();
+    };
+    let now = current_unix_epoch_for_render();
+    match format_recency(Some(now), Some(loaded_at)) {
+        Some(label) => format!("updated {label} ago · "),
+        None => String::new(),
+    }
+}
+
+#[cfg(not(test))]
+fn current_unix_epoch_for_render() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0)
+}
+
+/// Test override: a fixed clock so snapshot tests stay
+/// deterministic without monkey-patching the system clock.
+#[cfg(test)]
+fn current_unix_epoch_for_render() -> i64 {
+    test_clock::now()
+}
+
+#[cfg(test)]
+pub(crate) mod test_clock {
+    use std::cell::Cell;
+    thread_local! {
+        static NOW: Cell<i64> = const { Cell::new(0) };
+    }
+
+    pub fn set(value: i64) {
+        NOW.with(|cell| cell.set(value));
+    }
+
+    pub fn now() -> i64 {
+        NOW.with(|cell| cell.get())
+    }
 }
 
 fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
@@ -108,8 +167,13 @@ fn snapshot_counts(snapshot: Option<&GraphSnapshot>) -> (usize, usize) {
 // -----------------------------------------------------------------------------
 
 fn draw_body(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let direction = if area.width < NARROW_LAYOUT_THRESHOLD {
+        Direction::Vertical
+    } else {
+        Direction::Horizontal
+    };
     let split = Layout::default()
-        .direction(Direction::Horizontal)
+        .direction(direction)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
     draw_left_panel(app, frame, split[0]);
@@ -342,9 +406,12 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),
+            // Give the header exactly the height its fields need
+            // (title + blank + one row per HeaderField), clamped
+            // so the preview zone keeps a minimum of two rows.
+            Constraint::Length(header_zone_height(detail, inner.height)),
             Constraint::Length(1),
-            Constraint::Min(3),
+            Constraint::Min(0),
         ])
         .split(inner);
 
@@ -362,6 +429,15 @@ fn empty_right_panel_text(app: &App) -> &'static str {
     } else {
         "Select a row to view its detail."
     }
+}
+
+/// Natural height of the right-panel header (title + blank + one
+/// row per field), clamped so the preview zone keeps room for at
+/// least the separator and two body rows.
+fn header_zone_height(detail: &NodeDetail, panel_height: u16) -> u16 {
+    let natural = (detail.header_fields.len() + 2) as u16;
+    let max = panel_height.saturating_sub(3);
+    natural.min(max).max(3)
 }
 
 fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
@@ -408,27 +484,47 @@ fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, a
 }
 
 /// Source the preview body from whatever the selection points at.
-/// Today: the selected agent session's `last_message_preview` from
-/// the row tree, or an empty-state message otherwise. The pane-
-/// capture and transcript-tail surfaces wire in later
-/// (P8-009 / P8-012c).
+/// Mirrors the locked decision in `docs/tui-sessions-mockup.md`:
+///
+/// - Un-muxed agent session: render the graph-resident
+///   `last_message_preview`. `--no-live-preview` does **not**
+///   suppress this — only live extras (pane capture + transcript-
+///   tail) are gated.
+/// - Muxed agent session: the renderer would normally show a tmux
+///   pane capture; until `P8-009` wires that in, we show an
+///   "incoming" placeholder. With `--no-live-preview`, the
+///   placeholder switches to the privacy banner instead.
+/// - Other rows: pane capture or fork-detail enrichment wires in
+///   per `P8-009` / `P8-012b`. Gated by `--no-live-preview`.
 fn preview_text_for_selection(app: &App) -> String {
     let Some(selection) = app.selection() else {
         return String::new();
     };
-    let selected_row = app.tree().rows.iter().find(|r| &r.id == selection);
-    let Some(row) = selected_row else {
+    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
         return String::new();
     };
+    let live_preview = app.config().live_preview_enabled;
     match &row.kind {
-        RowKind::AgentSession(session) => session
-            .preview
-            .clone()
-            .unwrap_or_else(|| "no preview available".to_string()),
-        _ => match app.config().live_preview_enabled {
-            true => "preview lands once the mux capture adapter (P8-009) wires in".to_string(),
-            false => "preview disabled (--no-live-preview)".to_string(),
+        RowKind::AgentSession(session) => match session.mux_state {
+            MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
+                if live_preview {
+                    "preview lands once the mux capture adapter (P8-009) wires in".to_string()
+                } else {
+                    "preview disabled (--no-live-preview)".to_string()
+                }
+            }
+            MuxIndicator::Unmuxed => session
+                .preview
+                .clone()
+                .unwrap_or_else(|| "no preview available".to_string()),
         },
+        _ => {
+            if live_preview {
+                "preview lands once the mux capture adapter (P8-009) wires in".to_string()
+            } else {
+                "preview disabled (--no-live-preview)".to_string()
+            }
+        }
     }
 }
 
@@ -527,6 +623,7 @@ mod tests {
         app.update(Msg::SetData {
             snapshot: Arc::new(snapshot),
             tree,
+            loaded_at_epoch: 1_700_000_000,
         });
         app
     }
@@ -578,5 +675,134 @@ mod tests {
             text.contains("Loading"),
             "expected loading placeholder: {text}"
         );
+    }
+
+    #[test]
+    fn header_shows_updated_ns_ago_when_clock_is_ahead_of_load_epoch() {
+        let app = seeded_app();
+        // seeded_app sets loaded_at_epoch = 1_700_000_000.
+        // Advance the rendering clock 12s to assert the freshness slot.
+        test_clock::set(1_700_000_012);
+        let area = Rect::new(0, 0, 80, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("updated 12s ago"),
+            "expected updated-ago slot, got: {text}"
+        );
+    }
+
+    #[test]
+    fn narrow_terminal_stacks_the_two_panels_vertically() {
+        let mut app = seeded_app();
+        app.update(Msg::NavDown);
+        // Width 60 is below NARROW_LAYOUT_THRESHOLD.
+        let area = Rect::new(0, 0, 60, 30);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+
+        // In the stacked layout, only one panel border occupies
+        // each row at any given column. The header still appears
+        // at the top, and the right-panel content ("Phase 8
+        // walkthrough" title) sits *below* the row tree content
+        // ("~/src/proj") rather than beside it. Assert that
+        // ordering.
+        let proj_line = text
+            .lines()
+            .position(|l| l.contains("~/src/proj"))
+            .expect("project path line present");
+        let title_line = text
+            .lines()
+            .position(|l| l.contains("Phase 8 walkthrough"))
+            .expect("right-panel title present");
+        assert!(
+            title_line > proj_line,
+            "right panel should be below left in narrow mode (title={title_line}, proj={proj_line})"
+        );
+    }
+
+    #[test]
+    fn no_live_preview_muxed_session_shows_privacy_banner() {
+        // Build a session that's muxed (has one LinkedToMux candidate),
+        // load with --no-live-preview, and ensure the preview block
+        // shows the privacy banner rather than the graph snippet.
+        use crate::model::{
+            Confidence, GraphLink, GraphNode, LinkEndpoint, LinkState, MuxSessionId,
+            MuxSessionNode, NodeId, Provenance, RelationKind,
+        };
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
+            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "abc"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: None,
+                last_message_preview: Some("stale msg".to_string()),
+            }));
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("editor"),
+            backend: "tmux".to_string(),
+            native_id: "editor".to_string(),
+            cwd: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+        snapshot.candidate_links.push(GraphLink {
+            id: "session-mux".to_string(),
+            source: session_id,
+            target: LinkEndpoint::Node { id: mux_id },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+        });
+
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        config.live_preview_enabled = false;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: Arc::new(snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+        });
+        app.update(Msg::NavDown); // jump from repo group → session row
+
+        let area = Rect::new(0, 0, 80, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("preview disabled"),
+            "expected --no-live-preview banner in right panel, got: {text}"
+        );
+        // Per the locked mockup decision, `--no-live-preview` does
+        // NOT suppress inline previews in the row tree — only live
+        // extras (pane capture + transcript-tail) in the right
+        // panel. The graph-resident `stale msg` is allowed to
+        // remain in the inline-preview line below the row.
     }
 }

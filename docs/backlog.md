@@ -3183,27 +3183,27 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-007` v1 slice (the render shell is there); a
     `Msg::SetError` reducer addition may be needed.
 
-- [ ] `T8-004` Responsive TUI layout (narrow stack + wide
-    all-rows-inline preview).
-  - Scope: when terminal width is below ~100 cols, stack the
-    panels vertically (left-on-top, right-below) per the
-    phase-08 layout note. When terminal width fits the row plus
-    a preview cell on the same line, switch the inline preview
-    to all-visible-rows-on-same-line mode per the locked
-    decision. The threshold should be computed from column
-    widths + a minimum preview budget.
-  - Tests: snapshot pair (narrow 60-col, wide 160-col).
+- [ ] `T8-004` Wide-mode all-rows-inline preview switch.
+  - Scope: narrow-mode stacking (terminal width < 100 cols)
+    landed in the polish pass — the body switches from a
+    horizontal split to a vertical stack at the threshold. The
+    remaining locked behavior is the *wide* switch: when the
+    terminal has enough horizontal budget that a session-row
+    inline preview fits on the same line as the row without
+    crowding the columns, render the inline preview inline on
+    every visible session row. Compute the threshold from the
+    row's column widths plus a minimum preview budget.
+  - Tests: snapshot of a 160-col render with inline previews on
+    the same line as their rows.
   - Blockers: `P8-007` v1 slice.
 
-- [ ] `T8-005` Header `updated Ns ago` freshness indicator.
-  - Scope: thread `loaded_at_epoch` through `Msg::SetData` /
-    `App` / the renderer so the header shows
-    `updated Ns ago · counts` per the locked decision. The
-    builder uses the same clock the row tree's recency uses.
-  - Tests: extend the v1 render snapshot test to assert the
-    header includes a recency indicator when an epoch is
-    threaded through.
-  - Blockers: `P8-007` v1 slice.
+- [x] `T8-005` Header `updated Ns ago` freshness indicator.
+  - Outcome: `Msg::SetData` now carries `loaded_at_epoch`,
+    `App::loaded_at_epoch()` exposes it, and the header renders
+    `updated Ns ago · counts` via the shared
+    `format_recency` helper. Render-time clock is a
+    `#[cfg(test)]`-controllable shim so snapshot tests stay
+    deterministic.
 
 - [ ] `T8-006` Expand TUI buffer-snapshot test coverage.
   - Scope: add `insta`-backed snapshot tests covering the
