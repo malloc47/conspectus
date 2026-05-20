@@ -86,22 +86,26 @@ fn refresh_mux_preview_if_needed(
     if !config.live_preview_enabled {
         return;
     }
-    let Some(current) = current_mux_target(app) else {
+    let Some(target) = resolve_attach_target(app).ok() else {
         return;
     };
-    if prev.as_ref() == Some(&current) && app.mux_preview(&current).is_some() {
+    if prev.as_ref() == Some(&target.mux) && app.mux_preview(&target.mux).is_some() {
         return;
     }
-    let content = capture_via(runner, &current.native_id);
+    // Capture against the **raw** backend-native session name (e.g.
+    // `editor`), not the backend-prefixed graph id (`tmux:editor`)
+    // — tmux itself doesn't understand the latter.
+    let content = capture_via(runner, &target.native_id);
     app.update(Msg::SetMuxPreview {
-        mux: current,
+        mux: target.mux,
         content,
     });
 }
 
-/// Resolve the selection's preferred mux target, if any. Reuses
-/// the attach resolver so the row glyph, the attach action, and
-/// the preview source agree on what "this row's mux" is.
+/// Resolve the selection's preferred mux target's graph id, if
+/// any. Used as the "did the selection change" comparison key for
+/// preview-capture orchestration. Pure: works against [`App`]
+/// state, no I/O.
 fn current_mux_target(app: &App) -> Option<MuxSessionId> {
     resolve_attach_target(app).ok().map(|t| t.mux)
 }
@@ -192,13 +196,15 @@ fn attach_action(app: &mut App) {
 /// Restore the terminal and exec into the mux client. Diverges on
 /// success (the kernel replaces this process); exits with code 2
 /// on failure, after restoring the terminal so the shell prompt
-/// returns cleanly.
+/// returns cleanly. Uses the raw `native_id` (e.g. `editor`), not
+/// the backend-prefixed `mux.native_id` (e.g. `tmux:editor`) — the
+/// latter is a graph-key form that tmux itself doesn't understand.
 fn exec_tmux_attach(target: &AttachTarget) -> ! {
     ratatui::restore();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        let native = target.mux.native_id.clone();
+        let native = target.native_id.clone();
         let err = std::process::Command::new("tmux")
             .args(["attach-session", "-t", &native])
             .exec();

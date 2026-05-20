@@ -12,11 +12,20 @@ use crate::tui::rows::{RowId, RowKind};
 /// Resolved target for an attach action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachTarget {
-    /// The mux session to hand control to.
+    /// The mux session's graph id. Carries the backend-prefixed
+    /// `native_id` (e.g. `tmux:editor`) used as a stable key
+    /// inside the graph and the preview cache.
     pub mux: MuxSessionId,
     /// Backend label, e.g. `"tmux"`. Drives the exec invocation in
     /// the runtime.
     pub backend: String,
+    /// **Raw** backend-native session name, e.g. `editor`. This is
+    /// what gets passed to `tmux attach-session -t` and
+    /// `tmux capture-pane -t`. Tracked separately from
+    /// `mux.native_id` because the graph form is backend-prefixed
+    /// (`tmux:editor`) to keep ids unique across backends, but
+    /// the tmux binary needs the unprefixed name.
+    pub native_id: String,
 }
 
 /// Why an attach attempt cannot proceed. The runtime surfaces these
@@ -87,6 +96,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
     let target = AttachTarget {
         mux: mux_node.id.clone(),
         backend: mux_node.backend.clone(),
+        native_id: mux_node.native_id.clone(),
     };
     match target.backend.as_str() {
         "tmux" => Ok(target),
@@ -143,10 +153,10 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
 }
 
 /// Helper: format the target's display label for diagnostics (e.g.
-/// `tmux:editor`). Borrowed from the row tree so the messages stay
-/// consistent.
+/// `tmux:editor`). Uses the **raw** native_id so the label matches
+/// what the operator would see in `tmux list-sessions`.
 pub fn target_label(_snapshot: &GraphSnapshot, target: &AttachTarget) -> String {
-    format!("{}:{}", target.backend, target.mux.native_id)
+    format!("{}:{}", target.backend, target.native_id)
 }
 
 /// Pull the mux node out for callers that need its full row (e.g.
@@ -204,9 +214,12 @@ mod tests {
         })
     }
 
+    /// Mirror real-world `TmuxDiscovery` shape: the node's `id`
+    /// is backend-prefixed (`tmux:editor`) while `native_id` is
+    /// the raw session name (`editor`).
     fn mux_node(backend: &str, native: &str) -> GraphNode {
         GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(native),
+            id: MuxSessionId::new(format!("{backend}:{native}")),
             backend: backend.to_string(),
             native_id: native.to_string(),
             cwd: None,
@@ -286,6 +299,11 @@ mod tests {
         );
     }
 
+    /// Mux node id matching the prefixed form `mux_node` emits.
+    fn mux_node_id(backend: &str, native: &str) -> NodeId {
+        NodeId::MuxSession(MuxSessionId::new(format!("{backend}:{native}")))
+    }
+
     #[test]
     fn muxed_session_resolves_to_preferred_mux_target() {
         let mut snapshot = GraphSnapshot::empty();
@@ -295,7 +313,7 @@ mod tests {
             .push(session_node("codex", "/state", "abc", "/p/proj"));
         snapshot.nodes.push(mux_node("tmux", "editor"));
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
-        let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+        let mux_id = mux_node_id("tmux", "editor");
         snapshot.candidate_links.push(linked_to_mux(
             &session_id,
             &mux_id,
@@ -306,7 +324,14 @@ mod tests {
         app.update(Msg::NavDown);
         let target = resolve_attach_target(&app).expect("muxed session attachable");
         assert_eq!(target.backend, "tmux");
-        assert_eq!(target.mux.native_id, "editor");
+        assert_eq!(
+            target.mux.native_id, "tmux:editor",
+            "graph id retains the backend prefix"
+        );
+        assert_eq!(
+            target.native_id, "editor",
+            "raw native id strips the prefix — this is what tmux attach -t takes"
+        );
     }
 
     #[test]
@@ -319,8 +344,8 @@ mod tests {
         snapshot.nodes.push(mux_node("tmux", "editor"));
         snapshot.nodes.push(mux_node("tmux", "scratch"));
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
-        let editor = NodeId::MuxSession(MuxSessionId::new("editor"));
-        let scratch = NodeId::MuxSession(MuxSessionId::new("scratch"));
+        let editor = mux_node_id("tmux", "editor");
+        let scratch = mux_node_id("tmux", "scratch");
         snapshot.candidate_links.push(linked_to_mux(
             &session_id,
             &editor,
@@ -337,8 +362,8 @@ mod tests {
         app.update(Msg::NavDown);
         let target = resolve_attach_target(&app).expect("ambiguous session attachable");
         assert_eq!(
-            target.mux.native_id, "editor",
-            "preferred (StrongDiscovered) candidate wins"
+            target.native_id, "editor",
+            "preferred (StrongDiscovered) candidate wins; raw native id forwarded"
         );
     }
 
@@ -352,8 +377,8 @@ mod tests {
         snapshot.nodes.push(mux_node("tmux", "editor"));
         snapshot.nodes.push(mux_node("tmux", "scratch"));
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
-        let editor = NodeId::MuxSession(MuxSessionId::new("editor"));
-        let scratch = NodeId::MuxSession(MuxSessionId::new("scratch"));
+        let editor = mux_node_id("tmux", "editor");
+        let scratch = mux_node_id("tmux", "scratch");
         snapshot.candidate_links.push(linked_to_mux(
             &session_id,
             &editor,
@@ -375,7 +400,7 @@ mod tests {
         app.update(Msg::NavDown); // scratch candidate
         let target = resolve_attach_target(&app).expect("candidate row attachable");
         assert_eq!(
-            target.mux.native_id, "scratch",
+            target.native_id, "scratch",
             "attach respects the candidate row override"
         );
     }
