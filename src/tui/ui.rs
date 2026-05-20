@@ -31,10 +31,12 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::model::{GraphNode, GraphSnapshot};
+use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
 use crate::tui::View;
+use crate::tui::actions::resolve_attach_target;
 use crate::tui::app::{App, Focus};
 use crate::tui::detail::{HeaderField, NodeDetail};
+use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
     AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency,
 };
@@ -513,24 +515,57 @@ fn preview_text_for_selection(app: &App) -> String {
     match &row.kind {
         RowKind::AgentSession(session) => match session.mux_state {
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
-                if live_preview {
-                    "preview lands once the mux capture adapter (P8-009) wires in".to_string()
-                } else {
-                    "preview disabled (--no-live-preview)".to_string()
-                }
+                mux_preview_text(app, live_preview)
             }
             MuxIndicator::Unmuxed => session
                 .preview
                 .clone()
                 .unwrap_or_else(|| "no preview available".to_string()),
         },
-        _ => {
-            if live_preview {
-                "preview lands once the mux capture adapter (P8-009) wires in".to_string()
-            } else {
-                "preview disabled (--no-live-preview)".to_string()
+        RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview),
+        _ => match selection {
+            RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview),
+            _ => {
+                if live_preview {
+                    "no preview for this row".to_string()
+                } else {
+                    "preview disabled (--no-live-preview)".to_string()
+                }
             }
-        }
+        },
+    }
+}
+
+/// Compose the preview body for a row whose preview source is a
+/// tmux pane capture. Pulls from the per-mux cache; if no cache
+/// entry exists yet (the runtime hasn't refreshed for this
+/// selection), shows a "loading" placeholder. With
+/// `--no-live-preview`, swaps in the privacy banner instead.
+fn mux_preview_text(app: &App, live_preview: bool) -> String {
+    if !live_preview {
+        return "preview disabled (--no-live-preview)".to_string();
+    }
+    let Some(target) = resolve_attach_target(app).ok().map(|t| t.mux) else {
+        return "no mux target for this row".to_string();
+    };
+    format_preview_for_mux(app, &target)
+}
+
+fn format_preview_for_mux(app: &App, mux: &MuxSessionId) -> String {
+    match app.mux_preview(mux) {
+        Some(entry) => match &entry.content {
+            PreviewContent::Text(text) if text.is_empty() => "(empty pane)".to_string(),
+            PreviewContent::Text(text) => text.clone(),
+            PreviewContent::NoTarget => "tmux target not found — try `r` to refresh".to_string(),
+            PreviewContent::Unavailable(reason) => {
+                format!("tmux unavailable: {reason}")
+            }
+            PreviewContent::Failed(message) => message.clone(),
+            PreviewContent::Unsupported => {
+                "preview unavailable (runner does not implement capture)".to_string()
+            }
+        },
+        None => "loading mux preview…".to_string(),
     }
 }
 

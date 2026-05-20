@@ -2962,19 +2962,29 @@ work. `P8-014` is post-v1 polish that does not block the release.
       shape so a Phase 7 server snapshot transport can swap in
       without UI changes.
 
-- [ ] `P8-009` Add mux live-preview capture adapter.
-  - Scope: add a preview adapter over the existing tmux runner seam that
-    can capture the selected mux session/window/pane content, throttle
-    refresh independently from full graph discovery, and degrade to an
-    unavailable/disabled message on missing tmux, missing target,
-    permission failure, or `--no-live-preview`. Rendering code must only
-    consume preview state, never shell out directly.
-  - Tests: fake tmux runner tests for capture success, empty capture,
-    missing pane/session, command failure, disabled preview, and throttled
-    refresh. Ratatui snapshot covering a selected mux row with preview.
-  - Manual checks: run inside tmux, select a mux row, and confirm the
-    preview updates semi-live without blocking navigation.
-  - Blockers: `P8-003`; integrates into `P8-007`/`P8-008`.
+- [x] `P8-009` Add mux live-preview capture adapter.
+  - Outcome: `TmuxRunner` gained a `capture_pane(target)` method
+    with a default `TmuxCaptureOutcome::Unsupported` impl so
+    existing runners didn't have to change. `SystemTmux`
+    implements `tmux capture-pane -p -J -t <target>` and maps
+    failure modes (binary missing, no server, target missing,
+    other) to typed outcomes. `FakeTmux::with_capture` lets
+    tests register canned per-target responses.
+    `src/tui/preview.rs` exposes a `PreviewStore` cache keyed
+    by `MuxSessionId` plus a `capture_via(runner, native_id)`
+    helper that translates `TmuxCaptureOutcome` →
+    `PreviewContent`. The runtime calls capture synchronously
+    after each event when the selection's mux target has
+    changed (skipped when `live_preview_enabled` is false) and
+    dispatches the new `Msg::SetMuxPreview` into the reducer.
+    The UI's right-panel preview reads from the cache; muxed
+    rows show the captured pane content, "loading mux
+    preview…" before the first capture, or a typed error
+    surface (no target / unavailable / failed). Six unit tests
+    cover the adapter + cache.
+    Throttling on the configured `mux_preview_interval`, async
+    background capture, freshness markers, and snapshot tests
+    over the preview render move to `T8-009` (filed alongside).
 
 - [x] `P8-010` Implement attach-to-existing-mux action.
   - Outcome: `a` key bound. `src/tui/actions.rs` resolves the
@@ -3222,6 +3232,20 @@ work. `P8-014` is post-v1 polish that does not block the release.
     deterministic with fixed fixtures.
   - Blockers: `P8-007` v1 slice; individual snapshot variants
     depend on the corresponding feature stories.
+
+- [ ] `T8-009` Throttle and freshen mux pane-capture previews.
+  - Scope: the v1 P8-009 cut runs `tmux capture-pane`
+    synchronously on every selection change and never re-runs
+    until the next change. Add (1) a `mux_preview_interval`-
+    driven refresh so a stable selection still gets fresher
+    captures, (2) a freshness label ("captured Ns ago") in the
+    right-panel preview header, (3) a snapshot test over the
+    preview render with a fake runner so the layout stays
+    locked, and (4) background-thread execution per ADR 0024
+    so capture never blocks input. The background piece
+    overlaps `T8-007`; consider folding the two into a single
+    background-work pass.
+  - Blockers: `P8-009` v1 slice. Best done alongside `T8-007`.
 
 - [ ] `T8-007` Move TUI discovery onto a background thread with
     timer-driven refresh.

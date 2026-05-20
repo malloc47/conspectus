@@ -24,6 +24,34 @@ pub const TMUX_LIST_FORMAT: &str =
 
 pub trait TmuxRunner: Send + Sync {
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
+
+    /// Capture the visible content of pane `target` (e.g. a session
+    /// name like `editor`, or a fuller `session:window.pane`
+    /// selector). Default returns [`TmuxCaptureOutcome::Unsupported`]
+    /// so existing test runners don't need to change.
+    fn capture_pane(&self, _target: &str) -> Result<TmuxCaptureOutcome> {
+        Ok(TmuxCaptureOutcome::Unsupported)
+    }
+}
+
+/// Outcome of a `tmux capture-pane` call. Mirrors the shape of
+/// [`TmuxOutcome`] but for the per-pane capture path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TmuxCaptureOutcome {
+    /// `tmux capture-pane -p -t <target>` succeeded; payload is
+    /// the visible pane content as captured.
+    Captured(String),
+    /// tmux returned successfully but the target doesn't exist
+    /// (a session/window/pane lookup miss).
+    NoTarget,
+    /// tmux itself isn't usable on this host.
+    Unavailable(UnavailableReason),
+    /// tmux returned a non-zero status for an unexpected reason.
+    Failed { code: Option<i32>, message: String },
+    /// The runner doesn't implement capture (e.g. fakes that only
+    /// care about `list_sessions`). Treated as "no preview
+    /// available" by the TUI.
+    Unsupported,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +145,49 @@ impl TmuxRunner for SystemTmux {
             message: stderr,
         })
     }
+
+    fn capture_pane(&self, target: &str) -> Result<TmuxCaptureOutcome> {
+        // `-p` prints to stdout instead of leaving the capture in
+        // the buffer; `-J` joins wrapped lines so the result reads
+        // naturally in a fixed-width preview pane.
+        let output = Command::new(&self.binary)
+            .args(["capture-pane", "-p", "-J", "-t", target])
+            .output();
+
+        let output = match output {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TmuxCaptureOutcome::Unavailable(
+                    UnavailableReason::BinaryNotFound,
+                ));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to spawn tmux binary at {}", self.binary.display())
+                });
+            }
+        };
+
+        if output.status.success() {
+            return Ok(TmuxCaptureOutcome::Captured(
+                String::from_utf8_lossy(&output.stdout).into_owned(),
+            ));
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        if looks_like_no_server(&stderr) {
+            return Ok(TmuxCaptureOutcome::Unavailable(UnavailableReason::NoServer));
+        }
+        if looks_like_no_target(&stderr) {
+            return Ok(TmuxCaptureOutcome::NoTarget);
+        }
+
+        Ok(TmuxCaptureOutcome::Failed {
+            code: output.status.code(),
+            message: stderr,
+        })
+    }
 }
 
 fn looks_like_no_server(stderr: &str) -> bool {
@@ -124,23 +195,36 @@ fn looks_like_no_server(stderr: &str) -> bool {
     lower.contains("no server running") || lower.contains("no sessions")
 }
 
+fn looks_like_no_target(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("can't find session")
+        || lower.contains("can't find window")
+        || lower.contains("can't find pane")
+        || lower.contains("no such session")
+}
+
 /// Test runner that returns pre-canned outcomes.
 #[doc(hidden)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FakeTmux {
     outcome: TmuxOutcome,
+    /// Per-target canned captures. A missing target falls through
+    /// to [`TmuxCaptureOutcome::Unsupported`].
+    captures: std::collections::BTreeMap<String, TmuxCaptureOutcome>,
 }
 
 impl FakeTmux {
     pub fn with_sessions(stdout: impl Into<String>) -> Self {
         Self {
             outcome: TmuxOutcome::Sessions(stdout.into()),
+            captures: std::collections::BTreeMap::new(),
         }
     }
 
     pub fn unavailable(reason: UnavailableReason) -> Self {
         Self {
             outcome: TmuxOutcome::Unavailable(reason),
+            captures: std::collections::BTreeMap::new(),
         }
     }
 
@@ -150,7 +234,14 @@ impl FakeTmux {
                 code,
                 message: message.into(),
             },
+            captures: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Register a canned capture-pane response for `target`.
+    pub fn with_capture(mut self, target: impl Into<String>, capture: TmuxCaptureOutcome) -> Self {
+        self.captures.insert(target.into(), capture);
+        self
     }
 }
 
@@ -158,11 +249,23 @@ impl TmuxRunner for FakeTmux {
     fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
         Ok(self.outcome.clone())
     }
+
+    fn capture_pane(&self, target: &str) -> Result<TmuxCaptureOutcome> {
+        Ok(self
+            .captures
+            .get(target)
+            .cloned()
+            .unwrap_or(TmuxCaptureOutcome::Unsupported))
+    }
 }
 
 impl TmuxRunner for Box<dyn TmuxRunner> {
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
         (**self).list_sessions(format)
+    }
+
+    fn capture_pane(&self, target: &str) -> Result<TmuxCaptureOutcome> {
+        (**self).capture_pane(target)
     }
 }
 
@@ -512,6 +615,62 @@ mod tests {
                 code: Some(2),
                 message: "permission denied".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn missing_binary_capture_pane_reports_unavailable_binary_not_found() {
+        let runner = SystemTmux::with_binary("/definitely/not/here/tmux");
+        let outcome = runner.capture_pane("editor").expect("non-fatal");
+        assert_eq!(
+            outcome,
+            TmuxCaptureOutcome::Unavailable(UnavailableReason::BinaryNotFound)
+        );
+    }
+
+    #[test]
+    fn fake_runner_default_capture_pane_returns_unsupported() {
+        let runner = FakeTmux::with_sessions("");
+        assert_eq!(
+            runner.capture_pane("anything").unwrap(),
+            TmuxCaptureOutcome::Unsupported
+        );
+    }
+
+    #[test]
+    fn fake_runner_returns_registered_capture_outcomes_by_target() {
+        let runner = FakeTmux::with_sessions("")
+            .with_capture(
+                "editor",
+                TmuxCaptureOutcome::Captured("pane content".to_string()),
+            )
+            .with_capture("missing", TmuxCaptureOutcome::NoTarget)
+            .with_capture(
+                "broken",
+                TmuxCaptureOutcome::Failed {
+                    code: Some(1),
+                    message: "boom".to_string(),
+                },
+            );
+        assert_eq!(
+            runner.capture_pane("editor").unwrap(),
+            TmuxCaptureOutcome::Captured("pane content".to_string())
+        );
+        assert_eq!(
+            runner.capture_pane("missing").unwrap(),
+            TmuxCaptureOutcome::NoTarget
+        );
+        assert_eq!(
+            runner.capture_pane("broken").unwrap(),
+            TmuxCaptureOutcome::Failed {
+                code: Some(1),
+                message: "boom".to_string(),
+            }
+        );
+        // Unregistered targets keep the default Unsupported.
+        assert_eq!(
+            runner.capture_pane("other").unwrap(),
+            TmuxCaptureOutcome::Unsupported
         );
     }
 }

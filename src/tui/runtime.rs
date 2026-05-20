@@ -20,10 +20,12 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::discovery::discover_local_at_roots;
-use crate::model::GraphSnapshot;
+use crate::discovery::tmux::{SystemTmux, TmuxRunner};
+use crate::model::{GraphSnapshot, MuxSessionId};
 use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{AttachTarget, attach_disabled_reason, resolve_attach_target};
 use crate::tui::app::{App, Msg};
+use crate::tui::preview::capture_via;
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View, ui};
@@ -42,10 +44,13 @@ pub fn run(config: RunConfig) -> Result<()> {
 /// pure reducer until the app signals quit.
 fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let mut app = App::new(config.clone());
+    let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
+
     // Initial synchronous discovery. Failure here surfaces as an
     // empty tree + an error frame; the operator can still press
     // `r` to retry once the underlying issue is fixed.
     refresh(&mut app, &config);
+    refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);
 
     let poll_timeout = Duration::from_millis(100);
     while !app.should_quit() {
@@ -54,16 +59,51 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
         if event::poll(poll_timeout)? {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
+            let prev_mux_target = current_mux_target(&app);
             match translate(event, viewport) {
                 Some(Action::Msg(msg)) => app.update(msg),
                 Some(Action::Refresh) => refresh(&mut app, &config),
                 Some(Action::Attach) => attach_action(&mut app),
                 None => {}
             }
+            refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
         }
     }
 
     Ok(())
+}
+
+/// If the selection has moved to a new muxed target, capture its
+/// pane and stash the result in the app. Skipped when
+/// `live_preview_enabled` is false (privacy flag) or when the
+/// target hasn't changed (avoids re-shelling on every keystroke).
+fn refresh_mux_preview_if_needed(
+    app: &mut App,
+    config: &RunConfig,
+    runner: &dyn TmuxRunner,
+    prev: Option<MuxSessionId>,
+) {
+    if !config.live_preview_enabled {
+        return;
+    }
+    let Some(current) = current_mux_target(app) else {
+        return;
+    };
+    if prev.as_ref() == Some(&current) && app.mux_preview(&current).is_some() {
+        return;
+    }
+    let content = capture_via(runner, &current.native_id);
+    app.update(Msg::SetMuxPreview {
+        mux: current,
+        content,
+    });
+}
+
+/// Resolve the selection's preferred mux target, if any. Reuses
+/// the attach resolver so the row glyph, the attach action, and
+/// the preview source agree on what "this row's mux" is.
+fn current_mux_target(app: &App) -> Option<MuxSessionId> {
+    resolve_attach_target(app).ok().map(|t| t.mux)
 }
 
 /// Run discovery, build the row tree, and dispatch [`Msg::SetData`].

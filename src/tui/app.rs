@@ -17,9 +17,10 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::model::GraphSnapshot;
+use crate::model::{GraphSnapshot, MuxSessionId};
 use crate::tui::RunConfig;
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
+use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 
 /// Top-level state. Owns the resolved run configuration plus the
@@ -58,6 +59,10 @@ pub struct App {
     /// status-bar surface (provider chips, error states) lands
     /// with `T8-003`.
     status_message: Option<String>,
+    /// Cache of recent tmux pane captures, keyed by mux id. The
+    /// renderer reads this for the right-panel preview when the
+    /// selection points at a muxed agent session or a mux node.
+    preview_store: PreviewStore,
 }
 
 /// Which panel currently consumes navigation keys.
@@ -107,6 +112,13 @@ pub enum Msg {
     /// Set or clear the transient status-bar message. `None`
     /// clears any prior message.
     SetStatus(Option<String>),
+    /// Store a fresh mux preview capture in the per-mux cache.
+    /// The runtime dispatches this after running
+    /// `tmux capture-pane` against the selection's mux target.
+    SetMuxPreview {
+        mux: MuxSessionId,
+        content: PreviewContent,
+    },
 }
 
 impl App {
@@ -124,6 +136,7 @@ impl App {
             preview_scroll: 0,
             loaded_at_epoch: None,
             status_message: None,
+            preview_store: PreviewStore::new(),
         }
     }
 
@@ -187,6 +200,12 @@ impl App {
         self.status_message.as_deref()
     }
 
+    /// Look up a cached mux preview. Returns `None` if the mux
+    /// hasn't been captured yet.
+    pub fn mux_preview(&self, mux: &MuxSessionId) -> Option<&PreviewEntry> {
+        self.preview_store.get(mux)
+    }
+
     /// Iterate the row tree, skipping rows whose ancestors are
     /// collapsed. Iteration order matches display order.
     pub fn visible_rows(&self) -> Vec<&Row> {
@@ -240,6 +259,9 @@ impl App {
             }
             Msg::SetStatus(message) => {
                 self.status_message = message;
+            }
+            Msg::SetMuxPreview { mux, content } => {
+                self.preview_store.insert(mux, content);
             }
         }
     }

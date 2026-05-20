@@ -24,6 +24,7 @@ use anyhow::Result;
 pub mod actions;
 mod app;
 pub mod detail;
+pub mod preview;
 pub mod rows;
 mod runtime;
 mod ui;
