@@ -261,9 +261,7 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         0
     };
 
-    let widget = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
+    let widget = Paragraph::new(lines).scroll((scroll, 0));
     frame.render_widget(widget, inner);
 }
 
@@ -1288,16 +1286,21 @@ mod tests {
     #[test]
     fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
         // Build a snapshot with one repo and twenty sessions so
-        // the rendered tree spills well past a small viewport.
+        // the rendered tree spills well past a small viewport. The
+        // repo path is intentionally long: before the T8-019
+        // regression fix, the left tree wrapped that group row but
+        // computed scroll offsets as if every row occupied one
+        // physical line. That put the selected row one line below
+        // the viewport instead of on the bottom line.
+        let repo_root =
+            "/home/op/src/proj-with-a-very-long-display-path-that-would-wrap-before-clipping";
         let mut snapshot = GraphSnapshot::empty();
         snapshot
             .nodes
-            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
-                "/home/op/src/proj",
-            ))));
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo_root))));
         snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
-            root: "/home/op/src/proj".to_string(),
+            id: WorktreeId::new(RepoId::new(repo_root), repo_root),
+            root: repo_root.to_string(),
             git_dir: None,
             current_branch: None,
         }));
@@ -1307,7 +1310,7 @@ mod tests {
                 .push(GraphNode::AgentSession(AgentSessionNode {
                     id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
                     harness_key: "codex".to_string(),
-                    cwd: Some("/home/op/src/proj".to_string()),
+                    cwd: Some(repo_root.to_string()),
                     title: None,
                     last_message_preview: None,
                 }));
@@ -1335,10 +1338,10 @@ mod tests {
         // viewport for a 10-tall window.
         app.update(Msg::End);
 
-        // Render into a narrow 80x12 window — body is 10 tall after
-        // header/status bars. The selected session's short id must
-        // appear in the rendered buffer.
-        let area = Rect::new(0, 0, 80, 12);
+        // Render into a side-by-side 120x24 window. The left panel
+        // inner viewport is 20 rows tall, so the final selected row
+        // should land exactly on y=21, the bottom content row.
+        let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
 
@@ -1353,12 +1356,18 @@ mod tests {
             text.contains(&last_id),
             "selected row's short id ({last_id}) should be visible after End; got:\n{text}"
         );
+        let bottom_left_line: String = (1..59).map(|x| buffer[(x, 21)].symbol()).collect();
+        assert!(
+            bottom_left_line.contains(&last_id),
+            "selected row's short id ({last_id}) should land on the bottom visible left-panel line; got {bottom_left_line:?}\n{text}"
+        );
 
         // The first row (the repo group) should now be scrolled
         // off the top.
+        let top_left_line: String = (1..59).map(|x| buffer[(x, 2)].symbol()).collect();
         assert!(
-            !text.contains("~/src/proj"),
-            "top-of-tree group should be scrolled away when selection is at End; got:\n{text}"
+            !top_left_line.contains("proj-with-a-very-long"),
+            "top-of-tree group should be scrolled away when selection is at End; got top line {top_left_line:?}\n{text}"
         );
     }
 }

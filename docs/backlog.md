@@ -3452,10 +3452,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
     line further when an inline preview follows so both stay
     visible together, then asks `App::adjust_left_scroll` for
     the offset and passes it to `Paragraph::scroll`. Three
-    reducer-level tests plus a render-level test (20 sessions
-    in an 80×12 frame, `End`, assert the last short id is
-    visible and the top group has scrolled off) cover the
-    behavior. PageUp/PageDown already drive the viewport via
+    reducer-level tests plus a render-level test cover the
+    behavior. The render-level regression uses a long pre-selected
+    group row to prove left-tree rows clip rather than wrap, then
+    asserts the selected row lands on the bottom visible
+    left-panel line after `End`. PageUp/PageDown already drive the
+    viewport via
     the existing reducer; this story just keeps the rendered
     view in sync. Open: pixel-precise centering on first focus
     and a manual-scroll keymap remain follow-ons under
