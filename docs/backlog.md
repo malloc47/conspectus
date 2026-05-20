@@ -3232,6 +3232,11 @@ work. `P8-014` is post-v1 polish that does not block the release.
     deterministic with fixed fixtures.
   - Blockers: `P8-007` v1 slice; individual snapshot variants
     depend on the corresponding feature stories.
+  - **slice landed**: expanded `src/tui/ui.rs` coverage around
+    right-pane focus, selected-row styling when focus moves,
+    contextual status text, compact path labels, compact mux
+    preview headers, and bottom-cropped mux captures. The broader
+    snapshot matrix remains open.
 
 - [ ] `T8-009` Throttle and freshen mux pane-capture previews.
   - Scope: the v1 P8-009 cut runs `tmux capture-pane`
@@ -3263,8 +3268,13 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-009` v1 slice; coordinate with ADR 0022's color
     policy so `--color` semantics stay consistent.
 
-- [ ] `T8-011` Strengthen selected-row and focused-pane visual states.
-  - Scope: make the active attach target and focused pane visually
+- [x] `T8-011` Strengthen selected-row and focused-pane visual states.
+  - Outcome: selected rows now keep a full-row highlight even when
+    focus moves to the right pane, with a subtler inactive-selected
+    background. Focused panel borders/titles use a stronger style,
+    and the status bar leads with `[left]` / `[right]` plus the
+    active pane's keymap so `Tab` has visible effect.
+  - Original scope: make the active attach target and focused pane visually
     unmistakable. Use a full-row selected style for the left tree,
     a distinct but low-noise focus treatment for the active pane
     border/title, and right-pane scroll hints that only appear
@@ -3290,6 +3300,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
     and stable labels across refresh; Ratatui snapshots for narrow
     and 120-col sessions views.
   - Blockers: `P8-004`, `P8-005`, `P8-007` v1 slices.
+  - **slice landed**: the sessions tree renders compact group
+    primary labels with dim shortened-path secondary text, long mux
+    labels are shortened in candidate rows and detail fields, and
+    right-panel detail now receives `$HOME` for path shortening.
+    Duplicate-basename disambiguation and shared view-model helpers
+    remain open.
 
 - [ ] `T8-013` Default-expand and mark the launch-context project
     without filtering the world.
@@ -3318,6 +3334,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
     state; Ratatui snapshots for attachable, ambiguous, un-muxed,
     group-row, provider-error, and stale-refresh status bars.
   - Blockers: `P8-006`, `P8-010`, `T8-003`.
+  - **slice landed**: the status bar now derives its left-zone
+    action text from the selected row. It shows attach targets for
+    attachable selections, disabled attach reasons for un-muxed or
+    unsupported rows, ambiguity affordance text, focus scope, and
+    the active pane keymap. Provider health/freshness chips remain
+    with `T8-003`.
 
 - [ ] `T8-015` Add sessions-tree density modes.
   - Scope: add a user-facing density setting for the sessions view
@@ -3345,6 +3367,11 @@ work. `P8-014` is post-v1 polish that does not block the release.
     capture labels; Ratatui snapshots for long and short captures.
   - Blockers: `P8-009` v1 slice; overlaps `T8-009` freshness
     work and should be planned with it.
+  - **slice landed**: mux previews now use a compact separator
+    carrying the display target and capture freshness when cached,
+    and captured pane text is cropped to the bottom lines available
+    in the preview zone. Configurable budgets and stale/failure
+    header variants remain open with `T8-009`.
 
 - [ ] `T8-017` Add visible search/filter workflow for large session
     worlds.

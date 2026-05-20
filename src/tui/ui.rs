@@ -33,7 +33,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
 use crate::tui::View;
-use crate::tui::actions::resolve_attach_target;
+use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
 use crate::tui::app::{App, Focus};
 use crate::tui::detail::{HeaderField, NodeDetail};
 use crate::tui::preview::PreviewContent;
@@ -43,6 +43,8 @@ use crate::tui::rows::{
 
 const INLINE_PREVIEW_DEFAULT: usize = 3;
 const SELECTED_BG: Color = Color::Indexed(238);
+const SELECTED_INACTIVE_BG: Color = Color::Indexed(236);
+const PREVIEW_HEADER_FG: Color = Color::Indexed(244);
 /// Terminal width threshold below which the body switches from a
 /// side-by-side split to a vertical stack (left-on-top per the
 /// phase-08 layout note).
@@ -133,13 +135,12 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
         frame.render_widget(widget, area);
         return;
     }
-    let hints =
-        "j/k move · Enter expand · a attach · Tab focus · J/K scroll preview · r refresh · q quit";
+    let hints = contextual_status_text(app);
     let scope = match app.focus() {
         Focus::Left => "[left]",
         Focus::Right => "[right]",
     };
-    let widget = Paragraph::new(format!("{hints}  {scope}"))
+    let widget = Paragraph::new(format!("{scope} {hints}"))
         .style(Style::default().add_modifier(Modifier::DIM));
     frame.render_widget(widget, area);
 }
@@ -260,9 +261,16 @@ fn render_left_row(row: &crate::tui::rows::Row, app: &App, is_selected: bool) ->
     match &row.kind {
         RowKind::Group(group) => {
             spans.push(Span::styled(
-                group.display_path.clone(),
+                compact_path_label(&group.display_path),
                 Style::default().add_modifier(Modifier::BOLD),
             ));
+            let secondary = compact_path_secondary(&group.display_path);
+            if !secondary.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {secondary}"),
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+            }
         }
         RowKind::AgentSession(session) => spans.extend(render_session_spans(session)),
         RowKind::AgentSessionMuxCandidate(candidate) => {
@@ -271,14 +279,13 @@ fn render_left_row(row: &crate::tui::rows::Row, app: &App, is_selected: bool) ->
     }
 
     let mut line = Line::from(spans);
-    if is_selected && app.focus() == Focus::Left {
-        line = line.style(
-            Style::default()
-                .bg(SELECTED_BG)
-                .add_modifier(Modifier::BOLD),
-        );
-    } else if is_selected {
-        line = line.style(Style::default().add_modifier(Modifier::BOLD));
+    if is_selected {
+        let bg = if app.focus() == Focus::Left {
+            SELECTED_BG
+        } else {
+            SELECTED_INACTIVE_BG
+        };
+        line = line.style(Style::default().bg(bg).add_modifier(Modifier::BOLD));
     }
     line
 }
@@ -309,7 +316,7 @@ fn render_candidate_spans(candidate: &MuxCandidateRow) -> Vec<Span<'static>> {
         Span::styled("◯ ", Style::default().add_modifier(Modifier::DIM))
     };
     spans.push(glyph);
-    spans.push(Span::raw(candidate.mux_label.clone()));
+    spans.push(Span::raw(compact_mux_label(&candidate.mux_label)));
     if candidate.is_preferred {
         spans.push(Span::styled(
             "  (preferred)".to_string(),
@@ -372,6 +379,55 @@ fn truncate_to_width(text: &str, width: usize) -> String {
     out
 }
 
+fn compact_path_label(path: &str) -> String {
+    if path == "Ungrouped" {
+        return path.to_string();
+    }
+    let trimmed = path.trim_end_matches('/');
+    if trimmed == "~" {
+        return "~".to_string();
+    }
+    trimmed
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
+fn compact_path_secondary(path: &str) -> String {
+    if path == "Ungrouped" {
+        return String::new();
+    }
+    let label = compact_path_label(path);
+    if label == path {
+        String::new()
+    } else {
+        path.to_string()
+    }
+}
+
+fn compact_mux_label(label: &str) -> String {
+    let Some((backend, native)) = label.split_once(':') else {
+        return label.to_string();
+    };
+    let short_native = if native.chars().count() > 36 {
+        let head: String = native.chars().take(28).collect();
+        let tail: String = native
+            .chars()
+            .rev()
+            .take(6)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        format!("{head}…{tail}")
+    } else {
+        native.to_string()
+    };
+    format!("{backend}:{short_native}")
+}
+
 /// Compute the row ids that should render an inline preview line
 /// under their row. v1 rule: the selected row + the top `n` visible
 /// agent session rows by recency. Today recency is `None` for every
@@ -425,7 +481,11 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     draw_detail_header(detail, frame, split[0]);
     frame.render_widget(
-        Paragraph::new("─ preview ─").style(Style::default().add_modifier(Modifier::DIM)),
+        Paragraph::new(preview_separator(app)).style(
+            Style::default()
+                .fg(PREVIEW_HEADER_FG)
+                .add_modifier(Modifier::DIM),
+        ),
         split[1],
     );
     draw_detail_preview(app, detail, frame, split[2]);
@@ -484,7 +544,7 @@ fn render_header_field(field: &HeaderField) -> Line<'static> {
 }
 
 fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
-    let preview_text = preview_text_for_selection(app);
+    let preview_text = preview_text_for_selection(app, area.height as usize);
     let widget = Paragraph::new(preview_text)
         .wrap(Wrap { trim: false })
         .scroll((app.preview_scroll(), 0));
@@ -504,7 +564,7 @@ fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, a
 ///   placeholder switches to the privacy banner instead.
 /// - Other rows: pane capture or fork-detail enrichment wires in
 ///   per `P8-009` / `P8-012b`. Gated by `--no-live-preview`.
-fn preview_text_for_selection(app: &App) -> String {
+fn preview_text_for_selection(app: &App, height: usize) -> String {
     let Some(selection) = app.selection() else {
         return String::new();
     };
@@ -515,16 +575,16 @@ fn preview_text_for_selection(app: &App) -> String {
     match &row.kind {
         RowKind::AgentSession(session) => match session.mux_state {
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
-                mux_preview_text(app, live_preview)
+                mux_preview_text(app, live_preview, height)
             }
             MuxIndicator::Unmuxed => session
                 .preview
                 .clone()
                 .unwrap_or_else(|| "no preview available".to_string()),
         },
-        RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview),
+        RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, height),
         _ => match selection {
-            RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview),
+            RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
             _ => {
                 if live_preview {
                     "no preview for this row".to_string()
@@ -541,21 +601,21 @@ fn preview_text_for_selection(app: &App) -> String {
 /// entry exists yet (the runtime hasn't refreshed for this
 /// selection), shows a "loading" placeholder. With
 /// `--no-live-preview`, swaps in the privacy banner instead.
-fn mux_preview_text(app: &App, live_preview: bool) -> String {
+fn mux_preview_text(app: &App, live_preview: bool, height: usize) -> String {
     if !live_preview {
         return "preview disabled (--no-live-preview)".to_string();
     }
     let Some(target) = resolve_attach_target(app).ok().map(|t| t.mux) else {
         return "no mux target for this row".to_string();
     };
-    format_preview_for_mux(app, &target)
+    format_preview_for_mux(app, &target, height)
 }
 
-fn format_preview_for_mux(app: &App, mux: &MuxSessionId) -> String {
+fn format_preview_for_mux(app: &App, mux: &MuxSessionId, height: usize) -> String {
     match app.mux_preview(mux) {
         Some(entry) => match &entry.content {
             PreviewContent::Text(text) if text.is_empty() => "(empty pane)".to_string(),
-            PreviewContent::Text(text) => text.clone(),
+            PreviewContent::Text(text) => crop_bottom_lines(text, height.max(1)),
             PreviewContent::NoTarget => "tmux target not found — try `r` to refresh".to_string(),
             PreviewContent::Unavailable(reason) => {
                 format!("tmux unavailable: {reason}")
@@ -571,10 +631,91 @@ fn format_preview_for_mux(app: &App, mux: &MuxSessionId) -> String {
 
 fn panel_focus_style(app: &App, focus: Focus) -> Style {
     if app.focus() == focus {
-        Style::default().fg(Color::Cyan)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().add_modifier(Modifier::DIM)
     }
+}
+
+fn contextual_status_text(app: &App) -> String {
+    let focus_hint = match app.focus() {
+        Focus::Left => "j/k move · Enter expand",
+        Focus::Right => "J/K scroll preview",
+    };
+    let action_hint = match resolve_attach_target(app) {
+        Ok(target) => {
+            let label = app
+                .snapshot()
+                .map(|snapshot| target_label(snapshot.as_ref(), &target))
+                .unwrap_or_else(|| format!("{}:{}", target.backend, target.native_id));
+            match selected_mux_state(app) {
+                Some(MuxIndicator::Ambiguous { .. }) => {
+                    format!("a attach preferred {label} · m choose")
+                }
+                _ => format!("a attach {}", compact_mux_label(&label)),
+            }
+        }
+        Err(reason) => attach_disabled_reason(&reason),
+    };
+    format!("{focus_hint} · {action_hint} · Tab focus · r refresh · q quit")
+}
+
+fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
+    let selection = app.selection()?;
+    let row = app.tree().rows.iter().find(|row| &row.id == selection)?;
+    match &row.kind {
+        RowKind::AgentSession(session) => Some(session.mux_state),
+        _ => None,
+    }
+}
+
+fn preview_separator(app: &App) -> String {
+    let Some(target) = resolve_attach_target(app).ok() else {
+        return "─ preview ─".to_string();
+    };
+    let label = compact_mux_label(&format!("{}:{}", target.backend, target.native_id));
+    let freshness = app
+        .mux_preview(&target.mux)
+        .and_then(|entry| entry.captured_at)
+        .map(|captured| {
+            format!(
+                " · captured {}",
+                format_elapsed(captured.elapsed().as_secs())
+            )
+        });
+    match freshness {
+        Some(freshness) => format!("─ preview · {label}{freshness} ago ─"),
+        None => format!("─ preview · {label} ─"),
+    }
+}
+
+fn format_elapsed(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m");
+    }
+    let hours = minutes / 60;
+    if hours < 24 {
+        return format!("{hours}h");
+    }
+    format!("{}d", hours / 24)
+}
+
+fn crop_bottom_lines(text: &str, max_lines: usize) -> String {
+    if max_lines == 0 {
+        return String::new();
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= max_lines {
+        return text.to_string();
+    }
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
 }
 
 // -----------------------------------------------------------------------------
@@ -669,6 +810,81 @@ mod tests {
         app
     }
 
+    fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
+        use crate::model::{
+            Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
+            Provenance, RelationKind,
+        };
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
+            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "abc"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: None,
+                last_message_preview: Some("stale msg".to_string()),
+            }));
+        let mux_graph_id = MuxSessionId::new(native_id);
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: mux_graph_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: native_id.to_string(),
+            cwd: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mux_id = NodeId::MuxSession(mux_graph_id.clone());
+        snapshot.candidate_links.push(GraphLink {
+            id: "session-mux".to_string(),
+            source: session_id,
+            target: LinkEndpoint::Node { id: mux_id },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+        });
+
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: Arc::new(snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+        });
+        app.update(Msg::NavDown);
+        if let Some(capture) = capture {
+            app.update(Msg::SetMuxPreview {
+                mux: mux_graph_id,
+                content: PreviewContent::Text(capture.to_string()),
+            });
+        }
+        app
+    }
+
     #[test]
     fn render_at_default_size_shows_header_tree_and_detail() {
         let mut app = seeded_app();
@@ -678,7 +894,7 @@ mod tests {
         // assertions below cover.
         app.update(Msg::NavDown);
 
-        let area = Rect::new(0, 0, 80, 24);
+        let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
 
@@ -709,7 +925,7 @@ mod tests {
     #[test]
     fn empty_app_renders_loading_placeholder() {
         let app = App::new(RunConfig::defaults());
-        let area = Rect::new(0, 0, 80, 24);
+        let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
@@ -724,7 +940,7 @@ mod tests {
         // seeded_app sets loaded_at_epoch = 1_700_000_000.
         // Advance the rendering clock 12s to assert the freshness slot.
         test_clock::set(1_700_000_012);
-        let area = Rect::new(0, 0, 80, 24);
+        let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
@@ -833,7 +1049,7 @@ mod tests {
         });
         app.update(Msg::NavDown); // jump from repo group → session row
 
-        let area = Rect::new(0, 0, 80, 24);
+        let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
@@ -845,5 +1061,97 @@ mod tests {
         // extras (pane capture + transcript-tail) in the right
         // panel. The graph-resident `stale msg` is allowed to
         // remain in the inline-preview line below the row.
+    }
+
+    #[test]
+    fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
+        let mut app = seeded_app();
+        app.update(Msg::NavDown);
+        app.update(Msg::CycleFocus);
+
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("J/K scroll preview"),
+            "right focus status hint missing: {text}"
+        );
+        assert!(
+            text.contains("[right]"),
+            "right focus marker missing: {text}"
+        );
+
+        let selected_has_inactive_bg = (0..buffer.area.height).any(|y| {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            line.contains("codex")
+                && (0..buffer.area.width)
+                    .any(|x| buffer[(x, y)].style().bg == Some(SELECTED_INACTIVE_BG))
+        });
+        assert!(
+            selected_has_inactive_bg,
+            "selected row should remain highlighted when right pane has focus"
+        );
+    }
+
+    #[test]
+    fn contextual_status_reports_unmuxed_attach_reason() {
+        let mut app = seeded_app();
+        app.update(Msg::NavDown);
+        let area = Rect::new(0, 0, 100, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("attach: session is not attached to any mux"),
+            "expected contextual attach-disabled reason: {text}"
+        );
+    }
+
+    #[test]
+    fn mux_preview_renders_compact_header_and_bottom_cropped_capture() {
+        let mut app = muxed_app(
+            "agentdeck_conspectus-very-long-session-name-with-suffix_12345678",
+            Some("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7"),
+        );
+        app.update(Msg::ScrollPreviewDown);
+        app.update(Msg::ScrollPreviewUp);
+
+        let area = Rect::new(0, 0, 100, 14);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("preview · tmux:agentdeck_conspectus-very-lo"),
+            "expected compact mux preview header: {text}"
+        );
+        assert!(
+            preview_separator(&app).contains("captured"),
+            "freshness label missing from full preview separator"
+        );
+        assert!(
+            !text.contains("line 1"),
+            "oldest capture lines should be cropped out: {text}"
+        );
+        assert!(
+            text.contains("line 7"),
+            "latest capture line should remain visible: {text}"
+        );
+    }
+
+    #[test]
+    fn compact_path_helpers_keep_primary_label_short() {
+        assert_eq!(compact_path_label("~/src/conspectus"), "conspectus");
+        assert_eq!(
+            compact_path_secondary("~/src/conspectus"),
+            "~/src/conspectus"
+        );
+        assert_eq!(compact_path_label("Ungrouped"), "Ungrouped");
+        assert_eq!(compact_path_secondary("Ungrouped"), "");
+    }
+
+    #[test]
+    fn crop_bottom_lines_keeps_latest_lines() {
+        assert_eq!(crop_bottom_lines("a\nb\nc\nd", 2), "c\nd");
+        assert_eq!(crop_bottom_lines("a\nb", 3), "a\nb");
     }
 }

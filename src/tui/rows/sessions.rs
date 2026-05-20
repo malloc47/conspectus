@@ -474,7 +474,22 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
 }
 
 fn mux_session_label(node: &MuxSessionNode) -> String {
-    format!("{}:{}", node.backend, node.native_id)
+    let native = if node.native_id.chars().count() > 36 {
+        let head: String = node.native_id.chars().take(28).collect();
+        let tail: String = node
+            .native_id
+            .chars()
+            .rev()
+            .take(6)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        format!("{head}…{tail}")
+    } else {
+        node.native_id.clone()
+    };
+    format!("{}:{native}", node.backend)
 }
 
 /// Sessions within a group sort by recency desc (None last), then

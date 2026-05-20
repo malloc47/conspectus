@@ -377,21 +377,22 @@ impl App {
         let Some(snapshot) = self.snapshot.as_ref() else {
             return;
         };
+        let home = home_for_config(&self.config);
         self.detail = build_node_detail(DetailInputs {
             snapshot: snapshot.as_ref(),
             target: &target,
-            home: home_for_config(&self.config),
+            home: home.as_deref(),
         });
     }
 }
 
-fn home_for_config(_config: &RunConfig) -> Option<&std::path::Path> {
+fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
     // RunConfig doesn't carry the home directory today; the
     // dispatcher passes paths in already-shortened form via the
     // row tree, and the detail builder shortens its own when given
-    // a home. For now we read the environment lazily — pure-state
+    // a home. For now we read the environment lazily - pure-state
     // tests can patch this when home-sensitive behavior matters.
-    None
+    std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
 #[cfg(test)]

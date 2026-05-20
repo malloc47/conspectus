@@ -199,7 +199,7 @@ fn title_line(node: &GraphNode) -> String {
         GraphNode::AgentSession(session) => {
             format!("{}:…{}", session.harness_key, short_tail)
         }
-        GraphNode::MuxSession(mux) => format!("{}:{}", mux.backend, mux.native_id),
+        GraphNode::MuxSession(mux) => mux_display_label(mux),
         GraphNode::ForgePr(pr) => format!("forge_pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => match &fork.name {
             Some(name) => format!("fork:{name}"),
@@ -366,9 +366,12 @@ fn mux_session_fields(
     home: Option<&Path>,
 ) -> Vec<HeaderField> {
     let mut fields = vec![
+        plain("mux", mux_display_label(mux)),
         plain("backend", mux.backend.clone()),
-        plain("native_id", mux.native_id.clone()),
     ];
+    if mux.native_id.chars().count() <= 36 {
+        fields.push(plain("native_id", mux.native_id.clone()));
+    }
     if let Some(cwd) = &mux.cwd {
         fields.push(HeaderField {
             label: "cwd",
@@ -551,7 +554,7 @@ fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<Strin
     let target = link.target_node_id()?;
     let node = snapshot.nodes.iter().find(|n| n.id() == *target)?;
     match node {
-        GraphNode::MuxSession(mux) => Some(format!("{}:{}", mux.backend, mux.native_id)),
+        GraphNode::MuxSession(mux) => Some(mux_display_label(mux)),
         GraphNode::AgentSession(session) => Some(format!(
             "{}:{}",
             session.harness_key, session.id.session_key
@@ -559,6 +562,25 @@ fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<Strin
         GraphNode::Repo(repo) => Some(format!("repo:{}", repo.common_dir)),
         other => Some(format!("{}", other.id())),
     }
+}
+
+fn mux_display_label(mux: &MuxSessionNode) -> String {
+    let native = if mux.native_id.chars().count() > 36 {
+        let head: String = mux.native_id.chars().take(28).collect();
+        let tail: String = mux
+            .native_id
+            .chars()
+            .rev()
+            .take(6)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        format!("{head}…{tail}")
+    } else {
+        mux.native_id.clone()
+    };
+    format!("{}:{native}", mux.backend)
 }
 
 fn link_summaries(
