@@ -3247,6 +3247,120 @@ work. `P8-014` is post-v1 polish that does not block the release.
     background-work pass.
   - Blockers: `P8-009` v1 slice. Best done alongside `T8-007`.
 
+- [ ] `T8-010` Render ANSI color in tmux previews.
+  - Scope: capture mux previews with ANSI escape sequences when
+    available (for tmux this likely means dropping or conditionally
+    avoiding `capture-pane -p` behavior that strips styling, after
+    verifying the exact tmux flags). Parse ANSI into Ratatui spans
+    so agent/tool output keeps its terminal colors inside the
+    preview pane. Honor `--color=never` by stripping styles, and
+    fall back to plain text on malformed escape sequences without
+    failing the preview.
+  - Tests: unit tests for ANSI-to-span parsing over common SGR
+    sequences, color-disabled stripping, malformed-sequence
+    fallback, and a Ratatui snapshot showing colored preview spans
+    without leaking escape bytes into layout width.
+  - Blockers: `P8-009` v1 slice; coordinate with ADR 0022's color
+    policy so `--color` semantics stay consistent.
+
+- [ ] `T8-011` Strengthen selected-row and focused-pane visual states.
+  - Scope: make the active attach target and focused pane visually
+    unmistakable. Use a full-row selected style for the left tree,
+    a distinct but low-noise focus treatment for the active pane
+    border/title, and right-pane scroll hints that only appear
+    when the preview can scroll. `Tab` should have both visible
+    and behavioral effects: navigation keys apply to the focused
+    pane, and the status bar names the active keymap.
+  - Tests: reducer tests for focus-specific key handling; Ratatui
+    snapshots for left-focus, right-focus, selected agent row,
+    selected mux-candidate row, and scrollable vs non-scrollable
+    preview states.
+  - Blockers: `P8-006`, `P8-007` v1 slices.
+
+- [ ] `T8-012` Compress project, path, and mux display labels.
+  - Scope: introduce display-label helpers for TUI rows and detail
+    fields so raw paths and tmux native ids do not dominate prime
+    screen space. Group rows should use a short project/worktree
+    label first, with `~`-shortened path as dim secondary text
+    when width allows. Mux fields should prefer a human-readable
+    display name and keep the full native id available through the
+    existing copy-id/node-show affordances or a dim overflow field.
+  - Tests: pure view-model tests for home-shortened paths,
+    duplicate basename disambiguation, long tmux id compression,
+    and stable labels across refresh; Ratatui snapshots for narrow
+    and 120-col sessions views.
+  - Blockers: `P8-004`, `P8-005`, `P8-007` v1 slices.
+
+- [ ] `T8-013` Default-expand and mark the launch-context project
+    without filtering the world.
+  - Scope: when `conspectus tui` launches, still discover and show
+    the whole configured world state, but use the process cwd only
+    as an orientation hint. Expand the matching workspace/repo/
+    worktree group by default, select the most relevant recent row
+    inside it when present, and mark that group with a subtle
+    "cwd"/"here" indicator. If cwd has no matching graph node,
+    fall back to the global most-recent attachable session.
+  - Tests: row-tree/app initialization tests for cwd matching a
+    repo, matching a worktree, matching only a workspace, matching
+    no node, and selection retention after the first refresh.
+    Snapshot the indicator in the sessions view.
+  - Blockers: `P8-004`, `P8-006`, `P8-008` v1 slices.
+
+- [ ] `T8-014` Make the status bar contextual to the selected row.
+  - Scope: replace the static action list with a compact contextual
+    left zone. Examples: attachable rows show
+    `a attach <mux-display>`, ambiguous rows show
+    `a attach preferred · m choose`, un-muxed rows show the
+    disabled attach reason and reserved resume affordance, and
+    group rows show expand/collapse. Keep provider health,
+    freshness, and errors in the right chip zone.
+  - Tests: pure status-view tests for each row kind and attach
+    state; Ratatui snapshots for attachable, ambiguous, un-muxed,
+    group-row, provider-error, and stale-refresh status bars.
+  - Blockers: `P8-006`, `P8-010`, `T8-003`.
+
+- [ ] `T8-015` Add sessions-tree density modes.
+  - Scope: add a user-facing density setting for the sessions view
+    so operators can trade context for row count. Suggested modes:
+    `compact` (one line per session, no inline previews),
+    `balanced` (current locked behavior: selected + top-N recent
+    previews), and `expanded` (preview for every visible session
+    when width/height allow). Expose via config and a TUI toggle
+    only after the base `/` search and help overlays are stable.
+  - Tests: row-tree/render snapshots for all density modes at
+    80x24 and a wide terminal; config parsing tests once the
+    setting is added.
+  - Blockers: `P8-007` v1 slice; should follow `T8-004` so wide
+    inline behavior is not duplicated.
+
+- [ ] `T8-016` Crop and annotate tmux previews for recognition.
+  - Scope: make the mux preview behave like a recognition surface,
+    not a raw dump. Prefer the bottom N visible lines from
+    `capture-pane`, preserve wrapping enough to resemble the
+    terminal pane, and add a compact preview header such as
+    `preview · tmux · captured 2s ago`. Surface stale, disabled,
+    and failed capture states in that header when possible.
+  - Tests: preview adapter tests for bottom-line cropping,
+    configurable line budget, stale/fresh labels, and failed
+    capture labels; Ratatui snapshots for long and short captures.
+  - Blockers: `P8-009` v1 slice; overlaps `T8-009` freshness
+    work and should be planned with it.
+
+- [ ] `T8-017` Add visible search/filter workflow for large session
+    worlds.
+  - Scope: finish the `/` in-view search overlay for the TUI and
+    make active filtering visible in the header or status bar.
+    Matching should cover project label, path, harness, short id,
+    session title, preview snippet, branch/PR labels when present,
+    and mux display label. Results should preserve enough group
+    context that the operator understands where a matched session
+    lives.
+  - Tests: matcher tests for each searchable field; reducer tests
+    for open/type/clear/accept/cancel; Ratatui snapshots for an
+    active query, zero results, and grouped result context.
+  - Blockers: `P8-004`, `P8-006`; adding a heavyweight matcher
+    still requires following ADR 0024's dependency policy.
+
 - [ ] `T8-007` Move TUI discovery onto a background thread with
     timer-driven refresh.
   - Scope: replace the synchronous `discover_local_at_roots`

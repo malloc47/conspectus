@@ -29,6 +29,12 @@ Purpose: user-facing runtime reference covering the environment variables
 that gate discovery providers, the harness state-root overrides, the
 config-file precedence, and the current CLI surface.
 
+## `docs/tui-review.md`
+
+Purpose: UX review of the in-development `conspectus tui` sessions view,
+focused on fast session switching, spatial density, color, focus treatment,
+and follow-up backlog themes.
+
 ## `docs/library-api.md`
 
 Purpose: Phase 6 library API inventory describing stable consumer entry
