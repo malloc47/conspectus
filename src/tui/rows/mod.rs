@@ -116,6 +116,12 @@ pub struct GroupRow {
     /// Underlying node id when the group corresponds to a single
     /// node, `None` for synthetic buckets.
     pub primary_node: Option<NodeId>,
+    /// True when this group corresponds to the launch-time process
+    /// cwd (the longest ancestor of cwd among all group rows). The
+    /// renderer surfaces this with a subtle marker so the operator
+    /// can tell where they launched from; the runtime also uses it
+    /// to pick the initial selection and pre-expand ancestors.
+    pub is_launch_context: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

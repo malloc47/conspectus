@@ -38,6 +38,11 @@ pub struct RunConfig {
     /// Discovery scan roots. Empty means "discover from the current
     /// working directory" at runtime.
     pub scan_roots: Vec<PathBuf>,
+    /// Process working directory at launch. Treated as an
+    /// orientation hint only: the row tree highlights the matching
+    /// group row and pre-selects it at startup. None disables the
+    /// hint (useful for headless tests).
+    pub cwd: Option<PathBuf>,
     /// Initial left-panel organization.
     pub default_view: View,
     /// Row sort within each group.
@@ -60,6 +65,7 @@ impl RunConfig {
     pub fn defaults() -> Self {
         Self {
             scan_roots: Vec::new(),
+            cwd: None,
             default_view: View::Sessions,
             default_sort: Sort::Hierarchy,
             sessions_grouping: SessionsGrouping::Graph,

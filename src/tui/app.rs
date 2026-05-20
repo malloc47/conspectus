@@ -91,10 +91,16 @@ pub enum Msg {
     /// the nearest visible row by index. `loaded_at_epoch` is the
     /// Unix-epoch second at which the snapshot completed loading,
     /// used by the header's `updated Ns ago` indicator.
+    /// `initial_selection_hint` is consulted on the *first* SetData
+    /// (when no prior selection exists) to pre-select the launch-
+    /// context row (T8-013) instead of the leading row in the tree;
+    /// later refreshes ignore the hint and prefer the retained
+    /// selection.
     SetData {
         snapshot: Arc<GraphSnapshot>,
         tree: RowTree,
         loaded_at_epoch: i64,
+        initial_selection_hint: Option<RowId>,
     },
     /// Left panel: move selection down/up one visible row.
     NavDown,
@@ -281,7 +287,8 @@ impl App {
                 snapshot,
                 tree,
                 loaded_at_epoch,
-            } => self.set_data(snapshot, tree, loaded_at_epoch),
+                initial_selection_hint,
+            } => self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint),
             Msg::NavDown => self.move_selection(1),
             Msg::NavUp => self.move_selection(-1),
             Msg::PageDown(viewport) => self.move_selection(i32::from(viewport.max(1))),
@@ -310,7 +317,13 @@ impl App {
         }
     }
 
-    fn set_data(&mut self, snapshot: Arc<GraphSnapshot>, tree: RowTree, loaded_at_epoch: i64) {
+    fn set_data(
+        &mut self,
+        snapshot: Arc<GraphSnapshot>,
+        tree: RowTree,
+        loaded_at_epoch: i64,
+        initial_selection_hint: Option<RowId>,
+    ) {
         self.loaded_at_epoch = Some(loaded_at_epoch);
         // Auto-expand every group row on first arrival of a tree
         // segment so the operator sees their sessions immediately.
@@ -327,6 +340,7 @@ impl App {
         }
 
         let prev_selection = self.selection.take();
+        let is_first_load = prev_selection.is_none();
         let prev_visible_index = prev_selection
             .as_ref()
             .and_then(|id| self.visible_rows().iter().position(|r| &r.id == id));
@@ -343,6 +357,16 @@ impl App {
         } else if let Some(prev_index) = prev_visible_index {
             let clamped = prev_index.min(visible.len() - 1);
             self.selection = Some(visible[clamped].clone());
+        } else if is_first_load
+            && let Some(hint) = initial_selection_hint
+            && visible.iter().any(|id| id == &hint)
+        {
+            // First-load launch-context hint: pre-select the row
+            // the operator's cwd points at instead of the leading
+            // tree row. Only honored on the first SetData so later
+            // refreshes don't fight the operator's manual
+            // selection.
+            self.selection = Some(hint);
         } else {
             self.selection = Some(visible[0].clone());
         }
@@ -480,6 +504,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: None,
             now: None,
+            cwd: None,
         })
     }
 
@@ -491,6 +516,7 @@ mod tests {
             snapshot: snap,
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         app
     }
@@ -502,6 +528,7 @@ mod tests {
             snapshot: Arc::new(GraphSnapshot::empty()),
             tree: RowTree::default(),
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         assert!(app.selection().is_none());
         assert!(app.detail().is_none());
@@ -513,6 +540,75 @@ mod tests {
         let visible = app.visible_rows();
         assert!(!visible.is_empty(), "groups auto-expanded");
         assert!(app.selection().is_some());
+    }
+
+    #[test]
+    fn set_data_first_load_honors_initial_selection_hint() {
+        // Build a tree with two project groups and feed the second
+        // group's id as the launch-context hint on first SetData.
+        // The reducer should pre-select the hinted row instead of
+        // the leading row.
+        let snap = Arc::new(make_snapshot_with(&[
+            ("codex", "a", "/p/proja"),
+            ("codex", "b", "/p/projb"),
+        ]));
+        let tree = build_tree(&snap);
+        // Pick a group row whose id is *not* the first visible row.
+        let first_group_id = tree
+            .rows
+            .iter()
+            .find(|r| matches!(&r.kind, RowKind::Group(_)))
+            .map(|r| r.id.clone())
+            .expect("at least one group row");
+        let hint = tree
+            .rows
+            .iter()
+            .find_map(|r| match &r.kind {
+                RowKind::Group(_) if r.id != first_group_id => Some(r.id.clone()),
+                _ => None,
+            })
+            .expect("at least two group rows in the seeded tree");
+
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: snap,
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: Some(hint.clone()),
+        });
+        assert_eq!(app.selection().cloned(), Some(hint));
+    }
+
+    #[test]
+    fn set_data_later_refreshes_ignore_initial_selection_hint() {
+        // Seed the app once so prev_selection is populated, then
+        // dispatch a second SetData with a hint that points
+        // elsewhere. The retained selection should win.
+        let mut app = seeded_app(&[("codex", "a", "/p/proja"), ("codex", "b", "/p/projb")]);
+        app.update(Msg::End); // move selection to the last row
+        let kept = app.selection().cloned().expect("selection present");
+
+        let snap = app.snapshot.clone().unwrap();
+        let tree = build_tree(&snap);
+        // Pick *some* other row id as the hint.
+        let hint = tree
+            .rows
+            .iter()
+            .map(|r| r.id.clone())
+            .find(|id| id != &kept)
+            .expect("at least one alternate row");
+        app.update(Msg::SetData {
+            snapshot: snap,
+            tree,
+            loaded_at_epoch: 1_700_000_010,
+            initial_selection_hint: Some(hint.clone()),
+        });
+
+        assert_eq!(
+            app.selection().cloned(),
+            Some(kept),
+            "later refreshes must not overwrite the operator's selection with the hint"
+        );
     }
 
     #[test]
@@ -654,6 +750,7 @@ mod tests {
             snapshot: snap,
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         assert_eq!(app.selection().cloned().unwrap(), saved);
     }
@@ -671,6 +768,7 @@ mod tests {
             snapshot: snap,
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
 
         let new_selection = app.selection().cloned().unwrap();

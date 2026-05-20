@@ -303,6 +303,12 @@ fn render_left_row(row: &crate::tui::rows::Row, app: &App, is_selected: bool) ->
                     Style::default().add_modifier(Modifier::DIM),
                 ));
             }
+            if group.is_launch_context {
+                spans.push(Span::styled(
+                    "  (cwd)".to_string(),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+                ));
+            }
         }
         RowKind::AgentSession(session) => spans.extend(render_session_spans(session)),
         RowKind::AgentSessionMuxCandidate(candidate) => {
@@ -859,6 +865,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(std::path::Path::new("/home/op")),
             now: None,
+            cwd: None,
         });
 
         let mut config = RunConfig::defaults();
@@ -868,6 +875,7 @@ mod tests {
             snapshot: Arc::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         app
     }
@@ -927,6 +935,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(std::path::Path::new("/home/op")),
             now: None,
+            cwd: None,
         });
 
         let mut config = RunConfig::defaults();
@@ -936,6 +945,7 @@ mod tests {
             snapshot: Arc::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         app.update(Msg::NavDown);
         if let Some(capture) = capture {
@@ -1098,6 +1108,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(std::path::Path::new("/home/op")),
             now: None,
+            cwd: None,
         });
 
         let mut config = RunConfig::defaults();
@@ -1108,6 +1119,7 @@ mod tests {
             snapshot: Arc::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         app.update(Msg::NavDown); // jump from repo group → session row
 
@@ -1306,6 +1318,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(std::path::Path::new("/home/op")),
             now: None,
+            cwd: None,
         });
 
         let mut config = RunConfig::defaults();
@@ -1315,6 +1328,7 @@ mod tests {
             snapshot: Arc::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
 
         // Jump to the last visible row — it lives well below the

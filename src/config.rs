@@ -26,6 +26,19 @@ pub const USER_CONFIG_RELATIVE: &str = "conspectus/config.toml";
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
     pub table: TableConfig,
+    pub tui: TuiConfig,
+}
+
+/// Settings under `[tui]` in `.conspectus.toml` / user config.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TuiConfig {
+    /// Scan roots for `conspectus tui` discovery. Empty means "use
+    /// the process cwd" (the v1-default behavior). `~` and `~/<rel>`
+    /// tokens are expanded against the loader's home directory at
+    /// merge time, so the on-disk form stays portable across
+    /// machines. CLI `--scan-root` flags override this list when
+    /// present.
+    pub scan_roots: Vec<PathBuf>,
 }
 
 /// Per-row-type settings under `[table.<rows>]`. Each row-type gets
@@ -93,11 +106,19 @@ impl Projection {
 struct ConfigFile {
     #[serde(default)]
     table: Option<TableFile>,
+    #[serde(default)]
+    tui: Option<TuiFile>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
     #[serde(default)]
     session: Option<toml::Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TuiFile {
+    #[serde(default)]
+    scan_roots: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -209,12 +230,22 @@ impl ConfigLoader {
             && path.is_file()
         {
             outcome.user_path = Some(path.clone());
-            merge_from_file(&mut config, &path, &mut outcome.diagnostics);
+            merge_from_file(
+                &mut config,
+                &path,
+                self.home.as_deref(),
+                &mut outcome.diagnostics,
+            );
         }
 
         if let Some(path) = self.locate_project_config(cwd) {
             outcome.project_path = Some(path.clone());
-            merge_from_file(&mut config, &path, &mut outcome.diagnostics);
+            merge_from_file(
+                &mut config,
+                &path,
+                self.home.as_deref(),
+                &mut outcome.diagnostics,
+            );
         }
 
         outcome.config = config;
@@ -229,7 +260,12 @@ pub fn load_from_cwd() -> Result<LoadOutcome> {
     Ok(ConfigLoader::from_env().load_from(cwd))
 }
 
-fn merge_from_file(config: &mut Config, path: &Path, diagnostics: &mut Vec<ConfigDiagnostic>) {
+fn merge_from_file(
+    config: &mut Config,
+    path: &Path,
+    home: Option<&Path>,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return,
@@ -264,6 +300,37 @@ fn merge_from_file(config: &mut Config, path: &Path, diagnostics: &mut Vec<Confi
     if let Some(table) = parsed.table {
         merge_table(&mut config.table, table);
     }
+
+    if let Some(tui) = parsed.tui {
+        merge_tui(&mut config.tui, tui, home);
+    }
+}
+
+fn merge_tui(config: &mut TuiConfig, file: TuiFile, home: Option<&Path>) {
+    if let Some(raw_roots) = file.scan_roots {
+        config.scan_roots = raw_roots
+            .into_iter()
+            .map(|raw| expand_home(&raw, home))
+            .collect();
+    }
+}
+
+/// Expand a leading `~` or `~/<rest>` token against `home`. Other
+/// forms pass through unchanged. When `home` is `None`, the raw
+/// path is returned even if it starts with `~` — the loader has no
+/// home to splice in and the operator-visible result is at least
+/// stable rather than half-resolved.
+fn expand_home(raw: &str, home: Option<&Path>) -> PathBuf {
+    let Some(home) = home else {
+        return PathBuf::from(raw);
+    };
+    if raw == "~" {
+        return home.to_path_buf();
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    PathBuf::from(raw)
 }
 
 fn merge_table(config: &mut TableConfig, file: TableFile) {
@@ -475,5 +542,60 @@ mod tests {
         // was never opened (XDG took priority).
         assert!(outcome.diagnostics.is_empty());
         assert_eq!(outcome.user_path.unwrap(), xdg.join(USER_CONFIG_RELATIVE));
+    }
+
+    #[test]
+    fn tui_scan_roots_parse_and_expand_home() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui]\nscan_roots = [\"~\", \"~/src/oss\", \"/abs/path\"]\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(
+            outcome.config.tui.scan_roots,
+            vec![
+                temp.path().to_path_buf(),
+                temp.path().join("src/oss"),
+                PathBuf::from("/abs/path"),
+            ]
+        );
+    }
+
+    #[test]
+    fn tui_scan_roots_default_empty() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(&project.join(PROJECT_CONFIG_FILENAME), "[table.sessions]\n");
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.config.tui.scan_roots.is_empty());
+    }
+
+    #[test]
+    fn expand_home_preserves_paths_without_tilde() {
+        let home = PathBuf::from("/home/op");
+        assert_eq!(
+            expand_home("/etc/conspectus", Some(&home)),
+            PathBuf::from("/etc/conspectus")
+        );
+        assert_eq!(expand_home("~", Some(&home)), home);
+        assert_eq!(expand_home("~/src", Some(&home)), home.join("src"));
+        // `~suffix` without `/` is not a recognized form; leave as-is
+        // so we don't accidentally splice the username's home for
+        // some other user.
+        assert_eq!(expand_home("~root", Some(&home)), PathBuf::from("~root"));
+        // Without a home directory we cannot expand; keep the raw
+        // string rather than silently dropping the `~`.
+        assert_eq!(expand_home("~/src", None), PathBuf::from("~/src"));
     }
 }

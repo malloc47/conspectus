@@ -20,7 +20,7 @@
 //! v1. Populating them is tracked as a follow-on backlog story.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::{
     AgentSessionNode, GraphLink, GraphNode, GraphSnapshot, MuxSessionNode, NodeId, RelationKind,
@@ -45,6 +45,11 @@ pub struct SessionsBuildInputs<'a> {
     /// Wall-clock epoch (Unix seconds) used to compute recency.
     /// Pass `None` to leave recency blank — useful for tests.
     pub now: Option<i64>,
+    /// Process launch-time cwd. Used to mark the deepest matching
+    /// group row with `is_launch_context = true` so the renderer
+    /// and selection state machine can highlight the operator's
+    /// orientation. Pass `None` to disable the highlight (tests).
+    pub cwd: Option<&'a Path>,
 }
 
 /// Build the sessions row tree. Pure: depends only on the inputs,
@@ -100,7 +105,70 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         emit_ungrouped(&mut ctx, ungrouped);
     }
 
+    mark_launch_context(&mut tree, inputs.cwd);
+
     tree
+}
+
+/// Walk every group row and set `is_launch_context = true` on the
+/// one whose underlying path is the deepest ancestor of `cwd`.
+/// Skipped when `cwd` is absent or no row matches.
+fn mark_launch_context(tree: &mut RowTree, cwd: Option<&Path>) {
+    let Some(cwd) = cwd else {
+        return;
+    };
+    let mut best_idx: Option<usize> = None;
+    let mut best_depth: usize = 0;
+    for (idx, row) in tree.rows.iter().enumerate() {
+        let RowKind::Group(group) = &row.kind else {
+            continue;
+        };
+        let Some(path) = group
+            .primary_node
+            .as_ref()
+            .and_then(node_id_path)
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
+        if !path_is_ancestor_of(&path, cwd) {
+            continue;
+        }
+        let depth = path.components().count();
+        if depth > best_depth || best_idx.is_none() {
+            best_idx = Some(idx);
+            best_depth = depth;
+        }
+    }
+    if let Some(idx) = best_idx
+        && let RowKind::Group(group) = &mut tree.rows[idx].kind
+    {
+        group.is_launch_context = true;
+    }
+}
+
+fn node_id_path(id: &NodeId) -> Option<&str> {
+    match id {
+        NodeId::Workspace(ws) => Some(ws.root.as_str()),
+        NodeId::Repo(repo) => Some(repo.common_dir.as_str()),
+        NodeId::Worktree(wt) => Some(wt.root.as_str()),
+        _ => None,
+    }
+}
+
+/// Component-wise prefix match so `/a/b` does **not** count as an
+/// ancestor of `/a/barbecue`.
+fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
+    let mut anc_iter = ancestor.components();
+    let mut desc_iter = descendant.components();
+    loop {
+        match (anc_iter.next(), desc_iter.next()) {
+            (Some(a), Some(d)) if a == d => continue,
+            (Some(_), Some(_)) => return false,
+            (Some(_), None) => return false,
+            (None, _) => return true,
+        }
+    }
 }
 
 /// Bundle of mutable + read-only context threaded through the emit
@@ -353,6 +421,7 @@ fn push_workspace_row(tree: &mut RowTree, depth: u8, workspace_root: &str, home:
         kind: RowKind::Group(GroupRow {
             display_path: shorten_home(workspace_root, home),
             primary_node: Some(node_id),
+            is_launch_context: false,
         }),
     });
 }
@@ -366,6 +435,7 @@ fn push_repo_row(tree: &mut RowTree, depth: u8, key: &GroupKey, home: Option<&Pa
         kind: RowKind::Group(GroupRow {
             display_path: shorten_home(&key.repo, home),
             primary_node: Some(node_id),
+            is_launch_context: false,
         }),
     });
 }
@@ -386,6 +456,7 @@ fn push_worktree_row(
         kind: RowKind::Group(GroupRow {
             display_path: shorten_home(worktree_root, home),
             primary_node: Some(node_id),
+            is_launch_context: false,
         }),
     });
 }
@@ -399,6 +470,7 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
         kind: RowKind::Group(GroupRow {
             display_path: "Ungrouped".to_string(),
             primary_node: None,
+            is_launch_context: false,
         }),
     });
     for entry in sessions {
@@ -682,6 +754,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
         assert!(tree.rows.is_empty());
         assert_eq!(tree.view, ViewLabel::Sessions);
@@ -708,6 +781,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         // Expect: repo row, then session row. No worktree row.
@@ -756,6 +830,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         // Expect a single repo row at depth 0, followed by two
@@ -846,6 +921,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         let session_row = tree
@@ -892,6 +968,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         let row = tree
@@ -946,6 +1023,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         let session_row = tree
@@ -994,6 +1072,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         assert_eq!(tree.rows.len(), 2);
@@ -1025,6 +1104,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         let row = tree
@@ -1066,6 +1146,7 @@ mod tests {
             grouping: SessionsGrouping::Worktree,
             home: Some(home().as_path()),
             now: None,
+            cwd: None,
         });
 
         // With explicit worktree grouping, the worktree row is
@@ -1083,5 +1164,134 @@ mod tests {
             has_worktree_group,
             "explicit worktree grouping should show the worktree level"
         );
+    }
+
+    #[test]
+    fn mark_launch_context_marks_deepest_ancestor_group() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/wt/featx"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "a",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "b",
+            Some("/home/op/wt/featx"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            // Launching from inside the featx worktree should mark
+            // the featx worktree row (more specific than the repo
+            // row, which is also an ancestor).
+            cwd: Some(std::path::Path::new("/home/op/wt/featx/src")),
+        });
+
+        let marked: Vec<&GroupRow> = tree
+            .rows
+            .iter()
+            .filter_map(|r| match &r.kind {
+                RowKind::Group(g) if g.is_launch_context => Some(g),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(marked.len(), 1, "exactly one row should be marked");
+        let marked = marked[0];
+        match &marked.primary_node {
+            Some(NodeId::Worktree(wt)) => assert_eq!(wt.root, "/home/op/wt/featx"),
+            other => panic!("expected featx worktree marked, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mark_launch_context_with_no_match_leaves_all_rows_unmarked() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "a",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: Some(std::path::Path::new("/tmp/elsewhere")),
+        });
+        for row in &tree.rows {
+            if let RowKind::Group(g) = &row.kind {
+                assert!(
+                    !g.is_launch_context,
+                    "no row should be marked when cwd is unrelated; got marked: {g:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mark_launch_context_disabled_when_cwd_is_none() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "a",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+        });
+        for row in &tree.rows {
+            if let RowKind::Group(g) = &row.kind {
+                assert!(!g.is_launch_context);
+            }
+        }
+    }
+
+    #[test]
+    fn path_is_ancestor_of_respects_component_boundaries() {
+        use std::path::Path;
+        assert!(path_is_ancestor_of(Path::new("/a/b"), Path::new("/a/b")));
+        assert!(path_is_ancestor_of(Path::new("/a/b"), Path::new("/a/b/c")));
+        assert!(!path_is_ancestor_of(
+            Path::new("/a/b"),
+            Path::new("/a/barbecue")
+        ));
+        assert!(!path_is_ancestor_of(Path::new("/x"), Path::new("/y")));
     }
 }

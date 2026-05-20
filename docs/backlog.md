@@ -3309,49 +3309,51 @@ work. `P8-014` is post-v1 polish that does not block the release.
     Duplicate-basename disambiguation and shared view-model helpers
     remain open.
 
-- [ ] `T8-013` Default-expand and mark the launch-context project
+- [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
+    ancestor when neither CLI nor config specifies one. Low
+    priority.
+  - Scope: when `--scan-root` and `[tui].scan_roots` are both
+    empty, walk up from the process cwd to the first ancestor
+    that contains ≥ N (default 2 or 3) immediate-child entries
+    that themselves look like repository roots (a `.git`
+    directory or worktree). Use that ancestor as the scan root
+    instead of cwd. Should be opt-in via a flag or config
+    setting initially so we don't surprise operators who *want*
+    the cwd-scoped behavior; promote to default later if it
+    works out. The heuristic needs a clear cap (don't walk
+    past `$HOME` or filesystem boundaries) and should fall back
+    to the current cwd-scoped behavior when no plausible
+    ancestor is found.
+  - Tests: pure helper tests for the ancestor walk over fixture
+    directories with varied repo counts and depths; the
+    runtime side wires through the same scan-root resolution
+    path as `[tui].scan_roots`.
+  - Blockers: `T8-013` v1 slice. Filed at low priority per
+    operator direction — config-driven `[tui].scan_roots` is
+    the preferred default; this auto-broaden mode is a
+    "no-config still does the right thing most of the time"
+    affordance.
+
+- [x] `T8-013` Default-expand and mark the launch-context project
     without filtering the world.
-  - Scope: when `conspectus tui` launches, still discover and show
-    the whole configured world state, but use the process cwd only
-    as an orientation hint. Expand the matching workspace/repo/
-    worktree group by default, select the most relevant recent row
-    inside it when present, and mark that group with a subtle
-    "cwd"/"here" indicator. If cwd has no matching graph node,
-    fall back to the global most-recent attachable session.
-  - Tests: row-tree/app initialization tests for cwd matching a
-    repo, matching a worktree, matching only a workspace, matching
-    no node, and selection retention after the first refresh.
-    Snapshot the indicator in the sessions view.
-  - Blockers: `P8-004`, `P8-006`, `P8-008` v1 slices.
-  - **Design choice still open** (pending operator input). Two
-    orthogonal pieces:
-    1. **Where the "world" comes from when no `--scan-root` is
-       passed.** Today the runtime calls
-       `discover_local_at_roots([cwd])`, so the world is
-       cwd-scoped. Options for the v1 default:
-       - (a) Walk `$HOME`. Universal, no config. Slow for deep
-         home directories (potentially 10s+ of discovery).
-       - (b) Read `[tui].scan_roots = [...]` from
-         `.conspectus.toml` / user config, default to cwd if
-         unset. Operator-configurable; matches existing config
-         convention; no implicit slow scan.
-       - (c) Auto-broaden: walk up from cwd to the first
-         ancestor that contains ≥ N sibling repos
-         (e.g. `~/src`), use that as the scan root. Heuristic
-         but config-free.
-       - (d) Combo of (b) + (c) — config when set, otherwise
-         auto-broaden, otherwise cwd.
-       The config path requires a new `[tui]` section in
-       `src/config.rs`. The auto-broaden path is heuristic and
-       would need a clear unwinding rule for unusual layouts.
-    2. **CWD highlight piece** (independent of scan-root
-       choice): once the world is shown, find the tree row
-       whose path is an ancestor of cwd, set it as the initial
-       selection (instead of "first visible row"), keep it
-       expanded across refreshes, and render a subtle "here"
-       indicator. This is straightforward to implement; the
-       only design question is the marker style (suffix glyph,
-       dim "(cwd)" tag, etc.).
+  - Outcome: scan roots now resolve CLI → `[tui].scan_roots`
+    config → cwd-default (operator picked option (b)).
+    `src/config.rs` gained a `TuiConfig` struct with
+    `scan_roots: Vec<PathBuf>` parsed from `[tui].scan_roots` in
+    `.conspectus.toml` / user config, with `~` and `~/<rel>`
+    expansion against the loader's home directory at merge
+    time. `TuiArgs::run` consults the loaded config when
+    `--scan-root` is empty and falls back to `[cwd]` only when
+    both are unset. `RunConfig` carries the launch-time cwd as
+    an orientation hint that the sessions row-tree builder
+    uses to mark the deepest ancestor group row with
+    `GroupRow::is_launch_context = true`. `Msg::SetData`
+    carries an `initial_selection_hint`; the runtime computes
+    it from the marked row and the reducer prefers it on first
+    load over the leading row (later refreshes ignore the
+    hint so manual selection isn't clobbered). The renderer
+    adds a dim cyan `(cwd)` suffix to the marked row. Auto-
+    broaden option (c) filed as low-priority `T8-020`.
 
 - [ ] `T8-014` Make the status bar contextual to the selected row.
   - Scope: replace the static action list with a compact contextual

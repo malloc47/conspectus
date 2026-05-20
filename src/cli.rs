@@ -651,8 +651,30 @@ impl TuiArgs {
             })?;
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
 
+        // Resolve scan roots: CLI flags win, then config, then a
+        // single-element fallback to the current working directory
+        // (the original cwd-scoped v1 behavior).
+        let cwd = std::env::current_dir()?;
+        let loader = config::ConfigLoader::from_env();
+        let outcome = loader.load_from(&cwd);
+        for diagnostic in &outcome.diagnostics {
+            eprintln!(
+                "conspectus: warning: {}: {}",
+                diagnostic.path.display(),
+                diagnostic.message
+            );
+        }
+        let scan_roots = if !self.scan_roots.is_empty() {
+            self.scan_roots
+        } else if !outcome.config.tui.scan_roots.is_empty() {
+            outcome.config.tui.scan_roots
+        } else {
+            vec![cwd.clone()]
+        };
+
         let config = conspectus::tui::RunConfig {
-            scan_roots: self.scan_roots,
+            scan_roots,
+            cwd: Some(cwd),
             default_view: match self.view {
                 ViewFlag::Sessions => conspectus::tui::View::Sessions,
                 ViewFlag::Mux => conspectus::tui::View::Mux,

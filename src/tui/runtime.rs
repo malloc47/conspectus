@@ -62,7 +62,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let prev_mux_target = current_mux_target(&app);
             let action = translate(event, viewport).map(|a| remap_for_focus(a, app.focus()));
             match action {
-                Some(Action::Msg(msg)) => app.update(msg),
+                Some(Action::Msg(msg)) => app.update(*msg),
                 Some(Action::Refresh) => refresh(&mut app, &config),
                 Some(Action::Attach) => attach_action(terminal, &mut app, &config),
                 None => {}
@@ -117,10 +117,12 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 fn refresh(app: &mut App, config: &RunConfig) {
     match discover_and_build(config) {
         Ok((snapshot, tree)) => {
+            let initial_selection_hint = launch_context_row_id(&tree);
             app.update(Msg::SetData {
                 snapshot: Arc::new(snapshot),
                 tree,
                 loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+                initial_selection_hint,
             });
         }
         Err(_err) => {
@@ -128,6 +130,18 @@ fn refresh(app: &mut App, config: &RunConfig) {
             // retain the previous good state.
         }
     }
+}
+
+/// Find the `RowId` of the group row marked as the launch-context
+/// (per [`crate::tui::rows::GroupRow::is_launch_context`]). Used as
+/// the `initial_selection_hint` for [`Msg::SetData`] so the
+/// operator's cwd-matching project is pre-selected on first load.
+fn launch_context_row_id(tree: &RowTree) -> Option<crate::tui::rows::RowId> {
+    use crate::tui::rows::RowKind;
+    tree.rows.iter().find_map(|row| match &row.kind {
+        RowKind::Group(g) if g.is_launch_context => Some(row.id.clone()),
+        _ => None,
+    })
 }
 
 fn discover_and_build(config: &RunConfig) -> Result<(GraphSnapshot, RowTree)> {
@@ -151,6 +165,7 @@ fn build_tree_for_view(snapshot: &GraphSnapshot, config: &RunConfig) -> RowTree 
             grouping: config.sessions_grouping,
             home: home.as_deref(),
             now: current_unix_epoch(),
+            cwd: config.cwd.as_deref(),
         }),
         // Mux / union / prs / forks builders land in the remaining
         // P8-004 commits; until then those views show an empty
@@ -174,10 +189,14 @@ fn current_unix_epoch() -> Option<i64> {
 
 /// The runtime's outer action: either a [`Msg`] for the pure
 /// reducer or a side-effecting operation the reducer can't perform
-/// (running discovery, exec'ing into a mux client).
+/// (running discovery, exec'ing into a mux client). `Msg` is
+/// boxed because `Msg::SetData` carries a `RowTree` that pushes
+/// the enum past clippy's `large_enum_variant` threshold, even
+/// though `Action::Msg` only ever carries the small navigation
+/// variants in practice.
 #[derive(Debug, Clone, PartialEq)]
 enum Action {
-    Msg(Msg),
+    Msg(Box<Msg>),
     Refresh,
     Attach,
 }
@@ -266,14 +285,13 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
         return action;
     }
     match action {
-        Action::Msg(Msg::NavDown) => Action::Msg(Msg::ScrollPreviewBy(1)),
-        Action::Msg(Msg::NavUp) => Action::Msg(Msg::ScrollPreviewBy(-1)),
-        Action::Msg(Msg::PageDown(viewport)) => {
-            Action::Msg(Msg::ScrollPreviewBy(i32::from(viewport.max(1))))
-        }
-        Action::Msg(Msg::PageUp(viewport)) => {
-            Action::Msg(Msg::ScrollPreviewBy(-i32::from(viewport.max(1))))
-        }
+        Action::Msg(boxed) => Action::Msg(Box::new(match *boxed {
+            Msg::NavDown => Msg::ScrollPreviewBy(1),
+            Msg::NavUp => Msg::ScrollPreviewBy(-1),
+            Msg::PageDown(viewport) => Msg::ScrollPreviewBy(i32::from(viewport.max(1))),
+            Msg::PageUp(viewport) => Msg::ScrollPreviewBy(-i32::from(viewport.max(1))),
+            other => other,
+        })),
         other => other,
     }
 }
@@ -289,20 +307,22 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
 fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Msg(Msg::Quit)),
-            (_, KeyCode::Char('q')) => Some(Action::Msg(Msg::Quit)),
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Msg(Box::new(Msg::Quit))),
+            (_, KeyCode::Char('q')) => Some(Action::Msg(Box::new(Msg::Quit))),
             (m, KeyCode::Char('r')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Refresh),
             (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
-            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(Action::Msg(Msg::NavDown)),
-            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::Msg(Msg::NavUp)),
-            (_, KeyCode::PageDown) => Some(Action::Msg(Msg::PageDown(viewport_height))),
-            (_, KeyCode::PageUp) => Some(Action::Msg(Msg::PageUp(viewport_height))),
-            (_, KeyCode::Home) | (_, KeyCode::Char('g')) => Some(Action::Msg(Msg::Home)),
-            (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Msg::End)),
-            (_, KeyCode::Enter) => Some(Action::Msg(Msg::ToggleExpand)),
-            (_, KeyCode::Tab) => Some(Action::Msg(Msg::CycleFocus)),
-            (_, KeyCode::Char('J')) => Some(Action::Msg(Msg::ScrollPreviewBy(1))),
-            (_, KeyCode::Char('K')) => Some(Action::Msg(Msg::ScrollPreviewBy(-1))),
+            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
+                Some(Action::Msg(Box::new(Msg::NavDown)))
+            }
+            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::Msg(Box::new(Msg::NavUp))),
+            (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown(viewport_height)))),
+            (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp(viewport_height)))),
+            (_, KeyCode::Home) | (_, KeyCode::Char('g')) => Some(Action::Msg(Box::new(Msg::Home))),
+            (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Box::new(Msg::End))),
+            (_, KeyCode::Enter) => Some(Action::Msg(Box::new(Msg::ToggleExpand))),
+            (_, KeyCode::Tab) => Some(Action::Msg(Box::new(Msg::CycleFocus))),
+            (_, KeyCode::Char('J')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))),
+            (_, KeyCode::Char('K')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(-1)))),
             _ => None,
         },
         _ => None,
@@ -321,8 +341,10 @@ mod tests {
     }
 
     fn msg(action: Option<Action>) -> Option<Msg> {
+        // Action::Msg now boxes its payload (large enum variant);
+        // unwrap for the test assertions.
         match action {
-            Some(Action::Msg(msg)) => Some(msg),
+            Some(Action::Msg(msg)) => Some(*msg),
             _ => None,
         }
     }
@@ -429,9 +451,9 @@ mod tests {
     #[test]
     fn remap_for_focus_left_is_identity() {
         use crate::tui::app::Focus;
-        let action = Action::Msg(Msg::NavDown);
+        let action = Action::Msg(Box::new(Msg::NavDown));
         assert_eq!(remap_for_focus(action.clone(), Focus::Left), action);
-        let action = Action::Msg(Msg::PageDown(20));
+        let action = Action::Msg(Box::new(Msg::PageDown(20)));
         assert_eq!(remap_for_focus(action.clone(), Focus::Left), action);
     }
 
@@ -439,20 +461,20 @@ mod tests {
     fn remap_for_focus_right_swaps_nav_for_preview_scroll() {
         use crate::tui::app::Focus;
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::NavDown), Focus::Right),
-            Action::Msg(Msg::ScrollPreviewBy(1))
+            remap_for_focus(Action::Msg(Box::new(Msg::NavDown)), Focus::Right),
+            Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))
         );
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::NavUp), Focus::Right),
-            Action::Msg(Msg::ScrollPreviewBy(-1))
+            remap_for_focus(Action::Msg(Box::new(Msg::NavUp)), Focus::Right),
+            Action::Msg(Box::new(Msg::ScrollPreviewBy(-1)))
         );
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::PageDown(20)), Focus::Right),
-            Action::Msg(Msg::ScrollPreviewBy(20))
+            remap_for_focus(Action::Msg(Box::new(Msg::PageDown(20))), Focus::Right),
+            Action::Msg(Box::new(Msg::ScrollPreviewBy(20)))
         );
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::PageUp(20)), Focus::Right),
-            Action::Msg(Msg::ScrollPreviewBy(-20))
+            remap_for_focus(Action::Msg(Box::new(Msg::PageUp(20))), Focus::Right),
+            Action::Msg(Box::new(Msg::ScrollPreviewBy(-20)))
         );
     }
 
@@ -461,16 +483,16 @@ mod tests {
         use crate::tui::app::Focus;
         // Tab / Enter / quit should not be remapped.
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::CycleFocus), Focus::Right),
-            Action::Msg(Msg::CycleFocus)
+            remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
+            Action::Msg(Box::new(Msg::CycleFocus))
         );
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::ToggleExpand), Focus::Right),
-            Action::Msg(Msg::ToggleExpand)
+            remap_for_focus(Action::Msg(Box::new(Msg::ToggleExpand)), Focus::Right),
+            Action::Msg(Box::new(Msg::ToggleExpand))
         );
         assert_eq!(
-            remap_for_focus(Action::Msg(Msg::Quit), Focus::Right),
-            Action::Msg(Msg::Quit)
+            remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),
+            Action::Msg(Box::new(Msg::Quit))
         );
         assert_eq!(
             remap_for_focus(Action::Refresh, Focus::Right),

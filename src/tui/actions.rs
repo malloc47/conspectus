@@ -192,6 +192,7 @@ mod tests {
             grouping: SessionsGrouping::Graph,
             home: None,
             now: None,
+            cwd: None,
         });
         let mut cfg = RunConfig::defaults();
         cfg.default_view = View::Sessions;
@@ -200,6 +201,7 @@ mod tests {
             snapshot: Arc::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
         });
         app
     }
