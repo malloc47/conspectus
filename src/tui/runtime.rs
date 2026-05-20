@@ -63,7 +63,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             match translate(event, viewport) {
                 Some(Action::Msg(msg)) => app.update(msg),
                 Some(Action::Refresh) => refresh(&mut app, &config),
-                Some(Action::Attach) => attach_action(&mut app),
+                Some(Action::Attach) => attach_action(terminal, &mut app, &config),
                 None => {}
             }
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
@@ -181,42 +181,76 @@ enum Action {
     Attach,
 }
 
-/// Handle the `a` key. On success, exec into `tmux attach-session`
-/// — the process becomes the tmux client and never returns. On
-/// disabled, set a status-bar message and stay in the TUI.
-fn attach_action(app: &mut App) {
+/// Handle the `a` key. On success, suspend the TUI, spawn
+/// `tmux attach-session` and wait for it to exit, then re-enter
+/// the alt screen so the operator returns to the TUI ready to
+/// pick another row. On disabled, set a status-bar message and
+/// stay in the TUI without touching the terminal.
+fn attach_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
     match resolve_attach_target(app) {
-        Ok(target) => exec_tmux_attach(&target),
+        Ok(target) => {
+            let outcome = run_tmux_attach(terminal, &target);
+            // Always restore the row tree state — sessions may have
+            // come and gone during the attach.
+            refresh(app, config);
+            // Surface a status line that reflects what happened so
+            // the operator isn't guessing if anything ran.
+            let message = match outcome {
+                AttachOutcome::Detached => format!("attached/detached: {}", target_short(&target)),
+                AttachOutcome::Failed(reason) => format!("attach failed: {reason}"),
+            };
+            app.update(Msg::SetStatus(Some(message)));
+        }
         Err(reason) => {
             app.update(Msg::SetStatus(Some(attach_disabled_reason(&reason))));
         }
     }
 }
 
-/// Restore the terminal and exec into the mux client. Diverges on
-/// success (the kernel replaces this process); exits with code 2
-/// on failure, after restoring the terminal so the shell prompt
-/// returns cleanly. Uses the raw `native_id` (e.g. `editor`), not
-/// the backend-prefixed `mux.native_id` (e.g. `tmux:editor`) — the
-/// latter is a graph-key form that tmux itself doesn't understand.
-fn exec_tmux_attach(target: &AttachTarget) -> ! {
+/// Outcome of a single attach attempt. Errors carry a
+/// human-readable reason for the status bar.
+#[derive(Debug)]
+enum AttachOutcome {
+    /// `tmux attach-session` ran and exited (operator detached,
+    /// pane was closed, tmux returned successfully, etc.).
+    Detached,
+    /// We never got to `tmux` cleanly, or `tmux` exited non-zero
+    /// with a message worth surfacing.
+    Failed(String),
+}
+
+/// Leave the alt screen + raw mode, spawn `tmux attach-session
+/// -t <native_id>` inheriting the parent terminal, wait for it to
+/// exit, then re-enter the alt screen. The caller's
+/// `DefaultTerminal` is replaced in place so the resumed event
+/// loop draws into the fresh terminal.
+fn run_tmux_attach(terminal: &mut DefaultTerminal, target: &AttachTarget) -> AttachOutcome {
+    // Suspend the ratatui terminal so tmux owns the real screen
+    // for the duration of the attach.
     ratatui::restore();
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let native = target.native_id.clone();
-        let err = std::process::Command::new("tmux")
-            .args(["attach-session", "-t", &native])
-            .exec();
-        eprintln!("conspectus: failed to exec tmux: {err}");
-        std::process::exit(2);
+
+    let status = std::process::Command::new("tmux")
+        .args(["attach-session", "-t", &target.native_id])
+        .status();
+
+    // Re-enter the alt screen + raw mode and swap the terminal in
+    // place. Failure to re-init is fatal for the TUI, but we
+    // attempted restore() first so the shell stays usable.
+    *terminal = ratatui::init();
+    // Forget any cached frame state — the parent screen was
+    // overwritten by tmux, and a clean clear avoids ghost cells
+    // from the suspended buffer.
+    let _ = terminal.clear();
+
+    match status {
+        Ok(s) if s.success() => AttachOutcome::Detached,
+        Ok(s) => AttachOutcome::Failed(format!("tmux exited with {s}")),
+        Err(err) => AttachOutcome::Failed(format!("could not launch tmux: {err}")),
     }
-    #[cfg(not(unix))]
-    {
-        let _ = target;
-        eprintln!("conspectus: tmux attach is only supported on Unix");
-        std::process::exit(2);
-    }
+}
+
+fn target_short(target: &AttachTarget) -> String {
+    format!("{}:{}", target.backend, target.native_id)
 }
 
 /// Map crossterm events to [`Action`]s. Returns `None` for events

@@ -3381,8 +3381,21 @@ work. `P8-014` is post-v1 polish that does not block the release.
     in the preview zone. Configurable budgets and stale/failure
     header variants remain open with `T8-009`.
 
-- [ ] `T8-018` Round-trip attach: return to the TUI after the operator
+- [x] `T8-018` Round-trip attach: return to the TUI after the operator
     detaches from the mux client.
+  - Outcome: `attach_action` no longer `exec`s into tmux.
+    Instead, it calls `ratatui::restore()`, spawns
+    `tmux attach-session -t <native_id>` with
+    `Command::status()` so tmux owns the real terminal, waits
+    for it to exit, then calls `ratatui::init()` to re-enter
+    the alt screen and replaces the runtime's
+    `DefaultTerminal` in place (followed by a `clear()`). Once
+    control returns, the runtime kicks off a refresh so the
+    row tree reflects activity during the attach, and surfaces
+    a status-bar line — `attached/detached: tmux:<name>` on
+    success or `attach failed: <reason>` if tmux exited
+    non-zero or didn't launch. The operator stays in the TUI
+    ready to pick another row.
   - Scope: today `exec_tmux_attach` calls `execve`, so the
     conspectus process is replaced by tmux. When the operator
     detaches (Ctrl-B d), there's no TUI to return to — they
