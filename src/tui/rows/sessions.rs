@@ -85,8 +85,15 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         grouping: inputs.grouping,
     };
 
+    // Iterate worktree-keyed buckets while deduplicating their
+    // ancestor headers. Buckets ordered by (workspace, repo,
+    // worktree) come out adjacent for the same (workspace, repo)
+    // pair, so we just track the most recent header keys and emit
+    // each only on change.
+    let mut last_workspace: Option<Option<String>> = None;
+    let mut last_repo: Option<RepoId> = None;
     for (key, sessions) in buckets {
-        emit_group(&mut ctx, key, sessions);
+        emit_worktree_bucket(&mut ctx, key, sessions, &mut last_workspace, &mut last_repo);
     }
 
     if !ungrouped.is_empty() {
@@ -283,56 +290,84 @@ fn resolve_group_key(
     })
 }
 
-fn emit_group(ctx: &mut EmitCtx<'_, '_>, key: GroupKey, mut sessions: Vec<SessionEntry<'_>>) {
+/// Emit one worktree-keyed bucket while reusing the workspace and
+/// repo group rows from prior buckets when those keys haven't
+/// changed. Mutates `last_workspace` / `last_repo` to track the
+/// most recent header emitted.
+fn emit_worktree_bucket(
+    ctx: &mut EmitCtx<'_, '_>,
+    key: GroupKey,
+    mut sessions: Vec<SessionEntry<'_>>,
+    last_workspace: &mut Option<Option<String>>,
+    last_repo: &mut Option<RepoId>,
+) {
     sessions.sort_by(|a, b| compare_sessions(a, b));
 
+    let workspace_changed = last_workspace.as_ref() != Some(&key.workspace);
+    let repo_changed = workspace_changed || last_repo.as_ref() != Some(&key.repo_id);
+
     let mut depth: u8 = 0;
-    if let Some(workspace_root) = &key.workspace {
-        ctx.tree.rows.push(Row {
-            id: RowId::Group(NodeId::Workspace(WorkspaceId {
-                root: workspace_root.clone(),
-            })),
-            depth,
-            expandable: true,
-            kind: RowKind::Group(GroupRow {
-                display_path: shorten_home(workspace_root, ctx.home),
-                primary_node: Some(NodeId::Workspace(WorkspaceId {
-                    root: workspace_root.clone(),
-                })),
-            }),
-        });
+    if key.workspace.is_some() {
+        if workspace_changed && let Some(workspace_root) = &key.workspace {
+            push_workspace_row(ctx.tree, depth, workspace_root, ctx.home);
+        }
         depth = depth.saturating_add(1);
     }
 
-    // Repo level
-    ctx.tree.rows.push(Row {
-        id: RowId::Group(NodeId::Repo(key.repo_id.clone())),
-        depth,
-        expandable: true,
-        kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(&key.repo, ctx.home),
-            primary_node: Some(NodeId::Repo(key.repo_id.clone())),
-        }),
-    });
+    if repo_changed {
+        push_repo_row(ctx.tree, depth, &key, ctx.home);
+    }
+    let repo_depth = depth;
 
     let worktree_should_render = matches!(ctx.grouping, SessionsGrouping::Worktree)
         || ctx.index.worktree_count_for_repo(&key.repo_id) >= 2;
     let session_depth = if worktree_should_render && let Some(wt_root) = &key.worktree {
         push_worktree_row(
             ctx.tree,
-            depth.saturating_add(1),
+            repo_depth.saturating_add(1),
             &key.repo_id,
             wt_root,
             ctx.home,
         );
-        depth.saturating_add(2)
+        repo_depth.saturating_add(2)
     } else {
-        depth.saturating_add(1)
+        repo_depth.saturating_add(1)
     };
 
     for entry in sessions {
         emit_session(ctx, session_depth, entry);
     }
+
+    *last_workspace = Some(key.workspace);
+    *last_repo = Some(key.repo_id);
+}
+
+fn push_workspace_row(tree: &mut RowTree, depth: u8, workspace_root: &str, home: Option<&Path>) {
+    let node_id = NodeId::Workspace(WorkspaceId {
+        root: workspace_root.to_string(),
+    });
+    tree.rows.push(Row {
+        id: RowId::Group(node_id.clone()),
+        depth,
+        expandable: true,
+        kind: RowKind::Group(GroupRow {
+            display_path: shorten_home(workspace_root, home),
+            primary_node: Some(node_id),
+        }),
+    });
+}
+
+fn push_repo_row(tree: &mut RowTree, depth: u8, key: &GroupKey, home: Option<&Path>) {
+    let node_id = NodeId::Repo(key.repo_id.clone());
+    tree.rows.push(Row {
+        id: RowId::Group(node_id.clone()),
+        depth,
+        expandable: true,
+        kind: RowKind::Group(GroupRow {
+            display_path: shorten_home(&key.repo, home),
+            primary_node: Some(node_id),
+        }),
+    });
 }
 
 fn push_worktree_row(
@@ -708,20 +743,28 @@ mod tests {
             now: None,
         });
 
-        // Expect: repo row (0) → worktree row (1) → session row (2) for each worktree group.
-        let depths: Vec<u8> = tree.rows.iter().map(|r| r.depth).collect();
-        // Two repo rows (one per group key — workspace is None, so
-        // grouping is per (repo, worktree); same repo appears twice).
-        // The builder emits the repo group row once per group; given
-        // two groups with distinct worktree keys, the repo row
-        // repeats. That is acceptable for v1 — collapsing duplicate
-        // repo rows is its own follow-on (T8-* below).
-        assert!(
-            depths.contains(&1),
-            "expected at least one worktree-depth row, got depths={depths:?}"
-        );
+        // Expect a single repo row at depth 0, followed by two
+        // worktree rows at depth 1 each owning their session rows
+        // at depth 2. The dedup pass collapses what would otherwise
+        // be a per-bucket repo header repeat (was T8-001).
         let kinds: Vec<&RowKind> = tree.rows.iter().map(|r| &r.kind).collect();
-        let group_count = kinds
+        let repo_count = kinds
+            .iter()
+            .filter(|k| {
+                matches!(
+                    k,
+                    RowKind::Group(GroupRow {
+                        primary_node: Some(NodeId::Repo(_)),
+                        ..
+                    })
+                )
+            })
+            .count();
+        assert_eq!(
+            repo_count, 1,
+            "expected exactly one repo group row, kinds={kinds:#?}"
+        );
+        let worktree_count = kinds
             .iter()
             .filter(|k| {
                 matches!(
@@ -734,9 +777,37 @@ mod tests {
             })
             .count();
         assert_eq!(
-            group_count, 2,
+            worktree_count, 2,
             "expected two worktree group rows, kinds={kinds:#?}"
         );
+        // Repo row sits above the two worktree subtrees.
+        let repo_pos = tree
+            .rows
+            .iter()
+            .position(|r| {
+                matches!(
+                    &r.kind,
+                    RowKind::Group(GroupRow {
+                        primary_node: Some(NodeId::Repo(_)),
+                        ..
+                    })
+                )
+            })
+            .unwrap();
+        let first_worktree_pos = tree
+            .rows
+            .iter()
+            .position(|r| {
+                matches!(
+                    &r.kind,
+                    RowKind::Group(GroupRow {
+                        primary_node: Some(NodeId::Worktree(_)),
+                        ..
+                    })
+                )
+            })
+            .unwrap();
+        assert!(repo_pos < first_worktree_pos);
     }
 
     #[test]

@@ -3159,22 +3159,16 @@ work. `P8-014` is post-v1 polish that does not block the release.
     but P8-008's discovery refresh path benefits when this lands
     before snapshot tests on the rendered v1 TUI freeze.
 
-- [ ] `T8-001` Collapse duplicate repo group rows when a project
+- [x] `T8-001` Collapse duplicate repo group rows when a project
     appears across multiple worktree buckets in the TUI sessions
     row tree.
-  - Scope: when `SessionsGrouping::Graph` produces multiple group
-    keys with the same `(workspace, repo)` but different
-    `worktree` values, the v1 builder emits the repo group row
-    once per worktree bucket. The display shows the repo header
-    repeated above each worktree subtree, which is correct but
-    wastes vertical space. Refactor `emit_group` to group sibling
-    `worktree` buckets under a single repo row.
-  - Tests: extend the existing
-    `two_worktrees_in_same_repo_show_worktree_level` test in
-    `src/tui/rows/sessions.rs` to assert exactly one repo group
-    row.
-  - Blockers: `P8-004` (the row-tree builder this story refines).
-    Does not block the v1 release; the duplication is cosmetic.
+  - Outcome: `emit_worktree_bucket` now tracks the most recent
+    workspace + repo keys and skips re-emitting headers when
+    they're unchanged across adjacent worktree buckets (buckets
+    are already ordered by the BTreeMap so siblings are
+    adjacent). The existing
+    `two_worktrees_in_same_repo_show_worktree_level` test now
+    asserts exactly one repo row.
 
 - [ ] `T8-003` Fill out the TUI empty/loading/error frame matrix.
   - Scope: render the full set of empty/loading/error frames
