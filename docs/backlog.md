@@ -3268,12 +3268,20 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-009` v1 slice; coordinate with ADR 0022's color
     policy so `--color` semantics stay consistent.
 
-- [x] `T8-011` Strengthen selected-row and focused-pane visual states.
-  - Outcome: selected rows now keep a full-row highlight even when
-    focus moves to the right pane, with a subtler inactive-selected
-    background. Focused panel borders/titles use a stronger style,
-    and the status bar leads with `[left]` / `[right]` plus the
-    active pane's keymap so `Tab` has visible effect.
+- [ ] `T8-011` Strengthen selected-row and focused-pane visual states.
+  - **Visual slice landed**: selected rows now keep a full-row
+    highlight even when focus moves to the right pane, with a
+    subtler inactive-selected background. Focused panel
+    borders/titles use a stronger style, and the status bar
+    leads with `[left]` / `[right]` plus the active pane's
+    keymap. The behavioral half — navigation keys following the
+    focused pane — remains open: today `j`/`k` always drive
+    left-panel selection regardless of focus, so operator
+    feedback was that "Tab does nothing useful". Wire `j`/`k`
+    (and PageUp/PageDown) to scroll the right-panel preview when
+    focus is on the right, so the focus toggle has real
+    behavioral effect; `Tab` then becomes a meaningful gesture
+    rather than purely cosmetic.
   - Original scope: make the active attach target and focused pane visually
     unmistakable. Use a full-row selected style for the left tree,
     a distinct but low-noise focus treatment for the active pane
@@ -3372,6 +3380,49 @@ work. `P8-014` is post-v1 polish that does not block the release.
     and captured pane text is cropped to the bottom lines available
     in the preview zone. Configurable budgets and stale/failure
     header variants remain open with `T8-009`.
+
+- [ ] `T8-018` Round-trip attach: return to the TUI after the operator
+    detaches from the mux client.
+  - Scope: today `exec_tmux_attach` calls `execve`, so the
+    conspectus process is replaced by tmux. When the operator
+    detaches (Ctrl-B d), there's no TUI to return to — they
+    land at the parent shell prompt. Change the attach path to
+    `Command::new("tmux").status()` (spawn + wait) under a
+    suspend-resume guard: leave the alt screen + raw mode
+    before spawning, restore them after wait, and feed a
+    refresh into the reducer so the row tree reflects any
+    activity that happened during the attach. Quit (`q`) from
+    the TUI should still exit cleanly, and a failed spawn
+    should land in the status bar with a clear reason instead
+    of killing the process.
+  - Tests: extend the action tests to cover an `Action::Attach`
+    that runs a fake "attach" closure and returns control to
+    the reducer; assert the TUI is still alive afterward, that
+    the next refresh is scheduled, and that a fake "command
+    failed" surfaces as a status message. Manual: attach,
+    detach, repeat from a different row.
+  - Blockers: `P8-010` v1 slice.
+
+- [ ] `T8-019` Auto-scroll the left tree to keep the selected row
+    visible.
+  - Scope: today the left panel renders all visible rows into a
+    single `Paragraph` with no viewport awareness, so once the
+    selection moves past the rendered area the user can keep
+    pressing `j` and see nothing change. Track a per-render
+    scroll offset that follows the selection — at minimum,
+    bring the selected row to the top edge when it moves
+    above the viewport and to the bottom edge when it moves
+    below. Page-down / page-up should jump a viewport at a
+    time without losing the selection. Inline preview lines
+    must be counted against the viewport budget so the
+    selected row's preview stays visible too.
+  - Tests: reducer + render unit tests for selection moving past
+    the visible top/bottom in a small viewport, PageDown jumping
+    by viewport height, and a selected row whose inline preview
+    is folded into the visible area. Ratatui snapshots for a
+    short and a long tree at the same viewport size.
+  - Blockers: `P8-007` v1 slice. Friendlier after `T8-006`
+    expands the snapshot harness.
 
 - [ ] `T8-017` Add visible search/filter workflow for large session
     worlds.
