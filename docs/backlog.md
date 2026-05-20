@@ -3323,6 +3323,35 @@ work. `P8-014` is post-v1 polish that does not block the release.
     no node, and selection retention after the first refresh.
     Snapshot the indicator in the sessions view.
   - Blockers: `P8-004`, `P8-006`, `P8-008` v1 slices.
+  - **Design choice still open** (pending operator input). Two
+    orthogonal pieces:
+    1. **Where the "world" comes from when no `--scan-root` is
+       passed.** Today the runtime calls
+       `discover_local_at_roots([cwd])`, so the world is
+       cwd-scoped. Options for the v1 default:
+       - (a) Walk `$HOME`. Universal, no config. Slow for deep
+         home directories (potentially 10s+ of discovery).
+       - (b) Read `[tui].scan_roots = [...]` from
+         `.conspectus.toml` / user config, default to cwd if
+         unset. Operator-configurable; matches existing config
+         convention; no implicit slow scan.
+       - (c) Auto-broaden: walk up from cwd to the first
+         ancestor that contains ≥ N sibling repos
+         (e.g. `~/src`), use that as the scan root. Heuristic
+         but config-free.
+       - (d) Combo of (b) + (c) — config when set, otherwise
+         auto-broaden, otherwise cwd.
+       The config path requires a new `[tui]` section in
+       `src/config.rs`. The auto-broaden path is heuristic and
+       would need a clear unwinding rule for unusual layouts.
+    2. **CWD highlight piece** (independent of scan-root
+       choice): once the world is shown, find the tree row
+       whose path is an ancestor of cwd, set it as the initial
+       selection (instead of "first visible row"), keep it
+       expanded across refreshes, and render a subtle "here"
+       indicator. This is straightforward to implement; the
+       only design question is the marker style (suffix glyph,
+       dim "(cwd)" tag, etc.).
 
 - [ ] `T8-014` Make the status bar contextual to the selected row.
   - Scope: replace the static action list with a compact contextual
