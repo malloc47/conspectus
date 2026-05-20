@@ -2976,19 +2976,23 @@ work. `P8-014` is post-v1 polish that does not block the release.
     preview updates semi-live without blocking navigation.
   - Blockers: `P8-003`; integrates into `P8-007`/`P8-008`.
 
-- [ ] `P8-010` Implement attach-to-existing-mux action.
-  - Scope: add an action picker/default action that attaches to the
-    selected mux target or the mux attached to the selected agent session.
-    Resolve ambiguous mux candidates according to the P8-001 decision.
-    Use tmux command construction behind a testable adapter; never invoke
-    attach from rendering code. Surface clear disabled/error states when
-    no mux target exists or tmux is unavailable.
-  - Tests: unit tests for action availability across mux row, attached
-    agent row, un-muxed agent row, ambiguous links, and tmux unavailable;
-    fake tmux command tests for the selected target string.
-  - Manual checks: from inside and outside tmux, select an attached mux
-    row and verify attach reaches the expected session/window/pane.
-  - Blockers: `P8-006`, `P8-009`.
+- [x] `P8-010` Implement attach-to-existing-mux action.
+  - Outcome: `a` key bound. `src/tui/actions.rs` resolves the
+    attach target from the current selection — preferred mux for
+    an agent session, the candidate's mux for an
+    `AgentSessionMuxCandidate` child row, or the mux directly for
+    mux node rows. Pure resolver returns either an `AttachTarget`
+    or a typed `AttachDisabled` reason; the runtime surfaces the
+    reason in the status bar and stays in the TUI when attach
+    isn't available. On success, the runtime restores the
+    terminal and `exec()`s `tmux attach-session -t <native_id>`,
+    so the conspectus process becomes the tmux client (Unix
+    only). Six unit tests cover the resolver across attached /
+    ambiguous / un-muxed / candidate-row / unsupported-row /
+    no-selection paths. Remaining work tracked as `T8-008`:
+    surface attach-disabled status messages with the
+    yellow-chip styling intended for `T8-003` and verify
+    real-tmux attach via a manual script.
 
 - [ ] `P8-011` Implement resume un-muxed agent session into mux.
   - Scope: model harness-specific resume command support for the

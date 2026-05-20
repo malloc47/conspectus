@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+pub mod actions;
 mod app;
 pub mod detail;
 pub mod rows;

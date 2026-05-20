@@ -22,6 +22,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use crate::discovery::discover_local_at_roots;
 use crate::model::GraphSnapshot;
 use crate::resolve::resolve_snapshot;
+use crate::tui::actions::{AttachTarget, attach_disabled_reason, resolve_attach_target};
 use crate::tui::app::{App, Msg};
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
@@ -56,6 +57,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             match translate(event, viewport) {
                 Some(Action::Msg(msg)) => app.update(msg),
                 Some(Action::Refresh) => refresh(&mut app, &config),
+                Some(Action::Attach) => attach_action(&mut app),
                 None => {}
             }
         }
@@ -126,11 +128,49 @@ fn current_unix_epoch() -> Option<i64> {
 }
 
 /// The runtime's outer action: either a [`Msg`] for the pure
-/// reducer or a side-effecting refresh that runs discovery.
+/// reducer or a side-effecting operation the reducer can't perform
+/// (running discovery, exec'ing into a mux client).
 #[derive(Debug, Clone, PartialEq)]
 enum Action {
     Msg(Msg),
     Refresh,
+    Attach,
+}
+
+/// Handle the `a` key. On success, exec into `tmux attach-session`
+/// — the process becomes the tmux client and never returns. On
+/// disabled, set a status-bar message and stay in the TUI.
+fn attach_action(app: &mut App) {
+    match resolve_attach_target(app) {
+        Ok(target) => exec_tmux_attach(&target),
+        Err(reason) => {
+            app.update(Msg::SetStatus(Some(attach_disabled_reason(&reason))));
+        }
+    }
+}
+
+/// Restore the terminal and exec into the mux client. Diverges on
+/// success (the kernel replaces this process); exits with code 2
+/// on failure, after restoring the terminal so the shell prompt
+/// returns cleanly.
+fn exec_tmux_attach(target: &AttachTarget) -> ! {
+    ratatui::restore();
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let native = target.mux.native_id.clone();
+        let err = std::process::Command::new("tmux")
+            .args(["attach-session", "-t", &native])
+            .exec();
+        eprintln!("conspectus: failed to exec tmux: {err}");
+        std::process::exit(2);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = target;
+        eprintln!("conspectus: tmux attach is only supported on Unix");
+        std::process::exit(2);
+    }
 }
 
 /// Map crossterm events to [`Action`]s. Returns `None` for events
@@ -143,7 +183,8 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Msg(Msg::Quit)),
             (_, KeyCode::Char('q')) => Some(Action::Msg(Msg::Quit)),
-            (_, KeyCode::Char('r')) => Some(Action::Refresh),
+            (m, KeyCode::Char('r')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Refresh),
+            (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
             (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(Action::Msg(Msg::NavDown)),
             (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::Msg(Msg::NavUp)),
             (_, KeyCode::PageDown) => Some(Action::Msg(Msg::PageDown(viewport_height))),
@@ -202,6 +243,26 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
             Some(Action::Refresh)
+        );
+    }
+
+    #[test]
+    fn translate_a_requests_attach() {
+        assert_eq!(
+            translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
+            Some(Action::Attach)
+        );
+    }
+
+    #[test]
+    fn translate_ignores_control_a_and_control_r() {
+        assert_eq!(
+            translate(press(KeyCode::Char('a'), KeyModifiers::CONTROL), 24),
+            None
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('r'), KeyModifiers::CONTROL), 24),
+            None
         );
     }
 

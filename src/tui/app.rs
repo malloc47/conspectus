@@ -52,6 +52,12 @@ pub struct App {
     /// loaded. `None` before the first `SetData`. The renderer
     /// turns this into the header's `updated Ns ago` indicator.
     loaded_at_epoch: Option<i64>,
+    /// Transient status-bar message, e.g. the "disabled because…"
+    /// reason for a key that didn't apply to the current selection.
+    /// Cleared on the next selection / focus change. The richer
+    /// status-bar surface (provider chips, error states) lands
+    /// with `T8-003`.
+    status_message: Option<String>,
 }
 
 /// Which panel currently consumes navigation keys.
@@ -98,6 +104,9 @@ pub enum Msg {
     /// Right panel: scroll preview by one row.
     ScrollPreviewDown,
     ScrollPreviewUp,
+    /// Set or clear the transient status-bar message. `None`
+    /// clears any prior message.
+    SetStatus(Option<String>),
 }
 
 impl App {
@@ -114,6 +123,7 @@ impl App {
             focus: Focus::Left,
             preview_scroll: 0,
             loaded_at_epoch: None,
+            status_message: None,
         }
     }
 
@@ -170,6 +180,13 @@ impl App {
         self.loaded_at_epoch
     }
 
+    /// Transient status-bar message, if any. Renderer shows it in
+    /// the status zone; the reducer clears it on the next
+    /// selection / focus change so messages don't linger.
+    pub fn status_message(&self) -> Option<&str> {
+        self.status_message.as_deref()
+    }
+
     /// Iterate the row tree, skipping rows whose ancestors are
     /// collapsed. Iteration order matches display order.
     pub fn visible_rows(&self) -> Vec<&Row> {
@@ -221,6 +238,9 @@ impl App {
             Msg::ScrollPreviewUp => {
                 self.preview_scroll = self.preview_scroll.saturating_sub(1);
             }
+            Msg::SetStatus(message) => {
+                self.status_message = message;
+            }
         }
     }
 
@@ -264,6 +284,7 @@ impl App {
     }
 
     fn move_selection(&mut self, delta: i32) {
+        self.status_message = None;
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
@@ -282,6 +303,7 @@ impl App {
     }
 
     fn move_selection_to(&mut self, index: usize) {
+        self.status_message = None;
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;

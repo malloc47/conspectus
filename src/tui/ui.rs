@@ -126,7 +126,13 @@ pub(crate) mod test_clock {
 }
 
 fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    let hints = "j/k move · Enter expand · Tab focus · J/K scroll preview · r refresh · q quit";
+    if let Some(message) = app.status_message() {
+        let widget = Paragraph::new(message.to_string()).style(Style::default().fg(Color::Yellow));
+        frame.render_widget(widget, area);
+        return;
+    }
+    let hints =
+        "j/k move · Enter expand · a attach · Tab focus · J/K scroll preview · r refresh · q quit";
     let scope = match app.focus() {
         Focus::Left => "[left]",
         Focus::Right => "[right]",
