@@ -112,9 +112,10 @@ pub enum Msg {
     ToggleExpand,
     /// Move keyboard focus to the next panel.
     CycleFocus,
-    /// Right panel: scroll preview by one row.
-    ScrollPreviewDown,
-    ScrollPreviewUp,
+    /// Right panel: scroll preview by `delta` rows. Positive
+    /// scrolls down (deeper into the buffer), negative scrolls
+    /// up. The reducer clamps the offset at zero.
+    ScrollPreviewBy(i32),
     /// Set or clear the transient status-bar message. `None`
     /// clears any prior message.
     SetStatus(Option<String>),
@@ -294,11 +295,11 @@ impl App {
                     Focus::Right => Focus::Left,
                 };
             }
-            Msg::ScrollPreviewDown => {
-                self.preview_scroll = self.preview_scroll.saturating_add(1);
-            }
-            Msg::ScrollPreviewUp => {
-                self.preview_scroll = self.preview_scroll.saturating_sub(1);
+            Msg::ScrollPreviewBy(delta) => {
+                let current = i32::from(self.preview_scroll);
+                let next = current.saturating_add(delta).max(0);
+                self.preview_scroll =
+                    u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
             }
             Msg::SetStatus(message) => {
                 self.status_message = message;
@@ -581,12 +582,24 @@ mod tests {
     #[test]
     fn scroll_preview_clamps_at_zero() {
         let mut app = App::new(RunConfig::defaults());
-        app.update(Msg::ScrollPreviewDown);
-        app.update(Msg::ScrollPreviewDown);
+        app.update(Msg::ScrollPreviewBy(1));
+        app.update(Msg::ScrollPreviewBy(1));
         assert_eq!(app.preview_scroll(), 2);
-        app.update(Msg::ScrollPreviewUp);
-        app.update(Msg::ScrollPreviewUp);
-        app.update(Msg::ScrollPreviewUp);
+        app.update(Msg::ScrollPreviewBy(-1));
+        app.update(Msg::ScrollPreviewBy(-1));
+        app.update(Msg::ScrollPreviewBy(-1));
+        assert_eq!(app.preview_scroll(), 0);
+    }
+
+    #[test]
+    fn scroll_preview_by_advances_by_arbitrary_delta() {
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::ScrollPreviewBy(20));
+        assert_eq!(app.preview_scroll(), 20);
+        app.update(Msg::ScrollPreviewBy(-5));
+        assert_eq!(app.preview_scroll(), 15);
+        // Negative beyond zero clamps.
+        app.update(Msg::ScrollPreviewBy(-1000));
         assert_eq!(app.preview_scroll(), 0);
     }
 

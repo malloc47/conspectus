@@ -60,7 +60,8 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            match translate(event, viewport) {
+            let action = translate(event, viewport).map(|a| remap_for_focus(a, app.focus()));
+            match action {
                 Some(Action::Msg(msg)) => app.update(msg),
                 Some(Action::Refresh) => refresh(&mut app, &config),
                 Some(Action::Attach) => attach_action(terminal, &mut app, &config),
@@ -253,8 +254,35 @@ fn target_short(target: &AttachTarget) -> String {
     format!("{}:{}", target.backend, target.native_id)
 }
 
+/// Remap navigation keys to preview scroll when focus is on the
+/// right panel. Keeps the j/k muscle memory consistent — they
+/// always drive the focused pane. Uppercase J/K continue to scroll
+/// the preview regardless of focus, so operators with the left
+/// panel focused can still poke the preview without switching
+/// panes.
+fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
+    use crate::tui::app::Focus;
+    if focus != Focus::Right {
+        return action;
+    }
+    match action {
+        Action::Msg(Msg::NavDown) => Action::Msg(Msg::ScrollPreviewBy(1)),
+        Action::Msg(Msg::NavUp) => Action::Msg(Msg::ScrollPreviewBy(-1)),
+        Action::Msg(Msg::PageDown(viewport)) => {
+            Action::Msg(Msg::ScrollPreviewBy(i32::from(viewport.max(1))))
+        }
+        Action::Msg(Msg::PageUp(viewport)) => {
+            Action::Msg(Msg::ScrollPreviewBy(-i32::from(viewport.max(1))))
+        }
+        other => other,
+    }
+}
+
 /// Map crossterm events to [`Action`]s. Returns `None` for events
 /// the v1 shell ignores. Pulled out so tests don't need a terminal.
+/// Focus-aware remapping (j/k driving the focused pane) happens in
+/// a separate pass via [`remap_for_focus`] so the keymap stays
+/// pure with respect to terminal state.
 ///
 /// `viewport_height` is the rendered height of the row tree in
 /// rows, used to size PageUp/PageDown jumps. Pass 1 if unknown.
@@ -273,8 +301,8 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Msg::End)),
             (_, KeyCode::Enter) => Some(Action::Msg(Msg::ToggleExpand)),
             (_, KeyCode::Tab) => Some(Action::Msg(Msg::CycleFocus)),
-            (_, KeyCode::Char('J')) => Some(Action::Msg(Msg::ScrollPreviewDown)),
-            (_, KeyCode::Char('K')) => Some(Action::Msg(Msg::ScrollPreviewUp)),
+            (_, KeyCode::Char('J')) => Some(Action::Msg(Msg::ScrollPreviewBy(1))),
+            (_, KeyCode::Char('K')) => Some(Action::Msg(Msg::ScrollPreviewBy(-1))),
             _ => None,
         },
         _ => None,
@@ -390,11 +418,63 @@ mod tests {
         );
         assert_eq!(
             msg(translate(press(KeyCode::Char('J'), KeyModifiers::NONE), 24)),
-            Some(Msg::ScrollPreviewDown)
+            Some(Msg::ScrollPreviewBy(1))
         );
         assert_eq!(
             msg(translate(press(KeyCode::Char('K'), KeyModifiers::NONE), 24)),
-            Some(Msg::ScrollPreviewUp)
+            Some(Msg::ScrollPreviewBy(-1))
+        );
+    }
+
+    #[test]
+    fn remap_for_focus_left_is_identity() {
+        use crate::tui::app::Focus;
+        let action = Action::Msg(Msg::NavDown);
+        assert_eq!(remap_for_focus(action.clone(), Focus::Left), action);
+        let action = Action::Msg(Msg::PageDown(20));
+        assert_eq!(remap_for_focus(action.clone(), Focus::Left), action);
+    }
+
+    #[test]
+    fn remap_for_focus_right_swaps_nav_for_preview_scroll() {
+        use crate::tui::app::Focus;
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::NavDown), Focus::Right),
+            Action::Msg(Msg::ScrollPreviewBy(1))
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::NavUp), Focus::Right),
+            Action::Msg(Msg::ScrollPreviewBy(-1))
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::PageDown(20)), Focus::Right),
+            Action::Msg(Msg::ScrollPreviewBy(20))
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::PageUp(20)), Focus::Right),
+            Action::Msg(Msg::ScrollPreviewBy(-20))
+        );
+    }
+
+    #[test]
+    fn remap_for_focus_right_leaves_non_nav_actions_alone() {
+        use crate::tui::app::Focus;
+        // Tab / Enter / quit should not be remapped.
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::CycleFocus), Focus::Right),
+            Action::Msg(Msg::CycleFocus)
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::ToggleExpand), Focus::Right),
+            Action::Msg(Msg::ToggleExpand)
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Msg::Quit), Focus::Right),
+            Action::Msg(Msg::Quit)
+        );
+        assert_eq!(
+            remap_for_focus(Action::Refresh, Focus::Right),
+            Action::Refresh
         );
     }
 

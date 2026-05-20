@@ -673,7 +673,10 @@ fn panel_focus_style(app: &App, focus: Focus) -> Style {
 fn contextual_status_text(app: &App) -> String {
     let focus_hint = match app.focus() {
         Focus::Left => "j/k move · Enter expand",
-        Focus::Right => "J/K scroll preview",
+        // When the right pane has focus, j/k are remapped to
+        // preview scroll (T8-011 behavioral) — surface that so
+        // operators know `Tab` changed what those keys do.
+        Focus::Right => "j/k scroll preview",
     };
     let action_hint = match resolve_attach_target(app) {
         Ok(target) => {
@@ -1104,7 +1107,7 @@ mod tests {
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
-            text.contains("J/K scroll preview"),
+            text.contains("j/k scroll preview"),
             "right focus status hint missing: {text}"
         );
         assert!(
@@ -1145,8 +1148,8 @@ mod tests {
             "agentdeck_conspectus-very-long-session-name-with-suffix_12345678",
             Some("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7"),
         );
-        app.update(Msg::ScrollPreviewDown);
-        app.update(Msg::ScrollPreviewUp);
+        app.update(Msg::ScrollPreviewBy(1));
+        app.update(Msg::ScrollPreviewBy(-1));
 
         let area = Rect::new(0, 0, 100, 14);
         let buffer = render_to_buffer(&app, area);

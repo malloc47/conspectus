@@ -3268,20 +3268,18 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-009` v1 slice; coordinate with ADR 0022's color
     policy so `--color` semantics stay consistent.
 
-- [ ] `T8-011` Strengthen selected-row and focused-pane visual states.
-  - **Visual slice landed**: selected rows now keep a full-row
-    highlight even when focus moves to the right pane, with a
-    subtler inactive-selected background. Focused panel
-    borders/titles use a stronger style, and the status bar
-    leads with `[left]` / `[right]` plus the active pane's
-    keymap. The behavioral half — navigation keys following the
-    focused pane — remains open: today `j`/`k` always drive
-    left-panel selection regardless of focus, so operator
-    feedback was that "Tab does nothing useful". Wire `j`/`k`
-    (and PageUp/PageDown) to scroll the right-panel preview when
-    focus is on the right, so the focus toggle has real
-    behavioral effect; `Tab` then becomes a meaningful gesture
-    rather than purely cosmetic.
+- [x] `T8-011` Strengthen selected-row and focused-pane visual states.
+  - Visual slice landed in the earlier polish commit. Behavioral
+    half landed now: `Msg::ScrollPreviewBy(i32)` replaces the
+    old `ScrollPreviewDown` / `ScrollPreviewUp` variants. The
+    runtime adds a `remap_for_focus` pass between `translate`
+    and the reducer — when `App::focus()` is `Focus::Right`,
+    `j`/`k` translate to `ScrollPreviewBy(±1)` and
+    PageUp/PageDown to `ScrollPreviewBy(±viewport)`. Uppercase
+    `J`/`K` continue to scroll the preview regardless of focus.
+    The status-bar hint switches between `j/k move · Enter
+    expand` (left focus) and `j/k scroll preview` (right focus)
+    so the operator can see `Tab`'s effect immediately.
   - Original scope: make the active attach target and focused pane visually
     unmistakable. Use a full-row selected style for the left tree,
     a distinct but low-noise focus treatment for the active pane
