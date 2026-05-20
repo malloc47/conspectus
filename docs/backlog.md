@@ -3252,21 +3252,17 @@ work. `P8-014` is post-v1 polish that does not block the release.
     background-work pass.
   - Blockers: `P8-009` v1 slice. Best done alongside `T8-007`.
 
-- [ ] `T8-010` Render ANSI color in tmux previews.
-  - Scope: capture mux previews with ANSI escape sequences when
-    available (for tmux this likely means dropping or conditionally
-    avoiding `capture-pane -p` behavior that strips styling, after
-    verifying the exact tmux flags). Parse ANSI into Ratatui spans
-    so agent/tool output keeps its terminal colors inside the
-    preview pane. Honor `--color=never` by stripping styles, and
-    fall back to plain text on malformed escape sequences without
-    failing the preview.
-  - Tests: unit tests for ANSI-to-span parsing over common SGR
-    sequences, color-disabled stripping, malformed-sequence
-    fallback, and a Ratatui snapshot showing colored preview spans
-    without leaking escape bytes into layout width.
-  - Blockers: `P8-009` v1 slice; coordinate with ADR 0022's color
-    policy so `--color` semantics stay consistent.
+- [x] `T8-010` Render ANSI color in tmux previews.
+  - Outcome: `SystemTmux::capture_pane` now passes `-e` so tmux
+    emits the pane's escape sequences alongside the visible text.
+    The right-panel preview consumes those via `ansi-to-tui`
+    (ADR 0025) and renders them as styled `Text<'static>` —
+    agent output keeps the colours operators see in the source
+    pane. `--color=never` flattens the parsed text back to plain
+    via `Text::to_string`, and malformed escape bytes fall back
+    to a `Text::raw` so a single bad byte doesn't lose pane
+    content. Three unit tests cover the colour, no-colour, and
+    malformed-input paths.
 
 - [x] `T8-011` Strengthen selected-row and focused-pane visual states.
   - Visual slice landed in the earlier polish commit. Behavioral

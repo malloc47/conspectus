@@ -25,10 +25,11 @@
 //!   loaded yet; the rest of the error/empty matrix lands with
 //!   `T8-003`.
 
+use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
@@ -575,8 +576,8 @@ fn render_header_field(field: &HeaderField) -> Line<'static> {
 }
 
 fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
-    let preview_text = preview_text_for_selection(app, area.height as usize);
-    let widget = Paragraph::new(preview_text)
+    let preview = preview_text_for_selection(app, area.height as usize);
+    let widget = Paragraph::new(preview)
         .wrap(Wrap { trim: false })
         .scroll((app.preview_scroll(), 0));
     frame.render_widget(widget, area);
@@ -595,12 +596,12 @@ fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, a
 ///   placeholder switches to the privacy banner instead.
 /// - Other rows: pane capture or fork-detail enrichment wires in
 ///   per `P8-009` / `P8-012b`. Gated by `--no-live-preview`.
-fn preview_text_for_selection(app: &App, height: usize) -> String {
+fn preview_text_for_selection(app: &App, height: usize) -> Text<'static> {
     let Some(selection) = app.selection() else {
-        return String::new();
+        return Text::raw("");
     };
     let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
-        return String::new();
+        return Text::raw("");
     };
     let live_preview = app.config().live_preview_enabled;
     match &row.kind {
@@ -608,19 +609,21 @@ fn preview_text_for_selection(app: &App, height: usize) -> String {
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
                 mux_preview_text(app, live_preview, height)
             }
-            MuxIndicator::Unmuxed => session
-                .preview
-                .clone()
-                .unwrap_or_else(|| "no preview available".to_string()),
+            MuxIndicator::Unmuxed => Text::raw(
+                session
+                    .preview
+                    .clone()
+                    .unwrap_or_else(|| "no preview available".to_string()),
+            ),
         },
         RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, height),
         _ => match selection {
             RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
             _ => {
                 if live_preview {
-                    "no preview for this row".to_string()
+                    Text::raw("no preview for this row")
                 } else {
-                    "preview disabled (--no-live-preview)".to_string()
+                    Text::raw("preview disabled (--no-live-preview)")
                 }
             }
         },
@@ -632,32 +635,57 @@ fn preview_text_for_selection(app: &App, height: usize) -> String {
 /// entry exists yet (the runtime hasn't refreshed for this
 /// selection), shows a "loading" placeholder. With
 /// `--no-live-preview`, swaps in the privacy banner instead.
-fn mux_preview_text(app: &App, live_preview: bool, height: usize) -> String {
+fn mux_preview_text(app: &App, live_preview: bool, height: usize) -> Text<'static> {
     if !live_preview {
-        return "preview disabled (--no-live-preview)".to_string();
+        return Text::raw("preview disabled (--no-live-preview)");
     }
     let Some(target) = resolve_attach_target(app).ok().map(|t| t.mux) else {
-        return "no mux target for this row".to_string();
+        return Text::raw("no mux target for this row");
     };
-    format_preview_for_mux(app, &target, height)
+    format_preview_for_mux(app, &target, height, app.config().color)
 }
 
-fn format_preview_for_mux(app: &App, mux: &MuxSessionId, height: usize) -> String {
+fn format_preview_for_mux(
+    app: &App,
+    mux: &MuxSessionId,
+    height: usize,
+    color: bool,
+) -> Text<'static> {
     match app.mux_preview(mux) {
         Some(entry) => match &entry.content {
-            PreviewContent::Text(text) if text.is_empty() => "(empty pane)".to_string(),
-            PreviewContent::Text(text) => crop_bottom_lines(text, height.max(1)),
-            PreviewContent::NoTarget => "tmux target not found — try `r` to refresh".to_string(),
-            PreviewContent::Unavailable(reason) => {
-                format!("tmux unavailable: {reason}")
+            PreviewContent::Text(text) if text.is_empty() => Text::raw("(empty pane)"),
+            PreviewContent::Text(text) => {
+                let cropped = crop_bottom_lines(text, height.max(1));
+                render_captured_pane(&cropped, color)
             }
-            PreviewContent::Failed(message) => message.clone(),
+            PreviewContent::NoTarget => Text::raw("tmux target not found — try `r` to refresh"),
+            PreviewContent::Unavailable(reason) => Text::raw(format!("tmux unavailable: {reason}")),
+            PreviewContent::Failed(message) => Text::raw(message.clone()),
             PreviewContent::Unsupported => {
-                "preview unavailable (runner does not implement capture)".to_string()
+                Text::raw("preview unavailable (runner does not implement capture)")
             }
         },
-        None => "loading mux preview…".to_string(),
+        None => Text::raw("loading mux preview…"),
     }
+}
+
+/// Translate a raw `tmux capture-pane -e` payload into styled
+/// `Text` for the preview pane. ADR 0025: `ansi-to-tui` does the
+/// CSI/SGR parsing; we keep ownership of the colour-disabled
+/// path and the malformed-input fallback.
+fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
+    if !color {
+        // `Text::to_string` flattens spans back to plain bytes,
+        // which is the natural way to strip styling regardless of
+        // how the upstream parser would group the escape bytes.
+        // On a parse error there's nothing to strip — return as is.
+        return match text.into_text() {
+            Ok(parsed) => Text::raw(parsed.to_string()),
+            Err(_) => Text::raw(text.to_string()),
+        };
+    }
+    text.into_text()
+        .unwrap_or_else(|_| Text::raw(text.to_string()))
 }
 
 fn panel_focus_style(app: &App, focus: Focus) -> Style {
@@ -1187,6 +1215,62 @@ mod tests {
     fn crop_bottom_lines_keeps_latest_lines() {
         assert_eq!(crop_bottom_lines("a\nb\nc\nd", 2), "c\nd");
         assert_eq!(crop_bottom_lines("a\nb", 3), "a\nb");
+    }
+
+    #[test]
+    fn render_captured_pane_with_color_parses_ansi_into_styled_spans() {
+        // ESC[31m makes "red", ESC[0m resets.
+        let raw = "\x1b[31mred\x1b[0m  plain";
+        let text = render_captured_pane(raw, true);
+        // Flattened content matches the visible characters.
+        assert_eq!(text.to_string(), "red  plain");
+        // The first line's first span carries red foreground style.
+        let first_line = text.lines.first().expect("at least one line");
+        let first_span = first_line.spans.first().expect("at least one span");
+        assert_eq!(first_span.content, "red");
+        assert_eq!(
+            first_span.style.fg,
+            Some(ratatui::style::Color::Red),
+            "expected red fg on the red span"
+        );
+    }
+
+    #[test]
+    fn render_captured_pane_without_color_strips_styling() {
+        let raw = "\x1b[31mred\x1b[0m  plain";
+        let text = render_captured_pane(raw, false);
+        assert_eq!(text.to_string(), "red  plain");
+        // With colour disabled every span should land styled
+        // identically to a plain `Text::raw` — i.e. default fg.
+        for line in &text.lines {
+            for span in &line.spans {
+                assert_eq!(
+                    span.style.fg, None,
+                    "expected colour to be stripped, got span={span:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn render_captured_pane_falls_back_to_plain_text_on_malformed_input() {
+        // Lone ESC byte — ansi-to-tui should either parse harmlessly
+        // or fail; either way `render_captured_pane` returns
+        // something printable rather than panicking.
+        let raw = "before\x1bafter";
+        let text = render_captured_pane(raw, true);
+        let flattened = text.to_string();
+        // The visible characters either side of the rogue ESC
+        // must survive — operators don't lose pane content to a
+        // single bad byte.
+        assert!(
+            flattened.contains("before"),
+            "expected 'before' in output, got: {flattened:?}"
+        );
+        assert!(
+            flattened.contains("after"),
+            "expected 'after' in output, got: {flattened:?}"
+        );
     }
 
     #[test]

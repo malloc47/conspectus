@@ -149,9 +149,12 @@ impl TmuxRunner for SystemTmux {
     fn capture_pane(&self, target: &str) -> Result<TmuxCaptureOutcome> {
         // `-p` prints to stdout instead of leaving the capture in
         // the buffer; `-J` joins wrapped lines so the result reads
-        // naturally in a fixed-width preview pane.
+        // naturally in a fixed-width preview pane; `-e` emits the
+        // pane's ANSI escape sequences so the TUI preview can
+        // render with the same colours the operator sees in the
+        // source pane (ADR 0025).
         let output = Command::new(&self.binary)
-            .args(["capture-pane", "-p", "-J", "-t", target])
+            .args(["capture-pane", "-p", "-J", "-e", "-t", target])
             .output();
 
         let output = match output {

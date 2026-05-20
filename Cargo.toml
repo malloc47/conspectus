@@ -6,6 +6,7 @@ license = "MIT"
 description = "AI work graph status tool"
 
 [dependencies]
+ansi-to-tui = { version = "8.0.1", default-features = false }
 anstyle = "1.0"
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
