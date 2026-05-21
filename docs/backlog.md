@@ -1979,7 +1979,7 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     `worktree` output consumers still parse and new checkout-facing
     helpers produce the same node identities.
   - Blockers: `H-CHECKOUT-001`.
-- [ ] `H-CHECKOUT-003` Probe observed session and mux cwd paths for
+- [x] `H-CHECKOUT-003` Probe observed session and mux cwd paths for
   checkout context.
   - Scope: collect distinct cwd paths from discovered agent sessions and
     mux sessions, run read-only git probes for each path, and backfill
@@ -1987,9 +1987,6 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     when the cwd is outside the launch cwd or configured scan roots.
     Reserve `Ungrouped` for sessions with no usable path or context
     evidence.
-  - Remaining tests: fixture tests for linked worktree cwd,
-    bare-repo-derived worktree cwd, nonexistent cwd, and mux cwd outside
-    configured scan roots.
   - Slice landed: `discover_local_with` now probes distinct observed
     agent-session and mux-session cwd paths after initial discovery and
     merges any git repo/checkout/branch evidence before cross-link
@@ -1998,6 +1995,9 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Slice landed: table and TUI projections now match sessions whose cwd
     is nested under a checkout root, choosing the deepest matching
     checkout.
+  - Outcome: coverage now includes plain clone cwd, linked worktree cwd,
+    bare-repo-derived worktree cwd, nested cwd inside a checkout,
+    nonexistent cwd, and mux cwd outside configured scan roots.
   - Tests: `cargo test observed_session_cwd_backfills_git_context_outside_scan_roots`;
     `cargo test checkout`; `cargo test sessions_projection_optional_branch_repo_worktree_columns`;
     `cargo test prs_projection_attached_shows_agent_with_matching_cwd`.
