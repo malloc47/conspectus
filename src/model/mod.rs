@@ -42,6 +42,12 @@ pub struct WorktreeId {
     pub root: String,
 }
 
+/// Canonical product vocabulary for an editable repository checkout.
+///
+/// The graph still serializes this node kind as `worktree` during the
+/// compatibility window described by ADR 0026 and H-CHECKOUT-002.
+pub type CheckoutId = WorktreeId;
+
 impl WorktreeId {
     pub fn new(repo: RepoId, root: impl Into<String>) -> Self {
         Self {
@@ -150,6 +156,7 @@ impl fmt::Display for ForgePrId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeId {
     Repo(RepoId),
+    #[serde(alias = "checkout")]
     Worktree(WorktreeId),
     Workspace(WorkspaceId),
     AgentSession(AgentSessionId),
@@ -157,6 +164,19 @@ pub enum NodeId {
     Branch(BranchId),
     Fork(ForkId),
     ForgePr(ForgePrId),
+}
+
+impl NodeId {
+    pub fn checkout(repo: RepoId, root: impl Into<String>) -> Self {
+        Self::Worktree(CheckoutId::new(repo, root))
+    }
+
+    pub fn as_checkout(&self) -> Option<&CheckoutId> {
+        match self {
+            Self::Worktree(id) => Some(id),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for NodeId {
@@ -178,6 +198,7 @@ impl fmt::Display for NodeId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GraphNode {
     Repo(RepoNode),
+    #[serde(alias = "checkout")]
     Worktree(WorktreeNode),
     Workspace(WorkspaceNode),
     AgentSession(AgentSessionNode),
@@ -188,6 +209,10 @@ pub enum GraphNode {
 }
 
 impl GraphNode {
+    pub fn checkout(id: CheckoutId, root: impl Into<String>) -> Self {
+        Self::Worktree(CheckoutNode::new(id, root))
+    }
+
     pub fn id(&self) -> NodeId {
         match self {
             Self::Repo(node) => NodeId::Repo(node.id.clone()),
@@ -231,6 +256,22 @@ pub struct WorktreeNode {
     pub git_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_branch: Option<BranchId>,
+}
+
+/// Checkout-facing alias for the legacy graph node type.
+///
+/// Serialization remains `type: "worktree"` for existing consumers.
+pub type CheckoutNode = WorktreeNode;
+
+impl WorktreeNode {
+    pub fn new(id: WorktreeId, root: impl Into<String>) -> Self {
+        Self {
+            id,
+            root: root.into(),
+            git_dir: None,
+            current_branch: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -594,6 +635,55 @@ mod tests {
         let decoded: NodeId = serde_json::from_str(&encoded).expect("deserialize node id");
 
         assert_eq!(decoded, id);
+    }
+
+    #[test]
+    fn checkout_helpers_preserve_worktree_wire_compatibility() {
+        let repo = RepoId::new("/repo/.git");
+        let id = CheckoutId::new(repo.clone(), "/repo");
+        let node_id = NodeId::checkout(repo, "/repo");
+        let node = GraphNode::checkout(id.clone(), "/repo");
+
+        assert_eq!(node_id.as_checkout(), Some(&id));
+        assert_eq!(node.id(), NodeId::Worktree(id));
+
+        let encoded_id = serde_json::to_value(&node_id).expect("serialize node id");
+        let encoded_node = serde_json::to_value(&node).expect("serialize graph node");
+
+        assert_eq!(encoded_id["type"], "worktree");
+        assert_eq!(encoded_node["type"], "worktree");
+    }
+
+    #[test]
+    fn checkout_wire_aliases_parse_as_worktrees() {
+        let node_id: NodeId = serde_json::from_value(serde_json::json!({
+            "type": "checkout",
+            "repo": {
+                "common_dir": "/repo/.git"
+            },
+            "root": "/repo"
+        }))
+        .expect("deserialize checkout node id alias");
+        assert_eq!(
+            node_id,
+            NodeId::Worktree(WorktreeId::new(RepoId::new("/repo/.git"), "/repo"))
+        );
+
+        let node: GraphNode = serde_json::from_value(serde_json::json!({
+            "type": "checkout",
+            "id": {
+                "repo": {
+                    "common_dir": "/repo/.git"
+                },
+                "root": "/repo"
+            },
+            "root": "/repo"
+        }))
+        .expect("deserialize checkout node alias");
+        assert_eq!(
+            node.id(),
+            NodeId::Worktree(WorktreeId::new(RepoId::new("/repo/.git"), "/repo"))
+        );
     }
 
     #[test]

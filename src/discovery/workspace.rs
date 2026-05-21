@@ -1,5 +1,6 @@
 //! Generic workspace inference from explicit scan roots.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -59,6 +60,9 @@ impl GenericWorkspaceDiscovery {
             }
 
             let path = entry.path();
+            if file_type.is_symlink() && !path.exists() {
+                continue;
+            }
             let Some(probe) = self.git_probe.probe(&path)? else {
                 continue;
             };
@@ -94,11 +98,14 @@ impl GenericWorkspaceDiscovery {
         let mut fragment = merge_fragments(child_fragments);
         fragment.nodes.push(workspace_node);
 
+        let repo_counts = repo_counts(&repo_members);
         for member in repo_members {
+            let duplicate_target = repo_counts.get(&member.repo).copied().unwrap_or(0) > 1;
             fragment.candidate_links.push(workspace_repo_link(
                 workspace.clone(),
                 member,
                 "multiple git repos under explicit scan root",
+                duplicate_target,
             ));
         }
 
@@ -109,6 +116,14 @@ impl GenericWorkspaceDiscovery {
 
 fn provider_workspace_claims_root(root: &Path) -> bool {
     root.join(ATELIER_CONFIG_FILENAME).is_file()
+}
+
+fn repo_counts(members: &[WorkspaceMember]) -> BTreeMap<NodeId, usize> {
+    let mut counts = BTreeMap::new();
+    for member in members {
+        *counts.entry(member.repo.clone()).or_insert(0) += 1;
+    }
+    counts
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -134,14 +149,20 @@ impl WorkspaceMemberPathKind {
     }
 }
 
-fn workspace_repo_link(source: NodeId, member: WorkspaceMember, evidence: &str) -> GraphLink {
+fn workspace_repo_link(
+    source: NodeId,
+    member: WorkspaceMember,
+    evidence: &str,
+    duplicate_target: bool,
+) -> GraphLink {
     let relation = RelationKind::WorkspaceContainsRepo;
     let relation_name = relation_name(&relation);
     let target = member.repo;
+    let logical_path = path_string(&member.logical_path);
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         "logical_path".to_string(),
-        serde_json::Value::String(path_string(&member.logical_path)),
+        serde_json::Value::String(logical_path.clone()),
     );
     fields.insert(
         "canonical_checkout_root".to_string(),
@@ -153,7 +174,11 @@ fn workspace_repo_link(source: NodeId, member: WorkspaceMember, evidence: &str) 
     );
 
     GraphLink {
-        id: format!("generic_workspace:{source}:{relation_name}:{target}"),
+        id: if duplicate_target {
+            format!("generic_workspace:{source}:{relation_name}:{target}:{logical_path}")
+        } else {
+            format!("generic_workspace:{source}:{relation_name}:{target}")
+        },
         source,
         target: LinkEndpoint::Node { id: target },
         relation,
@@ -308,6 +333,64 @@ mod tests {
                     .canonicalize()
                     .expect("linked canonical path")
             )))
+        );
+    }
+
+    #[test]
+    fn generic_workspace_skips_broken_symlink_members() {
+        let temp = TempDir::new().expect("temp dir");
+        let _first = GitRepoFixture::init_at(temp.path(), "repo-a");
+        let _second = GitRepoFixture::init_at(temp.path(), "repo-b");
+        symlink_dir(
+            &temp.path().join("missing-target"),
+            &temp.path().join("broken-link"),
+        );
+
+        let fragment = GenericWorkspaceDiscovery::new()
+            .discover(&DiscoveryContext::from_roots([temp.path()]).expect("context"))
+            .expect("workspace discovery succeeds");
+
+        let workspace_links = fragment
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::WorkspaceContainsRepo)
+            .count();
+
+        assert_eq!(workspace_links, 2);
+    }
+
+    #[test]
+    fn generic_workspace_distinguishes_duplicate_logical_members() {
+        let workspace = TempDir::new().expect("workspace dir");
+        let external = TempDir::new().expect("external dir");
+        let target = GitRepoFixture::init_at(external.path(), "repo");
+        let first = workspace.path().join("repo-a");
+        let second = workspace.path().join("repo-b");
+        symlink_dir(target.path(), &first);
+        symlink_dir(target.path(), &second);
+
+        let fragment = GenericWorkspaceDiscovery::new()
+            .discover(&DiscoveryContext::from_roots([workspace.path()]).expect("context"))
+            .expect("workspace discovery succeeds");
+
+        let links = fragment
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::WorkspaceContainsRepo)
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 2);
+        assert_ne!(links[0].id, links[1].id);
+        assert!(
+            links
+                .iter()
+                .any(|link| link.id.contains(&path_string(&first))),
+            "first logical path should disambiguate a duplicate target: {links:#?}",
+        );
+        assert!(
+            links
+                .iter()
+                .any(|link| link.id.contains(&path_string(&second))),
+            "second logical path should disambiguate a duplicate target: {links:#?}",
         );
     }
 

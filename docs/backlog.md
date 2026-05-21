@@ -1973,13 +1973,18 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     staged terminology migration from legacy `Worktree` names.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [ ] `H-CHECKOUT-002` Introduce checkout model names without breaking
+- [x] `H-CHECKOUT-002` Introduce checkout model names without breaking
   graph compatibility.
   - Scope: add `Checkout` model/helpers as the canonical code-level
     vocabulary while preserving existing `Worktree` JSON fields or
     aliases for one compatibility window. Decide whether this is a pure
     rename with serde aliases or an internal wrapper around the current
     `Worktree` type.
+  - Outcome: `CheckoutId` and `CheckoutNode` are checkout-facing aliases
+    over the legacy `WorktreeId`/`WorktreeNode` graph representation,
+    with helper constructors for checkout-oriented code. Graph output
+    still serializes as `type: "worktree"` for existing consumers, while
+    `type: "checkout"` is accepted as a deserialization alias.
   - Tests: graph JSON snapshot/round-trip tests proving existing
     `worktree` output consumers still parse and new checkout-facing
     helpers produce the same node identities.
@@ -2007,7 +2012,7 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     `cargo test checkout`; `cargo test sessions_projection_optional_branch_repo_worktree_columns`;
     `cargo test prs_projection_attached_shows_agent_with_matching_cwd`.
   - Blockers: `H-CHECKOUT-001`.
-- [ ] `H-CHECKOUT-004` Preserve logical and canonical paths for workspace
+- [x] `H-CHECKOUT-004` Preserve logical and canonical paths for workspace
   members.
   - Scope: when a workspace member is reached through a symlink or
     provider-local member path, store both the workspace-visible logical
@@ -2017,10 +2022,13 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     candidates now preserve `logical_path`, `canonical_checkout_root`
     when discovered, and `member_path_kind` source metadata. Atelier
     links also preserve `provider_source_path` and `repo_name`.
+  - Outcome: generic discovery skips broken symlink members instead of
+    aborting the scan, and duplicate workspace-visible paths resolving
+    to the same repo get distinct candidate IDs keyed by logical path.
   - Tests: fixtures covering symlinked plain clones, provider member
     paths, broken symlinks, and duplicate logical paths resolving to the
     same checkout.
-  - Blockers: `H-CHECKOUT-002`.
+  - Blockers: none.
 - [ ] `H-CHECKOUT-005` Resolve multi-context session membership.
   - Scope: extend cross-link resolution so a session can associate with
     both a workspace and the underlying checkout/repo/branch. Preserve

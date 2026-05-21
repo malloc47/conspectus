@@ -8,8 +8,8 @@ use anyhow::{Context, Result, bail};
 
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::{
-    BranchId, BranchNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState,
-    NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata, WorktreeId, WorktreeNode,
+    BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence, Freshness, GraphLink, GraphNode,
+    LinkEndpoint, LinkState, NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -191,15 +191,15 @@ impl GitProbeResult {
 
 pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
     let repo_id = RepoId::new(path_string(&probe.common_dir));
-    let worktree_id = WorktreeId::new(repo_id.clone(), path_string(&probe.worktree_root));
+    let checkout_id = CheckoutId::new(repo_id.clone(), path_string(&probe.worktree_root));
     let repo_node = repo_node(repo_id.clone(), probe);
-    let worktree_node = worktree_node(worktree_id.clone(), probe);
+    let checkout_node = checkout_node(checkout_id.clone(), probe);
     let mut nodes = vec![
         GraphNode::Repo(repo_node),
-        GraphNode::Worktree(worktree_node),
+        GraphNode::Worktree(checkout_node),
     ];
     let mut candidate_links = vec![git_link(
-        NodeId::Worktree(worktree_id.clone()),
+        NodeId::Worktree(checkout_id.clone()),
         NodeId::Repo(repo_id.clone()),
         RelationKind::BelongsToRepo,
         "git common dir",
@@ -222,7 +222,7 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
     if let Some(branch_ref) = &probe.branch_ref {
         let branch_id = BranchId::new(repo_id, branch_ref.clone());
         candidate_links.push(git_link(
-            NodeId::Worktree(worktree_id),
+            NodeId::Worktree(checkout_id),
             NodeId::Branch(branch_id),
             RelationKind::CheckedOutBranch,
             "symbolic HEAD",
@@ -247,9 +247,9 @@ fn repo_node(repo_id: RepoId, probe: &GitProbeResult) -> RepoNode {
     repo
 }
 
-fn worktree_node(worktree_id: WorktreeId, probe: &GitProbeResult) -> WorktreeNode {
-    WorktreeNode {
-        id: worktree_id,
+fn checkout_node(checkout_id: CheckoutId, probe: &GitProbeResult) -> CheckoutNode {
+    CheckoutNode {
+        id: checkout_id,
         root: path_string(&probe.worktree_root),
         git_dir: Some(path_string(&probe.git_dir)),
         current_branch: probe.branch_ref.as_ref().map(|branch| {
