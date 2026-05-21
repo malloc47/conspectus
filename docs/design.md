@@ -666,6 +666,9 @@ running; the one-shot CLI is the writer otherwise.
   - ADR 0026: use `Checkout` as the provider-neutral model term for concrete
     editable repo working trees, while migrating existing `Worktree`
     implementation names over time.
+  - ADR 0027: infer generic workspaces only from explicit scan roots with two
+    or more immediate checkout children, and let provider-specific workspace
+    metadata take precedence over generic inference at the same root.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
@@ -709,14 +712,11 @@ only when the answer materially changes implementation scope.
 
 ### Workspace Detection And Identity
 
-- What concrete evidence threshold should make Conspectus infer a `Workspace`
-  instead of merely a repo parent directory or scan root?
-- How should nested workspaces, nested git repos, and workspaces containing
-  symlinked repos be handled?
-- How should generic workspace discovery interact with provider-specific
-  metadata such as `atelier.toml` and `.atelier/forks/index.toml`?
-- If multiple workspace providers claim the same path, which provider supplies
-  identity, membership, and local state location?
+Settled by ADR 0027. Generic workspace inference is limited to explicit scan
+roots with at least two immediate git checkout children, and provider-specific
+workspace metadata takes precedence over generic inference for the same
+canonical root. Nested repos and nested workspaces require provider metadata or
+declared links before they become workspace structure.
 
 ### Forge PR Identity And Branch Association
 

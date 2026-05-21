@@ -5,6 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::discovery::atelier::ATELIER_CONFIG_FILENAME;
 use crate::discovery::git::{GitProbe, fragment_from_probe};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::{
@@ -38,6 +39,9 @@ impl DiscoveryProvider for GenericWorkspaceDiscovery {
 impl GenericWorkspaceDiscovery {
     fn discover_root(&self, root: &Path) -> Result<GraphFragment> {
         if self.git_probe.probe(root)?.is_some() {
+            return Ok(GraphFragment::empty());
+        }
+        if provider_workspace_claims_root(root) {
             return Ok(GraphFragment::empty());
         }
 
@@ -94,6 +98,10 @@ impl GenericWorkspaceDiscovery {
         fragment.canonicalize();
         Ok(snapshot_fragment(fragment))
     }
+}
+
+fn provider_workspace_claims_root(root: &Path) -> bool {
+    root.join(ATELIER_CONFIG_FILENAME).is_file()
 }
 
 fn workspace_repo_link(source: NodeId, target: NodeId, evidence: &str) -> GraphLink {
@@ -201,6 +209,28 @@ mod tests {
                 .iter()
                 .all(|node| !matches!(node, GraphNode::Workspace(_)))
         );
+    }
+
+    #[test]
+    fn provider_workspace_metadata_suppresses_generic_inference() {
+        let temp = TempDir::new().expect("temp dir");
+        let _first = GitRepoFixture::init_at(temp.path(), "repo-a");
+        let _second = GitRepoFixture::init_at(temp.path(), "repo-b");
+        fs::write(
+            temp.path().join(ATELIER_CONFIG_FILENAME),
+            r#"
+[workspace]
+name = "provider-owned"
+"#,
+        )
+        .expect("write atelier config");
+
+        let fragment = GenericWorkspaceDiscovery::new()
+            .discover(&DiscoveryContext::from_roots([temp.path()]).expect("context"))
+            .expect("workspace discovery succeeds");
+
+        assert!(fragment.nodes.is_empty());
+        assert!(fragment.candidate_links.is_empty());
     }
 
     struct GitRepoFixture {

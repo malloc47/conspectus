@@ -1905,7 +1905,7 @@ Deferred under this cluster (no story yet, file when needed):
 
 ### Design Closure
 
-- [ ] `H-DESIGN-001` Settle the workspace-detection threshold and provider
+- [x] `H-DESIGN-001` Settle the workspace-detection threshold and provider
   precedence.
   - Scope: `docs/design.md` "Remaining Design Questions" calls out (a)
     evidence threshold for inferring a generic `Workspace`, (b) handling
@@ -1917,6 +1917,11 @@ Deferred under this cluster (no story yet, file when needed):
     refine it.
   - Tests: fixture tests covering the chosen rule for nested, symlinked,
     and provider-claimed roots.
+  - Outcome: ADR 0027 settles the generic threshold as two or more
+    immediate git checkout children under an explicit scan root, with
+    provider-specific workspace metadata taking precedence over generic
+    inference at the same canonical root. Generic inference now stands
+    down when `atelier.toml` claims the scan root.
   - Blockers: none.
 - [ ] `H-DESIGN-002` Settle `ForgePr` identity and branch-association keys.
   - Scope: `docs/design.md` "Remaining Design Questions" lists open
@@ -2011,7 +2016,7 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Tests: fixtures covering symlinked plain clones, provider member
     paths, broken symlinks, and duplicate logical paths resolving to the
     same checkout.
-  - Blockers: `H-CHECKOUT-002`, `H-DESIGN-001`.
+  - Blockers: `H-CHECKOUT-002`.
 - [ ] `H-CHECKOUT-005` Resolve multi-context session membership.
   - Scope: extend cross-link resolution so a session can associate with
     both a workspace and the underlying checkout/repo/branch. Preserve
