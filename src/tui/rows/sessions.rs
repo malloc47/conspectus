@@ -187,6 +187,7 @@ struct EmitCtx<'a, 'snap> {
 // -----------------------------------------------------------------------------
 
 struct SessionsIndex<'a> {
+    snapshot: &'a GraphSnapshot,
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
     mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
     repos: BTreeMap<NodeId, &'a RepoNode>,
@@ -236,6 +237,7 @@ impl<'a> SessionsIndex<'a> {
         }
 
         Self {
+            snapshot,
             agent_sessions,
             mux_sessions,
             repos,
@@ -289,6 +291,27 @@ impl<'a> SessionsIndex<'a> {
             }
         }
         None
+    }
+
+    /// Resolve the workspace context directly associated with a
+    /// session. This uses resolved `AssociatedWith` relationships so
+    /// workspace membership can come from logical/canonical workspace
+    /// member paths rather than only repo-level membership evidence.
+    fn workspace_for_session(&self, session: &NodeId) -> Option<WorkspaceId> {
+        self.snapshot
+            .resolved_relationships
+            .iter()
+            .find_map(|relationship| {
+                if relationship.source != *session
+                    || relationship.relation != RelationKind::AssociatedWith
+                {
+                    return None;
+                }
+                match &relationship.target {
+                    NodeId::Workspace(workspace) => Some(workspace.clone()),
+                    _ => None,
+                }
+            })
     }
 
     fn repo_display_path(&self, repo_id: &RepoId) -> String {
@@ -350,8 +373,9 @@ fn resolve_group_key(
     let repo_node_id = NodeId::Repo(repo_id.clone());
     let workspace = match grouping {
         SessionsGrouping::Graph => index
-            .workspace_for_repo(&repo_node_id)
-            .map(|ws| ws.root.clone()),
+            .workspace_for_session(&entry.id)
+            .or_else(|| index.workspace_for_repo(&repo_node_id).cloned())
+            .map(|ws| ws.root),
         // Repo/Worktree/ScanRoot collapse the workspace level.
         // ScanRoot fallback to repo grouping until the runtime
         // wires scan roots into the builder.
@@ -696,8 +720,8 @@ mod tests {
     use super::*;
     use crate::model::{
         AgentSessionId, AgentSessionNode, Confidence, GraphLink, GraphSnapshot, LinkEndpoint,
-        LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode, WorktreeId,
-        WorktreeNode,
+        LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode, WorkspaceId,
+        WorkspaceNode, WorktreeId, WorktreeNode,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -722,6 +746,15 @@ mod tests {
             root: root.to_string(),
             git_dir: None,
             current_branch: None,
+        })
+    }
+
+    fn workspace(root: &str) -> GraphNode {
+        GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new(root),
+            root: root.to_string(),
+            provider: None,
+            name: None,
         })
     }
 
@@ -766,6 +799,21 @@ mod tests {
             relation: RelationKind::LinkedToMux,
             provenance,
             confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    fn associated_with_workspace(session: &NodeId, root: &str) -> GraphLink {
+        let workspace = NodeId::Workspace(WorkspaceId::new(root));
+        GraphLink {
+            id: format!("test:{session}:associated_with:{workspace}"),
+            source: session.clone(),
+            target: LinkEndpoint::Node { id: workspace },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
             freshness: crate::model::Freshness::Fresh,
             source_metadata: crate::model::SourceMetadata::default(),
             state: LinkState::Active,
@@ -929,6 +977,94 @@ mod tests {
         };
         assert_eq!(group.display_path, "~/src/proj");
         assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
+    }
+
+    #[test]
+    fn graph_grouping_uses_session_workspace_context() {
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(workspace("/home/op/ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/proj/.git",
+            "/home/op/src/proj",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj/.git", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/proj/crates/core"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&session_id, "/home/op/ws"));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+        });
+
+        assert_eq!(tree.rows.len(), 3, "{:#?}", tree.rows);
+        let workspace_group = match &tree.rows[0].kind {
+            RowKind::Group(g) => g,
+            _ => unreachable!(),
+        };
+        assert_eq!(workspace_group.display_path, "~/ws");
+        assert!(matches!(
+            workspace_group.primary_node,
+            Some(NodeId::Workspace(_))
+        ));
+        assert_eq!(tree.rows[1].depth, 1, "repo should sit under workspace");
+        assert_eq!(tree.rows[2].depth, 2, "session should sit under repo");
+    }
+
+    #[test]
+    fn repo_grouping_excludes_workspace_context() {
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(workspace("/home/op/ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/proj/.git",
+            "/home/op/src/proj",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj/.git", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/proj/crates/core"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&session_id, "/home/op/ws"));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Repo,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+        });
+
+        assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
+        let group = match &tree.rows[0].kind {
+            RowKind::Group(g) => g,
+            _ => unreachable!(),
+        };
+        assert!(matches!(group.primary_node, Some(NodeId::Repo(_))));
+        assert_eq!(tree.rows[0].depth, 0);
+        assert_eq!(tree.rows[1].depth, 1);
     }
 
     #[test]

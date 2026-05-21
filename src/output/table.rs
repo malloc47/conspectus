@@ -427,6 +427,12 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         default: true,
     },
     ColumnSpec {
+        key: "workspace",
+        header: "WORKSPACE",
+        description: "Workspace context associated with this session.",
+        default: false,
+    },
+    ColumnSpec {
         key: "worktree",
         header: "WORKTREE",
         description: "Worktree root whose path matches the session's cwd.",
@@ -1105,6 +1111,9 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
         "pr" => preferred_pr_for_session(ctx.view, ctx.node_id).0,
         "pr-conf" => preferred_pr_for_session(ctx.view, ctx.node_id).1,
         "lineage" => lineage_cell(ctx.view, ctx.node_id),
+        "workspace" => {
+            session_workspace_identifier(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
+        }
         "worktree" => {
             session_worktree_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
         }
@@ -1131,6 +1140,31 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
 /// stays small.
 fn session_worktree_root(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
     Some(session_worktree_id(view, session)?.root.clone())
+}
+
+fn session_workspace_identifier(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
+    let mut workspaces = view
+        .snapshot
+        .resolved_relationships
+        .iter()
+        .filter_map(|relationship| {
+            if relationship.source != *session_id
+                || relationship.relation != RelationKind::AssociatedWith
+            {
+                return None;
+            }
+            match &relationship.target {
+                NodeId::Workspace(workspace) => Some(workspace.root.clone()),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>();
+    workspaces.sort();
+    workspaces.dedup();
+    match workspaces.len() {
+        0 => None,
+        _ => Some(workspaces.join(",")),
+    }
 }
 
 /// Resolve the session's worktree and follow `CheckedOutBranch` to the
@@ -2116,8 +2150,9 @@ mod tests {
     use crate::model::{
         AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForgePrNode, Freshness,
         GraphLink, GraphNode, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
-        Provenance, RelationKind, RepoId, SourceMetadata,
+        Provenance, RelationKind, RepoId, SourceMetadata, WorkspaceId,
     };
+    use crate::resolve::resolve_snapshot;
 
     fn agent_session(harness: &str, key: &str, cwd: Option<&str>) -> GraphNode {
         GraphNode::AgentSession(AgentSessionNode {
@@ -2171,6 +2206,21 @@ mod tests {
             relation: RelationKind::LinkedToMux,
             provenance,
             confidence,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    fn associated_with_workspace(session_id: AgentSessionId, root: &str) -> GraphLink {
+        let workspace = NodeId::Workspace(WorkspaceId::new(root));
+        GraphLink {
+            id: format!("workspace-{root}"),
+            source: NodeId::AgentSession(session_id),
+            target: LinkEndpoint::Node { id: workspace },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
             freshness: Freshness::Fresh,
             source_metadata: SourceMetadata::default(),
             state: LinkState::Active,
@@ -3245,6 +3295,31 @@ mod tests {
         assert!(body.contains("/workspace/repo"), "got:\n{body}");
         assert!(body.contains("feature"), "got:\n{body}");
         assert!(body.contains("/workspace/repo/.git"), "got:\n{body}");
+    }
+
+    #[test]
+    fn sessions_projection_workspace_column_renders_session_context() {
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![agent_session(
+                "codex",
+                "alpha",
+                Some("/workspace/repo/crates/core"),
+            )],
+            candidate_links: vec![associated_with_workspace(session_id, "/workspace")],
+            ..GraphSnapshot::empty()
+        });
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "workspace"]),
+        );
+
+        assert!(
+            rendered.contains("/workspace"),
+            "workspace column should expose resolved session context:\n{rendered}",
+        );
     }
 
     #[test]

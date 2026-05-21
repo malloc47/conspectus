@@ -2051,7 +2051,7 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     competes normally.
   - Tests: `cargo test checkout`.
   - Blockers: `H-CHECKOUT-003`, `H-CHECKOUT-004`.
-- [ ] `H-CHECKOUT-006` Update table and TUI projections for checkout
+- [x] `H-CHECKOUT-006` Update table and TUI projections for checkout
   grouping.
   - Scope: replace single-parent worktree grouping assumptions with
     checkout/workspace-aware projection rules. Default to including
@@ -2064,6 +2064,11 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Slice landed: repo rows in the TUI sessions tree display a
     human-oriented repo source path instead of the git common-dir
     identity, with a `/.git` stripping fallback.
+  - Outcome: TUI graph grouping now prefers resolved
+    session→workspace context, while repo grouping remains the
+    workspace-excluded view. The sessions table now has an opt-in
+    `workspace` column exposing resolved workspace context alongside
+    existing checkout/repo/branch columns.
   - Tests: `cargo test repo_group`.
   - Blockers: `H-CHECKOUT-005`.
 - [ ] `H-CHECKOUT-007` Retire legacy user-facing worktree terminology.
