@@ -840,10 +840,19 @@ expression: normalized
         "common_dir": "/fixture/repo-a/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
-      "competing_link_ids": [
-        "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b"
-      ]
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a"
+    },
+    {
+      "source": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-b/.git"
+      },
+      "relation": "workspace_contains_repo",
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b"
     },
     {
       "source": {
@@ -978,18 +987,6 @@ expression: normalized
       "kind": "unresolved_endpoint",
       "link_id": "atelier:fork:atelier:research:rooted_at_path:/fixture/.atelier/forks/research",
       "relation": "rooted_at_path"
-    },
-    {
-      "kind": "conflict",
-      "source": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "workspace_contains_repo",
-      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
-      "competing_link_ids": [
-        "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b"
-      ]
     }
   ]
 }

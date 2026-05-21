@@ -23,8 +23,10 @@ pub struct ResolveOutput {
 
 pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
     let mut output = ResolveOutput::default();
-    let mut concrete: BTreeMap<(NodeId, crate::model::RelationKind), Vec<&GraphLink>> =
-        BTreeMap::new();
+    let mut concrete: BTreeMap<
+        (NodeId, crate::model::RelationKind, Option<NodeId>),
+        Vec<&GraphLink>,
+    > = BTreeMap::new();
 
     for link in candidates {
         if link.state.is_ignored() {
@@ -43,13 +45,18 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
             continue;
         }
 
+        let target = link
+            .target_node_id()
+            .expect("concrete links have node targets")
+            .clone();
+        let target_key = multi_target_relation(&link.relation).then_some(target);
         concrete
-            .entry((link.source.clone(), link.relation.clone()))
+            .entry((link.source.clone(), link.relation.clone(), target_key))
             .or_default()
             .push(link);
     }
 
-    for ((source, relation), mut links) in concrete {
+    for ((source, relation, _), mut links) in concrete {
         links.sort_by(|left, right| compare_candidates(left, right));
         let selected = links[0];
         let target = selected
@@ -80,6 +87,13 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
     output.resolved_relationships.sort();
     output.diagnostics.sort();
     output
+}
+
+fn multi_target_relation(relation: &RelationKind) -> bool {
+    matches!(
+        relation,
+        RelationKind::AssociatedWith | RelationKind::WorkspaceContainsRepo
+    )
 }
 
 fn compare_candidates(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
@@ -250,6 +264,7 @@ mod tests {
     use crate::model::{
         AgentSessionId, BranchId, Confidence, ForgePrId, ForkId, GraphLink, LinkEndpoint,
         LinkState, MuxSessionId, NodeId, Provenance, RelationKind, RepoId, UnresolvedEndpoint,
+        WorkspaceId, WorktreeId,
     };
 
     use super::*;
@@ -260,6 +275,14 @@ mod tests {
 
     fn mux(id: &str) -> NodeId {
         NodeId::MuxSession(MuxSessionId::new(id))
+    }
+
+    fn workspace(id: &str) -> NodeId {
+        NodeId::Workspace(WorkspaceId::new(id))
+    }
+
+    fn checkout(root: &str) -> NodeId {
+        NodeId::Worktree(WorktreeId::new(RepoId::new("/repo/.git"), root))
     }
 
     #[test]
@@ -344,6 +367,78 @@ mod tests {
         let output = resolve_links(&[cached, strong]);
 
         assert_eq!(output.resolved_relationships[0].selected_link_id, "strong");
+    }
+
+    #[test]
+    fn multi_target_relations_resolve_each_distinct_target() {
+        let session = session("a");
+        let workspace_link = GraphLink::new(
+            "workspace",
+            session.clone(),
+            LinkEndpoint::Node {
+                id: workspace("/workspace"),
+            },
+            RelationKind::AssociatedWith,
+            Provenance::Discovered,
+        );
+        let checkout_link = GraphLink::new(
+            "checkout",
+            session.clone(),
+            LinkEndpoint::Node {
+                id: checkout("/workspace/repo"),
+            },
+            RelationKind::AssociatedWith,
+            Provenance::Discovered,
+        );
+
+        let output = resolve_links(&[workspace_link, checkout_link]);
+
+        assert_eq!(output.resolved_relationships.len(), 2);
+        assert!(output.diagnostics.is_empty());
+        assert!(
+            output
+                .resolved_relationships
+                .iter()
+                .any(|relationship| relationship.target == workspace("/workspace"))
+        );
+        assert!(
+            output
+                .resolved_relationships
+                .iter()
+                .any(|relationship| relationship.target == checkout("/workspace/repo"))
+        );
+    }
+
+    #[test]
+    fn multi_target_relations_still_compete_for_same_target() {
+        let session = session("a");
+        let lower = GraphLink::new(
+            "lower",
+            session.clone(),
+            LinkEndpoint::Node {
+                id: workspace("/workspace"),
+            },
+            RelationKind::AssociatedWith,
+            Provenance::Discovered,
+        );
+        let higher = GraphLink::new(
+            "higher",
+            session,
+            LinkEndpoint::Node {
+                id: workspace("/workspace"),
+            },
+            RelationKind::AssociatedWith,
+            Provenance::LocalDeclared,
+        );
+
+        let output = resolve_links(&[lower, higher]);
+
+        assert_eq!(output.resolved_relationships.len(), 1);
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "higher");
+        assert_eq!(
+            output.resolved_relationships[0].competing_link_ids,
+            vec!["lower".to_string()]
+        );
     }
 
     fn linked_to_mux_link(

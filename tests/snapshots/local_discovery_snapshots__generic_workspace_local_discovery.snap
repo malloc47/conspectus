@@ -344,24 +344,20 @@ expression: normalized
         "common_dir": "/fixture/repo-a/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git",
-      "competing_link_ids": [
-        "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git"
-      ]
-    }
-  ],
-  "diagnostics": [
+      "selected_link_id": "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git"
+    },
     {
-      "kind": "conflict",
       "source": {
         "type": "workspace",
         "root": "/fixture"
       },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-b/.git"
+      },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git",
-      "competing_link_ids": [
-        "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git"
-      ]
+      "selected_link_id": "generic_workspace:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git"
     }
-  ]
+  ],
+  "diagnostics": []
 }

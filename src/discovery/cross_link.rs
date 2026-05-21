@@ -11,6 +11,8 @@
 //! - `AgentSession` ↔ `Fork` `AssociatedWith` candidates when a session's cwd
 //!   lives at or below a fork's recorded root path (as captured by the atelier
 //!   `RootedAtPath` evidence).
+//! - `AgentSession` ↔ `Workspace` `AssociatedWith` candidates when a session's
+//!   cwd lives at or below a workspace member path.
 //! - `AgentSession` ↔ worktree/checkout `AssociatedWith` candidates when a
 //!   session's cwd lives at or below a discovered worktree root.
 //!
@@ -44,6 +46,7 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
         })
         .collect();
     let worktree_roots = worktree_roots(snapshot);
+    let workspace_member_roots = workspace_member_roots(snapshot);
     let fork_roots = fork_roots(snapshot);
 
     let mut new_links = Vec::new();
@@ -69,6 +72,10 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
             }
         }
 
+        for (workspace, root) in matching_workspaces(&session_cwd, &workspace_member_roots) {
+            new_links.push(workspace_association_link(session, workspace, root));
+        }
+
         if let Some((worktree, root)) = deepest_matching_worktree(&session_cwd, &worktree_roots) {
             new_links.push(worktree_association_link(session, worktree, root));
         }
@@ -87,6 +94,53 @@ fn worktree_roots(snapshot: &GraphSnapshot) -> Vec<(WorktreeId, String)> {
             _ => None,
         })
         .collect()
+}
+
+fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
+    let mut roots = HashMap::new();
+
+    for link in &snapshot.candidate_links {
+        if link.relation != RelationKind::WorkspaceContainsRepo {
+            continue;
+        }
+
+        for key in ["logical_path", "canonical_checkout_root"] {
+            if let Some(path) = link
+                .source_metadata
+                .fields
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+            {
+                roots
+                    .entry((link.source.clone(), normalize_path(path)))
+                    .or_insert(());
+            }
+        }
+    }
+
+    roots.into_keys().collect()
+}
+
+fn matching_workspaces<'a>(
+    session_cwd: &str,
+    workspace_roots: &'a [(NodeId, String)],
+) -> Vec<(&'a NodeId, &'a str)> {
+    let mut deepest_by_workspace: HashMap<&NodeId, &str> = HashMap::new();
+
+    for (workspace, root) in workspace_roots {
+        if !path_at_or_under(session_cwd, root) {
+            continue;
+        }
+
+        let current = deepest_by_workspace
+            .entry(workspace)
+            .or_insert(root.as_str());
+        if path_depth(root) > path_depth(current) {
+            *current = root;
+        }
+    }
+
+    deepest_by_workspace.into_iter().collect()
 }
 
 fn deepest_matching_worktree<'a>(
@@ -212,6 +266,36 @@ fn fork_association_link(session: &AgentSessionNode, fork: &NodeId, root: &str) 
     }
 }
 
+fn workspace_association_link(
+    session: &AgentSessionNode,
+    workspace: &NodeId,
+    member_root: &str,
+) -> GraphLink {
+    let source = NodeId::AgentSession(session.id.clone());
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "workspace_member_root".to_string(),
+        serde_json::Value::String(member_root.to_string()),
+    );
+    GraphLink {
+        id: format!("cross_link:{source}:associated_with:{workspace}:cwd_within_workspace"),
+        source,
+        target: LinkEndpoint::Node {
+            id: workspace.clone(),
+        },
+        relation: RelationKind::AssociatedWith,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some("session cwd within workspace member".to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
 fn worktree_association_link(
     session: &AgentSessionNode,
     worktree: &WorktreeId,
@@ -260,12 +344,17 @@ fn path_at_or_under(child: &str, parent: &str) -> bool {
     child.starts_with(&format!("{parent}/"))
 }
 
+fn path_depth(path: &str) -> usize {
+    path.split('/').filter(|part| !part.is_empty()).count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{
         AgentSessionId, AgentSessionNode, ForkId, ForkNode, GraphSnapshot, MuxSessionId,
-        MuxSessionNode, RepoId, UnresolvedEndpoint, WorktreeNode,
+        MuxSessionNode, RepoId, RepoNode, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
+        WorktreeNode,
     };
 
     fn session(id: &str, cwd: Option<&str>) -> GraphNode {
@@ -308,6 +397,52 @@ mod tests {
             git_dir: None,
             current_branch: None,
         })
+    }
+
+    fn repo(common_dir: &str) -> GraphNode {
+        GraphNode::Repo(RepoNode::new(RepoId::new(common_dir)))
+    }
+
+    fn workspace(root: &str) -> GraphNode {
+        GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new(root),
+            root: root.to_string(),
+            provider: None,
+            name: None,
+        })
+    }
+
+    fn workspace_contains_repo(
+        workspace_root: &str,
+        common_dir: &str,
+        logical_path: &str,
+    ) -> GraphLink {
+        let source = NodeId::Workspace(WorkspaceId::new(workspace_root));
+        let target = NodeId::Repo(RepoId::new(common_dir));
+        let mut fields = crate::model::Metadata::new();
+        fields.insert(
+            "logical_path".to_string(),
+            serde_json::Value::String(logical_path.to_string()),
+        );
+        fields.insert(
+            "canonical_checkout_root".to_string(),
+            serde_json::Value::String(logical_path.to_string()),
+        );
+        GraphLink {
+            id: format!("test:{source}:workspace_contains_repo:{target}"),
+            source,
+            target: LinkEndpoint::Node { id: target },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "test".to_string(),
+                evidence: Some("test workspace member".to_string()),
+                fields,
+            },
+            state: LinkState::Active,
+        }
     }
 
     fn rooted_at_path(fork_key: &str, path: &str) -> GraphLink {
@@ -486,6 +621,43 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("/work/repo")
         );
+    }
+
+    #[test]
+    fn session_inside_workspace_member_emits_workspace_and_checkout_candidates() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("a", Some("/workspace/repo/crates/core")),
+                workspace("/workspace"),
+                repo("/workspace/repo/.git"),
+                worktree("/workspace/repo/.git", "/workspace/repo"),
+            ],
+            candidate_links: vec![workspace_contains_repo(
+                "/workspace",
+                "/workspace/repo/.git",
+                "/workspace/repo",
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let associated: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::AssociatedWith)
+            .collect();
+        assert_eq!(associated.len(), 2);
+        assert!(associated.iter().any(|link| {
+            link.target_node_id() == Some(&NodeId::Workspace(WorkspaceId::new("/workspace")))
+        }));
+        assert!(associated.iter().any(|link| {
+            link.target_node_id()
+                == Some(&NodeId::Worktree(WorktreeId::new(
+                    RepoId::new("/workspace/repo/.git"),
+                    "/workspace/repo",
+                )))
+        }));
     }
 
     #[test]
