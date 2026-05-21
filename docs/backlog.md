@@ -2071,13 +2071,19 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     existing checkout/repo/branch columns.
   - Tests: `cargo test repo_group`.
   - Blockers: `H-CHECKOUT-005`.
-- [ ] `H-CHECKOUT-007` Retire legacy user-facing worktree terminology.
+- [x] `H-CHECKOUT-007` Retire legacy user-facing worktree terminology.
   - Scope: after compatibility aliases have soaked, rename CLI columns,
     docs, help text, and TUI labels from worktree to checkout where the
     user-facing meaning is the broader ADR 0026 concept. Keep git-linked
     worktree wording only when specifically describing git's feature.
   - Tests: CLI help snapshots/table snapshots once those exist; docs-only
     `git diff --check` for prose-only slices.
+  - Outcome: sessions table output now exposes `checkout`/`CHECKOUT`
+    instead of `worktree`/`WORKTREE`, PR table help and TUI checkout detail
+    labels use checkout terminology, and `--sessions-grouping checkout` is
+    accepted. Legacy `worktree` table columns and TUI grouping values remain
+    accepted as compatibility aliases while graph JSON continues serializing
+    legacy worktree node ids/types for existing consumers.
   - Blockers: `H-CHECKOUT-006`.
 
 ### Deferred Provider And Workflow Expansions

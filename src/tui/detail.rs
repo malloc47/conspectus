@@ -180,7 +180,7 @@ pub enum DiagnosticSummary {
 fn kind_label(node: &GraphNode) -> &'static str {
     match node {
         GraphNode::Repo(_) => "repo",
-        GraphNode::Worktree(_) => "worktree",
+        GraphNode::Worktree(_) => "checkout",
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
@@ -206,7 +206,7 @@ fn title_line(node: &GraphNode) -> String {
             None => format!("fork:{}", fork.provider_source_key),
         },
         GraphNode::Repo(repo) => format!("repo:{}", repo.common_dir),
-        GraphNode::Worktree(worktree) => format!("worktree:{}", worktree.root),
+        GraphNode::Worktree(worktree) => format!("checkout:{}", worktree.root),
         GraphNode::Workspace(workspace) => format!("workspace:{}", workspace.root),
         GraphNode::Branch(branch) => format!("branch:{}", branch.refname),
     }

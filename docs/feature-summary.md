@@ -8,11 +8,11 @@ project, right now?" reference.
 
 Conspectus is a Rust CLI and library that surveys AI-coding-agent work
 alive on your local machine. It reads local state only: git repositories and
-worktrees, Atelier workspace and fork metadata, supported agent harness state,
+checkouts, Atelier workspace and fork metadata, supported agent harness state,
 tmux sessions, and GitHub pull requests through the `gh` CLI.
 
 The core output is a deterministic provider-neutral graph of repos,
-worktrees, branches, workspaces, forks, agent sessions, mux sessions, and
+checkouts, branches, workspaces, forks, agent sessions, mux sessions, and
 forge PRs. Discovery records every plausible relationship as evidence first;
 the resolver then selects preferred relationships without discarding weaker,
 ambiguous, or unresolved candidates.
@@ -52,8 +52,9 @@ omitted, falling back to user config for orphan relationships.
 - **Session tables.** `conspectus session` renders human-readable table
   projections: `agent` (one row per agent session), `mux` (one row per mux
   session), and `union` (both node kinds with relationship status).
-- **Read-only git discovery.** Recognizes plain repos, linked worktrees,
-  detached HEADs, remotes, upstreams, current branch, and all local branches.
+- **Read-only git discovery.** Recognizes plain repo checkouts, linked git
+  worktrees, detached HEADs, remotes, upstreams, current branch, and all local
+  branches.
   Non-current local branches are graph nodes too, which lets PRs for sibling
   branches resolve to branch targets instead of staying unresolved.
 - **Workspace inference.** Detects generic multi-repo roots and Atelier
@@ -61,7 +62,7 @@ omitted, falling back to user config for orphan relationships.
   standalone repos.
 - **Atelier fork awareness.** Parses `.atelier/forks/index.toml` into one
   polymorphic `Fork` node per fork plus links for workspace/repo scope,
-  created or referenced worktrees, created or associated branches, fork roots,
+  created or referenced checkouts, created or associated branches, fork roots,
   parent forks, and unresolved session lineage evidence.
 - **Agent harness discovery.** Read-only adapters discover `codex`,
   `claude-code`, `opencode`, and `aider` sessions. Codex walks nested
@@ -129,7 +130,7 @@ omitted, falling back to user config for orphan relationships.
 2. **Joining sessions to terminal work.** When harness and tmux cwd evidence
    line up, the graph and session table show the preferred mux relationship
    while keeping ambiguous alternatives visible.
-3. **Inspecting Atelier fork state outside Atelier.** Forks, worktrees,
+3. **Inspecting Atelier fork state outside Atelier.** Forks, checkouts,
    branches, roots, parent forks, and session-lineage evidence are normalized
    into graph nodes and links without depending on Atelier command modules.
 4. **Seeing branch and PR context together.** GitHub PRs become graph nodes,

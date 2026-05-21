@@ -630,7 +630,8 @@ enum SessionsGroupingFlag {
     #[default]
     Graph,
     Repo,
-    Worktree,
+    #[value(alias = "worktree")]
+    Checkout,
     ScanRoot,
 }
 
@@ -689,7 +690,7 @@ impl TuiArgs {
             sessions_grouping: match self.sessions_grouping {
                 SessionsGroupingFlag::Graph => conspectus::tui::SessionsGrouping::Graph,
                 SessionsGroupingFlag::Repo => conspectus::tui::SessionsGrouping::Repo,
-                SessionsGroupingFlag::Worktree => conspectus::tui::SessionsGrouping::Worktree,
+                SessionsGroupingFlag::Checkout => conspectus::tui::SessionsGrouping::Worktree,
                 SessionsGroupingFlag::ScanRoot => conspectus::tui::SessionsGrouping::ScanRoot,
             },
             refresh_interval,

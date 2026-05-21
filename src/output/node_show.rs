@@ -149,7 +149,7 @@ fn write_node_summary(out: &mut String, node: &GraphNode, color: bool) {
 fn node_kind_label(node: &GraphNode) -> &'static str {
     match node {
         GraphNode::Repo(_) => "repo",
-        GraphNode::Worktree(_) => "worktree",
+        GraphNode::Worktree(_) => "checkout",
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",

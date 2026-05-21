@@ -813,7 +813,7 @@ fn table_sessions_columns_supports_branch_repo_optional_columns() {
         .arg("table")
         .arg("sessions")
         .arg("--columns")
-        .arg("id,agent,worktree,branch,repo,fork,declared")
+        .arg("id,agent,checkout,branch,repo,fork,declared")
         .assert()
         .success();
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
@@ -822,7 +822,7 @@ fn table_sessions_columns_supports_branch_repo_optional_columns() {
     assert_eq!(
         header_tokens,
         vec![
-            "ID", "AGENT", "WORKTREE", "BRANCH", "REPO", "FORK", "DECLARED",
+            "ID", "AGENT", "CHECKOUT", "BRANCH", "REPO", "FORK", "DECLARED",
         ],
     );
 }
@@ -1068,7 +1068,7 @@ fn columns_lists_every_row_type_with_default_marker() {
     let temp = tempfile::TempDir::new().expect("temp dir");
 
     for (row_type, expected_default, expected_optional) in [
-        ("sessions", "id ", "worktree "),
+        ("sessions", "id ", "checkout "),
         ("mux", "id ", "activity "),
         ("union", "id ", "label "),
         ("prs", "id ", "draft "),
@@ -1911,6 +1911,22 @@ fn tui_rejects_malformed_refresh_interval() {
     Command::cargo_bin("conspectus")
         .expect("conspectus binary exists")
         .args(["tui", "--refresh-interval", "abc"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid --refresh-interval"));
+}
+
+#[test]
+fn tui_accepts_checkout_sessions_grouping_value() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args([
+            "tui",
+            "--sessions-grouping",
+            "checkout",
+            "--refresh-interval",
+            "abc",
+        ])
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid --refresh-interval"));

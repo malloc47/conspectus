@@ -411,7 +411,7 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
     ColumnSpec {
         key: "pr",
         header: "PR",
-        description: "Preferred forge PR attached via the worktree branch.",
+        description: "Preferred forge PR attached via the checkout branch.",
         default: true,
     },
     ColumnSpec {
@@ -433,21 +433,21 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         default: false,
     },
     ColumnSpec {
-        key: "worktree",
-        header: "WORKTREE",
-        description: "Worktree root whose path matches the session's cwd.",
+        key: "checkout",
+        header: "CHECKOUT",
+        description: "Checkout root whose path matches the session's cwd.",
         default: false,
     },
     ColumnSpec {
         key: "branch",
         header: "BRANCH",
-        description: "Branch checked out in the session's worktree (refs/heads/ stripped).",
+        description: "Branch checked out in the session's checkout (refs/heads/ stripped).",
         default: false,
     },
     ColumnSpec {
         key: "repo",
         header: "REPO",
-        description: "Repo identifier (common_dir path) for the session's worktree.",
+        description: "Repo identifier (common_dir path) for the session's checkout.",
         default: false,
     },
     ColumnSpec {
@@ -618,7 +618,7 @@ const PRS_COLUMNS: &[ColumnSpec] = &[
     ColumnSpec {
         key: "attached",
         header: "ATTACHED",
-        description: "Agent sessions whose worktree has the PR's branch checked out.",
+        description: "Agent sessions whose checkout has the PR's branch checked out.",
         default: true,
     },
 ];
@@ -749,6 +749,7 @@ pub fn parse_columns_spec(
     let available: Vec<&'static str> = registry.iter().map(|spec| spec.key).collect();
 
     let lookup = |name: &str| -> Result<&'static str, ColumnsError> {
+        let name = column_alias(projection, name);
         registry
             .iter()
             .find(|spec| spec.key == name)
@@ -814,6 +815,7 @@ pub fn resolve_explicit_columns(
             if trimmed.is_empty() {
                 return Err(ColumnsError::EmptyToken);
             }
+            let trimmed = column_alias(projection, trimmed);
             registry
                 .iter()
                 .find(|spec| spec.key == trimmed)
@@ -825,6 +827,13 @@ pub fn resolve_explicit_columns(
                 })
         })
         .collect()
+}
+
+fn column_alias(projection: Projection, name: &str) -> &str {
+    match (projection, name) {
+        (Projection::Agent, "worktree") => "checkout",
+        _ => name,
+    }
 }
 
 /// Render a human-readable listing of the registered columns for
@@ -1114,7 +1123,7 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
         "workspace" => {
             session_workspace_identifier(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
         }
-        "worktree" => {
+        "checkout" | "worktree" => {
             session_worktree_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
         }
         "branch" => session_branch_label(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
@@ -2640,19 +2649,19 @@ mod tests {
             .expect("id line");
         assert!(id_line.ends_with("(default)"), "got: {id_line}");
 
-        // `worktree` was added as opt-in by H-TBL-010, so its line
+        // `checkout` was added as opt-in by H-TBL-010, so its line
         // should not carry the (default) marker.
-        let worktree_line = listing
+        let checkout_line = listing
             .lines()
-            .find(|line| line.starts_with("worktree "))
-            .expect("worktree line");
+            .find(|line| line.starts_with("checkout "))
+            .expect("checkout line");
         assert!(
-            !worktree_line.contains("(default)"),
-            "worktree should not be marked default: {worktree_line}",
+            !checkout_line.contains("(default)"),
+            "checkout should not be marked default: {checkout_line}",
         );
         assert!(
-            worktree_line.contains("matches the session's cwd"),
-            "worktree line should include the description: {worktree_line}",
+            checkout_line.contains("matches the session's cwd"),
+            "checkout line should include the description: {checkout_line}",
         );
     }
 
@@ -2747,6 +2756,16 @@ mod tests {
         // Bare token resets, then `+` appends after.
         let result = parse_columns_spec(Projection::Agent, "id,agent,+cwd").expect("mixed");
         assert_eq!(result, vec!["id", "agent", "cwd"]);
+    }
+
+    #[test]
+    fn parse_columns_accepts_legacy_worktree_alias() {
+        let result = parse_columns_spec(Projection::Agent, "id,worktree").expect("alias");
+        assert_eq!(result, vec!["id", "checkout"]);
+
+        let names: Vec<String> = vec!["id".into(), "worktree".into()];
+        let result = resolve_explicit_columns(Projection::Agent, &names).expect("alias");
+        assert_eq!(result, vec!["id", "checkout"]);
     }
 
     #[test]
@@ -3289,7 +3308,7 @@ mod tests {
         let rendered = render_with(
             &snapshot,
             Projection::Agent,
-            &RenderOptions::wide().with_columns(vec!["id", "agent", "worktree", "branch", "repo"]),
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "checkout", "branch", "repo"]),
         );
         let body = rendered.lines().nth(2).expect("body row");
         assert!(body.contains("/workspace/repo"), "got:\n{body}");

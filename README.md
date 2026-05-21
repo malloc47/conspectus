@@ -1,7 +1,7 @@
 # Conspectus
 
 Conspectus is a Rust CLI and library for surveying local AI-agent work across
-sessions, muxes, repos, worktrees, workspaces, forks, branches, and forge PRs.
+sessions, muxes, repos, checkouts, workspaces, forks, branches, and forge PRs.
 It reads local state, records relationship evidence in a provider-neutral graph,
 and renders deterministic JSON or compact session tables.
 
