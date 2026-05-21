@@ -1950,6 +1950,107 @@ Deferred under this cluster (no story yet, file when needed):
   - Tests: unit tests for the documented invariants.
   - Blockers: none.
 
+### Checkout Context Model
+
+ADR 0026 replaces "worktree" as the product-level concept with
+`Checkout`: the concrete editable working tree for a repo, whether it is
+an ordinary clone checkout, a linked git worktree, a bare-repo-derived
+linked worktree, or a workspace member reached through a symlink. The
+implementation still contains `Worktree` names; migrate in small slices
+so existing graph JSON and table/TUI behavior stay reviewable.
+
+- [x] `H-CHECKOUT-001` Memorialize the checkout context model.
+  - Scope: record the decision in ADR 0026, update `docs/design.md` to
+    use checkout terminology for the north-star model, and create this
+    backlog workstream.
+  - Outcome: ADR 0026 defines `Checkout`, the identity rule, cwd
+    probing, workspace overlay behavior, grouping precedence, and the
+    staged terminology migration from legacy `Worktree` names.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-CHECKOUT-002` Introduce checkout model names without breaking
+  graph compatibility.
+  - Scope: add `Checkout` model/helpers as the canonical code-level
+    vocabulary while preserving existing `Worktree` JSON fields or
+    aliases for one compatibility window. Decide whether this is a pure
+    rename with serde aliases or an internal wrapper around the current
+    `Worktree` type.
+  - Tests: graph JSON snapshot/round-trip tests proving existing
+    `worktree` output consumers still parse and new checkout-facing
+    helpers produce the same node identities.
+  - Blockers: `H-CHECKOUT-001`.
+- [ ] `H-CHECKOUT-003` Probe observed session and mux cwd paths for
+  checkout context.
+  - Scope: collect distinct cwd paths from discovered agent sessions and
+    mux sessions, run read-only git probes for each path, and backfill
+    `Repo`, `Checkout`, and `Branch` nodes plus candidate links even
+    when the cwd is outside the launch cwd or configured scan roots.
+    Reserve `Ungrouped` for sessions with no usable path or context
+    evidence.
+  - Remaining tests: fixture tests for linked worktree cwd,
+    bare-repo-derived worktree cwd, nonexistent cwd, and mux cwd outside
+    configured scan roots.
+  - Slice landed: `discover_local_with` now probes distinct observed
+    agent-session and mux-session cwd paths after initial discovery and
+    merges any git repo/checkout/branch evidence before cross-link
+    inference. The implementation still emits legacy `Worktree` nodes
+    per the compatibility plan in `H-CHECKOUT-002`.
+  - Slice landed: table and TUI projections now match sessions whose cwd
+    is nested under a checkout root, choosing the deepest matching
+    checkout.
+  - Tests: `cargo test observed_session_cwd_backfills_git_context_outside_scan_roots`;
+    `cargo test checkout`; `cargo test sessions_projection_optional_branch_repo_worktree_columns`;
+    `cargo test prs_projection_attached_shows_agent_with_matching_cwd`.
+  - Blockers: `H-CHECKOUT-001`.
+- [ ] `H-CHECKOUT-004` Preserve logical and canonical paths for workspace
+  members.
+  - Scope: when a workspace member is reached through a symlink or
+    provider-local member path, store both the workspace-visible logical
+    path and the canonical checkout root. Use canonical checkout root for
+    identity and logical path/source metadata for display and evidence.
+  - Tests: fixtures covering symlinked plain clones, provider member
+    paths, broken symlinks, and duplicate logical paths resolving to the
+    same checkout.
+  - Blockers: `H-CHECKOUT-002`, `H-DESIGN-001`.
+- [ ] `H-CHECKOUT-005` Resolve multi-context session membership.
+  - Scope: extend cross-link resolution so a session can associate with
+    both a workspace and the underlying checkout/repo/branch. Preserve
+    candidate evidence for each context and expose enough resolved data
+    for projections to choose deduped or multi-home display.
+  - Tests: resolver tests for workspace-member sessions, checkout-only
+    sessions, ambiguous workspace providers, and sessions with multiple
+    mux candidates.
+  - Slice landed: cross-link inference now emits
+    `AgentSession`→checkout `associated_with` candidates when the
+    session cwd is at or under a discovered checkout root, choosing the
+    deepest checkout for nested repo cases. Resolver multi-home semantics
+    are still open.
+  - Tests: `cargo test checkout`.
+  - Blockers: `H-CHECKOUT-003`, `H-CHECKOUT-004`.
+- [ ] `H-CHECKOUT-006` Update table and TUI projections for checkout
+  grouping.
+  - Scope: replace single-parent worktree grouping assumptions with
+    checkout/workspace-aware projection rules. Default to including
+    workspace overlay groups while also allowing checkout-centric output;
+    add include/exclude workspace controls before making workspace
+    duplication visible by default.
+  - Tests: table snapshots and TUI row-tree tests showing the same
+    session under workspace and checkout when appropriate, plus a
+    workspace-excluded mode with no duplicate workspace rows.
+  - Slice landed: repo rows in the TUI sessions tree display a
+    human-oriented repo source path instead of the git common-dir
+    identity, with a `/.git` stripping fallback.
+  - Tests: `cargo test repo_group`.
+  - Blockers: `H-CHECKOUT-005`.
+- [ ] `H-CHECKOUT-007` Retire legacy user-facing worktree terminology.
+  - Scope: after compatibility aliases have soaked, rename CLI columns,
+    docs, help text, and TUI labels from worktree to checkout where the
+    user-facing meaning is the broader ADR 0026 concept. Keep git-linked
+    worktree wording only when specifically describing git's feature.
+  - Tests: CLI help snapshots/table snapshots once those exist; docs-only
+    `git diff --check` for prose-only slices.
+  - Blockers: `H-CHECKOUT-006`.
+
 ### Deferred Provider And Workflow Expansions
 
 These items match the design guidance to *design for* additional providers

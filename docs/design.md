@@ -17,15 +17,15 @@ Build an opinionated read-only-first status tool for the user's AI work graph.
 It should show, in one integrated view:
 
 - agent sessions across all supported AI CLI tools
-- associated repos, worktrees, branches, and workspaces
-- mux sessions linked to workspaces, worktrees, or agent sessions
-- forge PRs linked to branches/worktrees
-- fork provenance across context, branch, worktree, and session effects
+- associated repos, checkouts, branches, and workspaces
+- mux sessions linked to workspaces, checkouts, or agent sessions
+- forge PRs linked to branches/checkouts
+- fork provenance across context, branch, checkout, and session effects
 - basic activity/status signals where each source can provide them
 
 Unlike `atelier status`, this tool should discover sparse records. A row with
 only an agent session is valid; so is a row with only a tmux session rooted in a
-repo, or a worktree branch with an open PR and no known agent session.
+repo, or a checkout branch with an open PR and no known agent session.
 
 ## Design Requirements
 
@@ -59,8 +59,13 @@ repo, or a worktree branch with an open PR and no known agent session.
 - Keep performance caches and other rebuildable indexes outside any given repo
   or workspace. Caches may accelerate discovery, but they must not become the
   only durable representation of user intent.
+- Use `Checkout` for the concrete editable working tree of a repo. A checkout
+  may be a plain clone checkout, a linked git worktree, a linked worktree whose
+  common dir belongs to a bare repo, or a workspace member reached through a
+  symlink. Existing implementation names may still say `Worktree` while the
+  model migrates, but new design work should use checkout terminology.
 - Use a loose definition of `Workspace`: a folder where one or more git repos,
-  symlinks to repos, or worktrees from repos are present together with the
+  symlinks to repos, or checkouts from repos are present together with the
   intent to make coordinated changes among them. Conspectus may assume
   conventions such as matching branch names when those conventions produce sane
   defaults for workspace-oriented views.
@@ -69,7 +74,7 @@ repo, or a worktree branch with an open PR and no known agent session.
   Conspectus link state on demand, but it should not become a workspace
   materializer.
 - Use a loose definition of `Fork`, or multiple fork terms if needed, centered
-  on tracking provenance of agent sessions, git branches, worktrees, and related
+  on tracking provenance of agent sessions, git branches, checkouts, and related
   state. The model should support context lineage and session lineage without
   assuming every provider implements both in the same way.
 - The initial interface is a CLI with two primary purposes: present tabular
@@ -126,7 +131,7 @@ Concrete v1 sources:
   `codex`, `aider`)
 - mux: tmux as the first implementation
 - forge: GitHub as the first implementation
-- workspaces: loose workspace groupings and individual git repos/worktrees
+- workspaces: loose workspace groupings and individual git repos/checkouts
 
 Design abstractions for additional harnesses, mux backends, and forge providers,
 but do not implement them until needed.
@@ -140,7 +145,7 @@ Nodes:
 - `AgentSession`
 - `MuxSession`
 - `Repo`
-- `Worktree`
+- `Checkout`
 - `Branch`
 - `Workspace`
 - `Fork`
@@ -148,13 +153,13 @@ Nodes:
 
 Links:
 
-- agent session launched from cwd/worktree
+- agent session launched from cwd/checkout
 - agent session belongs to workspace or fork provenance
 - mux session rooted at path
 - mux session linked to agent session
-- worktree belongs to repo and branch
+- checkout belongs to repo and branch
 - branch has forge PR
-- forks record parent/child lineage and link to affected repos, worktrees,
+- forks record parent/child lineage and link to affected repos, checkouts,
   branches, paths, and agent sessions
 - user-declared override or confirmation
 
@@ -181,31 +186,31 @@ things the user reasons about from relationship records that carry provenance.
 erDiagram
     WORKSPACE ||--o{ WORKSPACE_REPO : contains
     REPO ||--o{ WORKSPACE_REPO : participates_in
-    REPO ||--o{ WORKTREE : has
+    REPO ||--o{ CHECKOUT : has
     REPO ||--o{ BRANCH : has
-    BRANCH ||--o{ WORKTREE : checked_out_by
-    WORKSPACE }o--o{ WORKTREE : may_contain
+    BRANCH ||--o{ CHECKOUT : checked_out_by
+    WORKSPACE }o--o{ CHECKOUT : may_contain
 
     AGENT_SESSION }o--o| WORKSPACE : associated_with
     AGENT_SESSION }o--o| REPO : associated_with
-    AGENT_SESSION }o--o| WORKTREE : associated_with
+    AGENT_SESSION }o--o| CHECKOUT : associated_with
     AGENT_SESSION }o--o| FORK : associated_with
     AGENT_SESSION }o--o| MUX_SESSION : linked_to
     MUX_SESSION }o--o| WORKSPACE : rooted_in
     MUX_SESSION }o--o| REPO : rooted_in
-    MUX_SESSION }o--o| WORKTREE : rooted_in
+    MUX_SESSION }o--o| CHECKOUT : rooted_in
     MUX_SESSION }o--o| FORK : rooted_in
 
     FORK }o--o| WORKSPACE : forks_workspace
     FORK }o--o| REPO : forks_repo
-    FORK }o--o{ WORKTREE : may_reference
+    FORK }o--o{ CHECKOUT : may_reference
     FORK }o--o{ BRANCH : may_reference
     FORK }o--o| AGENT_SESSION : parent_session
     FORK }o--o| AGENT_SESSION : child_session
     FORK |o--o{ FORK : parent_of
 
     BRANCH ||--o{ FORGE_PR : may_have
-    WORKTREE }o--o| FORGE_PR : may_reference
+    CHECKOUT }o--o| FORGE_PR : may_reference
 
     GRAPH_LINK }o--|| LINK_SOURCE : has
     GRAPH_LINK }o--|| LINK_TARGET : has
@@ -217,7 +222,7 @@ Entity notes:
 - `Repo` is the durable git repository identity. A single repo can stand alone
   or participate in one or more workspaces over time.
 - `Workspace` is a folder-level working context where one or more git repos,
-  symlinks to repos, or worktrees from repos are present together with the
+  symlinks to repos, or checkouts from repos are present together with the
   intent to make coordinated changes among them. A workspace may be inferred
   from layout/convention, ephemeral with no versioned metadata, or persistent
   with metadata describing its intended shape.
@@ -226,20 +231,22 @@ Entity notes:
 - `WorkspaceRepo` is a membership edge because workspace membership may carry
   workspace-local identity, path, role, checkout policy, or whether the member
   is a concrete checkout, symlink, or convention-derived participant.
-- `Worktree` is a concrete checkout path for a repo. It normally has exactly
-  one current branch, but the branch can change as the checkout changes.
+- `Checkout` is a concrete editable working tree for a repo. It covers plain
+  clone checkouts, linked git worktrees, bare-repo-derived worktrees, and
+  workspace members reached through symlinks. It normally has exactly one
+  current branch, but the branch can change as the checkout changes.
 - `Branch` belongs to a repo and may have zero or more forge PRs. Multiple PRs
   are possible across forges, remotes, closed historical PRs, or ambiguous
   branch reuse.
 - `Fork` is a polymorphic provider-neutral node for fork-like provenance. It can
   represent context effects, session effects, both, or metadata-only provenance.
   Its meaning is expressed through attributes, provider/source metadata, and
-  links to affected workspaces, repos, worktrees, branches, paths, sessions, and
+  links to affected workspaces, repos, checkouts, branches, paths, sessions, and
   parent/child forks.
 - `AgentSession` is a harness-native session record. It may be global, orphaned,
-  repo-rooted, worktree-rooted, workspace-rooted, or fork-associated.
+  repo-rooted, checkout-rooted, workspace-rooted, or fork-associated.
 - `MuxSession` is a terminal multiplexer session. It can be linked to an agent
-  session and/or rooted in a workspace, repo, worktree, or fork path.
+  session and/or rooted in a workspace, repo, checkout, or fork path.
 - `ForgePr` is a forge pull request record. GitHub is the only v1 provider, but
   the entity should not encode GitHub-specific assumptions into the graph shape.
 - `GraphLink` is the canonical candidate/evidence edge record used for
@@ -251,13 +258,13 @@ Entity notes:
 Expected cardinality and sparsity:
 
 - A repo can exist with no workspace; a workspace can contain many repos.
-- A repo can have many worktrees; a worktree is for one repo.
-- A workspace can contain many repo participants, including worktrees, ordinary
-  repos, symlinks, or convention-derived members. A worktree may be outside any
+- A repo can have many checkouts; a checkout is for one repo.
+- A workspace can contain many repo participants, including checkouts, ordinary
+  repos, symlinks, or convention-derived members. A checkout may be outside any
   workspace.
-- A fork can affect a repo, a workspace, sessions, branches, worktrees, paths,
-  or any combination of those. It may create concrete worktrees, reference
-  existing worktrees, create or associate branches, represent session lineage,
+- A fork can affect a repo, a workspace, sessions, branches, checkouts, paths,
+  or any combination of those. It may create concrete checkouts, reference
+  existing checkouts, create or associate branches, represent session lineage,
   or be represented only by provider metadata.
 - A fork can have zero or one parent fork and many child forks.
 - Session-lineage endpoints may be unresolved. Parent or child session evidence
@@ -265,7 +272,7 @@ Expected cardinality and sparsity:
 - Session lineage edges may be either fork-anchored (sourced at a `Fork` node,
   as in ADR 0005) or directly between two `AgentSession` nodes for
   intra-harness compaction/resume (ADR 0018).
-- An agent session can exist without any known repo, worktree, workspace, mux
+- An agent session can exist without any known repo, checkout, workspace, mux
   session, or PR.
 - A mux session can exist without any known agent session.
 - An agent session can have many candidate mux links. A resolver may choose one
@@ -289,20 +296,20 @@ Fork effect matrix:
 
 Lifecycle transitions:
 
-- Single repo to workspace: grouping one or more repos, symlinks, or worktrees
+- Single repo to workspace: grouping one or more repos, symlinks, or checkouts
   under a common folder creates a `Workspace` plus `WorkspaceRepo` membership.
   Existing repo-local links remain valid and can be shadowed by workspace-local
   links when more specific.
 - Workspace to standalone repo: removing or ignoring a workspace should not
-  delete repo, worktree, branch, agent session, mux session, or PR nodes. The
-  graph should degrade to repo/worktree associations.
+  delete repo, checkout, branch, agent session, mux session, or PR nodes. The
+  graph should degrade to repo/checkout associations.
 - Context-like fork: forking a repo or workspace creates a `Fork` node and may
-  create worktrees, reference existing worktrees, create or associate branches,
+  create checkouts, reference existing checkouts, create or associate branches,
   record a fork root, or record only provider metadata. Existing sessions rooted
   in those paths may gain fork associations on the next discovery pass.
 - Session-like fork: forking an agent session creates `parent_session` and/or
   `child_session` link candidates from the `Fork`. It may reuse the same
-  worktree when no context effect was requested. Missing endpoints remain
+  checkout when no context effect was requested. Missing endpoints remain
   unresolved evidence until a concrete `AgentSession` is discovered or declared.
 - Combined fork: a heavyweight fork-like workflow creates one `Fork` node with
   both context-effect links and session-lineage links.
@@ -312,12 +319,12 @@ Lifecycle transitions:
   session state is useful without a new checkout.
 - Fork with no context effect, no session effect, and no meaningful provider
   provenance is a noop; do not create a graph node.
-- Fork back to ordinary worktree: if fork metadata disappears but the worktree
-  remains, sessions should keep their worktree/repo links and lose only the
+- Fork back to ordinary checkout: if fork metadata disappears but the checkout
+  remains, sessions should keep their checkout/repo links and lose only the
   fork lineage unless a declared link preserves it.
 - Orphan session to rooted session: when a later discovery pass finds cwd,
   transcript, mux, or declared metadata, the same `AgentSession` can gain links
-  to repo/worktree/workspace/fork nodes without changing session identity.
+  to repo/checkout/workspace/fork nodes without changing session identity.
 - Discovered link to declared link: user confirmation or override should create
   a durable `GraphLink` with `declared` provenance, leaving the discovered link
   visible in detailed diagnostics.
@@ -333,7 +340,10 @@ The sane default is:
 - inspect cwd and explicitly configured scan roots
 - read known workspace metadata from supported providers when a workspace is
   discovered
-- inspect git metadata for discovered repos/worktrees
+- inspect git metadata for discovered repos/checkouts
+- probe distinct agent-session and mux-session cwd paths read-only to backfill
+  repo, checkout, branch, and workspace context even when those paths are
+  outside the launch cwd or configured scan roots
 - query GitHub for PRs associated with discovered repo/branch pairs
 
 Discovery should prefer direct on-disk evidence first, then provider metadata,
@@ -418,8 +428,8 @@ Post-v1 commands should let users create, read, update, and delete
 relationships that discovery cannot infer:
 
 - link/unlink mux session to agent session
-- link/unlink GitHub PR to worktree or branch
-- link/unlink agent session to workspace, repo, worktree, or fork
+- link/unlink GitHub PR to checkout or branch
+- link/unlink agent session to workspace, repo, checkout, or fork
 - mark session/repo/mux rows ignored
 - confirm or override a discovered relationship
 
@@ -457,7 +467,7 @@ Candidate columns for the default AgentSession-oriented table:
 - session id
 - activity/status
 - mux session
-- repo/worktree
+- repo/checkout
 - branch
 - workspace
 - fork
@@ -468,6 +478,13 @@ Candidate columns for the default AgentSession-oriented table:
 
 Machine-readable output should preserve the graph shape directly: nodes, links,
 provenance, and source metadata. The table can be a projection over that graph.
+
+Workspace-aware projections should treat workspaces as an overlay context, not
+as a replacement for repo or checkout links. By default, sessions rooted in a
+workspace member may appear under both the workspace and the underlying
+checkout. A workspace visibility setting should support at least "include
+workspaces" and "exclude workspaces" so users without atelier, agent-deck, or a
+similar workspace concept can keep the view checkout-centric.
 The first implementation can expose this as JSON, but the interface should be
 treated as a graph API for future tools rather than a table serialization.
 
@@ -526,7 +543,7 @@ points (configurable per provider class):
 
 - harness state directories: a few seconds
 - mux backends: a few seconds
-- git repo/worktree probes: tens of seconds
+- git repo/checkout probes: tens of seconds
 - forge metadata (e.g. `gh pr list`): minutes
 
 Provider failures are isolated. A broken `gh` binary, unreachable mux
@@ -598,7 +615,7 @@ running; the one-shot CLI is the writer otherwise.
    - harness session discovery
    - mux session discovery
    - workspace/fork metadata readers
-   - git repo/worktree/branch probes
+   - git repo/checkout/branch probes
    - GitHub PR association
 2. Complete: expose reusable pieces through Conspectus library interfaces that
    do not depend on Atelier command modules. ADR 0015 defines the stable library
@@ -646,9 +663,12 @@ running; the one-shot CLI is the writer otherwise.
   - ADR 0016: prefer crates.io releases for steady-state distribution, allow
     pinned git revisions for Atelier migration, and keep path dependencies
     local-development only.
+  - ADR 0026: use `Checkout` as the provider-neutral model term for concrete
+    editable repo working trees, while migrating existing `Worktree`
+    implementation names over time.
 - Node identity:
   - repos use canonical git common dir for local discovery
-  - worktrees use repo identity plus canonical worktree root
+  - checkouts use repo identity plus canonical checkout root
   - workspaces use provider plus canonical root, or canonical root for generic
     inferred workspaces
   - agent sessions use harness key, state root or scope, and native session id

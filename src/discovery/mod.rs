@@ -166,6 +166,8 @@ pub fn discover_local_with(
     }
 
     let mut snapshot = providers.discover(&context)?;
+    let cwd_git_fragment = observed_cwd_git_fragment(&snapshot);
+    snapshot = merge_fragments([snapshot_fragment(snapshot), cwd_git_fragment]);
     cross_link::infer(&mut snapshot);
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(&mut snapshot, &context, loader);
@@ -303,6 +305,57 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     };
     snapshot.canonicalize();
     snapshot
+}
+
+fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
+    let mut roots = BTreeSet::new();
+
+    for node in &snapshot.nodes {
+        match node {
+            GraphNode::AgentSession(session) => {
+                if let Some(cwd) = &session.cwd {
+                    roots.insert(PathBuf::from(cwd));
+                }
+            }
+            GraphNode::MuxSession(mux) => {
+                if let Some(cwd) = &mux.cwd {
+                    roots.insert(PathBuf::from(cwd));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let probe = git::GitProbe::new();
+    let mut fragments = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+
+        match probe.probe(&root) {
+            Ok(Some(result)) => fragments.push(git::fragment_from_probe(&result)),
+            Ok(None) => {}
+            Err(error) => diagnostics.push(Diagnostic::Config {
+                path: root.to_string_lossy().to_string(),
+                message: format!("failed to probe observed cwd for git context: {error:#}"),
+            }),
+        }
+    }
+
+    let mut fragment = snapshot_fragment(merge_fragments(fragments));
+    fragment.diagnostics.extend(diagnostics);
+    fragment
+}
+
+fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
+    GraphFragment {
+        nodes: snapshot.nodes,
+        candidate_links: snapshot.candidate_links,
+        diagnostics: snapshot.diagnostics,
+    }
 }
 
 fn normalize_scan_root(root: &Path) -> Result<PathBuf> {

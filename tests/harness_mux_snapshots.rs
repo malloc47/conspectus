@@ -10,6 +10,7 @@ use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
 use conspectus::discovery::tmux::{FakeTmux, UnavailableReason};
 use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
+use conspectus::model::GraphNode;
 use conspectus::output::render_graph_json;
 use conspectus::resolve::resolve_snapshot;
 
@@ -56,6 +57,47 @@ fn session_and_tmux_cwd_match_emits_linked_to_mux_snapshot() {
         .with_tmux_runner(FakeTmux::with_sessions(stdout));
 
     assert_snapshot(&fixture, "session_and_tmux_cwd_match", config);
+}
+
+#[test]
+fn observed_session_cwd_backfills_git_context_outside_scan_roots() {
+    let fixture = ScenarioFixture::new();
+    fixture.init_repo("work");
+    let scan_root = fixture.path().join("scan");
+    let nested_cwd = fixture.path().join("work/nested");
+    fs::create_dir_all(&scan_root).expect("scan root");
+    fs::create_dir_all(&nested_cwd).expect("nested cwd");
+    fixture.write_codex_session("session-x", Some(nested_cwd.to_str().expect("utf8")));
+
+    let config = LocalDiscoveryConfig::empty()
+        .with_harness_state_root(CODEX_HARNESS_KEY, fixture.codex_state_root());
+
+    let snapshot = discover_local_with([scan_root], config).expect("discover");
+
+    assert!(
+        snapshot.nodes.iter().any(|node| matches!(
+            node,
+            GraphNode::Repo(repo) if repo.common_dir.ends_with("/work/.git")
+        )),
+        "observed cwd should backfill the repo node: {:#?}",
+        snapshot.nodes
+    );
+    assert!(
+        snapshot.nodes.iter().any(|node| matches!(
+            node,
+            GraphNode::Worktree(worktree) if worktree.root.ends_with("/work")
+        )),
+        "observed cwd should backfill the checkout/worktree node: {:#?}",
+        snapshot.nodes
+    );
+    assert!(
+        snapshot.nodes.iter().any(|node| matches!(
+            node,
+            GraphNode::Branch(branch) if branch.refname == "refs/heads/main"
+        )),
+        "observed cwd should backfill the branch node: {:#?}",
+        snapshot.nodes
+    );
 }
 
 #[test]

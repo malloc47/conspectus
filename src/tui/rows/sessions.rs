@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use crate::model::{
     AgentSessionNode, GraphLink, GraphNode, GraphSnapshot, MuxSessionNode, NodeId, RelationKind,
-    RepoId, WorkspaceId, WorktreeId, WorktreeNode,
+    RepoId, RepoNode, WorkspaceId, WorktreeId, WorktreeNode,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -150,7 +150,7 @@ fn mark_launch_context(tree: &mut RowTree, cwd: Option<&Path>) {
 fn node_id_path(id: &NodeId) -> Option<&str> {
     match id {
         NodeId::Workspace(ws) => Some(ws.root.as_str()),
-        NodeId::Repo(repo) => Some(repo.common_dir.as_str()),
+        NodeId::Repo(repo) => Some(repo_display_path_from_common_dir(&repo.common_dir)),
         NodeId::Worktree(wt) => Some(wt.root.as_str()),
         _ => None,
     }
@@ -189,6 +189,7 @@ struct EmitCtx<'a, 'snap> {
 struct SessionsIndex<'a> {
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
     mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
+    repos: BTreeMap<NodeId, &'a RepoNode>,
     worktrees: BTreeMap<NodeId, &'a WorktreeNode>,
     /// `(source, relation)` → all *active* candidate links. Mirrors
     /// `SnapshotView::by_source_relation` in `output::table` but
@@ -200,6 +201,7 @@ impl<'a> SessionsIndex<'a> {
     fn new(snapshot: &'a GraphSnapshot) -> Self {
         let mut agent_sessions = BTreeMap::new();
         let mut mux_sessions = BTreeMap::new();
+        let mut repos = BTreeMap::new();
         let mut worktrees = BTreeMap::new();
 
         for node in &snapshot.nodes {
@@ -210,6 +212,9 @@ impl<'a> SessionsIndex<'a> {
                 }
                 GraphNode::MuxSession(mux) => {
                     mux_sessions.insert(id, mux);
+                }
+                GraphNode::Repo(repo) => {
+                    repos.insert(id, repo);
                 }
                 GraphNode::Worktree(worktree) => {
                     worktrees.insert(id, worktree);
@@ -233,23 +238,25 @@ impl<'a> SessionsIndex<'a> {
         Self {
             agent_sessions,
             mux_sessions,
+            repos,
             worktrees,
             by_source_relation,
         }
     }
 
-    /// Find the worktree node whose root equals `cwd`. Mirrors the
-    /// behavior of `output::table::session_worktree_root`.
+    /// Find the deepest worktree node whose root contains `cwd`.
+    /// Mirrors the behavior of `output::table::session_worktree_root`.
     fn worktree_for_cwd(&self, cwd: &str) -> Option<(&WorktreeId, &WorktreeNode)> {
-        self.worktrees.iter().find_map(|(id, node)| {
-            if let NodeId::Worktree(wt_id) = id
-                && wt_id.root == cwd
-            {
-                Some((wt_id, *node))
-            } else {
-                None
-            }
-        })
+        let cwd = Path::new(cwd);
+        self.worktrees
+            .iter()
+            .filter_map(|(id, node)| match id {
+                NodeId::Worktree(wt_id) if path_is_ancestor_of(Path::new(&wt_id.root), cwd) => {
+                    Some((wt_id, *node))
+                }
+                _ => None,
+            })
+            .max_by_key(|(wt_id, _)| Path::new(&wt_id.root).components().count())
     }
 
     /// Count worktrees that belong to `repo`. Used to apply the
@@ -284,6 +291,15 @@ impl<'a> SessionsIndex<'a> {
         None
     }
 
+    fn repo_display_path(&self, repo_id: &RepoId) -> String {
+        let node_id = NodeId::Repo(repo_id.clone());
+        self.repos
+            .get(&node_id)
+            .and_then(|repo| repo.source_paths.first())
+            .cloned()
+            .unwrap_or_else(|| repo_display_path_from_common_dir(&repo_id.common_dir).to_string())
+    }
+
     /// All active `LinkedToMux` candidate links sourced at this
     /// agent session, in their stored order (deterministic per
     /// `by_source_relation`).
@@ -306,6 +322,9 @@ struct GroupKey {
     workspace: Option<String>,
     /// Repo common-dir.
     repo: String,
+    /// Human-oriented repo path. Prefer a checkout/source path over
+    /// the git common-dir identity so group labels do not show `/.git`.
+    repo_display_path: String,
     /// Repo id (kept alongside `repo` for the `RowId::Group(repo)`
     /// stable identity).
     repo_id: RepoId,
@@ -353,6 +372,7 @@ fn resolve_group_key(
     Some(GroupKey {
         workspace,
         repo: repo_id.common_dir.clone(),
+        repo_display_path: index.repo_display_path(&repo_id),
         repo_id,
         worktree,
     })
@@ -433,11 +453,15 @@ fn push_repo_row(tree: &mut RowTree, depth: u8, key: &GroupKey, home: Option<&Pa
         depth,
         expandable: true,
         kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(&key.repo, home),
+            display_path: shorten_home(&key.repo_display_path, home),
             primary_node: Some(node_id),
             is_launch_context: false,
         }),
     });
+}
+
+fn repo_display_path_from_common_dir(common_dir: &str) -> &str {
+    common_dir.strip_suffix("/.git").unwrap_or(common_dir)
 }
 
 fn push_worktree_row(
@@ -686,6 +710,12 @@ mod tests {
         GraphNode::Repo(RepoNode::new(RepoId::new(common_dir)))
     }
 
+    fn repo_with_source(common_dir: &str, source_path: &str) -> GraphNode {
+        let mut repo = RepoNode::new(RepoId::new(common_dir));
+        repo.source_paths.push(source_path.to_string());
+        GraphNode::Repo(repo)
+    }
+
     fn worktree(repo_common: &str, root: &str) -> GraphNode {
         GraphNode::Worktree(WorktreeNode {
             id: WorktreeId::new(RepoId::new(repo_common), root.to_string()),
@@ -796,6 +826,109 @@ mod tests {
 
         assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
         assert_eq!(tree.rows[1].depth, 1);
+    }
+
+    #[test]
+    fn repo_group_prefers_source_path_over_git_common_dir() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/proj/.git",
+            "/home/op/src/proj",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj/.git", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: Some(Path::new("/home/op/src/proj")),
+        });
+
+        let group = match &tree.rows[0].kind {
+            RowKind::Group(g) => g,
+            _ => unreachable!(),
+        };
+        assert_eq!(group.display_path, "~/src/proj");
+        assert!(group.is_launch_context);
+    }
+
+    #[test]
+    fn repo_group_strips_git_suffix_when_source_path_is_missing() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj/.git"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj/.git", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: Some(Path::new("/home/op/src/proj")),
+        });
+
+        let group = match &tree.rows[0].kind {
+            RowKind::Group(g) => g,
+            _ => unreachable!(),
+        };
+        assert_eq!(group.display_path, "~/src/proj");
+        assert!(group.is_launch_context);
+    }
+
+    #[test]
+    fn session_nested_inside_checkout_groups_under_checkout() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/proj/.git",
+            "/home/op/src/proj",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj/.git", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/proj/crates/core"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+        });
+
+        assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
+        let group = match &tree.rows[0].kind {
+            RowKind::Group(g) => g,
+            _ => unreachable!(),
+        };
+        assert_eq!(group.display_path, "~/src/proj");
+        assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
     }
 
     #[test]

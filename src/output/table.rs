@@ -21,6 +21,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::path::Path;
 
 use anstyle::{Ansi256Color, AnsiColor, Effects, Reset, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -1125,27 +1126,17 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
     }
 }
 
-/// Find the worktree whose root matches the session's cwd. Walks
+/// Find the worktree whose root contains the session's cwd. Walks
 /// `snapshot.nodes` once per call; row counts are bounded so the cost
 /// stays small.
 fn session_worktree_root(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    let cwd = session.cwd.as_deref()?;
-    // Worktrees aren't indexed on SnapshotView; do a linear scan of
-    // candidate_link sources for Worktree NodeIds whose root matches.
-    for (source, _relation) in view.by_source_relation.keys() {
-        if let NodeId::Worktree(worktree_id) = source
-            && worktree_id.root == cwd
-        {
-            return Some(worktree_id.root.clone());
-        }
-    }
-    None
+    Some(session_worktree_id(view, session)?.root.clone())
 }
 
 /// Resolve the session's worktree and follow `CheckedOutBranch` to the
 /// branch, returning the refname with `refs/heads/` stripped.
 fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    let cwd = session.cwd.as_deref()?;
+    let session_worktree = session_worktree_id(view, session)?;
     for ((source, relation), links) in &view.by_source_relation {
         if *relation != RelationKind::CheckedOutBranch {
             continue;
@@ -1153,7 +1144,7 @@ fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> 
         let NodeId::Worktree(worktree_id) = source else {
             continue;
         };
-        if worktree_id.root != cwd {
+        if worktree_id != session_worktree {
             continue;
         }
         let preferred = pick_preferred(links)?;
@@ -1170,15 +1161,38 @@ fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> 
 /// Resolve the session's worktree and return its repo identifier
 /// (`RepoId.common_dir`).
 fn session_repo_identifier(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    let cwd = session.cwd.as_deref()?;
-    for (source, _relation) in view.by_source_relation.keys() {
-        if let NodeId::Worktree(worktree_id) = source
-            && worktree_id.root == cwd
-        {
-            return Some(worktree_id.repo.common_dir.clone());
+    Some(session_worktree_id(view, session)?.repo.common_dir.clone())
+}
+
+fn session_worktree_id<'a>(
+    view: &'a SnapshotView<'_>,
+    session: &AgentSessionNode,
+) -> Option<&'a crate::model::WorktreeId> {
+    let cwd = Path::new(session.cwd.as_deref()?);
+    view.by_source_relation
+        .keys()
+        .filter_map(|(source, _relation)| match source {
+            NodeId::Worktree(worktree_id)
+                if path_is_ancestor_of(Path::new(&worktree_id.root), cwd) =>
+            {
+                Some(worktree_id)
+            }
+            _ => None,
+        })
+        .max_by_key(|worktree_id| Path::new(&worktree_id.root).components().count())
+}
+
+fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
+    let mut anc_iter = ancestor.components();
+    let mut desc_iter = descendant.components();
+    loop {
+        match (anc_iter.next(), desc_iter.next()) {
+            (Some(a), Some(d)) if a == d => continue,
+            (Some(_), Some(_)) => return false,
+            (Some(_), None) => return false,
+            (None, _) => return true,
         }
     }
-    None
 }
 
 /// When a fork records this session as a `child_session` target, return
@@ -1582,7 +1596,8 @@ fn strip_branch_prefix(refname: &str) -> &str {
 
 /// Find agent-session labels whose worktree has this PR's branch
 /// checked out. Walks `CheckedOutBranch` candidate links to locate
-/// worktrees, then matches `AgentSession.cwd == worktree.root`.
+/// worktrees, then matches sessions whose cwd is at or under that
+/// worktree root.
 fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<String> {
     let Some(branch_id) = pr_preferred_branch_id(view, pr_id) else {
         return Vec::new();
@@ -1618,7 +1633,10 @@ fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<St
         let Some(cwd) = session.cwd.as_deref() else {
             continue;
         };
-        if worktree_roots.contains(&cwd) {
+        if worktree_roots
+            .iter()
+            .any(|root| path_is_ancestor_of(Path::new(root), Path::new(cwd)))
+        {
             labels.push(agent_session_label(session));
         }
     }
@@ -3206,7 +3224,7 @@ mod tests {
 
         let snapshot = GraphSnapshot {
             nodes: vec![
-                agent_session("codex", "alpha", Some("/workspace/repo")),
+                agent_session("codex", "alpha", Some("/workspace/repo/crates/core")),
                 GraphNode::Worktree(WorktreeNode {
                     id: worktree_id,
                     root: "/workspace/repo".to_string(),
@@ -3388,7 +3406,7 @@ mod tests {
             git_dir: None,
             current_branch: None,
         });
-        let agent_node = agent_session("codex", "alpha", Some("/workspace/repo"));
+        let agent_node = agent_session("codex", "alpha", Some("/workspace/repo/crates/core"));
         let pr_node = forge_pr("octo", "repo", 7, "open", false);
 
         let mut pr_to_branch = branch_has_pr_link(

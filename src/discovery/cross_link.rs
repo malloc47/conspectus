@@ -11,6 +11,8 @@
 //! - `AgentSession` ↔ `Fork` `AssociatedWith` candidates when a session's cwd
 //!   lives at or below a fork's recorded root path (as captured by the atelier
 //!   `RootedAtPath` evidence).
+//! - `AgentSession` ↔ worktree/checkout `AssociatedWith` candidates when a
+//!   session's cwd lives at or below a discovered worktree root.
 //!
 //! No nodes are created here, and any `Unresolved` lineage endpoints already
 //! present in `candidate_links` are left untouched.
@@ -19,7 +21,7 @@ use std::collections::HashMap;
 
 use crate::model::{
     AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata,
+    LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata, WorktreeId,
 };
 
 const ADAPTER_NAME: &str = "cross_link";
@@ -41,6 +43,7 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
             _ => None,
         })
         .collect();
+    let worktree_roots = worktree_roots(snapshot);
     let fork_roots = fork_roots(snapshot);
 
     let mut new_links = Vec::new();
@@ -65,10 +68,36 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
                 new_links.push(fork_association_link(session, fork, root));
             }
         }
+
+        if let Some((worktree, root)) = deepest_matching_worktree(&session_cwd, &worktree_roots) {
+            new_links.push(worktree_association_link(session, worktree, root));
+        }
     }
 
     snapshot.candidate_links.extend(new_links);
     snapshot.canonicalize();
+}
+
+fn worktree_roots(snapshot: &GraphSnapshot) -> Vec<(WorktreeId, String)> {
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Worktree(worktree) => Some((worktree.id.clone(), worktree.root.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn deepest_matching_worktree<'a>(
+    session_cwd: &str,
+    worktrees: &'a [(WorktreeId, String)],
+) -> Option<(&'a WorktreeId, &'a str)> {
+    worktrees
+        .iter()
+        .filter(|(_, root)| path_at_or_under(session_cwd, &normalize_path(root)))
+        .max_by_key(|(_, root)| root.split('/').filter(|part| !part.is_empty()).count())
+        .map(|(id, root)| (id, root.as_str()))
 }
 
 fn fork_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
@@ -183,6 +212,35 @@ fn fork_association_link(session: &AgentSessionNode, fork: &NodeId, root: &str) 
     }
 }
 
+fn worktree_association_link(
+    session: &AgentSessionNode,
+    worktree: &WorktreeId,
+    root: &str,
+) -> GraphLink {
+    let source = NodeId::AgentSession(session.id.clone());
+    let target = NodeId::Worktree(worktree.clone());
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "checkout_root".to_string(),
+        serde_json::Value::String(root.to_string()),
+    );
+    GraphLink {
+        id: format!("cross_link:{source}:associated_with:{target}:cwd_within_checkout"),
+        source,
+        target: LinkEndpoint::Node { id: target },
+        relation: RelationKind::AssociatedWith,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some("session cwd within checkout root".to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
 fn normalize_path(path: &str) -> String {
     let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
@@ -207,7 +265,7 @@ mod tests {
     use super::*;
     use crate::model::{
         AgentSessionId, AgentSessionNode, ForkId, ForkNode, GraphSnapshot, MuxSessionId,
-        MuxSessionNode, UnresolvedEndpoint,
+        MuxSessionNode, RepoId, UnresolvedEndpoint, WorktreeNode,
     };
 
     fn session(id: &str, cwd: Option<&str>) -> GraphNode {
@@ -239,6 +297,16 @@ mod tests {
             name: Some(key.to_string()),
             scope: Some("workspace".to_string()),
             capabilities: Vec::new(),
+        })
+    }
+
+    fn worktree(repo_common_dir: &str, root: &str) -> GraphNode {
+        let repo = RepoId::new(repo_common_dir);
+        GraphNode::Worktree(WorktreeNode {
+            id: WorktreeId::new(repo, root.to_string()),
+            root: root.to_string(),
+            git_dir: None,
+            current_branch: None,
         })
     }
 
@@ -378,6 +446,73 @@ mod tests {
                 .get("fork_root")
                 .and_then(serde_json::Value::as_str),
             Some("/work/fork-alpha")
+        );
+    }
+
+    #[test]
+    fn session_inside_worktree_emits_checkout_association_candidate() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("a", Some("/work/repo/crates/core")),
+                worktree("/work/repo/.git", "/work/repo"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let associated: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::AssociatedWith)
+            .collect();
+        assert_eq!(associated.len(), 1);
+        let link = associated[0];
+        assert_eq!(
+            link.source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "a"))
+        );
+        assert_eq!(
+            link.target_node_id(),
+            Some(&NodeId::Worktree(WorktreeId::new(
+                RepoId::new("/work/repo/.git"),
+                "/work/repo"
+            )))
+        );
+        assert_eq!(
+            link.source_metadata
+                .fields
+                .get("checkout_root")
+                .and_then(serde_json::Value::as_str),
+            Some("/work/repo")
+        );
+    }
+
+    #[test]
+    fn nested_worktree_association_chooses_deepest_checkout() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("a", Some("/work/repo/nested/src")),
+                worktree("/work/repo/.git", "/work/repo"),
+                worktree("/work/repo/nested/.git", "/work/repo/nested"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let associated: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::AssociatedWith)
+            .collect();
+        assert_eq!(associated.len(), 1);
+        assert_eq!(
+            associated[0].target_node_id(),
+            Some(&NodeId::Worktree(WorktreeId::new(
+                RepoId::new("/work/repo/nested/.git"),
+                "/work/repo/nested"
+            )))
         );
     }
 
