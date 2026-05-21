@@ -386,6 +386,10 @@ expression: normalized
         "adapter": "atelier",
         "evidence": "atelier.toml repo entry",
         "fields": {
+          "canonical_checkout_root": "/fixture/repo-a",
+          "logical_path": "/fixture/repo-a",
+          "member_path_kind": "directory",
+          "provider_source_path": "/sources/repo-a",
           "repo_name": "repo-a"
         }
       },

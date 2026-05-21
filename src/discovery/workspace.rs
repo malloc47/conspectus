@@ -1,7 +1,7 @@
 //! Generic workspace inference from explicit scan roots.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -46,7 +46,7 @@ impl GenericWorkspaceDiscovery {
         }
 
         let mut child_fragments = Vec::new();
-        let mut repo_ids = Vec::new();
+        let mut repo_members = Vec::new();
 
         for entry in fs::read_dir(root)
             .with_context(|| format!("failed to read scan root: {}", root.display()))?
@@ -63,13 +63,20 @@ impl GenericWorkspaceDiscovery {
                 continue;
             };
 
-            repo_ids.push(NodeId::Repo(crate::model::RepoId::new(path_string(
-                &probe.common_dir,
-            ))));
+            repo_members.push(WorkspaceMember {
+                repo: NodeId::Repo(crate::model::RepoId::new(path_string(&probe.common_dir))),
+                logical_path: path,
+                canonical_checkout_root: canonicalized_or_original(&probe.worktree_root),
+                path_kind: if file_type.is_symlink() {
+                    WorkspaceMemberPathKind::Symlink
+                } else {
+                    WorkspaceMemberPathKind::Directory
+                },
+            });
             child_fragments.push(fragment_from_probe(&probe));
         }
 
-        if repo_ids.len() < 2 {
+        if repo_members.len() < 2 {
             return Ok(GraphFragment::empty());
         }
 
@@ -87,10 +94,10 @@ impl GenericWorkspaceDiscovery {
         let mut fragment = merge_fragments(child_fragments);
         fragment.nodes.push(workspace_node);
 
-        for repo in repo_ids {
+        for member in repo_members {
             fragment.candidate_links.push(workspace_repo_link(
                 workspace.clone(),
-                repo,
+                member,
                 "multiple git repos under explicit scan root",
             ));
         }
@@ -104,9 +111,47 @@ fn provider_workspace_claims_root(root: &Path) -> bool {
     root.join(ATELIER_CONFIG_FILENAME).is_file()
 }
 
-fn workspace_repo_link(source: NodeId, target: NodeId, evidence: &str) -> GraphLink {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WorkspaceMember {
+    repo: NodeId,
+    logical_path: PathBuf,
+    canonical_checkout_root: PathBuf,
+    path_kind: WorkspaceMemberPathKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceMemberPathKind {
+    Directory,
+    Symlink,
+}
+
+impl WorkspaceMemberPathKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Directory => "directory",
+            Self::Symlink => "symlink",
+        }
+    }
+}
+
+fn workspace_repo_link(source: NodeId, member: WorkspaceMember, evidence: &str) -> GraphLink {
     let relation = RelationKind::WorkspaceContainsRepo;
     let relation_name = relation_name(&relation);
+    let target = member.repo;
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "logical_path".to_string(),
+        serde_json::Value::String(path_string(&member.logical_path)),
+    );
+    fields.insert(
+        "canonical_checkout_root".to_string(),
+        serde_json::Value::String(path_string(&member.canonical_checkout_root)),
+    );
+    fields.insert(
+        "member_path_kind".to_string(),
+        serde_json::Value::String(member.path_kind.as_str().to_string()),
+    );
+
     GraphLink {
         id: format!("generic_workspace:{source}:{relation_name}:{target}"),
         source,
@@ -118,7 +163,7 @@ fn workspace_repo_link(source: NodeId, target: NodeId, evidence: &str) -> GraphL
         source_metadata: SourceMetadata {
             adapter: "generic_workspace".to_string(),
             evidence: Some(evidence.to_string()),
-            fields: Default::default(),
+            fields,
         },
         state: LinkState::Active,
     }
@@ -143,9 +188,12 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
+fn canonicalized_or_original(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::process::Command;
 
     use tempfile::TempDir;
@@ -193,6 +241,74 @@ mod tests {
         assert_eq!(workspace_nodes, 1);
         assert_eq!(repo_nodes, 2);
         assert_eq!(workspace_links, 2);
+    }
+
+    #[test]
+    fn generic_workspace_links_preserve_member_paths() {
+        let workspace = TempDir::new().expect("workspace dir");
+        let external = TempDir::new().expect("external dir");
+        let direct = GitRepoFixture::init_at(workspace.path(), "repo-a");
+        let linked_target = GitRepoFixture::init_at(external.path(), "repo-b");
+        let linked_logical_path = workspace.path().join("repo-b-link");
+        symlink_dir(linked_target.path(), &linked_logical_path);
+
+        let fragment = GenericWorkspaceDiscovery::new()
+            .discover(&DiscoveryContext::from_roots([workspace.path()]).expect("context"))
+            .expect("workspace discovery succeeds");
+
+        let links = fragment
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::WorkspaceContainsRepo)
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 2);
+
+        let direct_fields = links
+            .iter()
+            .find(|link| {
+                link.source_metadata.fields.get("logical_path")
+                    == Some(&serde_json::Value::String(path_string(direct.path())))
+            })
+            .expect("direct member link")
+            .source_metadata
+            .fields
+            .clone();
+        assert_eq!(
+            direct_fields.get("member_path_kind"),
+            Some(&serde_json::Value::String("directory".to_string()))
+        );
+        assert_eq!(
+            direct_fields.get("canonical_checkout_root"),
+            Some(&serde_json::Value::String(path_string(
+                &direct.path().canonicalize().expect("direct canonical path")
+            )))
+        );
+
+        let symlink_fields = links
+            .iter()
+            .find(|link| {
+                link.source_metadata.fields.get("logical_path")
+                    == Some(&serde_json::Value::String(path_string(
+                        &linked_logical_path,
+                    )))
+            })
+            .expect("symlink member link")
+            .source_metadata
+            .fields
+            .clone();
+        assert_eq!(
+            symlink_fields.get("member_path_kind"),
+            Some(&serde_json::Value::String("symlink".to_string()))
+        );
+        assert_eq!(
+            symlink_fields.get("canonical_checkout_root"),
+            Some(&serde_json::Value::String(path_string(
+                &linked_target
+                    .path()
+                    .canonicalize()
+                    .expect("linked canonical path")
+            )))
+        );
     }
 
     #[test]
@@ -286,5 +402,15 @@ name = "provider-owned"
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[cfg(unix)]
+    fn symlink_dir(target: &Path, link: &Path) {
+        std::os::unix::fs::symlink(target, link).expect("create symlink");
+    }
+
+    #[cfg(windows)]
+    fn symlink_dir(target: &Path, link: &Path) {
+        std::os::windows::fs::symlink_dir(target, link).expect("create symlink");
     }
 }

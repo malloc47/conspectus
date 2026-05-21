@@ -2013,6 +2013,10 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     provider-local member path, store both the workspace-visible logical
     path and the canonical checkout root. Use canonical checkout root for
     identity and logical path/source metadata for display and evidence.
+  - Slice landed: generic and Atelier `workspace_contains_repo`
+    candidates now preserve `logical_path`, `canonical_checkout_root`
+    when discovered, and `member_path_kind` source metadata. Atelier
+    links also preserve `provider_source_path` and `repo_name`.
   - Tests: fixtures covering symlinked plain clones, provider member
     paths, broken symlinks, and duplicate logical paths resolving to the
     same checkout.

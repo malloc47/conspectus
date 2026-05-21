@@ -87,14 +87,23 @@ impl AtelierWorkspaceDiscovery {
 
         for repo in &config.repos {
             let repo_root = workspace_root.join(&repo.name);
+            let provider_source_path = absolutize(&workspace_root, &repo.path);
+            let member_path_kind = workspace_member_path_kind(&repo_root);
 
             if let Some(probe) = self.git_probe.probe(&repo_root)? {
                 let repo_id =
                     NodeId::Repo(crate::model::RepoId::new(path_string(&probe.common_dir)));
+                let canonical_checkout_root = canonicalized_or_original(&probe.worktree_root);
                 repo_links.push(atelier_workspace_repo_link(
                     workspace.clone(),
                     repo_id,
-                    &repo.name,
+                    WorkspaceRepoMemberMetadata {
+                        repo_name: &repo.name,
+                        logical_path: &repo_root,
+                        provider_source_path: &provider_source_path,
+                        canonical_checkout_root: Some(&canonical_checkout_root),
+                        member_path_kind,
+                    },
                     "atelier.toml repo entry",
                 ));
                 child_fragments.push(fragment_from_probe(&probe));
@@ -102,9 +111,15 @@ impl AtelierWorkspaceDiscovery {
                 repo_links.push(atelier_workspace_repo_link(
                     workspace.clone(),
                     NodeId::Repo(crate::model::RepoId::new(path_string(
-                        &workspace_root.join(&repo.path),
+                        &provider_source_path,
                     ))),
-                    &repo.name,
+                    WorkspaceRepoMemberMetadata {
+                        repo_name: &repo.name,
+                        logical_path: &repo_root,
+                        provider_source_path: &provider_source_path,
+                        canonical_checkout_root: None,
+                        member_path_kind,
+                    },
                     "atelier.toml repo entry without discovered checkout",
                 ));
             }
@@ -660,7 +675,7 @@ fn find_atelier_config(start: &Path) -> Option<PathBuf> {
 fn atelier_workspace_repo_link(
     source: NodeId,
     target: NodeId,
-    repo_name: &str,
+    member: WorkspaceRepoMemberMetadata<'_>,
     evidence: &str,
 ) -> GraphLink {
     let relation = RelationKind::WorkspaceContainsRepo;
@@ -668,11 +683,32 @@ fn atelier_workspace_repo_link(
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         "repo_name".to_string(),
-        serde_json::Value::String(repo_name.to_string()),
+        serde_json::Value::String(member.repo_name.to_string()),
+    );
+    fields.insert(
+        "logical_path".to_string(),
+        serde_json::Value::String(path_string(member.logical_path)),
+    );
+    fields.insert(
+        "provider_source_path".to_string(),
+        serde_json::Value::String(path_string(member.provider_source_path)),
+    );
+    if let Some(canonical_checkout_root) = member.canonical_checkout_root {
+        fields.insert(
+            "canonical_checkout_root".to_string(),
+            serde_json::Value::String(path_string(canonical_checkout_root)),
+        );
+    }
+    fields.insert(
+        "member_path_kind".to_string(),
+        serde_json::Value::String(member.member_path_kind.to_string()),
     );
 
     GraphLink {
-        id: format!("atelier:{source}:{relation_name}:{target}:{repo_name}"),
+        id: format!(
+            "atelier:{source}:{relation_name}:{target}:{repo_name}",
+            repo_name = member.repo_name
+        ),
         source,
         target: LinkEndpoint::Node { id: target },
         relation,
@@ -685,6 +721,24 @@ fn atelier_workspace_repo_link(
             fields,
         },
         state: LinkState::Active,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WorkspaceRepoMemberMetadata<'a> {
+    repo_name: &'a str,
+    logical_path: &'a Path,
+    provider_source_path: &'a Path,
+    canonical_checkout_root: Option<&'a Path>,
+    member_path_kind: &'static str,
+}
+
+fn workspace_member_path_kind(path: &Path) -> &'static str {
+    match path.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_symlink() => "symlink",
+        Ok(metadata) if metadata.is_dir() => "directory",
+        Ok(_) => "other",
+        Err(_) => "provider_declared_unresolved",
     }
 }
 
@@ -713,6 +767,10 @@ fn absolutize(base: &Path, path: &Path) -> PathBuf {
     } else {
         base.join(path)
     }
+}
+
+fn canonicalized_or_original(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -801,6 +859,44 @@ path = "/source/repo-b"
 
         assert_eq!(atelier_workspaces, 1);
         assert_eq!(workspace_links, 2);
+
+        let repo_a_fields = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::WorkspaceContainsRepo
+                    && link.source_metadata.adapter == "atelier"
+                    && link.source_metadata.fields.get("repo_name")
+                        == Some(&serde_json::Value::String("repo-a".to_string()))
+            })
+            .expect("repo-a workspace membership link")
+            .source_metadata
+            .fields
+            .clone();
+        assert_eq!(
+            repo_a_fields.get("logical_path"),
+            Some(&serde_json::Value::String(path_string(
+                &fixture.root().join("repo-a")
+            )))
+        );
+        assert_eq!(
+            repo_a_fields.get("provider_source_path"),
+            Some(&serde_json::Value::String("/source/repo-a".to_string()))
+        );
+        assert_eq!(
+            repo_a_fields.get("canonical_checkout_root"),
+            Some(&serde_json::Value::String(path_string(
+                &fixture
+                    .root()
+                    .join("repo-a")
+                    .canonicalize()
+                    .expect("canonical repo-a")
+            )))
+        );
+        assert_eq!(
+            repo_a_fields.get("member_path_kind"),
+            Some(&serde_json::Value::String("directory".to_string()))
+        );
     }
 
     #[test]

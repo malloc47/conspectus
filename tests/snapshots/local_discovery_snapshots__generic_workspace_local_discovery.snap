@@ -107,7 +107,12 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "generic_workspace",
-        "evidence": "multiple git repos under explicit scan root"
+        "evidence": "multiple git repos under explicit scan root",
+        "fields": {
+          "canonical_checkout_root": "/fixture/repo-a",
+          "logical_path": "/fixture/repo-a",
+          "member_path_kind": "directory"
+        }
       },
       "state": {
         "state": "active"
@@ -132,7 +137,12 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "generic_workspace",
-        "evidence": "multiple git repos under explicit scan root"
+        "evidence": "multiple git repos under explicit scan root",
+        "fields": {
+          "canonical_checkout_root": "/fixture/repo-b",
+          "logical_path": "/fixture/repo-b",
+          "member_path_kind": "directory"
+        }
       },
       "state": {
         "state": "active"
