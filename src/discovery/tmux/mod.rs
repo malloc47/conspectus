@@ -19,8 +19,7 @@ pub const TMUX_BACKEND: &str = "tmux";
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
 /// session roots can safely contain spaces.
-pub const TMUX_LIST_FORMAT: &str =
-    "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}";
+pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}";
 
 pub trait TmuxRunner: Send + Sync {
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
@@ -281,6 +280,10 @@ pub struct TmuxSessionRow {
     pub path: Option<String>,
     pub activity_epoch: Option<i64>,
     pub created_epoch: Option<i64>,
+    pub active_pane_command: Option<String>,
+    pub active_pane_pid: Option<i64>,
+    pub active_pane_current_path: Option<String>,
+    pub active_pane_start_command: Option<String>,
 }
 
 pub fn parse_list_sessions(stdout: &str) -> Vec<TmuxSessionRow> {
@@ -301,12 +304,20 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     let path = optional_string(fields.next());
     let activity_epoch = optional_epoch(fields.next());
     let created_epoch = optional_epoch(fields.next());
+    let active_pane_command = optional_string(fields.next());
+    let active_pane_pid = optional_epoch(fields.next());
+    let active_pane_current_path = optional_string(fields.next());
+    let active_pane_start_command = optional_string(fields.next());
 
     Some(TmuxSessionRow {
         name,
         path,
         activity_epoch,
         created_epoch,
+        active_pane_command,
+        active_pane_pid,
+        active_pane_current_path,
+        active_pane_start_command,
     })
 }
 
@@ -391,6 +402,10 @@ impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 backend: TMUX_BACKEND.to_string(),
                 native_id: row.name.clone(),
                 cwd: row.path.clone(),
+                active_pane_command: row.active_pane_command.clone(),
+                active_pane_pid: row.active_pane_pid,
+                active_pane_current_path: row.active_pane_current_path.clone(),
+                active_pane_start_command: row.active_pane_start_command.clone(),
                 activity_epoch: row.activity_epoch,
                 created_epoch: row.created_epoch,
             }));
@@ -499,7 +514,27 @@ mod tests {
                 path: Some("/work/alpha".to_string()),
                 activity_epoch: Some(1700000500),
                 created_epoch: Some(1700000000),
+                active_pane_command: None,
+                active_pane_pid: None,
+                active_pane_current_path: None,
+                active_pane_start_command: None,
             }]
+        );
+    }
+
+    #[test]
+    fn parser_extracts_active_pane_process_fields() {
+        let rows = parse_list_sessions(
+            "alpha\t/work\t1700000500\t1700000000\tclaude\t123\t/work\tclaude --resume abc\n",
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].active_pane_command.as_deref(), Some("claude"));
+        assert_eq!(rows[0].active_pane_pid, Some(123));
+        assert_eq!(rows[0].active_pane_current_path.as_deref(), Some("/work"));
+        assert_eq!(
+            rows[0].active_pane_start_command.as_deref(),
+            Some("claude --resume abc")
         );
     }
 

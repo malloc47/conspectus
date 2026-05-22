@@ -19,7 +19,8 @@
 //! No nodes are created here, and any `Unresolved` lineage endpoints already
 //! present in `candidate_links` are left untouched.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::fs;
 
 use crate::model::{
     AgentSessionNode, CheckoutId, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
@@ -48,6 +49,7 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
     let checkout_roots = checkout_roots(snapshot);
     let workspace_member_roots = workspace_member_roots(snapshot);
     let fork_roots = fork_roots(snapshot);
+    let active_mux_sessions = active_mux_sessions(&agent_sessions, &mux_sessions, snapshot);
 
     let mut new_links = Vec::new();
 
@@ -60,7 +62,13 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
             let Some(mux_cwd) = mux.cwd.as_deref().map(normalize_path) else {
                 continue;
             };
-            if let Some(link) = mux_match(session, mux, &session_cwd, &mux_cwd) {
+            if let Some(link) = mux_match(
+                session,
+                mux,
+                &session_cwd,
+                &mux_cwd,
+                active_mux_sessions.get(&mux.id),
+            ) {
                 new_links.push(link);
             }
         }
@@ -179,7 +187,20 @@ fn mux_match(
     mux: &MuxSessionNode,
     session_cwd: &str,
     mux_cwd: &str,
+    active_sessions: Option<&ActiveMuxSessionMatch>,
 ) -> Option<GraphLink> {
+    if let Some(active_sessions) = active_sessions {
+        return active_sessions.contains(&session.id).then(|| {
+            linked_to_mux(
+                session,
+                mux,
+                active_sessions.evidence,
+                Provenance::StrongDiscovered,
+                Confidence::High,
+            )
+        });
+    }
+
     if session_cwd == mux_cwd {
         return Some(linked_to_mux(
             session,
@@ -201,6 +222,303 @@ fn mux_match(
     }
 
     None
+}
+
+fn active_mux_sessions(
+    sessions: &[&AgentSessionNode],
+    muxes: &[&MuxSessionNode],
+    snapshot: &GraphSnapshot,
+) -> HashMap<crate::model::MuxSessionId, ActiveMuxSessionMatch> {
+    let parent_by_child = parent_session_keys_by_child(snapshot);
+    let mut active = HashMap::new();
+
+    for mux in muxes {
+        let Some(evidence) = active_pane_evidence(mux) else {
+            continue;
+        };
+        let direct_matches: BTreeSet<_> = sessions
+            .iter()
+            .filter(|session| evidence.matches_session(session))
+            .map(|session| session.id.clone())
+            .collect();
+        if direct_matches.is_empty() {
+            continue;
+        }
+
+        let child_matches: BTreeSet<_> = sessions
+            .iter()
+            .filter(|session| {
+                parent_by_child
+                    .get(&session.id)
+                    .is_some_and(|parents| !parents.is_disjoint(&direct_matches))
+            })
+            .map(|session| session.id.clone())
+            .collect();
+
+        if child_matches.is_empty() {
+            active.insert(
+                mux.id.clone(),
+                ActiveMuxSessionMatch {
+                    sessions: direct_matches,
+                    evidence: evidence.link_evidence,
+                },
+            );
+        } else {
+            active.insert(
+                mux.id.clone(),
+                ActiveMuxSessionMatch {
+                    sessions: child_matches,
+                    evidence: evidence.link_evidence,
+                },
+            );
+        }
+    }
+
+    active
+}
+
+struct ActiveMuxSessionMatch {
+    sessions: BTreeSet<crate::model::AgentSessionId>,
+    evidence: &'static str,
+}
+
+impl ActiveMuxSessionMatch {
+    fn contains(&self, session: &crate::model::AgentSessionId) -> bool {
+        self.sessions.contains(session)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ActivePaneEvidence {
+    session_keys: BTreeSet<String>,
+    harnesses: BTreeSet<String>,
+    link_evidence: &'static str,
+}
+
+impl ActivePaneEvidence {
+    fn matches_session(&self, session: &AgentSessionNode) -> bool {
+        self.session_keys.contains(&session.id.session_key)
+            && (self.harnesses.is_empty() || self.harnesses.contains(&session.harness_key))
+    }
+}
+
+fn active_pane_evidence(mux: &MuxSessionNode) -> Option<ActivePaneEvidence> {
+    let fd_evidence = mux
+        .active_pane_pid
+        .and_then(active_pane_fd_session_evidence)
+        .unwrap_or_default();
+    let command_evidence = mux
+        .active_pane_start_command
+        .as_deref()
+        .map(command_session_evidence)
+        .unwrap_or_default();
+    let command_harnesses = active_pane_harnesses(mux);
+
+    active_pane_evidence_from_sources(fd_evidence, command_evidence, command_harnesses)
+}
+
+fn active_pane_evidence_from_sources(
+    fd_evidence: SessionKeyEvidence,
+    command_evidence: SessionKeyEvidence,
+    command_harnesses: BTreeSet<String>,
+) -> Option<ActivePaneEvidence> {
+    let mut fd_harnesses = fd_evidence.harnesses;
+    fd_harnesses.extend(command_harnesses.iter().cloned());
+
+    if fd_evidence.session_keys.len() == 1 {
+        return Some(ActivePaneEvidence {
+            session_keys: fd_evidence.session_keys,
+            harnesses: fd_harnesses,
+            link_evidence: "active_pane_fd_session_match",
+        });
+    }
+
+    let intersection: BTreeSet<_> = fd_evidence
+        .session_keys
+        .intersection(&command_evidence.session_keys)
+        .cloned()
+        .collect();
+    if !intersection.is_empty() {
+        let mut harnesses = fd_harnesses;
+        harnesses.extend(command_evidence.harnesses);
+        return Some(ActivePaneEvidence {
+            session_keys: intersection,
+            harnesses,
+            link_evidence: "active_pane_fd_command_session_match",
+        });
+    }
+
+    if !command_evidence.session_keys.is_empty() {
+        let mut harnesses = command_evidence.harnesses;
+        harnesses.extend(command_harnesses);
+        return Some(ActivePaneEvidence {
+            session_keys: command_evidence.session_keys,
+            harnesses,
+            link_evidence: "active_pane_command_session_match",
+        });
+    }
+
+    if !fd_evidence.session_keys.is_empty() {
+        return Some(ActivePaneEvidence {
+            session_keys: fd_evidence.session_keys,
+            harnesses: fd_harnesses,
+            link_evidence: "active_pane_fd_session_match",
+        });
+    }
+
+    None
+}
+
+#[derive(Default)]
+struct SessionKeyEvidence {
+    session_keys: BTreeSet<String>,
+    harnesses: BTreeSet<String>,
+}
+
+fn active_pane_fd_session_evidence(pid: i64) -> Option<SessionKeyEvidence> {
+    let fd_dir = fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
+    let paths = fd_dir.filter_map(|entry| entry.ok()).filter_map(|entry| {
+        fs::read_link(entry.path())
+            .ok()
+            .and_then(|path| path.into_os_string().into_string().ok())
+    });
+    Some(session_key_evidence_from_fd_paths(paths))
+}
+
+fn session_key_evidence_from_fd_paths<I, S>(paths: I) -> SessionKeyEvidence
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut evidence = SessionKeyEvidence::default();
+
+    for path in paths {
+        let path = path.as_ref();
+        let harness = if path.contains("/.codex/sessions/") || path.contains("/.codex/tmp/") {
+            Some("codex")
+        } else if path.contains("/.claude/tasks/") || path.contains("/.claude/projects/") {
+            Some("claude-code")
+        } else if path.contains("/.local/share/opencode/")
+            || path.contains("/.config/opencode/")
+            || path.contains("/.opencode/")
+        {
+            Some("opencode")
+        } else {
+            None
+        };
+        let Some(harness) = harness else {
+            continue;
+        };
+
+        let keys = uuid_like_values(path);
+        if keys.is_empty() {
+            continue;
+        }
+
+        evidence.harnesses.insert(harness.to_string());
+        evidence.session_keys.extend(keys);
+    }
+
+    evidence
+}
+
+fn command_session_evidence(command: &str) -> SessionKeyEvidence {
+    SessionKeyEvidence {
+        session_keys: command_session_keys(command),
+        harnesses: command_harnesses(command),
+    }
+}
+
+fn command_session_keys(command: &str) -> BTreeSet<String> {
+    command
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn uuid_like_values(value: &str) -> BTreeSet<String> {
+    const UUID_LEN: usize = 36;
+
+    if value.len() < UUID_LEN {
+        return BTreeSet::new();
+    }
+
+    let bytes = value.as_bytes();
+    (0..=bytes.len() - UUID_LEN)
+        .filter(|start| {
+            is_uuid_like_bytes(&bytes[*start..*start + UUID_LEN])
+                && uuid_boundary(bytes.get(start.wrapping_sub(1)).copied())
+                && uuid_boundary(bytes.get(*start + UUID_LEN).copied())
+        })
+        .filter_map(|start| value.get(start..start + UUID_LEN).map(str::to_string))
+        .collect()
+}
+
+fn is_uuid_like_bytes(bytes: &[u8]) -> bool {
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(idx, byte)| match idx {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+}
+
+fn uuid_boundary(byte: Option<u8>) -> bool {
+    !byte.is_some_and(|byte| byte.is_ascii_hexdigit())
+}
+
+fn active_pane_harnesses(mux: &MuxSessionNode) -> BTreeSet<String> {
+    let mut harnesses = BTreeSet::new();
+    if let Some(command) = mux.active_pane_command.as_deref() {
+        harnesses.extend(command_harnesses(command));
+    }
+    if let Some(command) = mux.active_pane_start_command.as_deref() {
+        harnesses.extend(command_harnesses(command));
+    }
+    harnesses
+}
+
+fn command_harnesses(command: &str) -> BTreeSet<String> {
+    let command = command.to_ascii_lowercase();
+    let mut harnesses = BTreeSet::new();
+    if command.contains("claude") {
+        harnesses.insert("claude-code".to_string());
+    }
+    if command.contains("codex") {
+        harnesses.insert("codex".to_string());
+    }
+    if command.contains("opencode") {
+        harnesses.insert("opencode".to_string());
+    }
+    if command.contains("aider") {
+        harnesses.insert("aider".to_string());
+    }
+    harnesses
+}
+
+fn parent_session_keys_by_child(
+    snapshot: &GraphSnapshot,
+) -> HashMap<crate::model::AgentSessionId, BTreeSet<crate::model::AgentSessionId>> {
+    let mut parents: HashMap<crate::model::AgentSessionId, BTreeSet<crate::model::AgentSessionId>> =
+        HashMap::new();
+
+    for link in &snapshot.candidate_links {
+        if link.relation != RelationKind::ParentSession {
+            continue;
+        }
+        let NodeId::AgentSession(child) = &link.source else {
+            continue;
+        };
+        let Some(NodeId::AgentSession(parent)) = link.target_node_id() else {
+            continue;
+        };
+        parents
+            .entry(child.clone())
+            .or_default()
+            .insert(parent.clone());
+    }
+
+    parents
 }
 
 fn linked_to_mux(
@@ -373,6 +691,25 @@ mod tests {
             backend: "tmux".to_string(),
             native_id: native.to_string(),
             cwd: cwd.map(str::to_string),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            activity_epoch: None,
+            created_epoch: None,
+        })
+    }
+
+    fn mux_with_active_command(native: &str, cwd: Option<&str>, command: &str) -> GraphNode {
+        GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new(format!("tmux:{native}")),
+            backend: "tmux".to_string(),
+            native_id: native.to_string(),
+            cwd: cwd.map(str::to_string),
+            active_pane_command: Some("codex".to_string()),
+            active_pane_pid: None,
+            active_pane_current_path: cwd.map(str::to_string),
+            active_pane_start_command: Some(command.to_string()),
             activity_epoch: None,
             created_epoch: None,
         })
@@ -473,6 +810,26 @@ mod tests {
         }
     }
 
+    fn parent_session_link(child: &str, parent: &str) -> GraphLink {
+        let source = NodeId::AgentSession(AgentSessionId::new("codex", "/state", child));
+        let target = NodeId::AgentSession(AgentSessionId::new("codex", "/state", parent));
+        GraphLink {
+            id: format!("test:{source}:parent_session:{target}"),
+            source,
+            target: LinkEndpoint::Node { id: target },
+            relation: RelationKind::ParentSession,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "test".to_string(),
+                evidence: Some("test parent".to_string()),
+                fields: Default::default(),
+            },
+            state: LinkState::Active,
+        }
+    }
+
     #[test]
     fn orphan_sessions_get_no_links() {
         let mut snapshot = GraphSnapshot {
@@ -545,6 +902,146 @@ mod tests {
             .filter(|link| link.provenance == Provenance::StrongDiscovered)
             .collect();
         assert_eq!(strong.len(), 2, "two exact-cwd matches");
+    }
+
+    #[test]
+    fn active_pane_command_session_match_suppresses_cwd_only_mux_links() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("current", Some("/work/repo")),
+                session("stale", Some("/work/repo")),
+                mux_with_active_command("one", Some("/work/repo"), "codex resume current"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert_eq!(mux_links.len(), 1);
+        let link = mux_links[0];
+        assert_eq!(
+            link.source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "current"))
+        );
+        assert_eq!(
+            link.source_metadata.evidence.as_deref(),
+            Some("active_pane_command_session_match")
+        );
+    }
+
+    #[test]
+    fn active_pane_resume_target_prefers_lineage_child() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("parent", Some("/work/repo")),
+                session("child", Some("/work/repo")),
+                mux_with_active_command("one", Some("/work/repo"), "codex resume parent"),
+            ],
+            candidate_links: vec![parent_session_link("child", "parent")],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert_eq!(mux_links.len(), 1);
+        assert_eq!(
+            mux_links[0].source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "child"))
+        );
+    }
+
+    #[test]
+    fn uuid_like_values_extracts_uuid_shaped_tokens() {
+        let values = uuid_like_values(
+            "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
+        );
+
+        assert_eq!(
+            values,
+            BTreeSet::from(["019e4354-26b9-7ad2-9521-4ad921cc312b".to_string()])
+        );
+    }
+
+    #[test]
+    fn fd_paths_extract_codex_and_claude_session_keys() {
+        let evidence = session_key_evidence_from_fd_paths([
+            "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
+            "/home/me/.claude/tasks/e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6/.lock",
+            "/home/me/.config/other/11111111-2222-3333-4444-555555555555",
+        ]);
+
+        assert_eq!(
+            evidence.session_keys,
+            BTreeSet::from([
+                "019e4354-26b9-7ad2-9521-4ad921cc312b".to_string(),
+                "e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6".to_string(),
+            ])
+        );
+        assert_eq!(
+            evidence.harnesses,
+            BTreeSet::from(["claude-code".to_string(), "codex".to_string()])
+        );
+    }
+
+    #[test]
+    fn active_pane_evidence_prefers_single_fd_session_over_command() {
+        let mux = match mux_with_active_command(
+            "one",
+            Some("/work/repo"),
+            "codex resume 019e3b8b-e512-7532-a1f2-7e88fcace046",
+        ) {
+            GraphNode::MuxSession(mut mux) => {
+                mux.active_pane_pid = None;
+                mux
+            }
+            _ => unreachable!(),
+        };
+        let fd = SessionKeyEvidence {
+            session_keys: BTreeSet::from(["019e4354-26b9-7ad2-9521-4ad921cc312b".to_string()]),
+            harnesses: BTreeSet::from(["codex".to_string()]),
+        };
+        let command = command_session_evidence(mux.active_pane_start_command.as_deref().unwrap());
+        let evidence =
+            active_pane_evidence_from_sources(fd, command, active_pane_harnesses(&mux)).unwrap();
+
+        assert_eq!(evidence.link_evidence, "active_pane_fd_session_match");
+        assert_eq!(
+            evidence.session_keys,
+            BTreeSet::from(["019e4354-26b9-7ad2-9521-4ad921cc312b".to_string()])
+        );
+    }
+
+    #[test]
+    fn active_pane_evidence_uses_fd_command_intersection() {
+        let fd = SessionKeyEvidence {
+            session_keys: BTreeSet::from([
+                "e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6".to_string(),
+                "c1901a9e-f3db-48e3-a46c-3f92c7c0f2d3".to_string(),
+            ]),
+            harnesses: BTreeSet::from(["claude-code".to_string()]),
+        };
+        let command =
+            command_session_evidence("claude --resume e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6");
+        let evidence = active_pane_evidence_from_sources(fd, command, BTreeSet::new()).unwrap();
+
+        assert_eq!(
+            evidence.link_evidence,
+            "active_pane_fd_command_session_match"
+        );
+        assert_eq!(
+            evidence.session_keys,
+            BTreeSet::from(["e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6".to_string()])
+        );
     }
 
     #[test]

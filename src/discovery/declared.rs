@@ -379,6 +379,10 @@ mod tests {
             backend: "tmux".to_string(),
             native_id: native_id.to_string(),
             cwd: Some("/work".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         })

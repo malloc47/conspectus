@@ -2711,6 +2711,26 @@ output when one is.
     tmux session running an agent; confirm the new evidence on the
     `LinkedToMux` candidate links.
   - Blockers: `H-MUXPROC-001`.
+  - **slice landed**: tmux discovery now records active-pane
+    process hints available directly from tmux format variables
+    (`pane_current_command`, `pane_pid`, `pane_current_path`, and
+    `pane_start_command`) on `MuxSessionNode`. Cross-link inference
+    inspects the pane process' open file descriptors for known
+    harness session paths such as Codex rollout JSONL files and
+    Claude task files, then falls back to known session keys in the
+    active pane's start command. Evidence is labeled as
+    `active_pane_fd_session_match`,
+    `active_pane_fd_command_session_match`, or
+    `active_pane_command_session_match` depending on the strongest
+    available signal. If active-pane evidence names a resumed parent
+    session and a discovered child session has a `parent_session`
+    link to that parent, the child is treated as active and the
+    parent is not linked. Once a mux session has active-pane session
+    evidence, cwd-only matches to other sessions are suppressed for
+    that mux; this turns the previous many-sessions-to-one-single-pane
+    ambiguity into a graph-level refinement instead of a TUI-only
+    picker problem.
+  - Tests: `cargo test active_pane --all-targets`.
 
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
@@ -3027,8 +3047,9 @@ work. `P8-014` is post-v1 polish that does not block the release.
     selection by `RowId` across refreshes and falls back to the
     nearest visible row by index when the previously-selected id
     disappears. Detail view-model recomputes eagerly on every
-    selection change. Group rows auto-expand on first sight so
-    sessions are visible immediately.
+    selection change. Initial expansion now opens the launch-context
+    tree and leaves unrelated trees collapsed; if no launch-context
+    row is known, it opens the first tree as a fallback.
   - Deferred to follow-on stories (not v1 through-line blockers):
     view switching `1`–`5` (waits on the other row-tree builders
     from P8-004 parts 2-5), `/` in-view search overlay,
@@ -3064,8 +3085,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-003`; friendlier after `P8-004` and `P8-005`.
   - **v1 slice landed**: two-panel render with header bar, left
     row tree (depth-indented disclosure glyphs, mux indicator
-    glyph with color, inline preview for selected + top-N session
-    rows), right detail (title line + header fields + preview
+    glyph with color, same-line session previews when width
+    allows), right detail (title line + header fields + preview
     block), status bar. Empty-/loading-frame placeholders cover
     the no-data case. Remaining work for full P8-007 (filed as
     follow-ons):
@@ -3074,8 +3095,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
       `--no-live-preview` zone message, tmux-unavailable banner,
       provider-error chips, refresh-failed stale marker.
     - `T8-004`: responsive layout — narrow-terminal stacked
-      panels (< 100 cols) and wide-terminal all-rows-inline
-      preview switch.
+      panels (< 100 cols) plus same-line row preview behavior.
     - `T8-005`: `updated Ns ago` header indicator (requires
       `loaded_at_epoch` on `Msg::SetData` and `App`).
     - `T8-006`: snapshot test coverage matrix beyond the v1
@@ -3342,18 +3362,21 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-007` v1 slice (the render shell is there); a
     `Msg::SetError` reducer addition may be needed.
 
-- [ ] `T8-004` Wide-mode all-rows-inline preview switch.
+- [x] `T8-004` Same-line session preview switch.
   - Scope: narrow-mode stacking (terminal width < 100 cols)
     landed in the polish pass — the body switches from a
     horizontal split to a vertical stack at the threshold. The
-    remaining locked behavior is the *wide* switch: when the
-    terminal has enough horizontal budget that a session-row
-    inline preview fits on the same line as the row without
-    crowding the columns, render the inline preview inline on
-    every visible session row. Compute the threshold from the
-    row's column widths plus a minimum preview budget.
-  - Tests: snapshot of a 160-col render with inline previews on
-    the same line as their rows.
+    remaining locked behavior changed after operator feedback:
+    session rows now stay one physical line tall and use remaining
+    horizontal space after the mux indicator for a dim same-line
+    `last_message_preview`, cropping or omitting it when width is
+    tight.
+  - Outcome: removed the second-line selected/recent preview rows;
+    `src/tui/ui.rs` appends the graph-resident preview to each
+    session row only when width remains after the fixed cells.
+    Left-tree auto-scroll now tracks one physical row per visible
+    row again.
+  - Tests: `cargo test tui --all-targets`.
   - Blockers: `P8-007` v1 slice.
 
 - [x] `T8-005` Header `updated Ns ago` freshness indicator.
@@ -3499,6 +3522,13 @@ work. `P8-014` is post-v1 polish that does not block the release.
     hint so manual selection isn't clobbered). The renderer
     adds a dim cyan `(cwd)` suffix to the marked row. Auto-
     broaden option (c) filed as low-priority `T8-020`.
+  - **slice landed**: initial expansion now opens only the
+    launch-context tree (ancestors, the marked group, and its
+    descendant groups) while leaving unrelated groups collapsed
+    for a cleaner first screen. If no launch-context group is
+    marked, the first group opens as a fallback so tests and
+    non-cwd-oriented data still present a usable starting point.
+  - Tests: `cargo test tui --all-targets`.
 
 - [ ] `T8-014` Make the status bar contextual to the selected row.
   - Scope: replace the static action list with a compact contextual
@@ -3522,10 +3552,10 @@ work. `P8-014` is post-v1 polish that does not block the release.
 - [ ] `T8-015` Add sessions-tree density modes.
   - Scope: add a user-facing density setting for the sessions view
     so operators can trade context for row count. Suggested modes:
-    `compact` (one line per session, no inline previews),
-    `balanced` (current locked behavior: selected + top-N recent
-    previews), and `expanded` (preview for every visible session
-    when width/height allow). Expose via config and a TUI toggle
+    `compact` (one line per session, no same-line previews),
+    `balanced` (current locked behavior: same-line previews when
+    width allows), and `expanded` (future richer preview treatment
+    if operators still need it). Expose via config and a TUI toggle
     only after the base `/` search and help overlays are stable.
   - Tests: row-tree/render snapshots for all density modes at
     80x24 and a wide terminal; config parsing tests once the
@@ -3593,10 +3623,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     method that nudges the offset only when the selected row
     falls outside the viewport (above the top edge or at/below
     the bottom edge). The renderer tracks which line index the
-    selected row's primary line lands at, biases the target one
-    line further when an inline preview follows so both stay
-    visible together, then asks `App::adjust_left_scroll` for
-    the offset and passes it to `Paragraph::scroll`. Three
+    selected row lands at, asks `App::adjust_left_scroll` for
+    the offset, and passes it to `Paragraph::scroll`. Three
     reducer-level tests plus a render-level test cover the
     behavior. The render-level regression uses a long pre-selected
     group row to prove left-tree rows clip rather than wrap, then
@@ -3615,13 +3643,11 @@ work. `P8-014` is post-v1 polish that does not block the release.
     bring the selected row to the top edge when it moves
     above the viewport and to the bottom edge when it moves
     below. Page-down / page-up should jump a viewport at a
-    time without losing the selection. Inline preview lines
-    must be counted against the viewport budget so the
-    selected row's preview stays visible too.
+    time without losing the selection. Same-line previews must
+    not affect viewport math.
   - Tests: reducer + render unit tests for selection moving past
     the visible top/bottom in a small viewport, PageDown jumping
-    by viewport height, and a selected row whose inline preview
-    is folded into the visible area. Ratatui snapshots for a
+    by viewport height. Ratatui snapshots for a
     short and a long tree at the same viewport size.
   - Blockers: `P8-007` v1 slice. Friendlier after `T8-006`
     expands the snapshot harness.

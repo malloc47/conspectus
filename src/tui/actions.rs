@@ -225,6 +225,10 @@ mod tests {
             backend: backend.to_string(),
             native_id: native.to_string(),
             cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         })

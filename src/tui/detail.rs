@@ -813,6 +813,10 @@ mod tests {
             backend: "tmux".into(),
             native_id: "editor".into(),
             cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -821,6 +825,10 @@ mod tests {
             backend: "tmux".into(),
             native_id: "scratch".into(),
             cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -949,6 +957,10 @@ mod tests {
             backend: "tmux".into(),
             native_id: "editor".into(),
             cwd: Some("/home/op/src/x".into()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -1005,6 +1017,10 @@ mod tests {
             backend: "tmux".into(),
             native_id: "editor".into(),
             cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         }));

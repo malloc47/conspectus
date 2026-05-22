@@ -165,24 +165,16 @@ Four sub-cells per row, left to right:
    `◐` attached with ambiguity (yellow), `◯` un-muxed (dim). Color
    carries the primary signal; the glyph stays small.
 
-Below the session row, when space allows, a **dim inline preview**
-shows the first ~60 chars of `last_message_preview`:
+After the mux indicator, the row uses any remaining horizontal space
+for a **dim inline preview** from `last_message_preview`:
 
 ```
-4e90b4 codex:…b4fdee8     2m   ◐
-  could you give me a bit more co…
+4e90b4 codex:…b4fdee8     2m   ◐  could you give me a bit more co…
 ```
 
-Default density: selected row + the N most-recent sessions globally
-get the inline preview (default N = 3, configurable via
-`[tui].inline_preview_rows`). Other rows pack tighter.
-
-When the terminal is wide enough that an inline preview can fit on
-the same line as the row without crowding the columns, the
-renderer switches to **inline-on-same-line** mode and applies it to
-every visible row. The threshold is computed from the row's column
-widths plus a minimum preview budget; below it, the preview falls
-back to its own line for the default-N rows only.
+Rows stay one physical line tall. Narrow panes simply omit or crop
+the inline preview instead of adding a second preview line under the
+session.
 
 ### Right panel: header + preview
 
@@ -237,7 +229,7 @@ The preview content depends on the selected row kind:
   for more than the graph-resident snippet (capped at 200 chars per
   ADR 0023) and `--no-live-preview` is not set, the data adapter
   does a transcript-tail read on selection and renders the fuller
-  message. The inline previews in the tree always use the
+  message. The same-line previews in the tree always use the
   graph-resident snippet — only the right-panel preview expands.
 - **Muxed agent session**: a tmux `capture-pane` snapshot of the
   attached mux, polled at the mux-preview cadence. The session's
@@ -304,12 +296,11 @@ resolved. They fold into the phase-08 plan on the next pass.
 3. **Activity indicator** — dropped for v1. The recency column
    already carries the "which one was I in" signal; the `●`/`○`
    prefix was visual noise.
-4. **Inline preview density** — default is selected row + the N
-   most-recent sessions globally (default N = 3, configurable via
-   `[tui].inline_preview_rows`). When the terminal is wide enough
-   to fit the preview on the same line as the row without
-   crowding, switch to all-rows-inline mode. The TUI should be
-   responsive to terminal width, not pinned to the 80-col default.
+4. **Inline preview density** — session rows stay one physical line
+   tall. When horizontal space remains after the mux indicator, show
+   a dim same-line preview from `last_message_preview`; otherwise
+   omit or crop it. The TUI should be responsive to terminal width,
+   not pinned to the 80-col default.
 5. **Mux indicator glyph set** — `◉`/`◐`/`◯` with color carrying
    the primary signal (green/yellow/dim). Option **(b)** from the
    open question.
@@ -324,7 +315,7 @@ resolved. They fold into the phase-08 plan on the next pass.
    distinguishes sessions within a group, it should appear in the
    tree row itself, not only the header. Tracked as `P8-015`.
 9. **Inline preview vs `--no-live-preview`** — `--no-live-preview`
-   does **not** suppress inline previews or the graph-resident
+   does **not** suppress same-line row previews or the graph-resident
    right-panel preview. It only suppresses the live extras:
    mux pane capture and the transcript-tail read that fills the
    right-panel preview beyond the graph-resident snippet. Option
@@ -338,9 +329,8 @@ resolved. They fold into the phase-08 plan on the next pass.
   including the static refresh cadences.
 - **Empty / loading / error frames** from the table in the phase-08
   doc.
-- **Wide-terminal inline-preview-on-same-line layout**. The 80-col
-  mockup falls below the threshold; the responsive switch only
-  kicks in above it.
+- **Additional wide-terminal preview behavior** beyond same-line
+  cropping. The row stays one physical line tall at every width.
 - **Card layout / multi-line previews**. Not in v1.
 - **PR / fork / mux / union views**. Out of scope per the user's
   ask.

@@ -78,8 +78,8 @@ preview that looks like the terminal the user will enter.
   to the current directory.
 - Add a density toggle after the core layout stabilizes:
   - compact: one line per session
-  - comfortable: selected plus recent inline previews
-  - expanded: preview under every visible session when space allows
+  - comfortable: same-line previews when width allows
+  - expanded: richer previews if the one-line treatment proves insufficient
 
 ## Right Pane: Detail And Preview
 

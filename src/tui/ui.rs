@@ -13,9 +13,8 @@
 //! - Header reports `updated Ns ago · N agents · M mux`; the
 //!   freshness slot uses [`format_recency`] over
 //!   `App::loaded_at_epoch`.
-//! - Sessions row inline preview lights up for the selected row and
-//!   for the N most-recent visible session rows
-//!   (`[tui].inline_preview_rows`, default 3).
+//! - Sessions use spare horizontal space after the mux indicator
+//!   for a dim one-line last-message preview.
 //! - Body switches from side-by-side to a vertical stack when the
 //!   terminal is narrower than ~100 columns (T8-004).
 //! - Muxed-session right-panel preview shows the
@@ -31,6 +30,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
 use crate::tui::View;
@@ -42,7 +42,6 @@ use crate::tui::rows::{
     AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency,
 };
 
-const INLINE_PREVIEW_DEFAULT: usize = 3;
 const SELECTED_BG: Color = Color::Indexed(238);
 const SELECTED_INACTIVE_BG: Color = Color::Indexed(236);
 const PREVIEW_HEADER_FG: Color = Color::Indexed(244);
@@ -208,55 +207,19 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     }
 
-    let inline_preview_ids = inline_preview_session_ids(app, INLINE_PREVIEW_DEFAULT);
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
-    // The selected row may render as one (primary) or two (primary
-    // + inline preview) lines. Track the line index of the primary
-    // line so we can scroll to keep it visible.
     let mut selected_primary_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
-        let primary = render_left_row(row, app, is_selected);
+        let primary = render_left_row(row, app, is_selected, inner.width as usize);
         if is_selected {
             selected_primary_line = Some(lines.len());
         }
         lines.push(primary);
-
-        // Inline preview line below the row when applicable.
-        if let RowKind::AgentSession(session) = &row.kind
-            && session.preview.is_some()
-            && (is_selected || inline_preview_ids.contains(&row.id))
-        {
-            let preview_text = session.preview.clone().unwrap_or_default();
-            let indent = row_indent(row.depth + 1);
-            lines.push(Line::from(vec![
-                Span::raw(indent),
-                Span::styled(
-                    truncate_to_width(&preview_text, inner.width.saturating_sub(4) as usize),
-                    Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
-                ),
-            ]));
-        }
     }
 
-    // Pick the line range the selected row needs (primary + the
-    // following preview line if there is one) and ask the App to
-    // adjust the per-frame scroll offset so it stays visible.
     let scroll = if let Some(line_idx) = selected_primary_line {
-        // If the inline preview line follows, target the preview
-        // line — that ensures the renderer scrolls enough to show
-        // both the row and its inline preview together.
-        let target = if line_idx + 1 < lines.len()
-            && app
-                .selection()
-                .and_then(|sel| visible.iter().find(|r| &r.id == sel))
-                .is_some_and(|r| matches!(&r.kind, RowKind::AgentSession(s) if s.preview.is_some()))
-        {
-            line_idx + 1
-        } else {
-            line_idx
-        };
-        app.adjust_left_scroll(target, inner.height)
+        app.adjust_left_scroll(line_idx, inner.height)
     } else {
         0
     };
@@ -283,7 +246,12 @@ fn empty_left_panel_text(app: &App) -> &'static str {
 }
 
 /// Build the rendered line for a single visible row.
-fn render_left_row(row: &crate::tui::rows::Row, app: &App, is_selected: bool) -> Line<'static> {
+fn render_left_row(
+    row: &crate::tui::rows::Row,
+    app: &App,
+    is_selected: bool,
+    width: usize,
+) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::raw(row_indent(row.depth)));
     spans.push(Span::raw(disclosure_glyph(row, app)));
@@ -308,7 +276,10 @@ fn render_left_row(row: &crate::tui::rows::Row, app: &App, is_selected: bool) ->
                 ));
             }
         }
-        RowKind::AgentSession(session) => spans.extend(render_session_spans(session)),
+        RowKind::AgentSession(session) => {
+            spans.extend(render_session_spans(session));
+            append_session_preview(&mut spans, session, width);
+        }
         RowKind::AgentSessionMuxCandidate(candidate) => {
             spans.extend(render_candidate_spans(candidate))
         }
@@ -342,6 +313,28 @@ fn render_session_spans(session: &AgentSessionRow) -> Vec<Span<'static>> {
     spans.push(Span::raw("  "));
     spans.push(mux_indicator_span(session.mux_state));
     spans
+}
+
+fn append_session_preview(spans: &mut Vec<Span<'static>>, session: &AgentSessionRow, width: usize) {
+    let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let used = spans_width(spans);
+    if width <= used + 8 {
+        return;
+    }
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        truncate_to_width(preview, width - used - 2),
+        Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
+    ));
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum()
 }
 
 fn render_candidate_spans(candidate: &MuxCandidateRow) -> Vec<Span<'static>> {
@@ -462,26 +455,6 @@ fn compact_mux_label(label: &str) -> String {
         native.to_string()
     };
     format!("{backend}:{short_native}")
-}
-
-/// Compute the row ids that should render an inline preview line
-/// under their row. v1 rule: the selected row + the top `n` visible
-/// agent session rows by recency. Today recency is `None` for every
-/// session, so this collapses to "the first n visible session rows".
-fn inline_preview_session_ids(app: &App, n: usize) -> std::collections::BTreeSet<RowId> {
-    let mut sessions: Vec<&crate::tui::rows::Row> = app
-        .visible_rows()
-        .into_iter()
-        .filter(|r| matches!(r.kind, RowKind::AgentSession(_)))
-        .collect();
-    sessions.sort_by(|a, b| {
-        let recency = |row: &&crate::tui::rows::Row| match &row.kind {
-            RowKind::AgentSession(s) => s.activity_epoch.unwrap_or(i64::MIN),
-            _ => i64::MIN,
-        };
-        recency(b).cmp(&recency(a))
-    });
-    sessions.into_iter().take(n).map(|r| r.id.clone()).collect()
 }
 
 // -----------------------------------------------------------------------------
@@ -911,6 +884,10 @@ mod tests {
             backend: "tmux".to_string(),
             native_id: native_id.to_string(),
             cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -983,7 +960,7 @@ mod tests {
         );
         assert!(
             text.contains("could you give me a bit more"),
-            "inline preview missing: {text}"
+            "same-line preview missing: {text}"
         );
         assert!(
             text.contains("Phase 8 walkthrough"),
@@ -1084,6 +1061,10 @@ mod tests {
             backend: "tmux".to_string(),
             native_id: "editor".to_string(),
             cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -1129,10 +1110,10 @@ mod tests {
             "expected --no-live-preview banner in right panel, got: {text}"
         );
         // Per the locked mockup decision, `--no-live-preview` does
-        // NOT suppress inline previews in the row tree — only live
-        // extras (pane capture + transcript-tail) in the right
-        // panel. The graph-resident `stale msg` is allowed to
-        // remain in the inline-preview line below the row.
+        // NOT suppress same-line previews in the row tree — only
+        // live extras (pane capture + transcript-tail) in the
+        // right panel. The graph-resident `stale msg` is allowed
+        // to remain in the session row.
     }
 
     #[test]

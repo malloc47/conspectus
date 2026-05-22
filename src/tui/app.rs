@@ -325,25 +325,14 @@ impl App {
         initial_selection_hint: Option<RowId>,
     ) {
         self.loaded_at_epoch = Some(loaded_at_epoch);
-        // Auto-expand every group row on first arrival of a tree
-        // segment so the operator sees their sessions immediately.
-        // Already-expanded rows are kept expanded; collapsed rows
-        // the user explicitly closed stay closed.
-        for row in &tree.rows {
-            if row.expandable
-                && matches!(row.kind, RowKind::Group(_))
-                && !self.expanded.contains(&row.id)
-                && !self.tree.rows.iter().any(|r| r.id == row.id)
-            {
-                self.expanded.insert(row.id.clone());
-            }
-        }
-
         let prev_selection = self.selection.take();
         let is_first_load = prev_selection.is_none();
         let prev_visible_index = prev_selection
             .as_ref()
             .and_then(|id| self.visible_rows().iter().position(|r| &r.id == id));
+        if is_first_load {
+            self.expanded = initial_expanded_rows(&tree);
+        }
         self.snapshot = Some(snapshot);
         self.tree = tree;
 
@@ -454,6 +443,56 @@ impl App {
     }
 }
 
+fn initial_expanded_rows(tree: &RowTree) -> BTreeSet<RowId> {
+    let mut expanded = BTreeSet::new();
+    let mut launch_indices: Vec<usize> = tree
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, row)| match &row.kind {
+            RowKind::Group(group) if group.is_launch_context => Some(idx),
+            _ => None,
+        })
+        .collect();
+    if launch_indices.is_empty()
+        && let Some((idx, _)) = tree
+            .rows
+            .iter()
+            .enumerate()
+            .find(|(_, row)| matches!(row.kind, RowKind::Group(_)))
+    {
+        launch_indices.push(idx);
+    }
+
+    for idx in launch_indices {
+        let launch_depth = tree.rows[idx].depth;
+        add_expandable_group(&mut expanded, &tree.rows[idx]);
+
+        let mut next_ancestor_depth = launch_depth;
+        for ancestor in tree.rows[..idx].iter().rev() {
+            if ancestor.depth < next_ancestor_depth {
+                add_expandable_group(&mut expanded, ancestor);
+                next_ancestor_depth = ancestor.depth;
+            }
+        }
+
+        for descendant in tree.rows[idx + 1..]
+            .iter()
+            .take_while(|row| row.depth > launch_depth)
+        {
+            add_expandable_group(&mut expanded, descendant);
+        }
+    }
+
+    expanded
+}
+
+fn add_expandable_group(expanded: &mut BTreeSet<RowId>, row: &Row) {
+    if row.expandable && matches!(row.kind, RowKind::Group(_)) {
+        expanded.insert(row.id.clone());
+    }
+}
+
 fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
     // RunConfig doesn't carry the home directory today; the
     // dispatcher passes paths in already-shortened form via the
@@ -538,7 +577,10 @@ mod tests {
     fn set_data_default_expands_group_rows_and_selects_first_visible() {
         let app = seeded_app(&[("codex", "a", "/p/proj")]);
         let visible = app.visible_rows();
-        assert!(!visible.is_empty(), "groups auto-expanded");
+        assert!(
+            !visible.is_empty(),
+            "initial tree expands a visible starting context"
+        );
         assert!(app.selection().is_some());
     }
 
@@ -577,6 +619,51 @@ mod tests {
             initial_selection_hint: Some(hint.clone()),
         });
         assert_eq!(app.selection().cloned(), Some(hint));
+    }
+
+    #[test]
+    fn set_data_first_load_expands_only_launch_context_tree() {
+        let snap = Arc::new(make_snapshot_with(&[
+            ("codex", "a", "/p/proja"),
+            ("codex", "b", "/p/projb"),
+        ]));
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snap,
+            grouping: SessionsGrouping::Graph,
+            home: None,
+            now: None,
+            cwd: Some(std::path::Path::new("/p/projb")),
+        });
+        let hint = tree
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::Group(group) if group.is_launch_context => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("launch context row");
+
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: snap,
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: Some(hint),
+        });
+
+        let visible = app.visible_rows();
+        assert!(
+            visible.iter().any(|row| {
+                matches!(&row.kind, RowKind::AgentSession(s) if s.session.session_key == "b")
+            }),
+            "launch-context session should be visible"
+        );
+        assert!(
+            !visible.iter().any(|row| {
+                matches!(&row.kind, RowKind::AgentSession(s) if s.session.session_key == "a")
+            }),
+            "non-launch-context sessions should start collapsed"
+        );
     }
 
     #[test]

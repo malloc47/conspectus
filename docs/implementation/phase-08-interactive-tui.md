@@ -207,7 +207,7 @@ panels stack vertically (left panel on top, right panel below). The
 
 See [`docs/tui-sessions-mockup.md`](../tui-sessions-mockup.md) for an
 annotated walk-through of this layout, the ambiguous-mux expansion,
-and the responsive-width inline-preview behavior.
+and the responsive same-line preview behavior.
 
 #### Left panel: hierarchical row browser
 
@@ -552,14 +552,11 @@ These pin the visible behavior of the v1 default sessions view
 - **Activity indicator dropped**: the recency column carries the
   "which one was I in" signal already; no per-row `●`/`○` prefix
   in v1.
-- **Inline preview density**: the row tree shows a dim inline
-  preview for the selected row plus the N globally-most-recent
-  sessions (default N = 3, configurable via
-  `[tui].inline_preview_rows`). When the terminal is wide enough
-  to fit the preview on the same line as the row without crowding
-  the columns, the renderer switches to all-rows-inline mode.
-  Layout must be responsive to terminal width, not pinned to 80
-  columns.
+- **Inline preview density**: session rows stay one physical line
+  tall. When horizontal space remains after the mux indicator, show
+  a dim same-line preview from `last_message_preview`; otherwise
+  omit or crop it. Layout must be responsive to terminal width, not
+  pinned to 80 columns.
 - **Mux indicator**: `◉`/`◐`/`◯` glyphs carrying color signal
   (green attached / yellow ambiguous / dim un-muxed). Color is the
   primary differentiator; the glyph stays small.
@@ -577,7 +574,7 @@ These pin the visible behavior of the v1 default sessions view
     ADR-0023 graph-resident snippet (200-char cap) and
     `--no-live-preview` is not set, the data adapter does a
     transcript-tail read on selection and renders the fuller
-    message. The inline previews in the tree always use the
+    message. The same-line previews in the tree always use the
     graph-resident snippet — only the right-panel preview
     expands.
   - Muxed agent session: render the tmux `capture-pane` snapshot
@@ -588,7 +585,7 @@ These pin the visible behavior of the v1 default sessions view
     "what was it doing" answer.
   - Standalone mux row: pane capture, same as above.
 - **Inline preview vs `--no-live-preview`**: `--no-live-preview`
-  does **not** suppress inline previews or the graph-resident
+  does **not** suppress same-line row previews or the graph-resident
   right-panel preview. It only suppresses live extras — mux pane
   capture and the transcript-tail read that fills the right-panel
   preview beyond the graph-resident snippet. The v1-deferrable
