@@ -301,7 +301,7 @@ fn graph_json_discovers_plain_repo_from_scan_root() {
             .as_array()
             .expect("nodes array")
             .iter()
-            .any(|node| node["type"] == "worktree")
+            .any(|node| node["type"] == "checkout")
     );
     assert!(
         json["nodes"]
@@ -1360,7 +1360,7 @@ fn declared_create_writes_project_config_for_repo_rooted_endpoint() {
     let repo_root = repo.path().canonicalize().expect("canonicalize");
     let common_dir = repo_root.join(".git");
     let worktree_source = format!(
-        "worktree:repo_common_dir={},root={}",
+        "checkout:repo_common_dir={},root={}",
         common_dir.display(),
         repo_root.display()
     );
@@ -1370,7 +1370,7 @@ fn declared_create_writes_project_config_for_repo_rooted_endpoint() {
         .arg("declared")
         .arg("create")
         .arg("--id")
-        .arg("worktree-belongs")
+        .arg("checkout-belongs")
         .arg("--relation")
         .arg("belongs_to_repo")
         .arg("--source")
@@ -1385,7 +1385,7 @@ fn declared_create_writes_project_config_for_repo_rooted_endpoint() {
     let config_path = repo.path().join(".conspectus.toml");
     let text = fs::read_to_string(&config_path).expect("config exists");
     assert!(text.contains("[declared]"), "config:\n{text}");
-    assert!(text.contains("worktree-belongs"), "config:\n{text}");
+    assert!(text.contains("checkout-belongs"), "config:\n{text}");
     assert!(!home.path().join(".config/conspectus/config.toml").exists());
 }
 

@@ -37,18 +37,12 @@ simple_id!(MuxSessionId, "mux_session", native_id);
 simple_id!(ForkId, "fork", provider_source_key);
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub struct WorktreeId {
+pub struct CheckoutId {
     pub repo: RepoId,
     pub root: String,
 }
 
-/// Canonical product vocabulary for an editable repository checkout.
-///
-/// The graph still serializes this node kind as `worktree` until the
-/// wire/model rename replaces the legacy variant names.
-pub type CheckoutId = WorktreeId;
-
-impl WorktreeId {
+impl CheckoutId {
     pub fn new(repo: RepoId, root: impl Into<String>) -> Self {
         Self {
             repo,
@@ -57,9 +51,9 @@ impl WorktreeId {
     }
 }
 
-impl fmt::Display for WorktreeId {
+impl fmt::Display for CheckoutId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "worktree:{}@{}", self.repo, self.root)
+        write!(f, "checkout:{}@{}", self.repo, self.root)
     }
 }
 
@@ -156,7 +150,7 @@ impl fmt::Display for ForgePrId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeId {
     Repo(RepoId),
-    Worktree(WorktreeId),
+    Checkout(CheckoutId),
     Workspace(WorkspaceId),
     AgentSession(AgentSessionId),
     MuxSession(MuxSessionId),
@@ -167,12 +161,12 @@ pub enum NodeId {
 
 impl NodeId {
     pub fn checkout(repo: RepoId, root: impl Into<String>) -> Self {
-        Self::Worktree(CheckoutId::new(repo, root))
+        Self::Checkout(CheckoutId::new(repo, root))
     }
 
     pub fn as_checkout(&self) -> Option<&CheckoutId> {
         match self {
-            Self::Worktree(id) => Some(id),
+            Self::Checkout(id) => Some(id),
             _ => None,
         }
     }
@@ -182,7 +176,7 @@ impl fmt::Display for NodeId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Repo(id) => id.fmt(f),
-            Self::Worktree(id) => id.fmt(f),
+            Self::Checkout(id) => id.fmt(f),
             Self::Workspace(id) => id.fmt(f),
             Self::AgentSession(id) => id.fmt(f),
             Self::MuxSession(id) => id.fmt(f),
@@ -197,7 +191,7 @@ impl fmt::Display for NodeId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GraphNode {
     Repo(RepoNode),
-    Worktree(WorktreeNode),
+    Checkout(CheckoutNode),
     Workspace(WorkspaceNode),
     AgentSession(AgentSessionNode),
     MuxSession(MuxSessionNode),
@@ -208,13 +202,13 @@ pub enum GraphNode {
 
 impl GraphNode {
     pub fn checkout(id: CheckoutId, root: impl Into<String>) -> Self {
-        Self::Worktree(CheckoutNode::new(id, root))
+        Self::Checkout(CheckoutNode::new(id, root))
     }
 
     pub fn id(&self) -> NodeId {
         match self {
             Self::Repo(node) => NodeId::Repo(node.id.clone()),
-            Self::Worktree(node) => NodeId::Worktree(node.id.clone()),
+            Self::Checkout(node) => NodeId::Checkout(node.id.clone()),
             Self::Workspace(node) => NodeId::Workspace(node.id.clone()),
             Self::AgentSession(node) => NodeId::AgentSession(node.id.clone()),
             Self::MuxSession(node) => NodeId::MuxSession(node.id.clone()),
@@ -247,8 +241,8 @@ impl RepoNode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct WorktreeNode {
-    pub id: WorktreeId,
+pub struct CheckoutNode {
+    pub id: CheckoutId,
     pub root: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_dir: Option<String>,
@@ -256,13 +250,8 @@ pub struct WorktreeNode {
     pub current_branch: Option<BranchId>,
 }
 
-/// Checkout-facing alias for the legacy graph node type.
-///
-/// Serialization remains `type: "worktree"` until the wire/model rename lands.
-pub type CheckoutNode = WorktreeNode;
-
-impl WorktreeNode {
-    pub fn new(id: WorktreeId, root: impl Into<String>) -> Self {
+impl CheckoutNode {
+    pub fn new(id: CheckoutId, root: impl Into<String>) -> Self {
         Self {
             id,
             root: root.into(),
@@ -364,8 +353,8 @@ pub enum RelationKind {
     RootedIn,
     ForksWorkspace,
     ForksRepo,
-    CreatedWorktree,
-    ReferencedWorktree,
+    CreatedCheckout,
+    ReferencedCheckout,
     ParentSession,
     ChildSession,
     CreatedBranch,
@@ -636,28 +625,28 @@ mod tests {
     }
 
     #[test]
-    fn checkout_helpers_use_legacy_wire_until_hard_rename() {
+    fn checkout_helpers_serialize_checkout_wire_names() {
         let repo = RepoId::new("/repo/.git");
         let id = CheckoutId::new(repo.clone(), "/repo");
         let node_id = NodeId::checkout(repo, "/repo");
         let node = GraphNode::checkout(id.clone(), "/repo");
 
         assert_eq!(node_id.as_checkout(), Some(&id));
-        assert_eq!(node.id(), NodeId::Worktree(id));
+        assert_eq!(node.id(), NodeId::Checkout(id));
 
         let encoded_id = serde_json::to_value(&node_id).expect("serialize node id");
         let encoded_node = serde_json::to_value(&node).expect("serialize graph node");
 
-        assert_eq!(encoded_id["type"], "worktree");
-        assert_eq!(encoded_node["type"], "worktree");
+        assert_eq!(encoded_id["type"], "checkout");
+        assert_eq!(encoded_node["type"], "checkout");
     }
 
     #[test]
     fn relation_kind_serializes_as_snake_case() {
         let encoded =
-            serde_json::to_string(&RelationKind::CreatedWorktree).expect("serialize relation kind");
+            serde_json::to_string(&RelationKind::CreatedCheckout).expect("serialize relation kind");
 
-        assert_eq!(encoded, r#""created_worktree""#);
+        assert_eq!(encoded, r#""created_checkout""#);
     }
 
     #[test]

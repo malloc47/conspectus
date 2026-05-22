@@ -22,7 +22,7 @@ expression: normalized
       ]
     },
     {
-      "type": "worktree",
+      "type": "checkout",
       "id": {
         "repo": {
           "common_dir": "/sources/repo-a"
@@ -38,7 +38,7 @@ expression: normalized
       }
     },
     {
-      "type": "worktree",
+      "type": "checkout",
       "id": {
         "repo": {
           "common_dir": "/fixture/repo-a/.git"
@@ -189,7 +189,7 @@ expression: normalized
       }
     },
     {
-      "id": "atelier:fork:atelier:alpha:created_worktree:worktree:repo:/sources/repo-a@.atelier/forks/alpha/repo-a",
+      "id": "atelier:fork:atelier:alpha:created_checkout:checkout:repo:/sources/repo-a@.atelier/forks/alpha/repo-a",
       "source": {
         "type": "fork",
         "provider_source_key": "atelier:alpha"
@@ -197,20 +197,20 @@ expression: normalized
       "target": {
         "kind": "node",
         "id": {
-          "type": "worktree",
+          "type": "checkout",
           "repo": {
             "common_dir": "/sources/repo-a"
           },
           "root": ".atelier/forks/alpha/repo-a"
         }
       },
-      "relation": "created_worktree",
+      "relation": "created_checkout",
       "provenance": "strong_discovered",
       "confidence": "high",
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "atelier",
-        "evidence": "fork created worktree",
+        "evidence": "fork created checkout",
         "fields": {
           "created_epoch": 1,
           "fork_mode": "worktree",
@@ -428,9 +428,9 @@ expression: normalized
       }
     },
     {
-      "id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git",
+      "id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git",
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo-a/.git"
         },
@@ -456,9 +456,9 @@ expression: normalized
       }
     },
     {
-      "id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main",
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo-a/.git"
         },
@@ -490,7 +490,7 @@ expression: normalized
   "resolved_relationships": [
     {
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo-a/.git"
         },
@@ -501,11 +501,11 @@ expression: normalized
         "common_dir": "/fixture/repo-a/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git"
     },
     {
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo-a/.git"
         },
@@ -519,7 +519,7 @@ expression: normalized
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:worktree:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main"
     },
     {
       "source": {
@@ -565,14 +565,14 @@ expression: normalized
         "provider_source_key": "atelier:alpha"
       },
       "target": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/sources/repo-a"
         },
         "root": ".atelier/forks/alpha/repo-a"
       },
-      "relation": "created_worktree",
-      "selected_link_id": "atelier:fork:atelier:alpha:created_worktree:worktree:repo:/sources/repo-a@.atelier/forks/alpha/repo-a"
+      "relation": "created_checkout",
+      "selected_link_id": "atelier:fork:atelier:alpha:created_checkout:checkout:repo:/sources/repo-a@.atelier/forks/alpha/repo-a"
     },
     {
       "source": {

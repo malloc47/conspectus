@@ -9,7 +9,7 @@ workspace, mux, fork, and forge graph tool now called `conspectus`.
 
 Meaning: a survey, synopsis, or comprehensive view. It fits the desired product
 shape: a cross-tool status surface that assembles sparse evidence about agent
-sessions, mux sessions, repos, worktrees, workspaces, forks, branches, and PRs.
+sessions, mux sessions, repos, checkouts, workspaces, forks, branches, and PRs.
 
 Collision read: used as a general English and academic/business term, but no
 obvious AI developer-tooling project collision was found in the initial search.

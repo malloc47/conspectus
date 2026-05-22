@@ -15,9 +15,9 @@ use crate::declared::{
 };
 use crate::discovery::DiscoveryContext;
 use crate::model::{
-    AgentSessionId, BranchId, Confidence, Diagnostic, ForgePrId, ForkId, Freshness, GraphLink,
-    GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, Provenance, RepoId,
-    SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorktreeId,
+    AgentSessionId, BranchId, CheckoutId, Confidence, Diagnostic, ForgePrId, ForkId, Freshness,
+    GraphLink, GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, Provenance,
+    RepoId, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
 };
 
 pub fn apply_declared_links(
@@ -141,10 +141,10 @@ fn link_from_declared(
 fn node_id(endpoint: &DeclaredEndpoint) -> NodeId {
     match endpoint {
         DeclaredEndpoint::Repo { common_dir } => NodeId::Repo(RepoId::new(common_dir.clone())),
-        DeclaredEndpoint::Worktree {
+        DeclaredEndpoint::Checkout {
             repo_common_dir,
             root,
-        } => NodeId::Worktree(WorktreeId::new(
+        } => NodeId::Checkout(CheckoutId::new(
             RepoId::new(repo_common_dir.clone()),
             root.clone(),
         )),
@@ -198,7 +198,7 @@ fn unresolved_endpoint(endpoint: &DeclaredEndpoint) -> UnresolvedEndpoint {
             path: Some(common_dir.clone()),
             metadata,
         },
-        DeclaredEndpoint::Worktree {
+        DeclaredEndpoint::Checkout {
             repo_common_dir,
             root,
         } => {
@@ -207,7 +207,7 @@ fn unresolved_endpoint(endpoint: &DeclaredEndpoint) -> UnresolvedEndpoint {
                 Value::String(repo_common_dir.clone()),
             );
             UnresolvedEndpoint {
-                node_type: "worktree".to_string(),
+                node_type: "checkout".to_string(),
                 harness_key: None,
                 native_id: Some(root.clone()),
                 state_scope: None,

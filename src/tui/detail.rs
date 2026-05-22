@@ -26,9 +26,9 @@
 use std::path::Path;
 
 use crate::model::{
-    AgentSessionNode, BranchNode, Confidence, Diagnostic, ForgePrNode, ForkNode, GraphLink,
-    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance,
-    RelationKind, RepoNode, ResolvedRelationship, WorkspaceNode, WorktreeNode,
+    AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
+    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
+    Provenance, RelationKind, RepoNode, ResolvedRelationship, WorkspaceNode,
 };
 use crate::output::table::node_short_id;
 use crate::tui::rows::shorten_home;
@@ -180,7 +180,7 @@ pub enum DiagnosticSummary {
 fn kind_label(node: &GraphNode) -> &'static str {
     match node {
         GraphNode::Repo(_) => "repo",
-        GraphNode::Worktree(_) => "checkout",
+        GraphNode::Checkout(_) => "checkout",
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
@@ -206,7 +206,7 @@ fn title_line(node: &GraphNode) -> String {
             None => format!("fork:{}", fork.provider_source_key),
         },
         GraphNode::Repo(repo) => format!("repo:{}", repo.common_dir),
-        GraphNode::Worktree(worktree) => format!("checkout:{}", worktree.root),
+        GraphNode::Checkout(worktree) => format!("checkout:{}", worktree.root),
         GraphNode::Workspace(workspace) => format!("workspace:{}", workspace.root),
         GraphNode::Branch(branch) => format!("branch:{}", branch.refname),
     }
@@ -223,7 +223,7 @@ fn header_fields(
         GraphNode::ForgePr(pr) => forge_pr_fields(pr),
         GraphNode::Fork(fork) => fork_fields(fork),
         GraphNode::Repo(repo) => repo_fields(repo, home),
-        GraphNode::Worktree(worktree) => worktree_fields(worktree, home),
+        GraphNode::Checkout(worktree) => worktree_fields(worktree, home),
         GraphNode::Workspace(workspace) => workspace_fields(workspace, home),
         GraphNode::Branch(branch) => branch_fields(branch),
     }
@@ -303,7 +303,7 @@ fn session_pr_field(
     // Sessions don't link to PRs directly today; the existing table
     // resolves session → worktree → branch → PR. v1 detail shows
     // the same: walk the resolved relationships once to find the
-    // PR keyed off the session's worktree (cwd-matched).
+    // PR keyed off the session's checkout (cwd-matched).
     let session_node = match snapshot.nodes.iter().find(|n| n.id() == *session) {
         Some(GraphNode::AgentSession(node)) => node,
         _ => return placeholder("pr", "— (no PR)"),
@@ -313,7 +313,7 @@ fn session_pr_field(
         None => return placeholder("pr", "— (no PR)"),
     };
     let Some(worktree_id) = snapshot.nodes.iter().find_map(|node| match node {
-        GraphNode::Worktree(wt) if wt.root == cwd => Some(NodeId::Worktree(wt.id.clone())),
+        GraphNode::Checkout(wt) if wt.root == cwd => Some(NodeId::Checkout(wt.id.clone())),
         _ => None,
     }) else {
         return placeholder("pr", "— (no PR)");
@@ -436,7 +436,7 @@ fn repo_fields(repo: &RepoNode, home: Option<&Path>) -> Vec<HeaderField> {
     }]
 }
 
-fn worktree_fields(worktree: &WorktreeNode, home: Option<&Path>) -> Vec<HeaderField> {
+fn worktree_fields(worktree: &CheckoutNode, home: Option<&Path>) -> Vec<HeaderField> {
     let mut fields = vec![HeaderField {
         label: "root",
         value: shorten_home(&worktree.root, home),
@@ -691,9 +691,9 @@ fn diagnostic_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<Diagnostic
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, Confidence, ForgePrId, ForgePrNode, GraphSnapshot,
-        LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode,
-        SourceMetadata, WorktreeId, WorktreeNode,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId,
+        ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+        Provenance, RepoId, RepoNode, SourceMetadata,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -869,8 +869,8 @@ mod tests {
         snapshot
             .nodes
             .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(repo_id.clone(), cwd.to_string()),
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(repo_id.clone(), cwd.to_string()),
             root: cwd.to_string(),
             git_dir: None,
             current_branch: None,
@@ -902,7 +902,7 @@ mod tests {
         // Worktree → Branch (CheckedOutBranch)
         snapshot.candidate_links.push(GraphLink {
             id: "wt-branch".into(),
-            source: NodeId::Worktree(WorktreeId::new(repo_id.clone(), cwd.to_string())),
+            source: NodeId::Checkout(CheckoutId::new(repo_id.clone(), cwd.to_string())),
             target: LinkEndpoint::Node {
                 id: NodeId::Branch(branch_id.clone()),
             },

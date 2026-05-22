@@ -175,9 +175,9 @@ pub fn lookup_mux_node<'a>(
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, Confidence, GraphLink, GraphNode, GraphSnapshot,
-        LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode,
-        WorktreeId, WorktreeNode,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink,
+        GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+        Provenance, RepoId, RepoNode,
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::app::Msg;
@@ -253,8 +253,8 @@ mod tests {
         snapshot
             .nodes
             .push(GraphNode::Repo(RepoNode::new(RepoId::new(common_dir))));
-        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new(common_dir), common_dir.to_string()),
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(common_dir), common_dir.to_string()),
             root: common_dir.to_string(),
             git_dir: None,
             current_branch: None,

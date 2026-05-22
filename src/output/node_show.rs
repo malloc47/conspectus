@@ -19,9 +19,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use crate::model::{
-    AgentSessionNode, BranchNode, Diagnostic, ForgePrNode, ForkNode, GraphLink, GraphNode,
-    GraphSnapshot, LinkEndpoint, MuxSessionNode, NodeId, RelationKind, RepoNode,
-    ResolvedRelationship, WorkspaceNode, WorktreeNode,
+    AgentSessionNode, BranchNode, CheckoutNode, Diagnostic, ForgePrNode, ForkNode, GraphLink,
+    GraphNode, GraphSnapshot, LinkEndpoint, MuxSessionNode, NodeId, RelationKind, RepoNode,
+    ResolvedRelationship, WorkspaceNode,
 };
 use crate::output::table::{header_style, indicator, node_short_id, push_styled};
 
@@ -136,7 +136,7 @@ fn write_node_summary(out: &mut String, node: &GraphNode, color: bool) {
     let _ = writeln!(out, "  id:   {id}");
     match node {
         GraphNode::Repo(node) => write_repo(out, node),
-        GraphNode::Worktree(node) => write_worktree(out, node),
+        GraphNode::Checkout(node) => write_worktree(out, node),
         GraphNode::Workspace(node) => write_workspace(out, node),
         GraphNode::AgentSession(node) => write_agent_session(out, node),
         GraphNode::MuxSession(node) => write_mux_session(out, node),
@@ -149,7 +149,7 @@ fn write_node_summary(out: &mut String, node: &GraphNode, color: bool) {
 fn node_kind_label(node: &GraphNode) -> &'static str {
     match node {
         GraphNode::Repo(_) => "repo",
-        GraphNode::Worktree(_) => "checkout",
+        GraphNode::Checkout(_) => "checkout",
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
@@ -189,7 +189,7 @@ fn write_repo(out: &mut String, node: &RepoNode) {
     }
 }
 
-fn write_worktree(out: &mut String, node: &WorktreeNode) {
+fn write_worktree(out: &mut String, node: &CheckoutNode) {
     let _ = writeln!(out, "  root: {}", node.root);
     if let Some(git_dir) = &node.git_dir {
         let _ = writeln!(out, "  git_dir: {git_dir}");

@@ -264,8 +264,8 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     as empty.
 - [x] `P2-008` Map Atelier forks into graph nodes and context-effect links.
   - Scope: emit one polymorphic `Fork` node per provider fork and candidate
-    links for `forks_workspace`, `forks_repo`, `created_worktree`,
-    `referenced_worktree`, `created_branch`, `associated_branch`,
+    links for `forks_workspace`, `forks_repo`, `created_checkout`,
+    `referenced_checkout`, `created_branch`, `associated_branch`,
     `rooted_at_path`, and `parent_fork` where evidence exists.
   - Tests: resolver and snapshot tests for created vs referenced worktrees,
     research forks, selected forks, standalone repo forks, parent forks, and
@@ -1702,11 +1702,11 @@ fork lineage, and worktree apply to any row whose node touches them.
 
 - [x] `H-TBL-010` Expand the `sessions` column pool.
   - Outcome: `SESSIONS_COLUMNS` gained five opt-in columns
-    (`worktree`, `branch`, `repo`, `fork`, `declared`). Each
+    (`checkout`, `branch`, `repo`, `fork`, `declared`). Each
     extractor walks the candidate-link graph to resolve the cell:
-    `worktree` matches a session's `cwd` against `WorktreeId.root`;
-    `branch` follows `CheckedOutBranch` from the matched worktree
-    and strips `refs/heads/`; `repo` returns the worktree's
+    `checkout` matches a session's `cwd` against `CheckoutId.root`;
+    `branch` follows `CheckedOutBranch` from the matched checkout
+    and strips `refs/heads/`; `repo` returns the checkout's
     `RepoId.common_dir`; `fork` finds the fork that records the
     session as a `ChildSession` target and renders the fork label;
     `declared` reports the strongest declared candidate's state
@@ -1960,9 +1960,7 @@ Deferred under this cluster (no story yet, file when needed):
 ADR 0026 replaces "worktree" as the product-level concept with
 `Checkout`: the concrete editable working tree for a repo, whether it is
 an ordinary clone checkout, a linked git worktree, a bare-repo-derived
-linked worktree, or a workspace member reached through a symlink. The
-implementation still contains `Worktree` names; migrate in small slices
-so existing graph JSON and table/TUI behavior stay reviewable.
+linked worktree, or a workspace member reached through a symlink.
 
 - [x] `H-CHECKOUT-001` Memorialize the checkout context model.
   - Scope: record the decision in ADR 0026, update `docs/design.md` to
@@ -1978,11 +1976,9 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Scope: add `Checkout` model/helpers as the canonical code-level
     vocabulary while keeping the current `Worktree` graph representation
     until the hard wire/model rename lands.
-  - Outcome: `CheckoutId` and `CheckoutNode` are checkout-facing aliases
-    over the legacy `WorktreeId`/`WorktreeNode` graph representation,
-    with helper constructors for checkout-oriented code. Graph output still
-    serializes as `type: "worktree"` until the dedicated wire/model rename
-    changes the representation in one reviewable slice.
+  - Outcome: initial checkout-facing helpers were introduced as a staging
+    step, then replaced by canonical checkout graph/model names in
+    `H-CHECKOUT-008`.
   - Tests: graph JSON snapshot/round-trip tests proving checkout-facing
     helpers produce the same node identities.
   - Blockers: `H-CHECKOUT-001`.
@@ -1997,8 +1993,7 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Slice landed: `discover_local_with` now probes distinct observed
     agent-session and mux-session cwd paths after initial discovery and
     merges any git repo/checkout/branch evidence before cross-link
-    inference. The implementation still emits legacy `Worktree` nodes
-    per the compatibility plan in `H-CHECKOUT-002`.
+    inference.
   - Slice landed: table and TUI projections now match sessions whose cwd
     is nested under a checkout root, choosing the deepest matching
     checkout.
@@ -2080,10 +2075,8 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     labels use checkout terminology, and `--sessions-grouping checkout` is
     accepted. Legacy `worktree` table columns, TUI grouping values, and
     checkout JSON deserialization aliases are intentionally not preserved.
-    Graph JSON still serializes legacy worktree node ids/types until the
-    deeper wire/model migration is completed.
   - Blockers: `H-CHECKOUT-006`.
-- [ ] `H-CHECKOUT-008` Hard-rename checkout graph wire/model names.
+- [x] `H-CHECKOUT-008` Hard-rename checkout graph wire/model names.
   - Scope: replace legacy `WorktreeId`/`WorktreeNode`/`GraphNode::Worktree`
     naming, node id display prefixes, JSON `type: "worktree"`, snapshot
     expectations, declared endpoint syntax, and user-visible relation docs
@@ -2093,6 +2086,13 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Tests: full graph snapshot refresh, declared endpoint round trips, node
     id round trips, resolver tests for checkout/session links, table/TUI
     smoke coverage, and `cargo test --all-targets --all-features`.
+  - Outcome: graph/model names now use `CheckoutId`, `CheckoutNode`, and
+    `GraphNode::Checkout`; node ids display as `checkout:...`; graph JSON
+    serializes `type: "checkout"`; declared endpoints use
+    `checkout:repo_common_dir=...,root=...`; and fork effect relation wire
+    names are `created_checkout` / `referenced_checkout`. Git commands,
+    fixture names, and provider-native Atelier fields still say worktree when
+    they describe actual git or source-format worktree concepts.
   - Blockers: `H-CHECKOUT-007`.
 
 ### Deferred Provider And Workflow Expansions

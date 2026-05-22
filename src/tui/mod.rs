@@ -101,7 +101,7 @@ pub enum Sort {
 pub enum SessionsGrouping {
     Graph,
     Repo,
-    Worktree,
+    Checkout,
     ScanRoot,
 }
 

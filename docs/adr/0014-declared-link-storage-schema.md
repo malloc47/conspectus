@@ -94,7 +94,7 @@ stable fields of graph node IDs rather than the `Display` strings.
 
 ```toml
 { type = "repo", common_dir = "/work/repo/.git" }
-{ type = "worktree", repo_common_dir = "/work/repo/.git", root = "/work/repo" }
+{ type = "checkout", repo_common_dir = "/work/repo/.git", root = "/work/repo" }
 { type = "workspace", root = "/work" }
 { type = "agent_session", harness_key = "codex", state_scope = "/home/me/.codex", session_key = "alpha" }
 { type = "mux_session", native_id = "tmux:editor" }

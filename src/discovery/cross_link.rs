@@ -14,7 +14,7 @@
 //! - `AgentSession` ↔ `Workspace` `AssociatedWith` candidates when a session's
 //!   cwd lives at or below a workspace member path.
 //! - `AgentSession` ↔ worktree/checkout `AssociatedWith` candidates when a
-//!   session's cwd lives at or below a discovered worktree root.
+//!   session's cwd lives at or below a discovered checkout root.
 //!
 //! No nodes are created here, and any `Unresolved` lineage endpoints already
 //! present in `candidate_links` are left untouched.
@@ -22,8 +22,8 @@
 use std::collections::HashMap;
 
 use crate::model::{
-    AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata, WorktreeId,
+    AgentSessionNode, CheckoutId, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
+    LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "cross_link";
@@ -45,7 +45,7 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
             _ => None,
         })
         .collect();
-    let worktree_roots = worktree_roots(snapshot);
+    let checkout_roots = checkout_roots(snapshot);
     let workspace_member_roots = workspace_member_roots(snapshot);
     let fork_roots = fork_roots(snapshot);
 
@@ -76,8 +76,8 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
             new_links.push(workspace_association_link(session, workspace, root));
         }
 
-        if let Some((worktree, root)) = deepest_matching_worktree(&session_cwd, &worktree_roots) {
-            new_links.push(worktree_association_link(session, worktree, root));
+        if let Some((worktree, root)) = deepest_matching_checkout(&session_cwd, &checkout_roots) {
+            new_links.push(checkout_association_link(session, worktree, root));
         }
     }
 
@@ -85,12 +85,12 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
     snapshot.canonicalize();
 }
 
-fn worktree_roots(snapshot: &GraphSnapshot) -> Vec<(WorktreeId, String)> {
+fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
     snapshot
         .nodes
         .iter()
         .filter_map(|node| match node {
-            GraphNode::Worktree(worktree) => Some((worktree.id.clone(), worktree.root.clone())),
+            GraphNode::Checkout(worktree) => Some((worktree.id.clone(), worktree.root.clone())),
             _ => None,
         })
         .collect()
@@ -143,10 +143,10 @@ fn matching_workspaces<'a>(
     deepest_by_workspace.into_iter().collect()
 }
 
-fn deepest_matching_worktree<'a>(
+fn deepest_matching_checkout<'a>(
     session_cwd: &str,
-    worktrees: &'a [(WorktreeId, String)],
-) -> Option<(&'a WorktreeId, &'a str)> {
+    worktrees: &'a [(CheckoutId, String)],
+) -> Option<(&'a CheckoutId, &'a str)> {
     worktrees
         .iter()
         .filter(|(_, root)| path_at_or_under(session_cwd, &normalize_path(root)))
@@ -296,13 +296,13 @@ fn workspace_association_link(
     }
 }
 
-fn worktree_association_link(
+fn checkout_association_link(
     session: &AgentSessionNode,
-    worktree: &WorktreeId,
+    worktree: &CheckoutId,
     root: &str,
 ) -> GraphLink {
     let source = NodeId::AgentSession(session.id.clone());
-    let target = NodeId::Worktree(worktree.clone());
+    let target = NodeId::Checkout(worktree.clone());
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         "checkout_root".to_string(),
@@ -352,9 +352,9 @@ fn path_depth(path: &str) -> usize {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, ForkId, ForkNode, GraphSnapshot, MuxSessionId,
-        MuxSessionNode, RepoId, RepoNode, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
-        WorktreeNode,
+        AgentSessionId, AgentSessionNode, CheckoutNode, ForkId, ForkNode, GraphSnapshot,
+        MuxSessionId, MuxSessionNode, RepoId, RepoNode, UnresolvedEndpoint, WorkspaceId,
+        WorkspaceNode,
     };
 
     fn session(id: &str, cwd: Option<&str>) -> GraphNode {
@@ -391,8 +391,8 @@ mod tests {
 
     fn worktree(repo_common_dir: &str, root: &str) -> GraphNode {
         let repo = RepoId::new(repo_common_dir);
-        GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(repo, root.to_string()),
+        GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(repo, root.to_string()),
             root: root.to_string(),
             git_dir: None,
             current_branch: None,
@@ -609,7 +609,7 @@ mod tests {
         );
         assert_eq!(
             link.target_node_id(),
-            Some(&NodeId::Worktree(WorktreeId::new(
+            Some(&NodeId::Checkout(CheckoutId::new(
                 RepoId::new("/work/repo/.git"),
                 "/work/repo"
             )))
@@ -653,7 +653,7 @@ mod tests {
         }));
         assert!(associated.iter().any(|link| {
             link.target_node_id()
-                == Some(&NodeId::Worktree(WorktreeId::new(
+                == Some(&NodeId::Checkout(CheckoutId::new(
                     RepoId::new("/workspace/repo/.git"),
                     "/workspace/repo",
                 )))
@@ -681,7 +681,7 @@ mod tests {
         assert_eq!(associated.len(), 1);
         assert_eq!(
             associated[0].target_node_id(),
-            Some(&NodeId::Worktree(WorktreeId::new(
+            Some(&NodeId::Checkout(CheckoutId::new(
                 RepoId::new("/work/repo/nested/.git"),
                 "/work/repo/nested"
             )))

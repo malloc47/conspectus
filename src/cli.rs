@@ -689,7 +689,7 @@ impl TuiArgs {
             sessions_grouping: match self.sessions_grouping {
                 SessionsGroupingFlag::Graph => conspectus::tui::SessionsGrouping::Graph,
                 SessionsGroupingFlag::Repo => conspectus::tui::SessionsGrouping::Repo,
-                SessionsGroupingFlag::Checkout => conspectus::tui::SessionsGrouping::Worktree,
+                SessionsGroupingFlag::Checkout => conspectus::tui::SessionsGrouping::Checkout,
                 SessionsGroupingFlag::ScanRoot => conspectus::tui::SessionsGrouping::ScanRoot,
             },
             refresh_interval,
@@ -1470,8 +1470,8 @@ fn parse_relation_kind(raw: &str) -> std::result::Result<RelationKind, String> {
         "rooted_in" => Ok(RelationKind::RootedIn),
         "forks_workspace" => Ok(RelationKind::ForksWorkspace),
         "forks_repo" => Ok(RelationKind::ForksRepo),
-        "created_worktree" => Ok(RelationKind::CreatedWorktree),
-        "referenced_worktree" => Ok(RelationKind::ReferencedWorktree),
+        "created_checkout" => Ok(RelationKind::CreatedCheckout),
+        "referenced_checkout" => Ok(RelationKind::ReferencedCheckout),
         "parent_session" => Ok(RelationKind::ParentSession),
         "child_session" => Ok(RelationKind::ChildSession),
         "created_branch" => Ok(RelationKind::CreatedBranch),
@@ -1495,8 +1495,8 @@ fn relation_label(relation: &RelationKind) -> &'static str {
         RelationKind::RootedIn => "rooted_in",
         RelationKind::ForksWorkspace => "forks_workspace",
         RelationKind::ForksRepo => "forks_repo",
-        RelationKind::CreatedWorktree => "created_worktree",
-        RelationKind::ReferencedWorktree => "referenced_worktree",
+        RelationKind::CreatedCheckout => "created_checkout",
+        RelationKind::ReferencedCheckout => "referenced_checkout",
         RelationKind::ParentSession => "parent_session",
         RelationKind::ChildSession => "child_session",
         RelationKind::CreatedBranch => "created_branch",
@@ -1513,7 +1513,7 @@ fn parse_endpoint(raw: &str) -> std::result::Result<DeclaredEndpoint, String> {
         "repo" => Ok(DeclaredEndpoint::Repo {
             common_dir: required_field(&fields, "common_dir")?,
         }),
-        "worktree" => Ok(DeclaredEndpoint::Worktree {
+        "checkout" => Ok(DeclaredEndpoint::Checkout {
             repo_common_dir: required_field(&fields, "repo_common_dir")?,
             root: required_field(&fields, "root")?,
         }),
@@ -1553,11 +1553,11 @@ fn endpoint_label(endpoint: &DeclaredEndpoint) -> String {
         DeclaredEndpoint::Repo { common_dir } => {
             format!("repo:common_dir={common_dir}")
         }
-        DeclaredEndpoint::Worktree {
+        DeclaredEndpoint::Checkout {
             repo_common_dir,
             root,
         } => {
-            format!("worktree:repo_common_dir={repo_common_dir},root={root}")
+            format!("checkout:repo_common_dir={repo_common_dir},root={root}")
         }
         DeclaredEndpoint::Workspace { root } => {
             format!("workspace:root={root}")

@@ -62,8 +62,9 @@ repo, or a checkout branch with an open PR and no known agent session.
 - Use `Checkout` for the concrete editable working tree of a repo. A checkout
   may be a plain clone checkout, a linked git worktree, a linked worktree whose
   common dir belongs to a bare repo, or a workspace member reached through a
-  symlink. Existing implementation names may still say `Worktree` while the
-  model migrates, but new design work should use checkout terminology.
+  symlink. Implementation, graph JSON, and user-facing surfaces use checkout
+  terminology; git-specific prose still says worktree only for the actual git
+  feature.
 - Use a loose definition of `Workspace`: a folder where one or more git repos,
   symlinks to repos, or checkouts from repos are present together with the
   intent to make coordinated changes among them. Conspectus may assume
@@ -649,7 +650,7 @@ running; the one-shot CLI is the writer otherwise.
   - ADR 0003: use one polymorphic `Fork` node instead of multiple fork node
     classes.
   - ADR 0004: represent fork context effects with provider-neutral relation
-    kinds such as `created_worktree`, `referenced_worktree`, `created_branch`,
+    kinds such as `created_checkout`, `referenced_checkout`, `created_branch`,
     `associated_branch`, `rooted_at_path`, and `parent_fork`.
   - ADR 0005: preserve unresolved session-lineage endpoint evidence without
     creating placeholder `AgentSession` nodes.
@@ -664,8 +665,7 @@ running; the one-shot CLI is the writer otherwise.
     pinned git revisions for Atelier migration, and keep path dependencies
     local-development only.
   - ADR 0026: use `Checkout` as the provider-neutral model term for concrete
-    editable repo working trees, while migrating existing `Worktree`
-    implementation names over time.
+    editable repo working trees.
   - ADR 0027: infer generic workspaces only from explicit scan roots with two
     or more immediate checkout children, and let provider-specific workspace
     metadata take precedence over generic inference at the same root.

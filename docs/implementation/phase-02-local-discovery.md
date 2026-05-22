@@ -24,8 +24,8 @@ metadata. Output remains graph JSON.
 - Add Atelier metadata readers for `atelier.toml` and
   `.atelier/forks/index.toml`.
 - Map fork context effects using ADR 0003 and ADR 0004 relation kinds:
-  `forks_workspace`, `forks_repo`, `created_worktree`,
-  `referenced_worktree`, `created_branch`, `associated_branch`,
+  `forks_workspace`, `forks_repo`, `created_checkout`,
+  `referenced_checkout`, `created_branch`, `associated_branch`,
   `rooted_at_path`, and `parent_fork`.
 
 ## Tests

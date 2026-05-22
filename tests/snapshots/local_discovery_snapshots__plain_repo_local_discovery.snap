@@ -15,7 +15,7 @@ expression: normalized
       ]
     },
     {
-      "type": "worktree",
+      "type": "checkout",
       "id": {
         "repo": {
           "common_dir": "/fixture/repo/.git"
@@ -44,9 +44,9 @@ expression: normalized
   ],
   "candidate_links": [
     {
-      "id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:belongs_to_repo:repo:/fixture/repo/.git",
+      "id": "git:checkout:repo:/fixture/repo/.git@/fixture/repo:belongs_to_repo:repo:/fixture/repo/.git",
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo/.git"
         },
@@ -72,9 +72,9 @@ expression: normalized
       }
     },
     {
-      "id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/repo/.git@/fixture/repo:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/main",
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo/.git"
         },
@@ -106,7 +106,7 @@ expression: normalized
   "resolved_relationships": [
     {
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo/.git"
         },
@@ -117,11 +117,11 @@ expression: normalized
         "common_dir": "/fixture/repo/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:belongs_to_repo:repo:/fixture/repo/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/repo/.git@/fixture/repo:belongs_to_repo:repo:/fixture/repo/.git"
     },
     {
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/fixture/repo/.git"
         },
@@ -135,7 +135,7 @@ expression: normalized
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:worktree:repo:/fixture/repo/.git@/fixture/repo:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/repo/.git@/fixture/repo:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/main"
     }
   ],
   "diagnostics": []

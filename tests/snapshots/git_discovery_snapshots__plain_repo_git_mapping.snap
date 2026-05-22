@@ -18,7 +18,7 @@ expression: rendered
       ]
     },
     {
-      "type": "worktree",
+      "type": "checkout",
       "id": {
         "repo": {
           "common_dir": "/workspace/repo/.git"
@@ -48,9 +48,9 @@ expression: rendered
   ],
   "candidate_links": [
     {
-      "id": "git:worktree:repo:/workspace/repo/.git@/workspace/repo:belongs_to_repo:repo:/workspace/repo/.git",
+      "id": "git:checkout:repo:/workspace/repo/.git@/workspace/repo:belongs_to_repo:repo:/workspace/repo/.git",
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/workspace/repo/.git"
         },
@@ -76,9 +76,9 @@ expression: rendered
       }
     },
     {
-      "id": "git:worktree:repo:/workspace/repo/.git@/workspace/repo:checked_out_branch:branch:repo:/workspace/repo/.git@refs/heads/main",
+      "id": "git:checkout:repo:/workspace/repo/.git@/workspace/repo:checked_out_branch:branch:repo:/workspace/repo/.git@refs/heads/main",
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/workspace/repo/.git"
         },
@@ -110,7 +110,7 @@ expression: rendered
   "resolved_relationships": [
     {
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/workspace/repo/.git"
         },
@@ -121,11 +121,11 @@ expression: rendered
         "common_dir": "/workspace/repo/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:worktree:repo:/workspace/repo/.git@/workspace/repo:belongs_to_repo:repo:/workspace/repo/.git"
+      "selected_link_id": "git:checkout:repo:/workspace/repo/.git@/workspace/repo:belongs_to_repo:repo:/workspace/repo/.git"
     },
     {
       "source": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/workspace/repo/.git"
         },
@@ -139,7 +139,7 @@ expression: rendered
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:worktree:repo:/workspace/repo/.git@/workspace/repo:checked_out_branch:branch:repo:/workspace/repo/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/workspace/repo/.git@/workspace/repo:checked_out_branch:branch:repo:/workspace/repo/.git@refs/heads/main"
     }
   ],
   "diagnostics": []

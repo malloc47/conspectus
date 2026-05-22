@@ -26,7 +26,7 @@ expression: rendered
       "common_dir": "/sources/repo-c"
     },
     {
-      "type": "worktree",
+      "type": "checkout",
       "id": {
         "repo": {
           "common_dir": "/sources/repo-a"
@@ -42,7 +42,7 @@ expression: rendered
       }
     },
     {
-      "type": "worktree",
+      "type": "checkout",
       "id": {
         "repo": {
           "common_dir": "/sources/repo-b"
@@ -167,7 +167,7 @@ expression: rendered
       }
     },
     {
-      "id": "atelier:fork:atelier:alpha:created_worktree:worktree:repo:/sources/repo-a@/workspace/.atelier/forks/alpha/repo-a",
+      "id": "atelier:fork:atelier:alpha:created_checkout:checkout:repo:/sources/repo-a@/workspace/.atelier/forks/alpha/repo-a",
       "source": {
         "type": "fork",
         "provider_source_key": "atelier:alpha"
@@ -175,20 +175,20 @@ expression: rendered
       "target": {
         "kind": "node",
         "id": {
-          "type": "worktree",
+          "type": "checkout",
           "repo": {
             "common_dir": "/sources/repo-a"
           },
           "root": "/workspace/.atelier/forks/alpha/repo-a"
         }
       },
-      "relation": "created_worktree",
+      "relation": "created_checkout",
       "provenance": "strong_discovered",
       "confidence": "high",
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "atelier",
-        "evidence": "fork created worktree",
+        "evidence": "fork created checkout",
         "fields": {
           "created_epoch": 1,
           "fork_mode": "worktree",
@@ -430,7 +430,7 @@ expression: rendered
       }
     },
     {
-      "id": "atelier:fork:atelier:beta:referenced_worktree:worktree:repo:/sources/repo-b@/workspace/repo-b",
+      "id": "atelier:fork:atelier:beta:referenced_checkout:checkout:repo:/sources/repo-b@/workspace/repo-b",
       "source": {
         "type": "fork",
         "provider_source_key": "atelier:beta"
@@ -438,20 +438,20 @@ expression: rendered
       "target": {
         "kind": "node",
         "id": {
-          "type": "worktree",
+          "type": "checkout",
           "repo": {
             "common_dir": "/sources/repo-b"
           },
           "root": "/workspace/repo-b"
         }
       },
-      "relation": "referenced_worktree",
+      "relation": "referenced_checkout",
       "provenance": "strong_discovered",
       "confidence": "high",
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "atelier",
-        "evidence": "fork referenced parent worktree",
+        "evidence": "fork referenced parent checkout",
         "fields": {
           "created_epoch": 2,
           "fork_mode": "selected",
@@ -683,14 +683,14 @@ expression: rendered
         "provider_source_key": "atelier:alpha"
       },
       "target": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/sources/repo-a"
         },
         "root": "/workspace/.atelier/forks/alpha/repo-a"
       },
-      "relation": "created_worktree",
-      "selected_link_id": "atelier:fork:atelier:alpha:created_worktree:worktree:repo:/sources/repo-a@/workspace/.atelier/forks/alpha/repo-a"
+      "relation": "created_checkout",
+      "selected_link_id": "atelier:fork:atelier:alpha:created_checkout:checkout:repo:/sources/repo-a@/workspace/.atelier/forks/alpha/repo-a"
     },
     {
       "source": {
@@ -737,14 +737,14 @@ expression: rendered
         "provider_source_key": "atelier:beta"
       },
       "target": {
-        "type": "worktree",
+        "type": "checkout",
         "repo": {
           "common_dir": "/sources/repo-b"
         },
         "root": "/workspace/repo-b"
       },
-      "relation": "referenced_worktree",
-      "selected_link_id": "atelier:fork:atelier:beta:referenced_worktree:worktree:repo:/sources/repo-b@/workspace/repo-b"
+      "relation": "referenced_checkout",
+      "selected_link_id": "atelier:fork:atelier:beta:referenced_checkout:checkout:repo:/sources/repo-b@/workspace/repo-b"
     },
     {
       "source": {

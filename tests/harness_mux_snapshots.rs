@@ -86,7 +86,7 @@ fn observed_session_cwd_backfills_git_context_outside_scan_roots() {
     assert!(
         snapshot.nodes.iter().any(|node| matches!(
             node,
-            GraphNode::Worktree(worktree) if worktree.root.ends_with("/work")
+            GraphNode::Checkout(worktree) if worktree.root.ends_with("/work")
         )),
         "observed cwd should backfill the checkout/worktree node: {:#?}",
         snapshot.nodes
@@ -151,7 +151,7 @@ fn missing_observed_session_cwd_does_not_create_git_context() {
         snapshot
             .nodes
             .iter()
-            .all(|node| !matches!(node, GraphNode::Repo(_) | GraphNode::Worktree(_))),
+            .all(|node| !matches!(node, GraphNode::Repo(_) | GraphNode::Checkout(_))),
         "missing cwd should not create git context: {:#?}",
         snapshot.nodes
     );
@@ -382,7 +382,7 @@ fn assert_worktree_root(snapshot: &conspectus::model::GraphSnapshot, root: &Path
     assert!(
         snapshot.nodes.iter().any(|node| matches!(
             node,
-            GraphNode::Worktree(worktree) if worktree.root == root
+            GraphNode::Checkout(worktree) if worktree.root == root
         )),
         "expected worktree root {root}: {:#?}",
         snapshot.nodes

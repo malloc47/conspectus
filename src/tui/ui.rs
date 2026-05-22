@@ -824,8 +824,8 @@ pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, RepoId, RepoNode, WorktreeId,
-        WorktreeNode,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
+        RepoId, RepoNode,
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::SessionsGrouping;
@@ -841,8 +841,8 @@ mod tests {
             .push(GraphNode::Repo(RepoNode::new(RepoId::new(
                 "/home/op/src/proj",
             ))));
-        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
             root: "/home/op/src/proj".to_string(),
             git_dir: None,
             current_branch: None,
@@ -890,8 +890,8 @@ mod tests {
             .push(GraphNode::Repo(RepoNode::new(RepoId::new(
                 "/home/op/src/proj",
             ))));
-        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
             root: "/home/op/src/proj".to_string(),
             git_dir: None,
             current_branch: None,
@@ -1064,8 +1064,8 @@ mod tests {
             .push(GraphNode::Repo(RepoNode::new(RepoId::new(
                 "/home/op/src/proj",
             ))));
-        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
             root: "/home/op/src/proj".to_string(),
             git_dir: None,
             current_branch: None,
@@ -1298,8 +1298,8 @@ mod tests {
         snapshot
             .nodes
             .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo_root))));
-        snapshot.nodes.push(GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new(repo_root), repo_root),
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_root), repo_root),
             root: repo_root.to_string(),
             git_dir: None,
             current_branch: None,

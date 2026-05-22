@@ -28,9 +28,9 @@ use serde::Deserialize;
 use crate::discovery::git::{GitProbe, fragment_from_probe};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::{
-    BranchId, BranchNode, Confidence, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
-    LinkEndpoint, LinkState, Metadata, NodeId, Provenance, RelationKind, RepoId, RepoNode,
-    SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode, WorktreeId, WorktreeNode,
+    BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence, ForkId, ForkNode, Freshness,
+    GraphLink, GraphNode, LinkEndpoint, LinkState, Metadata, NodeId, Provenance, RelationKind,
+    RepoId, RepoNode, SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
 };
 
 pub const ATELIER_CONFIG_FILENAME: &str = "atelier.toml";
@@ -367,8 +367,8 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
             ));
 
             if let Some(fork_worktree) = &repo.fork_worktree {
-                let worktree_id = WorktreeId::new(repo_id.clone(), path_string(fork_worktree));
-                fragment.nodes.push(GraphNode::Worktree(WorktreeNode {
+                let worktree_id = CheckoutId::new(repo_id.clone(), path_string(fork_worktree));
+                fragment.nodes.push(GraphNode::Checkout(CheckoutNode {
                     id: worktree_id.clone(),
                     root: path_string(fork_worktree),
                     git_dir: None,
@@ -380,18 +380,18 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                 fragment.candidate_links.push(atelier_link(
                     fork.clone(),
                     LinkEndpoint::Node {
-                        id: NodeId::Worktree(worktree_id),
+                        id: NodeId::Checkout(worktree_id),
                     },
-                    RelationKind::CreatedWorktree,
-                    "fork created worktree",
+                    RelationKind::CreatedCheckout,
+                    "fork created checkout",
                     record_metadata(record, Some(repo)),
                 ));
             }
 
             if repo.link {
                 let worktree_id =
-                    WorktreeId::new(repo_id.clone(), path_string(&repo.parent_worktree));
-                fragment.nodes.push(GraphNode::Worktree(WorktreeNode {
+                    CheckoutId::new(repo_id.clone(), path_string(&repo.parent_worktree));
+                fragment.nodes.push(GraphNode::Checkout(CheckoutNode {
                     id: worktree_id.clone(),
                     root: path_string(&repo.parent_worktree),
                     git_dir: None,
@@ -400,10 +400,10 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                 fragment.candidate_links.push(atelier_link(
                     fork.clone(),
                     LinkEndpoint::Node {
-                        id: NodeId::Worktree(worktree_id),
+                        id: NodeId::Checkout(worktree_id),
                     },
-                    RelationKind::ReferencedWorktree,
-                    "fork referenced parent worktree",
+                    RelationKind::ReferencedCheckout,
+                    "fork referenced parent checkout",
                     record_metadata(record, Some(repo)),
                 ));
             }

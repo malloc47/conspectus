@@ -262,9 +262,9 @@ fn pr_state_rank(raw: Option<&str>) -> PrStateRank {
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        AgentSessionId, BranchId, Confidence, ForgePrId, ForkId, GraphLink, LinkEndpoint,
-        LinkState, MuxSessionId, NodeId, Provenance, RelationKind, RepoId, UnresolvedEndpoint,
-        WorkspaceId, WorktreeId,
+        AgentSessionId, BranchId, CheckoutId, Confidence, ForgePrId, ForkId, GraphLink,
+        LinkEndpoint, LinkState, MuxSessionId, NodeId, Provenance, RelationKind, RepoId,
+        UnresolvedEndpoint, WorkspaceId,
     };
 
     use super::*;
@@ -282,7 +282,7 @@ mod tests {
     }
 
     fn checkout(root: &str) -> NodeId {
-        NodeId::Worktree(WorktreeId::new(RepoId::new("/repo/.git"), root))
+        NodeId::Checkout(CheckoutId::new(RepoId::new("/repo/.git"), root))
     }
 
     #[test]

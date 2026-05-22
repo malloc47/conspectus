@@ -174,7 +174,7 @@ impl AtelierDelegationFixture {
                         .map(|path| self.normalize(path))
                         .collect();
                 }
-                GraphNode::Worktree(node) => {
+                GraphNode::Checkout(node) => {
                     node.root = self.normalize(&node.root);
                     node.git_dir = node.git_dir.as_ref().map(|path| self.normalize(path));
                 }

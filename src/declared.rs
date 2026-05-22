@@ -79,7 +79,7 @@ pub enum DeclaredEndpoint {
     Repo {
         common_dir: String,
     },
-    Worktree {
+    Checkout {
         repo_common_dir: String,
         root: String,
     },
@@ -176,9 +176,9 @@ pub fn declared_endpoint_from_node_id(id: &NodeId) -> DeclaredEndpoint {
         NodeId::Repo(repo) => DeclaredEndpoint::Repo {
             common_dir: repo.common_dir.clone(),
         },
-        NodeId::Worktree(worktree) => DeclaredEndpoint::Worktree {
-            repo_common_dir: worktree.repo.common_dir.clone(),
-            root: worktree.root.clone(),
+        NodeId::Checkout(checkout) => DeclaredEndpoint::Checkout {
+            repo_common_dir: checkout.repo.common_dir.clone(),
+            root: checkout.root.clone(),
         },
         NodeId::Workspace(workspace) => DeclaredEndpoint::Workspace {
             root: workspace.root.clone(),
@@ -443,7 +443,7 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
 fn endpoint_project_root(endpoint: &DeclaredEndpoint, snapshot: &GraphSnapshot) -> Option<PathBuf> {
     match endpoint {
         DeclaredEndpoint::Repo { common_dir } => repo_root(common_dir, snapshot),
-        DeclaredEndpoint::Worktree { root, .. } | DeclaredEndpoint::Workspace { root } => {
+        DeclaredEndpoint::Checkout { root, .. } | DeclaredEndpoint::Workspace { root } => {
             Some(PathBuf::from(root))
         }
         DeclaredEndpoint::Branch {
@@ -565,7 +565,7 @@ fn known_project_roots(snapshot: &GraphSnapshot) -> Vec<PathBuf> {
                     roots.insert(parent);
                 }
             }
-            GraphNode::Worktree(worktree) => {
+            GraphNode::Checkout(worktree) => {
                 roots.insert(PathBuf::from(&worktree.root));
             }
             GraphNode::Workspace(workspace) => {
@@ -655,9 +655,9 @@ impl std::error::Error for DeclaredWriteError {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForkId, ForkNode,
-        Freshness, GraphLink, LinkState, MuxSessionId, MuxSessionNode, RepoId, RepoNode,
-        SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode, WorktreeId, WorktreeNode,
+        AgentSessionId, AgentSessionNode, BranchId, CheckoutId, CheckoutNode, Confidence,
+        ForgePrId, ForkId, ForkNode, Freshness, GraphLink, LinkState, MuxSessionId, MuxSessionNode,
+        RepoId, RepoNode, SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
     };
     use tempfile::TempDir;
 
@@ -732,10 +732,10 @@ mod tests {
             future = "ignored"
 
             [[declared.links]]
-            id = "repo-to-worktree"
+            id = "repo-to-checkout"
             relation = "belongs_to_repo"
             state = "active"
-            source = { type = "worktree", repo_common_dir = "/repo/.git", root = "/repo" }
+            source = { type = "checkout", repo_common_dir = "/repo/.git", root = "/repo" }
             target = { type = "repo", common_dir = "/repo/.git" }
             future_link_key = true
             "#,
@@ -753,10 +753,10 @@ mod tests {
             schema_version = 1
 
             [[declared.links]]
-            id = "repo-worktree"
+            id = "repo-checkout"
             relation = "belongs_to_repo"
             state = "active"
-            source = { type = "worktree", repo_common_dir = "/repo/.git", root = "/repo" }
+            source = { type = "checkout", repo_common_dir = "/repo/.git", root = "/repo" }
             target = { type = "repo", common_dir = "/repo/.git" }
 
             [[declared.links]]
@@ -901,8 +901,8 @@ mod tests {
                     provider: None,
                     name: None,
                 }),
-                GraphNode::Worktree(WorktreeNode {
-                    id: WorktreeId::new(
+                GraphNode::Checkout(CheckoutNode {
+                    id: CheckoutId::new(
                         RepoId::new(path_string(repo.join(".git"))),
                         path_string(&repo),
                     ),
@@ -914,7 +914,7 @@ mod tests {
             ..GraphSnapshot::empty()
         };
         let selection = select_store_for_declaration(
-            &DeclaredEndpoint::Worktree {
+            &DeclaredEndpoint::Checkout {
                 repo_common_dir: path_string(repo.join(".git")),
                 root: path_string(&repo),
             },
@@ -963,8 +963,8 @@ mod tests {
         let child = repo.join("nested");
         let snapshot = GraphSnapshot {
             nodes: vec![
-                GraphNode::Worktree(WorktreeNode {
-                    id: WorktreeId::new(
+                GraphNode::Checkout(CheckoutNode {
+                    id: CheckoutId::new(
                         RepoId::new(path_string(repo.join(".git"))),
                         path_string(&repo),
                     ),
@@ -1006,8 +1006,8 @@ mod tests {
         let child = repo.join("nested");
         let snapshot = GraphSnapshot {
             nodes: vec![
-                GraphNode::Worktree(WorktreeNode {
-                    id: WorktreeId::new(
+                GraphNode::Checkout(CheckoutNode {
+                    id: CheckoutId::new(
                         RepoId::new(path_string(repo.join(".git"))),
                         path_string(&repo),
                     ),

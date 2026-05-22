@@ -196,10 +196,10 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
     let checkout_node = checkout_node(checkout_id.clone(), probe);
     let mut nodes = vec![
         GraphNode::Repo(repo_node),
-        GraphNode::Worktree(checkout_node),
+        GraphNode::Checkout(checkout_node),
     ];
     let mut candidate_links = vec![git_link(
-        NodeId::Worktree(checkout_id.clone()),
+        NodeId::Checkout(checkout_id.clone()),
         NodeId::Repo(repo_id.clone()),
         RelationKind::BelongsToRepo,
         "git common dir",
@@ -222,7 +222,7 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
     if let Some(branch_ref) = &probe.branch_ref {
         let branch_id = BranchId::new(repo_id, branch_ref.clone());
         candidate_links.push(git_link(
-            NodeId::Worktree(checkout_id),
+            NodeId::Checkout(checkout_id),
             NodeId::Branch(branch_id),
             RelationKind::CheckedOutBranch,
             "symbolic HEAD",

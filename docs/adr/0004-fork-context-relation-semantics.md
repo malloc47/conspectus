@@ -30,8 +30,8 @@ Core relation kinds:
 
 - `forks_workspace`: `Fork -> Workspace`
 - `forks_repo`: `Fork -> Repo`
-- `created_worktree`: `Fork -> Worktree`
-- `referenced_worktree`: `Fork -> Worktree`
+- `created_checkout`: `Fork -> Checkout`
+- `referenced_checkout`: `Fork -> Checkout`
 - `created_branch`: `Fork -> Branch`
 - `associated_branch`: `Fork -> Branch`
 - `rooted_at_path`: `Fork -> Path` or equivalent path evidence
@@ -39,21 +39,21 @@ Core relation kinds:
 
 Relation semantics:
 
-- `created_worktree` means the fork operation or provider created or owns the
+- `created_checkout` means the fork operation or provider created or owns the
   checkout as an isolated fork artifact.
-- `referenced_worktree` means the fork context exposes an existing checkout, but
+- `referenced_checkout` means the fork context exposes an existing checkout, but
   edits are not isolated from the referenced parent.
 - `created_branch` means the provider created or intentionally allocated the
   branch for the fork.
 - `associated_branch` means the branch is relevant to the fork by discovery,
   convention, or declaration, but not proven to have been created by it.
-- `rooted_at_path` records a fork root even when the fork creates no worktrees.
+- `rooted_at_path` records a fork root even when the fork creates no checkouts.
 - `forks_repo` and `forks_workspace` describe intended context scope, not
   necessarily concrete filesystem effects.
 - `parent_fork` records fork lineage between fork nodes.
 
 Standalone repo fork-like contexts are allowed. A `Fork` may link directly to a
-`Repo`, `Worktree`, or `Branch` without requiring a `Workspace`. Conspectus
+`Repo`, `Checkout`, or `Branch` without requiring a `Workspace`. Conspectus
 should create or infer a `Workspace` only when there is layout, provider, or
 declared evidence of coordinated work.
 
@@ -89,7 +89,7 @@ remain source metadata unless they affect provider-neutral graph behavior.
 
 - Research forks are `Fork` nodes with `rooted_at_path` and optional reference
   links, not failed context forks.
-- Selected forks use both `created_worktree` and `referenced_worktree` links.
+- Selected forks use both `created_checkout` and `referenced_checkout` links.
 - Created, referenced, associated, and metadata-only fork effects are
   represented with relation kinds plus source metadata.
 - Standalone repo fork-like contexts are allowed and do not require an enclosing

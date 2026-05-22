@@ -23,8 +23,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::model::{
-    AgentSessionNode, GraphLink, GraphNode, GraphSnapshot, MuxSessionNode, NodeId, RelationKind,
-    RepoId, RepoNode, WorkspaceId, WorktreeId, WorktreeNode,
+    AgentSessionNode, CheckoutId, CheckoutNode, GraphLink, GraphNode, GraphSnapshot,
+    MuxSessionNode, NodeId, RelationKind, RepoId, RepoNode, WorkspaceId,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -98,7 +98,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut last_workspace: Option<Option<String>> = None;
     let mut last_repo: Option<RepoId> = None;
     for (key, sessions) in buckets {
-        emit_worktree_bucket(&mut ctx, key, sessions, &mut last_workspace, &mut last_repo);
+        emit_checkout_bucket(&mut ctx, key, sessions, &mut last_workspace, &mut last_repo);
     }
 
     if !ungrouped.is_empty() {
@@ -151,7 +151,7 @@ fn node_id_path(id: &NodeId) -> Option<&str> {
     match id {
         NodeId::Workspace(ws) => Some(ws.root.as_str()),
         NodeId::Repo(repo) => Some(repo_display_path_from_common_dir(&repo.common_dir)),
-        NodeId::Worktree(wt) => Some(wt.root.as_str()),
+        NodeId::Checkout(wt) => Some(wt.root.as_str()),
         _ => None,
     }
 }
@@ -191,7 +191,7 @@ struct SessionsIndex<'a> {
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
     mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
     repos: BTreeMap<NodeId, &'a RepoNode>,
-    worktrees: BTreeMap<NodeId, &'a WorktreeNode>,
+    worktrees: BTreeMap<NodeId, &'a CheckoutNode>,
     /// `(source, relation)` → all *active* candidate links. Mirrors
     /// `SnapshotView::by_source_relation` in `output::table` but
     /// scoped to the TUI's needs.
@@ -217,7 +217,7 @@ impl<'a> SessionsIndex<'a> {
                 GraphNode::Repo(repo) => {
                     repos.insert(id, repo);
                 }
-                GraphNode::Worktree(worktree) => {
+                GraphNode::Checkout(worktree) => {
                     worktrees.insert(id, worktree);
                 }
                 _ => {}
@@ -247,13 +247,13 @@ impl<'a> SessionsIndex<'a> {
     }
 
     /// Find the deepest worktree node whose root contains `cwd`.
-    /// Mirrors the behavior of `output::table::session_worktree_root`.
-    fn worktree_for_cwd(&self, cwd: &str) -> Option<(&WorktreeId, &WorktreeNode)> {
+    /// Mirrors the behavior of `output::table::session_checkout_root`.
+    fn checkout_for_cwd(&self, cwd: &str) -> Option<(&CheckoutId, &CheckoutNode)> {
         let cwd = Path::new(cwd);
         self.worktrees
             .iter()
             .filter_map(|(id, node)| match id {
-                NodeId::Worktree(wt_id) if path_is_ancestor_of(Path::new(&wt_id.root), cwd) => {
+                NodeId::Checkout(wt_id) if path_is_ancestor_of(Path::new(&wt_id.root), cwd) => {
                     Some((wt_id, *node))
                 }
                 _ => None,
@@ -263,11 +263,11 @@ impl<'a> SessionsIndex<'a> {
 
     /// Count worktrees that belong to `repo`. Used to apply the
     /// "show worktree level only when ≥ 2 worktrees" rule.
-    fn worktree_count_for_repo(&self, repo: &RepoId) -> usize {
+    fn checkout_count_for_repo(&self, repo: &RepoId) -> usize {
         self.worktrees
             .keys()
             .filter(|id| match id {
-                NodeId::Worktree(wt_id) => &wt_id.repo == repo,
+                NodeId::Checkout(wt_id) => &wt_id.repo == repo,
                 _ => false,
             })
             .count()
@@ -368,7 +368,7 @@ fn resolve_group_key(
     grouping: SessionsGrouping,
 ) -> Option<GroupKey> {
     let cwd = entry.node.cwd.as_deref()?;
-    let (worktree_id, _worktree) = index.worktree_for_cwd(cwd)?;
+    let (worktree_id, _worktree) = index.checkout_for_cwd(cwd)?;
     let repo_id = worktree_id.repo.clone();
     let repo_node_id = NodeId::Repo(repo_id.clone());
     let workspace = match grouping {
@@ -379,11 +379,11 @@ fn resolve_group_key(
         // Repo/Worktree/ScanRoot collapse the workspace level.
         // ScanRoot fallback to repo grouping until the runtime
         // wires scan roots into the builder.
-        SessionsGrouping::Repo | SessionsGrouping::Worktree | SessionsGrouping::ScanRoot => None,
+        SessionsGrouping::Repo | SessionsGrouping::Checkout | SessionsGrouping::ScanRoot => None,
     };
 
     let worktree = match grouping {
-        SessionsGrouping::Worktree => Some(worktree_id.root.clone()),
+        SessionsGrouping::Checkout => Some(worktree_id.root.clone()),
         // For graph/repo grouping, the worktree level is decided by
         // the builder's repo-fan-out rule (≥ 2 worktrees) later.
         // We always include the worktree key here so the grouping
@@ -406,7 +406,7 @@ fn resolve_group_key(
 /// repo group rows from prior buckets when those keys haven't
 /// changed. Mutates `last_workspace` / `last_repo` to track the
 /// most recent header emitted.
-fn emit_worktree_bucket(
+fn emit_checkout_bucket(
     ctx: &mut EmitCtx<'_, '_>,
     key: GroupKey,
     mut sessions: Vec<SessionEntry<'_>>,
@@ -431,10 +431,10 @@ fn emit_worktree_bucket(
     }
     let repo_depth = depth;
 
-    let worktree_should_render = matches!(ctx.grouping, SessionsGrouping::Worktree)
-        || ctx.index.worktree_count_for_repo(&key.repo_id) >= 2;
-    let session_depth = if worktree_should_render && let Some(wt_root) = &key.worktree {
-        push_worktree_row(
+    let checkout_should_render = matches!(ctx.grouping, SessionsGrouping::Checkout)
+        || ctx.index.checkout_count_for_repo(&key.repo_id) >= 2;
+    let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {
+        push_checkout_row(
             ctx.tree,
             repo_depth.saturating_add(1),
             &key.repo_id,
@@ -488,15 +488,15 @@ fn repo_display_path_from_common_dir(common_dir: &str) -> &str {
     common_dir.strip_suffix("/.git").unwrap_or(common_dir)
 }
 
-fn push_worktree_row(
+fn push_checkout_row(
     tree: &mut RowTree,
     depth: u8,
     repo: &RepoId,
     worktree_root: &str,
     home: Option<&Path>,
 ) {
-    let wt_id = WorktreeId::new(repo.clone(), worktree_root.to_string());
-    let node_id = NodeId::Worktree(wt_id);
+    let wt_id = CheckoutId::new(repo.clone(), worktree_root.to_string());
+    let node_id = NodeId::Checkout(wt_id);
     tree.rows.push(Row {
         id: RowId::Group(node_id.clone()),
         depth,
@@ -719,9 +719,9 @@ fn unique_prefix_len(ids: &[(NodeId, String)]) -> usize {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, Confidence, GraphLink, GraphSnapshot, LinkEndpoint,
-        LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode, WorkspaceId,
-        WorkspaceNode, WorktreeId, WorktreeNode,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink,
+        GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId,
+        RepoNode, WorkspaceId, WorkspaceNode,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -741,8 +741,8 @@ mod tests {
     }
 
     fn worktree(repo_common: &str, root: &str) -> GraphNode {
-        GraphNode::Worktree(WorktreeNode {
-            id: WorktreeId::new(RepoId::new(repo_common), root.to_string()),
+        GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_common), root.to_string()),
             root: root.to_string(),
             git_dir: None,
             current_branch: None,
@@ -1129,7 +1129,7 @@ mod tests {
                 matches!(
                     k,
                     RowKind::Group(GroupRow {
-                        primary_node: Some(NodeId::Worktree(_)),
+                        primary_node: Some(NodeId::Checkout(_)),
                         ..
                     })
                 )
@@ -1160,7 +1160,7 @@ mod tests {
                 matches!(
                     &r.kind,
                     RowKind::Group(GroupRow {
-                        primary_node: Some(NodeId::Worktree(_)),
+                        primary_node: Some(NodeId::Checkout(_)),
                         ..
                     })
                 )
@@ -1412,7 +1412,7 @@ mod tests {
         let snapshot = resolve_snapshot(snapshot);
         let tree = build(SessionsBuildInputs {
             snapshot: &snapshot,
-            grouping: SessionsGrouping::Worktree,
+            grouping: SessionsGrouping::Checkout,
             home: Some(home().as_path()),
             now: None,
             cwd: None,
@@ -1424,7 +1424,7 @@ mod tests {
             matches!(
                 r.kind,
                 RowKind::Group(GroupRow {
-                    primary_node: Some(NodeId::Worktree(_)),
+                    primary_node: Some(NodeId::Checkout(_)),
                     ..
                 })
             )
@@ -1484,7 +1484,7 @@ mod tests {
         assert_eq!(marked.len(), 1, "exactly one row should be marked");
         let marked = marked[0];
         match &marked.primary_node {
-            Some(NodeId::Worktree(wt)) => assert_eq!(wt.root, "/home/op/wt/featx"),
+            Some(NodeId::Checkout(wt)) => assert_eq!(wt.root, "/home/op/wt/featx"),
             other => panic!("expected featx worktree marked, got {other:?}"),
         }
     }

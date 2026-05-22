@@ -46,8 +46,8 @@ Relation kinds should express what the fork affected:
 
 - `forks_workspace`
 - `forks_repo`
-- `created_worktree`
-- `referenced_worktree`
+- `created_checkout`
+- `referenced_checkout`
 - `parent_session`
 - `child_session`
 - `created_branch`
@@ -59,12 +59,12 @@ Relation kinds should express what the fork affected:
 For Atelier:
 
 - One `.atelier/forks/index.toml` `ForkEntry` maps to one `Fork` node.
-- Worktree-mode repo entries produce `created_worktree` and branch association
+- Worktree-mode repo entries produce `created_checkout` and branch association
   links.
-- Selected-mode repo entries produce `created_worktree` links for forked repos
-  and `referenced_worktree` links for symlinked parent repos.
+- Selected-mode repo entries produce `created_checkout` links for forked repos
+  and `referenced_checkout` links for symlinked parent repos.
 - Research-mode fork entries produce a `Fork` node with root/provider metadata
-  and reference links, but no created worktrees.
+  and reference links, but no created checkouts.
 - Each `ForkHarnessEntry` contributes `parent_session` and/or `child_session`
   link candidates when source or fork session IDs are present.
 - Atelier-specific fields such as mode, state, read-only flag, sandbox
@@ -106,7 +106,7 @@ For Atelier:
 - A single Atelier fork can link to multiple repos, worktrees, branches, and
   agent sessions without creating separate context/session fork nodes.
 - Atelier repo membership states should map to relation kinds such as
-  `created_worktree` and `referenced_worktree`.
+  `created_checkout` and `referenced_checkout`.
 - Research forks are represented as fork nodes with metadata and reference
   links, even when they create no worktrees.
 - Atelier-specific fork fields remain source metadata unless later promoted to

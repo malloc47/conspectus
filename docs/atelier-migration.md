@@ -14,7 +14,7 @@ that cover the same inspection workflow.
 | `atelier session list` | `conspectus session` | Default projection is one row per agent session. It includes preferred mux, fork, branch, and PR context when discovered. |
 | `atelier mux status` | `conspectus session --projection mux` | Mux projection is one row per tmux session and shows attached agent counts. |
 | forge-related status surfaces | `conspectus session` or `conspectus graph --format json` | Session tables show preferred PR context; graph JSON preserves all PR nodes, branch links, unresolved endpoints, and diagnostics. |
-| graph-heavy parts of `atelier status` | `conspectus graph --format json` | Graph JSON is the stable machine-readable surface for repos, worktrees, branches, workspaces, forks, sessions, mux sessions, and PRs. |
+| graph-heavy parts of `atelier status` | `conspectus graph --format json` | Graph JSON is the stable machine-readable surface for repos, checkouts, branches, workspaces, forks, sessions, mux sessions, and PRs. |
 
 Use `--scan-root PATH` when the command should inspect a workspace or
 repo other than the current working directory:

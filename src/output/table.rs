@@ -1115,7 +1115,7 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
             session_workspace_identifier(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
         }
         "checkout" => {
-            session_worktree_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
+            session_checkout_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
         }
         "branch" => session_branch_label(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
         "repo" => session_repo_identifier(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
@@ -1135,11 +1135,11 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
     }
 }
 
-/// Find the worktree whose root contains the session's cwd. Walks
+/// Find the checkout whose root contains the session's cwd. Walks
 /// `snapshot.nodes` once per call; row counts are bounded so the cost
 /// stays small.
-fn session_worktree_root(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    Some(session_worktree_id(view, session)?.root.clone())
+fn session_checkout_root(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
+    Some(session_checkout_id(view, session)?.root.clone())
 }
 
 fn session_workspace_identifier(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
@@ -1167,18 +1167,18 @@ fn session_workspace_identifier(view: &SnapshotView<'_>, session_id: &NodeId) ->
     }
 }
 
-/// Resolve the session's worktree and follow `CheckedOutBranch` to the
+/// Resolve the session's checkout and follow `CheckedOutBranch` to the
 /// branch, returning the refname with `refs/heads/` stripped.
 fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    let session_worktree = session_worktree_id(view, session)?;
+    let session_checkout = session_checkout_id(view, session)?;
     for ((source, relation), links) in &view.by_source_relation {
         if *relation != RelationKind::CheckedOutBranch {
             continue;
         }
-        let NodeId::Worktree(worktree_id) = source else {
+        let NodeId::Checkout(worktree_id) = source else {
             continue;
         };
-        if worktree_id != session_worktree {
+        if worktree_id != session_checkout {
             continue;
         }
         let preferred = pick_preferred(links)?;
@@ -1192,21 +1192,21 @@ fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> 
     None
 }
 
-/// Resolve the session's worktree and return its repo identifier
+/// Resolve the session's checkout and return its repo identifier
 /// (`RepoId.common_dir`).
 fn session_repo_identifier(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    Some(session_worktree_id(view, session)?.repo.common_dir.clone())
+    Some(session_checkout_id(view, session)?.repo.common_dir.clone())
 }
 
-fn session_worktree_id<'a>(
+fn session_checkout_id<'a>(
     view: &'a SnapshotView<'_>,
     session: &AgentSessionNode,
-) -> Option<&'a crate::model::WorktreeId> {
+) -> Option<&'a crate::model::CheckoutId> {
     let cwd = Path::new(session.cwd.as_deref()?);
     view.by_source_relation
         .keys()
         .filter_map(|(source, _relation)| match source {
-            NodeId::Worktree(worktree_id)
+            NodeId::Checkout(worktree_id)
                 if path_is_ancestor_of(Path::new(&worktree_id.root), cwd) =>
             {
                 Some(worktree_id)
@@ -1628,10 +1628,10 @@ fn strip_branch_prefix(refname: &str) -> &str {
     refname.strip_prefix("refs/heads/").unwrap_or(refname)
 }
 
-/// Find agent-session labels whose worktree has this PR's branch
+/// Find agent-session labels whose checkout has this PR's branch
 /// checked out. Walks `CheckedOutBranch` candidate links to locate
 /// worktrees, then matches sessions whose cwd is at or under that
-/// worktree root.
+/// checkout root.
 fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<String> {
     let Some(branch_id) = pr_preferred_branch_id(view, pr_id) else {
         return Vec::new();
@@ -1639,7 +1639,7 @@ fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<St
     let branch_node_id = NodeId::Branch(branch_id);
 
     // Worktrees whose CheckedOutBranch link points at this branch.
-    let worktree_roots: Vec<&str> = view
+    let checkout_roots: Vec<&str> = view
         .by_source_relation
         .iter()
         .flat_map(|((_, relation), links)| {
@@ -1655,7 +1655,7 @@ fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<St
                     )
                 })
                 .filter_map(|link| match &link.source {
-                    NodeId::Worktree(w) => Some(w.root.as_str()),
+                    NodeId::Checkout(w) => Some(w.root.as_str()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -1667,7 +1667,7 @@ fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<St
         let Some(cwd) = session.cwd.as_deref() else {
             continue;
         };
-        if worktree_roots
+        if checkout_roots
             .iter()
             .any(|root| path_is_ancestor_of(Path::new(root), Path::new(cwd)))
         {
@@ -1819,7 +1819,7 @@ fn short_session_id(key: &str) -> String {
 
 /// Walk session → fork associations → branches → PRs to find the
 /// preferred PR for an agent session, if any. This covers the case
-/// where a session lives in a worktree whose branch has an open PR.
+/// where a session lives in a checkout whose branch has an open PR.
 fn preferred_pr_for_session(view: &SnapshotView<'_>, session_id: &NodeId) -> (String, String) {
     let session_cwd = match view.agent_sessions.get(session_id) {
         Some(session) => session.cwd.as_deref(),
@@ -1830,7 +1830,7 @@ fn preferred_pr_for_session(view: &SnapshotView<'_>, session_id: &NodeId) -> (St
     };
 
     // PRs are keyed off the branch node; the session's cwd is the
-    // worktree path, but we don't have a direct session→branch link
+    // checkout path, but we don't have a direct session→branch link
     // yet. For now match PRs whose link source metadata points to
     // a branch whose ref name appears in `session_cwd`. This is
     // intentionally conservative: when we add session→branch links
@@ -3270,15 +3270,15 @@ mod tests {
 
     #[test]
     fn sessions_projection_optional_branch_repo_worktree_columns() {
-        use crate::model::{WorktreeId, WorktreeNode};
+        use crate::model::{CheckoutId, CheckoutNode};
 
         let repo_id = RepoId::new("/workspace/repo/.git");
         let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature".to_string());
-        let worktree_id = WorktreeId::new(repo_id.clone(), "/workspace/repo");
+        let worktree_id = CheckoutId::new(repo_id.clone(), "/workspace/repo");
 
         let worktree_to_branch = GraphLink {
             id: "wt-branch".to_string(),
-            source: NodeId::Worktree(worktree_id.clone()),
+            source: NodeId::Checkout(worktree_id.clone()),
             target: LinkEndpoint::Node {
                 id: NodeId::Branch(branch_id),
             },
@@ -3293,7 +3293,7 @@ mod tests {
         let snapshot = GraphSnapshot {
             nodes: vec![
                 agent_session("codex", "alpha", Some("/workspace/repo/crates/core")),
-                GraphNode::Worktree(WorktreeNode {
+                GraphNode::Checkout(CheckoutNode {
                     id: worktree_id,
                     root: "/workspace/repo".to_string(),
                     git_dir: None,
@@ -3483,17 +3483,17 @@ mod tests {
 
     #[test]
     fn prs_projection_attached_shows_agent_with_matching_cwd() {
-        // PR -> branch (BranchHasForgePr) -> worktree (CheckedOutBranch
+        // PR -> branch (BranchHasForgePr) -> checkout (CheckedOutBranch
         // reversed) -> agent_session with matching cwd. Renders the
         // agent label in the ATTACHED column.
-        use crate::model::{WorktreeId, WorktreeNode};
+        use crate::model::{CheckoutId, CheckoutNode};
 
         let repo_id = RepoId::new("/workspace/repo/.git");
         let pr_id = ForgePrId::new("github", "github.com", "octo", "repo", 7);
         let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature".to_string());
-        let worktree_id = WorktreeId::new(repo_id.clone(), "/workspace/repo");
+        let worktree_id = CheckoutId::new(repo_id.clone(), "/workspace/repo");
 
-        let worktree_node = GraphNode::Worktree(WorktreeNode {
+        let worktree_node = GraphNode::Checkout(CheckoutNode {
             id: worktree_id.clone(),
             root: "/workspace/repo".to_string(),
             git_dir: None,
@@ -3512,7 +3512,7 @@ mod tests {
 
         let worktree_to_branch = GraphLink {
             id: "wt-branch".to_string(),
-            source: NodeId::Worktree(worktree_id),
+            source: NodeId::Checkout(worktree_id),
             target: LinkEndpoint::Node {
                 id: NodeId::Branch(branch_id),
             },

@@ -39,11 +39,11 @@ pub use crate::discovery::{
     discover_local_at_roots, discover_local_with, empty_graph, merge_fragments,
 };
 pub use crate::model::{
-    AgentSessionId, AgentSessionNode, BranchId, BranchNode, Confidence, Diagnostic, ForgePrId,
-    ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode,
-    ResolvedRelationship, SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
-    WorktreeId, WorktreeNode,
+    AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence,
+    Diagnostic, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
+    GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId, Provenance,
+    RelationKind, RepoId, RepoNode, ResolvedRelationship, SourceMetadata, UnresolvedEndpoint,
+    WorkspaceId, WorkspaceNode,
 };
 pub use crate::output::{render_graph_json, table};
 pub use crate::resolve::{ResolveOutput, resolve_links, resolve_snapshot};

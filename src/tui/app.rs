@@ -467,8 +467,8 @@ fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, RepoId, RepoNode, WorktreeId,
-        WorktreeNode,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
+        RepoId, RepoNode,
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::SessionsGrouping;
@@ -481,8 +481,8 @@ mod tests {
             let repo_id = RepoId::new(*cwd);
             snap.nodes
                 .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-            snap.nodes.push(GraphNode::Worktree(WorktreeNode {
-                id: WorktreeId::new(repo_id, cwd.to_string()),
+            snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+                id: CheckoutId::new(repo_id, cwd.to_string()),
                 root: cwd.to_string(),
                 git_dir: None,
                 current_branch: None,

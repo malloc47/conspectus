@@ -41,9 +41,11 @@ projection rules that group sessions.
 Adopt **`Checkout`** as the provider-neutral model term for a concrete
 working tree or editable repository view. A checkout may be an ordinary clone
 checkout, a linked git worktree, a linked worktree whose common dir belongs to
-a bare repository, or a workspace member reached through a symlink. The
-implementation may keep legacy `Worktree` type names and JSON fields during
-the migration, but the north-star model and new work should use `Checkout`.
+a bare repository, or a workspace member reached through a symlink.
+Implementation now uses `Checkout` type names and JSON fields; source adapters
+may still preserve provider-native `worktree` strings when they describe
+actual git or Atelier formats. The north-star model and new work should use
+`Checkout`.
 
 Checkout identity for local git discovery is:
 
@@ -107,14 +109,11 @@ probing.
   workspace is persistent and each member remains a real checkout elsewhere.
 - Some projections must support multi-home rows or explicit deduplication
   modes. A strict tree remains a view choice, not a graph invariant.
-- The implementation needs a staged terminology migration. Existing code,
-  snapshots, and graph JSON may still say `worktree` until a dedicated hard
-  rename changes those surfaces to checkout terminology in one reviewable
-  slice. Conspectus is not in active external use, so new user-facing aliases
-  should not be added just to preserve legacy `worktree` spelling.
-- Fork relation kinds from ADR 0004 such as `created_worktree` and
-  `referenced_worktree` remain valid legacy relation names during migration,
-  but new model prose should describe them as checkout effects.
+- Graph JSON and model names now use checkout terminology. Conspectus is not
+  in active external use, so user-facing aliases should not be added just to
+  preserve legacy `worktree` spelling.
+- Fork relation kinds from ADR 0004 use checkout terminology, such as
+  `created_checkout` and `referenced_checkout`.
 
 ## Alternatives Considered
 
