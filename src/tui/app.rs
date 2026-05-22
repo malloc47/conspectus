@@ -532,6 +532,7 @@ mod tests {
                 cwd: Some(cwd.to_string()),
                 title: None,
                 last_message_preview: None,
+                last_active_epoch: None,
             }));
         }
         resolve_snapshot(snap)

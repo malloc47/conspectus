@@ -419,6 +419,7 @@ mod tests {
             cwd: Some("/work".to_string()),
             title: None,
             last_message_preview: None,
+            last_active_epoch: None,
         })
     }
 

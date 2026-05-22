@@ -125,6 +125,7 @@ mod tests {
                     cwd: None,
                     title: None,
                     last_message_preview: None,
+                    last_active_epoch: None,
                 })],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
@@ -201,6 +202,7 @@ mod tests {
             cwd: None,
             title: None,
             last_message_preview: None,
+            last_active_epoch: None,
         });
         let session_beta = GraphNode::AgentSession(AgentSessionNode {
             id: AgentSessionId::new("codex", "scope", "beta"),
@@ -208,6 +210,7 @@ mod tests {
             cwd: None,
             title: None,
             last_message_preview: None,
+            last_active_epoch: None,
         });
 
         let fragment = HarnessDiscovery::new()

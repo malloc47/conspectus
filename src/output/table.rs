@@ -474,6 +474,12 @@ const SESSIONS_COLUMNS: &[ColumnSpec] = &[
         description: "Adapter-populated session title (opencode chat topic, claude-code compaction summary). `—` when unset.",
         default: false,
     },
+    ColumnSpec {
+        key: "activity",
+        header: "ACTIVITY",
+        description: "Relative recency from `AgentSessionNode.last_active_epoch` (e.g. `2h`, `3d`).",
+        default: false,
+    },
 ];
 
 const MUX_COLUMNS: &[ColumnSpec] = &[
@@ -1131,6 +1137,11 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
             .clone()
             .unwrap_or_else(|| "—".to_string()),
         "title" => ctx.session.title.clone().unwrap_or_else(|| "—".to_string()),
+        "activity" => ctx
+            .session
+            .last_active_epoch
+            .map(|epoch| format_relative_age(epoch, current_epoch()))
+            .unwrap_or_else(|| "—".to_string()),
         _ => "—".to_string(),
     }
 }
@@ -2161,6 +2172,7 @@ mod tests {
             cwd: cwd.map(str::to_string),
             title: None,
             last_message_preview: None,
+            last_active_epoch: None,
         })
     }
 
@@ -2176,6 +2188,7 @@ mod tests {
             cwd: cwd.map(str::to_string),
             title: None,
             last_message_preview: Some(preview.to_string()),
+            last_active_epoch: None,
         })
     }
 
@@ -4024,6 +4037,7 @@ mod tests {
             cwd: Some("/work".to_string()),
             title: Some("a very long conversation topic".to_string()),
             last_message_preview: None,
+            last_active_epoch: None,
         });
         let snapshot = GraphSnapshot {
             nodes: vec![node],
@@ -4082,6 +4096,7 @@ mod tests {
             cwd: Some("/work".to_string()),
             title: Some("clipboard sync over SSH".to_string()),
             last_message_preview: None,
+            last_active_epoch: None,
         });
         let without = agent_session("codex", "no-title", Some("/work"));
         let snapshot = GraphSnapshot {
@@ -4120,6 +4135,7 @@ mod tests {
             cwd: Some("/work".to_string()),
             title: Some("agent title".to_string()),
             last_message_preview: None,
+            last_active_epoch: None,
         });
         let mux = mux_session("tmux", "editor", Some("/work"));
         let snapshot = GraphSnapshot {

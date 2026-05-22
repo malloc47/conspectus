@@ -74,6 +74,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             cwd: info.directory.clone(),
             title: info.title.clone(),
             last_message_preview: info.last_message_preview.clone(),
+            last_active_epoch: info.last_active_epoch,
         }));
     }
 
@@ -121,6 +122,21 @@ struct SessionInfo {
     /// and older schemas without the table leave this `None`.
     #[serde(default)]
     last_message_preview: Option<String>,
+    /// Best-effort latest activity timestamp in Unix epoch seconds.
+    /// SQLite rows store millisecond timestamps; legacy info.json stores
+    /// the same shape under `time.updated` / `time.created`.
+    #[serde(default)]
+    last_active_epoch: Option<i64>,
+    #[serde(default)]
+    time: Option<SessionTime>,
+}
+
+#[derive(Deserialize)]
+struct SessionTime {
+    #[serde(default)]
+    created: Option<i64>,
+    #[serde(default)]
+    updated: Option<i64>,
 }
 
 fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
@@ -135,33 +151,35 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
         return Vec::new();
     };
 
-    // Newer opencode schemas expose `parent_id`; older ones don't. Try the
-    // richer query first and fall back to the lineage-less form rather than
-    // silently dropping every session when the column is missing.
-    let with_parent =
-        connection.prepare("SELECT id, directory, title, parent_id FROM session ORDER BY id");
-
-    let (mut statement, has_parent) = match with_parent {
-        Ok(statement) => (statement, true),
-        Err(_) => {
-            match connection.prepare("SELECT id, directory, title FROM session ORDER BY id") {
-                Ok(statement) => (statement, false),
-                Err(_) => return Vec::new(),
-            }
-        }
+    let Some(mut query) = session_query(&connection) else {
+        return Vec::new();
     };
 
-    let Ok(rows) = statement.query_map([], |row| {
+    let Ok(rows) = query.statement.query_map([], |row| {
         Ok(SessionInfo {
             id: row.get::<_, String>(0)?,
             directory: row.get::<_, Option<String>>(1)?,
             title: row.get::<_, Option<String>>(2)?,
-            parent_id: if has_parent {
+            parent_id: if query.has_parent {
                 row.get::<_, Option<String>>(3)?
             } else {
                 None
             },
+            last_active_epoch: if query.has_time && query.has_parent {
+                epoch_ms_to_seconds(
+                    row.get::<_, Option<i64>>(4)?
+                        .or(row.get::<_, Option<i64>>(5)?),
+                )
+            } else if query.has_time {
+                epoch_ms_to_seconds(
+                    row.get::<_, Option<i64>>(3)?
+                        .or(row.get::<_, Option<i64>>(4)?),
+                )
+            } else {
+                None
+            },
             last_message_preview: None,
+            time: None,
         })
     }) else {
         return Vec::new();
@@ -190,6 +208,53 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
     }
 
     sessions
+}
+
+struct SessionQuery<'conn> {
+    statement: rusqlite::Statement<'conn>,
+    has_parent: bool,
+    has_time: bool,
+}
+
+fn session_query(connection: &Connection) -> Option<SessionQuery<'_>> {
+    let candidates = [
+        (
+            "SELECT id, directory, title, parent_id, time_updated, time_created FROM session ORDER BY id",
+            true,
+            true,
+        ),
+        (
+            "SELECT id, directory, title, parent_id FROM session ORDER BY id",
+            true,
+            false,
+        ),
+        (
+            "SELECT id, directory, title, time_updated, time_created FROM session ORDER BY id",
+            false,
+            true,
+        ),
+        (
+            "SELECT id, directory, title FROM session ORDER BY id",
+            false,
+            false,
+        ),
+    ];
+
+    for (sql, has_parent, has_time) in candidates {
+        if let Ok(statement) = connection.prepare(sql) {
+            return Some(SessionQuery {
+                statement,
+                has_parent,
+                has_time,
+            });
+        }
+    }
+
+    None
+}
+
+fn epoch_ms_to_seconds(epoch_ms: Option<i64>) -> Option<i64> {
+    epoch_ms.map(|value| value / 1000)
 }
 
 /// Build a `session_id → most-recent-text` map by walking the `part`
@@ -323,7 +388,14 @@ fn read_legacy_sessions(state_root: &Path) -> Result<Vec<SessionInfo>> {
 
 fn read_info(path: &Path) -> Option<SessionInfo> {
     let body = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&body).ok()
+    let mut info: SessionInfo = serde_json::from_str(&body).ok()?;
+    if info.last_active_epoch.is_none() {
+        info.last_active_epoch = info
+            .time
+            .as_ref()
+            .and_then(|time| epoch_ms_to_seconds(time.updated.or(time.created)));
+    }
+    Some(info)
 }
 
 #[cfg(test)]
@@ -434,6 +506,7 @@ mod tests {
         assert_eq!(sessions[0].id.session_key, "db-session");
         assert_eq!(sessions[0].cwd.as_deref(), Some("/work/db"));
         assert_eq!(sessions[0].title.as_deref(), Some("database work"));
+        assert_eq!(sessions[0].last_active_epoch, Some(1_700_000_000));
     }
 
     #[test]
@@ -508,6 +581,8 @@ mod tests {
                 directory,
                 title,
                 parent_id: None,
+                time_created: Some(1_600_000_000_000),
+                time_updated: Some(1_700_000_000_000),
             }],
         );
     }
@@ -517,6 +592,8 @@ mod tests {
         directory: Option<&'a str>,
         title: Option<&'a str>,
         parent_id: Option<&'a str>,
+        time_created: Option<i64>,
+        time_updated: Option<i64>,
     }
 
     fn write_sqlite_sessions(path: &Path, with_parent_column: bool, rows: &[SqliteSessionRow<'_>]) {
@@ -550,15 +627,28 @@ mod tests {
             if with_parent_column {
                 connection
                     .execute(
-                        "INSERT INTO session (id, directory, title, parent_id) VALUES (?1, ?2, ?3, ?4)",
-                        (row.id, row.directory, row.title, row.parent_id),
+                        "INSERT INTO session (id, directory, title, time_created, time_updated, parent_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        (
+                            row.id,
+                            row.directory,
+                            row.title,
+                            row.time_created,
+                            row.time_updated,
+                            row.parent_id,
+                        ),
                     )
                     .expect("insert session row with parent_id");
             } else {
                 connection
                     .execute(
-                        "INSERT INTO session (id, directory, title) VALUES (?1, ?2, ?3)",
-                        (row.id, row.directory, row.title),
+                        "INSERT INTO session (id, directory, title, time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        (
+                            row.id,
+                            row.directory,
+                            row.title,
+                            row.time_created,
+                            row.time_updated,
+                        ),
                     )
                     .expect("insert session row");
             }
@@ -586,12 +676,16 @@ mod tests {
                     directory: Some("/work/repo"),
                     title: Some("parent"),
                     parent_id: None,
+                    time_created: None,
+                    time_updated: None,
                 },
                 SqliteSessionRow {
                     id: "child",
                     directory: Some("/work/repo"),
                     title: Some("child"),
                     parent_id: Some("parent"),
+                    time_created: None,
+                    time_updated: None,
                 },
             ],
         );
@@ -636,6 +730,8 @@ mod tests {
                 directory: Some("/work/repo"),
                 title: None,
                 parent_id: Some("pruned-parent"),
+                time_created: None,
+                time_updated: None,
             }],
         );
 
@@ -663,6 +759,8 @@ mod tests {
                 directory: Some("/work/repo"),
                 title: None,
                 parent_id: Some("loop"),
+                time_created: None,
+                time_updated: None,
             }],
         );
 
@@ -687,6 +785,8 @@ mod tests {
                 directory: Some("/work/repo"),
                 title: Some("legacy session"),
                 parent_id: None,
+                time_created: None,
+                time_updated: None,
             }],
         );
 

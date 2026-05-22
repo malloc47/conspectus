@@ -11,7 +11,8 @@ expression: normalized
         "state_scope": "/fixture/.state/codex",
         "session_key": "orphan-session"
       },
-      "harness_key": "codex"
+      "harness_key": "codex",
+      "last_active_epoch": 1700000000
     }
   ],
   "candidate_links": [],

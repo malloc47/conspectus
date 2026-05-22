@@ -285,6 +285,11 @@ pub struct AgentSessionNode {
     /// when the source is longer. See ADR 0023.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_message_preview: Option<String>,
+    /// Best-effort timestamp for the session's latest observed activity
+    /// (Unix epoch seconds). Harness adapters populate this from transcript
+    /// file mtimes or provider state when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_epoch: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]

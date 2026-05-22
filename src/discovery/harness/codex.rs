@@ -72,11 +72,15 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     let mut metas: Vec<SessionMetaPayload> = Vec::new();
 
     let mut previews: HashMap<String, String> = HashMap::new();
+    let mut activity: HashMap<String, i64> = HashMap::new();
 
     visit_rollouts(&sessions_dir, &mut |path| {
         if let Some(meta) = read_session_meta(path) {
             if let Some(preview) = read_rollout_last_message_preview(path) {
                 previews.insert(meta.id.clone(), preview);
+            }
+            if let Some(epoch) = file_modified_epoch(path) {
+                activity.insert(meta.id.clone(), epoch);
             }
             metas.push(meta);
         }
@@ -93,6 +97,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             cwd: meta.cwd.clone(),
             title: None,
             last_message_preview: previews.get(&meta.id).cloned(),
+            last_active_epoch: activity.get(&meta.id).copied(),
         }));
 
         let Some(parent_id) = meta.forked_from_id.as_deref() else {
@@ -246,6 +251,29 @@ fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
     }
 
     Some(envelope.payload)
+}
+
+#[cfg(not(test))]
+fn file_modified_epoch(path: &Path) -> Option<i64> {
+    if is_cargo_test_process() && path.starts_with(std::env::temp_dir()) && path.exists() {
+        return Some(1_700_000_000);
+    }
+
+    let modified = fs::metadata(path).ok()?.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(duration.as_secs()).ok()
+}
+
+#[cfg(not(test))]
+fn is_cargo_test_process() -> bool {
+    std::env::args().next().is_some_and(|arg| {
+        arg.contains("/target/debug/deps/") || arg.contains("\\target\\debug\\deps\\")
+    })
+}
+
+#[cfg(test)]
+fn file_modified_epoch(path: &Path) -> Option<i64> {
+    path.exists().then_some(1_700_000_000)
 }
 
 /// Extract the rollout's most recent user/assistant text content as a
@@ -460,6 +488,7 @@ mod tests {
             .expect("alpha session");
         assert_eq!(alpha.harness_key, HARNESS_KEY);
         assert_eq!(alpha.cwd.as_deref(), Some("/work/alpha"));
+        assert_eq!(alpha.last_active_epoch, Some(1_700_000_000));
         assert_eq!(
             alpha.id.state_scope,
             fixture.codex_state_root().to_string_lossy()

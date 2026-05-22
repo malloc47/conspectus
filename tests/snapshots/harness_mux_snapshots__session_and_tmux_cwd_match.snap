@@ -12,7 +12,8 @@ expression: normalized
         "session_key": "session-x"
       },
       "harness_key": "codex",
-      "cwd": "/fixture/work"
+      "cwd": "/fixture/work",
+      "last_active_epoch": 1700000000
     },
     {
       "type": "mux_session",

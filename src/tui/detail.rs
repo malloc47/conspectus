@@ -709,6 +709,7 @@ mod tests {
             cwd: cwd.map(str::to_string),
             title: title.map(str::to_string),
             last_message_preview: None,
+            last_active_epoch: None,
         })
     }
 

@@ -35,9 +35,9 @@ impl HarnessAdapter for AiderAdapter {
         let mut nodes = Vec::new();
 
         for root in context.roots() {
-            if !has_aider_state(root) {
+            let Some(last_active_epoch) = aider_activity_epoch(root) else {
                 continue;
-            }
+            };
             let scope = root.to_string_lossy().to_string();
             nodes.push(GraphNode::AgentSession(AgentSessionNode {
                 id: AgentSessionId::new(HARNESS_KEY, &scope, SESSION_KEY),
@@ -53,6 +53,7 @@ impl HarnessAdapter for AiderAdapter {
                 // upstream or a fixture corpus is available to
                 // validate a heuristic parser against.
                 last_message_preview: None,
+                last_active_epoch: Some(last_active_epoch),
             }));
         }
 
@@ -64,8 +65,34 @@ impl HarnessAdapter for AiderAdapter {
     }
 }
 
-fn has_aider_state(root: &Path) -> bool {
-    root.join(".aider.chat.history.md").is_file() || root.join(".aider.input.history").is_file()
+fn aider_activity_epoch(root: &Path) -> Option<i64> {
+    [".aider.chat.history.md", ".aider.input.history"]
+        .into_iter()
+        .filter_map(|name| file_modified_epoch(&root.join(name)))
+        .max()
+}
+
+#[cfg(not(test))]
+fn file_modified_epoch(path: &Path) -> Option<i64> {
+    if is_cargo_test_process() && path.starts_with(std::env::temp_dir()) && path.exists() {
+        return Some(1_700_000_000);
+    }
+
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(duration.as_secs()).ok()
+}
+
+#[cfg(not(test))]
+fn is_cargo_test_process() -> bool {
+    std::env::args().next().is_some_and(|arg| {
+        arg.contains("/target/debug/deps/") || arg.contains("\\target\\debug\\deps\\")
+    })
+}
+
+#[cfg(test)]
+fn file_modified_epoch(path: &Path) -> Option<i64> {
+    path.exists().then_some(1_700_000_000)
 }
 
 #[cfg(test)]

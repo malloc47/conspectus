@@ -3317,7 +3317,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     shape can be snapshot-tested without churning unrelated
     fixtures.
 
-- [ ] `H-AGENT-EPOCH` Populate `AgentSessionNode.last_active_epoch`
+- [x] `H-AGENT-EPOCH` Populate `AgentSessionNode.last_active_epoch`
     across harness adapters.
   - Scope: extend `AgentSessionNode` with an optional
     `last_active_epoch: Option<i64>` field (Unix seconds) and
@@ -3337,6 +3337,16 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: none; can land independently of further P8 stories,
     but P8-008's discovery refresh path benefits when this lands
     before snapshot tests on the rendered v1 TUI freeze.
+  - Outcome: `AgentSessionNode` now carries optional
+    `last_active_epoch`. Claude Code and Codex populate it from
+    transcript / rollout file mtime, opencode uses `time_updated`
+    / `time_created` from sqlite or legacy `info.json`, and aider
+    uses the freshest history marker mtime. The TUI sessions row
+    tree now feeds this into the recency column, and
+    `conspectus table sessions --columns +activity` can display the
+    same relative age outside the TUI.
+  - Tests: adapter unit coverage for Claude, Codex, and opencode
+    activity; row-tree test for `activity_epoch` / `recency`.
 
 - [x] `T8-001` Collapse duplicate repo group rows when a project
     appears across multiple checkout buckets in the TUI sessions

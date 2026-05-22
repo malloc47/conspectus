@@ -71,7 +71,8 @@ expression: normalized
         "session_key": "session-x"
       },
       "harness_key": "codex",
-      "cwd": "/fixture/.atelier/forks/alpha/repo-a"
+      "cwd": "/fixture/.atelier/forks/alpha/repo-a",
+      "last_active_epoch": 1700000000
     },
     {
       "type": "branch",

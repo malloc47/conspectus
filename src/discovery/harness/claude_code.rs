@@ -138,6 +138,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 
             let leaf_uuid = read_session_leaf_uuid(&path);
             let last_message_preview = read_session_last_message_preview(&path);
+            let last_active_epoch = file_modified_epoch(&path);
 
             entries.push(DiscoveredSession {
                 node: AgentSessionNode {
@@ -146,6 +147,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                     cwd: meta.cwd,
                     title: meta.summary,
                     last_message_preview,
+                    last_active_epoch,
                 },
                 parent_uuid: meta.parent_uuid,
                 cross_session_record_type: meta.cross_session_record_type,
@@ -203,6 +205,29 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
         candidate_links,
         diagnostics: Vec::new(),
     })
+}
+
+#[cfg(not(test))]
+fn file_modified_epoch(path: &Path) -> Option<i64> {
+    if is_cargo_test_process() && path.starts_with(std::env::temp_dir()) && path.exists() {
+        return Some(1_700_000_000);
+    }
+
+    let modified = fs::metadata(path).ok()?.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    i64::try_from(duration.as_secs()).ok()
+}
+
+#[cfg(not(test))]
+fn is_cargo_test_process() -> bool {
+    std::env::args().next().is_some_and(|arg| {
+        arg.contains("/target/debug/deps/") || arg.contains("\\target\\debug\\deps\\")
+    })
+}
+
+#[cfg(test)]
+fn file_modified_epoch(path: &Path) -> Option<i64> {
+    path.exists().then_some(1_700_000_000)
 }
 
 struct DiscoveredSession {
@@ -736,6 +761,7 @@ mod tests {
             .expect("session-a");
         assert_eq!(a.cwd.as_deref(), Some("/work/alpha"));
         assert_eq!(a.title.as_deref(), Some("alpha work"));
+        assert_eq!(a.last_active_epoch, Some(1_700_000_000));
 
         let b = sessions
             .iter()

@@ -15,10 +15,6 @@
 //!   "Ungrouped" bucket (one synthetic group at the top level,
 //!   regardless of `SessionsGrouping`).
 //!
-//! Today's `AgentSessionNode` does not carry an activity epoch, so
-//! `recency` / `activity_epoch` on the row are always `None` in
-//! v1. Populating them is tracked as a follow-on backlog story.
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -551,8 +547,8 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             short_id,
             harness_label: harness_label(&entry.node.harness_key),
             cwd_display,
-            recency: format_recency(ctx.now, None),
-            activity_epoch: None,
+            recency: format_recency(ctx.now, entry.node.last_active_epoch),
+            activity_epoch: entry.node.last_active_epoch,
             mux_state,
             preview: entry.node.last_message_preview.clone(),
             title: entry.node.title.clone(),
@@ -614,13 +610,11 @@ fn mux_session_label(node: &MuxSessionNode) -> String {
 
 /// Sessions within a group sort by recency desc (None last), then
 /// alphabetical by harness then short id for a stable tie-breaker.
-/// Today, `activity_epoch` is always `None`, so this collapses to
-/// the alphabetical tiebreak; once harness adapters populate the
-/// epoch, sorting becomes recency-first automatically.
 fn compare_sessions(a: &SessionEntry<'_>, b: &SessionEntry<'_>) -> std::cmp::Ordering {
-    a.node
-        .harness_key
-        .cmp(&b.node.harness_key)
+    b.node
+        .last_active_epoch
+        .cmp(&a.node.last_active_epoch)
+        .then_with(|| a.node.harness_key.cmp(&b.node.harness_key))
         .then_with(|| a.id.cmp(&b.id))
 }
 
@@ -772,7 +766,22 @@ mod tests {
             cwd: cwd.map(str::to_string),
             title: title.map(str::to_string),
             last_message_preview: preview.map(str::to_string),
+            last_active_epoch: None,
         })
+    }
+
+    fn agent_session_with_activity(
+        harness: &str,
+        scope: &str,
+        key: &str,
+        cwd: Option<&str>,
+        activity_epoch: i64,
+    ) -> GraphNode {
+        let mut node = agent_session(harness, scope, key, cwd, None, None);
+        if let GraphNode::AgentSession(session) = &mut node {
+            session.last_active_epoch = Some(activity_epoch);
+        }
+        node
     }
 
     fn mux_node(backend: &str, native_id: &str) -> GraphNode {
@@ -1209,6 +1218,91 @@ mod tests {
             _ => unreachable!(),
         }
         assert!(!session_row.expandable);
+    }
+
+    #[test]
+    fn session_row_uses_agent_activity_epoch_for_recency() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/proj"),
+            1_000_000 - 120,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+        });
+
+        let session_row = tree
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(session) => Some(session),
+                _ => None,
+            })
+            .expect("session row present");
+        assert_eq!(session_row.activity_epoch, Some(1_000_000 - 120));
+        assert_eq!(session_row.recency.as_deref(), Some("2m"));
+    }
+
+    #[test]
+    fn sessions_sort_by_most_recent_activity_within_group() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "old",
+            Some("/home/op/src/proj"),
+            1_000,
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "missing",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "new",
+            Some("/home/op/src/proj"),
+            2_000,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(2_500),
+            cwd: None,
+        });
+
+        let session_keys: Vec<&str> = tree
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(session) => Some(session.session.session_key.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(session_keys, vec!["new", "old", "missing"]);
     }
 
     #[test]
