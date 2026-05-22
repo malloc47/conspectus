@@ -1933,6 +1933,16 @@ fn tui_accepts_checkout_sessions_grouping_value() {
 }
 
 #[test]
+fn tui_rejects_legacy_worktree_sessions_grouping_value() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["tui", "--sessions-grouping", "worktree"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid value 'worktree'"));
+}
+
+#[test]
 fn tui_rejects_unknown_sessions_grouping_value() {
     Command::cargo_bin("conspectus")
         .expect("conspectus binary exists")

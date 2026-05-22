@@ -44,8 +44,8 @@ pub struct WorktreeId {
 
 /// Canonical product vocabulary for an editable repository checkout.
 ///
-/// The graph still serializes this node kind as `worktree` during the
-/// compatibility window described by ADR 0026 and H-CHECKOUT-002.
+/// The graph still serializes this node kind as `worktree` until the
+/// wire/model rename replaces the legacy variant names.
 pub type CheckoutId = WorktreeId;
 
 impl WorktreeId {
@@ -156,7 +156,6 @@ impl fmt::Display for ForgePrId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeId {
     Repo(RepoId),
-    #[serde(alias = "checkout")]
     Worktree(WorktreeId),
     Workspace(WorkspaceId),
     AgentSession(AgentSessionId),
@@ -198,7 +197,6 @@ impl fmt::Display for NodeId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GraphNode {
     Repo(RepoNode),
-    #[serde(alias = "checkout")]
     Worktree(WorktreeNode),
     Workspace(WorkspaceNode),
     AgentSession(AgentSessionNode),
@@ -260,7 +258,7 @@ pub struct WorktreeNode {
 
 /// Checkout-facing alias for the legacy graph node type.
 ///
-/// Serialization remains `type: "worktree"` for existing consumers.
+/// Serialization remains `type: "worktree"` until the wire/model rename lands.
 pub type CheckoutNode = WorktreeNode;
 
 impl WorktreeNode {
@@ -638,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn checkout_helpers_preserve_worktree_wire_compatibility() {
+    fn checkout_helpers_use_legacy_wire_until_hard_rename() {
         let repo = RepoId::new("/repo/.git");
         let id = CheckoutId::new(repo.clone(), "/repo");
         let node_id = NodeId::checkout(repo, "/repo");
@@ -652,38 +650,6 @@ mod tests {
 
         assert_eq!(encoded_id["type"], "worktree");
         assert_eq!(encoded_node["type"], "worktree");
-    }
-
-    #[test]
-    fn checkout_wire_aliases_parse_as_worktrees() {
-        let node_id: NodeId = serde_json::from_value(serde_json::json!({
-            "type": "checkout",
-            "repo": {
-                "common_dir": "/repo/.git"
-            },
-            "root": "/repo"
-        }))
-        .expect("deserialize checkout node id alias");
-        assert_eq!(
-            node_id,
-            NodeId::Worktree(WorktreeId::new(RepoId::new("/repo/.git"), "/repo"))
-        );
-
-        let node: GraphNode = serde_json::from_value(serde_json::json!({
-            "type": "checkout",
-            "id": {
-                "repo": {
-                    "common_dir": "/repo/.git"
-                },
-                "root": "/repo"
-            },
-            "root": "/repo"
-        }))
-        .expect("deserialize checkout node alias");
-        assert_eq!(
-            node.id(),
-            NodeId::Worktree(WorktreeId::new(RepoId::new("/repo/.git"), "/repo"))
-        );
     }
 
     #[test]

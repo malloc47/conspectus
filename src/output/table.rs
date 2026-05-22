@@ -749,7 +749,6 @@ pub fn parse_columns_spec(
     let available: Vec<&'static str> = registry.iter().map(|spec| spec.key).collect();
 
     let lookup = |name: &str| -> Result<&'static str, ColumnsError> {
-        let name = column_alias(projection, name);
         registry
             .iter()
             .find(|spec| spec.key == name)
@@ -815,7 +814,6 @@ pub fn resolve_explicit_columns(
             if trimmed.is_empty() {
                 return Err(ColumnsError::EmptyToken);
             }
-            let trimmed = column_alias(projection, trimmed);
             registry
                 .iter()
                 .find(|spec| spec.key == trimmed)
@@ -827,13 +825,6 @@ pub fn resolve_explicit_columns(
                 })
         })
         .collect()
-}
-
-fn column_alias(projection: Projection, name: &str) -> &str {
-    match (projection, name) {
-        (Projection::Agent, "worktree") => "checkout",
-        _ => name,
-    }
 }
 
 /// Render a human-readable listing of the registered columns for
@@ -1123,7 +1114,7 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
         "workspace" => {
             session_workspace_identifier(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
         }
-        "checkout" | "worktree" => {
+        "checkout" => {
             session_worktree_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
         }
         "branch" => session_branch_label(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
@@ -2759,16 +2750,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_columns_accepts_legacy_worktree_alias() {
-        let result = parse_columns_spec(Projection::Agent, "id,worktree").expect("alias");
-        assert_eq!(result, vec!["id", "checkout"]);
-
-        let names: Vec<String> = vec!["id".into(), "worktree".into()];
-        let result = resolve_explicit_columns(Projection::Agent, &names).expect("alias");
-        assert_eq!(result, vec!["id", "checkout"]);
-    }
-
-    #[test]
     fn parse_columns_unknown_name_errors_with_available_listed() {
         let err = parse_columns_spec(Projection::Agent, "+nope").unwrap_err();
         match err {
@@ -2782,6 +2763,24 @@ mod tests {
                 assert!(available.contains(&"agent"));
             }
             other => panic!("expected UnknownColumn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_columns_rejects_legacy_worktree_column() {
+        let err = parse_columns_spec(Projection::Agent, "id,worktree").unwrap_err();
+        match err {
+            ColumnsError::UnknownColumn {
+                name,
+                row_type,
+                available,
+            } => {
+                assert_eq!(name, "worktree");
+                assert_eq!(row_type, "sessions");
+                assert!(available.contains(&"checkout"));
+                assert!(!available.contains(&"worktree"));
+            }
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 

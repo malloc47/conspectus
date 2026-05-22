@@ -630,7 +630,6 @@ enum SessionsGroupingFlag {
     #[default]
     Graph,
     Repo,
-    #[value(alias = "worktree")]
     Checkout,
     ScanRoot,
 }

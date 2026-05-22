@@ -108,8 +108,10 @@ probing.
 - Some projections must support multi-home rows or explicit deduplication
   modes. A strict tree remains a view choice, not a graph invariant.
 - The implementation needs a staged terminology migration. Existing code,
-  snapshots, CLI columns, and JSON consumers may still say `worktree` until a
-  compatibility plan renames or aliases the fields.
+  snapshots, and graph JSON may still say `worktree` until a dedicated hard
+  rename changes those surfaces to checkout terminology in one reviewable
+  slice. Conspectus is not in active external use, so new user-facing aliases
+  should not be added just to preserve legacy `worktree` spelling.
 - Fork relation kinds from ADR 0004 such as `created_worktree` and
   `referenced_worktree` remain valid legacy relation names during migration,
   but new model prose should describe them as checkout effects.

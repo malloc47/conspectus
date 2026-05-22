@@ -1973,20 +1973,17 @@ so existing graph JSON and table/TUI behavior stay reviewable.
     staged terminology migration from legacy `Worktree` names.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [x] `H-CHECKOUT-002` Introduce checkout model names without breaking
-  graph compatibility.
+- [x] `H-CHECKOUT-002` Introduce checkout-facing model helpers ahead of
+  the graph wire rename.
   - Scope: add `Checkout` model/helpers as the canonical code-level
-    vocabulary while preserving existing `Worktree` JSON fields or
-    aliases for one compatibility window. Decide whether this is a pure
-    rename with serde aliases or an internal wrapper around the current
-    `Worktree` type.
+    vocabulary while keeping the current `Worktree` graph representation
+    until the hard wire/model rename lands.
   - Outcome: `CheckoutId` and `CheckoutNode` are checkout-facing aliases
     over the legacy `WorktreeId`/`WorktreeNode` graph representation,
-    with helper constructors for checkout-oriented code. Graph output
-    still serializes as `type: "worktree"` for existing consumers, while
-    `type: "checkout"` is accepted as a deserialization alias.
-  - Tests: graph JSON snapshot/round-trip tests proving existing
-    `worktree` output consumers still parse and new checkout-facing
+    with helper constructors for checkout-oriented code. Graph output still
+    serializes as `type: "worktree"` until the dedicated wire/model rename
+    changes the representation in one reviewable slice.
+  - Tests: graph JSON snapshot/round-trip tests proving checkout-facing
     helpers produce the same node identities.
   - Blockers: `H-CHECKOUT-001`.
 - [x] `H-CHECKOUT-003` Probe observed session and mux cwd paths for
@@ -2072,8 +2069,8 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Tests: `cargo test repo_group`.
   - Blockers: `H-CHECKOUT-005`.
 - [x] `H-CHECKOUT-007` Retire legacy user-facing worktree terminology.
-  - Scope: after compatibility aliases have soaked, rename CLI columns,
-    docs, help text, and TUI labels from worktree to checkout where the
+  - Scope: rename CLI columns, docs, help text, and TUI labels from
+    worktree to checkout where the
     user-facing meaning is the broader ADR 0026 concept. Keep git-linked
     worktree wording only when specifically describing git's feature.
   - Tests: CLI help snapshots/table snapshots once those exist; docs-only
@@ -2081,10 +2078,22 @@ so existing graph JSON and table/TUI behavior stay reviewable.
   - Outcome: sessions table output now exposes `checkout`/`CHECKOUT`
     instead of `worktree`/`WORKTREE`, PR table help and TUI checkout detail
     labels use checkout terminology, and `--sessions-grouping checkout` is
-    accepted. Legacy `worktree` table columns and TUI grouping values remain
-    accepted as compatibility aliases while graph JSON continues serializing
-    legacy worktree node ids/types for existing consumers.
+    accepted. Legacy `worktree` table columns, TUI grouping values, and
+    checkout JSON deserialization aliases are intentionally not preserved.
+    Graph JSON still serializes legacy worktree node ids/types until the
+    deeper wire/model migration is completed.
   - Blockers: `H-CHECKOUT-006`.
+- [ ] `H-CHECKOUT-008` Hard-rename checkout graph wire/model names.
+  - Scope: replace legacy `WorktreeId`/`WorktreeNode`/`GraphNode::Worktree`
+    naming, node id display prefixes, JSON `type: "worktree"`, snapshot
+    expectations, declared endpoint syntax, and user-visible relation docs
+    with checkout terminology where the concept is broader than git linked
+    worktrees. Keep git-specific `worktree` only for actual `git worktree`
+    feature behavior and source metadata.
+  - Tests: full graph snapshot refresh, declared endpoint round trips, node
+    id round trips, resolver tests for checkout/session links, table/TUI
+    smoke coverage, and `cargo test --all-targets --all-features`.
+  - Blockers: `H-CHECKOUT-007`.
 
 ### Deferred Provider And Workflow Expansions
 
