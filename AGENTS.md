@@ -3,7 +3,7 @@
 ## Project Context
 
 Conspectus is a planned standalone CLI for surveying local AI-agent work across
-agent sessions, mux sessions, repos, worktrees, loose workspaces, forks,
+agent sessions, mux sessions, repos, checkouts, loose workspaces, forks,
 branches, and forge PRs.
 
 The project is currently design-first. Before planning or implementing

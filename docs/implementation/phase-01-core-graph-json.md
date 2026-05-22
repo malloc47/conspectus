@@ -17,7 +17,7 @@ but the core model and resolver contracts must be in place.
 
 ## Implementation Changes
 
-- Implement structured node IDs from ADR 0001 for `Repo`, `Worktree`,
+- Implement structured node IDs from ADR 0001 for `Repo`, `Checkout`,
   `Workspace`, `AgentSession`, `MuxSession`, `Branch`, `Fork`, and `ForgePr`.
 - Implement typed nodes, `GraphLink`, relation kinds, provenance, confidence,
   freshness, source metadata, and ignored or overridden state.

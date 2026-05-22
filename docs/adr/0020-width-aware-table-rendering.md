@@ -11,7 +11,7 @@ renderer in `src/output/table.rs` (~45 LOC of formatting) hand-rolls column
 alignment with a fixed two-space padder and never measures the terminal width.
 Several cells routinely exceed any reasonable terminal width:
 
-- `CWD` — full absolute paths to worktrees, often 60-120 columns on their own.
+- `CWD` — full absolute paths to checkouts, often 60-120 columns on their own.
 - `AGENT` — `<harness_key>:<title-or-key>` where titles are free-form.
 - `MUX` — `<backend>:<session>` where session names can be long.
 - `PR` — `<owner>/<repo>#<n> (state)` is concise, but the column right-aligns

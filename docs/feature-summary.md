@@ -53,7 +53,7 @@ omitted, falling back to user config for orphan relationships.
   projections: `agent` (one row per agent session), `mux` (one row per mux
   session), and `union` (both node kinds with relationship status).
 - **Read-only git discovery.** Recognizes plain repo checkouts, linked git
-  worktrees, detached HEADs, remotes, upstreams, current branch, and all local
+  checkouts, detached HEADs, remotes, upstreams, current branch, and all local
   branches.
   Non-current local branches are graph nodes too, which lets PRs for sibling
   branches resolve to branch targets instead of staying unresolved.

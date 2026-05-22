@@ -89,7 +89,7 @@ Source plan: `docs/implementation/phase-01-core-graph-json.md`.
 
 - [x] `P1-001` Define graph node identity types.
   - Scope: implement structured node IDs from ADR 0001 for `Repo`,
-    `Worktree`, `Workspace`, `AgentSession`, `MuxSession`, `Branch`, `Fork`,
+    `Checkout`, `Workspace`, `AgentSession`, `MuxSession`, `Branch`, `Fork`,
     and `ForgePr`.
   - Tests: unit tests for ID construction, display/debug behavior, serde round
     trips, and deterministic ordering.
@@ -201,14 +201,14 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     branch ref, upstream, and remotes with temp-repo coverage for plain,
     detached, upstream, and linked-worktree cases.
 - [x] `P2-003` Map git probes into graph nodes and candidate links.
-  - Scope: emit `Repo`, `Worktree`, and `Branch` nodes plus links for repo
+  - Scope: emit `Repo`, `Checkout`, and `Branch` nodes plus links for repo
     membership and checked-out branch evidence from git probe results.
   - Tests: JSON snapshot tests for a plain repo, a detached worktree, and a
     linked worktree fixture.
   - Manual checks: run `cargo run -- graph --format json` from a plain git repo
-    and inspect repo/worktree/branch identity shape.
+    and inspect repo/checkout/branch identity shape.
   - Blockers: `P2-002`.
-  - Outcome: mapped git probe results into `Repo`, `Worktree`, and `Branch`
+  - Outcome: mapped git probe results into `Repo`, `Checkout`, and `Branch`
     nodes with strong-discovered candidate links for repo membership and checked
     out branches, plus fixed-path JSON snapshots for plain, detached, and linked
     worktree cases.
@@ -225,10 +225,10 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     and local discovery over non-git roots without recursive scanning.
 - [x] `P2-005` Add generic workspace inference.
   - Scope: infer generic workspace roots from configured roots or layout
-    evidence and link participating repos/worktrees without fabricating
+    evidence and link participating repos/checkouts without fabricating
     workspaces for standalone repo-only cases.
   - Tests: fixture tests for multi-repo workspace roots, standalone repos, and
-    worktrees outside any workspace.
+    checkouts outside any workspace.
   - Manual checks: inspect JSON for generic workspace fixtures and confirm
     workspace nodes appear only when there is workspace evidence.
   - Blockers: `P2-004`.
@@ -242,7 +242,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Tests: fixture tests for minimal, multi-repo, and malformed Atelier
     workspace metadata.
   - Manual checks: run from an Atelier workspace with no forks and inspect
-    workspace, repo, worktree, and branch nodes.
+    workspace, repo, checkout, and branch nodes.
   - Blockers: `P2-003`, `P2-005`.
   - Outcome: added a read-only `atelier.toml` subset parser and parent-walk
     workspace discovery that emits Atelier workspace nodes, discovered repo
@@ -267,14 +267,14 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
     links for `forks_workspace`, `forks_repo`, `created_checkout`,
     `referenced_checkout`, `created_branch`, `associated_branch`,
     `rooted_at_path`, and `parent_fork` where evidence exists.
-  - Tests: resolver and snapshot tests for created vs referenced worktrees,
+  - Tests: resolver and snapshot tests for created vs referenced checkouts,
     research forks, selected forks, standalone repo forks, parent forks, and
     associated branch links.
   - Manual checks: inspect graph JSON from Atelier fork fixtures and confirm no
     fake workspace nodes are fabricated for standalone repo contexts.
   - Blockers: `P2-007`.
   - Outcome: emitted one `Fork` node per Atelier fork plus candidate links for
-    workspace scope, repo scope, created worktrees, referenced worktrees,
+    workspace scope, repo scope, created checkouts, referenced checkouts,
     created or associated branches, fork roots as unresolved path evidence, and
     parent forks, with snapshot coverage for worktree, selected, research, and
     standalone contexts.
@@ -313,7 +313,7 @@ Source plan: `docs/implementation/phase-02-local-discovery.md`.
   - Blockers: `P2-009`, `P2-010`.
   - Outcome: `nix develop --command just check` passed with 56 tests, and
     `nix develop --command cargo run -- graph --format json` from the
-    Conspectus repo emitted git repo, worktree, branch, candidate link, and
+    Conspectus repo emitted git repo, checkout, branch, candidate link, and
     resolved relationship JSON without modifying workspace files.
 
 ## Phase 3: Agent And Mux Discovery
@@ -487,7 +487,7 @@ Source plan: `docs/implementation/phase-03-agent-mux-discovery.md`.
   - Blockers: `P3-009`, `P3-010`.
   - Outcome: `nix develop --command just check` passed with 124 tests. The
     tmux smoke test (`tmux new-session -d -s conspectus-smoke -c "$PWD"` +
-    `cargo run -- graph --format json`) emitted one repo/worktree/branch,
+    `cargo run -- graph --format json`) emitted one repo/checkout/branch,
     three mux sessions (including the smoke session at the conspectus repo
     cwd) and 16 agent sessions from the real `~/.codex`, `~/.claude`, and
     `~/.local/share/opencode` state. Discovery remained read-only.
@@ -788,7 +788,7 @@ Source plan: `docs/implementation/phase-04-forge-and-table-views.md`.
     state (claude-code agent sessions, no mux/PR rows because the
     local `gh` is unauthenticated and the smoke test had no tmux
     server). `cargo run -- graph --format json` emitted repo /
-    worktree / branch / agent_session / mux_session nodes plus 14
+    checkout / branch / agent_session / mux_session nodes plus 14
     resolved relationships. Discovery remained read-only.
   - Follow-up: live `gh` was unauthenticated in the dev shell, so
     the smoke run did not exercise real PR retrieval. The forge
@@ -882,18 +882,18 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
 - [x] `P5-005` Implement nearest-store selection for writes.
   - Scope: add a pure store-selection helper that decides where a new
     user-authored declaration belongs: project-local for relationships
-    rooted in a discovered repo/workspace/worktree, global for orphan or
+    rooted in a discovered repo/workspace/checkout, global for orphan or
     user-wide relationships, and never in cache/index storage. Reuse the
     config walk rules from ADR 0012.
   - Tests: unit tests for repo-rooted, workspace-rooted,
-    worktree-rooted, branch/PR-rooted, mux-only, orphan-agent,
+    checkout-rooted, branch/PR-rooted, mux-only, orphan-agent,
     multi-root, missing-root, and outside-home scenarios.
   - Manual checks: inspect selected paths for representative repos,
     linked worktrees, and non-repo directories.
   - Blockers: `P5-002`, `P5-003`.
   - Outcome: added a pure `select_store_for_declaration` helper that
     resolves declared-link writes to the nearest project config for
-    repo, workspace, worktree, session cwd, mux cwd, branch/PR, and
+    repo, workspace, checkout, session cwd, mux cwd, branch/PR, and
     fork-rooted relationships, and falls back to the user config for
     orphan relationships without touching cache or index storage.
 
@@ -954,11 +954,11 @@ Source plan: `docs/implementation/phase-05-declared-links.md`.
 - [x] `P5-009` Implement link and unlink commands.
   - Scope: add write commands that create and remove active declared
     relationships between supported endpoint types (`AgentSession`,
-    `MuxSession`, `ForgePr`, `Workspace`, `Repo`, `Worktree`,
+    `MuxSession`, `ForgePr`, `Workspace`, `Repo`, `Checkout`,
     `Branch`, and `Fork`), using nearest-store selection by default.
     Link creation should not delete discovered evidence.
   - Tests: CLI integration tests for session↔mux, branch↔PR,
-    workspace/repo/worktree/fork relationships, global orphan links,
+    workspace/repo/checkout/fork relationships, global orphan links,
     unlink by declared ID, unlink idempotency, and graph output after
     link/unlink.
   - Manual checks: create a manual mux/session link, rerun graph JSON,
@@ -1180,7 +1180,7 @@ this repo.
     preserved evidence/ambiguity.
   - Blockers: `P5-012`.
   - Outcome: added `tests/atelier_delegation_snapshots.rs`, which
-    builds an Atelier-style workspace with two git repos, a worktree
+    builds an Atelier-style workspace with two git repos, a checkout
     fork, unresolved codex lineage metadata, a fake codex session, and a
     matching `FakeTmux` row. The test snapshots rendered graph JSON plus
     agent, mux, and union session table projections with temp paths
@@ -1538,7 +1538,7 @@ H-TBL-006 onward shifts the surface from `conspectus session
 [--projection ...]` to `conspectus table <ROWS>` so that growing row-types
 (PRs, forks, …) and per-row-type column customization stay first-class.
 The columns themselves stop being session-specific, since cells like PR,
-fork lineage, and worktree apply to any row whose node touches them.
+fork lineage, and checkout apply to any row whose node touches them.
 
 - [x] `H-TBL-001` ADR: width-aware table rendering library.
   - Outcome: ADR 0020 records the decision to roll our own minimal
@@ -1665,9 +1665,9 @@ fork lineage, and worktree apply to any row whose node touches them.
     `repo`, `updated`, and `attached`, with the default set
     `id, pr, state, branch, attached`. `PrRowCtx` + `pr_cell` extract
     cells: the `branch` column walks `BranchHasForgePr` and strips
-    the `refs/heads/` prefix; `attached` finds worktrees via
+    the `refs/heads/` prefix; `attached` finds checkouts via
     `CheckedOutBranch` candidates and joins agent sessions whose
-    `cwd` matches the worktree root; `updated` formats
+    `cwd` matches the checkout root; `updated` formats
     `updated_epoch` via the new `format_relative_age` helper
     (`12s`, `5m`, `2h`, `3d`, `4w`). Config grew `[table.prs]`. CLI
     subcommand `conspectus table prs` honors the existing `--wide`,
@@ -1716,7 +1716,7 @@ fork lineage, and worktree apply to any row whose node touches them.
     `SnapshotView` now retains a reference to the underlying
     `GraphSnapshot` for that purpose. The default column set is
     unchanged. The `activity` column is deferred per the H-OBS-006
-    soft-blocker note. Three new unit tests cover worktree/branch/
+    soft-blocker note. Three new unit tests cover checkout/branch/
     repo, the fork column, and the declared column's link-state
     mapping; one CLI integration test exercises the seven-column
     selection via `--columns`. All 374 tests pass.
@@ -1817,10 +1817,10 @@ fork lineage, and worktree apply to any row whose node touches them.
 
 Deferred under this cluster (no story yet, file when needed):
 
-- `conspectus table repos` / `conspectus table worktrees`. Both node
+- `conspectus table repos` / `conspectus table checkouts`. Both node
   kinds already appear as related-context columns under
   `H-TBL-010`. Promote to their own row-type only when a user
-  workflow requires a repos-first or worktrees-first table.
+  workflow requires a repos-first or checkouts-first table.
 
 ### Product Surface Gaps
 
@@ -2045,7 +2045,7 @@ linked worktree, or a workspace member reached through a symlink.
   - Blockers: `H-CHECKOUT-003`, `H-CHECKOUT-004`.
 - [x] `H-CHECKOUT-006` Update table and TUI projections for checkout
   grouping.
-  - Scope: replace single-parent worktree grouping assumptions with
+  - Scope: replace single-parent checkout grouping assumptions with
     checkout/workspace-aware projection rules. Default to including
     workspace overlay groups while also allowing checkout-centric output;
     add include/exclude workspace controls before making workspace
@@ -2487,7 +2487,7 @@ render time.
 
 A growing class of "agent-over-tmux" orchestrators — agent-deck, dmux,
 workmux, agent-of-empires, and others — maintain on-disk state that
-maps agent sessions to tmux sessions, worktrees, branches, and
+maps agent sessions to tmux sessions, checkouts, branches, and
 sometimes forks. Most of that state, however, overlaps with what the
 process-tree linker (`H-MUXPROC-*`) can derive directly from running
 processes inside each tmux pane: pane ↔ harness binary, pane PID,
@@ -2529,7 +2529,7 @@ overlay rather than persistent state).
     both are in flight, since the runner seam may inform the adapter
     surface.
 
-- [ ] `H-AGENTMUX-002` Detect agent-deck multi-repo worktrees as a
+- [ ] `H-AGENTMUX-002` Detect agent-deck multi-repo checkouts as a
   workspace provider.
   - Scope: implement the first concrete `AgentMuxAdapter` for
     agent-deck. **Justification vs MUXPROC:** the unique evidence is
@@ -2542,19 +2542,19 @@ overlay rather than persistent state).
     `Workspace` node (with an `agent-deck` provider identifier and a
     short label derived from `<id>`) plus `Workspace`→`Repo`
     membership candidate links for each resolved symlink. Sessions
-    and mux sessions rooted at the worktree path should associate
+    and mux sessions rooted at the checkout path should associate
     with the workspace via the existing cross-link inference. Treat
     the symlink target's canonical git common dir as the `Repo`
     identity so existing repo nodes from other scan roots merge
     cleanly. Do not emit pane ↔ harness evidence from this adapter —
     leave that to MUXPROC.
-  - Tests: fixture tests for a multi-repo worktree with two symlinks,
+  - Tests: fixture tests for a multi-repo checkout with two symlinks,
     one symlink, broken symlinks, non-symlink children (skip), and a
     nested directory layout. Snapshot test for the session table
     confirming the workspace shows up and the participating repos
     are listed somewhere reachable from the agent row.
   - Manual checks: `cargo run -- graph --format json` from inside a
-    real agent-deck worktree; `cargo run -- session` and confirm the
+    real agent-deck checkout; `cargo run -- session` and confirm the
     new workspace/repo links appear.
   - Blockers: `H-AGENTMUX-001` (must survive the audit), `H-DESIGN-001`
     (workspace-provider precedence — agent-deck workspaces should not
@@ -2951,9 +2951,9 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `docs/implementation/phase-08-interactive-tui.md`. Headlines:
     (1) sessions-tree grouping is configurable from day one via
     `--sessions-grouping` / `[tui].sessions_grouping`, defaulting
-    to `graph` (workspace → repo → worktree → session derived from
+    to `graph` (workspace → repo → checkout → session derived from
     existing graph relationships); other values are `repo`,
-    `worktree`, `scan-root`. Orphan sessions land in an
+    `checkout`, `scan-root`. Orphan sessions land in an
     `Ungrouped` bucket. (2) Mux target granularity is session-only
     for v1; window/pane targeting waits on a future mux-discovery
     expansion. (3) Ambiguous `LinkedToMux` candidates resolve to
@@ -3014,7 +3014,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     Agent-session header rows are the locked five (harness, cwd,
     title-when-set, mux, pr, lineage); the mux row carries the
     ambiguous-candidate count + `⚠` annotation, and the pr row
-    walks worktree → branch → PR in the resolved graph to surface
+    walks checkout → branch → PR in the resolved graph to surface
     the immediate-stage label. Mux/PR/fork detail will gain richer
     fields as the enrichment stories land.
 
@@ -3170,7 +3170,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     stages so navigation never blocks on a `gh` call.
     1. **Immediate stage** (synchronous, graph-only): owner/repo,
        PR number, state, draft, head ref shortname, and the linked
-       branch / worktree / session rows that discovery already
+       branch / checkout / session rows that discovery already
        attached to the `ForgePr` node. Renders on the first frame
        the PR row is selected.
     2. **Enriched stage** (async, cached): once the row is
@@ -3208,7 +3208,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
 - [ ] `P8-012b` Fork right-panel enrichment (lineage, context, children).
   - Scope: enrich the right panel for a selected fork row beyond
     `node show` parity: parent-fork lineage, fork context effects
-    (recorded via the atelier discovery provider), related worktrees,
+    (recorded via the atelier discovery provider), related checkouts,
     and resolved child agent sessions. Keep the rendering bounded —
     long fork lineages truncate with a "+N more" marker rather than
     scroll independently.
@@ -3319,14 +3319,14 @@ work. `P8-014` is post-v1 polish that does not block the release.
     before snapshot tests on the rendered v1 TUI freeze.
 
 - [x] `T8-001` Collapse duplicate repo group rows when a project
-    appears across multiple worktree buckets in the TUI sessions
+    appears across multiple checkout buckets in the TUI sessions
     row tree.
-  - Outcome: `emit_worktree_bucket` now tracks the most recent
+  - Outcome: `emit_checkout_bucket` now tracks the most recent
     workspace + repo keys and skips re-emitting headers when
-    they're unchanged across adjacent worktree buckets (buckets
+    they're unchanged across adjacent checkout buckets (buckets
     are already ordered by the BTreeMap so siblings are
     adjacent). The existing
-    `two_worktrees_in_same_repo_show_worktree_level` test now
+    `two_checkouts_in_same_repo_show_checkout_level` test now
     asserts exactly one repo row.
 
 - [ ] `T8-003` Fill out the TUI empty/loading/error frame matrix.
@@ -3437,7 +3437,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
 - [ ] `T8-012` Compress project, path, and mux display labels.
   - Scope: introduce display-label helpers for TUI rows and detail
     fields so raw paths and tmux native ids do not dominate prime
-    screen space. Group rows should use a short project/worktree
+    screen space. Group rows should use a short project/checkout
     label first, with `~`-shortened path as dim secondary text
     when width allows. Mux fields should prefer a human-readable
     display name and keep the full native id available through the
@@ -3461,7 +3461,7 @@ work. `P8-014` is post-v1 polish that does not block the release.
     empty, walk up from the process cwd to the first ancestor
     that contains ≥ N (default 2 or 3) immediate-child entries
     that themselves look like repository roots (a `.git`
-    directory or worktree). Use that ancestor as the scan root
+    directory or checkout). Use that ancestor as the scan root
     instead of cwd. Should be opt-in via a flag or config
     setting initially so we don't surprise operators who *want*
     the cwd-scoped behavior; promote to default later if it

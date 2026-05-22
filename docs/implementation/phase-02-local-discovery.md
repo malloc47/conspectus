@@ -3,16 +3,16 @@
 ## Summary
 
 Teach Conspectus to discover local project structure: git repositories,
-worktrees, branches, generic workspace roots, and Atelier workspace or fork
+checkouts, branches, generic workspace roots, and Atelier workspace or fork
 metadata. Output remains graph JSON.
 
 ## End-State Behavior
 
-- Running Conspectus from a git repo emits repo, worktree, and branch nodes.
-- Running from an Atelier workspace emits workspace, repo, worktree, branch,
+- Running Conspectus from a git repo emits repo, checkout, and branch nodes.
+- Running from an Atelier workspace emits workspace, repo, checkout, branch,
   and fork nodes.
 - Atelier fork metadata maps to one polymorphic `Fork` node per provider fork.
-- Research, selected, worktree, and standalone repo fork-like contexts are
+- Research, selected, checkout-producing, and standalone repo fork-like contexts are
   represented without fabricating fake workspaces.
 
 ## Implementation Changes
@@ -32,7 +32,7 @@ metadata. Output remains graph JSON.
 
 - Integration tests using temporary git repos and linked worktrees.
 - Fixture tests for Atelier workspace metadata and fork index parsing.
-- Resolver tests for created vs referenced worktrees.
+- Resolver tests for created vs referenced checkouts.
 - Resolver tests for research forks, selected forks, standalone repo forks, and
   associated branch links.
 - Snapshot JSON tests for plain repo, generic workspace, and Atelier workspace
@@ -49,7 +49,7 @@ Run the command from:
 - a plain git repo
 - a linked worktree
 - an Atelier workspace with no forks
-- an Atelier workspace with worktree, selected, and research forks
+- an Atelier workspace with worktree-mode, selected, and research forks
 
 Confirm the command does not write `.conspectus.toml` or modify provider
 metadata.

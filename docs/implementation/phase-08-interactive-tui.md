@@ -81,9 +81,9 @@ Reference: <https://github.com/asheshgoplani/agent-deck>
 
 ### dmux
 
-dmux is a useful reference for tmux + worktree + agent operations. It centers
-on creating panes, launching agents into isolated worktrees, and then merging
-or creating PRs from those panes. Conspectus should borrow the mux/worktree
+dmux is a useful reference for tmux + git-worktree + agent operations. It centers
+on creating panes, launching agents into isolated git worktrees, and then merging
+or creating PRs from those panes. Conspectus should borrow the mux/checkout
 inspection posture and the emphasis on panes as the resumable execution
 surface.
 
@@ -155,20 +155,20 @@ conspectus tui [--scan-root PATH]... [--view sessions|mux|union|prs|forks]
   refresh because tmux capture is cheap and the operator-journey use
   case wants the preview to feel responsive.
 - `--sort` controls the row-tree ordering inside each group. Default
-  **`hierarchy`** (project → repo → worktree → session, alphabetical
+  **`hierarchy`** (workspace → repo → checkout → session, alphabetical
   within each level). `recency` re-orders within each group by the
   freshest contained agent session's activity. Configurable via
   `[tui].default_sort`; the flag overrides.
 - `--sessions-grouping` controls the top-level grouping in the
   sessions tree. Default **`graph`** — derive group hierarchy from
   the existing graph relationships (workspace →
-  `WorkspaceContainsRepo` → repo → `WorktreeOfRepo` → worktree →
+  `WorkspaceContainsRepo` → repo → `BelongsToRepo` → checkout →
   cwd-matched agent session). Other values: `repo` (collapse
-  workspace, group by repo common-dir), `worktree` (group by
-  worktree root, no workspace/repo nesting), `scan-root` (group by
+  workspace, group by repo common-dir), `checkout` (group by
+  checkout root, no workspace/repo nesting), `scan-root` (group by
   the configured discovery scan root). Configurable via
   `[tui].sessions_grouping`; the flag overrides. Orphan sessions
-  (no resolved repo/worktree) fall into a single "Ungrouped" bucket
+  (no resolved repo/checkout) fall into a single "Ungrouped" bucket
   regardless of mode.
 - `--no-live-preview` disables the live extras only: mux pane
   capture and the transcript-tail read that the right-panel preview
@@ -213,7 +213,7 @@ and the responsive-width inline-preview behavior.
 
 The left panel renders one of the registered row-tree views:
 
-- `sessions` (**v1 default**): project (repo common-dir) → worktree →
+- `sessions` (**v1 default**): project (repo common-dir) → checkout →
   agent session. Fork lineage nests under the parent session when known.
 - `mux`: mux session → attached agent sessions, with pane/window labels
   when the mux adapter records them.
@@ -260,7 +260,7 @@ toggling and no tabs in v1**:
      - *Immediate stage* (synchronous, graph-only): the PR header
        fields the discovery pass already collected — owner/repo,
        number, state, draft, head ref shortname, the linked branch
-       / worktree / session rows from the graph. Renders the first
+       / checkout / session rows from the graph. Renders the first
        frame the row is selected.
      - *Enriched stage* (async, cached): once the row is selected,
        the data adapter kicks off a background `gh pr view` to
@@ -277,7 +277,7 @@ toggling and no tabs in v1**:
        allowed to complete-and-cache silently. Either way the UI
        stays responsive.
    - **fork** row: parent / child lineage, context effects, related
-     worktrees and child sessions.
+     checkouts and child sessions.
    - Empty/unavailable: a single dim line ("no preview available"
      plus the reason — disabled by flag, no tmux, no transcript,
      etc.).
@@ -330,9 +330,9 @@ selected row doesn't support a key, the status bar shows a one-line
 | `f`   | Fork the selected session (agent-deck style)                        |
 | `n`   | New agent / new mux session                                         |
 | `c`   | Confirm a discovered candidate as a declared link                   |
-| `d`   | Delete (mux session, worktree, declared link, …)                    |
+| `d`   | Delete (mux session, checkout, declared link, …)                    |
 | `m`   | Inline mux-picker when the selected agent has ambiguous LinkedToMux |
-| `M`   | Merge (branch, worktree, fork)                                      |
+| `M`   | Merge (branch, checkout, fork)                                      |
 | `R`   | Resume an un-muxed agent session into a chosen mux target           |
 
 These keys are deliberately unbound in v1 so muscle memory can map to
@@ -354,7 +354,7 @@ Explicit non-goals for v1:
 - creating mux sessions, windows, or panes
 - starting new agent sessions (`n`)
 - resuming an un-muxed agent into a new or existing mux (`R`)
-- creating worktrees
+- creating checkouts
 - merging branches
 - creating or commenting on PRs
 - mutating declared links
@@ -427,7 +427,7 @@ warning yellow, info default).
   `output::node_show` where needed. The TUI should not scrape rendered table
   text.
 - Add a graph row tree builder that can group by:
-  - repo/project/worktree/session lineage
+  - repo/workspace/checkout/session lineage
   - mux session/window/pane/attached session
   - PR repo/state/branch/session
   - fork provider/workspace/parent/child
@@ -502,8 +502,8 @@ contract.
 
 - **"Project" grouping** in the sessions tree: configurable from
   day one. Default `graph` (derives the tree from
-  `WorkspaceContainsRepo` / `WorktreeOfRepo` / cwd-match
-  relationships); other values `repo`, `worktree`, `scan-root`.
+  `WorkspaceContainsRepo` / `BelongsToRepo` / cwd-match
+  relationships); other values `repo`, `checkout`, `scan-root`.
   Configurable via `[tui].sessions_grouping` and the
   `--sessions-grouping` flag. Orphan sessions always land in a
   single "Ungrouped" bucket.
@@ -535,8 +535,8 @@ These pin the visible behavior of the v1 default sessions view
 - **Path rendering**: every path shown in the TUI uses `~`
   shortening for `$HOME`. No raw `/home/<user>/…` strings in the
   tree, right panel, or status bar.
-- **Worktree-level depth**: render the worktree level only when a
-  project has ≥ 2 worktrees. Projects with a single worktree
+- **Checkout-level depth**: render the checkout level only when a
+  project has >= 2 checkouts. Projects with a single checkout
   collapse to one level (sessions hang directly off the project
   row).
 - **Ambiguous-mux row expansion**: when a session has ≥ 2
@@ -607,7 +607,7 @@ what produces the ambiguity marker:
   side-by-side.
 - **CWD-based heuristic matches multiple muxes**. The
   `cross_link::infer` pass correlates agent and mux sessions by
-  shared cwd. Two tmux sessions opened in the same worktree both
+  shared cwd. Two tmux sessions opened in the same checkout both
   become candidates for any agent session running there. This is
   the most common cause in practice today.
 - **Declared override + discovered**. A `conspectus declared`

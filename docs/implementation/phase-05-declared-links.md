@@ -21,7 +21,7 @@ non-mutating.
 - Add local declared-link loading and writing for `.conspectus.toml`.
 - Add global declared-link storage for orphan or user-wide relationships.
 - Add commands for link and unlink operations between agent sessions, mux
-  sessions, PRs, workspaces, repos, worktrees, branches, and forks.
+  sessions, PRs, workspaces, repos, checkouts, branches, and forks.
 - Add commands or flags for confirm, ignore, and override operations.
 - Implement nearest-store selection: project-rooted declarations local;
   orphan/global declarations global; caches global only.

@@ -17,11 +17,11 @@ Observed and expected workflows include:
 - working in a linked git worktree created from a non-bare clone
 - working in a linked git worktree created from a bare clone
 - working in a workspace that symlinks to ordinary clones elsewhere on disk
-- working in a workspace with worktrees linked to repos elsewhere on disk
+- working in a workspace with linked git worktrees from repos elsewhere on disk
 
 The sessions view exposed the mismatch. A discovery pass can find many
 agent sessions with stable `cwd` values, but only sessions whose `cwd`
-exactly matches an already discovered git worktree root get grouped under
+exactly matches an already discovered git checkout root get grouped under
 that context. Sessions rooted in other useful checkouts fall into
 `Ungrouped`, even when they share the same repo, workspace, or orchestrator
 context. Separately, workspace-oriented tools such as agent-deck may expose a
@@ -30,11 +30,11 @@ ordinary clone or linked worktree. In those cases users reasonably expect the
 same agent session to be visible both under the workspace and under the
 individual checkout it is acting on.
 
-ADR 0001's identity rule for `Worktree` remains structurally sound: identify
-the edit surface by repo identity plus canonical checkout root, and keep
-current branch out of identity. What needs to change is the product and graph
-language around the entity, the discovery surfaces that create it, and the
-projection rules that group sessions.
+ADR 0001's identity rule for the old `Worktree` entity remains structurally
+sound: identify the edit surface by repo identity plus canonical checkout root,
+and keep current branch out of identity. What needs to change is the product
+and graph language around the entity, the discovery surfaces that create it,
+and the projection rules that group sessions.
 
 ## Decision
 

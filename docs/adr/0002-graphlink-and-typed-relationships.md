@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Conspectus models a sparse graph of sessions, mux sessions, repos, worktrees,
+Conspectus models a sparse graph of sessions, mux sessions, repos, checkouts,
 branches, workspaces, forks, and forge PRs. Links can come from direct on-disk
 evidence, provider metadata, conventions, user declarations, or rebuildable
 caches. The same source and target may have multiple candidate links with

@@ -115,7 +115,7 @@ Only explicit mutation commands may write these files.
 
 Write commands choose the nearest appropriate store by default:
 
-- declarations rooted in a discovered repo, workspace, worktree, branch,
+- declarations rooted in a discovered repo, workspace, checkout, branch,
   fork, or forge PR go to the nearest project-local `.conspectus.toml`
 - orphan agent-session and mux-only declarations go to user-level config
 - generated caches and indexes are never the durable source of

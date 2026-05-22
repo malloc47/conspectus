@@ -11,15 +11,15 @@ ADR 0003 selects a single polymorphic `Fork` node instead of separate
 edge cases to be represented through relation kinds, attributes, and source
 metadata.
 
-Conspectus must handle fork-like workflows that create isolated worktrees,
-reference existing worktrees, create or associate branches, expose a metadata
+Conspectus must handle fork-like workflows that create isolated checkouts,
+reference existing checkouts, create or associate branches, expose a metadata
 root without creating any checkout, or operate on a standalone repo without a
 formal workspace.
 
 The model must preserve the distinction between isolated and referenced
-contexts. For example, a selected Atelier fork may create one repo worktree but
+contexts. For example, a selected Atelier fork may create one repo checkout but
 symlink another repo back to the parent workspace. Treating both as created
-worktrees would misrepresent edit isolation.
+checkouts would misrepresent edit isolation.
 
 ## Decision
 
@@ -62,12 +62,12 @@ remain source metadata unless they affect provider-neutral graph behavior.
 
 ## Consequences
 
-- Worktree, selected, research, metadata-only, and standalone fork-like
+- Checkout-producing, selected, research, metadata-only, and standalone fork-like
   workflows fit one graph shape.
-- Selected forks can truthfully distinguish isolated fork worktrees from
-  referenced parent worktrees.
+- Selected forks can truthfully distinguish isolated fork checkouts from
+  referenced parent checkouts.
 - Research forks remain visible as fork nodes with roots and provenance even
-  when they create no worktrees or branches.
+  when they create no checkouts or branches.
 - Standalone repo workflows do not require manufacturing fake workspace nodes.
 - Table views and downstream tools can render isolation and lineage by reading
   relation kinds instead of provider-specific fields.
@@ -79,7 +79,7 @@ remain source metadata unless they affect provider-neutral graph behavior.
 - Use one generic `fork_affects` relation with attributes. Rejected because
   projections and diagnostics would constantly need to inspect attributes, and
   isolation/reference semantics would be too easy to blur.
-- Create separate node types for worktree, selected, and research fork cases.
+- Create separate node types for checkout-producing, selected, and research fork cases.
   Rejected because ADR 0003 chose a polymorphic fork node to avoid
   over-normalizing provider-specific behavior.
 - Require all fork-like contexts to belong to a workspace. Rejected because

@@ -7,7 +7,7 @@ Proposed. Unresolved.
 ## Context
 
 Conspectus discovers sessions from multiple agent harnesses and records
-lineage between sessions, mux sessions, worktrees, forks, and repositories.
+lineage between sessions, mux sessions, checkouts, forks, and repositories.
 The current table and JSON views are useful for finding sessions, but they do
 not answer a separate workflow: open a readable, full transcript for an
 `AgentSession` without dropping into provider-specific JSON, SQLite, or

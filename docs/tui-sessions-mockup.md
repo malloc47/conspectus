@@ -16,9 +16,9 @@ Real state captured from this machine on 2026-05-19:
 
 - **24 claude-code sessions** across `~/src/conspectus`,
   `~/src/oss/worktrunk`, `~/src/atelier`, `~/src/sysadmin`, and a few
-  agent-deck multi-repo worktrees.
+  agent-deck multi-repo checkouts.
 - **~22 codex sessions** mostly under `~/src/atelier` and one fork
-  worktree.
+  checkout.
 - **3 opencode sessions** under `~/src/conspectus`.
 - **3 tmux sessions** managed by agent-deck.
 - **Preview text** sourced live from each adapter
@@ -59,11 +59,11 @@ strings.
 
 A few things the mockup is demonstrating beyond the basic layout:
 
-- The conspectus group has two worktrees (main + agent-deck multi-repo),
-  so the worktree level is shown.
-- The atelier group has one worktree, so the worktree level collapses
+- The conspectus group has two checkouts (main + agent-deck multi-repo),
+  so the checkout level is shown.
+- The atelier group has one checkout, so the checkout level collapses
   away — sessions hang directly off the project row. This is the
-  worktree-depth rule (see "Locked Decisions" below).
+  checkout-depth rule (see "Locked Decisions" below).
 - The selected session has `2 candidates` for its mux link. The mux
   row in the header shows the ambiguity inline. Expanding the session
   in the tree (covered below) would surface each candidate as its own
@@ -93,7 +93,7 @@ a child row navigates the right panel to that mux's `node show`;
 `a` attaches to *that* candidate, overriding the resolver's
 preferred pick without needing to open the reserved `m` modal.
 
-The same depth rule applies as for worktrees: don't expand a
+The same depth rule applies as for checkouts: don't expand a
 session that has a single, definitive mux link; only allow
 expansion when there are ≥ 2 candidates. Sessions with no mux at
 all (`◯`) don't get a disclosure triangle either.
@@ -125,8 +125,8 @@ The exact refresh cadences live in `?` help, not in the header.
 ### Left panel: the row tree
 
 Hierarchy default per `P8-001a`: workspace (none here) → repo →
-worktree → agent session. The worktree level renders only when a
-project has ≥ 2 worktrees; with one worktree, sessions hang directly
+checkout → agent session. The checkout level renders only when a
+project has >= 2 checkouts; with one checkout, sessions hang directly
 off the project row.
 
 #### Group rows
@@ -137,7 +137,7 @@ off the project row.
 ```
 
 - `▼` / `▶` indicates expanded / collapsed.
-- Two indent levels here because conspectus has multiple worktrees;
+- Two indent levels here because conspectus has multiple checkouts;
   the atelier section below collapses to a single level for the
   same reason in reverse.
 - Path is shown with `~` shortening for `$HOME`, full path
@@ -292,8 +292,8 @@ goal in the phase-08 plan holds.
 The questions originally posed as "Things I'm Guessing At" are
 resolved. They fold into the phase-08 plan on the next pass.
 
-1. **Tree depth (worktree level)** — show the worktree level only
-   when a project has ≥ 2 worktrees. With one worktree, sessions
+1. **Tree depth (checkout level)** — show the checkout level only
+   when a project has >= 2 checkouts. With one checkout, sessions
    hang directly off the project row. This is rule **(c)** from the
    open question.
 2. **Tree depth (mux candidates)** — apply the same rule to a new

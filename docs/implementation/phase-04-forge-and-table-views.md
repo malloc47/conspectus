@@ -17,7 +17,7 @@ remains the graph API; tables are projections over the resolved graph.
 
 - Add a GitHub forge adapter, initially using `gh` for auth and network
   behavior.
-- Add `ForgePr` nodes and GraphLinks from branches or worktrees to PRs.
+- Add `ForgePr` nodes and GraphLinks from branches or checkouts to PRs.
 - Add config loading for `[session] projection = "agent" | "mux" | "union"`.
 - Add table renderers for agent, mux, and union projections.
 - Include compact provenance, confidence, and ambiguity indicators in table

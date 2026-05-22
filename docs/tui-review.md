@@ -73,7 +73,7 @@ preview that looks like the terminal the user will enter.
   - show basename or `repo-name` as the primary label
   - keep shortened path as dim secondary text only when width allows
   - expose the full path in the right panel or help/status on demand
-- Add a small launch-context marker to the current repo/worktree group, such as
+- Add a small launch-context marker to the current repo/checkout group, such as
   `● cwd`, `here`, or a subtle accent on the group row. Do not filter the world
   to the current directory.
 - Add a density toggle after the core layout stabilizes:

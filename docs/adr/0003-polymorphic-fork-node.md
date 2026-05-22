@@ -12,7 +12,7 @@ risks over-normalizing a graph model whose main job is to capture sparse,
 provider-neutral provenance links.
 
 Fork-like behavior is not uniform across providers or workflows. A fork may
-create isolated worktrees, reference existing worktrees, start a new agent
+create isolated checkouts, reference existing checkouts, start a new agent
 session, continue from an existing agent session, group multiple harness
 sessions, or exist only as metadata. Atelier alone has worktree, selected, and
 research fork modes, plus per-harness session records with native, approximate,
@@ -36,7 +36,7 @@ Recommended `Fork` attributes include:
 - provider
 - provider source key
 - kind or capabilities, such as context, session, combined, metadata-only,
-  creates-worktree, references-worktree, read-only, approximate, unsupported, or
+  creates-checkout, references-checkout, read-only, approximate, unsupported, or
   fresh-session
 - scope, such as workspace, repo, session, or global
 - created timestamp when available
@@ -103,11 +103,11 @@ For Atelier:
 ## Open Questions Answered
 
 - One Atelier `ForkEntry` should become one `Fork` node.
-- A single Atelier fork can link to multiple repos, worktrees, branches, and
+- A single Atelier fork can link to multiple repos, checkouts, branches, and
   agent sessions without creating separate context/session fork nodes.
 - Atelier repo membership states should map to relation kinds such as
   `created_checkout` and `referenced_checkout`.
 - Research forks are represented as fork nodes with metadata and reference
-  links, even when they create no worktrees.
+  links, even when they create no checkouts.
 - Atelier-specific fork fields remain source metadata unless later promoted to
   provider-neutral attributes.

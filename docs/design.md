@@ -95,7 +95,7 @@ repo, or a checkout branch with an open PR and no known agent session.
 Atelier remains a workspace materializer and policy launcher:
 
 - creates and manages one flavor of multi-repo workspace
-- creates worktrees and fork metadata that conspectus can ingest
+- creates checkouts and fork metadata that conspectus can ingest
 - owns `atelier.toml` and `.atelier/forks/index.toml`
 - generates harness config and wrapper scripts
 - launches harnesses through workspace policy
@@ -290,7 +290,7 @@ Fork effect matrix:
 | Context Effects | Session Effects | Meaning |
 | --- | --- | --- |
 | yes | yes | Heavyweight fork-like workflow. A single `Fork` records both context provenance and session lineage evidence. |
-| yes | no | Context-only fork-like workflow for pure git, branch/worktree experiments, or pre-staging later agent work. |
+| yes | no | Context-only fork-like workflow for pure git, branch/checkout experiments, or pre-staging later agent work. |
 | no | yes | Session-only fork-like workflow for parallel non-colliding work, read-only agents, or multiple agents sharing one context. |
 | metadata only | optional | Provider records a fork root or operation but no concrete context or session endpoints have been discovered yet. |
 | no | no | Noop. Do not support or persist this as a fork node unless provider metadata supplies meaningful provenance. |

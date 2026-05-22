@@ -20,8 +20,8 @@ workspace just to discover local state.
 Git provides useful local identity surfaces:
 
 - A git repository with linked worktrees has a shared common metadata directory.
-- Each worktree has its own root and per-worktree metadata.
-- Branches are refs inside a repo and can move between commits and worktrees.
+- Each checkout has its own root and may have per-worktree git metadata.
+- Branches are refs inside a repo and can move between commits and checkouts.
 
 Agent harnesses do not provide a uniform global session identity. Some harnesses
 emit UUID-like session IDs, some use timestamp-derived IDs, and some expose only
@@ -38,9 +38,9 @@ Entity identity rules:
 - `Repo`: identify by canonical git common dir for local discovery. Store
   remotes, source paths, default remote, and normalized remote URLs as
   attributes or aliases, not as the primary key.
-- `Worktree`: identify by `(repo_id, canonical worktree root)`. Use git
+- `Checkout`: identify by `(repo_id, canonical checkout root)`. Use git
   per-worktree metadata path as source evidence when available. Do not include
-  the current branch in worktree identity.
+  the current branch in checkout identity.
 - `Workspace`: identify provider-backed workspaces by provider plus canonical
   root. Identify generic inferred workspaces by canonical root. If Conspectus
   later writes `.conspectus.toml`, it may add an optional local `workspace.id`
@@ -49,7 +49,7 @@ Entity identity rules:
   session id or source path fallback)`. Do not assume harness-native session IDs
   are globally unique.
 - `Branch`: identify by `(repo_id, refname)`. Store current commit, upstream,
-  remote, and checked-out worktrees as attributes or links.
+  remote, and checkouts currently using the branch as attributes or links.
 - `ForgePr`: identify by `(forge_provider, host, owner, repo, number)`. Store
   head/base refs, state, URLs, and provider-specific fields as attributes or
   source metadata.
@@ -60,7 +60,7 @@ Entity identity rules:
   Conspectus IDs into every discovered repo or workspace.
 - Declared links can refer to deterministic structured IDs, while later local
   `.conspectus.toml` files can add durable aliases for path-move resilience.
-- Repo identity remains robust for local worktree workflows because linked
+- Repo identity remains robust for local checkout workflows because linked
   worktrees share the same git common dir.
 - Remote URL changes, repo moves, or workspace moves may create apparent new
   nodes unless Conspectus has declared state, cache aliases, or a future local
@@ -83,14 +83,14 @@ Entity identity rules:
 - Use harness-native session IDs directly. Rejected because harness IDs are not
   guaranteed globally unique and some harnesses expose path-scoped or synthetic
   session identifiers.
-- Use branch name or current commit as part of `Worktree` identity. Rejected
+- Use branch name or current commit as part of `Checkout` identity. Rejected
   because branches and commits change while the checkout path remains the thing
   users navigate.
 
 ## Open Questions Answered
 
 - Harness-native session IDs should not be assumed globally unique.
-- Worktree identity should be path-based plus git metadata evidence, not
+- Checkout identity should be path-based plus git metadata evidence, not
   branch-based.
 - Workspace identity should be provider/root-based at first, with optional
   durable local IDs only when Conspectus writes declared state.

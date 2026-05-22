@@ -9,7 +9,7 @@ Accepted. Extends ADR 0005.
 ADR 0005 represents session lineage as `parent_session` / `child_session`
 relation candidates whose source is a `Fork` node. That shape fits Atelier:
 Atelier records a `ForkEntry` whose harness entries carry source and fork
-session ids, and one fork can affect several harnesses, repos, and worktrees,
+session ids, and one fork can affect several harnesses, repos, and checkouts,
 so a polymorphic `Fork` node is a natural anchor.
 
 Harnesses themselves also produce session lineage that is *not* fork-shaped:

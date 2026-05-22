@@ -8,7 +8,7 @@ Accepted.
 
 H-TBL-001 through H-TBL-005 modernized the renderer behind
 `conspectus session`. The renderer now serves more than agent sessions —
-PR identifiers, fork lineage, mux session names, and worktree cwds all
+PR identifiers, fork lineage, mux session names, and checkout cwds all
 appear as cells. Once H-TBL-008 / H-TBL-009 add `prs` and `forks`
 row-types, the `session` framing becomes actively misleading: a row in
 those tables is a PR or a fork, not a session.
