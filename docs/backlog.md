@@ -2483,6 +2483,209 @@ render time.
     key verbatim, and the new `title` column for both sessions and
     union row-types. 449 tests pass.
 
+### Agent Session Transcript Preview And Viewer
+
+The `H-PREVIEW-*` stories established a single-line
+`last_message_preview` populated at discovery time. The next step is
+the TUI right-panel surface: when an un-muxed agent session is
+selected, the panel currently renders only that one normalized line
+even though there is plenty of vertical space and useful prior context
+on disk. This workstream extends the un-muxed preview into a styled,
+multi-message recent-history rendering, and decides how an optional
+external "full transcript" viewer integrates per ADR 0019.
+
+The design constraints from the May 2026 candidate survey (see also
+ADR 0019):
+
+- The inline preview lives inside the existing two-panel Ratatui UI;
+  it should not require a child-process viewer just to populate the
+  right pane. Embedding a Rust markdown renderer is the lowest-risk
+  path.
+- `tui-markdown` (joshka/tui-markdown, v0.3.7) returns
+  `ratatui::text::Text` directly and pairs cleanly with the existing
+  `ansi-to-tui` dep and Ratatui 0.30. It is the leading candidate for
+  the inline styling concern. Per ADR 0024 a new TUI crate dependency
+  needs a follow-on ADR before adoption.
+- Recent-history extraction should be done on demand when the
+  selection changes, not eagerly populated for every session at
+  discovery time the way `last_message_preview` is. A per-selection
+  read is bounded (one transcript, last N turns) and avoids paying
+  the cost for sessions the user never opens.
+- Compaction (Claude Code), tool-only tails, reasoning blocks, and
+  channel markers (codex) are already handled in the H-PREVIEW
+  extractors; the recent-history readers should share that grammar
+  rather than re-parsing from scratch.
+- External viewers (`claude-history`, `recall`, etc.) remain the
+  right surface for a separate "open full transcript" action. The
+  inline preview is not a replacement for them, and they are not a
+  replacement for the inline preview.
+
+This workstream supersedes the single-bullet `P8-012c` story; that
+entry stays in Phase 8 as the v1 release-boundary marker that is
+satisfied when this workstream's TUI integration stories land.
+
+- [ ] `H-TRANSCRIPT-001` ADR: terminal markdown rendering for the
+  inline transcript preview.
+  - Scope: record a follow-on ADR (per ADR 0024) selecting the
+    markdown rendering path for the TUI. Compare `tui-markdown`
+    (Ratatui-native, returns `ratatui::text::Text`), `termimad`
+    (crossterm-targeted, requires bridging), and a roll-your-own
+    minimal styler over `pulldown-cmark`. Decide on adoption
+    criteria including: crate maintenance posture, syntect/
+    `highlight-code` feature use, license, supply-chain cost,
+    and integration shape inside the existing `src/tui/` module.
+  - Tests: ADR text only; no code in this story.
+  - Blockers: none. Should land before `H-TRANSCRIPT-008` adds
+    the dep.
+
+- [ ] `H-TRANSCRIPT-002` Resolve ADR 0019 with the May 2026 survey.
+  - Scope: move ADR 0019 from Proposed to Accepted (or amend it
+    in place) with the updated candidate status: `ccview`
+    disappeared; `claude-history`, `recall`, `ai-dash`,
+    `lazyagent`, and `ccboard` are all active; `lazyagent`
+    gained an HTTP API; `ccboard-core` is a candidate Rust
+    library; `coding_agent_session_search` is new and covers
+    20+ providers via `--json`. Narrow the `SessionViewer`
+    trait sketch to the integration shapes that current
+    candidates actually expose, and call out that the inline
+    preview is a separate concern handled by the rest of this
+    workstream rather than by `SessionViewer`.
+  - Tests: ADR text only.
+  - Blockers: none.
+
+- [ ] `H-TRANSCRIPT-003` Recent-history adapter API.
+  - Scope: define an on-demand adapter entry point on each
+    harness that returns the last N user/assistant turns for a
+    given `AgentSessionId` (parallel to the H-PREVIEW
+    extractors but returning a structured `Vec<TranscriptTurn>`
+    rather than a single normalized string). Decide whether the
+    structure lives in `model::` (and is also usable by a
+    future full-transcript viewer) or stays inside the harness
+    module. Cap turns by count, by total bytes, or both;
+    document the choice. Errors must degrade to "unavailable"
+    without panicking the TUI.
+  - Tests: trait/contract tests; one fake harness adapter.
+  - Blockers: none.
+
+- [ ] `H-TRANSCRIPT-004` Claude Code recent-turns extractor.
+  - Scope: extend the existing tail-scan reader to return the
+    last N user/assistant turns. Continue to skip tool-use,
+    tool-result, thinking, and `system` records. Handle
+    compaction (ADR 0019 context): when a `compact_boundary`
+    row is in scope, the post-compaction summary should be
+    distinguishable in the returned data (e.g. a turn-kind
+    flag) so the TUI can render it differently. Expand the
+    tail-scan window when N turns are not found in the current
+    window, bounded by a hard cap.
+  - Tests: fixture tests for the plain exchange, the
+    compaction-summary case, a tool-only tail, and the window
+    expansion path.
+  - Blockers: `H-TRANSCRIPT-003`.
+
+- [ ] `H-TRANSCRIPT-005` Codex recent-turns extractor.
+  - Scope: extend `read_rollout_last_message_preview` style
+    extraction to return the last N `response_item` /
+    `payload.type == "message"` turns with `user` / `assistant`
+    roles, skipping reasoning / function_call /
+    function_call_output / event_msg records. Apply the same
+    channel-marker filter (`<turn_aborted>`,
+    `<proposed_plan>`) used by `H-PREVIEW-006` per-turn.
+  - Tests: fixture tests including the channel-marker filter
+    applied across multiple turns.
+  - Blockers: `H-TRANSCRIPT-003`.
+
+- [ ] `H-TRANSCRIPT-006` OpenCode recent-turns extractor.
+  - Scope: extend the modern `part` table reader to return the
+    most recent N `type: "text"` rows per session via a single
+    SQL query (analogous to `read_last_message_previews`).
+    Degrade to an empty result when the `part` table is absent
+    so legacy stores still surface session metadata.
+  - Tests: SQLite-backed fixture tests covering most-recent
+    ordering, per-session attribution, and the absent-table
+    fallback.
+  - Blockers: `H-TRANSCRIPT-003`.
+
+- [ ] `H-TRANSCRIPT-007` Aider recent-turns extractor (deferred).
+  - Scope: deferred for the same reasons as `H-PREVIEW-005`
+    (free-form markdown without a stable assistant-turn
+    delimiter; input-history is user-only and would mislead).
+    Aider rows render "(transcript preview unavailable)" in
+    the panel. Reopen when aider gains a structural marker or
+    a stable fixture corpus is available.
+  - Blockers: same as `H-PREVIEW-005`.
+
+- [ ] `H-TRANSCRIPT-008` Add `tui-markdown` dependency.
+  - Scope: add the crate selected in `H-TRANSCRIPT-001` to
+    `Cargo.toml`. Decide on the `highlight-code` feature (and
+    whether the syntect cost is worth it for the preview
+    pane). Add the crate to the workspace lints/audit
+    allow-list if applicable. No usage yet — this story
+    isolates the dep change for review.
+  - Tests: `cargo build` and `cargo clippy --all-targets
+    --all-features -- -D warnings`.
+  - Blockers: `H-TRANSCRIPT-001`.
+
+- [ ] `H-TRANSCRIPT-009` Inline transcript-preview widget.
+  - Scope: new `src/tui/transcript_preview.rs` (or similar)
+    that takes a `Vec<TranscriptTurn>` and produces a styled
+    `ratatui::text::Text` filling the available right-panel
+    height. Render per-turn role headers
+    (e.g. dimmed `you`/`assistant` labels), use
+    `tui-markdown` for the body, mark compaction-summary
+    turns visibly, and crop or scroll when content exceeds
+    the pane. Honor `--no-live-preview` by falling back to
+    the existing single-line `last_message_preview`. Surface
+    "transcript unavailable" and stale-data markers per ADR
+    0023's privacy posture.
+  - Tests: Ratatui buffer snapshot tests for: (a) a normal
+    multi-turn preview, (b) a Claude Code compaction-summary
+    turn, (c) an "unavailable" case, (d) `--no-live-preview`
+    falling back to the single-line preview.
+  - Blockers: `H-TRANSCRIPT-003`, `H-TRANSCRIPT-008`.
+
+- [ ] `H-TRANSCRIPT-010` Wire the widget into the right panel for
+  un-muxed agent rows.
+  - Scope: route un-muxed `AgentSession` selections through the
+    new widget instead of the single-line preview. Trigger the
+    on-demand recent-turns read on selection change, similar to
+    `P8-009`'s mux capture and `P8-012a`'s `gh` enrichment:
+    immediate placeholder while loading, then content. Cache
+    by `AgentSessionId` for the lifetime of the TUI; invalidate
+    on session-state mtime changes if cheap to detect. Muxed
+    rows continue to render the mux capture preview from
+    `P8-009`. Mux candidate child rows continue to use the
+    existing detail rendering.
+  - Tests: TUI integration tests for the un-muxed selection
+    path, the muxed selection path (regression — mux capture
+    still wins), the loading→content transition, and the
+    cache-hit path on re-selection.
+  - Blockers: `H-TRANSCRIPT-004`, `H-TRANSCRIPT-005`,
+    `H-TRANSCRIPT-006`, `H-TRANSCRIPT-009`.
+
+- [ ] `H-TRANSCRIPT-011` Document the inline transcript preview.
+  - Scope: update `docs/operations.md` and the Phase 8
+    implementation doc with the new preview behavior,
+    `--no-live-preview` semantics for transcript reads, the
+    privacy posture (transcript text never leaves the local
+    process), and the supported harnesses. Note aider's
+    deferred status.
+  - Tests: `git diff --check`.
+  - Blockers: `H-TRANSCRIPT-010`.
+
+- [ ] `H-TRANSCRIPT-012` External full-transcript viewer launch
+  (optional follow-on).
+  - Scope: per the refreshed ADR 0019, add a keybind that
+    launches an external viewer (`claude-history` for Claude
+    Code, `recall` for multi-harness) as a child process and
+    hands control to it, the same way `P8-010` hands control
+    to `tmux attach-session`. Discover the binary on `PATH`;
+    surface a disabled-action reason when no viewer is
+    available for the selected harness. This is a separate
+    action from the inline preview, not a replacement.
+  - Tests: action-resolver tests covering supported /
+    unsupported harnesses and the no-binary-on-PATH path.
+  - Blockers: `H-TRANSCRIPT-002`, `H-TRANSCRIPT-010`.
+
 ### Agent-Mux Orchestrator Integrations
 
 A growing class of "agent-over-tmux" orchestrators — agent-deck, dmux,
@@ -2669,6 +2872,55 @@ session ↔ pane evidence source that works even when no orchestrator
 is installed — and a useful cross-check against agent-mux adapter
 output when one is.
 
+Drift-reduction sequence after the `H-MUXPROC-015` Claude Code
+failure:
+
+1. Finish the `H-MUXPROC-002` process-linking slice by making the
+   evidence taxonomy explicit in tests and resolver ranking. In
+   particular, treat start-command / argv session ids as launch
+   evidence, below active open-fd, hook, control-plane, and fresh
+   state evidence. This immediately reduces the chance that stale
+   `--resume` arguments become preferred links.
+2. Take `H-MUXPROC-015` as the first regression story, even before a
+   definitive Claude-current-session source exists. Add fixtures for
+   launch session A plus stronger current-session evidence B, and for
+   the fallback case where launch evidence remains the best available
+   signal. This locks in the intended resolver behavior while later
+   sources are still being researched.
+3. Do `H-MUXPROC-005` and `H-MUXPROC-009` as short audits in parallel
+   if possible. They have no blockers and decide whether Claude Code,
+   Codex, or opencode can expose current session identity through a
+   non-mutating control plane or hook/plugin path. The Claude Code
+   `/resume` drift should be the primary audit scenario.
+4. If hooks are viable, do `H-MUXPROC-010`, `H-MUXPROC-011`, then
+   `H-MUXPROC-012`. This is the highest-confidence durable path for
+   Claude Code drift if hook payloads include the post-`/resume`
+   session id or transcript path. Keep `H-MUXPROC-013` and
+   `H-MUXPROC-014` behind the same schema, but do not let them delay
+   the Claude fix.
+5. If a non-mutating Claude control plane exists, add the corresponding
+   control-plane adapter before or instead of the hook emitter. If only
+   Codex or opencode surfaces survive the audit, keep `H-MUXPROC-006`
+   and `H-MUXPROC-007` scoped to those harnesses and continue the
+   Claude path through hooks or read-only file/state evidence.
+6. Do `H-MUXPROC-003` next for one-shot and future continuous-mode
+   activity correlation. This improves fresh-session and post-switch
+   attribution without requiring opt-in hooks, and gives the resolver a
+   middle-strength signal above cwd-only matching.
+7. Do `H-MUXPROC-004` only after a schema audit proves stable
+   read-only state fields. It is useful for Codex/opencode and future
+   Claude state, but it has more locking/schema risk than hooks or
+   file-activity correlation.
+8. Land `H-MUXPROC-008` as soon as the ADR path is open, or fold it
+   into `H-MUXPROC-001` if that ADR is still being written. This keeps
+   terminal injection and slash-command probing out of the attribution
+   design while the tempting `/usage` workaround is fresh.
+9. Leave `H-MUXPROC-006`, `H-MUXPROC-007`, `H-MUXPROC-013`, and
+   `H-MUXPROC-014` behind their audits and schema decisions. They
+   improve cross-harness correctness, but they are not the shortest
+   path to fixing the Claude Code mapping drift seen in
+   `H-MUXPROC-015`.
+
 - [ ] `H-MUXPROC-001` ADR: process-tree linker design and dependency
   choice.
   - Scope: decide (1) whether to depend on the `sysinfo` crate or
@@ -2731,6 +2983,305 @@ output when one is.
     ambiguity into a graph-level refinement instead of a TUI-only
     picker problem.
   - Tests: `cargo test active_pane --all-targets`.
+
+- [ ] `H-MUXPROC-003` Add read-only session-file activity correlation.
+  - Scope: improve fresh-session attribution without sending input to
+    running agents. Add a read-only observation layer that correlates
+    tmux pane PIDs with harness session files by recent creation /
+    modification / open activity. Preferred implementation is a
+    Linux-first provider that can consume `inotify`/fanotify-style
+    events in continuous mode and a one-shot fallback that scans
+    known harness state roots for recently-created or recently-
+    modified session files matching the pane cwd and harness. Treat
+    this as weaker than an open fd match but stronger than cwd-only
+    matching when the event/file timestamp is close to the pane
+    process start time. Do not write marker files and do not touch
+    transcript contents.
+  - Tests: fixture-backed clocked tests covering Codex rollout file
+    creation, Claude project/task file creation, opencode sqlite
+    session updates, stale files outside the time window, and
+    ambiguous same-cwd events that remain candidates instead of
+    becoming a single preferred link.
+  - Manual checks: start a fresh harness session in tmux with no
+    explicit resume id; confirm `graph --format json` gains a
+    non-cwd `LinkedToMux` candidate after the session file appears.
+  - Blockers: `H-MUXPROC-002`; friendlier after the continuous-mode
+    snapshot workstream starts.
+
+- [ ] `H-MUXPROC-004` Read harness state databases for live-session
+  hints without mutating logs.
+  - Scope: for harnesses that maintain sqlite or other indexed state,
+    add read-only queries that can strengthen session ↔ mux
+    attribution. Codex currently opens `state_*.sqlite` and
+    `logs_*.sqlite`; opencode has a session database; future Claude
+    Code state may expose a durable index. The provider should open
+    databases in read-only mode, avoid long-lived locks, and extract
+    only stable fields such as session id, cwd, last activity, parent
+    session, and any pid / terminal / server binding if present.
+    The output should refine existing candidates; it must not become
+    the only source of session discovery.
+  - Tests: temp sqlite fixtures for each supported schema, missing
+    database degradation, unknown schema degradation, read-only lock
+    behavior, and resolver tests proving database evidence ranks
+    above cwd-only but below direct fd evidence.
+  - Manual checks: run against live Codex and opencode state stores
+    while sessions are active; confirm no write-ahead-log churn is
+    introduced by Conspectus.
+  - Blockers: schema audit per harness; ADR required before any new
+    persistent schema dependency or long-running read strategy is
+    introduced.
+
+- [ ] `H-MUXPROC-005` Audit harness control planes for non-mutating
+  current-session queries.
+  - Scope: determine whether any supported harness exposes a
+    documented side-channel that can ask an already-running
+    interactive process for its current session id without entering
+    text into the conversation or mutating JSONL/session logs. Audit
+    Codex `app-server` / `app-server proxy` / `--remote`, opencode
+    `serve` / `attach` / `acp`, Claude Code remote-control /
+    background-agent surfaces, and aider if a relevant server mode
+    exists. For each harness, record: launch mode required, discovery
+    path for the socket/URL/token, query shape, mutation guarantees,
+    authentication boundaries, and fallback behavior when the
+    control plane is absent.
+  - Tests: none for the audit itself. If a supported control plane
+    survives, create follow-up fixture or fake-server tests before
+    implementing the adapter.
+  - Manual checks: launch each harness in the required server/control
+    mode and prove the query does not append user, assistant, or
+    system records to the session transcript.
+  - Related: `H-MUXPROC-015` captures a live Claude Code case where
+    command-line `--resume` evidence became stale after an in-process
+    session switch; the audit should explicitly look for a safer
+    current-session source for that scenario.
+  - Blockers: none.
+
+- [ ] `H-MUXPROC-006` Add Codex app-server attribution adapter if
+  the audit proves a stable non-mutating query.
+  - Scope: if `H-MUXPROC-005` confirms Codex's app-server or control
+    socket can report the active session/rollout for an interactive
+    TUI, implement an optional adapter that discovers the control
+    endpoint, authenticates using the documented local mechanism, and
+    emits high-confidence `LinkedToMux` evidence for the active
+    session. This should be a launch-mode enhancement only: existing
+    plain TUI sessions must continue to rely on fd / command / cwd
+    evidence.
+  - Tests: fake app-server protocol tests for current-session,
+    missing-session, auth failure, server unavailable, and stale
+    socket cases.
+  - Manual checks: launch Codex with the required app-server mode;
+    confirm Conspectus links the live rollout without relying on
+    command-line resume args or open JSONL fd paths.
+  - Blockers: `H-MUXPROC-005`.
+
+- [ ] `H-MUXPROC-007` Add opencode server/ACP attribution adapter if
+  the audit proves a stable non-mutating query.
+  - Scope: if `H-MUXPROC-005` confirms opencode `serve`, `attach`,
+    or ACP can report active session identity for a running TUI or
+    headless server, implement an optional adapter that maps the
+    server session id back to a `MuxSession`. Prefer documented
+    attach URLs, pid/socket evidence, or server metadata over
+    guessing from ports. Keep plain opencode TUI support on the
+    existing fd / command / cwd path.
+  - Tests: fake server tests for active session, multiple projects,
+    unavailable server, auth/connection failure, and ambiguous
+    session responses.
+  - Manual checks: launch opencode in the supported server mode and
+    confirm the query does not create transcript records or alter
+    session recency.
+  - Blockers: `H-MUXPROC-005`.
+
+- [ ] `H-MUXPROC-008` Document terminal-injection attribution as a
+  rejected strategy unless a harness guarantees non-mutating status
+  commands.
+  - Scope: record the policy that Conspectus must not use
+    `tmux send-keys`, slash commands, prompts such as `/status`, or
+    terminal scraping to ask an agent for its current session id
+    because these are user inputs and may mutate JSONL/transcript
+    logs. The only exception is a harness-documented command channel
+    that explicitly guarantees no transcript/session mutation; such
+    an exception must be captured by `H-MUXPROC-005` and implemented
+    as a control-plane adapter rather than generic terminal input.
+    Put the rationale in the process-linking ADR or a short follow-up
+    ADR so future work does not rediscover the same tempting but
+    unsafe approach.
+  - Tests: none.
+  - Related: `H-MUXPROC-015` records why scraping or injecting
+    Claude Code `/usage` is tempting but should not be treated as
+    the preferred architecture unless no non-mutating control or hook
+    source exists.
+  - Blockers: `H-MUXPROC-001` ADR can absorb this if it has not
+    landed; otherwise write a follow-up ADR.
+
+- [ ] `H-MUXPROC-009` Audit harness hooks/plugins as definitive
+  session-state sidecar emitters.
+  - Scope: determine whether supported harnesses can expose current
+    session state through lifecycle hooks, tool hooks, plugins, or
+    status-line callbacks without sending text into the agent
+    conversation. Prototype one hook/plugin per harness that writes
+    its raw payload and selected environment/process context to a
+    temporary Conspectus-owned sidecar directory. Audit Claude Code
+    hooks, Codex `codex_hooks`, opencode plugin/server extension
+    points, and aider if a native hook or extension surface exists.
+    For each harness, record whether the payload includes an explicit
+    session id, transcript/session path, cwd, pid/ppid, tmux pane,
+    and event timestamp; also verify whether hook execution changes
+    transcript/session logs. Do not add a persistent Conspectus hook
+    convention until the audit proves at least one harness can emit
+    useful non-mutating state.
+  - Tests: none for the audit itself. Keep any prototype scripts out
+    of committed config unless they become intentional fixtures.
+  - Manual checks: run a short live session per harness with the
+    prototype hook enabled; diff the harness transcript/state before
+    and after to confirm only expected harness activity changed and
+    no Conspectus probe text was logged.
+  - Blockers: none. Follow-up ADR required before adding a durable
+    sidecar schema or installer.
+
+- [ ] `H-MUXPROC-010` Define Conspectus hook sidecar schema and
+  trust/ranking rules.
+  - Scope: if `H-MUXPROC-009` finds viable hook/plugin emitters,
+    define a provider-neutral sidecar record written outside project
+    trees, likely under the user's XDG state directory. Minimum
+    candidate fields: harness key, session key, cwd, pid, ppid,
+    tmux pane id, tmux socket/session/window/pane metadata,
+    transcript/session path, hook event kind, observed timestamp, and
+    harness version. Define stale-record expiry, collision handling,
+    privacy expectations, and evidence ranking. Proposed ranking:
+    explicit hook session id + tmux pane/pid above open-fd evidence;
+    hook transcript/session path above open-fd evidence when the path
+    resolves to a discovered session; hook cwd-only records below
+    command session ids and above generic cwd matching only when the
+    timestamp is fresh.
+  - Tests: schema parse/round-trip tests, stale-record filtering,
+    duplicate event coalescing, malformed record degradation, and
+    resolver ordering tests against fd, command, and cwd evidence.
+  - Blockers: `H-MUXPROC-009`; ADR required for the durable sidecar
+    convention.
+
+- [ ] `H-MUXPROC-011` Implement hook-sidecar discovery provider.
+  - Scope: read the sidecar records defined by `H-MUXPROC-010` and
+    convert them into `LinkedToMux` candidate links. Match hook
+    records to mux sessions by tmux pane id when present, then pane
+    pid, then tmux session metadata, and only then cwd as a weak
+    fallback. Match records to agent sessions by explicit session key
+    or transcript/session path. Handle stale records conservatively:
+    they may explain exited sessions in future views, but should not
+    override fresh active-pane fd/process evidence.
+  - Tests: fixture directory with multiple harness records, stale
+    records, malformed JSON, same-session duplicate events, tmux pane
+    reuse, missing mux session, and missing agent session. Resolver
+    tests for ranking relative to `active_pane_fd_session_match`.
+  - Manual checks: run with a live hook-enabled session and confirm
+    `graph --format json` shows the hook evidence without requiring
+    transcript scraping or terminal input.
+  - Blockers: `H-MUXPROC-010`.
+
+- [ ] `H-MUXPROC-012` Add Claude Code hook sidecar emitter if audit
+  proves non-mutating session identity.
+  - Scope: if Claude Code hook payloads include a current session id,
+    transcript path, or enough context to derive one, provide a
+    minimal documented hook command/script that writes Conspectus
+    sidecar records. Prefer explicit hook payload fields over
+    inspecting parent process fds. The hook must be opt-in and easy
+    to remove; Conspectus should discover its records but not require
+    users to install it.
+  - Tests: payload fixture tests for supported Claude Code hook
+    events; sidecar record generation tests; version/field-missing
+    degradation.
+  - Manual checks: enable the hook for a live Claude Code session and
+    verify the sidecar identifies the active session without adding
+    Conspectus probe messages to JSONL logs.
+  - Related: `H-MUXPROC-015` provides the concrete failure mode this
+    emitter should fix if Claude Code hook payloads expose the
+    post-`/resume` current session id.
+  - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+
+- [ ] `H-MUXPROC-015` Fix Claude Code mux attribution after
+  in-process `/resume` switches.
+  - Problem: live testing showed a Claude Code process running in
+    tmux with argv
+    `claude --resume 926c6991-9494-48ee-9d63-a98f4b4959d0`, while
+    the pane's `/usage` screen reported current session id
+    `2f11bd94-da81-4c5c-975d-a29dcdb3cda0`. Conspectus therefore
+    linked the tmux session to the launch/resume id (`926c6991`)
+    via `active_pane_command_session_match`, even though the active
+    transcript and recency belonged to `2f11bd94`. The operator
+    likely entered the older tmux session and then used Claude
+    Code's in-app `/resume` to switch sessions. The process argv did
+    not update, so command-line resume evidence became stale.
+  - Scope: refine Claude Code session ↔ mux attribution so
+    command-line `--resume <session>` is treated as launch evidence,
+    not definitive current-session evidence, when a stronger
+    current-session source exists. Investigate, in order:
+    non-mutating Claude control/state sources from `H-MUXPROC-005`;
+    hook/sidecar payloads from `H-MUXPROC-009` / `H-MUXPROC-012`;
+    read-only state/database/file evidence from `H-MUXPROC-003` /
+    `H-MUXPROC-004`; and only then carefully-scoped pane scraping of
+    already-visible status surfaces such as `/usage`. Do not inject
+    `/usage`, `/status`, or any slash command into the pane as part
+    of discovery.
+  - Desired behavior: when launch argv names session A but stronger
+    current-session evidence names session B in the same running
+    Claude process, emit or select the `LinkedToMux` candidate for B
+    and demote A to launch-history evidence. The TUI should then show
+    the attached mux indicator beside B, and B's recency should not
+    look like an unattached background write.
+  - Tests: fixture a mux node whose `active_pane_start_command`
+    contains `--resume A` and a stronger Claude-current-session
+    evidence source names B; assert resolver selects B and does not
+    keep A as the preferred mux relationship. Add a regression for
+    the no-stronger-evidence case where argv remains usable. Add a
+    TUI row-tree assertion that the mux indicator follows B.
+  - Manual checks: reproduce with a live Claude Code tmux session:
+    start or attach to session A, switch in-app to session B with
+    `/resume`, verify the pane reports B as current, then confirm
+    `conspectus graph --format json` and `conspectus tui` link the
+    mux to B.
+  - Related: `H-MUXPROC-002` (current argv/fd/process evidence),
+    `H-MUXPROC-003` (session-file activity correlation),
+    `H-MUXPROC-004` (read-only harness state), `H-MUXPROC-005`
+    (control-plane audit), `H-MUXPROC-008` (terminal-injection
+    policy), `H-MUXPROC-009` / `H-MUXPROC-010` /
+    `H-MUXPROC-012` (Claude hook sidecar path), `P8-014`
+    (ambiguous mux picker if evidence remains unresolved).
+  - Blockers: no hard blocker for documenting/demoting argv
+    semantics; a definitive fix likely depends on one of
+    `H-MUXPROC-003`, `H-MUXPROC-004`, `H-MUXPROC-005`, or
+    `H-MUXPROC-012`.
+
+- [ ] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
+  non-mutating session identity.
+  - Scope: if Codex `codex_hooks` events include the active
+    thread/rollout/session id, or if a hook can reliably identify the
+    current rollout path from its process context, provide an opt-in
+    hook emitter for Conspectus sidecar records. Avoid depending on
+    terminal input, prompt text, or transcript mutation. If Codex
+    hooks only run for tool events, document the expected delay
+    before the first sidecar record appears in a fresh session.
+  - Tests: payload fixture tests for supported Codex hook events;
+    sidecar generation tests for explicit session id and transcript
+    path cases; stale/missing-field degradation.
+  - Manual checks: enable the hook for a live Codex session and
+    confirm Conspectus links the active rollout even when the launch
+    command names only a resumed parent.
+  - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+
+- [ ] `H-MUXPROC-014` Add opencode plugin/server sidecar emitter if
+  audit proves non-mutating session identity.
+  - Scope: if opencode's plugin, server, ACP, or attach surfaces can
+    expose the active session id without mutating session logs, build
+    an opt-in sidecar emitter. Prefer a documented plugin/server API
+    over shell wrappers. The emitter should record active session id,
+    project directory, pid/server id, and any attach URL or socket
+    metadata needed to correlate back to a mux pane.
+  - Tests: fake plugin/server payload tests, sidecar generation
+    tests, multiple-project/session ambiguity tests, and degradation
+    when the plugin is absent.
+  - Manual checks: run opencode with the plugin/server extension and
+    confirm no transcript records are added by the Conspectus
+    attribution path.
+  - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
 
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
@@ -3237,21 +3788,16 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-005`, `P8-008`.
 
 - [ ] `P8-012c` Un-muxed agent transcript preview.
-  - Scope: extend the un-muxed-agent right-panel preview beyond the
-    single-line `last_message_preview` to a short recent-history
-    rendering. Read transcript state through an adapter aligned with
-    ADR 0019 so the future transcript viewer can share the same
-    backing types. The preview stays bounded (a few recent
-    user/assistant turns; honors `--no-live-preview`) and
-    visibly marks stale or unavailable data.
-  - Tests: fixture transcript tests for recent-history extraction
-    across each supported harness, including compacted Claude Code
-    history; Ratatui snapshots for an un-muxed-agent preview panel
-    that has transcript data and one that doesn't.
-  - Blockers: `P8-012a` or `P8-012b` are not blockers; this story
-    is parallel. Transcript behavior should align with ADR 0019
-    before broadening beyond a minimal preview, so coordinate with
-    that ADR's resolution if it lands first.
+  - Scope: v1 release-boundary marker for the un-muxed-agent
+    right-panel transcript preview. Implementation tracks under
+    the `Agent Session Transcript Preview And Viewer` workstream
+    in the Hardening Backlog (`H-TRANSCRIPT-*`). This story is
+    satisfied when `H-TRANSCRIPT-010` (TUI wire-up) and the
+    extractors it depends on (`H-TRANSCRIPT-004` /
+    `H-TRANSCRIPT-005` / `H-TRANSCRIPT-006`) land. Aider stays
+    deferred per `H-TRANSCRIPT-007`.
+  - Blockers: `H-TRANSCRIPT-010`. Parallel to `P8-012a` and
+    `P8-012b`.
 
 - [ ] `P8-013` Document and verify the v1 TUI workflow.
   - Scope: update `docs/operations.md` and README-level command listings
