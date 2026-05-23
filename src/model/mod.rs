@@ -544,6 +544,12 @@ pub struct GraphSnapshot {
     pub candidate_links: Vec<GraphLink>,
     pub resolved_relationships: Vec<ResolvedRelationship>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Operator-chosen display names per ADR 0029. Carried alongside
+    /// the graph but kept out of the serialized snapshot so the JSON
+    /// shape stays a pure view of discovered state. Empty for callers
+    /// that don't load aliases.
+    #[serde(skip, default)]
+    pub aliases: crate::aliases::AliasOverlay,
 }
 
 impl GraphSnapshot {

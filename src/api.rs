@@ -27,6 +27,11 @@
 //! # }
 //! ```
 
+pub use crate::aliases::{
+    AliasEntry, AliasOverlay, AliasParseError, AliasWriteError, AliasWriteOutcome, AliasesDocument,
+    AliasesSection, alias_node_from_node_id, load_alias_entry_for_node, parse_aliases_document,
+    remove_alias_entry, resolve_display_label, upsert_alias_entry,
+};
 pub use crate::config::{Config, ConfigDiagnostic, ConfigLoader, LoadOutcome, Projection};
 pub use crate::declared::{
     DeclaredDocument, DeclaredEndpoint, DeclaredLink, DeclaredLinkState, DeclaredSection,

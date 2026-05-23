@@ -397,7 +397,7 @@ fn replace_declared_section(
     Ok(())
 }
 
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let file_name = path

@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use crate::config::ConfigLoader;
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
+pub mod aliases;
 pub mod atelier;
 pub mod cross_link;
 pub mod declared;
@@ -175,6 +176,7 @@ pub fn discover_local_with(
     }
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(&mut snapshot, &context, loader);
+        aliases::apply_aliases(&mut snapshot, &context, loader);
     }
     Ok(snapshot)
 }
@@ -319,6 +321,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         candidate_links: candidate_links.into_values().collect(),
         resolved_relationships: Vec::new(),
         diagnostics,
+        aliases: crate::aliases::AliasOverlay::new(),
     };
     snapshot.canonicalize();
     snapshot
