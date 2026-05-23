@@ -78,6 +78,14 @@ is:
 3. mux session by active pane pid matching `pid` or `ppid`
 4. mux session by cwd as a weak fallback
 
+If a fresh hook record identifies a mux but the corresponding agent session
+node has not been discovered yet, Conspectus may synthesize a sparse
+`AgentSession` node from the hook record. This covers fresh Claude Code
+sessions that have fired `SessionStart` but have not yet persisted a JSONL
+transcript because no user message has been recorded. When a transcript path is
+present, the synthesized node infers its state scope from the path's state
+root; otherwise it uses a hook-sidecar fallback scope.
+
 Fresh explicit hook session evidence ranks above active-pane fd evidence,
 active-pane command/start-command evidence, file activity evidence, and
 cwd-only evidence. Stale records are ignored for active mux attribution. V1
@@ -173,3 +181,6 @@ such channels must be implemented as explicit control-plane adapters.
 - Hook observations are local operational state. User-authored aliases remain
   durable intent per ADR 0029 unless a later ADR explicitly changes that
   storage contract.
+- Fresh hook observations may synthesize sparse session nodes when the harness
+  has not yet persisted the transcript/state file that ordinary discovery
+  would otherwise read.

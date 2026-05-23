@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use crate::hook::{self, HookRecord, HookTmuxRecord};
 use crate::model::{
-    AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, Metadata, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata,
+    AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
+    LinkEndpoint, LinkState, Metadata, MuxSessionNode, NodeId, Provenance, RelationKind,
+    SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "hook_sidecar";
@@ -24,12 +25,10 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch:
             continue;
         }
 
-        let Some(session) = find_session(snapshot, &record) else {
-            continue;
-        };
         let Some(mux) = find_mux(snapshot, &record) else {
             continue;
         };
+        let session = ensure_session(snapshot, &record);
 
         let link = linked_to_mux(&session, &mux, &record);
         demote_stale_launch_links(snapshot, &link);
@@ -77,6 +76,43 @@ fn find_session(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<AgentSe
         (session.harness_key == record.harness_key && session.id.session_key == record.session_key)
             .then(|| session.clone())
     })
+}
+
+fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> AgentSessionNode {
+    if let Some(session) = find_session(snapshot, record) {
+        return session;
+    }
+
+    let session = AgentSessionNode {
+        id: AgentSessionId::new(
+            &record.harness_key,
+            inferred_state_scope(record),
+            &record.session_key,
+        ),
+        harness_key: record.harness_key.clone(),
+        cwd: record.cwd.clone(),
+        title: None,
+        last_message_preview: None,
+        last_active_epoch: Some(record.observed_epoch),
+    };
+    snapshot
+        .nodes
+        .push(GraphNode::AgentSession(session.clone()));
+    session
+}
+
+fn inferred_state_scope(record: &HookRecord) -> String {
+    record
+        .transcript_path
+        .as_deref()
+        .and_then(|path| {
+            Path::new(path)
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+        })
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| "hook_sidecar".to_string())
 }
 
 fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionNode> {
@@ -365,6 +401,43 @@ mod tests {
                 .as_deref(),
             Some("hook_session_match")
         );
+    }
+
+    #[test]
+    fn fresh_hook_record_synthesizes_session_before_transcript_exists() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("record.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "current",
+              "cwd": "/work",
+              "tmux": { "session_name": "editor" },
+              "transcript_path": "/home/me/.claude/projects/-work/current.jsonl",
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        let session_id = AgentSessionId::new("claude-code", "/home/me/.claude", "current");
+        assert!(snapshot.nodes.iter().any(|node| matches!(
+            node,
+            GraphNode::AgentSession(session)
+                if session.id == session_id
+                    && session.cwd.as_deref() == Some("/work")
+                    && session.last_active_epoch == Some(1_700_000_000)
+        )));
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.source == NodeId::AgentSession(session_id.clone())
+                && link.source_metadata.evidence.as_deref() == Some("hook_session_path_match")
+        }));
     }
 
     #[test]

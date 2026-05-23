@@ -3205,7 +3205,10 @@ failure:
   - Outcome: `discovery::hook_sidecar` reads fresh JSON records after
     harness and tmux discovery, emits high-confidence `LinkedToMux`
     candidates, and marks stale `active_pane_command_session_match`
-    candidates for the same mux as overridden.
+    candidates for the same mux as overridden. It also synthesizes a
+    sparse `AgentSession` node from fresh hook records when Claude Code
+    has fired `SessionStart` but has not yet persisted the transcript
+    file because the new session has no messages.
 
 - [x] `H-MUXPROC-012` Add Claude Code hook sidecar emitter if audit
   proves non-mutating session identity.
@@ -3349,7 +3352,9 @@ failure:
     current-session evidence beating launch argv and launch argv
     remaining usable without a current-session source. Hook-sidecar
     tests cover fresh Claude-current-session evidence overriding a
-    stale `active_pane_command_session_match` for the same mux.
+    stale `active_pane_command_session_match` for the same mux, plus
+    live-validation fallout where a fresh Claude session exists in
+    hook state before its transcript file exists on disk.
 
 - [ ] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
   non-mutating session identity.
