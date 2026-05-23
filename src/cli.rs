@@ -1129,10 +1129,24 @@ impl TuiArgs {
             mux_preview_interval,
             live_preview_enabled: !self.no_live_preview,
             color,
+            current_tmux_session: current_tmux_session_name(),
         };
 
         conspectus::tui::run(config)
     }
+}
+
+fn current_tmux_session_name() -> Option<String> {
+    std::env::var_os("TMUX")?;
+    let output = ProcCommand::new("tmux")
+        .args(["display-message", "-p", "#S"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 /// Parse a small subset of duration strings: `<integer><ms|s|m|h>`.

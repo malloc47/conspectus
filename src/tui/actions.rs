@@ -46,6 +46,10 @@ pub enum AttachDisabled {
     /// The mux backend is not supported by this build (today only
     /// `tmux`). Carries the backend name for the status bar.
     UnsupportedBackend(String),
+    /// The selected mux is the tmux session currently hosting the
+    /// Conspectus TUI. Attaching it would nest the TUI inside
+    /// itself.
+    CurrentTmuxSession(String),
 }
 
 /// Decide whether the current selection is attachable. Pure: works
@@ -99,7 +103,17 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         native_id: mux_node.native_id.clone(),
     };
     match target.backend.as_str() {
-        "tmux" => Ok(target),
+        "tmux" => {
+            if app
+                .config()
+                .current_tmux_session
+                .as_deref()
+                .is_some_and(|current| current == target.native_id)
+            {
+                return Err(AttachDisabled::CurrentTmuxSession(target.native_id));
+            }
+            Ok(target)
+        }
         other => Err(AttachDisabled::UnsupportedBackend(other.to_string())),
     }
 }
@@ -148,6 +162,9 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
         }
         AttachDisabled::UnsupportedBackend(name) => {
             format!("attach: mux backend `{name}` not supported (only tmux)")
+        }
+        AttachDisabled::CurrentTmuxSession(name) => {
+            format!("attach: refusing to attach current tmux session `{name}`")
         }
     }
 }
@@ -338,6 +355,48 @@ mod tests {
         assert_eq!(
             target.native_id, "editor",
             "raw native id strips the prefix — this is what tmux attach -t takes"
+        );
+    }
+
+    #[test]
+    fn current_tmux_session_is_not_attachable() {
+        let mut snapshot = GraphSnapshot::empty();
+        add_repo_and_worktree(&mut snapshot, "/p/proj");
+        snapshot
+            .nodes
+            .push(session_node("codex", "/state", "abc", "/p/proj"));
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mux_id = mux_node_id("tmux", "editor");
+        snapshot.candidate_links.push(linked_to_mux(
+            &session_id,
+            &mux_id,
+            Provenance::Discovered,
+            "1",
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: None,
+            now: None,
+            cwd: None,
+        });
+        let mut cfg = RunConfig::defaults();
+        cfg.default_view = View::Sessions;
+        cfg.current_tmux_session = Some("editor".to_string());
+        let mut app = App::new(cfg);
+        app.update(Msg::SetData {
+            snapshot: Arc::new(snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.update(Msg::NavDown);
+
+        assert_eq!(
+            resolve_attach_target(&app),
+            Err(AttachDisabled::CurrentTmuxSession("editor".to_string()))
         );
     }
 

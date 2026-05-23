@@ -58,6 +58,9 @@ pub struct RunConfig {
     pub live_preview_enabled: bool,
     /// Whether color is enabled, resolved per ADR 0022.
     pub color: bool,
+    /// tmux session that hosts this TUI, when known. Used to
+    /// prevent self-attachment loops.
+    pub current_tmux_session: Option<String>,
 }
 
 impl RunConfig {
@@ -73,6 +76,7 @@ impl RunConfig {
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,
             color: true,
+            current_tmux_session: None,
         }
     }
 }
