@@ -60,11 +60,28 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            let action = translate(event, viewport).map(|a| remap_for_focus(a, app.focus()));
+            // While the rename overlay is open it owns key input.
+            // Translate every Press event into a forwarded key
+            // action; everything else is dropped so the overlay
+            // can't accidentally trigger nav side effects.
+            let action = if app.rename_overlay().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::RenameOverlayKey(key))
+                    }
+                    _ => None,
+                }
+            } else {
+                translate(event, viewport).map(|a| remap_for_focus(a, app.focus()))
+            };
             match action {
                 Some(Action::Msg(msg)) => app.update(*msg),
                 Some(Action::Refresh) => refresh(&mut app, &config),
                 Some(Action::Attach) => attach_action(terminal, &mut app, &config),
+                Some(Action::OpenRename) => open_rename_overlay(&mut app),
+                Some(Action::RenameOverlayKey(key)) => {
+                    handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
+                }
                 None => {}
             }
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
@@ -72,6 +89,183 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolve the current selection to an agent session and seed the
+/// rename overlay with the strongest display label available
+/// (alias > harness title > empty). No-op for non-session
+/// selections; a status-bar message explains why.
+fn open_rename_overlay(app: &mut App) {
+    use crate::tui::rows::{RowId, RowKind};
+    let Some(selection) = app.selection().cloned() else {
+        app.update(Msg::SetStatus(Some("rename: nothing selected".to_string())));
+        return;
+    };
+    if !matches!(
+        selection,
+        RowId::AgentSession(crate::model::NodeId::AgentSession(_))
+    ) {
+        app.update(Msg::SetStatus(Some(
+            "rename: select an agent session row first".to_string(),
+        )));
+        return;
+    }
+    let initial = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| row.id == selection)
+        .and_then(|row| match &row.kind {
+            RowKind::AgentSession(session_row) => {
+                Some(session_row.display_label().unwrap_or("").to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_default();
+    let state = crate::tui::widgets::input::TextInputState::new(" rename session ", initial);
+    app.open_rename_overlay(state);
+    app.update(Msg::SetStatus(Some(
+        "rename: Enter confirm · Esc cancel".to_string(),
+    )));
+}
+
+/// Forward `key` to the open rename overlay, then act on the
+/// resulting outcome. Confirm runs the lockstep plan (alias write +
+/// optional tmux rename) and refreshes; Cancel just closes the
+/// overlay.
+fn handle_rename_overlay_key(
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn TmuxRunner,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::widgets::input::InputOutcome;
+    let Some(state) = app.rename_overlay_mut() else {
+        return;
+    };
+    let outcome = state.handle_key(key);
+    match outcome {
+        InputOutcome::Continue => {}
+        InputOutcome::Cancel => {
+            app.close_rename_overlay();
+            app.update(Msg::SetStatus(Some("rename: cancelled".to_string())));
+        }
+        InputOutcome::Confirm(value) => {
+            app.close_rename_overlay();
+            commit_rename(app, config, tmux, value);
+        }
+    }
+}
+
+fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value: String) {
+    use crate::tui::rows::RowId;
+    let session_id = match app.selection().cloned() {
+        Some(RowId::AgentSession(crate::model::NodeId::AgentSession(id))) => id,
+        _ => {
+            app.update(Msg::SetStatus(Some(
+                "rename: lost selection before commit".to_string(),
+            )));
+            return;
+        }
+    };
+    let trimmed = value.trim().to_string();
+    let new_display_name = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.clone())
+    };
+
+    let snapshot = match app.snapshot() {
+        Some(snap) => snap,
+        None => {
+            app.update(Msg::SetStatus(Some(
+                "rename: no snapshot available".to_string(),
+            )));
+            return;
+        }
+    };
+
+    let plan = match crate::rename::plan_session_rename(
+        snapshot.as_ref(),
+        &session_id,
+        new_display_name.clone(),
+        false,
+    ) {
+        Ok(plan) => plan,
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+            return;
+        }
+    };
+
+    let endpoint = crate::declared::declared_endpoint_from_node_id(
+        &crate::model::NodeId::AgentSession(session_id.clone()),
+    );
+    let loader = crate::config::ConfigLoader::from_env();
+    let store_path = match crate::declared::select_store_for_declaration(
+        &endpoint,
+        &endpoint,
+        snapshot.as_ref(),
+        &loader,
+    ) {
+        Some(selection) => selection.path,
+        None => match loader.user_config_path() {
+            Some(path) => path,
+            None => {
+                app.update(Msg::SetStatus(Some(
+                    "rename failed: no alias store available".to_string(),
+                )));
+                return;
+            }
+        },
+    };
+
+    let alias_outcome = match &plan.agent_alias_write.display_name {
+        Some(name) => crate::aliases::upsert_alias_entry(
+            &store_path,
+            crate::aliases::AliasEntry {
+                node: endpoint.clone(),
+                display_name: name.clone(),
+                reason: None,
+            },
+        )
+        .map(|_| format!("renamed: {name}"))
+        .map_err(|err| err.to_string()),
+        None => crate::aliases::remove_alias_entry(&store_path, &endpoint)
+            .map(|_| "rename: cleared alias".to_string())
+            .map_err(|err| err.to_string()),
+    };
+
+    let alias_status = match alias_outcome {
+        Ok(message) => message,
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+            return;
+        }
+    };
+
+    if let Some(mux_rename) = &plan.mux_native_rename {
+        match tmux.rename_session(&mux_rename.mux.native_id, &mux_rename.new_name) {
+            Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
+            Ok(other) => {
+                app.update(Msg::SetStatus(Some(format!(
+                    "alias updated, tmux rename failed: {other:?}"
+                ))));
+                refresh(app, config);
+                return;
+            }
+            Err(err) => {
+                app.update(Msg::SetStatus(Some(format!(
+                    "alias updated, tmux rename errored: {err}"
+                ))));
+                refresh(app, config);
+                return;
+            }
+        }
+    }
+
+    refresh(app, config);
+    app.update(Msg::SetStatus(Some(alias_status)));
 }
 
 /// If the selection has moved to a new muxed target, capture its
@@ -199,6 +393,13 @@ enum Action {
     Msg(Box<Msg>),
     Refresh,
     Attach,
+    /// Open the rename overlay for the current selection. The
+    /// runtime resolves the AgentSession id and seeds the input
+    /// buffer with the current alias, harness title, or an empty
+    /// string per ADR 0030.
+    OpenRename,
+    /// Forward a key event into the open rename overlay.
+    RenameOverlayKey(ratatui::crossterm::event::KeyEvent),
 }
 
 /// Handle the `a` key. On success, suspend the TUI, spawn
@@ -311,6 +512,8 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (_, KeyCode::Char('q')) => Some(Action::Msg(Box::new(Msg::Quit))),
             (m, KeyCode::Char('r')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Refresh),
             (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
+            (KeyModifiers::SHIFT, KeyCode::Char('R'))
+            | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
             (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
                 Some(Action::Msg(Box::new(Msg::NavDown)))
             }
@@ -370,6 +573,26 @@ mod tests {
 
     #[test]
     fn translate_r_requests_refresh() {
+        assert_eq!(
+            translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
+            Some(Action::Refresh)
+        );
+    }
+
+    #[test]
+    fn translate_shift_r_opens_rename_overlay() {
+        assert_eq!(
+            translate(press(KeyCode::Char('R'), KeyModifiers::SHIFT), 24),
+            Some(Action::OpenRename)
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('R'), KeyModifiers::NONE), 24),
+            Some(Action::OpenRename)
+        );
+    }
+
+    #[test]
+    fn translate_lowercase_r_still_refreshes() {
         assert_eq!(
             translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
             Some(Action::Refresh)

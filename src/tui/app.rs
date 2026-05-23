@@ -69,6 +69,10 @@ pub struct App {
     /// each frame so the selected row stays visible without the
     /// renderer needing `&mut self`.
     left_scroll: Cell<u16>,
+    /// Active rename overlay state per ADR 0029 / ADR 0030. `None`
+    /// when no overlay is open; `Some` suspends the surrounding
+    /// keymap and routes input through the modal.
+    rename_overlay: Option<crate::tui::widgets::input::TextInputState>,
 }
 
 /// Which panel currently consumes navigation keys.
@@ -151,7 +155,32 @@ impl App {
             status_message: None,
             preview_store: PreviewStore::new(),
             left_scroll: Cell::new(0),
+            rename_overlay: None,
         }
+    }
+
+    /// Active rename-overlay state, if any.
+    pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextInputState> {
+        self.rename_overlay.as_ref()
+    }
+
+    /// Mutable access for the runtime's per-key forwarding.
+    pub fn rename_overlay_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::input::TextInputState> {
+        self.rename_overlay.as_mut()
+    }
+
+    /// Open the rename overlay for `state`. The caller pre-populates
+    /// the input with the current alias, harness title, or empty
+    /// string per ADR 0030.
+    pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
+        self.rename_overlay = Some(state);
+    }
+
+    /// Close the rename overlay without committing.
+    pub fn close_rename_overlay(&mut self) {
+        self.rename_overlay = None;
     }
 
     /// Read-only access to the immutable run config.

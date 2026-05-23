@@ -127,9 +127,7 @@ impl Widget for TextInputWidget<'_> {
         let para = Paragraph::new(Line::from(display.text.clone()));
         para.render(inner, buf);
 
-        if let Some(cell) =
-            buf.cell_mut((inner.x + display.cursor_offset as u16, inner.y))
-        {
+        if let Some(cell) = buf.cell_mut((inner.x + display.cursor_offset as u16, inner.y)) {
             cell.set_style(Style::default().add_modifier(Modifier::REVERSED));
         }
     }
