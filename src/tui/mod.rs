@@ -28,6 +28,7 @@ pub mod preview;
 pub mod rows;
 mod runtime;
 mod ui;
+pub mod widgets;
 
 pub use app::{App, Msg};
 
