@@ -8,6 +8,7 @@ pub mod discovery;
 pub mod hook;
 pub mod model;
 pub mod output;
+pub mod rename;
 pub mod resolve;
 pub mod tui;
 

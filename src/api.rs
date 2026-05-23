@@ -51,4 +51,7 @@ pub use crate::model::{
     WorkspaceId, WorkspaceNode,
 };
 pub use crate::output::{render_graph_json, table};
+pub use crate::rename::{
+    AgentAliasWrite, MuxNativeRename, RenamePlan, RenamePlanError, plan_session_rename,
+};
 pub use crate::resolve::{ResolveOutput, resolve_links, resolve_snapshot};
