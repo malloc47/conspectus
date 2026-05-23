@@ -18,6 +18,7 @@ pub mod declared;
 pub mod forge;
 pub mod git;
 pub mod harness;
+pub mod hook_sidecar;
 pub mod tmux;
 pub mod workspace;
 
@@ -169,6 +170,9 @@ pub fn discover_local_with(
     let cwd_git_fragment = observed_cwd_git_fragment(&snapshot);
     snapshot = merge_fragments([snapshot_fragment(snapshot), cwd_git_fragment]);
     cross_link::infer(&mut snapshot);
+    if let Some(root) = &config.hook_sidecar_root {
+        hook_sidecar::apply_hook_sidecars(&mut snapshot, root, hook_sidecar::current_epoch());
+    }
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(&mut snapshot, &context, loader);
     }
@@ -180,6 +184,7 @@ pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
     pub tmux_runner: Option<Box<dyn tmux::TmuxRunner>>,
     pub forge_runner: Option<Box<dyn forge::GhRunner>>,
+    pub hook_sidecar_root: Option<PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
 }
 
@@ -219,6 +224,7 @@ impl LocalDiscoveryConfig {
             harness_state_roots,
             tmux_runner,
             forge_runner,
+            hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             declared_config_loader: Some(ConfigLoader::from_env()),
         }
     }
@@ -228,6 +234,7 @@ impl LocalDiscoveryConfig {
             harness_state_roots: BTreeMap::new(),
             tmux_runner: None,
             forge_runner: None,
+            hook_sidecar_root: None,
             declared_config_loader: None,
         }
     }
@@ -259,6 +266,16 @@ impl LocalDiscoveryConfig {
 
     pub fn without_forge(mut self) -> Self {
         self.forge_runner = None;
+        self
+    }
+
+    pub fn with_hook_sidecar_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.hook_sidecar_root = Some(root.into());
+        self
+    }
+
+    pub fn without_hook_sidecar(mut self) -> Self {
+        self.hook_sidecar_root = None;
         self
     }
 

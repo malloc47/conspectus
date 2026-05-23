@@ -121,6 +121,7 @@ fn compare_session_mux(left: &GraphLink, right: &GraphLink) -> std::cmp::Orderin
 
     r.tier
         .cmp(&l.tier)
+        .then_with(|| r.evidence_rank.cmp(&l.evidence_rank))
         .then_with(|| r.confidence.cmp(&l.confidence))
         .then_with(|| r.activity_epoch.cmp(&l.activity_epoch))
         .then_with(|| left.id.cmp(&right.id))
@@ -129,6 +130,7 @@ fn compare_session_mux(left: &GraphLink, right: &GraphLink) -> std::cmp::Orderin
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct MuxScore {
     tier: MuxTier,
+    evidence_rank: u8,
     confidence: Confidence,
     activity_epoch: i64,
 }
@@ -144,8 +146,16 @@ enum MuxTier {
 }
 
 fn mux_score(link: &GraphLink) -> MuxScore {
+    let match_kind = link
+        .source_metadata
+        .fields
+        .get("match_kind")
+        .and_then(serde_json::Value::as_str)
+        .or(link.source_metadata.evidence.as_deref());
+
     MuxScore {
         tier: mux_tier(link.provenance),
+        evidence_rank: mux_evidence_rank(match_kind),
         confidence: link.confidence,
         activity_epoch: link
             .source_metadata
@@ -153,6 +163,23 @@ fn mux_score(link: &GraphLink) -> MuxScore {
             .get("mux_activity_epoch")
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(i64::MIN),
+    }
+}
+
+fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
+    match match_kind {
+        Some(
+            "control_plane_current_session_match"
+            | "hook_session_match"
+            | "hook_session_path_match"
+            | "active_pane_fd_session_match",
+        ) => 50,
+        Some("active_pane_fd_command_session_match") => 45,
+        Some("session_file_activity_match" | "harness_state_current_session_match") => 40,
+        Some("active_pane_command_session_match") => 30,
+        Some("exact_cwd_match") => 20,
+        Some("cwd_prefix_match") => 10,
+        _ => 0,
     }
 }
 
@@ -448,6 +475,7 @@ mod tests {
         provenance: Provenance,
         confidence: Confidence,
         activity_epoch: Option<i64>,
+        match_kind: Option<&str>,
     ) -> GraphLink {
         let mut link = GraphLink::new(
             id,
@@ -457,6 +485,14 @@ mod tests {
             provenance,
         );
         link.confidence = confidence;
+
+        if let Some(match_kind) = match_kind {
+            link.source_metadata.evidence = Some(match_kind.to_string());
+            link.source_metadata.fields.insert(
+                "match_kind".to_string(),
+                serde_json::Value::String(match_kind.to_string()),
+            );
+        }
 
         if let Some(epoch) = activity_epoch {
             link.source_metadata.fields.insert(
@@ -477,6 +513,7 @@ mod tests {
             Provenance::StrongDiscovered,
             Confidence::High,
             Some(2_000),
+            None,
         );
         let declared = linked_to_mux_link(
             "declared",
@@ -484,6 +521,7 @@ mod tests {
             mux("tmux:declared"),
             Provenance::LocalDeclared,
             Confidence::Low,
+            None,
             None,
         );
         let convention = linked_to_mux_link(
@@ -493,6 +531,7 @@ mod tests {
             Provenance::Convention,
             Confidence::High,
             Some(9_999),
+            None,
         );
 
         let output = resolve_links(&[convention, strong, declared]);
@@ -512,6 +551,7 @@ mod tests {
             Provenance::Discovered,
             Confidence::Medium,
             None,
+            Some("exact_cwd_match"),
         );
         let convention = linked_to_mux_link(
             "convention",
@@ -520,6 +560,7 @@ mod tests {
             Provenance::Convention,
             Confidence::High,
             Some(9_999),
+            None,
         );
 
         let output = resolve_links(&[convention, discovered_exact]);
@@ -536,6 +577,7 @@ mod tests {
             Provenance::Discovered,
             Confidence::Medium,
             Some(1_000),
+            None,
         );
         let newer = linked_to_mux_link(
             "newer",
@@ -544,6 +586,7 @@ mod tests {
             Provenance::Discovered,
             Confidence::Medium,
             Some(5_000),
+            None,
         );
 
         let output = resolve_links(&[older, newer]);
@@ -556,6 +599,72 @@ mod tests {
     }
 
     #[test]
+    fn session_mux_resolver_prefers_current_session_evidence_over_launch_argv() {
+        let launch_argv = linked_to_mux_link(
+            "launch-argv",
+            session("a"),
+            mux("tmux:stale"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(5_000),
+            Some("active_pane_command_session_match"),
+        );
+        let current_session = linked_to_mux_link(
+            "current-session",
+            session("a"),
+            mux("tmux:current"),
+            Provenance::StrongDiscovered,
+            Confidence::Medium,
+            Some(1_000),
+            Some("hook_session_match"),
+        );
+
+        let output = resolve_links(&[launch_argv, current_session]);
+
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id,
+            "current-session"
+        );
+        assert_eq!(
+            output.resolved_relationships[0].competing_link_ids,
+            vec!["launch-argv".to_string()]
+        );
+    }
+
+    #[test]
+    fn session_mux_resolver_keeps_launch_argv_usable_without_current_evidence() {
+        let launch_argv = linked_to_mux_link(
+            "launch-argv",
+            session("a"),
+            mux("tmux:launch"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("active_pane_command_session_match"),
+        );
+        let cwd = linked_to_mux_link(
+            "cwd",
+            session("a"),
+            mux("tmux:cwd"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(5_000),
+            Some("exact_cwd_match"),
+        );
+
+        let output = resolve_links(&[cwd, launch_argv]);
+
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id,
+            "launch-argv"
+        );
+        assert_eq!(
+            output.resolved_relationships[0].competing_link_ids,
+            vec!["cwd".to_string()]
+        );
+    }
+
+    #[test]
     fn session_mux_resolver_emits_ambiguity_diagnostic_for_multiple_candidates() {
         let one = linked_to_mux_link(
             "one",
@@ -564,6 +673,7 @@ mod tests {
             Provenance::Discovered,
             Confidence::Medium,
             Some(2_000),
+            None,
         );
         let two = linked_to_mux_link(
             "two",
@@ -572,6 +682,7 @@ mod tests {
             Provenance::Discovered,
             Confidence::Medium,
             Some(3_000),
+            None,
         );
 
         let output = resolve_links(&[one, two]);
@@ -603,6 +714,7 @@ mod tests {
             Provenance::LocalDeclared,
             Confidence::High,
             Some(9_999),
+            None,
         );
         ignored.state = LinkState::Ignored { reason: None };
         let mut overridden = linked_to_mux_link(
@@ -612,6 +724,7 @@ mod tests {
             Provenance::GlobalDeclared,
             Confidence::High,
             Some(9_999),
+            None,
         );
         overridden.state = LinkState::Overridden {
             by: "winner".to_string(),
@@ -624,6 +737,7 @@ mod tests {
             Provenance::Discovered,
             Confidence::Medium,
             Some(1_000),
+            None,
         );
 
         let output = resolve_links(&[ignored, overridden, active]);

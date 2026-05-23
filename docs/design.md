@@ -340,6 +340,9 @@ The sane default is:
 - read home-global agent-specific state/config directories for supported
   harnesses
 - read mux sessions from the configured mux backend
+- read fresh harness hook sidecar records from the user's Conspectus state
+  directory when present, using them as current-session evidence rather than
+  durable user intent
 - inspect cwd and explicitly configured scan roots
 - read known workspace metadata from supported providers when a workspace is
   discovered
@@ -354,6 +357,12 @@ then common conventions, then user-declared overrides. Conventions such as
 matching branch names or known fork roots should create useful candidate links,
 but they should carry provenance and confidence rather than silently becoming
 facts.
+
+Hook sidecar records are local, rebuildable observations written by opt-in
+harness hooks outside project trees. They may refine mux/session attribution
+when fresh, but stale records should not override active process evidence.
+Conspectus must not inject terminal input or slash commands to ask an agent for
+its current session id.
 
 Additive discovery:
 
@@ -671,6 +680,8 @@ running; the one-shot CLI is the writer otherwise.
   - ADR 0027: infer generic workspaces only from explicit scan roots with two
     or more immediate checkout children, and let provider-specific workspace
     metadata take precedence over generic inference at the same root.
+  - ADR 0028: use opt-in hook sidecar records for non-mutating current-session
+    mux attribution, and reject terminal injection as a discovery strategy.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
@@ -706,6 +717,10 @@ running; the one-shot CLI is the writer otherwise.
   `$XDG_DATA_HOME/conspectus/snapshots/`. Partial eviction operates at
   provider granularity using node/link provenance and per-provider freshness
   timestamps; both the server and the one-shot CLI use the same format.
+- Hook sidecar records are local rebuildable observations under
+  `$XDG_STATE_HOME/conspectus/hooks` or
+  `$HOME/.local/state/conspectus/hooks`, with
+  `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.
 
 ## Remaining Design Questions
 

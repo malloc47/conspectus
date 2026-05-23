@@ -2983,6 +2983,12 @@ failure:
     ambiguity into a graph-level refinement instead of a TUI-only
     picker problem.
   - Tests: `cargo test active_pane --all-targets`.
+  - **ranking slice landed**: resolver ordering now distinguishes
+    `LinkedToMux` `match_kind` evidence. Fresh current-session
+    evidence such as hooks, control-plane responses, and active-pane
+    fd matches ranks above `active_pane_command_session_match`, so
+    argv / start-command session ids remain useful launch evidence
+    without being treated as definitive current-session truth.
 
 - [ ] `H-MUXPROC-003` Add read-only session-file activity correlation.
   - Scope: improve fresh-session attribution without sending input to
@@ -3055,6 +3061,12 @@ failure:
     session switch; the audit should explicitly look for a safer
     current-session source for that scenario.
   - Blockers: none.
+  - **audit slice landed**: local Codex CLI exposes experimental
+    app-server thread APIs, but no local hook surface in `--help`;
+    keep `H-MUXPROC-006` gated. OpenCode exposes HTTP server, ACP,
+    and plugin surfaces; keep `H-MUXPROC-007` gated. Claude Code's
+    strongest non-mutating path is hooks, tracked under
+    `H-MUXPROC-009` / `H-MUXPROC-012`.
 
 - [ ] `H-MUXPROC-006` Add Codex app-server attribution adapter if
   the audit proves a stable non-mutating query.
@@ -3091,7 +3103,7 @@ failure:
     session recency.
   - Blockers: `H-MUXPROC-005`.
 
-- [ ] `H-MUXPROC-008` Document terminal-injection attribution as a
+- [x] `H-MUXPROC-008` Document terminal-injection attribution as a
   rejected strategy unless a harness guarantees non-mutating status
   commands.
   - Scope: record the policy that Conspectus must not use
@@ -3112,6 +3124,10 @@ failure:
     source exists.
   - Blockers: `H-MUXPROC-001` ADR can absorb this if it has not
     landed; otherwise write a follow-up ADR.
+  - Outcome: ADR 0028 rejects terminal injection, slash-command
+    probing, and generic terminal scraping for current-session
+    attribution. Harness-documented non-mutating command channels
+    remain possible only as explicit control-plane adapters.
 
 - [ ] `H-MUXPROC-009` Audit harness hooks/plugins as definitive
   session-state sidecar emitters.
@@ -3137,8 +3153,14 @@ failure:
     no Conspectus probe text was logged.
   - Blockers: none. Follow-up ADR required before adding a durable
     sidecar schema or installer.
+  - **audit slice landed**: Claude Code hooks are viable and provide
+    `session_id`, `transcript_path`, `cwd`, and event name on stdin;
+    `SessionStart` covers startup, resume, clear, and compact. ADR
+    0028 records the sidecar path. OpenCode plugin/session events
+    remain viable but non-critical. Codex hook viability remains
+    unproven.
 
-- [ ] `H-MUXPROC-010` Define Conspectus hook sidecar schema and
+- [x] `H-MUXPROC-010` Define Conspectus hook sidecar schema and
   trust/ranking rules.
   - Scope: if `H-MUXPROC-009` finds viable hook/plugin emitters,
     define a provider-neutral sidecar record written outside project
@@ -3158,8 +3180,12 @@ failure:
     resolver ordering tests against fd, command, and cwd evidence.
   - Blockers: `H-MUXPROC-009`; ADR required for the durable sidecar
     convention.
+  - Outcome: ADR 0028 defines schema version 1 under the user's
+    Conspectus state directory, a 15-minute active-record TTL,
+    matching by explicit session id plus tmux native id / pid / cwd,
+    and ranking above launch argv evidence.
 
-- [ ] `H-MUXPROC-011` Implement hook-sidecar discovery provider.
+- [x] `H-MUXPROC-011` Implement hook-sidecar discovery provider.
   - Scope: read the sidecar records defined by `H-MUXPROC-010` and
     convert them into `LinkedToMux` candidate links. Match hook
     records to mux sessions by tmux pane id when present, then pane
@@ -3176,8 +3202,12 @@ failure:
     `graph --format json` shows the hook evidence without requiring
     transcript scraping or terminal input.
   - Blockers: `H-MUXPROC-010`.
+  - Outcome: `discovery::hook_sidecar` reads fresh JSON records after
+    harness and tmux discovery, emits high-confidence `LinkedToMux`
+    candidates, and marks stale `active_pane_command_session_match`
+    candidates for the same mux as overridden.
 
-- [ ] `H-MUXPROC-012` Add Claude Code hook sidecar emitter if audit
+- [x] `H-MUXPROC-012` Add Claude Code hook sidecar emitter if audit
   proves non-mutating session identity.
   - Scope: if Claude Code hook payloads include a current session id,
     transcript path, or enough context to derive one, provide a
@@ -3196,6 +3226,11 @@ failure:
     emitter should fix if Claude Code hook payloads expose the
     post-`/resume` current session id.
   - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+  - Outcome: added `scripts/conspectus-claude-hook-sidecar.py` and
+    documented a `SessionStart` hook configuration in
+    `docs/operations.md`. The emitter writes schema-v1 sidecar
+    records with Claude `session_id`, `transcript_path`, `cwd`,
+    process ids, and tmux context when available.
 
 - [ ] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
@@ -3249,6 +3284,11 @@ failure:
     semantics; a definitive fix likely depends on one of
     `H-MUXPROC-003`, `H-MUXPROC-004`, `H-MUXPROC-005`, or
     `H-MUXPROC-012`.
+  - **regression slice landed**: resolver tests cover stronger
+    current-session evidence beating launch argv and launch argv
+    remaining usable without a current-session source. Hook-sidecar
+    tests cover fresh Claude-current-session evidence overriding a
+    stale `active_pane_command_session_match` for the same mux.
 
 - [ ] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
   non-mutating session identity.

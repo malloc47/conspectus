@@ -43,6 +43,45 @@ The aider adapter is per-repo rather than per-state-root, so it
 walks scan roots looking for `.aider*` markers and is not gated by an
 environment variable.
 
+### Hook sidecar state
+
+Hook sidecar records are optional, local observations written by
+harness hooks. They refine session-to-mux attribution when a harness
+can report the current session id without terminal input. Conspectus
+reads them from:
+
+1. `$CONSPECTUS_HOOK_SIDECAR_STATE`, when set.
+2. `$XDG_STATE_HOME/conspectus/hooks`.
+3. `$HOME/.local/state/conspectus/hooks`.
+
+The records are not project intent and should not be committed. Stale
+records are ignored for active mux attribution.
+
+Claude Code hook sidecar setup:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "resume|startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/scripts/conspectus-claude-hook-sidecar.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Place that in `~/.claude/settings.json` or a local Claude Code
+settings file. The script reads Claude's hook JSON from stdin, records
+`session_id`, `transcript_path`, `cwd`, and tmux context when available,
+then exits without writing to the transcript.
+
 ## Configuration File
 
 See ADR 0012 for the layout and precedence rules. Briefly:
