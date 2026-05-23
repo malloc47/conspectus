@@ -3517,7 +3517,7 @@ spine; once it lands, projection (`006`), CLI (`007`/`008`), and lockstep
 (`009`) follow. Input widget (`010`) is parallel to the CLI track but
 blocks TUI wire-up (`011`).
 
-- [ ] `H-RENAME-001` ADR: alias overlay schema and storage.
+- [x] `H-RENAME-001` ADR: alias overlay schema and storage.
   - Scope: settle the storage schema (`[[aliases]]` table sibling to
     `[declared]`, not nested inside it), store-selection rules, conflict
     resolution between local and global, render precedence
@@ -3527,7 +3527,7 @@ blocks TUI wire-up (`011`).
     alias-equals-title round-trip rule. Record as ADR 0029.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [ ] `H-RENAME-002` ADR: TUI text-input primitive.
+- [x] `H-RENAME-002` ADR: TUI text-input primitive.
   - Scope: resolve ADR 0024's deferred `tui-input` decision now that three
     callers exist (rename, `T8-017` search overlay, `P8-014` mux-picker).
     Settle hand-rolled vs crate, locked key semantics (`Enter` confirm,
@@ -3536,7 +3536,7 @@ blocks TUI wire-up (`011`).
     (`src/tui/widgets/input.rs`). Record as ADR 0030.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [ ] `H-RENAME-003` Extend `TmuxRunner` with `rename_session` mutation seam.
+- [x] `H-RENAME-003` Extend `TmuxRunner` with `rename_session` mutation seam.
   - Scope: first non-read-only tmux call. Add `rename_session(target,
     new_name) -> TmuxOutcome` to the trait in `src/discovery/tmux/mod.rs`
     with a default impl returning `Unsupported` so future backends (zellij
@@ -3547,7 +3547,7 @@ blocks TUI wire-up (`011`).
     name-collision (tmux rejects duplicates). `FakeTmux` recording
     assertions.
   - Blockers: none (parallel to ADRs).
-- [ ] `H-RENAME-004` Alias storage layer.
+- [x] `H-RENAME-004` Alias storage layer.
   - Scope: per ADR 0029. Define the TOML model (round-trip), load aliases
     from local + global stores at discovery time into a sidecar
     `HashMap<NodeId, String>` carried alongside the graph snapshot. Add
@@ -3561,7 +3561,7 @@ blocks TUI wire-up (`011`).
     tests across project-rooted vs orphan agent sessions, malformed-entry
     diagnostics, schema-version skip behavior, atomic-write retry path.
   - Blockers: `H-RENAME-001`.
-- [ ] `H-RENAME-006` Projection precedence.
+- [x] `H-RENAME-006` Projection precedence.
   - Scope: apply `alias > title > id-suffix` at the four projection sites
     — `src/output/table.rs` `title` column rendering, `src/output/node_show.rs`
     header field, `src/tui/rows/mod.rs` `AgentSessionRow` label,
@@ -3571,7 +3571,7 @@ blocks TUI wire-up (`011`).
   - Tests: projection unit tests across present-alias / present-title /
     absent-both cases at each of the four sites. Insta snapshot updates.
   - Blockers: `H-RENAME-004`.
-- [ ] `H-RENAME-007` CLI: `conspectus rename` command tree.
+- [x] `H-RENAME-007` CLI: `conspectus rename` command tree.
   - Scope: add `conspectus rename session <id> [<name>] [--no-mux]
     [--clear]` and `conspectus rename mux <id> [<name>] [--clear]`.
     `<name>` and `--clear` are mutually exclusive; missing both is an
@@ -3584,7 +3584,7 @@ blocks TUI wire-up (`011`).
     mutually-exclusive flags, fake-runner-backed assertion that lockstep
     invokes both alias write and tmux rename.
   - Blockers: `H-RENAME-006`, `H-RENAME-009`, `H-RENAME-003`.
-- [ ] `H-RENAME-008` CLI: `conspectus alias list` (and `show`).
+- [x] `H-RENAME-008` CLI: `conspectus alias list` (and `show`).
   - Scope: read-path counterpart to the rename write commands. Operators
     will want to audit overlays that hide harness-native titles. Mirrors
     `conspectus declared list` shape (`src/cli.rs:1180+`). Add `alias show
@@ -3593,7 +3593,7 @@ blocks TUI wire-up (`011`).
   - Tests: CLI snapshot tests for empty, single-store, both-stores, and
     mixed-with-declared cases.
   - Blockers: `H-RENAME-007`.
-- [ ] `H-RENAME-009` Mux lockstep helper.
+- [x] `H-RENAME-009` Mux lockstep helper.
   - Scope: pure function consumed by the CLI rename command and the TUI
     rename action. Given a target node, the current snapshot, and a
     `--no-mux` flag, returns a `RenamePlan { agent_alias_write,
@@ -3604,7 +3604,7 @@ blocks TUI wire-up (`011`).
   - Tests: unit tests across resolved-single-mux, ambiguous-mux,
     no-mux-link, and `--no-mux`-flag cases.
   - Blockers: `H-RENAME-001`.
-- [ ] `H-RENAME-010` TUI text-input widget implementation.
+- [x] `H-RENAME-010` TUI text-input widget implementation.
   - Scope: per ADR 0030. Lives in new `src/tui/widgets/input.rs`. Exports
     `TextInputState`, `TextInputWidget`, and `handle_key` returning
     `InputOutcome::{Continue, Confirm(String), Cancel}`. Centered modal
@@ -3615,7 +3615,7 @@ blocks TUI wire-up (`011`).
     narrow-terminal layouts. Reducer-level tests for the
     confirm/cancel/passthrough outcomes.
   - Blockers: `H-RENAME-002`.
-- [ ] `H-RENAME-011` TUI `R` keybinding wires rename flow.
+- [x] `H-RENAME-011` TUI `R` keybinding wires rename flow.
   - Scope: bind `R` (capital) — verify it's unused today
     (`src/tui/runtime.rs:324-325`). On press, opens the input widget
     pre-populated with the current alias (or harness title, or empty
@@ -3628,7 +3628,7 @@ blocks TUI wire-up (`011`).
     Manual: rename a session in a real TUI, confirm both alias and
     tmux update.
   - Blockers: `H-RENAME-007`, `H-RENAME-010`.
-- [ ] `H-RENAME-012` Read-only invariant audit.
+- [x] `H-RENAME-012` Read-only invariant audit.
   - Scope: mirror of `P5-004`. Smoke tests verifying that `conspectus
     graph`, `conspectus node show`, `conspectus table`, and TUI
     navigation (no rename action) do not mtime-touch or content-modify
@@ -3636,7 +3636,7 @@ blocks TUI wire-up (`011`).
     harness used by Phase 5.
   - Tests: as scoped above.
   - Blockers: `H-RENAME-011`.
-- [ ] `H-RENAME-013` Live-session UX advisory.
+- [x] `H-RENAME-013` Live-session UX advisory.
   - Scope: status-bar advisory when the operator renames a session whose
     mux indicator is `Attached` or `Ambiguous` (per `MuxIndicator` in
     `src/tui/rows/mod.rs:159-172`) and hook-sidecar evidence is fresh
@@ -3647,7 +3647,7 @@ blocks TUI wire-up (`011`).
   - Tests: status-bar message tests across live / ambiguous / dormant /
     no-mux cases.
   - Blockers: `H-RENAME-011`.
-- [ ] `H-RENAME-014` Docs and snapshot coverage.
+- [x] `H-RENAME-014` Docs and snapshot coverage.
   - Scope: update `docs/operations.md` with the new commands; update the
     Phase 8 TUI doc keybindings table
     (`docs/implementation/phase-08-interactive-tui.md`); add insta

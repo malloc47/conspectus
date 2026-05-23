@@ -264,8 +264,41 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
         }
     }
 
+    let advisory = live_session_advisory(app, &session_id);
     refresh(app, config);
-    app.update(Msg::SetStatus(Some(alias_status)));
+    let final_status = match advisory {
+        Some(suffix) => format!("{alias_status} · {suffix}"),
+        None => alias_status,
+    };
+    app.update(Msg::SetStatus(Some(final_status)));
+}
+
+/// Append an informational advisory when the rename target is a
+/// live session per ADR 0029's live-session safety rule. "Live"
+/// here means the row's mux indicator was `Attached` or `Ambiguous`
+/// at the moment of commit — both of which require at least one
+/// active mux candidate, which in turn carries hook-sidecar or
+/// pane-process freshness signal.
+fn live_session_advisory(
+    app: &App,
+    session_id: &crate::model::AgentSessionId,
+) -> Option<&'static str> {
+    use crate::tui::rows::{MuxIndicator, RowKind};
+    let row = app.tree().rows.iter().find(|row| {
+        matches!(
+            &row.kind,
+            RowKind::AgentSession(s) if s.session == *session_id
+        )
+    })?;
+    let RowKind::AgentSession(session_row) = &row.kind else {
+        return None;
+    };
+    match session_row.mux_state {
+        MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => Some(
+            "live session: alias overlays harness title until session ends",
+        ),
+        MuxIndicator::Unmuxed => None,
+    }
 }
 
 /// If the selection has moved to a new muxed target, capture its

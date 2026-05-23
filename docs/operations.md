@@ -277,6 +277,30 @@ All commands run from the current working directory by default;
 passing one or more `--scan-root` flags overrides that with explicit
 roots.
 
+## Renaming sessions
+
+`conspectus rename session <ID> [<NAME>] [--no-mux] [--clear]` stores
+an operator-chosen display name as an ADR 0029 alias overlay in the
+nearest `.conspectus.toml` (or the user-level config for orphan
+sessions). `<ID>` accepts the same forms as `node show`. By default a
+single linked tmux session is renamed in lockstep; pass `--no-mux` to
+skip that side, or `--clear` to drop the alias entirely.
+
+`conspectus rename mux <ID> <NAME>` renames a tmux session without
+writing any alias — mux ids are the native tmux name, so the rename
+mutates the identity directly (per ADR 0029).
+
+`conspectus alias list [--store project|user|all] [--scan-root PATH]`
+prints existing alias entries grouped by store. The output columns are
+tab-separated: `<store>\t<path>\t<endpoint>\t<display_name>`.
+
+In the TUI, capital `R` opens an inline rename overlay on the selected
+agent-session row. `Enter` confirms, `Esc` cancels; lower-case `r`
+continues to mean refresh. The status bar surfaces the result, and
+when the target is a live session (mux indicator `Attached` or
+`Ambiguous`) appends an informational advisory that the alias
+overlays the harness title until the session ends.
+
 ## Caches
 
 Conspectus does not maintain a machine-generated cache yet. When a

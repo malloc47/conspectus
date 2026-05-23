@@ -318,6 +318,7 @@ bar rather than offered through a separate menu.
 | `a`   | mux row, or agent row with mux   | Attach to the mux target                               |
 | `i`   | any row                          | Copy the node's short id to the clipboard for `node show` |
 | `o`   | PR row                           | Open the PR URL in `$BROWSER` (if available)           |
+| `R`   | agent session row                | Open the rename overlay (ADR 0029 / ADR 0030); `Enter` commits the alias and the optional lockstep tmux rename, `Esc` cancels |
 
 Single keystroke; status bar reflects the action's outcome. When the
 selected row doesn't support a key, the status bar shows a one-line
@@ -333,7 +334,7 @@ selected row doesn't support a key, the status bar shows a one-line
 | `d`   | Delete (mux session, checkout, declared link, …)                    |
 | `m`   | Inline mux-picker when the selected agent has ambiguous LinkedToMux |
 | `M`   | Merge (branch, checkout, fork)                                      |
-| `R`   | Resume an un-muxed agent session into a chosen mux target           |
+| `s`   | AI session-name suggestion overlay (`H-AI-NAMING-003`)              |
 
 These keys are deliberately unbound in v1 so muscle memory can map to
 their final actions in later phases without rebinding. v1 is

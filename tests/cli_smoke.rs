@@ -105,6 +105,42 @@ fn graph_rejects_invalid_format() {
 }
 
 #[test]
+fn read_only_commands_do_not_mutate_alias_bearing_config() {
+    // ADR 0029 invariant: every read-only surface (graph, table,
+    // alias list) must leave alias-bearing TOML files byte-for-byte
+    // untouched. Mirrors the declared-link read-only audit.
+    let home = tempfile::TempDir::new().expect("home");
+    let temp = tempfile::TempDir::new().expect("temp");
+    let config = temp.path().join(".conspectus.toml");
+    let original = r#"[aliases]
+schema_version = 1
+
+[[aliases.entries]]
+node = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "alpha" }
+display_name = "ingest-refactor"
+"#;
+    fs::write(&config, original).expect("seed");
+
+    for args in [
+        vec!["graph", "--format", "json", "--scan-root"],
+        vec!["table", "sessions", "--scan-root"],
+        vec!["alias", "list", "--scan-root"],
+    ] {
+        let mut cmd = isolated_cmd(home.path());
+        let mut full = args.clone();
+        full.push(temp.path().to_str().expect("utf-8 path"));
+        cmd.args(&full);
+        cmd.assert().success();
+
+        let after = fs::read_to_string(&config).expect("read after");
+        assert_eq!(
+            after, original,
+            "command {args:?} mutated alias config",
+        );
+    }
+}
+
+#[test]
 fn rename_help_lists_session_and_mux() {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
 
