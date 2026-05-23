@@ -3414,6 +3414,40 @@ failure:
     confirm Conspectus links the active rollout even when the launch
     command names only a resumed parent.
   - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+  - Audit notes:
+    - Local Codex 0.128.0 already gives strong non-mutating live
+      evidence through tmux active pane pid -> `/proc/<pid>/fd` ->
+      open rollout JSONL path. In live testing, the process argv named
+      an older resumed thread, while the open fd identified the current
+      rollout, and Conspectus emitted
+      `active_pane_fd_session_match` for the current `codex`
+      `AgentSession`.
+    - Generated app-server schemas expose hook events
+      `sessionStart`, `userPromptSubmit`, `postToolUse`, `preToolUse`,
+      `permissionRequest`, and `stop`, plus hook notifications with
+      `threadId`; this is useful control-plane evidence but not enough
+      by itself to identify the currently active thread inside an
+      arbitrary already-running TUI process.
+    - Codex user hooks are accepted in `$CODEX_HOME/config.toml` under
+      `[hooks]` with PascalCase event keys such as `SessionStart`.
+      `hooks/list` reports them as `eventName = "sessionStart"`.
+      Command hooks must currently be synchronous; `async = true` is
+      parsed but skipped with a warning.
+    - A `SessionStart` command hook invoked by `codex exec` receives
+      JSON on stdin containing `session_id`, `transcript_path`, `cwd`,
+      `hook_event_name`, `model`, `permission_mode`, and `source`.
+      Ephemeral runs can have `transcript_path = null`; persisted runs
+      include the rollout JSONL path.
+    - Hook command environments include `TMUX` and `TMUX_PANE`, which
+      are enough to correlate the hook event back to a mux pane. Do
+      not trust inherited `CODEX_THREAD_ID` for attribution; live
+      probing showed it can name the parent Codex session that launched
+      the probe rather than the hook payload's new `session_id`.
+  - Recommended implementation path: first harden and test the
+    existing active-pane fd Codex signal as a default, no-opt-in
+    current-session source; then add `conspectus hook write codex`
+    for `SessionStart` payloads and `conspectus hook init codex`
+    editing `$CODEX_HOME/config.toml` as the opt-in durable path.
 
 - [ ] `H-MUXPROC-014` Add opencode plugin/server sidecar emitter if
   audit proves non-mutating session identity.
