@@ -4,6 +4,7 @@ pub mod api;
 pub mod config;
 pub mod declared;
 pub mod discovery;
+pub mod hook;
 pub mod model;
 pub mod output;
 pub mod resolve;

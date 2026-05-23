@@ -448,6 +448,21 @@ relationships that discovery cannot infer:
 These commands should write declared links to the nearest appropriate local or
 global store according to the persistence rules above.
 
+## Session Aliases
+
+Conspectus supports operator-chosen display names for agent sessions as a
+Conspectus-owned overlay on top of the adapter-populated `title` field.
+Aliases live in a sibling `[[aliases]]` TOML table in the same local/global
+config files as declared links, follow the same store-selection and
+provenance rules, and are applied at projection time with precedence
+`alias > title > id-suffix`. The harness-native title is never mutated; the
+alias-only model works uniformly across every harness, including those with
+no writeable title field. Renaming a muxed agent session also renames the
+tmux session in lockstep by default. ADR 0029 captures the schema, mux
+node-id stability rule, and lockstep contract. ADR 0030 settles the shared
+TUI text-input primitive used by the rename overlay (and reused by the
+search overlay and inline mux-picker).
+
 ## Status Views
 
 The default `conspectus session` table should be AgentSession-oriented: one row
@@ -682,6 +697,15 @@ running; the one-shot CLI is the writer otherwise.
     metadata take precedence over generic inference at the same root.
   - ADR 0028: use opt-in hook sidecar records for non-mutating current-session
     mux attribution, and reject terminal injection as a discovery strategy.
+  - ADR 0029: store user-chosen session display names as a Conspectus-owned
+    alias overlay in a sibling `[[aliases]]` TOML table; never mutate
+    harness-native titles, never store mux aliases (lockstep mux renames
+    mutate the tmux native name directly), and apply
+    `alias > title > id-suffix` precedence at projection time.
+  - ADR 0030: adopt `tui-input` as the shared TUI text-input primitive
+    underwriting the rename overlay, the search overlay, and the inline
+    mux-picker; lock `Enter` confirm / `Esc` cancel semantics and centered-
+    modal placement.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
@@ -717,7 +741,8 @@ running; the one-shot CLI is the writer otherwise.
   `$XDG_DATA_HOME/conspectus/snapshots/`. Partial eviction operates at
   provider granularity using node/link provenance and per-provider freshness
   timestamps; both the server and the one-shot CLI use the same format.
-- Hook sidecar records are local rebuildable observations under
+- Hook sidecar records are local rebuildable observations written through
+  `conspectus hook write` to `hooks.sqlite3` under
   `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.

@@ -46,18 +46,30 @@ environment variable.
 ### Hook sidecar state
 
 Hook sidecar records are optional, local observations written by
-harness hooks. They refine session-to-mux attribution when a harness
-can report the current session id without terminal input. Conspectus
-reads them from:
+harness hooks through `conspectus hook write`. They refine
+session-to-mux attribution when a harness can report the current
+session id without terminal input. Conspectus stores them in a local
+SQLite database under:
 
 1. `$CONSPECTUS_HOOK_SIDECAR_STATE`, when set.
 2. `$XDG_STATE_HOME/conspectus/hooks`.
 3. `$HOME/.local/state/conspectus/hooks`.
 
 The records are not project intent and should not be committed. Stale
-records are ignored for active mux attribution.
+records are ignored for active mux attribution. Older per-event JSON
+records in the same directory remain readable as a compatibility path.
 
-Claude Code hook sidecar setup:
+Install the Claude Code hook automatically:
+
+```sh
+conspectus hook init claude-code --scope user
+```
+
+The command is idempotent. `conspectus hook status claude-code` reports
+whether the hook is present, and `conspectus hook remove claude-code`
+removes only the Conspectus hook entry.
+
+Manual Claude Code hook setup:
 
 ```json
 {
@@ -68,7 +80,7 @@ Claude Code hook sidecar setup:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/scripts/conspectus-claude-hook-sidecar.py"
+            "command": "conspectus hook write claude-code"
           }
         ]
       }
@@ -78,9 +90,9 @@ Claude Code hook sidecar setup:
 ```
 
 Place that in `~/.claude/settings.json` or a local Claude Code
-settings file. The script reads Claude's hook JSON from stdin, records
-`session_id`, `transcript_path`, `cwd`, and tmux context when available,
-then exits without writing to the transcript.
+settings file. The subcommand reads Claude's hook JSON from stdin,
+records `session_id`, `transcript_path`, `cwd`, and tmux context when
+available, then exits without writing to the transcript.
 
 ## Configuration File
 

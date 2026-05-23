@@ -3230,7 +3230,68 @@ failure:
     documented a `SessionStart` hook configuration in
     `docs/operations.md`. The emitter writes schema-v1 sidecar
     records with Claude `session_id`, `transcript_path`, `cwd`,
-    process ids, and tmux context when available.
+    process ids, and tmux context when available. The script is now a
+    compatibility shim for `conspectus hook write claude-code`.
+
+- [x] `H-MUXPROC-016` Add `conspectus hook write` sidecar writer.
+  - Scope: move the sidecar write path into the Conspectus binary so
+    schema validation, root selection, atomic writes, permissions, and
+    future migrations live in Rust beside the reader. Treat the
+    subcommand as the compatibility boundary between harness hook
+    configuration and Conspectus storage: v1 may continue writing
+    per-event JSON files, but the command should encapsulate that choice
+    so a later SQLite state backend or daemon ingest path does not
+    require users to reinstall hooks. The first supported input should be
+    Claude Code hook JSON on stdin, producing the same schema-v1 records
+    currently written by `scripts/conspectus-claude-hook-sidecar.py`.
+    Keep the script only as a compatibility shim or remove it once the
+    CLI path is documented. Candidate command shape:
+    `conspectus hook write claude-code`, with room to add `--format` if
+    future harnesses need multiple payload forms.
+  - Design notes: ADR 0028 keeps hook observations as rebuildable local
+    state and calls SQLite a plausible next backend once this command
+    owns migrations, busy handling, retention, and fallback behavior.
+    Keep that separate from ADR 0029 session aliases, which are
+    user-authored durable intent even if a future implementation reuses
+    SQLite machinery for both.
+  - Tests: CLI tests for valid Claude payloads, missing `session_id`,
+    malformed JSON, sidecar-root precedence, user-only file
+    permissions where supported, and atomic write behavior. Reader /
+    writer compatibility tests should assert the discovery provider
+    accepts records emitted by the subcommand.
+  - Manual checks: configure a Claude Code hook to call the subcommand
+    directly, then confirm `graph --format json` shows
+    `hook_session_match` / `hook_session_path_match` evidence without
+    relying on the Python emitter.
+  - Blockers: `H-MUXPROC-010`, `H-MUXPROC-011`, `H-MUXPROC-012`.
+  - Outcome: added `conspectus hook write claude-code`, which reads
+    Claude Code hook JSON from stdin and writes schema-v1 observations
+    to `hooks.sqlite3` under the hook state root. Discovery reads the
+    SQLite store plus legacy per-event JSON records.
+
+- [x] `H-MUXPROC-017` Add `conspectus hook init` installer UX.
+  - Scope: add an idempotent hook installer for supported harnesses,
+    starting with Claude Code. It should merge with existing harness
+    settings, preserve unrelated user hooks, install a hook command
+    that invokes `conspectus hook write`, and support dry-run/status/
+    remove flows before mutating external config. Candidate commands:
+    `conspectus hook init claude-code --scope user|project`,
+    `conspectus hook status claude-code`, and
+    `conspectus hook remove claude-code`. Treat this as a write to
+    external tool configuration, distinct from read-only discovery.
+  - Tests: fixture-backed settings merge tests for empty settings,
+    existing unrelated hooks, existing Conspectus hook, malformed
+    settings, dry-run output, status detection, and removal without
+    deleting unrelated entries.
+  - Manual checks: install into a temporary Claude Code settings file,
+    run a hook-enabled session, verify sidecar emission, then remove
+    and confirm the settings file returns to the expected state.
+  - Blockers: `H-MUXPROC-016`; ADR/design update if the command mutates
+    any persistent convention not already covered by ADR 0028.
+  - Outcome: added `conspectus hook init/status/remove claude-code`
+    with user/project scope support. The installer merges with existing
+    Claude settings, preserves unrelated hooks, and installs a command
+    that invokes `conspectus hook write claude-code`.
 
 - [ ] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
@@ -3322,6 +3383,231 @@ failure:
     confirm no transcript records are added by the Conspectus
     attribution path.
   - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+
+### Session Naming
+
+Conspectus today is read-only outside Phase 5 declared-link CRUD. Session
+identifiers feel anonymous in the TUI: harness-native titles are sparse
+(opencode only, claude-code carries a compaction summary, codex/aider
+populate nothing) and tmux session names are operator-chosen but not
+coordinated with the agent context. This workstream introduces operator-
+controlled session naming as the first non-relationship write surface,
+deliberately scoped conservatively:
+
+- Names are stored as a Conspectus-owned alias overlay (ADR 0029), not
+  written back to harness stores. Works uniformly across every harness
+  including read-only ones.
+- Renaming a muxed agent session also renames the tmux session in
+  lockstep by default; `--no-mux` decouples.
+- AI-driven name suggestions are deferred to the sibling
+  `H-AI-NAMING-*` workstream so this one stays free of new dependencies,
+  network IO, and an async runtime.
+- Incidentally builds the first reusable TUI text-input primitive
+  (ADR 0030), which unblocks `T8-017` (`/` search overlay) and `P8-014`
+  (inline mux-picker).
+
+Dependency shape inside the workstream:
+
+```
+H-RENAME-001 ──┬─→ H-RENAME-004 ──┐
+H-RENAME-002 ──┤                  ├─→ H-RENAME-006 ──┬─→ H-RENAME-007 ─→ H-RENAME-008
+               └─→ H-RENAME-010   │                  │
+                                  │                  ├─→ H-RENAME-009 ─→ H-RENAME-011
+H-RENAME-003 ─────────────────────┤                  │                       │
+                                  │                  │                       ├─→ H-RENAME-012
+                                  │                  │                       ├─→ H-RENAME-013
+                                  │                  │                       └─→ H-RENAME-014
+```
+
+The two ADRs (`001`, `002`) and the `TmuxRunner::rename_session` seam
+(`003`) are unblocked from day one and can land in parallel. `004` is the
+spine; once it lands, projection (`006`), CLI (`007`/`008`), and lockstep
+(`009`) follow. Input widget (`010`) is parallel to the CLI track but
+blocks TUI wire-up (`011`).
+
+- [ ] `H-RENAME-001` ADR: alias overlay schema and storage.
+  - Scope: settle the storage schema (`[[aliases]]` table sibling to
+    `[declared]`, not nested inside it), store-selection rules, conflict
+    resolution between local and global, render precedence
+    (`alias > title > id-suffix`), mux node-id stability rule (no mux
+    aliases stored — lockstep renames mutate the native tmux name
+    directly), lockstep contract, hook-sidecar drift caveat, and the
+    alias-equals-title round-trip rule. Record as ADR 0029.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-RENAME-002` ADR: TUI text-input primitive.
+  - Scope: resolve ADR 0024's deferred `tui-input` decision now that three
+    callers exist (rename, `T8-017` search overlay, `P8-014` mux-picker).
+    Settle hand-rolled vs crate, locked key semantics (`Enter` confirm,
+    `Esc` cancel, `Tab` suspended while overlay is open), overlay
+    placement (centered modal, 60-col width cap), and module boundary
+    (`src/tui/widgets/input.rs`). Record as ADR 0030.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-RENAME-003` Extend `TmuxRunner` with `rename_session` mutation seam.
+  - Scope: first non-read-only tmux call. Add `rename_session(target,
+    new_name) -> TmuxOutcome` to the trait in `src/discovery/tmux/mod.rs`
+    with a default impl returning `Unsupported` so future backends (zellij
+    per `H-FUTURE-001`) don't break. `SystemTmux` runs
+    `tmux rename-session -t <native_id> <new_name>`. `FakeTmux` records
+    calls for assertion.
+  - Tests: per-impl tests for success, target-missing, binary-missing, and
+    name-collision (tmux rejects duplicates). `FakeTmux` recording
+    assertions.
+  - Blockers: none (parallel to ADRs).
+- [ ] `H-RENAME-004` Alias storage layer.
+  - Scope: per ADR 0029. Define the TOML model (round-trip), load aliases
+    from local + global stores at discovery time into a sidecar
+    `HashMap<NodeId, String>` carried alongside the graph snapshot. Add
+    atomic write helpers analogous to `upsert_declared_link` and
+    `remove_declared_link` (`src/declared.rs:233`, `:252`); reuse
+    `write_atomic` (`src/declared.rs:400-430`) directly. Reuse
+    `select_store_for_declaration` (`src/declared.rs:143-167`) for nearest-
+    store write selection. Reuse `DeclaredEndpoint` (`src/declared.rs:77`)
+    as the node-key encoding.
+  - Tests: round-trip TOML tests for the new schema, store-selection
+    tests across project-rooted vs orphan agent sessions, malformed-entry
+    diagnostics, schema-version skip behavior, atomic-write retry path.
+  - Blockers: `H-RENAME-001`.
+- [ ] `H-RENAME-006` Projection precedence.
+  - Scope: apply `alias > title > id-suffix` at the four projection sites
+    — `src/output/table.rs` `title` column rendering, `src/output/node_show.rs`
+    header field, `src/tui/rows/mod.rs` `AgentSessionRow` label,
+    `src/tui/detail.rs` header field. Centralize the precedence helper so a
+    future tweak touches one place. Snapshot fixtures updated here;
+    expect non-trivial diff churn.
+  - Tests: projection unit tests across present-alias / present-title /
+    absent-both cases at each of the four sites. Insta snapshot updates.
+  - Blockers: `H-RENAME-004`.
+- [ ] `H-RENAME-007` CLI: `conspectus rename` command tree.
+  - Scope: add `conspectus rename session <id> [<name>] [--no-mux]
+    [--clear]` and `conspectus rename mux <id> [<name>] [--clear]`.
+    `<name>` and `--clear` are mutually exclusive; missing both is an
+    error. Imperative pattern from Phase 5 — no `--dry-run`, no `--yes`.
+    Use the short row-id resolution from `H-TBL-005`. Mux rename never
+    writes an alias row (per ADR 0029 stability rule); only the native
+    tmux name changes. Session rename invokes the lockstep helper from
+    `H-RENAME-009` for the default-lockstep behavior.
+  - Tests: CLI smoke tests for each command shape, error handling for
+    mutually-exclusive flags, fake-runner-backed assertion that lockstep
+    invokes both alias write and tmux rename.
+  - Blockers: `H-RENAME-006`, `H-RENAME-009`, `H-RENAME-003`.
+- [ ] `H-RENAME-008` CLI: `conspectus alias list` (and `show`).
+  - Scope: read-path counterpart to the rename write commands. Operators
+    will want to audit overlays that hide harness-native titles. Mirrors
+    `conspectus declared list` shape (`src/cli.rs:1180+`). Add `alias show
+    <id>` if list-only feels thin during review.
+    `conspectus alias list [--store local|global|all]`.
+  - Tests: CLI snapshot tests for empty, single-store, both-stores, and
+    mixed-with-declared cases.
+  - Blockers: `H-RENAME-007`.
+- [ ] `H-RENAME-009` Mux lockstep helper.
+  - Scope: pure function consumed by the CLI rename command and the TUI
+    rename action. Given a target node, the current snapshot, and a
+    `--no-mux` flag, returns a `RenamePlan { agent_alias_write,
+    mux_native_rename }`. Refuses lockstep with a typed reason when the
+    target has ambiguous `LinkedToMux` candidates (per ADR 0029 lockstep
+    rule) — operator must either resolve ambiguity first or pass
+    `--no-mux`.
+  - Tests: unit tests across resolved-single-mux, ambiguous-mux,
+    no-mux-link, and `--no-mux`-flag cases.
+  - Blockers: `H-RENAME-001`.
+- [ ] `H-RENAME-010` TUI text-input widget implementation.
+  - Scope: per ADR 0030. Lives in new `src/tui/widgets/input.rs`. Exports
+    `TextInputState`, `TextInputWidget`, and `handle_key` returning
+    `InputOutcome::{Continue, Confirm(String), Cancel}`. Centered modal
+    overlay, 60-col width cap, 3-row height for the rename variant.
+    Status-bar shows `Enter confirm · Esc cancel` while open. Designed
+    so `T8-017` and `P8-014` adopt without changes.
+  - Tests: insta snapshot tests for empty / typed / wide-terminal /
+    narrow-terminal layouts. Reducer-level tests for the
+    confirm/cancel/passthrough outcomes.
+  - Blockers: `H-RENAME-002`.
+- [ ] `H-RENAME-011` TUI `R` keybinding wires rename flow.
+  - Scope: bind `R` (capital) — verify it's unused today
+    (`src/tui/runtime.rs:324-325`). On press, opens the input widget
+    pre-populated with the current alias (or harness title, or empty
+    when neither). Enter triggers `H-RENAME-009` plan → alias write +
+    optional `TmuxRunner::rename_session` → `Msg::SetStatus` feedback
+    (`renamed: <new>` or `rename failed: <reason>`) → refresh. Esc
+    cancels. Lower-case `r` continues to mean refresh per Phase 8.
+  - Tests: reducer tests for the open/confirm/cancel paths. Insta
+    snapshot for the active rename overlay over the sessions tree.
+    Manual: rename a session in a real TUI, confirm both alias and
+    tmux update.
+  - Blockers: `H-RENAME-007`, `H-RENAME-010`.
+- [ ] `H-RENAME-012` Read-only invariant audit.
+  - Scope: mirror of `P5-004`. Smoke tests verifying that `conspectus
+    graph`, `conspectus node show`, `conspectus table`, and TUI
+    navigation (no rename action) do not mtime-touch or content-modify
+    alias-bearing config files. Add to the existing read-only test
+    harness used by Phase 5.
+  - Tests: as scoped above.
+  - Blockers: `H-RENAME-011`.
+- [ ] `H-RENAME-013` Live-session UX advisory.
+  - Scope: status-bar advisory when the operator renames a session whose
+    mux indicator is `Attached` or `Ambiguous` (per `MuxIndicator` in
+    `src/tui/rows/mod.rs:159-172`) and hook-sidecar evidence is fresh
+    (per ADR 0028 `ACTIVE_TTL_SECONDS`, `src/discovery/hook_sidecar.rs:21-28`).
+    Alias is safe; message is informational ("renamed live session:
+    alias overlays harness title until session ends"). Establishes the
+    live-detection plumbing the future write-back ADR will need.
+  - Tests: status-bar message tests across live / ambiguous / dormant /
+    no-mux cases.
+  - Blockers: `H-RENAME-011`.
+- [ ] `H-RENAME-014` Docs and snapshot coverage.
+  - Scope: update `docs/operations.md` with the new commands; update the
+    Phase 8 TUI doc keybindings table
+    (`docs/implementation/phase-08-interactive-tui.md`); add insta
+    snapshot tests for renamed-row rendering in tree, table, and detail
+    surfaces.
+  - Tests: doctest where applicable; `git diff --check`; insta review.
+  - Blockers: `H-RENAME-011`, `H-RENAME-013`.
+
+### AI Session Naming
+
+Sibling workstream to `H-RENAME-*`. Layers AI-driven name suggestions on
+top of the alias write surface. Filed lightly so the follow-up is tracked
+without diluting the rename workstream — the AI track touches dependencies,
+network IO, privacy posture, and possibly an async runtime, all of which
+deserve their own ADR before any story lands.
+
+- [ ] `H-AI-NAMING-001` ADR: provider, dependency, privacy, dispatch.
+  - Scope: settle LLM provider choice (Anthropic vs pluggable), Cargo
+    feature gating (e.g. `ai` feature so default builds stay HTTP-free),
+    privacy / transcript-redaction posture, config schema and env-var
+    convention (`ANTHROPIC_API_KEY` or equivalent), and how the call
+    dispatches (synchronous blocking via existing `Cmd` runner per
+    ADR 0024, or new async surface). Note whether this counts as a
+    "control-plane adapter" under ADR 0028's framing.
+  - Tests: docs-only.
+  - Blockers: none.
+- [ ] `H-AI-NAMING-002` Transcript context extractor.
+  - Scope: reuse extractors from the `H-TRANSCRIPT-*` workstream
+    (currently 0/12). Coordination dependency: this story either waits
+    on `H-TRANSCRIPT-003` (recent-history adapter API) and the per-
+    harness extractors, or pulls them forward.
+  - Tests: per-harness fixture tests showing extracted context is bounded
+    and transcript-stable.
+  - Blockers: `H-AI-NAMING-001`, `H-TRANSCRIPT-003`.
+- [ ] `H-AI-NAMING-003` CLI + TUI suggest surface.
+  - Scope: `conspectus rename session <id> --suggest [--accept N]` returns
+    N candidate names; operator picks one or accepts the first.
+    TUI `s` key opens a candidate-list overlay backed by the alias write
+    path from `H-RENAME-004`. Picker reuses the input-widget overlay
+    pattern from `H-RENAME-010`.
+  - Tests: fake-LLM-runner CLI tests; TUI reducer tests for the suggest
+    overlay open/pick/cancel paths.
+  - Blockers: `H-AI-NAMING-001`, `H-AI-NAMING-002`, `H-RENAME-004`,
+    `H-RENAME-010`.
+- [ ] `H-AI-NAMING-004` Optional auto-suggest hook.
+  - Scope: config-gated, off by default. Triggered on detection of a new
+    session whose alias is unset and whose harness allows transcript
+    context extraction. Surfaces a candidate name in the row tree until
+    the operator accepts, edits, or dismisses.
+  - Tests: detection trigger tests; config-gate tests; dismissal
+    persistence tests.
+  - Blockers: `H-AI-NAMING-003`.
 
 ## Phase 7: Continuous Operation And Snapshot Persistence
 

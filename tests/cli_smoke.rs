@@ -119,6 +119,104 @@ fn declared_help_lists_subcommands() {
 }
 
 #[test]
+fn hook_write_claude_code_writes_sqlite_observation() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let state = tempfile::TempDir::new().expect("state temp");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("write")
+        .arg("claude-code")
+        .arg("--state-root")
+        .arg(state.path())
+        .write_stdin(
+            r#"{
+              "session_id": "session-1",
+              "cwd": "/work",
+              "transcript_path": "/tmp/transcript.jsonl",
+              "hook_event_name": "SessionStart"
+            }"#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let database = state.path().join("hooks.sqlite3");
+    assert!(database.is_file());
+    let connection = rusqlite::Connection::open(database).expect("open sqlite");
+    let body: String = connection
+        .query_row("SELECT record_json FROM hook_records", [], |row| row.get(0))
+        .expect("record json");
+    let record: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(record["harness_key"], "claude-code");
+    assert_eq!(record["session_key"], "session-1");
+    assert_eq!(record["transcript_path"], "/tmp/transcript.jsonl");
+}
+
+#[test]
+fn hook_init_status_remove_claude_code_preserves_existing_settings() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let settings = home.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().expect("parent")).expect("settings parent");
+    fs::write(
+        &settings,
+        r#"{
+          "theme": "dark",
+          "hooks": {
+            "SessionStart": [
+              {
+                "matcher": "startup",
+                "hooks": [
+                  { "type": "command", "command": "echo existing" }
+                ]
+              }
+            ]
+          }
+        }"#,
+    )
+    .expect("write settings");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("init")
+        .arg("claude-code")
+        .arg("--command")
+        .arg("conspectus hook write claude-code")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed Claude Code hook"));
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("status")
+        .arg("claude-code")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed\tclaude-code"));
+
+    let installed: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).expect("read")).expect("json");
+    assert_eq!(installed["theme"], "dark");
+    assert!(
+        fs::read_to_string(&settings)
+            .expect("read")
+            .contains("echo existing")
+    );
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("remove")
+        .arg("claude-code")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("removed Claude Code hook"));
+
+    let removed = fs::read_to_string(&settings).expect("read");
+    assert!(removed.contains("echo existing"));
+    assert!(!removed.contains("hook write claude-code"));
+}
+
+#[test]
 fn declared_create_rejects_invalid_relation() {
     let home = tempfile::TempDir::new().expect("home temp");
 

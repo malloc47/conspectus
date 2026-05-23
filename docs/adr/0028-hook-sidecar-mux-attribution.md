@@ -38,12 +38,21 @@ The May 2026 audit found:
 ## Decision
 
 Conspectus will support opt-in hook sidecar records as current-session
-evidence. Harness-specific hook emitters write small JSON records under the
-user's state directory, outside project trees:
+evidence. Harness-specific hook emitters call `conspectus hook write`; the
+subcommand writes observations under the user's state directory, outside
+project trees:
 
 - `$CONSPECTUS_HOOK_SIDECAR_STATE` when set
 - otherwise `$XDG_STATE_HOME/conspectus/hooks`
 - otherwise `$HOME/.local/state/conspectus/hooks`
+
+The durable hook interface is `conspectus hook write`, not direct
+provider-specific file writes. The first implementation writes to a SQLite
+database named `hooks.sqlite3` in that state directory and keeps the older
+per-event JSON reader as a compatibility fallback. Because harness
+configuration targets the subcommand rather than a storage file, Conspectus
+can later move hook observations to a daemon ingest path or another
+local-state backend without changing installed hooks.
 
 Schema version 1 records contain:
 
@@ -59,9 +68,10 @@ Schema version 1 records contain:
 - `observed_epoch`
 - optional `harness_version`
 
-Read-only graph discovery may read this directory and convert fresh records
-into `LinkedToMux` candidates after ordinary harness and tmux discovery has
-produced nodes. Matching order is:
+Read-only graph discovery may read this SQLite store plus legacy JSON records
+in the same directory and convert fresh records into `LinkedToMux` candidates
+after ordinary harness and tmux discovery has produced nodes. Matching order
+is:
 
 1. agent session by explicit `harness_key` + `session_key`
 2. mux session by tmux native id / session name
@@ -97,6 +107,12 @@ such channels must be implemented as explicit control-plane adapters.
   should be written with user-only permissions where possible.
 - Hook records can be generalized to Codex and OpenCode if their audits prove
   non-mutating hook/plugin payloads with current-session identity.
+- `conspectus hook write` is the compatibility boundary between harness hooks
+  and Conspectus storage. Storage changes after v1 should happen behind that
+  command rather than requiring users to edit every harness hook.
+- Rebuildable hook observations remain semantically separate from durable
+  user-authored intent such as session aliases in ADR 0029, even if both are
+  eventually backed by SQLite-shaped implementation code.
 
 ## Alternatives Considered
 
@@ -110,6 +126,37 @@ such channels must be implemented as explicit control-plane adapters.
   Claude Code drift case.
 - **Persist sidecar records in project config.** Rejected because hook events
   are rebuildable local observations, not user-authored project intent.
+- **Append hook events to a per-harness JSONL file.** Deferred. JSONL would
+  keep a compact chronological log and reduce directory entries, but
+  concurrent hooks need append/locking discipline, cleanup is less direct, and
+  readers must tolerate partial or corrupt lines.
+- **Store one latest-record file per harness/session or pane.** Deferred.
+  This bounds file growth and makes "current state" cheap to read, but it
+  discards event history and requires careful key design for pane reuse,
+  resumed sessions, and multiple hook events from the same process.
+- **Store hook observations in a Conspectus SQLite database.** Accepted once
+  hooks call `conspectus hook write`. SQLite supports indexing, retention,
+  de-duplication, "latest fresh record" queries, and richer continuous-mode
+  state. The Rust writer subcommand owns migrations, busy timeouts, atomicity,
+  and fallback behavior so provider scripts can remain thin shims.
+- **Send hook events to a local Conspectus daemon or socket.** Deferred until
+  continuous mode exists. A daemon can validate records centrally and update
+  views immediately, but hooks still need a no-daemon fallback and discovery
+  cannot depend on a long-running process.
+- **Keep provider-specific emitter scripts as the durable interface.**
+  Accepted only as a bootstrap path. `conspectus hook write` is the preferred
+  writer so the schema, permissions, storage behavior, and migrations live
+  beside the Rust reader.
+- **Use one SQLite database for hook observations and session aliases.**
+  Deferred. Sharing implementation machinery may make sense, but hook records
+  are rebuildable local observations while ADR 0029 aliases are durable
+  user-authored intent with project/global placement and review expectations.
+  A shared physical backend must preserve that semantic split: evicting or
+  rebuilding hook state must not delete aliases.
+- **Install hooks manually forever.** Rejected for the durable path. Manual
+  setup remains documented, but `conspectus hook init` provides idempotent
+  install/status/remove flows while preserving unrelated harness
+  configuration.
 
 ## Open Questions Answered
 
@@ -118,3 +165,11 @@ such channels must be implemented as explicit control-plane adapters.
   discovery.
 - Claude Code hook sidecars are the preferred first fix path for
   post-`/resume` current-session attribution.
+- SQLite under user state is the v1 writer storage format. Legacy per-event
+  JSON files remain readable so existing hook configs degrade cleanly during
+  migration.
+- `conspectus hook write` is the forward-compatible boundary for hook storage
+  changes. It owns migrations and locking behavior.
+- Hook observations are local operational state. User-authored aliases remain
+  durable intent per ADR 0029 unless a later ADR explicitly changes that
+  storage contract.

@@ -5,27 +5,22 @@
 //! those records onto already-discovered `AgentSession` and `MuxSession` nodes.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-use serde::Deserialize;
-
+use crate::hook::{self, HookRecord, HookTmuxRecord};
 use crate::model::{
     AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
     LinkState, Metadata, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "hook_sidecar";
-const SCHEMA_VERSION: u16 = 1;
-const ACTIVE_TTL_SECONDS: i64 = 15 * 60;
 
 pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch: i64) {
-    for record in read_records(root) {
-        if record.schema_version != SCHEMA_VERSION {
+    for record in hook::HookStore::new(root).read_records() {
+        if record.schema_version != hook::SCHEMA_VERSION {
             continue;
         }
-        if record.observed_epoch + ACTIVE_TTL_SECONDS < now_epoch {
+        if record.observed_epoch + hook::ACTIVE_TTL_SECONDS < now_epoch {
             continue;
         }
 
@@ -74,59 +69,7 @@ fn demote_stale_launch_links(snapshot: &mut GraphSnapshot, current_link: &GraphL
     }
 }
 
-fn read_records(root: &Path) -> Vec<HookSidecarRecord> {
-    let Ok(entries) = fs::read_dir(root) else {
-        return Vec::new();
-    };
-
-    entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .filter_map(|path| read_record(&path).ok())
-        .collect()
-}
-
-fn read_record(path: &Path) -> Result<HookSidecarRecord> {
-    let body = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&body)?)
-}
-
-#[derive(Debug, Deserialize)]
-struct HookSidecarRecord {
-    schema_version: u16,
-    harness_key: String,
-    session_key: String,
-    #[serde(default)]
-    cwd: Option<String>,
-    #[serde(default)]
-    pid: Option<i64>,
-    #[serde(default)]
-    ppid: Option<i64>,
-    #[serde(default)]
-    tmux: Option<HookTmuxRecord>,
-    #[serde(default)]
-    transcript_path: Option<String>,
-    #[serde(default)]
-    hook_event_name: Option<String>,
-    observed_epoch: i64,
-    #[serde(default)]
-    harness_version: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HookTmuxRecord {
-    #[serde(default)]
-    session_name: Option<String>,
-    #[serde(default)]
-    native_id: Option<String>,
-    #[serde(default)]
-    pane_id: Option<String>,
-    #[serde(default)]
-    socket_path: Option<String>,
-}
-
-fn find_session(snapshot: &GraphSnapshot, record: &HookSidecarRecord) -> Option<AgentSessionNode> {
+fn find_session(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<AgentSessionNode> {
     snapshot.nodes.iter().find_map(|node| {
         let GraphNode::AgentSession(session) = node else {
             return None;
@@ -136,7 +79,7 @@ fn find_session(snapshot: &GraphSnapshot, record: &HookSidecarRecord) -> Option<
     })
 }
 
-fn find_mux(snapshot: &GraphSnapshot, record: &HookSidecarRecord) -> Option<MuxSessionNode> {
+fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionNode> {
     let muxes: Vec<_> = snapshot
         .nodes
         .iter()
@@ -179,7 +122,7 @@ fn find_mux(snapshot: &GraphSnapshot, record: &HookSidecarRecord) -> Option<MuxS
 fn linked_to_mux(
     session: &AgentSessionNode,
     mux: &MuxSessionNode,
-    record: &HookSidecarRecord,
+    record: &HookRecord,
 ) -> GraphLink {
     let source = NodeId::AgentSession(session.id.clone());
     let target = NodeId::MuxSession(mux.id.clone());
@@ -275,29 +218,11 @@ fn tmux_metadata(tmux: &HookTmuxRecord) -> BTreeMap<String, serde_json::Value> {
 }
 
 pub fn default_sidecar_root() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("CONSPECTUS_HOOK_SIDECAR_STATE") {
-        return Some(PathBuf::from(path));
-    }
-
-    if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
-        return Some(PathBuf::from(path).join("conspectus/hooks"));
-    }
-
-    std::env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".local")
-            .join("state")
-            .join("conspectus")
-            .join("hooks")
-    })
+    hook::default_root()
 }
 
 pub fn current_epoch() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-        .unwrap_or(0)
+    hook::current_epoch()
 }
 
 #[cfg(test)]
@@ -399,6 +324,46 @@ mod tests {
         assert_eq!(
             links[0].source,
             NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "current"))
+        );
+    }
+
+    #[test]
+    fn fresh_sqlite_hook_record_links_session_to_mux() {
+        let temp = tempdir().expect("tempdir");
+        hook::HookStore::new(temp.path())
+            .write_record(&hook::HookRecord {
+                schema_version: hook::SCHEMA_VERSION,
+                harness_key: "claude-code".to_string(),
+                session_key: "current".to_string(),
+                cwd: Some("/work".to_string()),
+                pid: Some(123),
+                ppid: Some(456),
+                tmux: Some(hook::HookTmuxRecord {
+                    session_name: Some("editor".to_string()),
+                    native_id: None,
+                    pane_id: Some("%1".to_string()),
+                    socket_path: None,
+                }),
+                transcript_path: None,
+                hook_event_name: Some("SessionStart".to_string()),
+                observed_epoch: 1_700_000_000,
+                harness_version: None,
+            })
+            .expect("write hook record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session("current"), mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        assert_eq!(snapshot.candidate_links.len(), 1);
+        assert_eq!(
+            snapshot.candidate_links[0]
+                .source_metadata
+                .evidence
+                .as_deref(),
+            Some("hook_session_match")
         );
     }
 
