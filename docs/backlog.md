@@ -3296,6 +3296,48 @@ failure:
     Claude settings, preserves unrelated hooks, and installs a command
     that invokes `conspectus hook write claude-code`.
 
+- [ ] `H-MUXPROC-018` Dedupe hook records by pane and drop the
+  15-minute emission gate.
+  - Problem: in-app `/resume` between two Claude Code sessions in the
+    same tmux pane leaves both sessions linked to the mux. Each
+    session's `SessionStart` / `Resume` hook writes its own record;
+    both records fall inside the 15-minute `ACTIVE_TTL_SECONDS`
+    window, both resolve to the same mux, and the current
+    `apply_hook_sidecars` pass emits an Active `LinkedToMux` for each
+    rather than letting the freshest pane observation win. The 15-min
+    TTL also causes legitimate live links to drop off a working
+    session as soon as the operator idles longer than the window.
+  - Scope: change `apply_hook_sidecars` in
+    `src/discovery/hook_sidecar.rs` to group records by
+    `(resolved_mux.id, record.tmux.pane_id)` after mux resolution,
+    pick the record with the highest `observed_epoch` per group as
+    the Active winner, and emit older same-pane records as
+    `LinkState::Overridden { by: winner_link_id, reason: "superseded
+    by fresher hook sidecar record for same pane" }`. Records with
+    no `pane_id` fall back to keying by `(resolved_mux.id, None)`
+    (one winner per mux for pane-less records), which conservatively
+    dedupes cwd-only and pid-only matches. Drop the
+    `ACTIVE_TTL_SECONDS` filter from the emission gate; the constant
+    stays in `src/hook.rs` for higher-layer freshness signals (e.g.
+    the live-session advisory planned for `H-RENAME-013`). Update
+    ADR 0028 to record the new emission semantics.
+  - Tests: replace the existing
+    `stale_hook_record_does_not_link_active_mux` test with one
+    asserting an old hook record still links when no fresher record
+    supersedes it. Add `fresher_hook_record_overrides_older_hook_for
+    _same_pane` asserting the older link state flips to `Overridden`.
+    Add `hook_records_for_different_panes_in_same_mux_both_remain_
+    active` asserting per-pane independence. Existing demotion tests
+    for launch-argv and cwd evidence stay green.
+  - Manual checks: reproduce the in-app `/resume` scenario from a
+    real Claude Code tmux pane and verify
+    `conspectus graph --format json` and `conspectus tui` show
+    exactly one Active `LinkedToMux` per pane (the freshest), with
+    the older link visible as Overridden in diagnostic output.
+  - Related: `H-MUXPROC-015` (the original in-process `/resume`
+    drift fix scope), ADR 0028 (hook sidecar attribution).
+  - Blockers: none.
+
 - [ ] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
   - Problem: live testing showed a Claude Code process running in

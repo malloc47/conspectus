@@ -4,34 +4,55 @@
 //! current harness session and terminal context. This post-merge pass maps
 //! those records onto already-discovered `AgentSession` and `MuxSession` nodes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::hook::{self, HookRecord, HookTmuxRecord};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, Metadata, MuxSessionNode, NodeId, Provenance, RelationKind,
-    SourceMetadata,
+    LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, Provenance,
+    RelationKind, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "hook_sidecar";
 
-pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch: i64) {
-    for record in hook::HookStore::new(root).read_records() {
-        if record.schema_version != hook::SCHEMA_VERSION {
-            continue;
-        }
-        if record.observed_epoch + hook::ACTIVE_TTL_SECONDS < now_epoch {
-            continue;
-        }
+pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch: i64) {
+    let mut records: Vec<HookRecord> = hook::HookStore::new(root)
+        .read_records()
+        .into_iter()
+        .filter(|record| record.schema_version == hook::SCHEMA_VERSION)
+        .collect();
+    // Freshest first so the dedupe map keeps the winner per pane.
+    records.sort_by(|a, b| b.observed_epoch.cmp(&a.observed_epoch));
 
+    let mut winners: HashMap<(MuxSessionId, Option<String>), String> = HashMap::new();
+
+    for record in records {
         let Some(mux) = find_mux(snapshot, &record) else {
             continue;
         };
+        let pane_key = (
+            mux.id.clone(),
+            record.tmux.as_ref().and_then(|t| t.pane_id.clone()),
+        );
         let session = ensure_session(snapshot, &record);
+        let mut link = linked_to_mux(&session, &mux, &record);
 
-        let link = linked_to_mux(&session, &mux, &record);
-        demote_weaker_mux_links(snapshot, &link);
+        match winners.get(&pane_key) {
+            None => {
+                winners.insert(pane_key, link.id.clone());
+                demote_weaker_mux_links(snapshot, &link);
+            }
+            Some(winner_id) => {
+                link.state = LinkState::Overridden {
+                    by: winner_id.clone(),
+                    reason: Some(
+                        "superseded by fresher hook sidecar record for same pane".to_string(),
+                    ),
+                };
+            }
+        }
+
         if !snapshot
             .candidate_links
             .iter()
@@ -472,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_hook_record_does_not_link_active_mux() {
+    fn old_hook_record_still_links_when_no_fresher_record_supersedes() {
         let temp = tempdir().expect("tempdir");
         fs::write(
             temp.path().join("record.json"),
@@ -480,7 +501,7 @@ mod tests {
               "schema_version": 1,
               "harness_key": "claude-code",
               "session_key": "current",
-              "tmux": { "session_name": "editor" },
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
               "observed_epoch": 1700000000
             }"#,
         )
@@ -490,9 +511,142 @@ mod tests {
             ..GraphSnapshot::empty()
         };
 
-        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_001_000);
+        // Far beyond the former 15-minute TTL; with dedupe-by-pane the
+        // record still links because no fresher observation supersedes it.
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_000 + 86_400);
 
-        assert!(snapshot.candidate_links.is_empty());
+        let active: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.state, LinkState::Active)
+            })
+            .collect();
+        assert_eq!(active.len(), 1);
+    }
+
+    #[test]
+    fn fresher_hook_record_overrides_older_hook_for_same_pane() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("older.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "old",
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write older record");
+        fs::write(
+            temp.path().join("newer.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "current",
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
+              "observed_epoch": 1700000500
+            }"#,
+        )
+        .expect("write newer record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session("old"), session("current"), mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_600);
+
+        let current_id = AgentSessionId::new("claude-code", "/state", "current");
+        let old_id = AgentSessionId::new("claude-code", "/state", "old");
+
+        let winner = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source == NodeId::AgentSession(current_id.clone())
+            })
+            .expect("winner link present");
+        assert!(matches!(winner.state, LinkState::Active));
+
+        let loser = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source == NodeId::AgentSession(old_id.clone())
+            })
+            .expect("loser link present");
+        match &loser.state {
+            LinkState::Overridden { by, reason } => {
+                assert_eq!(by, &winner.id);
+                assert_eq!(
+                    reason.as_deref(),
+                    Some("superseded by fresher hook sidecar record for same pane")
+                );
+            }
+            other => panic!("expected Overridden, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_records_for_different_panes_in_same_mux_both_remain_active() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("pane1.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "alpha",
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write pane 1 record");
+        fs::write(
+            temp.path().join("pane2.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "beta",
+              "tmux": { "session_name": "editor", "pane_id": "%2" },
+              "observed_epoch": 1700000500
+            }"#,
+        )
+        .expect("write pane 2 record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session("alpha"), session("beta"), mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_600);
+
+        let active_sources: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.state, LinkState::Active)
+            })
+            .map(|link| link.source.clone())
+            .collect();
+        assert_eq!(active_sources.len(), 2);
+        assert!(
+            active_sources.contains(&NodeId::AgentSession(AgentSessionId::new(
+                "claude-code",
+                "/state",
+                "alpha"
+            )))
+        );
+        assert!(
+            active_sources.contains(&NodeId::AgentSession(AgentSessionId::new(
+                "claude-code",
+                "/state",
+                "beta"
+            )))
+        );
     }
 
     #[test]
