@@ -246,11 +246,25 @@ fn agent_session_fields(
         None => placeholder("cwd", "— (unknown)"),
     };
     fields.push(cwd_value);
-    if let Some(title) = session
-        .title
-        .as_deref()
+    let session_id_for_alias = NodeId::AgentSession(session.id.clone());
+    let alias = snapshot
+        .aliases
+        .get(&session_id_for_alias)
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(alias) = &alias {
+        fields.push(plain("alias", alias.clone()));
+    }
+    // ADR 0029: the alias hides the harness-native title in default
+    // renders. Auditing both surfaces lives behind
+    // `conspectus alias list` (H-RENAME-008).
+    if alias.is_none()
+        && let Some(title) = session
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     {
         fields.push(plain("title", title.to_string()));
     }
@@ -798,6 +812,36 @@ mod tests {
             .unwrap();
         assert_eq!(title.value, "Phase 8 mockup");
         assert!(!title.placeholder);
+    }
+
+    #[test]
+    fn alias_replaces_title_in_detail_header_per_adr_0029() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(agent(
+            "opencode",
+            "abc",
+            Some("/home/op/src/x"),
+            Some("harness title that should be hidden"),
+        ));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("opencode", "/state", "abc"));
+        snapshot
+            .aliases
+            .insert(session_id.clone(), "ingest-refactor".to_string());
+        let snapshot = resolve_snapshot(snapshot);
+        let detail = build(&snapshot, &session_id, Some(home().as_path()));
+
+        let labels: Vec<&str> = detail.header_fields.iter().map(|f| f.label).collect();
+        assert_eq!(
+            labels,
+            vec!["harness", "cwd", "alias", "mux", "pr", "lineage"],
+            "alias row replaces title row when both would be present"
+        );
+        let alias = detail
+            .header_fields
+            .iter()
+            .find(|f| f.label == "alias")
+            .expect("alias header present");
+        assert_eq!(alias.value, "ingest-refactor");
     }
 
     #[test]

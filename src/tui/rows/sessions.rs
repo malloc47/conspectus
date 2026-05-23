@@ -567,6 +567,12 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             mux_state,
             preview: entry.node.last_message_preview.clone(),
             title: entry.node.title.clone(),
+            alias: ctx
+                .index
+                .snapshot
+                .aliases
+                .get(&entry.id)
+                .map(str::to_string),
             primary_node: entry.id.clone(),
         }),
     });
@@ -1558,6 +1564,42 @@ mod tests {
         );
         assert_eq!(row.cwd_display.as_deref(), Some("~/src/proj"));
         assert_eq!(row.short_id.len(), 6, "short id floor at 6 chars");
+    }
+
+    #[test]
+    fn session_row_alias_overrides_title_in_display_label() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            None,
+            Some("harness title"),
+            None,
+        ));
+        let id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        snapshot.aliases.insert(id, "ingest-refactor".to_string());
+
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+        });
+
+        let row = tree
+            .rows
+            .iter()
+            .find_map(|r| match &r.kind {
+                RowKind::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .expect("session row");
+        assert_eq!(row.alias.as_deref(), Some("ingest-refactor"));
+        assert_eq!(row.title.as_deref(), Some("harness title"));
+        assert_eq!(row.display_label(), Some("ingest-refactor"));
     }
 
     #[test]

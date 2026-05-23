@@ -102,6 +102,12 @@ pub struct Row {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+// AgentSessionRow carries a handful of optional display strings and
+// is the only variant the renderer hot-loops over. Boxing would push
+// every match arm through an extra indirection for no measurable win
+// because the row tree allocates a single owning `Vec<Row>` and never
+// stores RowKind in densely-packed collections.
+#[allow(clippy::large_enum_variant)]
 pub enum RowKind {
     Group(GroupRow),
     AgentSession(AgentSessionRow),
@@ -153,7 +159,21 @@ pub struct AgentSessionRow {
     /// today). Right panel renders it as a header field; the tree
     /// uses it only after `P8-015` lands.
     pub title: Option<String>,
+    /// Operator-chosen display name from the ADR 0029 alias overlay,
+    /// when set. Takes precedence over [`Self::title`] at every
+    /// projection site via [`Self::display_label`].
+    pub alias: Option<String>,
     pub primary_node: NodeId,
+}
+
+impl AgentSessionRow {
+    /// Apply ADR 0029's `alias > title > id-suffix` precedence and
+    /// return the strongest display label available for this row.
+    /// Falls back to `None` when neither alias nor title is set so
+    /// callers can render the short-id suffix instead.
+    pub fn display_label(&self) -> Option<&str> {
+        self.alias.as_deref().or(self.title.as_deref())
+    }
 }
 
 /// Which mux indicator glyph the renderer should draw for an agent

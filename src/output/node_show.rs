@@ -117,7 +117,7 @@ pub fn render_node_show(snapshot: &GraphSnapshot, id: &NodeId, color: bool) -> S
         return format!("node {id} not found in snapshot\n");
     };
     let mut out = String::new();
-    write_node_summary(&mut out, node, color);
+    write_node_summary(&mut out, node, color, Some(&snapshot.aliases));
     write_candidate_links(&mut out, snapshot, id, color);
     write_resolved(&mut out, snapshot, id, color);
     write_diagnostics(&mut out, snapshot, id, color);
@@ -129,7 +129,12 @@ fn write_section_header(out: &mut String, text: &str, color: bool) {
     out.push('\n');
 }
 
-fn write_node_summary(out: &mut String, node: &GraphNode, color: bool) {
+fn write_node_summary(
+    out: &mut String,
+    node: &GraphNode,
+    color: bool,
+    aliases: Option<&crate::aliases::AliasOverlay>,
+) {
     let id = node.id();
     write_section_header(out, &format!("node {}", node_short_id(&id)), color);
     let _ = writeln!(out, "  kind: {}", node_kind_label(node));
@@ -138,7 +143,7 @@ fn write_node_summary(out: &mut String, node: &GraphNode, color: bool) {
         GraphNode::Repo(node) => write_repo(out, node),
         GraphNode::Checkout(node) => write_worktree(out, node),
         GraphNode::Workspace(node) => write_workspace(out, node),
-        GraphNode::AgentSession(node) => write_agent_session(out, node),
+        GraphNode::AgentSession(node) => write_agent_session(out, node, aliases),
         GraphNode::MuxSession(node) => write_mux_session(out, node),
         GraphNode::Branch(node) => write_branch(out, node),
         GraphNode::Fork(node) => write_fork(out, node),
@@ -159,14 +164,29 @@ fn node_kind_label(node: &GraphNode) -> &'static str {
     }
 }
 
-fn write_agent_session(out: &mut String, node: &AgentSessionNode) {
+fn write_agent_session(
+    out: &mut String,
+    node: &AgentSessionNode,
+    aliases: Option<&crate::aliases::AliasOverlay>,
+) {
     let _ = writeln!(out, "  harness:     {}", node.harness_key);
     let _ = writeln!(out, "  state_scope: {}", node.id.state_scope);
     let _ = writeln!(out, "  session_key: {}", node.id.session_key);
     if let Some(cwd) = &node.cwd {
         let _ = writeln!(out, "  cwd:         {cwd}");
     }
-    if let Some(title) = &node.title {
+    let alias = aliases
+        .and_then(|overlay| overlay.get(&NodeId::AgentSession(node.id.clone())))
+        .map(str::to_string);
+    if let Some(alias) = &alias {
+        let _ = writeln!(out, "  alias:       {alias}");
+    }
+    // ADR 0029: the alias hides the harness-native title in default
+    // renders. Operators can still inspect the original title via
+    // `conspectus alias list` once that lands (H-RENAME-008).
+    if alias.is_none()
+        && let Some(title) = &node.title
+    {
         let _ = writeln!(out, "  title:       {title}");
     }
 }
@@ -503,6 +523,58 @@ mod tests {
         let snapshot = GraphSnapshot::empty();
         let err = resolve_node_id("does-not-exist", &snapshot).unwrap_err();
         assert!(matches!(err, NodeResolveError::NotFound { .. }));
+    }
+
+    #[test]
+    fn node_show_renders_alias_in_place_of_title() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("opencode", "/state", "alpha"),
+                harness_key: "opencode".to_string(),
+                cwd: Some("/work".to_string()),
+                title: Some("harness title that should be hidden".to_string()),
+                last_message_preview: None,
+                last_active_epoch: None,
+            })],
+            ..GraphSnapshot::empty()
+        };
+        let id = snapshot.nodes[0].id();
+        snapshot
+            .aliases
+            .insert(id.clone(), "ingest-refactor".to_string());
+
+        let output = render_node_show(&snapshot, &id, false);
+        assert!(
+            output.contains("alias:       ingest-refactor"),
+            "alias row missing in:\n{output}",
+        );
+        assert!(
+            !output.contains("title:"),
+            "title row should be hidden when alias is set:\n{output}",
+        );
+    }
+
+    #[test]
+    fn node_show_falls_back_to_title_when_no_alias() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("opencode", "/state", "alpha"),
+                harness_key: "opencode".to_string(),
+                cwd: Some("/work".to_string()),
+                title: Some("Phase 8 mockup".to_string()),
+                last_message_preview: None,
+                last_active_epoch: None,
+            })],
+            ..GraphSnapshot::empty()
+        };
+        let id = snapshot.nodes[0].id();
+
+        let output = render_node_show(&snapshot, &id, false);
+        assert!(
+            output.contains("title:       Phase 8 mockup"),
+            "title row should appear when alias is unset:\n{output}",
+        );
+        assert!(!output.contains("alias:"));
     }
 
     #[test]

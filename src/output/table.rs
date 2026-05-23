@@ -1136,7 +1136,7 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
             .last_message_preview
             .clone()
             .unwrap_or_else(|| "—".to_string()),
-        "title" => ctx.session.title.clone().unwrap_or_else(|| "—".to_string()),
+        "title" => session_display_title(ctx.view, ctx.node_id, ctx.session),
         "activity" => ctx
             .session
             .last_active_epoch
@@ -1144,6 +1144,23 @@ fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
             .unwrap_or_else(|| "—".to_string()),
         _ => "—".to_string(),
     }
+}
+
+/// Render the `title` column for an agent-session row per ADR 0029's
+/// `alias > title > id-suffix` precedence. The id-suffix tier degrades
+/// to `—` here because the `id` column carries the short id already.
+fn session_display_title(
+    view: &SnapshotView<'_>,
+    node_id: &NodeId,
+    session: &AgentSessionNode,
+) -> String {
+    crate::aliases::resolve_display_label(
+        Some(&view.snapshot.aliases),
+        node_id,
+        session.title.as_deref(),
+    )
+    .map(str::to_string)
+    .unwrap_or_else(|| "—".to_string())
 }
 
 /// Find the checkout whose root contains the session's cwd. Walks
@@ -1425,8 +1442,8 @@ fn union_cell(key: &str, ctx: &UnionRowCtx<'_, '_>) -> String {
             .clone()
             .unwrap_or_else(|| "—".to_string()),
         ("preview", UnionRowSource::Mux { .. }) => "—".to_string(),
-        ("title", UnionRowSource::Agent { session, .. }) => {
-            session.title.clone().unwrap_or_else(|| "—".to_string())
+        ("title", UnionRowSource::Agent { node_id, session }) => {
+            session_display_title(ctx.view, node_id, session)
         }
         ("title", UnionRowSource::Mux { .. }) => "—".to_string(),
         _ => "—".to_string(),
@@ -4124,6 +4141,45 @@ mod tests {
         assert!(
             untitled.trim_end().ends_with('—'),
             "untitled row should show — in TITLE column:\n{untitled}",
+        );
+    }
+
+    #[test]
+    fn sessions_title_column_prefers_alias_over_harness_title() {
+        let session = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "global", "ses_a"),
+            harness_key: "opencode".to_string(),
+            cwd: Some("/work".to_string()),
+            title: Some("harness title that should be hidden".to_string()),
+            last_message_preview: None,
+            last_active_epoch: None,
+        });
+        let session_id = session.id();
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session],
+            ..GraphSnapshot::empty()
+        };
+        snapshot
+            .aliases
+            .insert(session_id, "ingest-refactor".to_string());
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "title"]),
+        );
+        let body: Vec<&str> = rendered.lines().skip(2).collect();
+        let row = body
+            .iter()
+            .find(|line| line.contains("opencode:ses_a"))
+            .expect("session row");
+        assert!(
+            row.contains("ingest-refactor"),
+            "alias should replace harness title in title column:\n{row}",
+        );
+        assert!(
+            !row.contains("harness title that should be hidden"),
+            "harness title should be hidden when alias is set:\n{row}",
         );
     }
 
