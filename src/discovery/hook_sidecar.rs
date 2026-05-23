@@ -38,18 +38,29 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
         let session = ensure_session(snapshot, &record);
         let mut link = linked_to_mux(&session, &mux, &record);
 
-        match winners.get(&pane_key) {
-            None => {
-                winners.insert(pane_key, link.id.clone());
-                demote_weaker_mux_links(snapshot, &link);
-            }
-            Some(winner_id) => {
-                link.state = LinkState::Overridden {
-                    by: winner_id.clone(),
-                    reason: Some(
-                        "superseded by fresher hook sidecar record for same pane".to_string(),
-                    ),
-                };
+        if let Some(running) = pane_running_harness(&mux)
+            && running != record.harness_key
+        {
+            link.state = LinkState::Ignored {
+                reason: Some(format!(
+                    "pane now running `{running}`; hook record is from `{}`",
+                    record.harness_key
+                )),
+            };
+        } else {
+            match winners.get(&pane_key) {
+                None => {
+                    winners.insert(pane_key, link.id.clone());
+                    demote_weaker_mux_links(snapshot, &link);
+                }
+                Some(winner_id) => {
+                    link.state = LinkState::Overridden {
+                        by: winner_id.clone(),
+                        reason: Some(
+                            "superseded by fresher hook sidecar record for same pane".to_string(),
+                        ),
+                    };
+                }
             }
         }
 
@@ -60,6 +71,20 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
         {
             snapshot.candidate_links.push(link);
         }
+    }
+}
+
+/// Maps the mux's active pane command back to the harness key when the
+/// command unambiguously identifies one. Conservative: ambiguous commands
+/// (e.g. `node`, `shell`) return `None` so hook records aren't filtered on
+/// weak evidence.
+fn pane_running_harness(mux: &MuxSessionNode) -> Option<&'static str> {
+    match mux.active_pane_command.as_deref()? {
+        "claude" => Some("claude-code"),
+        "codex" | "codex-rs" => Some("codex"),
+        "opencode" => Some("opencode"),
+        "aider" => Some("aider"),
+        _ => None,
     }
 }
 
@@ -308,12 +333,16 @@ mod tests {
     }
 
     fn mux(native_id: &str) -> GraphNode {
+        mux_with_command(native_id, Some("claude"))
+    }
+
+    fn mux_with_command(native_id: &str, command: Option<&str>) -> GraphNode {
         GraphNode::MuxSession(MuxSessionNode {
             id: MuxSessionId::new(format!("tmux:{native_id}")),
             backend: "tmux".to_string(),
             native_id: native_id.to_string(),
             cwd: Some("/work".to_string()),
-            active_pane_command: Some("claude".to_string()),
+            active_pane_command: command.map(str::to_string),
             active_pane_pid: Some(123),
             active_pane_current_path: Some("/work".to_string()),
             active_pane_start_command: Some("claude --resume old".to_string()),
@@ -589,6 +618,86 @@ mod tests {
             }
             other => panic!("expected Overridden, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn hook_record_is_ignored_when_pane_runs_a_different_harness() {
+        let temp = tempdir().expect("tempdir");
+        // Stale claude hook left over from when claude was running in this pane.
+        fs::write(
+            temp.path().join("stale_claude.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "stale",
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write stale claude record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("stale"),
+                // Pane is now running codex.
+                mux_with_command("editor", Some("codex")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_600);
+
+        let link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::LinkedToMux)
+            .expect("link present for diagnostics");
+        match &link.state {
+            LinkState::Ignored { reason } => {
+                let reason = reason.as_deref().unwrap_or("");
+                assert!(
+                    reason.contains("codex") && reason.contains("claude-code"),
+                    "expected reason to name both harnesses, got: {reason}"
+                );
+            }
+            other => panic!("expected Ignored, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_record_links_normally_when_pane_command_is_unknown() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("record.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "current",
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("current"),
+                // Operator dropped to a shell in the pane; not a known harness command.
+                mux_with_command("editor", Some("zsh")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_600);
+
+        let link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::LinkedToMux)
+            .expect("link present");
+        assert!(
+            matches!(link.state, LinkState::Active),
+            "unknown pane command should not filter; got {:?}",
+            link.state
+        );
     }
 
     #[test]
