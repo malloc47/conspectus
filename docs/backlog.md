@@ -3398,7 +3398,7 @@ failure:
     live-validation fallout where a fresh Claude session exists in
     hook state before its transcript file exists on disk.
 
-- [ ] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
+- [x] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
   non-mutating session identity.
   - Scope: if Codex `codex_hooks` events include the active
     thread/rollout/session id, or if a hook can reliably identify the
@@ -3448,6 +3448,17 @@ failure:
     current-session source; then add `conspectus hook write codex`
     for `SessionStart` payloads and `conspectus hook init codex`
     editing `$CODEX_HOME/config.toml` as the opt-in durable path.
+  - Outcome: added `conspectus hook write codex`, which converts
+    Codex `SessionStart` hook JSON into schema-v1 SQLite sidecar
+    records with `harness_key = "codex"`. Added
+    `conspectus hook init/status/remove codex`, which manages a
+    synchronous `SessionStart` command hook in `$CODEX_HOME/config.toml`
+    or `~/.codex/config.toml` while preserving unrelated TOML config.
+    Hook-sidecar discovery now infers Codex state scope from the
+    `.codex` ancestor in rollout paths when it must synthesize a
+    sparse session node. Active-pane fd evidence remains the default
+    no-opt-in current-session source for already-running Codex TUI
+    processes.
 
 - [ ] `H-MUXPROC-014` Add opencode plugin/server sidecar emitter if
   audit proves non-mutating session identity.

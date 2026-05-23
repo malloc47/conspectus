@@ -165,6 +165,13 @@ fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> Option<A
 }
 
 fn inferred_state_scope(record: &HookRecord) -> String {
+    if record.harness_key == "codex"
+        && let Some(path) = record.transcript_path.as_deref()
+        && let Some(scope) = path_ancestor_named(path, ".codex")
+    {
+        return scope;
+    }
+
     record
         .transcript_path
         .as_deref()
@@ -176,6 +183,13 @@ fn inferred_state_scope(record: &HookRecord) -> String {
         })
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|| "hook_sidecar".to_string())
+}
+
+fn path_ancestor_named(path: &str, name: &str) -> Option<String> {
+    Path::new(path).ancestors().find_map(|ancestor| {
+        (ancestor.file_name().and_then(|value| value.to_str()) == Some(name))
+            .then(|| ancestor.to_string_lossy().to_string())
+    })
 }
 
 fn find_mux(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<MuxSessionNode> {
@@ -575,6 +589,54 @@ mod tests {
                 if session.id == session_id
                     && session.cwd.as_deref() == Some("/work")
                     && session.last_active_epoch == Some(1_700_000_000)
+        )));
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.source == NodeId::AgentSession(session_id.clone())
+                && link.source_metadata.evidence.as_deref() == Some("hook_session_path_match")
+        }));
+    }
+
+    #[test]
+    fn codex_hook_record_synthesizes_session_with_codex_state_scope() {
+        let temp = tempdir().expect("tempdir");
+        let codex_root = temp.path().join("home/.codex");
+        let session_dir = codex_root.join("sessions/2026/05/23");
+        fs::create_dir_all(&session_dir).expect("create transcript dir");
+        let transcript_path = session_dir
+            .join("rollout-2026-05-23T00-36-47-019e531f-19ee-7823-816f-4526ef89d70b.jsonl");
+        fs::write(&transcript_path, "").expect("touch transcript");
+
+        let record_payload = format!(
+            r#"{{
+              "schema_version": 1,
+              "harness_key": "codex",
+              "session_key": "019e531f-19ee-7823-816f-4526ef89d70b",
+              "cwd": "/work",
+              "tmux": {{ "session_name": "editor" }},
+              "transcript_path": "{}",
+              "observed_epoch": 1700000000
+            }}"#,
+            transcript_path.display()
+        );
+        fs::write(temp.path().join("record.json"), record_payload).expect("write record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![mux_with_command("editor", Some("codex"))],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        let expected_state_scope = codex_root.to_string_lossy().into_owned();
+        let session_id = AgentSessionId::new(
+            "codex",
+            expected_state_scope,
+            "019e531f-19ee-7823-816f-4526ef89d70b",
+        );
+        assert!(snapshot.nodes.iter().any(|node| matches!(
+            node,
+            GraphNode::AgentSession(session)
+                if session.id == session_id
+                    && session.cwd.as_deref() == Some("/work")
         )));
         assert!(snapshot.candidate_links.iter().any(|link| {
             link.source == NodeId::AgentSession(session_id.clone())

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 use std::str::FromStr;
 use std::time::Duration;
+use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
 use conspectus::config::{self, ConfigLoader, PROJECT_CONFIG_FILENAME};
 use conspectus::declared::{
@@ -135,6 +136,7 @@ impl HookWriteArgs {
     fn run(self) -> Result<()> {
         match self.harness {
             HookWriteHarness::ClaudeCode(args) => args.run(),
+            HookWriteHarness::Codex(args) => args.run(),
         }
     }
 }
@@ -143,6 +145,8 @@ impl HookWriteArgs {
 enum HookWriteHarness {
     /// Read Claude Code hook JSON from stdin and write a hook observation.
     ClaudeCode(ClaudeHookWriteArgs),
+    /// Read Codex hook JSON from stdin and write a hook observation.
+    Codex(CodexHookWriteArgs),
 }
 
 #[derive(Debug, Args)]
@@ -168,6 +172,36 @@ impl ClaudeHookWriteArgs {
             i64::from(parent_pid()),
             tmux_context(),
             std::env::var("CLAUDE_CODE_VERSION").ok(),
+            conspectus::hook::current_epoch(),
+        )?;
+        HookStore::new(root).write_record(&record)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct CodexHookWriteArgs {
+    /// Override hook state root. Primarily useful for tests and experiments.
+    #[arg(long = "state-root", value_name = "PATH")]
+    state_root: Option<PathBuf>,
+}
+
+impl CodexHookWriteArgs {
+    fn run(self) -> Result<()> {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        if input.trim().is_empty() {
+            bail!("Codex hook payload was empty");
+        }
+        let payload: serde_json::Value =
+            serde_json::from_str(&input).context("failed to parse Codex hook JSON")?;
+        let root = resolve_hook_state_root(self.state_root)?;
+        let record = conspectus::hook::codex_record_from_payload(
+            &payload,
+            i64::from(std::process::id()),
+            i64::from(parent_pid()),
+            tmux_context(),
+            None,
             conspectus::hook::current_epoch(),
         )?;
         HookStore::new(root).write_record(&record)?;
@@ -223,18 +257,22 @@ struct HookRemoveArgs {
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum HookHarnessFlag {
     ClaudeCode,
+    Codex,
 }
 
 impl HookInitArgs {
     fn run(self) -> Result<()> {
         match self.harness {
             HookHarnessFlag::ClaudeCode => self.run_claude_install(),
+            HookHarnessFlag::Codex => self.run_codex_install(),
         }
     }
 
     fn run_claude_install(self) -> Result<()> {
         let path = claude_settings_path(self.scope)?;
-        let command = self.command.unwrap_or_else(default_hook_command);
+        let command = self
+            .command
+            .unwrap_or_else(|| default_hook_command("claude-code"));
         let mut document = read_json_document(&path)?;
         let changed = ensure_claude_hook(&mut document, &command);
 
@@ -255,12 +293,39 @@ impl HookInitArgs {
         }
         Ok(())
     }
+
+    fn run_codex_install(self) -> Result<()> {
+        let path = codex_config_path(self.scope)?;
+        let command = self
+            .command
+            .unwrap_or_else(|| default_hook_command("codex"));
+        let mut document = read_toml_document(&path)?;
+        let changed = ensure_codex_hook(&mut document, &command);
+
+        if self.dry_run {
+            let verb = if changed {
+                "would install"
+            } else {
+                "already installed"
+            };
+            println!("{verb} Codex hook in {}", path.display());
+            return Ok(());
+        }
+        if changed {
+            write_toml_document(&path, &document)?;
+            println!("installed Codex hook in {}", path.display());
+        } else {
+            println!("Codex hook already installed in {}", path.display());
+        }
+        Ok(())
+    }
 }
 
 impl HookStatusArgs {
     fn run(self) -> Result<()> {
         match self.harness {
             HookHarnessFlag::ClaudeCode => self.run_claude_status(),
+            HookHarnessFlag::Codex => self.run_codex_status(),
         }
     }
 
@@ -274,12 +339,24 @@ impl HookStatusArgs {
         }
         Ok(())
     }
+
+    fn run_codex_status(self) -> Result<()> {
+        let path = codex_config_path(self.scope)?;
+        let document = read_toml_document(&path)?;
+        if has_codex_hook(&document) {
+            println!("installed\tcodex\t{}", path.display());
+        } else {
+            println!("not-installed\tcodex\t{}", path.display());
+        }
+        Ok(())
+    }
 }
 
 impl HookRemoveArgs {
     fn run(self) -> Result<()> {
         match self.harness {
             HookHarnessFlag::ClaudeCode => self.run_claude_remove(),
+            HookHarnessFlag::Codex => self.run_codex_remove(),
         }
     }
 
@@ -302,6 +379,29 @@ impl HookRemoveArgs {
             println!("removed Claude Code hook from {}", path.display());
         } else {
             println!("Claude Code hook not installed in {}", path.display());
+        }
+        Ok(())
+    }
+
+    fn run_codex_remove(self) -> Result<()> {
+        let path = codex_config_path(self.scope)?;
+        let mut document = read_toml_document(&path)?;
+        let changed = remove_codex_hook(&mut document);
+
+        if self.dry_run {
+            let verb = if changed {
+                "would remove"
+            } else {
+                "not installed"
+            };
+            println!("{verb} Codex hook in {}", path.display());
+            return Ok(());
+        }
+        if changed {
+            write_toml_document(&path, &document)?;
+            println!("removed Codex hook from {}", path.display());
+        } else {
+            println!("Codex hook not installed in {}", path.display());
         }
         Ok(())
     }
@@ -385,12 +485,32 @@ fn claude_settings_path(scope: HookScopeFlag) -> Result<PathBuf> {
     }
 }
 
-fn default_hook_command() -> String {
+fn codex_config_path(scope: HookScopeFlag) -> Result<PathBuf> {
+    match scope {
+        HookScopeFlag::User => {
+            let home = if let Some(codex_home) = std::env::var_os("CODEX_HOME") {
+                PathBuf::from(codex_home)
+            } else {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .ok_or_else(|| anyhow!("HOME or CODEX_HOME is required for --scope user"))?
+                    .join(".codex")
+            };
+            Ok(home.join("config.toml"))
+        }
+        HookScopeFlag::Project => {
+            let cwd = std::env::current_dir()?;
+            Ok(cwd.join(".codex").join("config.toml"))
+        }
+    }
+}
+
+fn default_hook_command(harness: &str) -> String {
     let program = std::env::current_exe()
         .ok()
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_else(|| "conspectus".to_string());
-    format!("{} hook write claude-code", shell_quote(&program))
+    format!("{} hook write {harness}", shell_quote(&program))
 }
 
 fn shell_quote(value: &str) -> String {
@@ -427,6 +547,28 @@ fn write_json_document(path: &Path, value: &serde_json::Value) -> Result<()> {
     }
     let text = serde_json::to_string_pretty(value)? + "\n";
     let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, text).with_context(|| format!("failed to write {}", tmp.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("failed to replace {}", path.display()))?;
+    Ok(())
+}
+
+fn read_toml_document(path: &Path) -> Result<DocumentMut> {
+    match fs::read_to_string(path) {
+        Ok(text) => text
+            .parse::<DocumentMut>()
+            .with_context(|| format!("failed to parse TOML {}", path.display())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(DocumentMut::new()),
+        Err(err) => Err(err).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn write_toml_document(path: &Path, value: &DocumentMut) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let text = value.to_string();
+    let tmp = path.with_extension("toml.tmp");
     fs::write(&tmp, text).with_context(|| format!("failed to write {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("failed to replace {}", path.display()))?;
     Ok(())
@@ -523,6 +665,135 @@ fn hook_is_conspectus_command(hook: &serde_json::Value) -> bool {
 
 fn is_conspectus_hook_command(command: &str) -> bool {
     command.contains("hook write claude-code")
+}
+
+fn ensure_codex_hook(document: &mut DocumentMut, command: &str) -> bool {
+    if has_codex_hook(document) {
+        return false;
+    }
+
+    let hooks = document
+        .entry("hooks")
+        .or_insert_with(|| Item::Table(Table::new()));
+    if !hooks.is_table() {
+        *hooks = Item::Table(Table::new());
+    }
+    let hooks_table = hooks.as_table_mut().expect("hooks is table");
+    let session_start = hooks_table
+        .entry("SessionStart")
+        .or_insert_with(|| Item::Value(Value::Array(Array::new())));
+    if !session_start.is_array() {
+        *session_start = Item::Value(Value::Array(Array::new()));
+    }
+    session_start
+        .as_array_mut()
+        .expect("SessionStart is array")
+        .push(codex_hook_entry_value(command));
+    true
+}
+
+fn has_codex_hook(document: &DocumentMut) -> bool {
+    document
+        .get("hooks")
+        .and_then(|hooks| hooks.get("SessionStart"))
+        .and_then(Item::as_array)
+        .is_some_and(|entries| entries.iter().any(codex_entry_contains_conspectus_hook))
+}
+
+fn remove_codex_hook(document: &mut DocumentMut) -> bool {
+    let Some(entries) = document
+        .get_mut("hooks")
+        .and_then(|hooks| hooks.get_mut("SessionStart"))
+        .and_then(Item::as_array_mut)
+    else {
+        return false;
+    };
+
+    let mut changed = false;
+    let retained: Vec<Value> = entries
+        .iter()
+        .filter_map(|entry| {
+            let mut entry = entry.clone();
+            if remove_codex_hooks_from_entry(&mut entry) {
+                changed = true;
+            }
+            (!codex_entry_hooks_empty(&entry)).then_some(entry)
+        })
+        .collect();
+    if retained.len() != entries.len() {
+        changed = true;
+    }
+    if changed {
+        entries.clear();
+        for entry in retained {
+            entries.push(entry);
+        }
+    }
+    changed
+}
+
+fn codex_hook_entry_value(command: &str) -> Value {
+    let mut hook = toml_edit::InlineTable::new();
+    hook.insert("type", Value::from("command"));
+    hook.insert("command", Value::from(command));
+    hook.insert("async", Value::from(false));
+
+    let mut hooks = Array::new();
+    hooks.push(Value::InlineTable(hook));
+
+    let mut entry = toml_edit::InlineTable::new();
+    entry.insert("hooks", Value::Array(hooks));
+    Value::InlineTable(entry)
+}
+
+fn codex_entry_contains_conspectus_hook(entry: &Value) -> bool {
+    entry
+        .as_inline_table()
+        .and_then(|table| table.get("hooks"))
+        .and_then(Value::as_array)
+        .is_some_and(|hooks| hooks.iter().any(codex_hook_is_conspectus_command))
+}
+
+fn codex_hook_is_conspectus_command(hook: &Value) -> bool {
+    hook.as_inline_table().is_some_and(|table| {
+        table.get("type").and_then(Value::as_str) == Some("command")
+            && table
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|command| command.contains("hook write codex"))
+    })
+}
+
+fn remove_codex_hooks_from_entry(entry: &mut Value) -> bool {
+    let Some(hooks) = entry
+        .as_inline_table_mut()
+        .and_then(|table| table.get_mut("hooks"))
+        .and_then(Value::as_array_mut)
+    else {
+        return false;
+    };
+    let original_len = hooks.len();
+    let retained: Vec<Value> = hooks
+        .iter()
+        .filter(|hook| !codex_hook_is_conspectus_command(hook))
+        .cloned()
+        .collect();
+    if retained.len() == original_len {
+        return false;
+    }
+    hooks.clear();
+    for hook in retained {
+        hooks.push(hook);
+    }
+    true
+}
+
+fn codex_entry_hooks_empty(entry: &Value) -> bool {
+    entry
+        .as_inline_table()
+        .and_then(|table| table.get("hooks"))
+        .and_then(Value::as_array)
+        .is_none_or(Array::is_empty)
 }
 
 #[derive(Debug, Args)]

@@ -180,6 +180,39 @@ pub fn claude_code_record_from_payload(
     })
 }
 
+pub fn codex_record_from_payload(
+    payload: &serde_json::Value,
+    pid: i64,
+    ppid: i64,
+    tmux: Option<HookTmuxRecord>,
+    harness_version: Option<String>,
+    observed_epoch: i64,
+) -> Result<HookRecord> {
+    let Some(session_id) = payload
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        bail!("Codex hook payload missing string `session_id`");
+    };
+    if session_id.is_empty() {
+        bail!("Codex hook payload has empty `session_id`");
+    }
+
+    Ok(HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "codex".to_string(),
+        session_key: session_id.to_string(),
+        cwd: optional_string(payload, "cwd"),
+        pid: Some(pid),
+        ppid: Some(ppid),
+        tmux: tmux.filter(|tmux| !tmux.is_empty()),
+        transcript_path: optional_string(payload, "transcript_path"),
+        hook_event_name: optional_string(payload, "hook_event_name"),
+        observed_epoch,
+        harness_version,
+    })
+}
+
 impl HookTmuxRecord {
     pub fn is_empty(&self) -> bool {
         self.session_name.is_none()
@@ -325,5 +358,39 @@ mod tests {
         .expect_err("missing id");
 
         assert!(err.to_string().contains("session_id"));
+    }
+
+    #[test]
+    fn codex_payload_builds_hook_record() {
+        let record = codex_record_from_payload(
+            &serde_json::json!({
+                "session_id": "019e531f-19ee-7823-816f-4526ef89d70b",
+                "transcript_path": "/home/me/.codex/sessions/2026/05/23/rollout.jsonl",
+                "cwd": "/work",
+                "hook_event_name": "SessionStart"
+            }),
+            10,
+            9,
+            Some(HookTmuxRecord {
+                session_name: Some("editor".to_string()),
+                native_id: None,
+                pane_id: Some("%1".to_string()),
+                socket_path: None,
+            }),
+            Some("0.128.0".to_string()),
+            100,
+        )
+        .expect("record");
+
+        assert_eq!(record.harness_key, "codex");
+        assert_eq!(record.session_key, "019e531f-19ee-7823-816f-4526ef89d70b");
+        assert_eq!(
+            record.transcript_path.as_deref(),
+            Some("/home/me/.codex/sessions/2026/05/23/rollout.jsonl")
+        );
+        assert_eq!(record.cwd.as_deref(), Some("/work"));
+        assert_eq!(record.hook_event_name.as_deref(), Some("SessionStart"));
+        assert_eq!(record.pid, Some(10));
+        assert_eq!(record.ppid, Some(9));
     }
 }

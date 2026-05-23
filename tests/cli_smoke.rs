@@ -154,6 +154,44 @@ fn hook_write_claude_code_writes_sqlite_observation() {
 }
 
 #[test]
+fn hook_write_codex_writes_sqlite_observation() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let state = tempfile::TempDir::new().expect("state temp");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("write")
+        .arg("codex")
+        .arg("--state-root")
+        .arg(state.path())
+        .write_stdin(
+            r#"{
+              "session_id": "019e531f-19ee-7823-816f-4526ef89d70b",
+              "cwd": "/work",
+              "transcript_path": "/tmp/rollout.jsonl",
+              "hook_event_name": "SessionStart"
+            }"#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let database = state.path().join("hooks.sqlite3");
+    assert!(database.is_file());
+    let connection = rusqlite::Connection::open(database).expect("open sqlite");
+    let body: String = connection
+        .query_row("SELECT record_json FROM hook_records", [], |row| row.get(0))
+        .expect("record json");
+    let record: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(record["harness_key"], "codex");
+    assert_eq!(
+        record["session_key"],
+        "019e531f-19ee-7823-816f-4526ef89d70b"
+    );
+    assert_eq!(record["transcript_path"], "/tmp/rollout.jsonl");
+}
+
+#[test]
 fn hook_init_status_remove_claude_code_preserves_existing_settings() {
     let home = tempfile::TempDir::new().expect("home temp");
     let settings = home.path().join(".claude/settings.json");
@@ -214,6 +252,63 @@ fn hook_init_status_remove_claude_code_preserves_existing_settings() {
     let removed = fs::read_to_string(&settings).expect("read");
     assert!(removed.contains("echo existing"));
     assert!(!removed.contains("hook write claude-code"));
+}
+
+#[test]
+fn hook_init_status_remove_codex_preserves_existing_config() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let config = home.path().join(".codex/config.toml");
+    fs::create_dir_all(config.parent().expect("parent")).expect("config parent");
+    fs::write(
+        &config,
+        r#"
+model = "gpt-5.4-mini"
+
+[hooks]
+SessionStart = [
+  { hooks = [
+      { type = "command", command = "echo existing", async = false },
+    ] },
+]
+"#,
+    )
+    .expect("write config");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("init")
+        .arg("codex")
+        .arg("--command")
+        .arg("conspectus hook write codex")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed Codex hook"));
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("status")
+        .arg("codex")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("installed\tcodex"));
+
+    let installed = fs::read_to_string(&config).expect("read");
+    assert!(installed.contains("model = \"gpt-5.4-mini\""));
+    assert!(installed.contains("echo existing"));
+    assert!(installed.contains("hook write codex"));
+    assert!(installed.contains("async = false"));
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("remove")
+        .arg("codex")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("removed Codex hook"));
+
+    let removed = fs::read_to_string(&config).expect("read");
+    assert!(removed.contains("echo existing"));
+    assert!(!removed.contains("hook write codex"));
 }
 
 #[test]
