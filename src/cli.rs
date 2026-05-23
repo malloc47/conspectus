@@ -10,14 +10,19 @@ use std::str::FromStr;
 use std::time::Duration;
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
+use conspectus::aliases::{
+    AliasEntry, AliasesDocument, parse_aliases_document, remove_alias_entry, upsert_alias_entry,
+};
 use conspectus::config::{self, ConfigLoader, PROJECT_CONFIG_FILENAME};
 use conspectus::declared::{
     DeclaredEndpoint, DeclaredLink, DeclaredLinkState, DeclaredStoreKind, DeclaredStoreSelection,
     declared_endpoint_from_node_id, load_declared_link_by_id, parse_declared_document,
     remove_declared_link, select_store_for_declaration, upsert_declared_link,
 };
+use conspectus::discovery::tmux::{SystemTmux, TmuxRenameOutcome, TmuxRunner};
 use conspectus::hook::{HookStore, HookTmuxRecord};
-use conspectus::model::{GraphLink, GraphSnapshot, LinkEndpoint, Provenance, RelationKind};
+use conspectus::model::{GraphLink, GraphSnapshot, LinkEndpoint, NodeId, Provenance, RelationKind};
+use conspectus::rename::{MuxNativeRename, RenamePlan, plan_session_rename};
 
 #[derive(Debug, Parser)]
 #[command(name = "conspectus", version, about = "AI work graph status tool")]
@@ -36,6 +41,8 @@ impl Cli {
             Command::Columns(args) => args.run(),
             Command::Tui(args) => args.run(),
             Command::Hook(args) => args.run(),
+            Command::Rename(args) => args.run(),
+            Command::Alias(args) => args.run(),
         }
     }
 }
@@ -56,6 +63,10 @@ enum Command {
     Tui(TuiArgs),
     /// Write or install harness hook integrations.
     Hook(HookArgs),
+    /// Rename an agent session or a tmux session.
+    Rename(RenameArgs),
+    /// Inspect operator-authored session aliases.
+    Alias(AliasArgs),
 }
 
 #[derive(Debug, Args)]
@@ -2113,6 +2124,460 @@ impl DeclaredOverrideArgs {
             path.display()
         );
         Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct RenameArgs {
+    #[command(subcommand)]
+    command: RenameCommand,
+}
+
+impl RenameArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            RenameCommand::Session(args) => args.run(),
+            RenameCommand::Mux(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum RenameCommand {
+    /// Set, change, or clear an agent session's display-name alias.
+    /// The linked tmux session is renamed in lockstep by default;
+    /// pass `--no-mux` to skip the tmux side.
+    Session(RenameSessionArgs),
+    /// Rename a tmux session. No alias is written; only the tmux
+    /// native name changes (per ADR 0029 mux-id stability rule).
+    Mux(RenameMuxArgs),
+}
+
+#[derive(Debug, Args)]
+struct RenameSessionArgs {
+    /// Agent session id. Accepts the short row id, the full
+    /// `NodeId` display form, or the `harness:session_key` label
+    /// (same forms `conspectus node show` understands).
+    id: String,
+    /// New display name. Mutually exclusive with `--clear`.
+    name: Option<String>,
+    /// Skip the lockstep tmux rename. The alias is still written.
+    #[arg(long = "no-mux")]
+    no_mux: bool,
+    /// Remove any existing alias for this session instead of setting one.
+    /// Mutually exclusive with `<NAME>`.
+    #[arg(long, conflicts_with = "name")]
+    clear: bool,
+    /// Restrict the alias write to one store.
+    #[arg(long, value_enum)]
+    store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local alias stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl RenameSessionArgs {
+    fn run(self) -> Result<()> {
+        let new_display_name = match (self.name, self.clear) {
+            (Some(_), true) => bail!("--clear and <NAME> are mutually exclusive"),
+            (None, false) => bail!("specify either a new <NAME> or --clear"),
+            (Some(name), false) => Some(name),
+            (None, true) => None,
+        };
+
+        let snapshot = discover_for_store_selection(&self.scan_roots)?;
+        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+
+        let resolved = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+            Ok(id) => id,
+            Err(err) => {
+                eprint!("conspectus: {err}");
+                std::process::exit(2);
+            }
+        };
+        let session_id = match resolved {
+            NodeId::AgentSession(id) => id,
+            other => bail!(
+                "`{}` resolves to a {} node; rename session only operates on agent sessions",
+                self.id,
+                node_kind_label(&other)
+            ),
+        };
+
+        let plan = plan_session_rename(&snapshot, &session_id, new_display_name, self.no_mux)
+            .map_err(|err| anyhow!(err.to_string()))?;
+
+        execute_rename_plan(&plan, self.store, &self.scan_roots, &SystemTmux::new())
+    }
+}
+
+#[derive(Debug, Args)]
+struct RenameMuxArgs {
+    /// Mux session id. Accepts the short row id, the full `NodeId`
+    /// display form, or the `tmux:<native>` label.
+    id: String,
+    /// New tmux session name. Required because mux aliases are not
+    /// stored (per ADR 0029) — only the native tmux name changes.
+    name: Option<String>,
+    /// Rejected: mux sessions have no Conspectus-owned alias to
+    /// clear. Surfaced so the help text documents the constraint.
+    #[arg(long, conflicts_with = "name")]
+    clear: bool,
+    /// Root used to discover the running tmux server, if any.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl RenameMuxArgs {
+    fn run(self) -> Result<()> {
+        if self.clear {
+            bail!(
+                "mux sessions have no Conspectus-owned alias to clear; \
+                 supply a new <NAME> instead"
+            );
+        }
+        let new_name = self
+            .name
+            .ok_or_else(|| anyhow!("rename mux requires a new <NAME>"))?;
+        if new_name.trim().is_empty() {
+            bail!("mux rename requires a non-empty <NAME>");
+        }
+
+        let snapshot = discover_for_store_selection(&self.scan_roots)?;
+        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+
+        let resolved = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+            Ok(id) => id,
+            Err(err) => {
+                eprint!("conspectus: {err}");
+                std::process::exit(2);
+            }
+        };
+        let mux_id = match resolved {
+            NodeId::MuxSession(id) => id,
+            other => bail!(
+                "`{}` resolves to a {} node; rename mux only operates on mux sessions",
+                self.id,
+                node_kind_label(&other)
+            ),
+        };
+
+        run_mux_rename(
+            &MuxNativeRename {
+                mux: mux_id,
+                new_name,
+            },
+            &SystemTmux::new(),
+        )
+    }
+}
+
+/// Execute the alias-write side of `plan`, then (when present) the
+/// linked tmux rename. Either step can leave the other in a partial
+/// state — we surface the error and let the operator decide whether
+/// to re-run.
+fn execute_rename_plan(
+    plan: &RenamePlan,
+    store: Option<DeclaredStoreFlag>,
+    scan_roots: &[PathBuf],
+    tmux: &dyn TmuxRunner,
+) -> Result<()> {
+    let endpoint = declared_endpoint_from_node_id(&NodeId::AgentSession(
+        plan.agent_alias_write.session.clone(),
+    ));
+    match &plan.agent_alias_write.display_name {
+        Some(display_name) => {
+            let path = resolve_alias_store(store, &endpoint, scan_roots)?;
+            let entry = AliasEntry {
+                node: endpoint,
+                display_name: display_name.clone(),
+                reason: None,
+            };
+            let outcome =
+                upsert_alias_entry(&path, entry).map_err(|err| anyhow!(err.to_string()))?;
+            let verb = if outcome.changed {
+                "wrote"
+            } else {
+                "unchanged"
+            };
+            println!("{verb} alias `{}` in {}", display_name, path.display());
+        }
+        None => {
+            let stores = alias_candidate_store_paths(store, scan_roots)?;
+            let mut removed_from = None;
+            for path in &stores {
+                if !path.is_file() {
+                    continue;
+                }
+                let outcome =
+                    remove_alias_entry(path, &endpoint).map_err(|err| anyhow!(err.to_string()))?;
+                if outcome.changed {
+                    removed_from = Some(path.clone());
+                    break;
+                }
+            }
+            match removed_from {
+                Some(path) => println!("removed alias from {}", path.display()),
+                None => println!("no alias found for session"),
+            }
+        }
+    }
+
+    if let Some(mux_rename) = &plan.mux_native_rename {
+        run_mux_rename(mux_rename, tmux)?;
+    }
+    Ok(())
+}
+
+fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn TmuxRunner) -> Result<()> {
+    let outcome = tmux
+        .rename_session(&rename.mux.native_id, &rename.new_name)
+        .map_err(|err| anyhow!("tmux rename-session failed: {err}"))?;
+    match outcome {
+        TmuxRenameOutcome::Renamed => {
+            println!(
+                "renamed tmux session `{}` to `{}`",
+                rename.mux.native_id, rename.new_name
+            );
+            Ok(())
+        }
+        TmuxRenameOutcome::NoTarget => bail!(
+            "tmux session `{}` not found on this server",
+            rename.mux.native_id
+        ),
+        TmuxRenameOutcome::NameCollision => bail!(
+            "tmux refused to rename `{}` to `{}`: name already in use",
+            rename.mux.native_id,
+            rename.new_name
+        ),
+        TmuxRenameOutcome::Unavailable(reason) => bail!("tmux unavailable: {}", reason.as_str()),
+        TmuxRenameOutcome::Failed { code, message } => bail!(
+            "tmux rename-session failed (exit code {:?}): {}",
+            code,
+            message
+        ),
+        TmuxRenameOutcome::Unsupported => bail!("tmux runner does not support rename_session"),
+    }
+}
+
+fn node_kind_label(id: &NodeId) -> &'static str {
+    match id {
+        NodeId::Repo(_) => "repo",
+        NodeId::Checkout(_) => "checkout",
+        NodeId::Workspace(_) => "workspace",
+        NodeId::AgentSession(_) => "agent_session",
+        NodeId::MuxSession(_) => "mux_session",
+        NodeId::Branch(_) => "branch",
+        NodeId::Fork(_) => "fork",
+        NodeId::ForgePr(_) => "forge_pr",
+    }
+}
+
+fn resolve_alias_store(
+    store: Option<DeclaredStoreFlag>,
+    endpoint: &DeclaredEndpoint,
+    scan_roots: &[PathBuf],
+) -> Result<PathBuf> {
+    match store {
+        Some(DeclaredStoreFlag::All) => {
+            bail!("`--store all` is not valid for alias writes; pick `project` or `user`")
+        }
+        Some(DeclaredStoreFlag::User) => {
+            let loader = ConfigLoader::from_env();
+            loader.user_config_path().ok_or_else(|| {
+                anyhow!("no user config path available; set $HOME or $XDG_CONFIG_HOME")
+            })
+        }
+        Some(DeclaredStoreFlag::Project) => project_store_path(scan_roots),
+        None => {
+            let snapshot = discover_for_store_selection(scan_roots)?;
+            let loader = ConfigLoader::from_env();
+            let selection = select_store_for_declaration(endpoint, endpoint, &snapshot, &loader)
+                .ok_or_else(|| {
+                    anyhow!("could not pick an alias store; pass --store user or --store project")
+                })?;
+            Ok(selection.path)
+        }
+    }
+}
+
+fn alias_candidate_store_paths(
+    store: Option<DeclaredStoreFlag>,
+    scan_roots: &[PathBuf],
+) -> Result<Vec<PathBuf>> {
+    // Same shape as `candidate_store_paths`: project stores first,
+    // then user, so a project alias is removed before the global
+    // entry takes over the rendering precedence.
+    candidate_store_paths(store, scan_roots)
+}
+
+#[derive(Debug, Args)]
+struct AliasArgs {
+    #[command(subcommand)]
+    command: AliasCommand,
+}
+
+impl AliasArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            AliasCommand::List(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum AliasCommand {
+    /// List session aliases from the discovered config stores.
+    List(AliasListArgs),
+}
+
+#[derive(Debug, Args)]
+struct AliasListArgs {
+    /// Limit the list to a store.
+    #[arg(long, value_enum, default_value_t = DeclaredStoreFlag::All)]
+    store: DeclaredStoreFlag,
+    /// Root used to discover project-local alias stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl AliasListArgs {
+    fn run(self) -> Result<()> {
+        let loader = ConfigLoader::from_env();
+        let cwd = std::env::current_dir()?;
+        let scan_roots = if self.scan_roots.is_empty() {
+            vec![cwd]
+        } else {
+            self.scan_roots
+        };
+
+        let mut records: Vec<AliasListRecord> = Vec::new();
+        if matches!(
+            self.store,
+            DeclaredStoreFlag::All | DeclaredStoreFlag::Project
+        ) {
+            let mut project_paths = BTreeSet::new();
+            for root in &scan_roots {
+                if let Some(path) = loader.locate_project_config(root) {
+                    project_paths.insert(path);
+                }
+            }
+            for path in project_paths {
+                append_alias_records(&mut records, DeclaredStoreFlag::Project, path);
+            }
+        }
+        if matches!(self.store, DeclaredStoreFlag::All | DeclaredStoreFlag::User)
+            && let Some(path) = loader.user_config_path()
+        {
+            append_alias_records(&mut records, DeclaredStoreFlag::User, path);
+        }
+
+        records.sort_by(|left, right| {
+            (
+                store_label(left.store),
+                left.path.as_path(),
+                alias_record_key(left),
+            )
+                .cmp(&(
+                    store_label(right.store),
+                    right.path.as_path(),
+                    alias_record_key(right),
+                ))
+        });
+
+        for record in records {
+            match record.entry {
+                Ok(entry) => println!(
+                    "{}\t{}\t{}\t{}",
+                    store_label(record.store),
+                    record.path.display(),
+                    format_alias_endpoint(&entry.node),
+                    entry.display_name
+                ),
+                Err(message) => eprintln!(
+                    "conspectus: warning: {}: {}",
+                    record.path.display(),
+                    message
+                ),
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct AliasListRecord {
+    store: DeclaredStoreFlag,
+    path: PathBuf,
+    entry: std::result::Result<AliasEntry, String>,
+}
+
+fn alias_record_key(record: &AliasListRecord) -> String {
+    match &record.entry {
+        Ok(entry) => format_alias_endpoint(&entry.node),
+        Err(_) => String::new(),
+    }
+}
+
+fn append_alias_records(
+    records: &mut Vec<AliasListRecord>,
+    store: DeclaredStoreFlag,
+    path: PathBuf,
+) {
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return,
+        Err(err) => {
+            records.push(AliasListRecord {
+                store,
+                path,
+                entry: Err(format!("failed to read aliases: {err}")),
+            });
+            return;
+        }
+    };
+    let parsed: AliasesDocument = match parse_aliases_document(&text) {
+        Ok(document) => document,
+        Err(err) => {
+            records.push(AliasListRecord {
+                store,
+                path,
+                entry: Err(format!("failed to parse aliases: {err}")),
+            });
+            return;
+        }
+    };
+    for entry in parsed.entries() {
+        records.push(AliasListRecord {
+            store,
+            path: path.clone(),
+            entry: Ok(entry.clone()),
+        });
+    }
+}
+
+fn format_alias_endpoint(endpoint: &DeclaredEndpoint) -> String {
+    match endpoint {
+        DeclaredEndpoint::AgentSession {
+            harness_key,
+            state_scope,
+            session_key,
+        } => format!("agent_session:{harness_key}:{state_scope}:{session_key}"),
+        DeclaredEndpoint::MuxSession { native_id } => format!("mux_session:{native_id}"),
+        DeclaredEndpoint::Repo { common_dir } => format!("repo:{common_dir}"),
+        DeclaredEndpoint::Checkout { root, .. } => format!("checkout:{root}"),
+        DeclaredEndpoint::Workspace { root } => format!("workspace:{root}"),
+        DeclaredEndpoint::Branch { refname, .. } => format!("branch:{refname}"),
+        DeclaredEndpoint::Fork {
+            provider_source_key,
+        } => format!("fork:{provider_source_key}"),
+        DeclaredEndpoint::ForgePr {
+            provider,
+            host,
+            owner,
+            repo,
+            number,
+        } => format!("forge_pr:{provider}:{host}/{owner}/{repo}#{number}"),
     }
 }
 

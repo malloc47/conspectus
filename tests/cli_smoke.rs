@@ -105,6 +105,233 @@ fn graph_rejects_invalid_format() {
 }
 
 #[test]
+fn rename_help_lists_session_and_mux() {
+    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
+
+    cmd.arg("rename")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("session"))
+        .stdout(predicate::str::contains("mux"));
+}
+
+#[test]
+fn rename_session_rejects_name_and_clear_together() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("rename")
+        .arg("session")
+        .arg("codex:alpha")
+        .arg("ingest-refactor")
+        .arg("--clear")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "'[NAME]' cannot be used with '--clear'",
+        ));
+}
+
+#[test]
+fn rename_session_requires_name_or_clear() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("rename")
+        .arg("session")
+        .arg("codex:alpha")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "specify either a new <NAME> or --clear",
+        ));
+}
+
+#[test]
+fn rename_mux_rejects_clear_flag() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("rename")
+        .arg("mux")
+        .arg("tmux:editor")
+        .arg("--clear")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "mux sessions have no Conspectus-owned alias to clear",
+        ));
+}
+
+#[test]
+fn alias_help_lists_list_subcommand() {
+    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
+
+    cmd.arg("alias")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("list"));
+}
+
+#[test]
+fn alias_list_empty_stores_prints_nothing() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("alias")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn alias_list_renders_project_alias_entries() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    fs::write(
+        temp.path().join(".conspectus.toml"),
+        r#"[aliases]
+schema_version = 1
+
+[[aliases.entries]]
+node = { type = "agent_session", harness_key = "codex", state_scope = "/state", session_key = "alpha" }
+display_name = "ingest-refactor"
+"#,
+    )
+    .expect("write project config");
+
+    isolated_cmd(home.path())
+        .current_dir(temp.path())
+        .arg("alias")
+        .arg("list")
+        .arg("--scan-root")
+        .arg(temp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("project"))
+        .stdout(predicate::str::contains("agent_session:codex:/state:alpha"))
+        .stdout(predicate::str::contains("ingest-refactor"));
+}
+
+#[test]
+fn rename_session_writes_alias_for_codex_session() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let codex_state = home.path().join(".codex");
+    fs::create_dir_all(
+        codex_state
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("23"),
+    )
+    .expect("codex state dir");
+    // Minimal codex rollout file the harness discovery accepts.
+    let rollout = codex_state.join("sessions/2026/05/23/rollout-2026-05-23T00-00-00-alpha.jsonl");
+    fs::write(
+        &rollout,
+        r#"{"timestamp":"2026-05-23T00:00:00Z","type":"session_meta","payload":{"id":"alpha","cwd":"/tmp"}}
+"#,
+    )
+    .expect("rollout");
+
+    let project = tempfile::TempDir::new().expect("project");
+
+    let mut cmd = isolated_cmd(home.path());
+    cmd.env("CONSPECTUS_CODEX_STATE", &codex_state);
+    cmd.current_dir(project.path())
+        .arg("rename")
+        .arg("session")
+        .arg("codex:alpha")
+        .arg("ingest-refactor")
+        .arg("--no-mux")
+        .arg("--store")
+        .arg("user")
+        .arg("--scan-root")
+        .arg(project.path());
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("wrote alias `ingest-refactor`"));
+
+    let user_config = home.path().join(".config/conspectus/config.toml");
+    let written = fs::read_to_string(&user_config).expect("user config exists");
+    assert!(
+        written.contains("display_name = \"ingest-refactor\""),
+        "alias missing from user config:\n{written}"
+    );
+    assert!(written.contains("session_key = \"alpha\""));
+}
+
+#[test]
+fn rename_session_clear_removes_alias_entry() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let codex_state = home.path().join(".codex");
+    fs::create_dir_all(codex_state.join("sessions/2026/05/23")).expect("dir");
+    let rollout = codex_state.join("sessions/2026/05/23/rollout-alpha.jsonl");
+    fs::write(
+        &rollout,
+        r#"{"timestamp":"2026-05-23T00:00:00Z","type":"session_meta","payload":{"id":"alpha","cwd":"/tmp"}}
+"#,
+    )
+    .expect("rollout");
+
+    let project = tempfile::TempDir::new().expect("project");
+
+    // Seed the alias by running the rename command first; this uses
+    // the same state_scope as discovery, so the clear step finds it.
+    let mut seed = isolated_cmd(home.path());
+    seed.env("CONSPECTUS_CODEX_STATE", &codex_state);
+    seed.current_dir(project.path())
+        .arg("rename")
+        .arg("session")
+        .arg("codex:alpha")
+        .arg("ingest-refactor")
+        .arg("--no-mux")
+        .arg("--store")
+        .arg("user")
+        .arg("--scan-root")
+        .arg(project.path());
+    seed.assert().success();
+
+    let user_config = home.path().join(".config/conspectus/config.toml");
+    assert!(
+        user_config.is_file(),
+        "seed should have created user config"
+    );
+
+    let mut clear = isolated_cmd(home.path());
+    clear.env("CONSPECTUS_CODEX_STATE", &codex_state);
+    clear
+        .current_dir(project.path())
+        .arg("rename")
+        .arg("session")
+        .arg("codex:alpha")
+        .arg("--clear")
+        .arg("--scan-root")
+        .arg(project.path());
+    clear
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("removed alias from"));
+
+    let surviving = fs::read_to_string(&user_config).unwrap_or_default();
+    assert!(
+        !surviving.contains("[aliases]"),
+        "aliases not pruned: {surviving}"
+    );
+}
+
+#[test]
 fn declared_help_lists_subcommands() {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
 
