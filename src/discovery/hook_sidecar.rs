@@ -35,7 +35,9 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
             mux.id.clone(),
             record.tmux.as_ref().and_then(|t| t.pane_id.clone()),
         );
-        let session = ensure_session(snapshot, &record);
+        let Some(session) = ensure_session(snapshot, &record) else {
+            continue;
+        };
         let mut link = linked_to_mux(&session, &mux, &record);
 
         if let Some(running) = pane_running_harness(&mux)
@@ -129,9 +131,19 @@ fn find_session(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<AgentSe
     })
 }
 
-fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> AgentSessionNode {
+fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> Option<AgentSessionNode> {
     if let Some(session) = find_session(snapshot, record) {
-        return session;
+        return Some(session);
+    }
+
+    // Strict gating: if the hook claims a transcript path, require the file
+    // to exist before synthesizing a placeholder node. Otherwise an old hook
+    // record for a deleted or never-flushed session would leave an empty row
+    // in the TUI indistinguishable from a real session with no preview yet.
+    if let Some(path) = record.transcript_path.as_deref()
+        && !Path::new(path).is_file()
+    {
+        return None;
     }
 
     let session = AgentSessionNode {
@@ -149,7 +161,7 @@ fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> AgentSes
     snapshot
         .nodes
         .push(GraphNode::AgentSession(session.clone()));
-    session
+    Some(session)
 }
 
 fn inferred_state_scope(record: &HookRecord) -> String {
@@ -485,17 +497,20 @@ mod tests {
     }
 
     #[test]
-    fn fresh_hook_record_synthesizes_session_before_transcript_exists() {
+    fn hook_record_with_missing_transcript_does_not_synthesize_phantom_session() {
         let temp = tempdir().expect("tempdir");
+        // Hook claims a transcript_path that does not exist on disk —
+        // the session was deleted, or never flushed. Strict gating in
+        // ensure_session should refuse to synthesize a placeholder node.
         fs::write(
             temp.path().join("record.json"),
             r#"{
               "schema_version": 1,
               "harness_key": "claude-code",
-              "session_key": "current",
+              "session_key": "ghost",
               "cwd": "/work",
               "tmux": { "session_name": "editor" },
-              "transcript_path": "/home/me/.claude/projects/-work/current.jsonl",
+              "transcript_path": "/nonexistent/.claude/projects/-work/ghost.jsonl",
               "observed_epoch": 1700000000
             }"#,
         )
@@ -507,7 +522,53 @@ mod tests {
 
         apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
 
-        let session_id = AgentSessionId::new("claude-code", "/home/me/.claude", "current");
+        assert!(
+            !snapshot.nodes.iter().any(|node| matches!(
+                node,
+                GraphNode::AgentSession(session) if session.id.session_key == "ghost"
+            )),
+            "no phantom session should be synthesized when transcript is missing"
+        );
+        assert!(
+            snapshot.candidate_links.is_empty(),
+            "no link should be emitted for a suppressed phantom"
+        );
+    }
+
+    #[test]
+    fn hook_record_synthesizes_session_when_transcript_exists_but_adapter_missed_it() {
+        let temp = tempdir().expect("tempdir");
+        // Real transcript on disk that the harness adapter happened to
+        // miss this pass (e.g. a different state-root scan). The hook
+        // synthesizer should still fill in the gap.
+        let claude_root = temp.path().join("home/.claude");
+        let project_dir = claude_root.join("projects/-work");
+        fs::create_dir_all(&project_dir).expect("create transcript dir");
+        let transcript_path = project_dir.join("current.jsonl");
+        fs::write(&transcript_path, "").expect("touch transcript");
+
+        let record_payload = format!(
+            r#"{{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "current",
+              "cwd": "/work",
+              "tmux": {{ "session_name": "editor" }},
+              "transcript_path": "{}",
+              "observed_epoch": 1700000000
+            }}"#,
+            transcript_path.display()
+        );
+        fs::write(temp.path().join("record.json"), record_payload).expect("write record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        let expected_state_scope = claude_root.to_string_lossy().into_owned();
+        let session_id = AgentSessionId::new("claude-code", expected_state_scope, "current");
         assert!(snapshot.nodes.iter().any(|node| matches!(
             node,
             GraphNode::AgentSession(session)
