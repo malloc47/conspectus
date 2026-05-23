@@ -319,14 +319,29 @@ impl<'a> SessionsIndex<'a> {
             .unwrap_or_else(|| repo_display_path_from_common_dir(&repo_id.common_dir).to_string())
     }
 
-    /// All active `LinkedToMux` candidate links sourced at this
-    /// agent session, in their stored order (deterministic per
-    /// `by_source_relation`).
-    fn mux_candidates_for_session(&self, session: &NodeId) -> &[&'a GraphLink] {
-        self.by_source_relation
+    /// Active `LinkedToMux` candidate links sourced at this agent
+    /// session, de-duplicated by target mux. Multiple evidence links
+    /// to the same mux should not make the row look ambiguous.
+    fn mux_candidates_for_session(&self, session: &NodeId) -> Vec<&'a GraphLink> {
+        let Some(links) = self
+            .by_source_relation
             .get(&(session.clone(), RelationKind::LinkedToMux))
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        else {
+            return Vec::new();
+        };
+
+        let mut by_target: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
+        for link in links {
+            let Some(target) = link.target_node_id() else {
+                continue;
+            };
+            by_target.entry(target.clone()).or_default().push(*link);
+        }
+
+        by_target
+            .into_values()
+            .filter_map(|links| pick_preferred_link(&links))
+            .collect()
     }
 }
 
@@ -524,7 +539,7 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
 
 fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
     let candidates = ctx.index.mux_candidates_for_session(&entry.id);
-    let preferred = pick_preferred_link(candidates);
+    let preferred = pick_preferred_link(&candidates);
     let mux_state = match candidates.len() {
         0 => MuxIndicator::Unmuxed,
         1 => MuxIndicator::Attached,
@@ -1425,6 +1440,59 @@ mod tests {
             .find(|c| !c.is_preferred)
             .expect("an alternate candidate is present");
         assert_eq!(alt.mux_label, "tmux:scratch");
+    }
+
+    #[test]
+    fn duplicate_mux_target_links_do_not_make_session_ambiguous() {
+        let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "s1"));
+        let mux = NodeId::MuxSession(MuxSessionId::new("editor"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(agent_session(
+            "claude-code",
+            "/state",
+            "s1",
+            Some("/repo"),
+            None,
+            None,
+        ));
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        snapshot.candidate_links.push(linked_to_mux(
+            &session_id,
+            &mux,
+            Provenance::StrongDiscovered,
+            "hook",
+        ));
+        snapshot.candidate_links.push(linked_to_mux(
+            &session_id,
+            &mux,
+            Provenance::Discovered,
+            "cwd",
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+        });
+
+        let session_row = tree
+            .rows
+            .iter()
+            .find(|r| matches!(r.kind, RowKind::AgentSession(_)))
+            .expect("session row");
+        match &session_row.kind {
+            RowKind::AgentSession(s) => assert_eq!(s.mux_state, MuxIndicator::Attached),
+            _ => unreachable!(),
+        }
+        assert!(!session_row.expandable);
+        assert!(
+            !tree
+                .rows
+                .iter()
+                .any(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_)))
+        );
     }
 
     #[test]

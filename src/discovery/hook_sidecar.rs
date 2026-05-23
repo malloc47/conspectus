@@ -31,7 +31,7 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch:
         let session = ensure_session(snapshot, &record);
 
         let link = linked_to_mux(&session, &mux, &record);
-        demote_stale_launch_links(snapshot, &link);
+        demote_weaker_mux_links(snapshot, &link);
         if !snapshot
             .candidate_links
             .iter()
@@ -42,21 +42,15 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch:
     }
 }
 
-fn demote_stale_launch_links(snapshot: &mut GraphSnapshot, current_link: &GraphLink) {
+fn demote_weaker_mux_links(snapshot: &mut GraphSnapshot, current_link: &GraphLink) {
     let Some(target) = current_link.target_node_id().cloned() else {
         return;
     };
 
     for link in &mut snapshot.candidate_links {
         if link.relation != RelationKind::LinkedToMux
-            || link.source == current_link.source
             || link.target_node_id() != Some(&target)
-            || link
-                .source_metadata
-                .fields
-                .get("match_kind")
-                .and_then(serde_json::Value::as_str)
-                != Some("active_pane_command_session_match")
+            || !is_weaker_mux_evidence(link)
         {
             continue;
         }
@@ -66,6 +60,17 @@ fn demote_stale_launch_links(snapshot: &mut GraphSnapshot, current_link: &GraphL
             reason: Some("fresh hook sidecar current-session evidence".to_string()),
         };
     }
+}
+
+fn is_weaker_mux_evidence(link: &GraphLink) -> bool {
+    matches!(
+        link.source_metadata
+            .fields
+            .get("match_kind")
+            .and_then(serde_json::Value::as_str)
+            .or(link.source_metadata.evidence.as_deref()),
+        Some("active_pane_command_session_match" | "exact_cwd_match" | "cwd_prefix_match")
+    )
 }
 
 fn find_session(snapshot: &GraphSnapshot, record: &HookRecord) -> Option<AgentSessionNode> {
@@ -322,6 +327,32 @@ mod tests {
         }
     }
 
+    fn cwd_link(session_key: &str, mux_native_id: &str) -> GraphLink {
+        let source =
+            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", session_key));
+        let target = NodeId::MuxSession(MuxSessionId::new(format!("tmux:{mux_native_id}")));
+        let mut fields = Metadata::new();
+        fields.insert(
+            "match_kind".to_string(),
+            serde_json::Value::String("exact_cwd_match".to_string()),
+        );
+        GraphLink {
+            id: format!("cwd:{session_key}:{mux_native_id}"),
+            source,
+            target: LinkEndpoint::Node { id: target },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "cross_link".to_string(),
+                evidence: Some("exact_cwd_match".to_string()),
+                fields,
+            },
+            state: LinkState::Active,
+        }
+    }
+
     #[test]
     fn fresh_hook_record_links_session_to_mux_by_tmux_session_name() {
         let temp = tempdir().expect("tempdir");
@@ -494,5 +525,43 @@ mod tests {
         assert!(matches!(stale.state, LinkState::Overridden { .. }));
         assert!(snapshot.candidate_links.iter().any(|link| link.source
             == NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "current"))));
+    }
+
+    #[test]
+    fn fresh_hook_record_demotes_cwd_links_for_same_mux() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("record.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "current",
+              "tmux": { "session_name": "editor" },
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session("old"), session("current"), mux("editor")],
+            candidate_links: vec![cwd_link("old", "editor"), cwd_link("current", "editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        for id in ["cwd:old:editor", "cwd:current:editor"] {
+            let link = snapshot
+                .candidate_links
+                .iter()
+                .find(|link| link.id == id)
+                .expect("cwd link");
+            assert!(matches!(link.state, LinkState::Overridden { .. }));
+        }
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            matches!(link.state, LinkState::Active)
+                && link.source
+                    == NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "current"))
+                && link.source_metadata.evidence.as_deref() == Some("hook_session_match")
+        }));
     }
 }
