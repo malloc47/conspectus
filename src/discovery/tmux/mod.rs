@@ -31,6 +31,14 @@ pub trait TmuxRunner: Send + Sync {
     fn capture_pane(&self, _target: &str) -> Result<TmuxCaptureOutcome> {
         Ok(TmuxCaptureOutcome::Unsupported)
     }
+
+    /// Rename tmux session `target` to `new_name`. Default returns
+    /// [`TmuxRenameOutcome::Unsupported`] so runners that only model
+    /// read paths keep compiling (e.g. zellij backends per
+    /// `H-FUTURE-001`).
+    fn rename_session(&self, _target: &str, _new_name: &str) -> Result<TmuxRenameOutcome> {
+        Ok(TmuxRenameOutcome::Unsupported)
+    }
 }
 
 /// Outcome of a `tmux capture-pane` call. Mirrors the shape of
@@ -50,6 +58,28 @@ pub enum TmuxCaptureOutcome {
     /// The runner doesn't implement capture (e.g. fakes that only
     /// care about `list_sessions`). Treated as "no preview
     /// available" by the TUI.
+    Unsupported,
+}
+
+/// Outcome of a `tmux rename-session` call. Mirrors the shape of
+/// [`TmuxOutcome`] / [`TmuxCaptureOutcome`] but for the mutation path
+/// introduced by ADR 0029's session-naming workstream.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TmuxRenameOutcome {
+    /// `tmux rename-session -t <target> <new_name>` succeeded.
+    Renamed,
+    /// tmux returned successfully but the target session doesn't
+    /// exist on this server.
+    NoTarget,
+    /// tmux refused the rename because `new_name` is already taken
+    /// by another session on the same server.
+    NameCollision,
+    /// tmux itself isn't usable on this host.
+    Unavailable(UnavailableReason),
+    /// tmux returned a non-zero status for an unexpected reason.
+    Failed { code: Option<i32>, message: String },
+    /// The runner doesn't implement rename (default for runners that
+    /// only model read paths).
     Unsupported,
 }
 
@@ -190,6 +220,47 @@ impl TmuxRunner for SystemTmux {
             message: stderr,
         })
     }
+
+    fn rename_session(&self, target: &str, new_name: &str) -> Result<TmuxRenameOutcome> {
+        let output = Command::new(&self.binary)
+            .args(["rename-session", "-t", target, new_name])
+            .output();
+
+        let output = match output {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TmuxRenameOutcome::Unavailable(
+                    UnavailableReason::BinaryNotFound,
+                ));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to spawn tmux binary at {}", self.binary.display())
+                });
+            }
+        };
+
+        if output.status.success() {
+            return Ok(TmuxRenameOutcome::Renamed);
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+        if looks_like_no_server(&stderr) {
+            return Ok(TmuxRenameOutcome::Unavailable(UnavailableReason::NoServer));
+        }
+        if looks_like_no_target(&stderr) {
+            return Ok(TmuxRenameOutcome::NoTarget);
+        }
+        if looks_like_name_collision(&stderr) {
+            return Ok(TmuxRenameOutcome::NameCollision);
+        }
+
+        Ok(TmuxRenameOutcome::Failed {
+            code: output.status.code(),
+            message: stderr,
+        })
+    }
 }
 
 fn looks_like_no_server(stderr: &str) -> bool {
@@ -205,21 +276,49 @@ fn looks_like_no_target(stderr: &str) -> bool {
         || lower.contains("no such session")
 }
 
+fn looks_like_name_collision(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("duplicate session")
+        || lower.contains("session already exists")
+        || lower.contains("name already in use")
+}
+
 /// Test runner that returns pre-canned outcomes.
 #[doc(hidden)]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FakeTmux {
     outcome: TmuxOutcome,
     /// Per-target canned captures. A missing target falls through
     /// to [`TmuxCaptureOutcome::Unsupported`].
     captures: std::collections::BTreeMap<String, TmuxCaptureOutcome>,
+    /// Per-target canned rename outcomes. A missing target falls
+    /// through to [`TmuxRenameOutcome::Renamed`] so existing tests
+    /// that only care about the call being recorded don't need to
+    /// register a response.
+    rename_outcomes: std::collections::BTreeMap<String, TmuxRenameOutcome>,
+    /// Recorded `(target, new_name)` pairs across every
+    /// `rename_session` call.
+    rename_calls: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
 }
+
+impl PartialEq for FakeTmux {
+    fn eq(&self, other: &Self) -> bool {
+        self.outcome == other.outcome
+            && self.captures == other.captures
+            && self.rename_outcomes == other.rename_outcomes
+            && *self.rename_calls.lock().unwrap() == *other.rename_calls.lock().unwrap()
+    }
+}
+
+impl Eq for FakeTmux {}
 
 impl FakeTmux {
     pub fn with_sessions(stdout: impl Into<String>) -> Self {
         Self {
             outcome: TmuxOutcome::Sessions(stdout.into()),
             captures: std::collections::BTreeMap::new(),
+            rename_outcomes: std::collections::BTreeMap::new(),
+            rename_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -227,6 +326,8 @@ impl FakeTmux {
         Self {
             outcome: TmuxOutcome::Unavailable(reason),
             captures: std::collections::BTreeMap::new(),
+            rename_outcomes: std::collections::BTreeMap::new(),
+            rename_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -237,6 +338,8 @@ impl FakeTmux {
                 message: message.into(),
             },
             captures: std::collections::BTreeMap::new(),
+            rename_outcomes: std::collections::BTreeMap::new(),
+            rename_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -244,6 +347,19 @@ impl FakeTmux {
     pub fn with_capture(mut self, target: impl Into<String>, capture: TmuxCaptureOutcome) -> Self {
         self.captures.insert(target.into(), capture);
         self
+    }
+
+    /// Register a canned rename-session response for `target`. Unset
+    /// targets default to [`TmuxRenameOutcome::Renamed`].
+    pub fn with_rename(mut self, target: impl Into<String>, outcome: TmuxRenameOutcome) -> Self {
+        self.rename_outcomes.insert(target.into(), outcome);
+        self
+    }
+
+    /// Snapshot of `(target, new_name)` pairs recorded by
+    /// [`TmuxRunner::rename_session`].
+    pub fn rename_calls(&self) -> Vec<(String, String)> {
+        self.rename_calls.lock().unwrap().clone()
     }
 }
 
@@ -259,6 +375,18 @@ impl TmuxRunner for FakeTmux {
             .cloned()
             .unwrap_or(TmuxCaptureOutcome::Unsupported))
     }
+
+    fn rename_session(&self, target: &str, new_name: &str) -> Result<TmuxRenameOutcome> {
+        self.rename_calls
+            .lock()
+            .unwrap()
+            .push((target.to_string(), new_name.to_string()));
+        Ok(self
+            .rename_outcomes
+            .get(target)
+            .cloned()
+            .unwrap_or(TmuxRenameOutcome::Renamed))
+    }
 }
 
 impl TmuxRunner for Box<dyn TmuxRunner> {
@@ -268,6 +396,10 @@ impl TmuxRunner for Box<dyn TmuxRunner> {
 
     fn capture_pane(&self, target: &str) -> Result<TmuxCaptureOutcome> {
         (**self).capture_pane(target)
+    }
+
+    fn rename_session(&self, target: &str, new_name: &str) -> Result<TmuxRenameOutcome> {
+        (**self).rename_session(target, new_name)
     }
 }
 
@@ -673,6 +805,91 @@ mod tests {
             runner.capture_pane("anything").unwrap(),
             TmuxCaptureOutcome::Unsupported
         );
+    }
+
+    #[test]
+    fn missing_binary_rename_session_reports_unavailable_binary_not_found() {
+        let runner = SystemTmux::with_binary("/definitely/not/here/tmux");
+        let outcome = runner.rename_session("alpha", "new").expect("non-fatal");
+        assert_eq!(
+            outcome,
+            TmuxRenameOutcome::Unavailable(UnavailableReason::BinaryNotFound)
+        );
+    }
+
+    #[test]
+    fn fake_runner_default_rename_session_records_call_and_returns_renamed() {
+        let runner = FakeTmux::with_sessions("");
+        let outcome = runner.rename_session("alpha", "beta").expect("ok");
+        assert_eq!(outcome, TmuxRenameOutcome::Renamed);
+        assert_eq!(
+            runner.rename_calls(),
+            vec![("alpha".to_string(), "beta".to_string())]
+        );
+    }
+
+    #[test]
+    fn fake_runner_returns_registered_rename_outcome_by_target() {
+        let runner = FakeTmux::with_sessions("")
+            .with_rename("alpha", TmuxRenameOutcome::NoTarget)
+            .with_rename("beta", TmuxRenameOutcome::NameCollision)
+            .with_rename(
+                "broken",
+                TmuxRenameOutcome::Failed {
+                    code: Some(1),
+                    message: "boom".to_string(),
+                },
+            );
+        assert_eq!(
+            runner.rename_session("alpha", "alias").unwrap(),
+            TmuxRenameOutcome::NoTarget
+        );
+        assert_eq!(
+            runner.rename_session("beta", "alias").unwrap(),
+            TmuxRenameOutcome::NameCollision
+        );
+        assert_eq!(
+            runner.rename_session("broken", "alias").unwrap(),
+            TmuxRenameOutcome::Failed {
+                code: Some(1),
+                message: "boom".to_string(),
+            }
+        );
+        assert_eq!(
+            runner.rename_session("other", "alias").unwrap(),
+            TmuxRenameOutcome::Renamed
+        );
+        assert_eq!(
+            runner.rename_calls(),
+            vec![
+                ("alpha".to_string(), "alias".to_string()),
+                ("beta".to_string(), "alias".to_string()),
+                ("broken".to_string(), "alias".to_string()),
+                ("other".to_string(), "alias".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn default_rename_session_impl_returns_unsupported() {
+        struct ReadOnlyRunner;
+        impl TmuxRunner for ReadOnlyRunner {
+            fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
+                Ok(TmuxOutcome::Sessions(String::new()))
+            }
+        }
+        let runner = ReadOnlyRunner;
+        assert_eq!(
+            runner.rename_session("alpha", "beta").unwrap(),
+            TmuxRenameOutcome::Unsupported
+        );
+    }
+
+    #[test]
+    fn name_collision_stderr_maps_to_name_collision() {
+        assert!(looks_like_name_collision("duplicate session: alpha"));
+        assert!(looks_like_name_collision("session already exists"));
+        assert!(!looks_like_name_collision("can't find session alpha"));
     }
 
     #[test]
