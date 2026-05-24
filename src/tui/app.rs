@@ -449,6 +449,12 @@ impl App {
         &self.config
     }
 
+    /// Resolved color theme (ADR 0032). Renderer reads from this in
+    /// place of inline color literals.
+    pub fn theme(&self) -> &crate::tui::Theme {
+        &self.config.theme
+    }
+
     /// True once the runtime should leave the event loop.
     pub fn should_quit(&self) -> bool {
         self.should_quit

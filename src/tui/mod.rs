@@ -30,10 +30,12 @@ pub mod preview;
 pub mod rows;
 mod runtime;
 pub mod search;
+pub mod theme;
 mod ui;
 pub mod widgets;
 
 pub use app::{App, Msg};
+pub use theme::Theme;
 
 /// Knobs the CLI shell passes into the TUI. The TUI does not read
 /// any other CLI state — every input arrives here.
@@ -69,6 +71,10 @@ pub struct RunConfig {
     /// tmux session that hosts this TUI, when known. Used to
     /// prevent self-attachment loops.
     pub current_tmux_session: Option<String>,
+    /// Resolved TUI color theme (ADR 0032). The CLI shell builds
+    /// this from `[tui.theme]` config and passes it through; the
+    /// renderer reads it via [`App::theme`].
+    pub theme: Theme,
 }
 
 impl RunConfig {
@@ -86,6 +92,7 @@ impl RunConfig {
             live_preview_enabled: true,
             color: true,
             current_tmux_session: None,
+            theme: Theme::default(),
         }
     }
 }

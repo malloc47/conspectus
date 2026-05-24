@@ -27,12 +27,13 @@
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
+use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
 use crate::tui::app::{App, Focus};
@@ -42,14 +43,6 @@ use crate::tui::rows::{
     AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency,
 };
 
-/// Modifier set applied to a row whose selection is the active
-/// focus target (left tree focused). `REVERSED` inverts fg/bg via
-/// whatever pair the terminal theme provides, so the highlight
-/// stays readable on both light and dark themes; `BOLD` adds
-/// emphasis to distinguish "actively focused" from "selected but
-/// not focused" (which only gets `BOLD`).
-const SELECTED_ACTIVE_MODIFIERS: Modifier = Modifier::REVERSED.union(Modifier::BOLD);
-const SELECTED_INACTIVE_MODIFIERS: Modifier = Modifier::BOLD;
 /// Terminal width threshold below which the body switches from a
 /// side-by-side split to a vertical stack (left-on-top per the
 /// phase-08 layout note).
@@ -82,7 +75,7 @@ fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     use crate::tui::widgets::help::HelpOverlayWidget;
-    frame.render_widget(HelpOverlayWidget::new(state), area);
+    frame.render_widget(HelpOverlayWidget::new(state, app.theme()), area);
 }
 
 fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
@@ -98,7 +91,7 @@ fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // row).
     let visible: Vec<crate::tui::rows::Row> = app.visible_rows().into_iter().cloned().collect();
     let items = items_from_rows(&visible);
-    let widget = SearchOverlayWidget::new(state, &items);
+    let widget = SearchOverlayWidget::new(state, &items, app.theme());
     frame.render_widget(widget, area);
 }
 
@@ -208,8 +201,9 @@ pub(crate) mod test_clock {
 }
 
 fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let theme = app.theme();
     if let Some(message) = app.status_message() {
-        let widget = Paragraph::new(message.to_string()).style(Style::default().fg(Color::Yellow));
+        let widget = Paragraph::new(message.to_string()).style(Style::default().fg(theme.warning));
         frame.render_widget(widget, area);
         return;
     }
@@ -222,15 +216,15 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let line = if chip_text.is_empty() {
         Line::from(Span::styled(
             format!("{scope} {hints}"),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default().add_modifier(theme.placeholder),
         ))
     } else {
         Line::from(vec![
             Span::styled(
                 format!("{scope} {hints} · "),
-                Style::default().add_modifier(Modifier::DIM),
+                Style::default().add_modifier(theme.placeholder),
             ),
-            Span::styled(chip_text, Style::default().fg(Color::Cyan)),
+            Span::styled(chip_text, Style::default().fg(theme.cwd_mark)),
         ])
     };
     let widget = Paragraph::new(line);
@@ -342,7 +336,7 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         let placeholder = empty_left_panel_text(app);
         let widget = Paragraph::new(placeholder)
             .wrap(Wrap { trim: false })
-            .style(Style::default().add_modifier(Modifier::DIM));
+            .style(Style::default().add_modifier(app.theme().placeholder));
         frame.render_widget(widget, inner);
         return;
     }
@@ -399,6 +393,7 @@ fn render_left_row(
     is_selected: bool,
     width: usize,
 ) -> Line<'static> {
+    let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::raw(row_indent(row.depth)));
     spans.push(Span::raw(disclosure_glyph(row, app)));
@@ -413,56 +408,63 @@ fn render_left_row(
             if !secondary.is_empty() {
                 spans.push(Span::styled(
                     format!("  {secondary}"),
-                    Style::default().add_modifier(Modifier::DIM),
+                    Style::default().add_modifier(theme.placeholder),
                 ));
             }
             if group.is_launch_context {
                 spans.push(Span::styled(
                     "  (cwd)".to_string(),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(theme.cwd_mark)
+                        .add_modifier(theme.placeholder),
                 ));
             }
         }
         RowKind::AgentSession(session) => {
-            spans.extend(render_session_spans(session));
-            append_session_preview(&mut spans, session, width);
+            spans.extend(render_session_spans(session, theme));
+            append_session_preview(&mut spans, session, width, theme);
         }
         RowKind::AgentSessionMuxCandidate(candidate) => {
-            spans.extend(render_candidate_spans(candidate))
+            spans.extend(render_candidate_spans(candidate, theme))
         }
     }
 
     let mut line = Line::from(spans);
     if is_selected {
         let modifiers = if app.focus() == Focus::Left {
-            SELECTED_ACTIVE_MODIFIERS
+            theme.selection_active
         } else {
-            SELECTED_INACTIVE_MODIFIERS
+            theme.selection_inactive
         };
         line = line.style(Style::default().add_modifier(modifiers));
     }
     line
 }
 
-fn render_session_spans(session: &AgentSessionRow) -> Vec<Span<'static>> {
+fn render_session_spans(session: &AgentSessionRow, theme: &Theme) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     spans.push(Span::raw(format!("{}  ", session.short_id)));
     spans.push(Span::styled(
         format!("{:8}", session.harness_label),
-        Style::default().fg(harness_color(&session.harness_label)),
+        Style::default().fg(theme.harness_color(&session.harness_label)),
     ));
     spans.push(Span::raw("  "));
     let recency = session.recency.clone().unwrap_or_else(|| "—".to_string());
     spans.push(Span::styled(
         format!("{recency:>4}"),
-        Style::default().add_modifier(Modifier::DIM),
+        Style::default().add_modifier(theme.placeholder),
     ));
     spans.push(Span::raw("  "));
-    spans.push(mux_indicator_span(session.mux_state));
+    spans.push(mux_indicator_span(session.mux_state, theme));
     spans
 }
 
-fn append_session_preview(spans: &mut Vec<Span<'static>>, session: &AgentSessionRow, width: usize) {
+fn append_session_preview(
+    spans: &mut Vec<Span<'static>>,
+    session: &AgentSessionRow,
+    width: usize,
+    theme: &Theme,
+) {
     let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
         return;
     };
@@ -473,7 +475,7 @@ fn append_session_preview(spans: &mut Vec<Span<'static>>, session: &AgentSession
     spans.push(Span::raw("  "));
     spans.push(Span::styled(
         truncate_to_width(preview, width - used - 2),
-        Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC),
+        Style::default().add_modifier(theme.placeholder | Modifier::ITALIC),
     ));
 }
 
@@ -484,41 +486,33 @@ fn spans_width(spans: &[Span<'_>]) -> usize {
         .sum()
 }
 
-fn render_candidate_spans(candidate: &MuxCandidateRow) -> Vec<Span<'static>> {
+fn render_candidate_spans(candidate: &MuxCandidateRow, theme: &Theme) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let glyph = if candidate.is_preferred {
-        Span::styled("◉ ", Style::default().fg(Color::Green))
+        Span::styled("◉ ", Style::default().fg(theme.mux_attached))
     } else {
-        Span::styled("◯ ", Style::default().add_modifier(Modifier::DIM))
+        Span::styled("◯ ", Style::default().add_modifier(theme.mux_unmuxed))
     };
     spans.push(glyph);
     spans.push(Span::raw(compact_mux_label(&candidate.mux_label)));
     if candidate.is_preferred {
         spans.push(Span::styled(
             "  (preferred)".to_string(),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default().add_modifier(theme.placeholder),
         ));
     }
     spans
 }
 
-fn mux_indicator_span(state: MuxIndicator) -> Span<'static> {
+fn mux_indicator_span(state: MuxIndicator, theme: &Theme) -> Span<'static> {
     match state {
-        MuxIndicator::Attached => Span::styled("◉", Style::default().fg(Color::Green)),
-        MuxIndicator::Ambiguous { .. } => Span::styled("◐", Style::default().fg(Color::Yellow)),
-        MuxIndicator::Unmuxed => Span::styled("◯", Style::default().add_modifier(Modifier::DIM)),
-    }
-}
-
-fn harness_color(label: &str) -> Color {
-    // Per H-TBL-014: each harness gets a distinct hue. We pick from
-    // a small palette here; downstream story can converge with the
-    // table renderer's color map (T8-002).
-    match label {
-        "claude" => Color::Magenta,
-        "codex" => Color::Cyan,
-        "opencode" => Color::Green,
-        _ => Color::White,
+        MuxIndicator::Attached => Span::styled("◉", Style::default().fg(theme.mux_attached)),
+        MuxIndicator::Ambiguous { .. } => {
+            Span::styled("◐", Style::default().fg(theme.mux_ambiguous))
+        }
+        MuxIndicator::Unmuxed => {
+            Span::styled("◯", Style::default().add_modifier(theme.mux_unmuxed))
+        }
     }
 }
 
@@ -618,7 +612,7 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let Some(detail) = app.detail() else {
         let widget = Paragraph::new(empty_right_panel_text(app))
-            .style(Style::default().add_modifier(Modifier::DIM));
+            .style(Style::default().add_modifier(app.theme().placeholder));
         frame.render_widget(widget, inner);
         return;
     };
@@ -635,12 +629,13 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         ])
         .split(inner);
 
-    draw_detail_header(detail, frame, split[0]);
+    draw_detail_header(detail, frame, split[0], app.theme());
     frame.render_widget(
         // No explicit fg color so the preview separator inherits
-        // the terminal theme's default and DIM fades it predictably
-        // on both light and dark backgrounds.
-        Paragraph::new(preview_separator(app)).style(Style::default().add_modifier(Modifier::DIM)),
+        // the terminal theme's default; theme.divider fades it
+        // predictably on both light and dark backgrounds.
+        Paragraph::new(preview_separator(app))
+            .style(Style::default().add_modifier(app.theme().divider)),
         split[1],
     );
     draw_detail_preview(app, detail, frame, split[2]);
@@ -663,7 +658,7 @@ fn header_zone_height(detail: &NodeDetail, panel_height: u16) -> u16 {
     natural.min(max).max(3)
 }
 
-fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
+fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![Span::styled(
         detail.title_line.clone(),
@@ -671,19 +666,19 @@ fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
     )]));
     lines.push(Line::raw(""));
     for field in &detail.header_fields {
-        lines.push(render_header_field(field));
+        lines.push(render_header_field(field, theme));
     }
     let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 }
 
-fn render_header_field(field: &HeaderField) -> Line<'static> {
+fn render_header_field(field: &HeaderField, theme: &Theme) -> Line<'static> {
     let label = Span::styled(
         format!("{:<10}", field.label),
         Style::default().add_modifier(Modifier::BOLD),
     );
     let value_style = if field.placeholder {
-        Style::default().add_modifier(Modifier::DIM)
+        Style::default().add_modifier(theme.placeholder)
     } else {
         Style::default()
     };
@@ -692,7 +687,7 @@ fn render_header_field(field: &HeaderField) -> Line<'static> {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             annotation.to_string(),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.warning),
         ));
     }
     Line::from(spans)
@@ -812,12 +807,13 @@ fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
 }
 
 fn panel_focus_style(app: &App, focus: Focus) -> Style {
+    let theme = app.theme();
     if app.focus() == focus {
         Style::default()
-            .fg(Color::Cyan)
+            .fg(theme.panel_focus_accent)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().add_modifier(Modifier::DIM)
+        Style::default().add_modifier(theme.placeholder)
     }
 }
 

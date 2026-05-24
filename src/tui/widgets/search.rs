@@ -14,9 +14,11 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+
+use crate::tui::Theme;
 
 use crate::tui::rows::RowId;
 use crate::tui::search::{SearchBackend, SearchItem, SearchMatch, snippet_around};
@@ -154,11 +156,20 @@ impl SearchOverlayState {
 pub struct SearchOverlayWidget<'a> {
     state: &'a SearchOverlayState,
     items: &'a [SearchItem<'a>],
+    theme: &'a Theme,
 }
 
 impl<'a> SearchOverlayWidget<'a> {
-    pub fn new(state: &'a SearchOverlayState, items: &'a [SearchItem<'a>]) -> Self {
-        Self { state, items }
+    pub fn new(
+        state: &'a SearchOverlayState,
+        items: &'a [SearchItem<'a>],
+        theme: &'a Theme,
+    ) -> Self {
+        Self {
+            state,
+            items,
+            theme,
+        }
     }
 }
 
@@ -188,7 +199,7 @@ impl Widget for SearchOverlayWidget<'_> {
         // widget, since we want the query and the result list in a
         // single bordered modal.
         let query_line = Line::from(vec![
-            Span::styled("/", Style::default().fg(Color::Cyan)),
+            Span::styled("/", Style::default().fg(self.theme.panel_focus_accent)),
             Span::raw(self.state.query().to_string()),
         ]);
         let query_area = Rect {
@@ -214,7 +225,7 @@ impl Widget for SearchOverlayWidget<'_> {
             };
             Paragraph::new(Line::from(Span::styled(
                 label,
-                Style::default().add_modifier(Modifier::DIM),
+                Style::default().add_modifier(self.theme.placeholder),
             )))
             .render(list_area, buf);
             return;
@@ -243,7 +254,14 @@ impl Widget for SearchOverlayWidget<'_> {
                 .map(|i| i.label.to_string())
                 .unwrap_or_else(|| "<missing>".to_string());
             let is_cursor = idx == self.state.cursor();
-            let line = build_match_line(label, item.copied(), m, is_cursor, snippet_budget);
+            let line = build_match_line(
+                label,
+                item.copied(),
+                m,
+                is_cursor,
+                snippet_budget,
+                self.theme,
+            );
             lines.push(line);
         }
         Paragraph::new(lines).render(list_area, buf);
@@ -261,6 +279,7 @@ fn build_match_line(
     m: &SearchMatch,
     is_cursor: bool,
     snippet_budget: usize,
+    theme: &Theme,
 ) -> Line<'static> {
     // Compose a per-span style. The cursor row uses
     // `Modifier::REVERSED` rather than an explicit background color
@@ -274,7 +293,7 @@ fn build_match_line(
         if is_cursor {
             style = style.add_modifier(Modifier::REVERSED);
         } else if dim_when_not_cursor {
-            style = style.add_modifier(Modifier::DIM);
+            style = style.add_modifier(theme.placeholder);
         }
         style
     };
@@ -308,7 +327,7 @@ fn build_match_line(
         let match_style = span_style(
             false,
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme.warning)
                 .add_modifier(Modifier::BOLD),
         );
         if let Some(range) = snippet.highlight.clone() {
@@ -515,7 +534,15 @@ mod tests {
             state.refresh_matches(&backend, &items);
         }
         let m = &state.matches()[0];
-        let line = build_match_line(items[0].label.to_string(), Some(&items[0]), m, true, 40);
+        let theme = Theme::default();
+        let line = build_match_line(
+            items[0].label.to_string(),
+            Some(&items[0]),
+            m,
+            true,
+            40,
+            &theme,
+        );
         let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(rendered.contains("nice"), "label rendered: {rendered}");
         assert!(rendered.contains("puffin"), "snippet rendered: {rendered}");
@@ -548,7 +575,15 @@ mod tests {
             state.refresh_matches(&backend, &items);
         }
         let m = &state.matches()[0];
-        let line = build_match_line(items[0].label.to_string(), Some(&items[0]), m, false, 40);
+        let theme = Theme::default();
+        let line = build_match_line(
+            items[0].label.to_string(),
+            Some(&items[0]),
+            m,
+            false,
+            40,
+            &theme,
+        );
         let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         // No `· ` separator means no duplicate snippet.
         assert!(!rendered.contains("  · "), "rendered: {rendered}");

@@ -1603,6 +1603,7 @@ impl TuiArgs {
             live_preview_enabled: !self.no_live_preview,
             color,
             current_tmux_session: current_tmux_session_name(),
+            theme: conspectus::tui::Theme::default(),
         };
 
         conspectus::tui::run(config)

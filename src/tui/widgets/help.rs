@@ -10,9 +10,11 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+
+use crate::tui::Theme;
 
 /// Pure state for the help overlay. Carries no settings today — the
 /// renderer reads the static keymap below.
@@ -51,15 +53,17 @@ pub enum HelpOutcome {
 /// Centered modal that renders the keymap reference. Lays out two
 /// columns of `key · action` pairs grouped into sections so the
 /// operator can scan for the action they want.
-pub struct HelpOverlayWidget;
+pub struct HelpOverlayWidget<'a> {
+    theme: &'a Theme,
+}
 
-impl HelpOverlayWidget {
-    pub fn new(_state: &HelpOverlayState) -> Self {
-        Self
+impl<'a> HelpOverlayWidget<'a> {
+    pub fn new(_state: &HelpOverlayState, theme: &'a Theme) -> Self {
+        Self { theme }
     }
 }
 
-impl Widget for HelpOverlayWidget {
+impl Widget for HelpOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let modal = centered_modal_rect(area);
         for y in modal.top()..modal.bottom() {
@@ -74,7 +78,7 @@ impl Widget for HelpOverlayWidget {
             .title(Line::from(" Help "));
         let inner = block.inner(modal);
         block.render(modal, buf);
-        let para = Paragraph::new(body_lines());
+        let para = Paragraph::new(body_lines(self.theme));
         para.render(inner, buf);
     }
 }
@@ -82,39 +86,49 @@ impl Widget for HelpOverlayWidget {
 /// Build the static keymap. The first column is the key, the second
 /// is a one-line description. Sections are bold; bindings are plain
 /// text.
-fn body_lines() -> Vec<Line<'static>> {
+fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
+    let bind = |lines: &mut Vec<Line<'static>>, key: &str, desc: &str| {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {key:<14}"),
+                Style::default().fg(theme.panel_focus_accent),
+            ),
+            Span::raw(desc.to_string()),
+        ]));
+    };
+
     section(&mut lines, "Discoverable controls (ADR 0031)");
-    binding(
+    bind(
         &mut lines,
         "v",
         "Open the controls overlay (view / grouping / filters / sort)",
     );
-    binding(&mut lines, "?", "This help");
+    bind(&mut lines, "?", "This help");
     blank(&mut lines);
 
     section(&mut lines, "View switching");
-    binding(
+    bind(
         &mut lines,
         "1 – 5",
         "Switch directly to view N (sessions, mux, union, prs, forks)",
     );
-    binding(&mut lines, "] / [", "Cycle to next / previous view");
+    bind(&mut lines, "] / [", "Cycle to next / previous view");
     blank(&mut lines);
 
     section(&mut lines, "Filters & grouping");
-    binding(
+    bind(
         &mut lines,
         "f",
         "Jump into the controls overlay's Filters section",
     );
-    binding(
+    bind(
         &mut lines,
         "F",
         "Clear all active filters for the visible view",
     );
-    binding(
+    bind(
         &mut lines,
         "Ctrl-G",
         "Cycle grouping forward for the active view",
@@ -122,7 +136,7 @@ fn body_lines() -> Vec<Line<'static>> {
     blank(&mut lines);
 
     section(&mut lines, "Search");
-    binding(
+    bind(
         &mut lines,
         "/",
         "Open the search overlay (ranks within the active filter set)",
@@ -130,28 +144,28 @@ fn body_lines() -> Vec<Line<'static>> {
     blank(&mut lines);
 
     section(&mut lines, "Navigation");
-    binding(&mut lines, "j / k / arrows", "Move selection down / up");
-    binding(&mut lines, "PgDn / PgUp", "Page through the row tree");
-    binding(&mut lines, "g / G", "First / last row");
-    binding(&mut lines, "Enter", "Expand / collapse a parent row");
-    binding(
+    bind(&mut lines, "j / k / arrows", "Move selection down / up");
+    bind(&mut lines, "PgDn / PgUp", "Page through the row tree");
+    bind(&mut lines, "g / G", "First / last row");
+    bind(&mut lines, "Enter", "Expand / collapse a parent row");
+    bind(
         &mut lines,
         "Tab",
         "Cycle focus between left tree and right panel",
     );
-    binding(&mut lines, "J / K", "Scroll the right-panel preview");
+    bind(&mut lines, "J / K", "Scroll the right-panel preview");
     blank(&mut lines);
 
     section(&mut lines, "Actions");
-    binding(&mut lines, "a", "Attach to the selected mux");
-    binding(&mut lines, "R", "Rename the selected agent session");
-    binding(&mut lines, "r", "Refresh discovery now");
-    binding(&mut lines, "q / Ctrl-C", "Quit");
+    bind(&mut lines, "a", "Attach to the selected mux");
+    bind(&mut lines, "R", "Rename the selected agent session");
+    bind(&mut lines, "r", "Refresh discovery now");
+    bind(&mut lines, "q / Ctrl-C", "Quit");
     blank(&mut lines);
 
     lines.push(Line::from(Span::styled(
         "Press Esc, q, or ? to close.",
-        Style::default().add_modifier(Modifier::DIM),
+        Style::default().add_modifier(theme.placeholder),
     )));
     lines
 }
@@ -161,13 +175,6 @@ fn section(lines: &mut Vec<Line<'static>>, title: &str) {
         title.to_string(),
         Style::default().add_modifier(Modifier::BOLD),
     )));
-}
-
-fn binding(lines: &mut Vec<Line<'static>>, key: &str, desc: &str) {
-    lines.push(Line::from(vec![
-        Span::styled(format!("  {key:<14}"), Style::default().fg(Color::Cyan)),
-        Span::raw(desc.to_string()),
-    ]));
 }
 
 fn blank(lines: &mut Vec<Line<'static>>) {
@@ -248,7 +255,8 @@ mod tests {
 
     #[test]
     fn body_lines_cover_every_documented_key() {
-        let rendered: String = body_lines()
+        let theme = Theme::default();
+        let rendered: String = body_lines(&theme)
             .iter()
             .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))
             .collect::<Vec<_>>()
