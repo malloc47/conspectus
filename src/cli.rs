@@ -1018,6 +1018,14 @@ impl TableRowsArgs {
             }
         };
 
+        // Resolve the active filter from CLI flags. Future config
+        // parity (load from `[table.<rows>].filters` or
+        // `[tui.views.sessions]`) lands as a follow-up; for v1 the
+        // CLI flags are the only source so the static table matches
+        // what the operator typed.
+        let cli_filter = self.filter_args.to_row_filter()?;
+        let now_epoch = current_unix_epoch_for_table();
+
         let snapshot = if self.scan_roots.is_empty() {
             conspectus::discovery::discover_local_at_roots([cwd])?
         } else {
@@ -1037,11 +1045,22 @@ impl TableRowsArgs {
             options = options.with_columns(columns);
         }
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        options = options.with_color(color);
+        options = options
+            .with_color(color)
+            .with_filter(cli_filter)
+            .with_now_epoch(now_epoch);
         let table = conspectus::output::table::render_with(&snapshot, projection, &options);
         print_paged(&table, PagerOptions::from_flags(self.pager, self.no_pager));
         Ok(())
     }
+}
+
+fn current_unix_epoch_for_table() -> Option<i64> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
 }
 
 /// Resolve which column set to render, with CLI overriding config.

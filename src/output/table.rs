@@ -55,6 +55,18 @@ pub struct RenderOptions {
     /// Defaults to `false` so existing snapshot tests stay
     /// byte-for-byte stable.
     pub color: bool,
+    /// Active row filter (ADR 0031). Empty filter (the
+    /// [`crate::filter::RowFilter::default`] value) admits every row,
+    /// preserving today's behavior. In v1 the predicate applies to
+    /// the agent (sessions) projection only; other projections
+    /// silently pass it through until per-projection dimensions
+    /// land.
+    pub filter: crate::filter::RowFilter,
+    /// Wall-clock epoch (Unix seconds) used as the recency anchor
+    /// when evaluating `max-age`. `None` disables age-based
+    /// filtering (the predicate admits the row). Callers pass a
+    /// fixed value in tests for determinism.
+    pub now_epoch: Option<i64>,
 }
 
 impl RenderOptions {
@@ -65,6 +77,8 @@ impl RenderOptions {
             layout: Layout::Columnar,
             columns: None,
             color: false,
+            filter: crate::filter::RowFilter::default(),
+            now_epoch: None,
         }
     }
 
@@ -75,6 +89,8 @@ impl RenderOptions {
             layout: Layout::Columnar,
             columns: None,
             color: false,
+            filter: crate::filter::RowFilter::default(),
+            now_epoch: None,
         }
     }
 
@@ -85,6 +101,8 @@ impl RenderOptions {
             layout: Layout::Card,
             columns: None,
             color: false,
+            filter: crate::filter::RowFilter::default(),
+            now_epoch: None,
         }
     }
 
@@ -95,6 +113,8 @@ impl RenderOptions {
             layout: Layout::Card,
             columns: None,
             color: false,
+            filter: crate::filter::RowFilter::default(),
+            now_epoch: None,
         }
     }
 
@@ -109,6 +129,20 @@ impl RenderOptions {
     /// Builder helper: enable ANSI color escapes per ADR 0022.
     pub fn with_color(mut self, color: bool) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Builder helper: attach an active row filter (ADR 0031).
+    pub fn with_filter(mut self, filter: crate::filter::RowFilter) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Builder helper: set the recency anchor for `max-age`
+    /// evaluation. Tests pin this to a fixture value; the CLI uses
+    /// the real wall clock.
+    pub fn with_now_epoch(mut self, now: Option<i64>) -> Self {
+        self.now_epoch = now;
         self
     }
 }
@@ -196,7 +230,7 @@ pub fn render_with(
         .clone()
         .unwrap_or_else(|| default_columns(projection));
     let rows = match projection {
-        Projection::Agent => build_agent_rows(&view, &columns),
+        Projection::Agent => build_agent_rows(&view, &columns, options),
         Projection::Mux => build_mux_rows(&view, &columns),
         Projection::Union => build_union_rows(&view, &columns),
         Projection::Pr => build_pr_rows(&view, &columns),
@@ -1760,8 +1794,22 @@ fn build_pr_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<S
     rows
 }
 
-fn build_agent_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
-    let body_full_ids: Vec<String> = view.agent_sessions.keys().map(node_short_id).collect();
+fn build_agent_rows(
+    view: &SnapshotView<'_>,
+    columns: &[&'static str],
+    options: &RenderOptions,
+) -> Vec<Vec<String>> {
+    // Apply the active row filter (ADR 0031) before building rows so
+    // narrowed listings collapse the data they exclude rather than
+    // computing it.
+    let filtered: Vec<(&NodeId, &AgentSessionNode)> = view
+        .agent_sessions
+        .iter()
+        .filter(|(node_id, session)| agent_row_matches(view, options, node_id, session))
+        .map(|(id, s)| (id, *s))
+        .collect();
+
+    let body_full_ids: Vec<String> = filtered.iter().map(|(id, _)| node_short_id(id)).collect();
     let id_len = unique_prefix_len(&body_full_ids);
 
     let mut rows: Vec<Vec<String>> = Vec::new();
@@ -1772,7 +1820,7 @@ fn build_agent_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Ve
             .collect(),
     );
 
-    for ((node_id, session), full_short) in view.agent_sessions.iter().zip(body_full_ids.iter()) {
+    for ((node_id, session), full_short) in filtered.iter().zip(body_full_ids.iter()) {
         let short_id = &full_short[..id_len];
         let ctx = AgentRowCtx {
             view,
@@ -1784,6 +1832,30 @@ fn build_agent_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Ve
     }
 
     rows
+}
+
+/// Evaluate the active filter against one agent session. Mirrors the
+/// TUI row-tree's matching logic so a `--harness claude --max-age 7d`
+/// invocation narrows the table and the TUI identically.
+fn agent_row_matches(
+    view: &SnapshotView<'_>,
+    options: &RenderOptions,
+    node_id: &NodeId,
+    session: &AgentSessionNode,
+) -> bool {
+    if options.filter.is_empty() {
+        return true;
+    }
+    let candidate_count = view
+        .candidates_for(node_id, RelationKind::LinkedToMux)
+        .len();
+    let inputs = crate::filter::SessionMatchInputs {
+        harness_key: &session.harness_key,
+        now_epoch: options.now_epoch,
+        last_active_epoch: session.last_active_epoch,
+        mux_state: crate::filter::MuxStateKey::from_candidate_count(candidate_count),
+    };
+    options.filter.matches_session(&inputs)
 }
 
 /// Lineage cell for the agent projection (ADR 0018). Shows the preferred
@@ -4412,5 +4484,164 @@ mod tests {
                 "column {idx} should be at floor; got {budget} expected {expected_floor}",
             );
         }
+    }
+
+    // ---- ADR 0031 / F8-010: filter parity ----
+
+    fn three_session_snapshot() -> GraphSnapshot {
+        let mut snapshot = GraphSnapshot::empty();
+        // claude session, recent
+        let mut claude = match agent_session("claude-code", "c1", Some("/home/op/src/proj")) {
+            GraphNode::AgentSession(s) => s,
+            _ => unreachable!(),
+        };
+        claude.last_active_epoch = Some(1_000_000);
+        snapshot.nodes.push(GraphNode::AgentSession(claude));
+
+        // codex session, 8 days old
+        let mut codex = match agent_session("codex", "x1", Some("/home/op/src/proj")) {
+            GraphNode::AgentSession(s) => s,
+            _ => unreachable!(),
+        };
+        codex.last_active_epoch = Some(1_000_000 - 8 * 24 * 60 * 60);
+        snapshot.nodes.push(GraphNode::AgentSession(codex));
+
+        // opencode session, recent, attached to mux
+        let mut opencode = match agent_session("opencode", "o1", Some("/home/op/src/proj")) {
+            GraphNode::AgentSession(s) => s,
+            _ => unreachable!(),
+        };
+        opencode.last_active_epoch = Some(1_000_000 - 600);
+        snapshot.nodes.push(GraphNode::AgentSession(opencode));
+        snapshot.nodes.push(mux_session("tmux", "editor", None));
+        snapshot.candidate_links.push(linked_to_mux_link(
+            "lnk-1",
+            AgentSessionId::new("opencode", "global", "o1"),
+            MuxSessionId::new("tmux:editor"),
+            Provenance::Discovered,
+            Confidence::High,
+        ));
+
+        resolve_snapshot(snapshot)
+    }
+
+    fn body_row_count(rendered: &str) -> usize {
+        // Subtract 2 for the header row plus the dashed-separator
+        // row beneath it. Both render even when the body is empty.
+        rendered
+            .lines()
+            .filter(|line| !line.is_empty())
+            .count()
+            .saturating_sub(2)
+    }
+
+    #[test]
+    fn filter_harness_narrows_agent_table() {
+        let snapshot = three_session_snapshot();
+        let options = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Agent, &options);
+        assert_eq!(body_row_count(&table), 1, "table:\n{table}");
+        assert!(table.contains("claude"));
+        assert!(!table.contains("codex"));
+        assert!(!table.contains("opencode"));
+    }
+
+    #[test]
+    fn filter_max_age_drops_stale_agent_rows() {
+        let snapshot = three_session_snapshot();
+        let week = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+        let options = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                max_age: Some(week),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Agent, &options);
+        // codex (8d old) drops; claude + opencode remain.
+        assert_eq!(body_row_count(&table), 2, "table:\n{table}");
+        assert!(table.contains("claude"));
+        assert!(table.contains("opencode"));
+        assert!(!table.contains("codex"));
+    }
+
+    #[test]
+    fn filter_mux_state_unmuxed_drops_attached_rows() {
+        let snapshot = three_session_snapshot();
+        let options = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                mux_state: Some(crate::filter::MuxStateFilter::from_values([
+                    crate::filter::MuxStateKey::Unmuxed,
+                ])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Agent, &options);
+        // opencode has a mux link; it should drop.
+        assert_eq!(body_row_count(&table), 2, "table:\n{table}");
+        assert!(table.contains("claude"));
+        assert!(table.contains("codex"));
+        assert!(!table.contains("opencode"));
+    }
+
+    #[test]
+    fn filter_empty_table_keeps_header_row() {
+        let snapshot = three_session_snapshot();
+        let options = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["aider"])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Agent, &options);
+        assert_eq!(body_row_count(&table), 0, "table:\n{table}");
+    }
+
+    #[test]
+    fn filter_parity_with_tui_sessions_row_tree() {
+        use crate::tui::SessionsGrouping;
+        use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
+        let snapshot = three_session_snapshot();
+        let filter = crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values([
+                "claude-code",
+                "codex",
+            ])),
+            max_age: Some(std::time::Duration::from_secs(7 * 24 * 60 * 60)),
+            mux_state: Some(crate::filter::MuxStateFilter::from_values([
+                crate::filter::MuxStateKey::Unmuxed,
+            ])),
+        };
+
+        let table_options = RenderOptions::wide()
+            .with_filter(filter.clone())
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Agent, &table_options);
+
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: None,
+            now: Some(1_000_000),
+            cwd: None,
+            filter,
+        });
+        let tree_sessions = tree
+            .rows
+            .iter()
+            .filter(|row| matches!(row.kind, crate::tui::rows::RowKind::AgentSession(_)))
+            .count();
+
+        assert_eq!(
+            body_row_count(&table),
+            tree_sessions,
+            "table rows ({}) should equal TUI sessions ({}) for the same filter\ntable:\n{table}",
+            body_row_count(&table),
+            tree_sessions
+        );
     }
 }
