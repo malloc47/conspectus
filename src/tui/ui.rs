@@ -42,9 +42,14 @@ use crate::tui::rows::{
     AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency,
 };
 
-const SELECTED_BG: Color = Color::Indexed(238);
-const SELECTED_INACTIVE_BG: Color = Color::Indexed(236);
-const PREVIEW_HEADER_FG: Color = Color::Indexed(244);
+/// Modifier set applied to a row whose selection is the active
+/// focus target (left tree focused). `REVERSED` inverts fg/bg via
+/// whatever pair the terminal theme provides, so the highlight
+/// stays readable on both light and dark themes; `BOLD` adds
+/// emphasis to distinguish "actively focused" from "selected but
+/// not focused" (which only gets `BOLD`).
+const SELECTED_ACTIVE_MODIFIERS: Modifier = Modifier::REVERSED.union(Modifier::BOLD);
+const SELECTED_INACTIVE_MODIFIERS: Modifier = Modifier::BOLD;
 /// Terminal width threshold below which the body switches from a
 /// side-by-side split to a vertical stack (left-on-top per the
 /// phase-08 layout note).
@@ -429,12 +434,12 @@ fn render_left_row(
 
     let mut line = Line::from(spans);
     if is_selected {
-        let bg = if app.focus() == Focus::Left {
-            SELECTED_BG
+        let modifiers = if app.focus() == Focus::Left {
+            SELECTED_ACTIVE_MODIFIERS
         } else {
-            SELECTED_INACTIVE_BG
+            SELECTED_INACTIVE_MODIFIERS
         };
-        line = line.style(Style::default().bg(bg).add_modifier(Modifier::BOLD));
+        line = line.style(Style::default().add_modifier(modifiers));
     }
     line
 }
@@ -632,11 +637,10 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     draw_detail_header(detail, frame, split[0]);
     frame.render_widget(
-        Paragraph::new(preview_separator(app)).style(
-            Style::default()
-                .fg(PREVIEW_HEADER_FG)
-                .add_modifier(Modifier::DIM),
-        ),
+        // No explicit fg color so the preview separator inherits
+        // the terminal theme's default and DIM fades it predictably
+        // on both light and dark backgrounds.
+        Paragraph::new(preview_separator(app)).style(Style::default().add_modifier(Modifier::DIM)),
         split[1],
     );
     draw_detail_preview(app, detail, frame, split[2]);
@@ -1283,17 +1287,30 @@ mod tests {
             "right focus marker missing: {text}"
         );
 
-        let selected_has_inactive_bg = (0..buffer.area.height).any(|y| {
+        // Selected row should still carry the inactive-selection
+        // indicator (BOLD without REVERSED) — i.e. some cell on the
+        // codex row has BOLD set and the row is *not* in the
+        // REVERSED active-selection state.
+        let selected_carries_inactive_indicator = (0..buffer.area.height).any(|y| {
             let line: String = (0..buffer.area.width)
                 .map(|x| buffer[(x, y)].symbol())
                 .collect();
-            line.contains("codex")
-                && (0..buffer.area.width)
-                    .any(|x| buffer[(x, y)].style().bg == Some(SELECTED_INACTIVE_BG))
+            if !line.contains("codex") {
+                return false;
+            }
+            let any_bold = (0..buffer.area.width)
+                .any(|x| buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD));
+            let any_reversed = (0..buffer.area.width).any(|x| {
+                buffer[(x, y)]
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::REVERSED)
+            });
+            any_bold && !any_reversed
         });
         assert!(
-            selected_has_inactive_bg,
-            "selected row should remain highlighted when right pane has focus"
+            selected_carries_inactive_indicator,
+            "selected row should remain highlighted via BOLD when right pane has focus"
         );
     }
 

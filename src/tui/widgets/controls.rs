@@ -26,7 +26,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
@@ -609,9 +609,11 @@ fn section_header(label: &str) -> Line<'static> {
 
 fn row_line(label: String, active: bool, cursored: bool) -> Line<'static> {
     let marker = if cursored { "> " } else { "  " };
+    // REVERSED (not a fixed bg color) so the cursor row stays
+    // readable on both light and dark terminal themes.
     let mut style = Style::default();
     if cursored {
-        style = style.bg(Color::Indexed(238));
+        style = style.add_modifier(Modifier::REVERSED);
     }
     if active {
         style = style.add_modifier(Modifier::BOLD);
@@ -623,7 +625,7 @@ fn row_line(label: String, active: bool, cursored: bool) -> Line<'static> {
 fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     let marker = if cursored { "> " } else { "  " };
     let style = if cursored {
-        Style::default().bg(Color::Indexed(238))
+        Style::default().add_modifier(Modifier::REVERSED)
     } else {
         Style::default()
     };
