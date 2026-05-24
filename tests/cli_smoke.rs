@@ -133,10 +133,7 @@ display_name = "ingest-refactor"
         cmd.assert().success();
 
         let after = fs::read_to_string(&config).expect("read after");
-        assert_eq!(
-            after, original,
-            "command {args:?} mutated alias config",
-        );
+        assert_eq!(after, original, "command {args:?} mutated alias config",);
     }
 }
 

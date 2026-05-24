@@ -191,6 +191,7 @@ pub fn lookup_mux_node<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink,
         GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
@@ -210,6 +211,7 @@ mod tests {
             home: None,
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
         let mut cfg = RunConfig::defaults();
         cfg.default_view = View::Sessions;
@@ -381,6 +383,7 @@ mod tests {
             home: None,
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
         let mut cfg = RunConfig::defaults();
         cfg.default_view = View::Sessions;

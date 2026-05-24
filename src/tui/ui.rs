@@ -806,6 +806,7 @@ pub fn buffer_to_string(buffer: &ratatui::buffer::Buffer) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
         RepoId, RepoNode,
@@ -848,6 +849,7 @@ mod tests {
             home: Some(std::path::Path::new("/home/op")),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let mut config = RunConfig::defaults();
@@ -923,6 +925,7 @@ mod tests {
             home: Some(std::path::Path::new("/home/op")),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let mut config = RunConfig::defaults();
@@ -1101,6 +1104,7 @@ mod tests {
             home: Some(std::path::Path::new("/home/op")),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let mut config = RunConfig::defaults();
@@ -1317,6 +1321,7 @@ mod tests {
             home: Some(std::path::Path::new("/home/op")),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let mut config = RunConfig::defaults();

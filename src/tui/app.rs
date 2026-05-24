@@ -534,6 +534,7 @@ fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
         RepoId, RepoNode,
@@ -574,6 +575,7 @@ mod tests {
             home: None,
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         })
     }
 
@@ -663,6 +665,7 @@ mod tests {
             home: None,
             now: None,
             cwd: Some(std::path::Path::new("/p/projb")),
+            filter: RowFilter::default(),
         });
         let hint = tree
             .rows

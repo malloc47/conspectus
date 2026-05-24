@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, CheckoutNode, GraphLink, GraphNode, GraphSnapshot,
     MuxSessionNode, NodeId, RelationKind, RepoId, RepoNode, WorkspaceId,
@@ -46,6 +47,11 @@ pub struct SessionsBuildInputs<'a> {
     /// and selection state machine can highlight the operator's
     /// orientation. Pass `None` to disable the highlight (tests).
     pub cwd: Option<&'a Path>,
+    /// Active row filter for the sessions view (ADR 0031). Sessions
+    /// that fail the predicate are dropped before bucketing so empty
+    /// groups never emit. An empty filter (the [`RowFilter::default`]
+    /// value) admits every session.
+    pub filter: RowFilter,
 }
 
 /// Build the sessions row tree. Pure: depends only on the inputs,
@@ -59,11 +65,26 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
 
     // Bucket sessions by their grouping key. The key shape depends
     // on `inputs.grouping`; the "Ungrouped" bucket catches sessions
-    // whose worktree/repo lookup fails.
+    // whose worktree/repo lookup fails. The active filter (ADR 0031)
+    // is applied per session before bucketing so empty groups never
+    // emit a header.
     let mut buckets: BTreeMap<GroupKey, Vec<SessionEntry<'_>>> = BTreeMap::new();
     let mut ungrouped: Vec<SessionEntry<'_>> = Vec::new();
 
+    let filter = &inputs.filter;
     for (session_id, session) in &index.agent_sessions {
+        if !filter.is_empty() {
+            let candidate_count = index.mux_candidates_for_session(session_id).len();
+            let match_inputs = SessionMatchInputs {
+                harness_key: &session.harness_key,
+                now_epoch: inputs.now,
+                last_active_epoch: session.last_active_epoch,
+                mux_state: MuxStateKey::from_candidate_count(candidate_count),
+            };
+            if !filter.matches_session(&match_inputs) {
+                continue;
+            }
+        }
         let entry = SessionEntry {
             id: session_id.clone(),
             node: session,
@@ -867,6 +888,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
         assert!(tree.rows.is_empty());
         assert_eq!(tree.view, ViewLabel::Sessions);
@@ -894,6 +916,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         // Expect: repo row, then session row. No worktree row.
@@ -935,6 +958,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: Some(Path::new("/home/op/src/proj")),
+            filter: RowFilter::default(),
         });
 
         let group = match &tree.rows[0].kind {
@@ -967,6 +991,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: Some(Path::new("/home/op/src/proj")),
+            filter: RowFilter::default(),
         });
 
         let group = match &tree.rows[0].kind {
@@ -1002,6 +1027,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
@@ -1043,6 +1069,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         assert_eq!(tree.rows.len(), 3, "{:#?}", tree.rows);
@@ -1089,6 +1116,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
@@ -1134,6 +1162,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         // Expect a single repo row at depth 0, followed by two
@@ -1225,6 +1254,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let session_row = tree
@@ -1262,6 +1292,7 @@ mod tests {
             home: Some(home().as_path()),
             now: Some(1_000_000),
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let session_row = tree
@@ -1312,6 +1343,7 @@ mod tests {
             home: Some(home().as_path()),
             now: Some(2_500),
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let session_keys: Vec<&str> = tree
@@ -1357,6 +1389,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let row = tree
@@ -1412,6 +1445,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let session_row = tree
@@ -1481,6 +1515,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let session_row = tree
@@ -1514,6 +1549,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         assert_eq!(tree.rows.len(), 2);
@@ -1546,6 +1582,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let row = tree
@@ -1587,6 +1624,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         let row = tree
@@ -1624,6 +1662,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
 
         // With explicit worktree grouping, the worktree row is
@@ -1679,6 +1718,7 @@ mod tests {
             // the featx worktree row (more specific than the repo
             // row, which is also an ancestor).
             cwd: Some(std::path::Path::new("/home/op/wt/featx/src")),
+            filter: RowFilter::default(),
         });
 
         let marked: Vec<&GroupRow> = tree
@@ -1719,6 +1759,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: Some(std::path::Path::new("/tmp/elsewhere")),
+            filter: RowFilter::default(),
         });
         for row in &tree.rows {
             if let RowKind::Group(g) = &row.kind {
@@ -1752,6 +1793,7 @@ mod tests {
             home: Some(home().as_path()),
             now: None,
             cwd: None,
+            filter: RowFilter::default(),
         });
         for row in &tree.rows {
             if let RowKind::Group(g) = &row.kind {
@@ -1770,5 +1812,228 @@ mod tests {
             Path::new("/a/barbecue")
         ));
         assert!(!path_is_ancestor_of(Path::new("/x"), Path::new("/y")));
+    }
+
+    // ---- ADR 0031: filter predicate integration ----
+
+    fn three_harness_snapshot() -> GraphSnapshot {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        // claude session, recent
+        snapshot.nodes.push(agent_session_with_activity(
+            "claude-code",
+            "/state",
+            "c1",
+            Some("/home/op/src/proj"),
+            1_000_000,
+        ));
+        // codex session, stale (8 days old vs `now = 1_000_000`)
+        let eight_days = 8 * 24 * 60 * 60;
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "x1",
+            Some("/home/op/src/proj"),
+            1_000_000 - eight_days,
+        ));
+        // opencode session, recent
+        snapshot.nodes.push(agent_session_with_activity(
+            "opencode",
+            "/state",
+            "o1",
+            Some("/home/op/src/proj"),
+            1_000_000 - 600,
+        ));
+        resolve_snapshot(snapshot)
+    }
+
+    fn session_rows(tree: &RowTree) -> Vec<&AgentSessionRow> {
+        tree.rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn filter_harness_narrows_to_matching_sessions() {
+        let snapshot = three_harness_snapshot();
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+            filter: RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+                ..RowFilter::default()
+            },
+        });
+        let sessions = session_rows(&tree);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].harness_label, "claude");
+    }
+
+    #[test]
+    fn filter_max_age_drops_stale_sessions() {
+        let snapshot = three_harness_snapshot();
+        let week = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+            filter: RowFilter {
+                max_age: Some(week),
+                ..RowFilter::default()
+            },
+        });
+        // codex (8d old) drops; claude and opencode remain.
+        let labels: Vec<&str> = session_rows(&tree)
+            .iter()
+            .map(|s| s.harness_label.as_str())
+            .collect();
+        assert_eq!(labels.len(), 2);
+        assert!(labels.contains(&"claude"));
+        assert!(labels.contains(&"opencode"));
+        assert!(!labels.contains(&"codex"));
+    }
+
+    #[test]
+    fn filter_mux_state_unmuxed_admits_unmuxed_sessions_only() {
+        let snapshot = three_harness_snapshot();
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+            filter: RowFilter {
+                mux_state: Some(crate::filter::MuxStateFilter::from_values([
+                    crate::filter::MuxStateKey::Unmuxed,
+                ])),
+                ..RowFilter::default()
+            },
+        });
+        // None of the fixture sessions have mux links, so all three pass.
+        assert_eq!(session_rows(&tree).len(), 3);
+
+        // Asking for attached-only drops all three.
+        let attached_only = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+            filter: RowFilter {
+                mux_state: Some(crate::filter::MuxStateFilter::from_values([
+                    crate::filter::MuxStateKey::Attached,
+                ])),
+                ..RowFilter::default()
+            },
+        });
+        assert!(session_rows(&attached_only).is_empty());
+    }
+
+    #[test]
+    fn filter_intersection_of_all_dimensions() {
+        let snapshot = three_harness_snapshot();
+        let week = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+            filter: RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values([
+                    "claude-code",
+                    "codex",
+                ])),
+                max_age: Some(week),
+                mux_state: Some(crate::filter::MuxStateFilter::from_values([
+                    crate::filter::MuxStateKey::Unmuxed,
+                ])),
+            },
+        });
+        // claude-code passes harness+age+mux; codex fails the age cut.
+        let sessions = session_rows(&tree);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].harness_label, "claude");
+    }
+
+    #[test]
+    fn filter_emptying_set_drops_entire_tree() {
+        let snapshot = three_harness_snapshot();
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(1_000_000),
+            cwd: None,
+            filter: RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["aider"])),
+                ..RowFilter::default()
+            },
+        });
+        // No matching session means no rows at all — group headers
+        // skip emission when their bucket is empty.
+        assert!(tree.rows.is_empty(), "{:#?}", tree.rows);
+    }
+
+    #[test]
+    fn filter_skips_empty_groups_so_no_orphan_headers_render() {
+        // Two repos, but the filter only matches a session in repo A.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/projA"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/projA", "/home/op/src/projA"));
+        snapshot.nodes.push(repo("/home/op/src/projB"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/projB", "/home/op/src/projB"));
+        snapshot.nodes.push(agent_session(
+            "claude-code",
+            "/state",
+            "a",
+            Some("/home/op/src/projA"),
+            None,
+            None,
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "b",
+            Some("/home/op/src/projB"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+                ..RowFilter::default()
+            },
+        });
+        // Only one group header should render (projA), not both.
+        let group_count = tree
+            .rows
+            .iter()
+            .filter(|r| matches!(r.kind, RowKind::Group(_)))
+            .count();
+        assert_eq!(group_count, 1, "{:#?}", tree.rows);
+        assert_eq!(session_rows(&tree).len(), 1);
     }
 }

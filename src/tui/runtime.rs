@@ -21,6 +21,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 
 use crate::discovery::discover_local_at_roots;
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
+use crate::filter::RowFilter;
 use crate::model::{GraphSnapshot, MuxSessionId};
 use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{AttachTarget, attach_disabled_reason, resolve_attach_target};
@@ -294,9 +295,9 @@ fn live_session_advisory(
         return None;
     };
     match session_row.mux_state {
-        MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => Some(
-            "live session: alias overlays harness title until session ends",
-        ),
+        MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => {
+            Some("live session: alias overlays harness title until session ends")
+        }
         MuxIndicator::Unmuxed => None,
     }
 }
@@ -393,6 +394,7 @@ fn build_tree_for_view(snapshot: &GraphSnapshot, config: &RunConfig) -> RowTree 
             home: home.as_deref(),
             now: current_unix_epoch(),
             cwd: config.cwd.as_deref(),
+            filter: RowFilter::default(),
         }),
         // Mux / union / prs / forks builders land in the remaining
         // P8-004 commits; until then those views show an empty
