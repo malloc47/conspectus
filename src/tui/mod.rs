@@ -21,6 +21,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+use crate::filter::RowFilter;
+
 pub mod actions;
 mod app;
 pub mod detail;
@@ -50,6 +52,10 @@ pub struct RunConfig {
     pub default_sort: Sort,
     /// Top-level grouping in the sessions tree.
     pub sessions_grouping: SessionsGrouping,
+    /// Initial row filter (ADR 0031). Applies to the sessions view
+    /// in v1; F8-003 generalizes to per-view state. Empty filter
+    /// admits every row.
+    pub initial_filter: RowFilter,
     /// Background graph refresh cadence.
     pub refresh_interval: Duration,
     /// Selected mux pane capture cadence.
@@ -73,6 +79,7 @@ impl RunConfig {
             default_view: View::Sessions,
             default_sort: Sort::Hierarchy,
             sessions_grouping: SessionsGrouping::Graph,
+            initial_filter: RowFilter::default(),
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,

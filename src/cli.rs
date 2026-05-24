@@ -979,6 +979,10 @@ struct TableRowsArgs {
     /// `never` forces it off.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
+    /// Filter / grouping flags (ADR 0031). The flags are recognized
+    /// today; `table` will start applying them in F8-010.
+    #[command(flatten)]
+    filter_args: FilterArgs,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -1289,14 +1293,17 @@ struct TuiArgs {
     /// Initial left-panel organization.
     #[arg(long, value_enum, default_value_t = ViewFlag::Sessions)]
     view: ViewFlag,
-    /// Top-level grouping in the sessions tree. See
-    /// `docs/implementation/phase-08-interactive-tui.md` for
-    /// semantics of each value.
-    #[arg(long = "sessions-grouping", value_enum, default_value_t = SessionsGroupingFlag::Graph)]
-    sessions_grouping: SessionsGroupingFlag,
+    /// Deprecated alias for `--grouping` when `--view sessions` is
+    /// active (ADR 0031). Continues to work but emits a one-line
+    /// deprecation warning to stderr; `--grouping` overrides on
+    /// conflict.
+    #[arg(long = "sessions-grouping", value_enum)]
+    sessions_grouping: Option<SessionsGroupingFlag>,
     /// Row sort within each group.
     #[arg(long, value_enum, default_value_t = SortFlag::Hierarchy)]
     sort: SortFlag,
+    #[command(flatten)]
+    filter_args: FilterArgs,
     /// Background graph refresh cadence (e.g. `30s`, `1m`, `500ms`).
     #[arg(
         long = "refresh-interval",
@@ -1349,6 +1356,125 @@ enum SessionsGroupingFlag {
     ScanRoot,
 }
 
+impl SessionsGroupingFlag {
+    fn to_grouping(self) -> conspectus::tui::Grouping {
+        use conspectus::tui::{Grouping, SessionsGrouping};
+        match self {
+            SessionsGroupingFlag::Graph => Grouping::Sessions(SessionsGrouping::Graph),
+            SessionsGroupingFlag::Repo => Grouping::Sessions(SessionsGrouping::Repo),
+            SessionsGroupingFlag::Checkout => Grouping::Sessions(SessionsGrouping::Checkout),
+            SessionsGroupingFlag::ScanRoot => Grouping::Sessions(SessionsGrouping::ScanRoot),
+        }
+    }
+}
+
+/// Filter / grouping flag surface shared by `conspectus tui` and
+/// `conspectus table <ROWS>` (ADR 0031, F8-009). Mount with
+/// `#[command(flatten)]` so the host struct picks up every flag
+/// without re-declaring them.
+///
+/// Resolution helpers ([`FilterArgs::to_row_filter`] and
+/// [`FilterArgs::to_grouping`]) take the active view so per-view
+/// grouping validation can produce actionable errors against the
+/// view's enum.
+#[derive(Debug, Args, Default, Clone)]
+struct FilterArgs {
+    /// Narrow to one or more harness keys. Repeatable; values
+    /// accumulate into a set. Comparison is case-insensitive and
+    /// trim-aware.
+    #[arg(long = "harness", value_name = "HARNESS")]
+    harness: Vec<String>,
+    /// Drop rows whose `last_active_epoch` is older than this
+    /// window (e.g. `7d`, `24h`, `30m`).
+    #[arg(long = "max-age", value_name = "DURATION")]
+    max_age: Option<String>,
+    /// Narrow by derived mux state. Comma-separated or repeatable.
+    /// Legal values: `attached`, `ambiguous`, `unmuxed`.
+    #[arg(long = "mux-state", value_name = "STATE", value_delimiter = ',')]
+    mux_state: Vec<String>,
+    /// Per-view grouping. Accepted values depend on `--view`; see
+    /// `conspectus tui --help` for the per-view list (ADR 0031).
+    #[arg(long = "grouping", value_name = "VALUE")]
+    grouping: Option<String>,
+}
+
+impl FilterArgs {
+    /// Convert the raw flag values into a [`conspectus::filter::RowFilter`].
+    /// Returns an error when a value fails to parse (max-age
+    /// duration, mux-state spelling).
+    fn to_row_filter(&self) -> Result<conspectus::filter::RowFilter> {
+        use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+        let harness = if self.harness.is_empty() {
+            None
+        } else {
+            Some(HarnessFilter::from_values(self.harness.iter()))
+        };
+        let max_age = match self.max_age.as_deref() {
+            Some(raw) => Some(
+                parse_filter_duration(raw)
+                    .map_err(|err| anyhow!("invalid --max-age `{raw}`: {err}"))?,
+            ),
+            None => None,
+        };
+        let mux_state = if self.mux_state.is_empty() {
+            None
+        } else {
+            let mut keys = Vec::with_capacity(self.mux_state.len());
+            for raw in &self.mux_state {
+                let key = MuxStateKey::from_str_ci(raw).ok_or_else(|| {
+                    anyhow!(
+                        "invalid --mux-state `{raw}`; expected one of attached, ambiguous, unmuxed"
+                    )
+                })?;
+                keys.push(key);
+            }
+            Some(MuxStateFilter::from_values(keys))
+        };
+        Ok(RowFilter {
+            harness,
+            max_age,
+            mux_state,
+        })
+    }
+
+    /// Convert the `--grouping` flag value into a typed
+    /// [`conspectus::tui::Grouping`] for the active view. Returns
+    /// `Ok(None)` when the flag wasn't provided; returns an error
+    /// when the value isn't valid for `view` so the caller can list
+    /// the legal values in the message.
+    fn to_grouping(
+        &self,
+        view: conspectus::tui::View,
+    ) -> Result<Option<conspectus::tui::Grouping>> {
+        let Some(raw) = self.grouping.as_deref() else {
+            return Ok(None);
+        };
+        conspectus::tui::Grouping::parse_for(view, raw)
+            .map(Some)
+            .ok_or_else(|| {
+                let choices = conspectus::tui::Grouping::values_for(view)
+                    .iter()
+                    .map(|g| g.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                anyhow!(
+                    "invalid --grouping `{raw}` for --view {}; expected one of {choices}",
+                    view_flag_label(view)
+                )
+            })
+    }
+}
+
+fn view_flag_label(view: conspectus::tui::View) -> &'static str {
+    match view {
+        conspectus::tui::View::Sessions => "sessions",
+        conspectus::tui::View::Mux => "mux",
+        conspectus::tui::View::Union => "union",
+        conspectus::tui::View::Prs => "prs",
+        conspectus::tui::View::Forks => "forks",
+    }
+}
+
 impl TuiArgs {
     fn run(self) -> Result<()> {
         let refresh_interval = parse_tui_duration(&self.refresh_interval).map_err(|err| {
@@ -1382,31 +1508,77 @@ impl TuiArgs {
         let scan_roots = if !self.scan_roots.is_empty() {
             self.scan_roots
         } else if !outcome.config.tui.scan_roots.is_empty() {
-            outcome.config.tui.scan_roots
+            outcome.config.tui.scan_roots.clone()
         } else {
             vec![cwd.clone()]
+        };
+
+        let view = match self.view {
+            ViewFlag::Sessions => conspectus::tui::View::Sessions,
+            ViewFlag::Mux => conspectus::tui::View::Mux,
+            ViewFlag::Union => conspectus::tui::View::Union,
+            ViewFlag::Prs => conspectus::tui::View::Prs,
+            ViewFlag::Forks => conspectus::tui::View::Forks,
+        };
+
+        // Resolve initial filter: CLI flags win over config.
+        let cli_filter = self.filter_args.to_row_filter()?;
+        let initial_filter = if cli_filter.is_empty() {
+            outcome.config.tui.views.for_view(view).filter.clone()
+        } else {
+            cli_filter
+        };
+
+        // Resolve initial grouping with precedence:
+        //  1. --grouping (new, per-view, validated)
+        //  2. --sessions-grouping (legacy alias; warns; only valid when view=sessions)
+        //  3. config `[tui.views.<name>].grouping`
+        //  4. Grouping::default_for(view)
+        let mut initial_grouping = self.filter_args.to_grouping(view)?;
+        if let Some(legacy) = self.sessions_grouping {
+            eprintln!(
+                "conspectus: warning: --sessions-grouping is deprecated; \
+                 use --grouping instead (ADR 0031)"
+            );
+            if view != conspectus::tui::View::Sessions {
+                eprintln!(
+                    "conspectus: warning: --sessions-grouping ignored because \
+                     --view is not `sessions`"
+                );
+            } else if initial_grouping.is_none() {
+                initial_grouping = Some(legacy.to_grouping());
+            }
+        }
+        let initial_grouping = match initial_grouping {
+            Some(g) => g,
+            None => outcome
+                .config
+                .tui
+                .views
+                .for_view(view)
+                .grouping
+                .unwrap_or_else(|| conspectus::tui::Grouping::default_for(view)),
+        };
+        let sessions_grouping = match initial_grouping {
+            conspectus::tui::Grouping::Sessions(g) => g,
+            // For non-sessions views, the runtime still needs a
+            // SessionsGrouping for build_tree_for_view's sessions
+            // branch; fall back to the default so a `--view mux
+            // --grouping host` launch doesn't accidentally drag a
+            // sessions grouping along. F8-003 generalizes this.
+            _ => conspectus::tui::SessionsGrouping::Graph,
         };
 
         let config = conspectus::tui::RunConfig {
             scan_roots,
             cwd: Some(cwd),
-            default_view: match self.view {
-                ViewFlag::Sessions => conspectus::tui::View::Sessions,
-                ViewFlag::Mux => conspectus::tui::View::Mux,
-                ViewFlag::Union => conspectus::tui::View::Union,
-                ViewFlag::Prs => conspectus::tui::View::Prs,
-                ViewFlag::Forks => conspectus::tui::View::Forks,
-            },
+            default_view: view,
             default_sort: match self.sort {
                 SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
                 SortFlag::Recency => conspectus::tui::Sort::Recency,
             },
-            sessions_grouping: match self.sessions_grouping {
-                SessionsGroupingFlag::Graph => conspectus::tui::SessionsGrouping::Graph,
-                SessionsGroupingFlag::Repo => conspectus::tui::SessionsGrouping::Repo,
-                SessionsGroupingFlag::Checkout => conspectus::tui::SessionsGrouping::Checkout,
-                SessionsGroupingFlag::ScanRoot => conspectus::tui::SessionsGrouping::ScanRoot,
-            },
+            sessions_grouping,
+            initial_filter,
             refresh_interval,
             mux_preview_interval,
             live_preview_enabled: !self.no_live_preview,
@@ -1429,6 +1601,33 @@ fn current_tmux_session_name() -> Option<String> {
     }
     let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!name.is_empty()).then_some(name)
+}
+
+/// Parse a duration like [`parse_tui_duration`] but accept a `d`
+/// (days) suffix. Used by `--max-age` where day-scale windows are
+/// common; `parse_tui_duration` deliberately rejects `d` because
+/// day-scale refresh intervals don't make sense.
+fn parse_filter_duration(input: &str) -> Result<Duration, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("empty duration".into());
+    }
+    let split = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| "missing unit (expected ms/s/m/h/d)".to_string())?;
+    let (num_str, suffix) = trimmed.split_at(split);
+    let value: u64 = num_str
+        .parse()
+        .map_err(|_| format!("not a non-negative integer: `{num_str}`"))?;
+    let dur = match suffix {
+        "ms" => Duration::from_millis(value),
+        "s" => Duration::from_secs(value),
+        "m" => Duration::from_secs(value.saturating_mul(60)),
+        "h" => Duration::from_secs(value.saturating_mul(3600)),
+        "d" => Duration::from_secs(value.saturating_mul(86_400)),
+        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h/d)")),
+    };
+    Ok(dur)
 }
 
 /// Parse a small subset of duration strings: `<integer><ms|s|m|h>`.
@@ -1736,6 +1935,109 @@ mod tests {
             .expect("hooks");
         assert_eq!(hooks.len(), 1);
         assert_eq!(hooks[0]["command"], "echo existing");
+    }
+
+    // ---- ADR 0031 / F8-009: FilterArgs ----
+
+    fn filter_args_with(
+        harness: Vec<&str>,
+        max_age: Option<&str>,
+        mux_state: Vec<&str>,
+        grouping: Option<&str>,
+    ) -> FilterArgs {
+        FilterArgs {
+            harness: harness.into_iter().map(String::from).collect(),
+            max_age: max_age.map(String::from),
+            mux_state: mux_state.into_iter().map(String::from).collect(),
+            grouping: grouping.map(String::from),
+        }
+    }
+
+    #[test]
+    fn filter_args_empty_produces_empty_row_filter() {
+        let args = FilterArgs::default();
+        let filter = args.to_row_filter().expect("parse");
+        assert!(filter.is_empty());
+    }
+
+    #[test]
+    fn filter_args_harness_repeats_into_set() {
+        let args = filter_args_with(vec!["claude-code", "codex"], None, vec![], None);
+        let filter = args.to_row_filter().expect("parse");
+        assert_eq!(
+            filter
+                .harness
+                .as_ref()
+                .map(|h| h.values().to_vec())
+                .unwrap_or_default(),
+            vec!["claude-code".to_string(), "codex".to_string()]
+        );
+    }
+
+    #[test]
+    fn filter_args_max_age_parses_duration_suffixes() {
+        let args = filter_args_with(vec![], Some("7d"), vec![], None);
+        let filter = args.to_row_filter().expect("parse");
+        assert_eq!(
+            filter.max_age,
+            Some(std::time::Duration::from_secs(7 * 24 * 60 * 60))
+        );
+    }
+
+    #[test]
+    fn filter_args_max_age_reports_actionable_error() {
+        let args = filter_args_with(vec![], Some("nope"), vec![], None);
+        let err = args.to_row_filter().unwrap_err().to_string();
+        assert!(err.contains("invalid --max-age"));
+    }
+
+    #[test]
+    fn filter_args_mux_state_parses_each_value() {
+        let args = filter_args_with(vec![], None, vec!["unmuxed", "Ambiguous"], None);
+        let filter = args.to_row_filter().expect("parse");
+        let states = filter
+            .mux_state
+            .as_ref()
+            .map(|m| m.values().to_vec())
+            .unwrap_or_default();
+        use conspectus::filter::MuxStateKey;
+        assert!(states.contains(&MuxStateKey::Unmuxed));
+        assert!(states.contains(&MuxStateKey::Ambiguous));
+    }
+
+    #[test]
+    fn filter_args_mux_state_invalid_value_errors_with_choices() {
+        let args = filter_args_with(vec![], None, vec!["frobnicated"], None);
+        let err = args.to_row_filter().unwrap_err().to_string();
+        assert!(err.contains("invalid --mux-state"));
+        assert!(err.contains("attached, ambiguous, unmuxed"));
+    }
+
+    #[test]
+    fn filter_args_grouping_parses_per_view() {
+        use conspectus::tui::{Grouping, SessionsGrouping, View};
+        let args = filter_args_with(vec![], None, vec![], Some("repo"));
+        assert_eq!(
+            args.to_grouping(View::Sessions).expect("parse"),
+            Some(Grouping::Sessions(SessionsGrouping::Repo))
+        );
+    }
+
+    #[test]
+    fn filter_args_grouping_rejects_value_for_wrong_view() {
+        use conspectus::tui::View;
+        // `host` is a mux grouping, not a sessions one.
+        let args = filter_args_with(vec![], None, vec![], Some("host"));
+        let err = args.to_grouping(View::Sessions).unwrap_err().to_string();
+        assert!(err.contains("invalid --grouping `host` for --view sessions"));
+        assert!(err.contains("graph, repo, checkout, scan-root"));
+    }
+
+    #[test]
+    fn filter_args_grouping_none_when_flag_omitted() {
+        use conspectus::tui::View;
+        let args = FilterArgs::default();
+        assert!(args.to_grouping(View::Sessions).expect("parse").is_none());
     }
 }
 
