@@ -73,6 +73,21 @@ pub struct App {
     /// when no overlay is open; `Some` suspends the surrounding
     /// keymap and routes input through the modal.
     rename_overlay: Option<crate::tui::widgets::input::TextInputState>,
+    /// Active controls overlay (ADR 0031, F8-004). `None` when the
+    /// overlay is closed; `Some` suspends the surrounding keymap
+    /// and routes input through the modal.
+    controls_overlay: Option<crate::tui::widgets::controls::ControlsOverlayState>,
+    /// Global sort toggle (ADR 0031). Per-view state covers
+    /// filter/grouping/expanded; sort stays global because the
+    /// recency-vs-hierarchy choice is view-independent in operator
+    /// practice. Seeded from [`RunConfig::default_sort`].
+    sort: super::Sort,
+    /// Active row filter (ADR 0031). In the v1 wiring this is the
+    /// effective filter for the active view; per-view state
+    /// retention (F8-003) generalizes it to a map.
+    filter: crate::filter::RowFilter,
+    /// Active grouping (ADR 0031). Same v1 scoping as `filter`.
+    grouping: super::Grouping,
 }
 
 /// Which panel currently consumes navigation keys.
@@ -141,6 +156,9 @@ pub enum Msg {
 impl App {
     /// Build a fresh app at the start of the run.
     pub fn new(config: RunConfig) -> Self {
+        let sort = config.default_sort;
+        let filter = config.initial_filter.clone();
+        let grouping = super::Grouping::Sessions(config.sessions_grouping);
         Self {
             config,
             should_quit: false,
@@ -156,6 +174,10 @@ impl App {
             preview_store: PreviewStore::new(),
             left_scroll: Cell::new(0),
             rename_overlay: None,
+            controls_overlay: None,
+            sort,
+            filter,
+            grouping,
         }
     }
 
@@ -181,6 +203,103 @@ impl App {
     /// Close the rename overlay without committing.
     pub fn close_rename_overlay(&mut self) {
         self.rename_overlay = None;
+    }
+
+    /// Active controls-overlay state (ADR 0031, F8-004), if any.
+    pub fn controls_overlay(&self) -> Option<&crate::tui::widgets::controls::ControlsOverlayState> {
+        self.controls_overlay.as_ref()
+    }
+
+    /// Mutable access for the runtime's per-key forwarding.
+    pub fn controls_overlay_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::controls::ControlsOverlayState> {
+        self.controls_overlay.as_mut()
+    }
+
+    /// Open the controls overlay with the cursor on the active view
+    /// row.
+    pub fn open_controls_overlay(&mut self) {
+        let ctx = self.controls_context();
+        self.controls_overlay = Some(crate::tui::widgets::controls::ControlsOverlayState::new(
+            &ctx,
+        ));
+    }
+
+    /// Open the controls overlay with the cursor on the Filters >
+    /// Harness row. Used by the `f` accelerator (F8-005).
+    pub fn open_controls_overlay_at_filters(&mut self) {
+        let ctx = self.controls_context();
+        self.controls_overlay =
+            Some(crate::tui::widgets::controls::ControlsOverlayState::new_at_filters(&ctx));
+    }
+
+    /// Close the controls overlay without applying anything.
+    pub fn close_controls_overlay(&mut self) {
+        self.controls_overlay = None;
+    }
+
+    /// Snapshot of the live state the controls overlay renders
+    /// against. Borrowed each frame so the overlay never lags
+    /// behind the app.
+    pub fn controls_context(&self) -> crate::tui::widgets::controls::ControlsContext<'_> {
+        crate::tui::widgets::controls::ControlsContext {
+            view: self.config.default_view,
+            grouping: self.grouping,
+            filter: &self.filter,
+            sort: self.sort,
+        }
+    }
+
+    /// Active row filter for the visible view. F8-003 will
+    /// generalize this to per-view state.
+    pub fn filter(&self) -> &crate::filter::RowFilter {
+        &self.filter
+    }
+
+    /// Active grouping for the visible view.
+    pub fn grouping(&self) -> super::Grouping {
+        self.grouping
+    }
+
+    /// Global sort order.
+    pub fn sort(&self) -> super::Sort {
+        self.sort
+    }
+
+    /// Apply a [`crate::tui::widgets::controls::ControlsAction`] to
+    /// the app state. The runtime calls this when the controls
+    /// overlay returns an `ApplyAndStay` / `ApplyAndClose` outcome
+    /// so the side effect lives in one place.
+    pub fn apply_controls_action(&mut self, action: crate::tui::widgets::controls::ControlsAction) {
+        use crate::tui::widgets::controls::ControlsAction;
+        match action {
+            ControlsAction::SwitchView(view) => {
+                self.config.default_view = view;
+                // Reset grouping to the new view's default unless
+                // F8-003 retention takes over. v1 keeps the existing
+                // sessions_grouping field in sync for the sessions
+                // builder path.
+                self.grouping = super::Grouping::default_for(view);
+                if let super::Grouping::Sessions(g) = self.grouping {
+                    self.config.sessions_grouping = g;
+                }
+            }
+            ControlsAction::SetGrouping(g) => {
+                self.grouping = g;
+                if let super::Grouping::Sessions(g) = g {
+                    self.config.sessions_grouping = g;
+                }
+            }
+            ControlsAction::SetFilter(filter) => {
+                self.filter = filter.clone();
+                self.config.initial_filter = filter;
+            }
+            ControlsAction::SetSort(sort) => {
+                self.sort = sort;
+                self.config.default_sort = sort;
+            }
+        }
     }
 
     /// Read-only access to the immutable run config.

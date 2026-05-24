@@ -66,6 +66,7 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
     draw_header(app, frame, layout[0]);
     draw_body(app, frame, layout[1]);
     draw_status_bar(app, frame, layout[2]);
+    draw_controls_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
 }
 
@@ -75,6 +76,15 @@ fn draw_rename_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     };
     use crate::tui::widgets::input::TextInputWidget;
     let widget = TextInputWidget::new(state);
+    frame.render_widget(widget, area);
+}
+
+fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.controls_overlay() else {
+        return;
+    };
+    use crate::tui::widgets::controls::ControlsOverlayWidget;
+    let widget = ControlsOverlayWidget::new(state, app.controls_context());
     frame.render_widget(widget, area);
 }
 
