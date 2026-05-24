@@ -3476,6 +3476,132 @@ failure:
     attribution path.
   - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
 
+### Testing Improvements And Regression Replay (TEST-*)
+
+Recent bugfixes around hook sidecars, active-pane evidence, TUI
+attachment, and provider parser drift show that individual unit tests
+are not enough. The missing coverage is a higher-level, fixture-backed
+way to replay whole operator scenarios across harness state, mux state,
+hook records, resolver output, and TUI row projection. This workstream
+adds that layer without replacing the existing unit, CLI smoke, and
+snapshot tests.
+
+Dependency shape inside the workstream:
+
+```
+TEST-001 ─→ TEST-002 ─→ TEST-003 ─→ TEST-005
+              │             │
+              └────────────→ TEST-004
+```
+
+`TEST-001` establishes the harness. `TEST-002` adds sanitized
+real-world fixture material so regressions can be captured quickly.
+`TEST-003` turns recent MUXPROC escapes into replayed scenarios.
+`TEST-004` adds broad invariants that should hold across any graph
+fixture. `TEST-005` covers TUI interaction regressions that only show
+up after row expansion, scrolling, or attach resolution.
+
+- [x] `TEST-001` Add a MUXPROC scenario replay harness.
+  - Scope: introduce a test support layer that can build a complete
+    synthetic local world from small scenario inputs: harness state
+    roots, hook SQLite records, fake tmux rows with active-pane
+    command/pid/cwd, and injected active-pane fd evidence. Run the
+    same pipeline an operator relies on: discovery, resolution, and
+    sessions row-tree projection. Keep it deterministic and free of
+    real tmux, real `/proc`, real home directories, or network
+    access.
+  - Tests: self-tests for the harness itself covering empty worlds,
+    one harness session plus one mux, hook SQLite record insertion,
+    fake fd evidence injection, and path normalization for stable
+    snapshots.
+  - Manual checks: none; this is infrastructure for automated
+    regression replay.
+  - Blockers: none.
+  - Outcome: added `tests/support/replay.rs`, a deterministic
+    integration-test harness that builds synthetic local worlds from
+    temp harness state roots, fake tmux rows with active-pane process
+    fields, hook sidecar SQLite records, and injected active-pane fd
+    target paths. Replay runs the operator pipeline through local
+    discovery, fd-evidence inference, resolution, and the sessions
+    row-tree projection without real tmux, real `/proc`, real home
+    directories, or network access. Added five self-tests in
+    `tests/testing_replay.rs` covering empty worlds, one harness
+    session plus one mux, hook SQLite record insertion, fake fd
+    evidence injection, and temp-path normalization.
+
+- [ ] `TEST-002` Add a sanitized real-state fixture corpus.
+  - Scope: create checked-in fixture directories for representative
+    real provider shapes that synthetic builders have historically
+    missed: Codex rollout JSONL files, Claude Code transcript
+    envelopes and lineage variants, hook payloads, tmux discovery
+    rows, and `/proc/<pid>/fd` target strings. Add a small sanitizer
+    script or documented command sequence that strips usernames,
+    absolute private paths, tokens, prompt contents, and host-specific
+    IDs while preserving schema shape and edge-case fields.
+  - Tests: fixture-load tests that parse every corpus file and assert
+    the expected node/link or payload shape; no test reads the user's
+    real `~/.codex`, `~/.claude`, tmux server, or `/proc`.
+  - Manual checks: run the sanitizer against a known live failure and
+    confirm the resulting fixture is reviewable, deterministic, and
+    free of private transcript text.
+  - Blockers: `TEST-001` for replay integration; the corpus can start
+    with parser-only tests before the replay harness is complete.
+
+- [ ] `TEST-003` Replay recent MUXPROC drift and stale-evidence bugs.
+  - Scope: encode the recent bugfix history as replay scenarios:
+    launch argv names session A while stronger hook/fd evidence names
+    B; multiple same-pane hook records where the freshest wins; stale
+    Claude hook records left behind after the pane starts running
+    Codex; hook records whose transcript path is missing; Codex argv
+    naming an older resumed thread while open fd evidence names the
+    current rollout. Assert both graph evidence state and TUI-visible
+    row projection.
+  - Tests: scenario snapshots or structured assertions proving there
+    is exactly one preferred mux indicator per active pane, weaker
+    launch/cwd evidence is overridden or ignored rather than deleted,
+    phantom sessions are not synthesized from missing transcripts,
+    and Codex open-fd evidence remains preferred over stale argv.
+  - Manual checks: none required once scenarios are replayable; live
+    checks remain useful only when adding a new real-world failure to
+    the corpus.
+  - Blockers: `TEST-001`; benefits from `TEST-002`.
+
+- [ ] `TEST-004` Add graph and row-projection invariant tests.
+  - Scope: add table-driven and, where practical, property-style
+    tests for invariants that cut across specific scenarios: ignored
+    candidates never resolve as active relationships; stronger
+    current-session evidence beats launch evidence; hook-sidecar
+    records produce at most one active link per `(mux, pane_id)` key;
+    TUI session rows dedupe mux indicators by target; unresolved or
+    ignored candidates remain diagnosable without becoming preferred
+    rows.
+  - Tests: invariant tests over hand-built graph fragments plus a
+    small matrix of replay fixtures. Add `proptest` only if a
+    bounded generator demonstrates value; otherwise keep the first
+    slice deterministic and table-driven.
+  - Manual checks: none.
+  - Blockers: none for table-driven invariants; `TEST-001` before
+    running invariants against replay fixtures.
+
+- [ ] `TEST-005` Add TUI interaction regression tests for row
+  expansion, scrolling, and attach resolution.
+  - Scope: build a thin test driver around `App` that applies fixed
+    key/action sequences at deterministic terminal sizes. Cover the
+    cases that escaped pure row snapshots: expanded ambiguous mux
+    candidates remain navigable, selection stays visible while
+    groups expand/collapse, attach target resolution never targets
+    the current tmux session, preview/detail panes tolerate missing
+    or ignored links, and the row cursor can move past duplicate or
+    overridden candidate rows.
+  - Tests: reducer/action tests plus Ratatui buffer snapshots for the
+    smallest useful set of fixed viewports. Prefer structured
+    assertions for navigation state and snapshots only where layout
+    regressions are the risk.
+  - Manual checks: run `conspectus tui` against a replayed or live
+    ambiguous-mux fixture only when adding a new interaction failure.
+  - Blockers: `TEST-001`; coordinates with `T8-006` so buffer
+    snapshot coverage is not duplicated.
+
 ### Session Naming
 
 Conspectus today is read-only outside Phase 5 declared-link CRUD. Session

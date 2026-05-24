@@ -19,7 +19,7 @@
 //! No nodes are created here, and any `Unresolved` lineage endpoints already
 //! present in `candidate_links` are left untouched.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 
 use crate::model::{
@@ -30,6 +30,31 @@ use crate::model::{
 const ADAPTER_NAME: &str = "cross_link";
 
 pub fn infer(snapshot: &mut GraphSnapshot) {
+    infer_with_fd_reader(snapshot, active_pane_fd_session_evidence);
+}
+
+/// Infer cross-provider links while injecting active-pane fd targets by pid.
+///
+/// This is primarily a deterministic test/replay seam: production discovery
+/// uses [`infer`], which reads `/proc/<pid>/fd` on platforms where that exists.
+/// Scenario tests use this helper to exercise the same fd-evidence path without
+/// depending on the host process table.
+#[doc(hidden)]
+pub fn infer_with_fd_paths(
+    snapshot: &mut GraphSnapshot,
+    fd_paths_by_pid: &BTreeMap<i64, Vec<String>>,
+) {
+    infer_with_fd_reader(snapshot, |pid| {
+        fd_paths_by_pid
+            .get(&pid)
+            .map(session_key_evidence_from_fd_paths)
+    });
+}
+
+fn infer_with_fd_reader(
+    snapshot: &mut GraphSnapshot,
+    fd_reader: impl Fn(i64) -> Option<SessionKeyEvidence>,
+) {
     let agent_sessions: Vec<&AgentSessionNode> = snapshot
         .nodes
         .iter()
@@ -49,7 +74,8 @@ pub fn infer(snapshot: &mut GraphSnapshot) {
     let checkout_roots = checkout_roots(snapshot);
     let workspace_member_roots = workspace_member_roots(snapshot);
     let fork_roots = fork_roots(snapshot);
-    let active_mux_sessions = active_mux_sessions(&agent_sessions, &mux_sessions, snapshot);
+    let active_mux_sessions =
+        active_mux_sessions(&agent_sessions, &mux_sessions, snapshot, &fd_reader);
 
     let mut new_links = Vec::new();
 
@@ -228,12 +254,13 @@ fn active_mux_sessions(
     sessions: &[&AgentSessionNode],
     muxes: &[&MuxSessionNode],
     snapshot: &GraphSnapshot,
+    fd_reader: &impl Fn(i64) -> Option<SessionKeyEvidence>,
 ) -> HashMap<crate::model::MuxSessionId, ActiveMuxSessionMatch> {
     let parent_by_child = parent_session_keys_by_child(snapshot);
     let mut active = HashMap::new();
 
     for mux in muxes {
-        let Some(evidence) = active_pane_evidence(mux) else {
+        let Some(evidence) = active_pane_evidence(mux, fd_reader) else {
             continue;
         };
         let direct_matches: BTreeSet<_> = sessions
@@ -302,11 +329,11 @@ impl ActivePaneEvidence {
     }
 }
 
-fn active_pane_evidence(mux: &MuxSessionNode) -> Option<ActivePaneEvidence> {
-    let fd_evidence = mux
-        .active_pane_pid
-        .and_then(active_pane_fd_session_evidence)
-        .unwrap_or_default();
+fn active_pane_evidence(
+    mux: &MuxSessionNode,
+    fd_reader: &impl Fn(i64) -> Option<SessionKeyEvidence>,
+) -> Option<ActivePaneEvidence> {
+    let fd_evidence = mux.active_pane_pid.and_then(fd_reader).unwrap_or_default();
     let command_evidence = mux
         .active_pane_start_command
         .as_deref()
