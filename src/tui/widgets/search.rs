@@ -19,7 +19,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::tui::rows::RowId;
-use crate::tui::search::{SearchBackend, SearchItem, SearchMatch};
+use crate::tui::search::{SearchBackend, SearchItem, SearchMatch, snippet_around};
 use crate::tui::widgets::input::TextInputState;
 
 /// Pure state for the search overlay. Holds the query text input,
@@ -227,35 +227,102 @@ impl Widget for SearchOverlayWidget<'_> {
             self.state.matches().len(),
         );
         let mut lines: Vec<Line<'static>> = Vec::new();
-        let id_to_label: std::collections::HashMap<&RowId, String> = self
-            .items
-            .iter()
-            .map(|item| (&item.id, item.label.to_string()))
-            .collect();
-        for (rendered_idx, idx) in
-            (scroll..(scroll + visible_rows).min(self.state.matches().len())).enumerate()
-        {
+        let id_to_item: std::collections::HashMap<&RowId, &SearchItem<'_>> =
+            self.items.iter().map(|item| (&item.id, item)).collect();
+        // Budget the snippet width against the modal so the line
+        // (label + separator + snippet) fits without wrapping; the
+        // label itself can be wide for verbose aliases, so the
+        // snippet always reserves at least ~24 chars.
+        let snippet_budget = (list_area.width as usize)
+            .saturating_sub(8 /* prefix + label spacer + ellipsis */)
+            .max(24);
+        for idx in scroll..(scroll + visible_rows).min(self.state.matches().len()) {
             let m = &self.state.matches()[idx];
-            let label = id_to_label
-                .get(&m.id)
-                .cloned()
+            let item = id_to_item.get(&m.id);
+            let label = item
+                .map(|i| i.label.to_string())
                 .unwrap_or_else(|| "<missing>".to_string());
-            let prefix = if idx == self.state.cursor() {
-                "> "
-            } else {
-                "  "
-            };
-            let style = if idx == self.state.cursor() {
-                Style::default().bg(Color::Indexed(238))
-            } else {
-                Style::default()
-            };
-            let line = Line::from(Span::styled(format!("{prefix}{label}"), style));
+            let is_cursor = idx == self.state.cursor();
+            let line = build_match_line(label, item.copied(), m, is_cursor, snippet_budget);
             lines.push(line);
-            let _ = rendered_idx;
         }
         Paragraph::new(lines).render(list_area, buf);
     }
+}
+
+/// Render a single match row with prefix, label, and a snippet of
+/// the haystack around the matched range. The cursor row carries a
+/// background highlight on every span; the matched bytes inside
+/// the snippet are bolded so they stand out even on the highlighted
+/// row.
+fn build_match_line(
+    label: String,
+    item: Option<&SearchItem<'_>>,
+    m: &SearchMatch,
+    is_cursor: bool,
+    snippet_budget: usize,
+) -> Line<'static> {
+    let row_bg = if is_cursor {
+        Some(Color::Indexed(238))
+    } else {
+        None
+    };
+    let apply_bg = |style: Style| -> Style {
+        if let Some(bg) = row_bg {
+            style.bg(bg)
+        } else {
+            style
+        }
+    };
+    let prefix = if is_cursor { "> " } else { "  " };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::styled(prefix.to_string(), apply_bg(Style::default())));
+    spans.push(Span::styled(label.clone(), apply_bg(Style::default())));
+
+    // If we can show a snippet (haystack present and either
+    // distinct from the label or carrying a match range), append
+    // `· …<context>…` after the label so the operator sees *why*
+    // the row matched.
+    let haystack = item.map(|i| i.haystack.as_ref()).unwrap_or("");
+    let matched_range = m.matched_range.clone().unwrap_or(0..0);
+    let snippet_distinct = haystack != label;
+    if !haystack.is_empty() && snippet_distinct {
+        spans.push(Span::styled(
+            "  · ".to_string(),
+            apply_bg(Style::default().add_modifier(Modifier::DIM)),
+        ));
+        let snippet = snippet_around(haystack, matched_range, snippet_budget);
+        // Split the snippet into pre-match / match / post-match
+        // spans so the matched portion is bolded.
+        if let Some(range) = snippet.highlight.clone() {
+            let pre = snippet.text[..range.start].to_string();
+            let mid = snippet.text[range.start..range.end].to_string();
+            let post = snippet.text[range.end..].to_string();
+            spans.push(Span::styled(
+                pre,
+                apply_bg(Style::default().add_modifier(Modifier::DIM)),
+            ));
+            spans.push(Span::styled(
+                mid,
+                apply_bg(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ));
+            spans.push(Span::styled(
+                post,
+                apply_bg(Style::default().add_modifier(Modifier::DIM)),
+            ));
+        } else {
+            spans.push(Span::styled(
+                snippet.text,
+                apply_bg(Style::default().add_modifier(Modifier::DIM)),
+            ));
+        }
+    }
+
+    Line::from(spans)
 }
 
 fn centered_modal_rect(area: Rect) -> Rect {
@@ -424,6 +491,65 @@ mod tests {
         };
         state.handle_key(ctrl_p);
         assert_eq!(state.cursor(), 0);
+    }
+
+    #[test]
+    fn match_line_includes_snippet_with_matched_bytes_highlighted() {
+        // Agent row whose alias is short but whose preview contains
+        // the actual match — the rendered line should expose the
+        // matching preview snippet alongside the alias.
+        let row = agent_row("nice", Some("nice"));
+        let mut row_with_preview = row.clone();
+        if let crate::tui::rows::RowKind::AgentSession(s) = &mut row_with_preview.kind {
+            s.preview = Some("lots of stuff and then puffin shows up here".to_string());
+        }
+        let items = items_from_rows(std::slice::from_ref(&row_with_preview));
+        let mut state = SearchOverlayState::new();
+        let backend = SubstringBackend;
+        for c in "puffin".chars() {
+            state.handle_key(key(KeyCode::Char(c)));
+            state.refresh_matches(&backend, &items);
+        }
+        let m = &state.matches()[0];
+        let line = build_match_line(items[0].label.to_string(), Some(&items[0]), m, true, 40);
+        let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(rendered.contains("nice"), "label rendered: {rendered}");
+        assert!(rendered.contains("puffin"), "snippet rendered: {rendered}");
+        // The matched portion should land in its own span so the
+        // renderer can style it.
+        let has_match_span = line.spans.iter().any(|s| s.content.as_ref() == "puffin");
+        assert!(has_match_span, "match span missing in: {:?}", line.spans);
+    }
+
+    #[test]
+    fn match_line_skips_snippet_when_label_equals_haystack() {
+        // Group rows have label == haystack — a snippet would just
+        // duplicate the label, so we omit it.
+        use crate::tui::rows::{GroupRow, Row, RowKind};
+        let row = Row {
+            id: RowId::Synthetic("g"),
+            depth: 0,
+            expandable: true,
+            kind: RowKind::Group(GroupRow {
+                display_path: "puffin/dir".to_string(),
+                primary_node: None,
+                is_launch_context: false,
+            }),
+        };
+        let items = items_from_rows(std::slice::from_ref(&row));
+        let mut state = SearchOverlayState::new();
+        let backend = SubstringBackend;
+        for c in "puffin".chars() {
+            state.handle_key(key(KeyCode::Char(c)));
+            state.refresh_matches(&backend, &items);
+        }
+        let m = &state.matches()[0];
+        let line = build_match_line(items[0].label.to_string(), Some(&items[0]), m, false, 40);
+        let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        // No `· ` separator means no duplicate snippet.
+        assert!(!rendered.contains("  · "), "rendered: {rendered}");
+        // Label still appears.
+        assert!(rendered.contains("puffin/dir"));
     }
 
     #[test]

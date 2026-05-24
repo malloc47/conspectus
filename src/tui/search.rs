@@ -88,6 +88,136 @@ impl SearchBackend for SubstringBackend {
     }
 }
 
+/// A windowed view of the haystack around a matched range, sized
+/// so it fits in the overlay's result list while keeping the match
+/// itself visible. The snippet is built by [`snippet_around`] and
+/// consumed by the search renderer to show context next to each
+/// match (rather than just the row label).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchSnippet {
+    /// The display text, with `…` markers on truncated sides.
+    pub text: String,
+    /// Byte range inside `text` to highlight (typically rendered
+    /// bold). `None` when the source range was empty or fell
+    /// outside the haystack.
+    pub highlight: Option<std::ops::Range<usize>>,
+}
+
+/// Build a [`MatchSnippet`] for `haystack` centered on `byte_range`,
+/// constrained to at most `max_chars` characters total. The result
+/// always contains the matched span; truncation happens on either
+/// side with a `…` marker. Operates in `char`s so multi-byte UTF-8
+/// stays valid.
+///
+/// `byte_range` is the byte range produced by a [`SearchBackend`]
+/// against the same haystack. An empty / out-of-range range yields
+/// a snippet without a highlight.
+pub fn snippet_around(
+    haystack: &str,
+    byte_range: std::ops::Range<usize>,
+    max_chars: usize,
+) -> MatchSnippet {
+    let total_chars = haystack.chars().count();
+    if total_chars <= max_chars {
+        let highlight = valid_byte_range(haystack, byte_range);
+        return MatchSnippet {
+            text: haystack.to_string(),
+            highlight,
+        };
+    }
+
+    // Locate the matched span's char indices. When the byte range
+    // is empty or outside the haystack, fall back to a head-anchored
+    // snippet without a highlight.
+    let Some((match_start_char, match_len_chars)) = chars_for_byte_range(haystack, &byte_range)
+    else {
+        let chars: Vec<char> = haystack.chars().take(max_chars.saturating_sub(1)).collect();
+        let mut text: String = chars.iter().collect();
+        text.push('…');
+        return MatchSnippet {
+            text,
+            highlight: None,
+        };
+    };
+
+    // Budget for context on either side, after accounting for the
+    // matched span and the two ellipsis markers (only used when we
+    // actually truncate).
+    let context = max_chars
+        .saturating_sub(match_len_chars)
+        .saturating_sub(2 /* room for two `…` */);
+    let before_budget = context / 2;
+    let after_budget = context - before_budget;
+
+    let chars: Vec<char> = haystack.chars().collect();
+    let mut window_start = match_start_char.saturating_sub(before_budget);
+    let mut window_end = (match_start_char + match_len_chars + after_budget).min(total_chars);
+
+    // If one side was unbounded, spend the leftover budget on the
+    // other side so the visible width stays close to `max_chars`.
+    if window_start == 0 && match_start_char < before_budget {
+        let slack = before_budget - match_start_char;
+        window_end = (window_end + slack).min(total_chars);
+    }
+    if window_end == total_chars {
+        let used_after = window_end - (match_start_char + match_len_chars);
+        if used_after < after_budget {
+            let slack = after_budget - used_after;
+            window_start = window_start.saturating_sub(slack);
+        }
+    }
+
+    let needs_leading = window_start > 0;
+    let needs_trailing = window_end < total_chars;
+
+    let mut text = String::new();
+    if needs_leading {
+        text.push('…');
+    }
+    let pre: String = chars[window_start..match_start_char].iter().collect();
+    text.push_str(&pre);
+    let highlight_start = text.len();
+    let matched: String = chars[match_start_char..match_start_char + match_len_chars]
+        .iter()
+        .collect();
+    text.push_str(&matched);
+    let highlight_end = text.len();
+    let post: String = chars[match_start_char + match_len_chars..window_end]
+        .iter()
+        .collect();
+    text.push_str(&post);
+    if needs_trailing {
+        text.push('…');
+    }
+
+    MatchSnippet {
+        text,
+        highlight: Some(highlight_start..highlight_end),
+    }
+}
+
+fn chars_for_byte_range(
+    haystack: &str,
+    byte_range: &std::ops::Range<usize>,
+) -> Option<(usize, usize)> {
+    if byte_range.is_empty() || byte_range.end > haystack.len() {
+        return None;
+    }
+    let start_char = haystack[..byte_range.start].chars().count();
+    let len_chars = haystack[byte_range.clone()].chars().count();
+    Some((start_char, len_chars))
+}
+
+fn valid_byte_range(
+    haystack: &str,
+    range: std::ops::Range<usize>,
+) -> Option<std::ops::Range<usize>> {
+    if range.is_empty() || range.end > haystack.len() {
+        return None;
+    }
+    Some(range)
+}
+
 /// Build the per-row search inputs from a slice of [`Row`]s. The
 /// haystack concatenates every visible field for the row kind so a
 /// query like `"puffin"` matches an alias **or** a title **or** a
@@ -236,5 +366,53 @@ mod tests {
         let no_alias = vec![agent_row("claude-code", "abc123", None, "x")];
         let items = items_from_rows(&no_alias);
         assert_eq!(items[0].label.as_ref(), "claude-code:abc123");
+    }
+
+    #[test]
+    fn snippet_around_returns_haystack_unchanged_when_short() {
+        let snippet = snippet_around("look at puffin here", 8..14, 80);
+        assert_eq!(snippet.text, "look at puffin here");
+        assert_eq!(snippet.highlight, Some(8..14));
+    }
+
+    #[test]
+    fn snippet_around_windows_long_haystack_with_ellipses() {
+        let haystack: String = (0..200).map(|_| "x").collect::<String>()
+            + "puffin"
+            + &(0..200).map(|_| "y").collect::<String>();
+        let needle_byte_start = 200;
+        let needle_byte_end = needle_byte_start + "puffin".len();
+        let snippet = snippet_around(&haystack, needle_byte_start..needle_byte_end, 30);
+        assert!(snippet.text.starts_with('…'));
+        assert!(snippet.text.ends_with('…'));
+        assert!(snippet.text.contains("puffin"));
+        // Highlight should locate the puffin substring inside the
+        // rendered snippet.
+        let range = snippet.highlight.expect("highlight present");
+        assert_eq!(&snippet.text[range], "puffin");
+        // Width budget honored within tolerance (chars; not bytes
+        // because UTF-8 ellipsis is 3 bytes).
+        let char_count = snippet.text.chars().count();
+        assert!(char_count <= 30, "snippet too wide: {char_count}");
+    }
+
+    #[test]
+    fn snippet_around_unicode_safe_split() {
+        let haystack = "naïve · approach · brûlée";
+        let needle_byte_start = haystack.find("approach").unwrap();
+        let needle_byte_end = needle_byte_start + "approach".len();
+        let snippet = snippet_around(haystack, needle_byte_start..needle_byte_end, 15);
+        // Should not panic and should keep the match visible.
+        assert!(snippet.text.contains("approach"));
+        let range = snippet.highlight.unwrap();
+        assert_eq!(&snippet.text[range], "approach");
+    }
+
+    #[test]
+    fn snippet_around_falls_back_when_range_is_out_of_bounds() {
+        let snippet = snippet_around("short text", 100..200, 20);
+        // No highlight, but still a readable snippet (head-anchored).
+        assert!(snippet.highlight.is_none());
+        assert!(!snippet.text.is_empty());
     }
 }
