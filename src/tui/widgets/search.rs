@@ -262,20 +262,17 @@ fn build_match_line(
     is_cursor: bool,
     snippet_budget: usize,
 ) -> Line<'static> {
-    let row_bg = if is_cursor {
-        Some(Color::Indexed(238))
-    } else {
-        None
-    };
-    // Compose a per-span style. The cursor row carries a
-    // background highlight and **must not** also fade the
-    // foreground via DIM, since the combination renders the text
-    // too dark to read against the gray bg. Off-cursor rows still
-    // dim the snippet context so the matched portion pops.
+    // Compose a per-span style. The cursor row uses
+    // `Modifier::REVERSED` rather than an explicit background color
+    // so the highlight adapts to whatever fg/bg the terminal theme
+    // provides — a fixed dark-gray bg renders dark-on-dark on
+    // light themes. Off-cursor rows dim the snippet context so the
+    // matched portion pops; the cursor row skips DIM because the
+    // reversed surface already separates it from neighbors.
     let span_style = |dim_when_not_cursor: bool, extra: Style| -> Style {
         let mut style = extra;
-        if let Some(bg) = row_bg {
-            style = style.bg(bg);
+        if is_cursor {
+            style = style.add_modifier(Modifier::REVERSED);
         } else if dim_when_not_cursor {
             style = style.add_modifier(Modifier::DIM);
         }
