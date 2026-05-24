@@ -741,6 +741,16 @@ running; the one-shot CLI is the writer otherwise.
     `RowFilter` predicate between CLI `table` and the TUI, and front the
     capability with a discoverable Controls overlay before accelerator
     keys.
+  - ADR 0032: centralize TUI styling in a single `Theme` value, expose it
+    through a flat `[tui.theme]` config table with named-ANSI / 256-color /
+    `#RRGGBB` / modifier-suffix grammar, and treat parse errors as
+    soft-failure warnings that fall back to defaults without aborting the
+    TUI.
+  - ADR 0033: structure the right-panel detail view as a closed
+    `SectionKind` enum (Session, Mux, PR, Lineage, Preview, Output) with
+    omit-when-placeholder-only suppression, right-anchored labeled
+    dividers, and per-`(section, label)` colorization dispatched against
+    the ADR 0032 `Theme`.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
