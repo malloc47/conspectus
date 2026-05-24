@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
+use std::collections::BTreeMap;
+
 use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+use crate::tui::theme::{Theme, ThemeKeyKind, parse_color, parse_modifier, parse_style_spec};
 use crate::tui::{Grouping, View};
 
 /// Filename Conspectus looks for in project trees.
@@ -46,6 +49,9 @@ pub struct TuiConfig {
     /// under `[tui.views.<name>]` sub-tables. CLI flags override
     /// these when present.
     pub views: TuiViewsConfig,
+    /// Resolved color theme (ADR 0032). Built from `[tui.theme]` with
+    /// unspecified entries falling back to [`Theme::default`].
+    pub theme: Theme,
 }
 
 /// Per-view configuration block — one entry per registered view.
@@ -170,6 +176,12 @@ struct TuiFile {
     sessions_grouping: Option<String>,
     #[serde(default)]
     views: Option<TuiViewsFile>,
+    /// `[tui.theme]` table (ADR 0032). Flat map of palette overrides
+    /// — unspecified keys keep the runtime defaults, unknown keys
+    /// produce a diagnostic, malformed values produce a diagnostic
+    /// and the field falls back to its default.
+    #[serde(default)]
+    theme: Option<BTreeMap<String, toml::Value>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -497,6 +509,78 @@ fn merge_tui(
         && config.views.sessions.grouping.is_none()
     {
         config.views.sessions.grouping = Some(legacy);
+    }
+
+    if let Some(theme_file) = file.theme {
+        merge_tui_theme(&mut config.theme, theme_file, path, diagnostics);
+    }
+}
+
+/// Apply `[tui.theme]` overrides to the in-memory [`Theme`]. Each
+/// entry routes by [`ThemeKeyKind`]; unknown keys, non-string values,
+/// and unparseable specs each emit a per-key [`ConfigDiagnostic`]
+/// and leave the corresponding field at its default value.
+fn merge_tui_theme(
+    theme: &mut Theme,
+    overrides: BTreeMap<String, toml::Value>,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let known: BTreeMap<&'static str, ThemeKeyKind> = Theme::known_keys()
+        .iter()
+        .map(|entry| (entry.name, entry.kind))
+        .collect();
+
+    for (key, value) in overrides {
+        let Some(&kind) = known.get(key.as_str()) else {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("unknown `[tui.theme]` key `{key}`"),
+            });
+            continue;
+        };
+        let raw = match value.as_str() {
+            Some(s) => s.to_string(),
+            None => {
+                diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "`[tui.theme].{key}` must be a string (got `{}`)",
+                        value.type_str()
+                    ),
+                });
+                continue;
+            }
+        };
+        match kind {
+            ThemeKeyKind::Color => match parse_color(&raw) {
+                Ok(color) => {
+                    theme.set_color(&key, color);
+                }
+                Err(err) => diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!("`[tui.theme].{key}`: {err}"),
+                }),
+            },
+            ThemeKeyKind::Modifier => match parse_modifier(&raw) {
+                Ok(modifier) => {
+                    theme.set_modifier(&key, modifier);
+                }
+                Err(err) => diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!("`[tui.theme].{key}`: {err}"),
+                }),
+            },
+            ThemeKeyKind::StyleSpec => match parse_style_spec(&raw) {
+                Ok(spec) => {
+                    theme.set_style_spec(&key, spec);
+                }
+                Err(err) => diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!("`[tui.theme].{key}`: {err}"),
+                }),
+            },
+        }
     }
 }
 
@@ -1120,6 +1204,143 @@ mod tests {
         assert!(parse_config_duration("").is_err());
         assert!(parse_config_duration("nope").is_err());
         assert!(parse_config_duration("12years").is_err());
+    }
+
+    #[test]
+    fn tui_theme_overrides_named_color_and_modifier() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme]\n\
+             harness_claude = \"bright_red\"\n\
+             mux_attached = \"#00ff88\"\n\
+             selection_active = \"reversed,italic\"\n\
+             recency_cold = \"dim,italic\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        let theme = &outcome.config.tui.theme;
+        assert_eq!(theme.harness_claude, ratatui::style::Color::LightRed);
+        assert_eq!(
+            theme.mux_attached,
+            ratatui::style::Color::Rgb(0x00, 0xff, 0x88)
+        );
+        assert!(
+            theme
+                .selection_active
+                .contains(ratatui::style::Modifier::REVERSED)
+        );
+        assert!(
+            theme
+                .selection_active
+                .contains(ratatui::style::Modifier::ITALIC)
+        );
+        assert!(
+            theme
+                .recency_cold
+                .modifier
+                .contains(ratatui::style::Modifier::DIM)
+        );
+    }
+
+    #[test]
+    fn tui_theme_unspecified_keys_keep_defaults() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme]\nharness_codex = \"yellow\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        let theme = &outcome.config.tui.theme;
+        let defaults = Theme::default();
+        assert_eq!(theme.harness_codex, ratatui::style::Color::Yellow);
+        // Untouched fields stay at default values.
+        assert_eq!(theme.harness_claude, defaults.harness_claude);
+        assert_eq!(theme.mux_attached, defaults.mux_attached);
+    }
+
+    #[test]
+    fn tui_theme_unknown_key_emits_diagnostic_and_keeps_defaults() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme]\nnot_a_field = \"red\"\nharness_claude = \"green\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("unknown `[tui.theme]` key `not_a_field`")
+        );
+        // Recognized neighbors still apply.
+        assert_eq!(
+            outcome.config.tui.theme.harness_claude,
+            ratatui::style::Color::Green
+        );
+    }
+
+    #[test]
+    fn tui_theme_malformed_value_warns_and_falls_back() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme]\nharness_claude = \"#zzzzzz\"\nmux_attached = \"green\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("`[tui.theme].harness_claude`")
+        );
+        let defaults = Theme::default();
+        assert_eq!(
+            outcome.config.tui.theme.harness_claude, defaults.harness_claude,
+            "bad spec falls back to default"
+        );
+        // Sibling fields still parse.
+        assert_eq!(
+            outcome.config.tui.theme.mux_attached,
+            ratatui::style::Color::Green
+        );
+    }
+
+    #[test]
+    fn tui_theme_non_string_value_emits_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme]\nharness_claude = 42\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(outcome.diagnostics[0].message.contains("must be a string"));
     }
 
     #[test]
