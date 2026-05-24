@@ -95,10 +95,36 @@ fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let view_label = view_label(app.config().default_view);
     let (agents, mux) = snapshot_counts(app.snapshot().map(|s| s.as_ref()));
+    let visible_sessions = visible_agent_session_count(app);
     let freshness = header_freshness(app);
-    let title = format!("Conspectus · {view_label} ─ {freshness}{agents} agents · {mux} mux",);
+    let agent_cell = format_count_with_filtered(visible_sessions, agents);
+    let title = format!("Conspectus · {view_label} ─ {freshness}{agent_cell} agents · {mux} mux",);
     let widget = Paragraph::new(title).style(Style::default().add_modifier(Modifier::BOLD));
     frame.render_widget(widget, area);
+}
+
+/// Render the header's agents count. When a filter is active and the
+/// visible row count differs from the snapshot's total, format as
+/// `<filtered> of <total>` per ADR 0031; otherwise keep the bare
+/// count so unfiltered runs render exactly as before.
+fn format_count_with_filtered(visible: usize, total: usize) -> String {
+    if visible == total {
+        total.to_string()
+    } else {
+        format!("{visible} of {total}")
+    }
+}
+
+/// Count agent-session rows currently in the row tree. Mirrors the
+/// "filtered count" the operator sees in the left panel, since the
+/// row-tree builder is the authority on what's visible after
+/// filters apply.
+fn visible_agent_session_count(app: &App) -> usize {
+    app.tree()
+        .rows
+        .iter()
+        .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        .count()
 }
 
 /// Build the `updated Ns ago · ` slice of the header, or an empty
@@ -160,9 +186,71 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
         Focus::Left => "[left]",
         Focus::Right => "[right]",
     };
-    let widget = Paragraph::new(format!("{scope} {hints}"))
-        .style(Style::default().add_modifier(Modifier::DIM));
+    let chip_text = render_filter_chips(app.filter());
+    let line = if chip_text.is_empty() {
+        Line::from(Span::styled(
+            format!("{scope} {hints}"),
+            Style::default().add_modifier(Modifier::DIM),
+        ))
+    } else {
+        Line::from(vec![
+            Span::styled(
+                format!("{scope} {hints} · "),
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+            Span::styled(chip_text, Style::default().fg(Color::Cyan)),
+        ])
+    };
+    let widget = Paragraph::new(line);
     frame.render_widget(widget, area);
+}
+
+/// Render the active filter as a compact chip-strip:
+/// `harness:claude,codex · max-age:7d · mux:unmuxed`. Returns the
+/// empty string when no constraints are active so callers can
+/// short-circuit the separator. Per ADR 0031 the chip order is
+/// stable across runs (harness → max-age → mux-state) so the
+/// operator builds muscle memory for where each predicate lives.
+fn render_filter_chips(filter: &crate::filter::RowFilter) -> String {
+    if filter.is_empty() {
+        return String::new();
+    }
+    let mut chips: Vec<String> = Vec::new();
+    if let Some(harness) = &filter.harness {
+        let values = harness.values();
+        if !values.is_empty() {
+            chips.push(format!("harness:{}", truncate_chip_list(values, 3)));
+        }
+    }
+    if let Some(max_age) = filter.max_age {
+        chips.push(format!(
+            "max-age:{}",
+            crate::tui::widgets::controls::format_duration_for_input(max_age)
+        ));
+    }
+    if let Some(mux_state) = &filter.mux_state {
+        let labels: Vec<String> = mux_state
+            .values()
+            .iter()
+            .map(|k| k.as_str().to_string())
+            .collect();
+        if !labels.is_empty() {
+            chips.push(format!("mux:{}", truncate_chip_list(&labels, 3)));
+        }
+    }
+    chips.join(" · ")
+}
+
+/// Comma-join up to `cap` values, replacing the tail with `+N more`
+/// when the list is longer. Keeps the status bar compact when an
+/// operator selects every harness or mux state.
+fn truncate_chip_list(values: &[String], cap: usize) -> String {
+    if values.len() <= cap {
+        return values.join(",");
+    }
+    let head: Vec<&str> = values.iter().take(cap).map(|s| s.as_str()).collect();
+    let extra = values.len() - cap;
+    format!("{}+{extra} more", head.join(","))
 }
 
 fn view_label(view: View) -> &'static str {
@@ -257,12 +345,19 @@ fn left_panel_title(app: &App) -> Line<'static> {
     ])
 }
 
-fn empty_left_panel_text(app: &App) -> &'static str {
+fn empty_left_panel_text(app: &App) -> String {
     if app.snapshot().is_none() {
-        "Loading discovery…"
-    } else {
-        "No sessions discovered.\nPress `r` to refresh or `q` to quit."
+        return "Loading discovery…".to_string();
     }
+    if !app.filter().is_empty() {
+        // Filtered-zero case (F8-012): a snapshot is loaded but the
+        // active filter dropped every session. Distinguish from
+        // "no sessions discovered" so the operator knows their
+        // filter — not the world — is the reason.
+        let chips = render_filter_chips(app.filter());
+        return format!("No rows match `{chips}`.\nPress `F` to clear filters, `v` to edit.");
+    }
+    "No sessions discovered.\nPress `r` to refresh or `q` to quit.".to_string()
 }
 
 /// Build the rendered line for a single visible row.
