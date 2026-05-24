@@ -310,6 +310,10 @@ bar rather than offered through a separate menu.
 | `r`                | Refresh discovery now                        |
 | `?`                | Help overlay                                 |
 | `q` / Ctrl-C       | Quit (restores terminal)                     |
+| `v`                | Open the controls overlay (ADR 0031)         |
+| `]` / `[`          | Cycle to next / previous view                |
+| `f`                | Jump into the controls overlay's Filters section (ADR 0031) |
+| `F`                | Clear all active filters in the current view |
 
 #### Actions on the selected row (v1)
 
@@ -328,7 +332,6 @@ selected row doesn't support a key, the status bar shows a one-line
 
 | Key   | Future action                                                       |
 | ----- | ------------------------------------------------------------------- |
-| `f`   | Fork the selected session (agent-deck style)                        |
 | `n`   | New agent / new mux session                                         |
 | `c`   | Confirm a discovered candidate as a declared link                   |
 | `d`   | Delete (mux session, checkout, declared link, …)                    |
@@ -339,6 +342,11 @@ selected row doesn't support a key, the status bar shows a one-line
 These keys are deliberately unbound in v1 so muscle memory can map to
 their final actions in later phases without rebinding. v1 is
 read-mostly + attach.
+
+`f` was previously reserved for a future fork-the-selected-session
+action; ADR 0031 reallocates it to "jump into the controls overlay's
+Filters section." A future fork accelerator will land on a different
+key (TBD when the fork-action workstream begins).
 
 ### Actions (v1 scope)
 
@@ -591,6 +599,57 @@ These pin the visible behavior of the v1 default sessions view
   capture and the transcript-tail read that fills the right-panel
   preview beyond the graph-resident snippet. The v1-deferrable
   question on this topic is now resolved.
+
+### Controls overlay (ADR 0031)
+
+ADR 0031 fronts filtering, view switching, per-view grouping, and the
+sort toggle with a single navigable **Controls overlay**. Accelerator
+keys (`v`, `1`–`5`, `]`/`[`, `f`, `F`, the grouping-cycle key) reach
+the same outcomes for muscle-memory operators, but no capability in
+this surface depends on memorizing a key.
+
+The overlay opens with `v` (final key choice settled in `F8-005`) and
+shows sections for View, Grouping (scoped to the active view), Filters
+(scoped to the active view), and Sort (global). Arrow keys move the
+cursor between actionable rows; Enter picks or drills into a sub-
+editor; Esc backs out one level; mouse click selects when the
+terminal supports it. Accelerator keys are surfaced inline (`[1]`,
+`[2]`, …) so they remain discoverable.
+
+Sub-editors:
+
+- **Harness**: multi-select list (claude / codex / opencode / aider).
+- **Max age**: text input (ADR 0030 primitive) seeded with the
+  current value; parse errors render inline; empty commit clears.
+- **Mux state**: multi-select (attached / ambiguous / unmuxed).
+
+Active filters render as compact chips in a new status-bar zone left
+of the provider chips, color-coded per ADR 0022:
+
+```
+… │ harness:claude · max-age:7d · mux:unmuxed │ updated 12s ago │ gh ⟳ │
+```
+
+Header counts reflect the filtered set with the unfiltered total in
+parens: `12 of 47 agents · 3 of 8 mux · 0 PRs`. The filtered-zero
+empty frame shows `No sessions match <chips>. F clears.`
+
+Per ADR 0031, filter / grouping / selection / expanded / left-scroll
+state is **per view**; sort is **global**. Switching `1 → 2 → 1`
+restores the sessions view's prior state exactly. Defaults seed from
+`[tui.views.<name>]` config sub-tables; the legacy `[tui]
+.sessions_grouping` key continues to work as a deprecated alias.
+
+CLI parity is via a shared `RowFilter` predicate type:
+
+```sh
+conspectus tui --view sessions --harness claude --max-age 7d \
+               --mux-state unmuxed --grouping repo
+conspectus table sessions --harness claude --max-age 7d
+```
+
+`/` fuzzy search (T8-017) remains a separate, transient overlay that
+ranks within the active filter set rather than the full snapshot.
 
 ### Sources of mux ambiguity
 

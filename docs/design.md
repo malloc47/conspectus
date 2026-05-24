@@ -548,6 +548,35 @@ Mux-aware views should:
 - show ambiguity when multiple non-ignored candidates remain
 - allow mux-oriented views to show zero, one, or many linked agent sessions
 
+### Filtering And View State
+
+Settled by ADR 0031.
+
+Interactive and static views share a single `RowFilter` predicate type
+so the same narrowing is reproducible at the CLI and in the TUI. v1
+filter dimensions are `harness` (set membership), `max-age` (recency
+window against `last_active_epoch`), and `mux-state` (attached /
+ambiguous / unmuxed). Free-text "contains" filtering is intentionally
+deferred to the `/` fuzzy search overlay; structured filters narrow by
+structure, `/` ranks within the filtered set.
+
+In the TUI, filter / grouping / selection / expanded-set / left-scroll
+state is **per view**. Sort order is **global**. Switching views and
+back returns each view to its prior state. Each view has its own
+grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
+`PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
+backs config, CLI flags, and TUI controls.
+
+Every capability in this surface is reachable through a navigable
+**Controls overlay** (sections for view, grouping, filters, sort).
+Single-key accelerators are layered on top and surfaced in the
+overlay's hint footer so they remain discoverable rather than
+required.
+
+Configuration moves to `[tui.views.<name>]` sub-tables. The original
+`[tui].sessions_grouping` key remains supported as a deprecated alias
+until a follow-on ADR retires it.
+
 ## Continuous Operation Mode
 
 Conspectus supports two operation modes:
@@ -706,6 +735,12 @@ running; the one-shot CLI is the writer otherwise.
     underwriting the rename overlay, the search overlay, and the inline
     mux-picker; lock `Enter` confirm / `Esc` cancel semantics and centered-
     modal placement.
+  - ADR 0031: layer structured filters with `/` fuzzy search, scope
+    filter / grouping / selection / expanded state per view (sort stays
+    global), give each view its own grouping enum, share a single
+    `RowFilter` predicate between CLI `table` and the TUI, and front the
+    capability with a discoverable Controls overlay before accelerator
+    keys.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

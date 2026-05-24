@@ -4676,6 +4676,181 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `P8-005` (detail view-models) so the shared API surface is
     settled.
 
+### Filter, View Switching, And Per-View State (F8-*)
+
+ADR 0031 settled the design for layered structured filters + `/`
+fuzzy search, per-view filter/grouping/selection/expanded state
+(sort stays global), per-view grouping enums, a shared `RowFilter`
+predicate driving both CLI `table` and the TUI, and a discoverable
+Controls overlay fronting the capability with accelerator keys layered
+on top. Stories below carve that ADR into implementable slices.
+
+Dependency shape inside the workstream:
+
+```
+ADR 0031 ─→ F8-001 ─→ F8-009 ─→ F8-010
+            │
+            ├─→ F8-002 ─→ F8-003 ─┐
+            │                     │
+            ├─→ F8-006 ─┐         │
+            │           ↓         ↓
+            ├─→ F8-004 ─→ F8-005 ─→ F8-011
+            │           ↓
+            └─→ F8-007 ─→ F8-012
+                F8-008 (independent loader work)
+```
+
+`F8-001`/`F8-002`/`F8-006`/`F8-008` can land in parallel after the
+ADR. `F8-009` and `F8-010` extend the CLI surface and table
+projections respectively. `F8-004` (controls overlay) and the
+status-bar / empty-frame stories converge on `F8-005` for the
+keybinding surface; `F8-011` documents the final keymap once it
+settles.
+
+- [ ] `F8-001` Define `RowFilter` predicate + dimension types in a
+    crate-public module.
+  - Scope: introduce `src/filter.rs` with `RowFilter`,
+    `HarnessFilter::Any(Vec<String>)`,
+    `MuxStateFilter::Any(Vec<MuxStateKey>)`, and
+    `MuxStateKey { Attached, Ambiguous, Unmuxed }` per ADR 0031.
+    Predicate evaluation runs against an `AgentSessionNode` plus
+    its resolved mux state. Apply the predicate in
+    `build_sessions_tree` before bucket emission so empty groups
+    collapse naturally. No new dependencies (ADR 0024 policy).
+  - Tests: unit tests over existing sessions fixtures for
+    claude-only narrowing, max-age cutoff at the boundary minute,
+    unmuxed-only, ambiguous-only, the empty-result case, and the
+    intersection of all three v1 dimensions.
+  - Blockers: ADR 0031.
+
+- [ ] `F8-002` Per-view grouping enums for the four pending views.
+  - Scope: introduce `MuxGrouping`, `UnionGrouping`, `PrsGrouping`,
+    and `ForksGrouping` alongside their P8-004 row-tree builders.
+    Wire a `Grouping` dispatch enum so `App` state and config can
+    carry a single field that narrows to the active view's enum.
+    Sessions enum unchanged but joins the dispatch.
+  - Tests: row-tree builder unit tests for each view's grouping
+    values; dispatch-enum cycle-to-next tests covering wrap-around.
+  - Blockers: ADR 0031; lands alongside `P8-004` for each view.
+
+- [ ] `F8-003` Per-view state retention.
+  - Scope: introduce `ViewStates` map on `App`, keyed by `View`,
+    carrying `(filters, grouping, expanded, selection, left_scroll)`.
+    On view switch, save the active slice and load the target
+    slice; first-time entries seed from
+    `[tui.views.<name>]` config defaults. Sort stays a top-level
+    `App` field per ADR 0031.
+  - Tests: reducer tests for switch-and-return state retention
+    (filters survive `1 → 2 → 1`), per-view selection retention
+    across refreshes, fresh-view default seeding from config.
+  - Blockers: `F8-001`, `F8-002`, `F8-005`.
+
+- [ ] `F8-004` Controls overlay (modal).
+  - Scope: render a centered modal with sections for View,
+    Grouping (scoped to active view), Filters (scoped to active
+    view), and Sort (global). Arrow-key + Enter navigation, Esc
+    backs out one level, mouse click support inside the overlay.
+    Inline accelerator hints (`[1]`, `[2]`, …) per row. Drill-in
+    sub-editors: harness multi-select, max-age text input (reuses
+    ADR 0030 primitive), mux-state multi-select. Filter chips
+    render in the status bar via `F8-007`.
+  - Tests: snapshot tests for overlay open, each sub-editor open,
+    chip applied state, cleared state. Reducer tests for arrow-key
+    navigation skipping section headers and for sub-editor
+    Confirm/Cancel outcomes.
+  - Blockers: `F8-001`, `F8-002`, `F8-006`.
+
+- [ ] `F8-005` Accelerator keybindings + view-switching plumbing.
+  - Scope: bind `v` (controls overlay), `1`–`5` (direct view
+    switch), `]`/`[` (cycle views), `f` (jump into the Filters
+    section), `F` (clear all filters), and the grouping-cycle key.
+    Resolve the `G` collision with End — either move "last row" to
+    `End` only and reuse `G`, or bind grouping-cycle to `Ctrl-G`.
+    Repurposes `f` from the previously-reserved fork action per
+    ADR 0031; impl doc updated. Closes the `P8-006` deferred view-
+    switching slice.
+  - Tests: reducer tests for each new keybinding; Ratatui snapshots
+    for the overlay open vs accelerator-only paths producing the
+    same end state.
+  - Blockers: `F8-002`, `F8-004`.
+
+- [ ] `F8-006` Multi-select list widget.
+  - Scope: shared list-with-checkbox primitive in
+    `src/tui/widgets/multi_select.rs` for the harness and mux-state
+    sub-editors. Pure state machine: cursor up/down, Space toggle,
+    Enter confirms with `Vec<T>`, Esc cancels. Renders as a small
+    bordered list anchored next to the originating row.
+  - Tests: unit tests for cursor wrap, toggle semantics, empty-
+    commit (clears the predicate), and large-list scrolling.
+  - Blockers: none beyond ADR 0031; can land in parallel with
+    `F8-004`.
+
+- [ ] `F8-007` Status-bar filter chips + counts-with-totals.
+  - Scope: new status-bar zone left of provider chips, rendering
+    active filter chips with ADR 0022 colors and stable ordering
+    (harness → max-age → mux-state → future dimensions). Truncate
+    long lists with `+N more`. Header counts switch to
+    `<filtered> of <total>` form (`12 of 47 agents · …`).
+  - Tests: status-view unit tests for each chip layout; Ratatui
+    snapshots for one-chip / many-chips / truncated / cleared
+    states.
+  - Blockers: `F8-001`, `T8-003` (provider chip zone).
+
+- [ ] `F8-008` `[tui.views.<name>]` config schema + legacy alias.
+  - Scope: parse `[tui.views.<name>] grouping = "…"` and
+    `[[tui.views.<name>.filters]]` sub-tables in `src/config.rs`.
+    Existing `[tui].sessions_grouping` continues to load as a
+    deprecated alias that emits a one-line warning to stderr when
+    encountered and seeds
+    `[tui.views.sessions].grouping` when the new key is absent.
+    Multiple `[[…filters]]` entries OR their predicates (set
+    union).
+  - Tests: loader unit tests for new schema, legacy alias alone,
+    both present (new wins, warning emitted), malformed values,
+    array-of-tables filter unions.
+  - Blockers: ADR 0031; independent of TUI work.
+
+- [ ] `F8-009` CLI flag parity: shared `FilterArgs` + per-view
+    grouping.
+  - Scope: introduce a shared `FilterArgs` struct mounted on both
+    `TuiArgs` and `TableArgs`, exposing `--harness` (repeatable),
+    `--max-age <DURATION>`, `--mux-state` (comma-or-repeat), and
+    `--grouping <VALUE>` (per-view; values depend on `--view`).
+    Legacy `--sessions-grouping` stays as an alias that prints a
+    one-line deprecation warning to stderr.
+  - Tests: CLI smoke tests for each flag, duration parse-error
+    messages, deprecation-warning emission, `--grouping` rejected
+    with a useful message when given an invalid value for the
+    chosen view.
+  - Blockers: `F8-001`.
+
+- [ ] `F8-010` `conspectus table <ROWS>` consumes `RowFilter`.
+  - Scope: thread the shared `RowFilter` through the table
+    projection layer so the same flags narrow static output the
+    same way the TUI narrows the row tree. Reuses `F8-009`'s
+    `FilterArgs`.
+  - Tests: snapshot/output tests for filtered `table sessions`,
+    `table mux`, and a parity test asserting TUI row count matches
+    `table` row count for the same flag set against a fixture.
+  - Blockers: `F8-001`, `F8-009`.
+
+- [ ] `F8-011` Help-overlay docs.
+  - Scope: extend the `?` help overlay with the new keymap
+    (`v`, `1`–`5`, `]`/`[`, `f`, `F`, grouping-cycle), a one-line
+    description of the controls overlay, the v1 filter dimensions,
+    and an example CLI invocation. Document the menu-first
+    discovery rule.
+  - Tests: snapshot test for the help overlay's new layout.
+  - Blockers: `F8-004`, `F8-005`.
+
+- [ ] `F8-012` Filtered-zero empty frame.
+  - Scope: render `No sessions match <chips>. F clears.` in the
+    row tree when the active filter set produces zero rows.
+    Status-bar chips continue to render so the operator sees
+    exactly which predicates are active.
+  - Tests: snapshot test for the empty frame across each view.
+  - Blockers: `F8-004`, `F8-007`, `T8-003`.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
