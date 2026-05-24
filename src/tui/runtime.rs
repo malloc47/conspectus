@@ -60,11 +60,18 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            // While the rename overlay is open it owns key input.
-            // Translate every Press event into a forwarded key
-            // action; everything else is dropped so the overlay
-            // can't accidentally trigger nav side effects.
-            let action = if app.rename_overlay().is_some() {
+            // Open overlays own key input while up. The controls
+            // overlay takes precedence over the bare keymap; the
+            // rename overlay does the same. Only one is open at a
+            // time in v1.
+            let action = if app.controls_overlay().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::ControlsOverlayKey(key))
+                    }
+                    _ => None,
+                }
+            } else if app.rename_overlay().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         Some(Action::RenameOverlayKey(key))
@@ -81,6 +88,48 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
                     handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
+                }
+                Some(Action::OpenControls) => {
+                    app.open_controls_overlay();
+                    app.update(Msg::SetStatus(Some(
+                        "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
+                    )));
+                }
+                Some(Action::OpenControlsAtFilters) => {
+                    app.open_controls_overlay_at_filters();
+                    app.update(Msg::SetStatus(Some(
+                        "controls: editing filters · Esc closes".to_string(),
+                    )));
+                }
+                Some(Action::ControlsOverlayKey(key)) => {
+                    handle_controls_overlay_key(&mut app, &config, key)
+                }
+                Some(Action::SwitchView(view)) => apply_view_switch(&mut app, &config, view),
+                Some(Action::CycleView(delta)) => {
+                    let next = cycle_view(app.config().default_view, delta);
+                    apply_view_switch(&mut app, &config, next);
+                }
+                Some(Action::CycleGrouping(delta)) => {
+                    let next = if delta >= 0 {
+                        app.grouping().cycle_next()
+                    } else {
+                        app.grouping().cycle_prev()
+                    };
+                    apply_controls_action_and_refresh(
+                        &mut app,
+                        &config,
+                        crate::tui::widgets::controls::ControlsAction::SetGrouping(next),
+                    );
+                }
+                Some(Action::ClearFilters) => {
+                    apply_controls_action_and_refresh(
+                        &mut app,
+                        &config,
+                        crate::tui::widgets::controls::ControlsAction::SetFilter(
+                            crate::filter::RowFilter::default(),
+                        ),
+                    );
+                    app.update(Msg::SetStatus(Some("filters cleared".to_string())));
                 }
                 None => {}
             }
@@ -341,8 +390,14 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 /// Run discovery, build the row tree, and dispatch [`Msg::SetData`].
 /// Errors leave the app's last good snapshot in place; once the
 /// status-bar wiring lands the failure surfaces there too.
-fn refresh(app: &mut App, config: &RunConfig) {
-    match discover_and_build(config) {
+///
+/// Reads the *live* config from `app` so view / grouping / filter
+/// changes applied via the controls overlay take effect on the
+/// next rebuild. The runtime's startup `config` is the seed but is
+/// no longer the source of truth after the first user action.
+fn refresh(app: &mut App, _seed: &RunConfig) {
+    let config = app.config().clone();
+    match discover_and_build(&config) {
         Ok((snapshot, tree)) => {
             let initial_selection_hint = launch_context_row_id(&tree);
             app.update(Msg::SetData {
@@ -434,6 +489,97 @@ enum Action {
     OpenRename,
     /// Forward a key event into the open rename overlay.
     RenameOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Open the controls overlay (ADR 0031, F8-005) at its top
+    /// section.
+    OpenControls,
+    /// Open the controls overlay positioned at the Filters section
+    /// (the `f` accelerator).
+    OpenControlsAtFilters,
+    /// Forward a key event into the open controls overlay.
+    ControlsOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Switch to a specific view (1–5 accelerators).
+    SwitchView(View),
+    /// Cycle to the next (delta > 0) or previous (delta < 0) view
+    /// (the `]` / `[` accelerators).
+    CycleView(i32),
+    /// Cycle grouping for the active view forward or back. Bound
+    /// to `Ctrl-G` because the End binding owns plain `G`.
+    CycleGrouping(i32),
+    /// Clear every active filter for the visible view (`F`).
+    ClearFilters,
+}
+
+/// Handle the controls overlay's key event and apply the resulting
+/// action to the app, refreshing the row tree when needed.
+fn handle_controls_overlay_key(
+    app: &mut App,
+    config: &RunConfig,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::widgets::controls::{ControlsContext, ControlsOutcome};
+    // Snapshot the live state into owned copies so the immutable
+    // borrow on `app` ends before we re-borrow it mutably to
+    // dispatch the key into the overlay.
+    let view = app.config().default_view;
+    let grouping = app.grouping();
+    let filter_snapshot = app.filter().clone();
+    let sort = app.sort();
+    let ctx = ControlsContext {
+        view,
+        grouping,
+        filter: &filter_snapshot,
+        sort,
+    };
+    let outcome = match app.controls_overlay_mut() {
+        Some(state) => state.handle_key(&ctx, key),
+        None => return,
+    };
+    match outcome {
+        ControlsOutcome::Continue => {}
+        ControlsOutcome::Close => {
+            app.close_controls_overlay();
+        }
+        ControlsOutcome::ApplyAndStay(action) => {
+            apply_controls_action_and_refresh(app, config, action);
+        }
+        ControlsOutcome::ApplyAndClose(action) => {
+            app.close_controls_overlay();
+            apply_controls_action_and_refresh(app, config, action);
+        }
+    }
+}
+
+/// Apply a controls action and rebuild the row tree so the change
+/// is visible immediately. Side-effecting in two places (App state
+/// plus discovery refresh) but kept in one helper so the call
+/// sites can't accidentally apply without refreshing.
+fn apply_controls_action_and_refresh(
+    app: &mut App,
+    config: &RunConfig,
+    action: crate::tui::widgets::controls::ControlsAction,
+) {
+    app.apply_controls_action(action);
+    refresh(app, config);
+}
+
+/// Switch view and refresh. Shared between the `1`–`5` direct keys
+/// and `]` / `[` cycling.
+fn apply_view_switch(app: &mut App, config: &RunConfig, view: View) {
+    apply_controls_action_and_refresh(
+        app,
+        config,
+        crate::tui::widgets::controls::ControlsAction::SwitchView(view),
+    );
+}
+
+/// Step the view enum forward (delta > 0) or back (delta < 0),
+/// wrapping. Used by the `]` / `[` accelerator pair.
+fn cycle_view(view: View, delta: i32) -> View {
+    use crate::tui::widgets::controls::VIEW_OPTIONS;
+    let idx = VIEW_OPTIONS.iter().position(|v| *v == view).unwrap_or(0) as i32;
+    let len = VIEW_OPTIONS.len() as i32;
+    let next = ((idx + delta) % len + len) % len;
+    VIEW_OPTIONS[next as usize]
 }
 
 /// Handle the `a` key. On success, suspend the TUI, spawn
@@ -548,6 +694,42 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
             (KeyModifiers::SHIFT, KeyCode::Char('R'))
             | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
+            // ADR 0031 / F8-005 accelerator surface. `v` opens the
+            // controls overlay; `1`–`5` switch view directly;
+            // `]`/`[` cycle views; `f` jumps into the controls
+            // overlay's Filters section; `F` clears every active
+            // filter; `Ctrl-G` cycles grouping (plain `G` is the
+            // existing End binding).
+            (m, KeyCode::Char('v')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::OpenControls)
+            }
+            (m, KeyCode::Char('f')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::OpenControlsAtFilters)
+            }
+            (KeyModifiers::SHIFT, KeyCode::Char('F'))
+            | (KeyModifiers::NONE, KeyCode::Char('F')) => Some(Action::ClearFilters),
+            (KeyModifiers::CONTROL, KeyCode::Char('g')) => Some(Action::CycleGrouping(1)),
+            (m, KeyCode::Char(']')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::CycleView(1))
+            }
+            (m, KeyCode::Char('[')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::CycleView(-1))
+            }
+            (m, KeyCode::Char('1')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::SwitchView(View::Sessions))
+            }
+            (m, KeyCode::Char('2')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::SwitchView(View::Mux))
+            }
+            (m, KeyCode::Char('3')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::SwitchView(View::Union))
+            }
+            (m, KeyCode::Char('4')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::SwitchView(View::Prs))
+            }
+            (m, KeyCode::Char('5')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::SwitchView(View::Forks))
+            }
             (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
                 Some(Action::Msg(Box::new(Msg::NavDown)))
             }
@@ -639,6 +821,80 @@ mod tests {
             translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
             Some(Action::Attach)
         );
+    }
+
+    #[test]
+    fn translate_v_opens_controls_overlay() {
+        assert_eq!(
+            translate(press(KeyCode::Char('v'), KeyModifiers::NONE), 24),
+            Some(Action::OpenControls)
+        );
+    }
+
+    #[test]
+    fn translate_f_opens_controls_at_filters() {
+        assert_eq!(
+            translate(press(KeyCode::Char('f'), KeyModifiers::NONE), 24),
+            Some(Action::OpenControlsAtFilters)
+        );
+    }
+
+    #[test]
+    fn translate_shift_f_clears_filters() {
+        assert_eq!(
+            translate(press(KeyCode::Char('F'), KeyModifiers::SHIFT), 24),
+            Some(Action::ClearFilters)
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('F'), KeyModifiers::NONE), 24),
+            Some(Action::ClearFilters)
+        );
+    }
+
+    #[test]
+    fn translate_ctrl_g_cycles_grouping() {
+        assert_eq!(
+            translate(press(KeyCode::Char('g'), KeyModifiers::CONTROL), 24),
+            Some(Action::CycleGrouping(1))
+        );
+    }
+
+    #[test]
+    fn translate_digits_switch_views_directly() {
+        let cases = [
+            ('1', View::Sessions),
+            ('2', View::Mux),
+            ('3', View::Union),
+            ('4', View::Prs),
+            ('5', View::Forks),
+        ];
+        for (ch, view) in cases {
+            assert_eq!(
+                translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
+                Some(Action::SwitchView(view)),
+                "char {ch}"
+            );
+        }
+    }
+
+    #[test]
+    fn translate_brackets_cycle_views() {
+        assert_eq!(
+            translate(press(KeyCode::Char(']'), KeyModifiers::NONE), 24),
+            Some(Action::CycleView(1))
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('['), KeyModifiers::NONE), 24),
+            Some(Action::CycleView(-1))
+        );
+    }
+
+    #[test]
+    fn cycle_view_wraps_in_both_directions() {
+        assert_eq!(cycle_view(View::Sessions, -1), View::Forks);
+        assert_eq!(cycle_view(View::Forks, 1), View::Sessions);
+        assert_eq!(cycle_view(View::Mux, 1), View::Union);
+        assert_eq!(cycle_view(View::Union, -1), View::Mux);
     }
 
     #[test]
