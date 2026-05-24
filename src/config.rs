@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
+use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+use crate::tui::{Grouping, View};
+
 /// Filename Conspectus looks for in project trees.
 pub const PROJECT_CONFIG_FILENAME: &str = ".conspectus.toml";
 
@@ -39,6 +42,47 @@ pub struct TuiConfig {
     /// machines. CLI `--scan-root` flags override this list when
     /// present.
     pub scan_roots: Vec<PathBuf>,
+    /// Per-view grouping and filter defaults (ADR 0031). Configured
+    /// under `[tui.views.<name>]` sub-tables. CLI flags override
+    /// these when present.
+    pub views: TuiViewsConfig,
+}
+
+/// Per-view configuration block — one entry per registered view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TuiViewsConfig {
+    pub sessions: TuiViewConfig,
+    pub mux: TuiViewConfig,
+    pub union: TuiViewConfig,
+    pub prs: TuiViewConfig,
+    pub forks: TuiViewConfig,
+}
+
+impl TuiViewsConfig {
+    /// Read-only access to a view's config slice.
+    pub fn for_view(&self, view: View) -> &TuiViewConfig {
+        match view {
+            View::Sessions => &self.sessions,
+            View::Mux => &self.mux,
+            View::Union => &self.union,
+            View::Prs => &self.prs,
+            View::Forks => &self.forks,
+        }
+    }
+}
+
+/// Settings for a single TUI view. Both fields are optional so an
+/// absent block means "use the defaults baked into the runtime
+/// (ADR 0031)" without forcing every config file to enumerate
+/// every view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TuiViewConfig {
+    /// Initial grouping for this view. `None` falls back to
+    /// [`Grouping::default_for`].
+    pub grouping: Option<Grouping>,
+    /// Active row filter for this view. Empty filter (the
+    /// [`RowFilter::default`] value) means "no constraint".
+    pub filter: RowFilter,
 }
 
 /// Per-row-type settings under `[table.<rows>]`. Each row-type gets
@@ -119,6 +163,68 @@ struct ConfigFile {
 struct TuiFile {
     #[serde(default)]
     scan_roots: Option<Vec<String>>,
+    /// Legacy alias for `[tui.views.sessions].grouping` (ADR 0031).
+    /// Presence emits a deprecation diagnostic; value still merges
+    /// into the new schema as long as the new key is absent.
+    #[serde(default)]
+    sessions_grouping: Option<String>,
+    #[serde(default)]
+    views: Option<TuiViewsFile>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TuiViewsFile {
+    #[serde(default)]
+    sessions: Option<TuiViewFile>,
+    #[serde(default)]
+    mux: Option<TuiViewFile>,
+    #[serde(default)]
+    union: Option<TuiViewFile>,
+    #[serde(default)]
+    prs: Option<TuiViewFile>,
+    #[serde(default)]
+    forks: Option<TuiViewFile>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TuiViewFile {
+    #[serde(default)]
+    grouping: Option<String>,
+    /// One or more filter predicates whose values OR together (set
+    /// union per dimension). Single-entry inline tables are the
+    /// common case; multi-entry array-of-tables lets operators add
+    /// alternate predicates without losing existing ones.
+    #[serde(default)]
+    filters: Option<TuiViewFilters>,
+}
+
+/// Disk shape of `[[tui.views.<name>.filters]]`. Either a single
+/// inline table or an array of tables — both deserialize through
+/// the same vector internally.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum TuiViewFilters {
+    Single(TuiViewFilterEntry),
+    Many(Vec<TuiViewFilterEntry>),
+}
+
+impl TuiViewFilters {
+    fn entries(self) -> Vec<TuiViewFilterEntry> {
+        match self {
+            Self::Single(entry) => vec![entry],
+            Self::Many(entries) => entries,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TuiViewFilterEntry {
+    #[serde(default)]
+    harness: Option<Vec<String>>,
+    #[serde(default)]
+    max_age: Option<String>,
+    #[serde(default)]
+    mux_state: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -302,17 +408,227 @@ fn merge_from_file(
     }
 
     if let Some(tui) = parsed.tui {
-        merge_tui(&mut config.tui, tui, home);
+        merge_tui(&mut config.tui, tui, home, path, diagnostics);
     }
 }
 
-fn merge_tui(config: &mut TuiConfig, file: TuiFile, home: Option<&Path>) {
+fn merge_tui(
+    config: &mut TuiConfig,
+    file: TuiFile,
+    home: Option<&Path>,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
     if let Some(raw_roots) = file.scan_roots {
         config.scan_roots = raw_roots
             .into_iter()
             .map(|raw| expand_home(&raw, home))
             .collect();
     }
+
+    // Legacy alias: `[tui].sessions_grouping = "..."`. Per ADR 0031
+    // it stays parseable but emits a deprecation diagnostic, and
+    // only seeds the new key when no `[tui.views.sessions].grouping`
+    // is present. The new key wins on conflict so operators who
+    // already migrated don't get their value clobbered.
+    let mut legacy_sessions_grouping: Option<Grouping> = None;
+    if let Some(raw) = file.sessions_grouping.as_deref() {
+        match Grouping::parse_for(View::Sessions, raw) {
+            Some(g) => {
+                legacy_sessions_grouping = Some(g);
+                diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: "`[tui].sessions_grouping` is deprecated; \
+                                  set `[tui.views.sessions].grouping` instead (ADR 0031)"
+                        .to_string(),
+                });
+            }
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui].sessions_grouping` value `{raw}`; expected one of {}",
+                    grouping_choices_for(View::Sessions)
+                ),
+            }),
+        }
+    }
+
+    if let Some(views) = file.views {
+        merge_tui_view(
+            &mut config.views.sessions,
+            views.sessions,
+            View::Sessions,
+            path,
+            diagnostics,
+        );
+        merge_tui_view(
+            &mut config.views.mux,
+            views.mux,
+            View::Mux,
+            path,
+            diagnostics,
+        );
+        merge_tui_view(
+            &mut config.views.union,
+            views.union,
+            View::Union,
+            path,
+            diagnostics,
+        );
+        merge_tui_view(
+            &mut config.views.prs,
+            views.prs,
+            View::Prs,
+            path,
+            diagnostics,
+        );
+        merge_tui_view(
+            &mut config.views.forks,
+            views.forks,
+            View::Forks,
+            path,
+            diagnostics,
+        );
+    }
+
+    // Seed the sessions grouping from the legacy alias only when the
+    // operator hasn't moved over yet.
+    if let Some(legacy) = legacy_sessions_grouping
+        && config.views.sessions.grouping.is_none()
+    {
+        config.views.sessions.grouping = Some(legacy);
+    }
+}
+
+fn merge_tui_view(
+    config: &mut TuiViewConfig,
+    file: Option<TuiViewFile>,
+    view: View,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(file) = file else { return };
+    if let Some(raw) = file.grouping.as_deref() {
+        match Grouping::parse_for(view, raw) {
+            Some(g) => config.grouping = Some(g),
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui.views.{}].grouping` value `{raw}`; expected one of {}",
+                    view_config_key(view),
+                    grouping_choices_for(view)
+                ),
+            }),
+        }
+    }
+    if let Some(filters) = file.filters {
+        let merged = merge_view_filter_entries(filters.entries(), view, path, diagnostics);
+        config.filter = merged;
+    }
+}
+
+/// Combine one or more filter entries into a single [`RowFilter`].
+/// Multiple entries OR their predicates per dimension (set union),
+/// matching the operator mental model that "I want claude OR codex,
+/// and 7d OR 24h" expands the visible set.
+fn merge_view_filter_entries(
+    entries: Vec<TuiViewFilterEntry>,
+    view: View,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> RowFilter {
+    let mut harnesses: Vec<String> = Vec::new();
+    let mut max_age_secs: Option<u64> = None;
+    let mut mux_states: Vec<MuxStateKey> = Vec::new();
+
+    for entry in entries {
+        if let Some(values) = entry.harness {
+            harnesses.extend(values);
+        }
+        if let Some(raw) = entry.max_age.as_deref() {
+            match parse_config_duration(raw) {
+                Ok(secs) => {
+                    // Multiple entries OR — take the widest window
+                    // because OR-ing predicates admits more rows.
+                    max_age_secs = Some(max_age_secs.map_or(secs, |existing| existing.max(secs)));
+                }
+                Err(err) => diagnostics.push(ConfigDiagnostic {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "invalid `[tui.views.{}.filters].max_age` value `{raw}`: {err}",
+                        view_config_key(view)
+                    ),
+                }),
+            }
+        }
+        if let Some(values) = entry.mux_state {
+            for raw in values {
+                match MuxStateKey::from_str_ci(&raw) {
+                    Some(key) => mux_states.push(key),
+                    None => diagnostics.push(ConfigDiagnostic {
+                        path: path.to_path_buf(),
+                        message: format!(
+                            "invalid `[tui.views.{}.filters].mux_state` value `{raw}`; \
+                             expected one of attached, ambiguous, unmuxed",
+                            view_config_key(view)
+                        ),
+                    }),
+                }
+            }
+        }
+    }
+
+    RowFilter {
+        harness: (!harnesses.is_empty()).then(|| HarnessFilter::from_values(harnesses)),
+        max_age: max_age_secs.map(std::time::Duration::from_secs),
+        mux_state: (!mux_states.is_empty()).then(|| MuxStateFilter::from_values(mux_states)),
+    }
+}
+
+fn view_config_key(view: View) -> &'static str {
+    match view {
+        View::Sessions => "sessions",
+        View::Mux => "mux",
+        View::Union => "union",
+        View::Prs => "prs",
+        View::Forks => "forks",
+    }
+}
+
+fn grouping_choices_for(view: View) -> String {
+    Grouping::values_for(view)
+        .iter()
+        .map(|g| g.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Parse a small subset of duration strings used in config: `<n>ms`,
+/// `<n>s`, `<n>m`, `<n>h`, `<n>d`. Mirrors the CLI parser so a
+/// value written in `.conspectus.toml` matches the CLI invocation
+/// shape. Returns the duration as whole seconds — sub-second config
+/// values quantize to zero.
+fn parse_config_duration(raw: &str) -> Result<u64, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("empty duration".to_string());
+    }
+    let (digits, suffix) = match raw.find(|c: char| !c.is_ascii_digit()) {
+        Some(idx) => raw.split_at(idx),
+        None => (raw, "s"),
+    };
+    let value: u64 = digits
+        .parse()
+        .map_err(|_| format!("non-integer magnitude `{digits}`"))?;
+    let secs = match suffix.trim() {
+        "" | "s" => value,
+        "ms" => value / 1_000,
+        "m" => value.saturating_mul(60),
+        "h" => value.saturating_mul(60 * 60),
+        "d" => value.saturating_mul(60 * 60 * 24),
+        other => return Err(format!("unknown unit `{other}` (expected ms, s, m, h, d)")),
+    };
+    Ok(secs)
 }
 
 /// Expand a leading `~` or `~/<rest>` token against `home`. Other
@@ -579,6 +895,231 @@ mod tests {
         let outcome = loader.load_from(&project);
 
         assert!(outcome.config.tui.scan_roots.is_empty());
+    }
+
+    #[test]
+    fn tui_views_grouping_parses_per_view() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.views.sessions]\ngrouping = \"repo\"\n\
+             [tui.views.mux]\ngrouping = \"workspace\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        assert_eq!(
+            outcome.config.tui.views.sessions.grouping,
+            Some(Grouping::Sessions(crate::tui::SessionsGrouping::Repo))
+        );
+        assert_eq!(
+            outcome.config.tui.views.mux.grouping,
+            Some(Grouping::Mux(crate::tui::MuxGrouping::Workspace))
+        );
+    }
+
+    #[test]
+    fn tui_views_grouping_rejects_value_from_other_view() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.views.sessions]\ngrouping = \"host\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        // `host` is a mux grouping, not a sessions one.
+        assert!(outcome.config.tui.views.sessions.grouping.is_none());
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("invalid `[tui.views.sessions].grouping`")
+        );
+    }
+
+    #[test]
+    fn tui_views_filters_inline_single_entry() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.views.sessions]\n\
+             filters = { harness = [\"claude-code\", \"codex\"], max_age = \"7d\", \
+                         mux_state = [\"unmuxed\"] }\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        let filter = &outcome.config.tui.views.sessions.filter;
+        assert_eq!(
+            filter.harness.as_ref().map(|h| h.values().to_vec()),
+            Some(vec!["claude-code".to_string(), "codex".to_string()])
+        );
+        assert_eq!(
+            filter.max_age,
+            Some(std::time::Duration::from_secs(7 * 24 * 60 * 60))
+        );
+        assert_eq!(
+            filter.mux_state.as_ref().map(|m| m.values().to_vec()),
+            Some(vec![MuxStateKey::Unmuxed])
+        );
+    }
+
+    #[test]
+    fn tui_views_filters_array_of_tables_unions_per_dimension() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[[tui.views.sessions.filters]]\nharness = [\"claude-code\"]\nmax_age = \"24h\"\n\
+             [[tui.views.sessions.filters]]\nharness = [\"codex\"]\nmax_age = \"7d\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        let filter = &outcome.config.tui.views.sessions.filter;
+        // Harness sets union: both claude and codex.
+        assert_eq!(
+            filter.harness.as_ref().map(|h| h.values().to_vec()),
+            Some(vec!["claude-code".to_string(), "codex".to_string()])
+        );
+        // Max-age takes the widest window (7d).
+        assert_eq!(
+            filter.max_age,
+            Some(std::time::Duration::from_secs(7 * 24 * 60 * 60))
+        );
+    }
+
+    #[test]
+    fn tui_views_filter_invalid_mux_state_emits_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.views.sessions]\n\
+             filters = { mux_state = [\"unmuxed\", \"frobnicated\"] }\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("invalid `[tui.views.sessions.filters].mux_state` value `frobnicated`")
+        );
+        // The valid entry still lands.
+        let filter = &outcome.config.tui.views.sessions.filter;
+        assert_eq!(
+            filter.mux_state.as_ref().map(|m| m.values().to_vec()),
+            Some(vec![MuxStateKey::Unmuxed])
+        );
+    }
+
+    #[test]
+    fn legacy_sessions_grouping_seeds_new_key_with_deprecation_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui]\nsessions_grouping = \"checkout\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("`[tui].sessions_grouping` is deprecated")
+        );
+        assert_eq!(
+            outcome.config.tui.views.sessions.grouping,
+            Some(Grouping::Sessions(crate::tui::SessionsGrouping::Checkout))
+        );
+    }
+
+    #[test]
+    fn new_views_grouping_wins_over_legacy_when_both_present() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui]\nsessions_grouping = \"checkout\"\n\
+             [tui.views.sessions]\ngrouping = \"scan-root\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        // Deprecation diagnostic still emits.
+        assert!(
+            outcome
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("deprecated"))
+        );
+        // But the new key wins.
+        assert_eq!(
+            outcome.config.tui.views.sessions.grouping,
+            Some(Grouping::Sessions(crate::tui::SessionsGrouping::ScanRoot))
+        );
+    }
+
+    #[test]
+    fn legacy_sessions_grouping_invalid_value_emits_error_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui]\nsessions_grouping = \"nope\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        // Invalid legacy value emits an error diagnostic and does
+        // not seed the new key.
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("invalid `[tui].sessions_grouping`")
+        );
+        assert!(outcome.config.tui.views.sessions.grouping.is_none());
+    }
+
+    #[test]
+    fn parse_config_duration_handles_each_unit() {
+        assert_eq!(parse_config_duration("30s"), Ok(30));
+        assert_eq!(parse_config_duration("2m"), Ok(120));
+        assert_eq!(parse_config_duration("1h"), Ok(3_600));
+        assert_eq!(parse_config_duration("7d"), Ok(7 * 24 * 60 * 60));
+        assert_eq!(parse_config_duration("2000ms"), Ok(2));
+        assert_eq!(parse_config_duration("42"), Ok(42));
+        assert!(parse_config_duration("").is_err());
+        assert!(parse_config_duration("nope").is_err());
+        assert!(parse_config_duration("12years").is_err());
     }
 
     #[test]
