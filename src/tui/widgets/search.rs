@@ -267,17 +267,30 @@ fn build_match_line(
     } else {
         None
     };
-    let apply_bg = |style: Style| -> Style {
+    // Compose a per-span style. The cursor row carries a
+    // background highlight and **must not** also fade the
+    // foreground via DIM, since the combination renders the text
+    // too dark to read against the gray bg. Off-cursor rows still
+    // dim the snippet context so the matched portion pops.
+    let span_style = |dim_when_not_cursor: bool, extra: Style| -> Style {
+        let mut style = extra;
         if let Some(bg) = row_bg {
-            style.bg(bg)
-        } else {
-            style
+            style = style.bg(bg);
+        } else if dim_when_not_cursor {
+            style = style.add_modifier(Modifier::DIM);
         }
+        style
     };
     let prefix = if is_cursor { "> " } else { "  " };
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(prefix.to_string(), apply_bg(Style::default())));
-    spans.push(Span::styled(label.clone(), apply_bg(Style::default())));
+    spans.push(Span::styled(
+        prefix.to_string(),
+        span_style(false, Style::default()),
+    ));
+    spans.push(Span::styled(
+        label.clone(),
+        span_style(false, Style::default()),
+    ));
 
     // If we can show a snippet (haystack present and either
     // distinct from the label or carrying a match range), append
@@ -289,35 +302,29 @@ fn build_match_line(
     if !haystack.is_empty() && snippet_distinct {
         spans.push(Span::styled(
             "  · ".to_string(),
-            apply_bg(Style::default().add_modifier(Modifier::DIM)),
+            span_style(true, Style::default()),
         ));
         let snippet = snippet_around(haystack, matched_range, snippet_budget);
-        // Split the snippet into pre-match / match / post-match
-        // spans so the matched portion is bolded.
+        // The matched portion always renders bold + yellow so it
+        // pops on both cursor and non-cursor rows; pre/post context
+        // dims only when the row isn't the cursor.
+        let match_style = span_style(
+            false,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
         if let Some(range) = snippet.highlight.clone() {
             let pre = snippet.text[..range.start].to_string();
             let mid = snippet.text[range.start..range.end].to_string();
             let post = snippet.text[range.end..].to_string();
-            spans.push(Span::styled(
-                pre,
-                apply_bg(Style::default().add_modifier(Modifier::DIM)),
-            ));
-            spans.push(Span::styled(
-                mid,
-                apply_bg(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ));
-            spans.push(Span::styled(
-                post,
-                apply_bg(Style::default().add_modifier(Modifier::DIM)),
-            ));
+            spans.push(Span::styled(pre, span_style(true, Style::default())));
+            spans.push(Span::styled(mid, match_style));
+            spans.push(Span::styled(post, span_style(true, Style::default())));
         } else {
             spans.push(Span::styled(
                 snippet.text,
-                apply_bg(Style::default().add_modifier(Modifier::DIM)),
+                span_style(true, Style::default()),
             ));
         }
     }
