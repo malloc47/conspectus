@@ -93,7 +93,7 @@ impl RunConfig {
 /// Which of the registered row-tree views to render initially.
 /// Mirrors `Projection` from `conspectus table <ROWS>` so the
 /// terminology stays consistent across CLI and TUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum View {
     Sessions,
     Mux,

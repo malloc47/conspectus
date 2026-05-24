@@ -15,14 +15,14 @@
 //!   `Msg::SetData` results into the reducer.
 
 use std::cell::Cell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::model::{GraphSnapshot, MuxSessionId};
-use crate::tui::RunConfig;
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
+use crate::tui::{RunConfig, View};
 
 /// Top-level state. Owns the resolved run configuration plus the
 /// per-frame UI state.
@@ -87,12 +87,47 @@ pub struct App {
     /// recency-vs-hierarchy choice is view-independent in operator
     /// practice. Seeded from [`RunConfig::default_sort`].
     sort: super::Sort,
-    /// Active row filter (ADR 0031). In the v1 wiring this is the
-    /// effective filter for the active view; per-view state
-    /// retention (F8-003) generalizes it to a map.
+    /// Active row filter (ADR 0031, F8-003). Mirrors the active
+    /// view's slot in `view_states` so callers don't pay a map
+    /// lookup per read. Kept in sync via `switch_to_view` /
+    /// `apply_controls_action::SetFilter`.
     filter: crate::filter::RowFilter,
-    /// Active grouping (ADR 0031). Same v1 scoping as `filter`.
+    /// Active grouping (ADR 0031, F8-003). Same caching pattern as
+    /// `filter` — mirrors the active view's slot.
     grouping: super::Grouping,
+    /// Saved UI state for views the operator is not currently
+    /// looking at (ADR 0031, F8-003). On view switch the active
+    /// slot is saved here and the target slot loaded into the
+    /// active fields. Sort stays global, so it lives on `App`
+    /// rather than per-view.
+    view_states: BTreeMap<View, ViewStateSlot>,
+}
+
+/// Saved-per-view UI state. Each entry holds everything that needs
+/// to round-trip across view switches per ADR 0031: filter,
+/// grouping, expanded-row set, selection, and left-panel scroll
+/// offset. Constructed lazily — view_states is empty at App::new
+/// and slots fill in as the operator visits each view (or saves
+/// the currently-active view on the first switch away).
+#[derive(Debug, Clone)]
+pub(crate) struct ViewStateSlot {
+    pub filter: crate::filter::RowFilter,
+    pub grouping: super::Grouping,
+    pub expanded: BTreeSet<RowId>,
+    pub selection: Option<RowId>,
+    pub left_scroll: u16,
+}
+
+impl ViewStateSlot {
+    fn defaults_for(view: View) -> Self {
+        Self {
+            filter: crate::filter::RowFilter::default(),
+            grouping: super::Grouping::default_for(view),
+            expanded: BTreeSet::new(),
+            selection: None,
+            left_scroll: 0,
+        }
+    }
 }
 
 /// Which panel currently consumes navigation keys.
@@ -184,7 +219,59 @@ impl App {
             sort,
             filter,
             grouping,
+            view_states: BTreeMap::new(),
         }
+    }
+
+    /// Snapshot the active view's UI state into a saved slot. Used
+    /// by [`Self::switch_to_view`] to preserve filter / grouping /
+    /// selection / expanded-set / scroll across view switches.
+    fn snapshot_active_state(&self) -> ViewStateSlot {
+        ViewStateSlot {
+            filter: self.filter.clone(),
+            grouping: self.grouping,
+            expanded: self.expanded.clone(),
+            selection: self.selection.clone(),
+            left_scroll: self.left_scroll.get(),
+        }
+    }
+
+    /// Restore a saved view state into the active fields.
+    fn restore_active_state(&mut self, slot: ViewStateSlot) {
+        self.filter = slot.filter;
+        self.grouping = slot.grouping;
+        self.expanded = slot.expanded;
+        self.selection = slot.selection;
+        self.left_scroll.set(slot.left_scroll);
+    }
+
+    /// Switch the active view to `target`, saving the previous
+    /// view's state into `view_states` and loading the target's
+    /// state (or fresh defaults on first visit). Per ADR 0031 sort
+    /// stays global, so callers don't touch it here.
+    pub(crate) fn switch_to_view(&mut self, target: View) {
+        let from = self.config.default_view;
+        if from == target {
+            return;
+        }
+        let saved = self.snapshot_active_state();
+        self.view_states.insert(from, saved);
+        let loaded = self
+            .view_states
+            .remove(&target)
+            .unwrap_or_else(|| ViewStateSlot::defaults_for(target));
+        self.restore_active_state(loaded);
+        self.config.default_view = target;
+        // Keep `config.sessions_grouping` in sync for the sessions
+        // row-tree builder. Other views read their grouping from
+        // `self.grouping` once their builders land.
+        if let super::Grouping::Sessions(g) = self.grouping {
+            self.config.sessions_grouping = g;
+        }
+        // Mirror the active filter into config so refresh() picks
+        // it up when it rebuilds the row tree.
+        self.config.initial_filter = self.filter.clone();
+        self.status_message = None;
     }
 
     /// Active rename-overlay state, if any.
@@ -314,15 +401,11 @@ impl App {
         use crate::tui::widgets::controls::ControlsAction;
         match action {
             ControlsAction::SwitchView(view) => {
-                self.config.default_view = view;
-                // Reset grouping to the new view's default unless
-                // F8-003 retention takes over. v1 keeps the existing
-                // sessions_grouping field in sync for the sessions
-                // builder path.
-                self.grouping = super::Grouping::default_for(view);
-                if let super::Grouping::Sessions(g) = self.grouping {
-                    self.config.sessions_grouping = g;
-                }
+                // Per ADR 0031 / F8-003: save the prior view's
+                // filter / grouping / expanded / selection / scroll
+                // into the per-view map and load the target view's
+                // saved state (or fresh defaults on first visit).
+                self.switch_to_view(view);
             }
             ControlsAction::SetGrouping(g) => {
                 self.grouping = g;
@@ -1066,5 +1149,96 @@ mod tests {
         // groups still produce a NodeDetail because they're backed
         // by a NodeId.
         assert!(app.detail().is_some());
+    }
+
+    // ---- ADR 0031 / F8-003: per-view state retention ----
+
+    #[test]
+    fn switching_views_saves_active_state_and_loads_target_defaults() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        // Apply a sessions-only filter so we can observe it round-trip.
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
+            crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+                ..crate::filter::RowFilter::default()
+            },
+        ));
+        // Switch to mux view; sessions state should park in the
+        // per-view map and mux loads fresh defaults.
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Mux,
+        ));
+        assert_eq!(app.config().default_view, View::Mux);
+        assert!(app.filter().is_empty(), "mux view starts unfiltered");
+        assert_eq!(
+            app.grouping(),
+            crate::tui::Grouping::default_for(View::Mux),
+            "mux view starts at its default grouping"
+        );
+        assert!(app.selection().is_none(), "fresh view has no selection");
+    }
+
+    #[test]
+    fn switching_back_to_prior_view_restores_filter_and_grouping() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        let original_filter = crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+            ..crate::filter::RowFilter::default()
+        };
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
+            original_filter.clone(),
+        ));
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Repo),
+        ));
+        // Switch away…
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Prs,
+        ));
+        // …and back.
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Sessions,
+        ));
+        assert_eq!(app.filter(), &original_filter);
+        assert_eq!(
+            app.grouping(),
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Repo)
+        );
+    }
+
+    #[test]
+    fn switching_views_keeps_sort_global() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetSort(
+            crate::tui::Sort::Recency,
+        ));
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Mux,
+        ));
+        assert_eq!(app.sort(), crate::tui::Sort::Recency);
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Sessions,
+        ));
+        assert_eq!(app.sort(), crate::tui::Sort::Recency);
+    }
+
+    #[test]
+    fn no_op_view_switch_is_idempotent() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
+            crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+                ..crate::filter::RowFilter::default()
+            },
+        ));
+        let filter_before = app.filter().clone();
+        let grouping_before = app.grouping();
+        // SwitchView to the current view should be a no-op — not
+        // a save+restore cycle that could wipe state.
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            app.config().default_view,
+        ));
+        assert_eq!(app.filter(), &filter_before);
+        assert_eq!(app.grouping(), grouping_before);
     }
 }
