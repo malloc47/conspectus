@@ -64,7 +64,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             // overlay takes precedence over the bare keymap; the
             // rename overlay does the same. Only one is open at a
             // time in v1.
-            let action = if app.controls_overlay().is_some() {
+            let action = if app.search_overlay().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::SearchOverlayKey(key))
+                    }
+                    _ => None,
+                }
+            } else if app.controls_overlay().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         Some(Action::ControlsOverlayKey(key))
@@ -130,6 +137,15 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                         ),
                     );
                     app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+                }
+                Some(Action::OpenSearch) => {
+                    app.open_search_overlay();
+                    app.update(Msg::SetStatus(Some(
+                        "search: type to filter · Enter pick · Esc close".to_string(),
+                    )));
+                }
+                Some(Action::SearchOverlayKey(key)) => {
+                    handle_search_overlay_key(&mut app, key);
                 }
                 None => {}
             }
@@ -507,6 +523,44 @@ enum Action {
     CycleGrouping(i32),
     /// Clear every active filter for the visible view (`F`).
     ClearFilters,
+    /// Open the `/` search overlay (T8-017).
+    OpenSearch,
+    /// Forward a key event into the open search overlay.
+    SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
+}
+
+/// Dispatch a key into the open search overlay, refresh its match
+/// list from the visible row tree using the configured backend,
+/// and act on its outcome (Confirm picks a row, Cancel closes).
+fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+    use crate::tui::search::{SubstringBackend, items_from_rows};
+    use crate::tui::widgets::search::SearchOutcome;
+    // The backend choice lives behind the SearchBackend trait so a
+    // future swap (e.g. to a fuzzy matcher) needs only an
+    // implementation change, not a runtime change. The substring
+    // backend is the v1 default per ADR 0024's "prefer hand-rolled
+    // first" stance.
+    let backend = SubstringBackend;
+    let visible: Vec<_> = app.visible_rows().into_iter().cloned().collect();
+    let items = items_from_rows(&visible);
+    let outcome = match app.search_overlay_mut() {
+        Some(state) => {
+            let outcome = state.handle_key(key);
+            state.refresh_matches(&backend, &items);
+            outcome
+        }
+        None => return,
+    };
+    match outcome {
+        SearchOutcome::Continue => {}
+        SearchOutcome::Cancel => {
+            app.close_search_overlay();
+        }
+        SearchOutcome::Confirm(id) => {
+            app.close_search_overlay();
+            app.set_selection(*id);
+        }
+    }
 }
 
 /// Handle the controls overlay's key event and apply the resulting
@@ -729,6 +783,9 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             }
             (m, KeyCode::Char('5')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::SwitchView(View::Forks))
+            }
+            (m, KeyCode::Char('/')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::OpenSearch)
             }
             (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
                 Some(Action::Msg(Box::new(Msg::NavDown)))

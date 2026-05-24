@@ -3,3 +3,4 @@
 pub mod controls;
 pub mod input;
 pub mod multi_select;
+pub mod search;

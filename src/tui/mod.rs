@@ -29,6 +29,7 @@ pub mod detail;
 pub mod preview;
 pub mod rows;
 mod runtime;
+pub mod search;
 mod ui;
 pub mod widgets;
 

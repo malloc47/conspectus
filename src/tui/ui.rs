@@ -67,7 +67,25 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
     draw_body(app, frame, layout[1]);
     draw_status_bar(app, frame, layout[2]);
     draw_controls_overlay(app, frame, area);
+    draw_search_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
+}
+
+fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.search_overlay() else {
+        return;
+    };
+    use crate::tui::search::items_from_rows;
+    use crate::tui::widgets::search::SearchOverlayWidget;
+    // Recompute items from the live visible row tree each frame so
+    // the search overlay's label lookup never lags behind a
+    // refresh. The trade is cheap (visible_rows is already
+    // materialized; items_from_rows just clones a few strings per
+    // row).
+    let visible: Vec<crate::tui::rows::Row> = app.visible_rows().into_iter().cloned().collect();
+    let items = items_from_rows(&visible);
+    let widget = SearchOverlayWidget::new(state, &items);
+    frame.render_widget(widget, area);
 }
 
 fn draw_rename_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {

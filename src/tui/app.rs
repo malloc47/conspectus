@@ -77,6 +77,11 @@ pub struct App {
     /// overlay is closed; `Some` suspends the surrounding keymap
     /// and routes input through the modal.
     controls_overlay: Option<crate::tui::widgets::controls::ControlsOverlayState>,
+    /// Active `/` search overlay (T8-017). `None` when closed;
+    /// `Some` suspends the surrounding keymap, routes input
+    /// through the modal, and overlays a ranked match list within
+    /// the active filter set.
+    search_overlay: Option<crate::tui::widgets::search::SearchOverlayState>,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -175,6 +180,7 @@ impl App {
             left_scroll: Cell::new(0),
             rename_overlay: None,
             controls_overlay: None,
+            search_overlay: None,
             sort,
             filter,
             grouping,
@@ -237,6 +243,39 @@ impl App {
     /// Close the controls overlay without applying anything.
     pub fn close_controls_overlay(&mut self) {
         self.controls_overlay = None;
+    }
+
+    /// Active `/` search overlay (T8-017), if any.
+    pub fn search_overlay(&self) -> Option<&crate::tui::widgets::search::SearchOverlayState> {
+        self.search_overlay.as_ref()
+    }
+
+    pub fn search_overlay_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::search::SearchOverlayState> {
+        self.search_overlay.as_mut()
+    }
+
+    pub fn open_search_overlay(&mut self) {
+        self.search_overlay = Some(crate::tui::widgets::search::SearchOverlayState::new());
+    }
+
+    pub fn close_search_overlay(&mut self) {
+        self.search_overlay = None;
+    }
+
+    /// Programmatically set the selection to a row id, recomputing
+    /// the detail view-model. Used by the search overlay to land
+    /// the operator on a picked match without typing j/k. No-op
+    /// when the id isn't currently visible (the overlay would have
+    /// rejected it during commit; the guard here is defensive).
+    pub fn set_selection(&mut self, id: RowId) {
+        if !self.tree.rows.iter().any(|row| row.id == id) {
+            return;
+        }
+        self.selection = Some(id);
+        self.status_message = None;
+        self.recompute_detail();
     }
 
     /// Snapshot of the live state the controls overlay renders
