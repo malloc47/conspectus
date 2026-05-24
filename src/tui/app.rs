@@ -82,6 +82,8 @@ pub struct App {
     /// through the modal, and overlays a ranked match list within
     /// the active filter set.
     search_overlay: Option<crate::tui::widgets::search::SearchOverlayState>,
+    /// Active `?` help overlay (F8-011). `None` when closed.
+    help_overlay: Option<crate::tui::widgets::help::HelpOverlayState>,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -216,6 +218,7 @@ impl App {
             rename_overlay: None,
             controls_overlay: None,
             search_overlay: None,
+            help_overlay: None,
             sort,
             filter,
             grouping,
@@ -349,6 +352,23 @@ impl App {
 
     pub fn close_search_overlay(&mut self) {
         self.search_overlay = None;
+    }
+
+    /// Active `?` help overlay (F8-011), if any.
+    pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
+        self.help_overlay.as_ref()
+    }
+
+    pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::HelpOverlayState> {
+        self.help_overlay.as_mut()
+    }
+
+    pub fn open_help_overlay(&mut self) {
+        self.help_overlay = Some(crate::tui::widgets::help::HelpOverlayState::new());
+    }
+
+    pub fn close_help_overlay(&mut self) {
+        self.help_overlay = None;
     }
 
     /// Programmatically set the selection to a row id, recomputing

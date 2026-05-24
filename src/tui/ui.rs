@@ -68,7 +68,16 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
     draw_status_bar(app, frame, layout[2]);
     draw_controls_overlay(app, frame, area);
     draw_search_overlay(app, frame, area);
+    draw_help_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
+}
+
+fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.help_overlay() else {
+        return;
+    };
+    use crate::tui::widgets::help::HelpOverlayWidget;
+    frame.render_widget(HelpOverlayWidget::new(state), area);
 }
 
 fn draw_search_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {

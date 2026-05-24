@@ -64,7 +64,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             // overlay takes precedence over the bare keymap; the
             // rename overlay does the same. Only one is open at a
             // time in v1.
-            let action = if app.search_overlay().is_some() {
+            let action = if app.help_overlay().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::HelpOverlayKey(key))
+                    }
+                    _ => None,
+                }
+            } else if app.search_overlay().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         Some(Action::SearchOverlayKey(key))
@@ -146,6 +153,12 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 }
                 Some(Action::SearchOverlayKey(key)) => {
                     handle_search_overlay_key(&mut app, key);
+                }
+                Some(Action::OpenHelp) => {
+                    app.open_help_overlay();
+                }
+                Some(Action::HelpOverlayKey(key)) => {
+                    handle_help_overlay_key(&mut app, key);
                 }
                 None => {}
             }
@@ -527,6 +540,23 @@ enum Action {
     OpenSearch,
     /// Forward a key event into the open search overlay.
     SearchOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Open the `?` help overlay (F8-011).
+    OpenHelp,
+    /// Forward a key event into the open help overlay.
+    HelpOverlayKey(ratatui::crossterm::event::KeyEvent),
+}
+
+/// Dispatch a key into the open help overlay and close it on
+/// HelpOutcome::Close.
+fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+    use crate::tui::widgets::help::HelpOutcome;
+    let outcome = match app.help_overlay_mut() {
+        Some(state) => state.handle_key(key),
+        None => return,
+    };
+    if let HelpOutcome::Close = outcome {
+        app.close_help_overlay();
+    }
 }
 
 /// Dispatch a key into the open search overlay, refresh its match
@@ -787,6 +817,7 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (m, KeyCode::Char('/')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenSearch)
             }
+            (m, KeyCode::Char('?')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::OpenHelp),
             (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
                 Some(Action::Msg(Box::new(Msg::NavDown)))
             }
