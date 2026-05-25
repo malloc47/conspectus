@@ -1,5 +1,8 @@
 //! Core graph model boundaries.
 
+pub mod index;
+pub use index::{SnapshotIndex, path_is_ancestor_of, pick_preferred};
+
 use std::collections::BTreeMap;
 use std::fmt;
 
