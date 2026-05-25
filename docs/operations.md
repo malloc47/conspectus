@@ -154,8 +154,9 @@ mux_unmuxed   = "dim"
 # Detail-pane and structural cues.
 cwd_mark           = "cyan"
 link_id            = "blue"
+secondary_text     = "dark_gray"   # short ids + preview snippets
 divider            = "dim"
-panel_focus_accent = "cyan"
+panel_focus_accent = "cyan"        # the ▸ marker on the active pane title
 
 # PR-state coloring (matches the ADR 0022 table palette defaults).
 pr_open   = "green"

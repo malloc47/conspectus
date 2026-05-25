@@ -51,6 +51,13 @@ pub struct Theme {
     pub cwd_mark: Color,
     pub link_id: Color,
     pub placeholder: Modifier,
+    /// Reliable foreground color for "secondary" text the operator
+    /// shouldn't put the same visual weight on as primary columns —
+    /// row short ids and the inline preview snippet. Modeled as a
+    /// concrete `Color` rather than the `placeholder` modifier
+    /// because the `DIM` modifier renders inconsistently across
+    /// terminals (no effect in some popular configurations).
+    pub secondary_text: Color,
     pub divider: Modifier,
     pub warning: Color,
     pub error: Color,
@@ -145,6 +152,7 @@ impl Default for Theme {
             cwd_mark: Color::Cyan,
             link_id: Color::Blue,
             placeholder: Modifier::DIM,
+            secondary_text: Color::DarkGray,
             divider: Modifier::DIM,
             warning: Color::Yellow,
             error: Color::Red,
@@ -280,6 +288,10 @@ impl Theme {
                 kind: Modifier,
             },
             ThemeKey {
+                name: "secondary_text",
+                kind: Color,
+            },
+            ThemeKey {
                 name: "divider",
                 kind: Modifier,
             },
@@ -333,6 +345,7 @@ impl Theme {
             "panel_focus_accent" => self.panel_focus_accent = color,
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,
+            "secondary_text" => self.secondary_text = color,
             "warning" => self.warning = color,
             "error" => self.error = color,
             "success" => self.success = color,

@@ -485,8 +485,7 @@ fn draw_body(app: &App, frame: &mut Frame<'_>, area: Rect) {
 fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(left_panel_title(app))
-        .style(panel_focus_style(app, Focus::Left));
+        .title(left_panel_title(app));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -525,10 +524,30 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn left_panel_title(app: &App) -> Line<'static> {
-    let view_label = view_label(app.config().default_view);
+    panel_title(app, Focus::Left, view_label(app.config().default_view))
+}
+
+fn right_panel_title(app: &App) -> Line<'static> {
+    panel_title(app, Focus::Right, "detail")
+}
+
+/// Render a panel title with a subtle focus marker. The active pane
+/// is prefixed with `▸ ` styled in `theme.panel_focus_accent`; the
+/// label itself stays in default fg + BOLD on both panes so the
+/// inactive pane's content keeps its normal colors. Pane focus is
+/// also redundantly surfaced in the status-bar `[left]`/`[right]`
+/// chip — this title marker is the spatial cue.
+fn panel_title(app: &App, panel: Focus, label: &'static str) -> Line<'static> {
+    let theme = app.theme();
+    let focused = app.focus() == panel;
+    let marker = Span::styled(
+        if focused { "▸ " } else { "  " }.to_string(),
+        Style::default().fg(theme.panel_focus_accent),
+    );
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(view_label, Style::default().add_modifier(Modifier::BOLD)),
+        marker,
+        Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" "),
     ])
 }
@@ -682,7 +701,13 @@ fn render_left_row(
 fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> Vec<Span<'static>> {
     use crate::tui::widgets::badge::{harness_badge, harness_badge_padding};
     let mut spans = Vec::new();
-    spans.push(Span::raw(format!("{}  ", session.short_id)));
+    // Short id is a recognition aid, not a primary column — render
+    // it in the secondary fg so it stays readable but lighter than
+    // the harness badge / recency / mux glyph that follow.
+    spans.push(Span::styled(
+        format!("{}  ", session.short_id),
+        Style::default().fg(theme.secondary_text),
+    ));
     spans.push(harness_badge(&session.harness_label, theme));
     if let Some(pad) = harness_badge_padding(&session.harness_label, HARNESS_LABEL_COLUMN_WIDTH) {
         spans.push(pad);
@@ -714,7 +739,9 @@ fn append_session_preview(
     spans.push(Span::raw("  "));
     spans.push(Span::styled(
         truncate_to_width(preview, width - used - 2),
-        Style::default().add_modifier(theme.placeholder | Modifier::ITALIC),
+        Style::default()
+            .fg(theme.secondary_text)
+            .add_modifier(Modifier::ITALIC),
     ));
 }
 
@@ -844,8 +871,7 @@ fn compact_mux_label(label: &str) -> String {
 fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" detail ")
-        .style(panel_focus_style(app, Focus::Right));
+        .title(right_panel_title(app));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -1120,17 +1146,6 @@ fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
     }
     text.into_text()
         .unwrap_or_else(|_| Text::raw(text.to_string()))
-}
-
-fn panel_focus_style(app: &App, focus: Focus) -> Style {
-    let theme = app.theme();
-    if app.focus() == focus {
-        Style::default()
-            .fg(theme.panel_focus_accent)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(theme.placeholder)
-    }
 }
 
 fn contextual_status_text(app: &App) -> String {
@@ -1469,6 +1484,40 @@ mod tests {
         assert!(
             !header.contains('◉') && !header.contains('◐') && !header.contains('◯'),
             "mux chips should be dropped at narrow width: {header}",
+        );
+    }
+
+    #[test]
+    fn focus_marker_prefixes_only_the_active_pane_title() {
+        // Phase 9 refinement: focus is signaled by a `▸ ` glyph on
+        // the active pane's title rather than by holistically
+        // styling the panel. The inactive pane gets two-space
+        // padding so titles align column-wise and content colors
+        // stay untouched between focus states.
+        let area = Rect::new(0, 0, 160, 24);
+        let app = seeded_app();
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("▸ sessions"),
+            "left-focused app should mark the left title: {text}",
+        );
+        assert!(
+            !text.contains("▸ detail"),
+            "right title should be unmarked when left is focused: {text}",
+        );
+
+        let mut app = seeded_app();
+        app.update(Msg::CycleFocus);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("▸ detail"),
+            "right-focused app should mark the right title: {text}",
+        );
+        assert!(
+            !text.contains("▸ sessions"),
+            "left title should be unmarked after CycleFocus: {text}",
         );
     }
 
