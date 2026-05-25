@@ -1307,7 +1307,7 @@ fn pager_candidates_with_env(pager_env: Option<String>) -> Vec<ProcCommand> {
 ///   on the user's scrollback instead of being cleared on exit.
 const LESS_DEFAULT_ARGS: &[&str] = &["-F", "-R", "-X"];
 
-#[derive(Debug, Args, Default)]
+#[derive(Debug, Args)]
 struct TuiArgs {
     /// Discovery scan root. Repeatable. Defaults to the current
     /// working directory when omitted.
@@ -1351,6 +1351,22 @@ struct TuiArgs {
     /// color on; `never` forces it off.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
+}
+
+impl Default for TuiArgs {
+    fn default() -> Self {
+        Self {
+            scan_roots: Vec::new(),
+            view: ViewFlag::Sessions,
+            sessions_grouping: None,
+            sort: SortFlag::Hierarchy,
+            filter_args: FilterArgs::default(),
+            refresh_interval: "30s".to_string(),
+            mux_preview_interval: "2s".to_string(),
+            no_live_preview: false,
+            color: ColorFlag::Auto,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -1744,7 +1760,17 @@ mod tests {
         let cli = Cli::parse_from(["conspectus"]);
         assert!(matches!(cli.command, None));
         let command = cli.command.unwrap_or_else(default_command);
-        assert!(matches!(command, Command::Tui(_)));
+        let Command::Tui(args) = command else {
+            panic!("expected default command to be tui");
+        };
+        assert_eq!(
+            parse_tui_duration(&args.refresh_interval),
+            Ok(Duration::from_secs(30))
+        );
+        assert_eq!(
+            parse_tui_duration(&args.mux_preview_interval),
+            Ok(Duration::from_secs(2))
+        );
     }
 
     #[test]
