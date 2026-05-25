@@ -35,6 +35,15 @@ use crate::tui::{RunConfig, View, ui};
 /// `ratatui::init` installs).
 pub fn run(config: RunConfig) -> Result<()> {
     let mut terminal = ratatui::init();
+    // Explicitly clear the alt screen before the first draw.
+    // `EnterAlternateScreen` alone isn't enough under some
+    // multiplexers — notably mosh, which doesn't fully blank the
+    // alt buffer on switch — so the previous shell's content can
+    // "bleed through" any cell ratatui's diff-renderer decides
+    // hasn't changed from the empty initial buffer. The explicit
+    // clear forces every cell to a known blank state and matches
+    // the reattach path below.
+    let _ = terminal.clear();
     let result = event_loop(&mut terminal, config);
     ratatui::restore();
     result
