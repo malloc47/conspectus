@@ -1257,52 +1257,14 @@ fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
     }
 }
 
-/// Build the chip-style divider above the preview body. Reuses the
-/// section divider so the preview anchor matches Session / Mux /
-/// PR / Lineage visually; the suffix carries the live attachment
-/// context (`tmux:editor · captured 2s ago`) so the operator still
-/// sees what the preview is sourced from.
-fn preview_divider_line(app: &App, width: usize, theme: &Theme) -> Line<'static> {
-    let suffix = preview_context_suffix(app);
-    chip_divider_line("Preview", suffix.as_deref(), width, theme)
-}
-
-/// Compose the dim-rendered context that sits between the
-/// `[ Preview ]` chip and the trailing rule: the target's mux label
-/// plus a captured-time freshness tag when the runtime has one.
-/// Returns `None` when no attach target is resolved (un-muxed
-/// preview, or no selection).
-fn preview_context_suffix(app: &App) -> Option<String> {
-    let target = resolve_attach_target(app).ok()?;
-    let label = compact_mux_label(&format!("{}:{}", target.backend, target.native_id));
-    let freshness = app
-        .mux_preview(&target.mux)
-        .and_then(|entry| entry.captured_at)
-        .map(|captured| {
-            format!(
-                " · captured {} ago",
-                format_elapsed(captured.elapsed().as_secs())
-            )
-        });
-    Some(match freshness {
-        Some(f) => format!("{label}{f}"),
-        None => label,
-    })
-}
-
-fn format_elapsed(seconds: u64) -> String {
-    if seconds < 60 {
-        return format!("{seconds}s");
-    }
-    let minutes = seconds / 60;
-    if minutes < 60 {
-        return format!("{minutes}m");
-    }
-    let hours = minutes / 60;
-    if hours < 24 {
-        return format!("{hours}h");
-    }
-    format!("{}d", hours / 24)
+/// Build the chip-style divider above the preview body. Sits in
+/// the same right-anchored position as the section dividers
+/// (Session / Mux / PR / Lineage) so the `[ Preview ]` chip lines
+/// up below them. No inline suffix: the mux pane label and
+/// captured-time freshness already render in the Mux section
+/// above, and a second copy here pushed the chip far to the left.
+fn preview_divider_line(_app: &App, width: usize, theme: &Theme) -> Line<'static> {
+    chip_divider_line("Preview", None, width, theme)
 }
 
 fn crop_bottom_lines(text: &str, max_lines: usize) -> String {
@@ -2025,22 +1987,23 @@ mod tests {
         let area = Rect::new(0, 0, 100, 14);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
+        let preview_divider = text
+            .lines()
+            .find(|l| l.contains(" Preview "))
+            .expect("preview divider line present");
+        // The pane label + captured-time freshness now live in the
+        // Mux detail section above, so they should NOT appear on
+        // the preview divider itself — that was the duplication
+        // the styling refresh removed.
         assert!(
-            text.contains("Preview"),
-            "expected `Preview` chip on the divider: {text}"
+            !preview_divider.contains("tmux:"),
+            "preview divider should no longer duplicate the mux pane label: \
+             {preview_divider}",
         );
         assert!(
-            text.contains("tmux:agentdeck_conspectus-very-lo"),
-            "expected mux pane label inline with the divider: {text}"
-        );
-        // The buffer divider may truncate the captured-time suffix
-        // at narrow widths; assert on the helper that composes the
-        // suffix directly so the test is independent of layout
-        // math.
-        let suffix = preview_context_suffix(&app).expect("preview suffix composed");
-        assert!(
-            suffix.contains("captured"),
-            "expected captured-time tag on the preview suffix: {suffix}"
+            !preview_divider.contains("captured"),
+            "preview divider should drop the captured-time tag (now in the Mux \
+             section): {preview_divider}",
         );
         assert!(
             !text.contains("line 1"),
