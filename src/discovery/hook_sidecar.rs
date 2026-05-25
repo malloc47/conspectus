@@ -40,7 +40,16 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
         };
         let mut link = linked_to_mux(&session, &mux, &record);
 
-        if let Some(running) = pane_running_harness(&mux)
+        if let Some(created_epoch) = mux.created_epoch
+            && record.observed_epoch < created_epoch
+        {
+            link.state = LinkState::Ignored {
+                reason: Some(format!(
+                    "mux was created at {created_epoch}, after hook record observed at {}",
+                    record.observed_epoch
+                )),
+            };
+        } else if let Some(running) = pane_running_harness(&mux)
             && running != record.harness_key
         {
             link.state = LinkState::Ignored {
@@ -363,6 +372,14 @@ mod tests {
     }
 
     fn mux_with_command(native_id: &str, command: Option<&str>) -> GraphNode {
+        mux_with_command_created(native_id, command, None)
+    }
+
+    fn mux_with_command_created(
+        native_id: &str,
+        command: Option<&str>,
+        created_epoch: Option<i64>,
+    ) -> GraphNode {
         GraphNode::MuxSession(MuxSessionNode {
             id: MuxSessionId::new(format!("tmux:{native_id}")),
             backend: "tmux".to_string(),
@@ -373,7 +390,7 @@ mod tests {
             active_pane_current_path: Some("/work".to_string()),
             active_pane_start_command: Some("claude --resume old".to_string()),
             activity_epoch: Some(1_700_000_000),
-            created_epoch: None,
+            created_epoch,
         })
     }
 
@@ -780,6 +797,48 @@ mod tests {
                 assert!(
                     reason.contains("codex") && reason.contains("claude-code"),
                     "expected reason to name both harnesses, got: {reason}"
+                );
+            }
+            other => panic!("expected Ignored, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_record_is_ignored_when_mux_was_created_after_observation() {
+        let temp = tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("stale_reused_name.json"),
+            r#"{
+              "schema_version": 1,
+              "harness_key": "claude-code",
+              "session_key": "stale",
+              "tmux": { "session_name": "editor", "pane_id": "%1" },
+              "observed_epoch": 1700000000
+            }"#,
+        )
+        .expect("write stale record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("stale"),
+                mux_with_command_created("editor", Some("claude"), Some(1_700_000_100)),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_600);
+
+        let link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::LinkedToMux)
+            .expect("link present for diagnostics");
+        match &link.state {
+            LinkState::Ignored { reason } => {
+                let reason = reason.as_deref().unwrap_or("");
+                assert!(
+                    reason.contains("created at 1700000100")
+                        && reason.contains("observed at 1700000000"),
+                    "expected reason to describe stale mux creation, got: {reason}"
                 );
             }
             other => panic!("expected Ignored, got {other:?}"),
