@@ -37,7 +37,7 @@ use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
 use crate::tui::app::{App, Focus};
-use crate::tui::detail::{HeaderField, NodeDetail};
+use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
     AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency, recency_bucket,
@@ -815,7 +815,13 @@ fn empty_right_panel_text(app: &App) -> &'static str {
 /// row per field), clamped so the preview zone keeps room for at
 /// least the separator and two body rows.
 fn header_zone_height(detail: &NodeDetail, panel_height: u16) -> u16 {
-    let natural = (detail.header_fields.len() + 2) as u16;
+    // Per Phase 6 / ADR 0033: sectioned layout adds one labeled
+    // divider before each section after the first. Budget grows
+    // accordingly so the preview pane below doesn't get squeezed.
+    let sections = detail.sections();
+    let field_count: usize = sections.iter().map(|s| s.fields.len()).sum();
+    let divider_count = sections.len().saturating_sub(1);
+    let natural = (field_count + divider_count + 2) as u16;
     let max = panel_height.saturating_sub(3);
     natural.min(max).max(3)
 }
@@ -827,23 +833,59 @@ fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect, th
         Style::default().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(""));
-    for field in &detail.header_fields {
-        lines.push(render_header_field(field, theme));
+    let sections = detail.sections();
+    let mut first = true;
+    for section in &sections {
+        if !first {
+            lines.push(section_divider_line(
+                section.kind,
+                area.width as usize,
+                theme,
+            ));
+        }
+        first = false;
+        for field in &section.fields {
+            lines.push(render_header_field(field, section.kind, theme));
+        }
     }
     let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
 }
 
-fn render_header_field(field: &HeaderField, theme: &Theme) -> Line<'static> {
+/// Right-anchored labeled rule used between detail sections. The
+/// rule is rendered with `theme.divider` (default `DIM`) and the
+/// label is bold default-fg so it pops against the rule.
+fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<'static> {
+    let label = kind.label();
+    let trailing_rule = 2;
+    let trailing_pad = 1;
+    let label_section = label.chars().count() + 2; // 1 space each side
+    let total_used = label_section + trailing_rule + trailing_pad;
+    let leading_rule = width.saturating_sub(total_used);
+    let mut spans = Vec::with_capacity(4);
+    if leading_rule > 0 {
+        spans.push(Span::styled(
+            "─".repeat(leading_rule),
+            Style::default().add_modifier(theme.divider),
+        ));
+    }
+    spans.push(Span::styled(
+        format!(" {label} "),
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(
+        "─".repeat(trailing_rule),
+        Style::default().add_modifier(theme.divider),
+    ));
+    Line::from(spans)
+}
+
+fn render_header_field(field: &HeaderField, section: SectionKind, theme: &Theme) -> Line<'static> {
     let label = Span::styled(
         format!("{:<10}", field.label),
         Style::default().add_modifier(Modifier::BOLD),
     );
-    let value_style = if field.placeholder {
-        Style::default().add_modifier(theme.placeholder)
-    } else {
-        Style::default()
-    };
+    let value_style = field_value_style(section, field, theme);
     let mut spans = vec![label, Span::styled(field.value.clone(), value_style)];
     if let Some(annotation) = field.annotation {
         spans.push(Span::raw(" "));
@@ -853,6 +895,41 @@ fn render_header_field(field: &HeaderField, theme: &Theme) -> Line<'static> {
         ));
     }
     Line::from(spans)
+}
+
+/// Per-(section, field-label) colorization per ADR 0033's mapping.
+/// Placeholders always inherit `theme.placeholder` regardless of
+/// section so the dim treatment stays consistent across the pane.
+fn field_value_style(section: SectionKind, field: &HeaderField, theme: &Theme) -> Style {
+    if field.placeholder {
+        return Style::default().add_modifier(theme.placeholder);
+    }
+    match (section, field.label) {
+        (SectionKind::Session, "cwd") => Style::default().fg(theme.cwd_mark),
+        (SectionKind::Session, "title") => Style::default().add_modifier(Modifier::BOLD),
+        (SectionKind::Mux, "native_id") => Style::default().fg(theme.link_id),
+        (SectionKind::Lineage, "lineage") => Style::default().fg(theme.link_id),
+        (SectionKind::Pr, "pr") => pr_value_style(&field.value, theme),
+        _ => Style::default(),
+    }
+}
+
+/// Coarse PR-state coloring: scan the value for one of the known
+/// state tokens and route through the ADR 0022 palette. Falls back
+/// to default-fg when no token matches so unfamiliar provider
+/// states still render legibly.
+fn pr_value_style(value: &str, theme: &Theme) -> Style {
+    if value.contains("(merged)") {
+        Style::default().fg(theme.pr_merged)
+    } else if value.contains("(closed)") {
+        Style::default().fg(theme.pr_closed)
+    } else if value.contains("draft") {
+        Style::default().fg(theme.pr_draft)
+    } else if value.contains("(open)") {
+        Style::default().fg(theme.pr_open)
+    } else {
+        Style::default()
+    }
 }
 
 fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
@@ -1315,6 +1392,23 @@ mod tests {
         assert!(
             !header.contains('◉') && !header.contains('◐') && !header.contains('◯'),
             "mux chips should be dropped at narrow width: {header}",
+        );
+    }
+
+    #[test]
+    fn detail_pane_renders_section_dividers_when_multiple_sections_present() {
+        // Phase 6 / ADR 0033: when the selected session carries
+        // mux/PR/lineage data, the detail pane separates them with
+        // right-anchored labeled dividers. seeded_app's session has
+        // no mux/pr/lineage, so the muxed_app fixture (which gives
+        // the session one mux candidate) is the right shape.
+        let app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains(" Mux "),
+            "expected Mux section divider label: {text}",
         );
     }
 

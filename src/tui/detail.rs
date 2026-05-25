@@ -103,6 +103,41 @@ pub struct NodeDetail {
     pub diagnostics: Vec<DiagnosticSummary>,
 }
 
+impl NodeDetail {
+    /// Group [`Self::header_fields`] into sections per ADR 0033.
+    ///
+    /// Sections are emitted in canonical order (Session, Mux, PR,
+    /// Lineage). A section is omitted entirely when every field it
+    /// would contain is a no-annotation placeholder — operators see
+    /// a shorter pane rather than rows of dashes.
+    pub fn sections(&self) -> Vec<DetailSection> {
+        use SectionKind::*;
+        let mut grouped: std::collections::BTreeMap<SectionKind, Vec<HeaderField>> =
+            std::collections::BTreeMap::new();
+        for field in &self.header_fields {
+            let kind = section_for(self.kind_label, field.label);
+            grouped.entry(kind).or_default().push(field.clone());
+        }
+        let order = [Session, Mux, Pr, Lineage];
+        order
+            .iter()
+            .filter_map(|kind| {
+                let fields = grouped.remove(kind)?;
+                let all_blank_placeholders = fields
+                    .iter()
+                    .all(|f| f.placeholder && f.annotation.is_none());
+                if all_blank_placeholders {
+                    return None;
+                }
+                Some(DetailSection {
+                    kind: *kind,
+                    fields,
+                })
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeaderField {
     /// Label shown in the leftmost column (`harness`, `cwd`, `mux`,
@@ -116,6 +151,58 @@ pub struct HeaderField {
     /// Optional trailing annotation: `⚠` for ambiguity, `⟳` for an
     /// async-enrichment in-flight, `(preferred)` markers, etc.
     pub annotation: Option<&'static str>,
+}
+
+/// Closed set of right-panel detail sections (ADR 0033). The
+/// renderer walks sections in declaration order and emits a
+/// right-anchored labeled divider before each one after the first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SectionKind {
+    Session,
+    Mux,
+    Pr,
+    Lineage,
+}
+
+impl SectionKind {
+    /// Divider label shown to the operator (Title Case per the
+    /// agent-deck-style mockup in the styling overhaul plan).
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Session => "Session",
+            Self::Mux => "Mux",
+            Self::Pr => "PR",
+            Self::Lineage => "Lineage",
+        }
+    }
+}
+
+/// One section of the right-panel detail. Built lazily from
+/// [`NodeDetail::sections`] so the existing `header_fields` slice
+/// stays the source of truth for tests; the section view-model is
+/// a renderer-facing grouping that respects ADR 0033's suppression
+/// rule (omit when every field is a no-annotation placeholder).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DetailSection {
+    pub kind: SectionKind,
+    pub fields: Vec<HeaderField>,
+}
+
+/// Map a `(kind_label, field_label)` pair to its owning section.
+/// Defaults to [`SectionKind::Session`] so any field added without
+/// an explicit routing still lands somewhere visible — the
+/// suppression rule then hides empty sections.
+fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
+    use SectionKind::*;
+    match (kind_label, field_label) {
+        ("agent_session", "mux") => Mux,
+        ("agent_session", "pr") => Pr,
+        ("agent_session", "lineage") => Lineage,
+        ("mux_session", "mux" | "backend" | "native_id" | "attached") => Mux,
+        ("forge_pr", _) => Pr,
+        ("fork", _) => Lineage,
+        _ => Session,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -786,6 +873,71 @@ mod tests {
         assert_eq!(by_label("mux").value, "— (no attach)");
         assert!(by_label("pr").placeholder);
         assert!(by_label("lineage").placeholder);
+
+        // ADR 0033 / Phase 6: sparse sessions collapse to just the
+        // Session section. Mux / PR / Lineage sections are all
+        // placeholder-only here and should be suppressed.
+        let sections = detail.sections();
+        assert_eq!(
+            sections.iter().map(|s| s.kind).collect::<Vec<_>>(),
+            vec![SectionKind::Session],
+            "sparse session should hide placeholder-only sections",
+        );
+        let session_field_labels: Vec<&str> = sections[0].fields.iter().map(|f| f.label).collect();
+        assert_eq!(session_field_labels, vec!["harness", "cwd"]);
+    }
+
+    #[test]
+    fn sections_emit_mux_section_when_ambiguous_mux_carries_warning() {
+        // A session with ≥2 mux candidates has a `⚠` annotation on
+        // its mux field; even though the value reads as a
+        // placeholder-ish "— (N candidates)" it is *not* a blank
+        // placeholder per ADR 0033's suppression rule and the Mux
+        // section stays visible.
+        use crate::model::{Freshness, GraphLink, RelationKind};
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(agent("codex", "abc", Some("/home/op/src/x"), None));
+        let mux_a = MuxSessionId::new("editor");
+        let mux_b = MuxSessionId::new("scratch");
+        for native in ["editor", "scratch"] {
+            snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+                id: MuxSessionId::new(native),
+                backend: "tmux".to_string(),
+                native_id: native.to_string(),
+                cwd: None,
+                active_pane_command: None,
+                active_pane_pid: None,
+                active_pane_current_path: None,
+                active_pane_start_command: None,
+                activity_epoch: None,
+                created_epoch: None,
+            }));
+        }
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        for (idx, mux) in [mux_a, mux_b].into_iter().enumerate() {
+            snapshot.candidate_links.push(GraphLink {
+                id: format!("link-{idx}"),
+                source: session_id.clone(),
+                target: LinkEndpoint::Node {
+                    id: NodeId::MuxSession(mux),
+                },
+                relation: RelationKind::LinkedToMux,
+                provenance: Provenance::Discovered,
+                confidence: Confidence::Medium,
+                freshness: Freshness::Fresh,
+                source_metadata: SourceMetadata::default(),
+                state: LinkState::Active,
+            });
+        }
+        let snapshot = resolve_snapshot(snapshot);
+        let detail = build(&snapshot, &session_id, Some(home().as_path()));
+        let kinds: Vec<SectionKind> = detail.sections().iter().map(|s| s.kind).collect();
+        assert!(
+            kinds.contains(&SectionKind::Mux),
+            "ambiguous-mux session keeps the Mux section: got {kinds:?}",
+        );
     }
 
     #[test]
