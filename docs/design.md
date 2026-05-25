@@ -582,6 +582,27 @@ Configuration moves to `[tui.views.<name>]` sub-tables. The original
 `[tui].sessions_grouping` key remains supported as a deprecated alias
 until a follow-on ADR retires it.
 
+### Graph-to-View Slicing
+
+Per ADR 0035, every view that renders the snapshot funnels its joins
+through a single read-only `SnapshotIndex` (`src/model/index.rs`) built
+once per snapshot build. The index carries typed node maps per
+[`NodeKind`], a `(source, relation)` map over active candidate links, and
+named selectors for the joins that more than one view was already coding
+by hand (`workspace_for_repo`, `workspace_for_session`,
+`checkout_for_path`, `mux_candidates_for_session`, `preferred_link`,
+…). View-specific inverse indexes — such as the table renderer's
+`attached_to_mux` — are built on top of the shared index in the view
+that needs them rather than duplicating its construction loop.
+
+This is the explicit layer between graph and view: a future ADR 0031
+view (Mux / Union / Prs / Forks) defines itself as `pick a starting
+selector → chain filter/group-by → enrich → render`, not as another
+ad-hoc walk over `snapshot.nodes` and `snapshot.candidate_links`.
+Escalation to a Datalog (Ascent) or SQL (DuckDB/CozoDB) layer is named
+in ADR 0035 with explicit triggers; the selector module is the
+substrate for either path.
+
 ## Continuous Operation Mode
 
 Conspectus supports two operation modes:
