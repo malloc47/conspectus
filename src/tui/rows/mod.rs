@@ -142,6 +142,11 @@ pub struct AgentSessionRow {
     pub harness_label: String,
     /// Working directory recorded by the harness, `~`-shortened.
     pub cwd_display: Option<String>,
+    /// Project label for flat sessions layouts. Populated when the
+    /// sessions view uses `grouping = "none"` so the table-like
+    /// row can preserve project context without rendering ancestor
+    /// group rows.
+    pub project_display: Option<String>,
     /// Recency tag for the right-aligned column. `2m`, `17m`, `1h`,
     /// `2d`. `None` when no activity timestamp is known.
     pub recency: Option<String>,

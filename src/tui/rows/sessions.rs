@@ -62,6 +62,47 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         view: ViewLabel::Sessions,
         ..RowTree::default()
     };
+    let filter = &inputs.filter;
+
+    if matches!(inputs.grouping, SessionsGrouping::None) {
+        let mut sessions: Vec<_> = index
+            .agent_sessions
+            .iter()
+            .filter_map(|(session_id, session)| {
+                if !filter.is_empty() {
+                    let candidate_count = index.mux_candidates_for_session(session_id).len();
+                    let match_inputs = SessionMatchInputs {
+                        harness_key: &session.harness_key,
+                        now_epoch: inputs.now,
+                        last_active_epoch: session.last_active_epoch,
+                        mux_state: MuxStateKey::from_candidate_count(candidate_count),
+                    };
+                    if !filter.matches_session(&match_inputs) {
+                        return None;
+                    }
+                }
+                Some(SessionEntry {
+                    id: session_id.clone(),
+                    node: session,
+                })
+            })
+            .collect();
+        sessions.sort_by(|a, b| compare_sessions(a, b));
+
+        let mut session_short_ids = ShortIds::from_sessions(sessions.iter());
+        let mut ctx = EmitCtx {
+            tree: &mut tree,
+            index: &index,
+            short_ids: &mut session_short_ids,
+            home: inputs.home,
+            now: inputs.now,
+            grouping: inputs.grouping,
+        };
+        for entry in sessions {
+            emit_session(&mut ctx, 0, entry);
+        }
+        return tree;
+    }
 
     // Bucket sessions by their grouping key. The key shape depends
     // on `inputs.grouping`; the "Ungrouped" bucket catches sessions
@@ -71,7 +112,6 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut buckets: BTreeMap<GroupKey, Vec<SessionEntry<'_>>> = BTreeMap::new();
     let mut ungrouped: Vec<SessionEntry<'_>> = Vec::new();
 
-    let filter = &inputs.filter;
     for (session_id, session) in &index.agent_sessions {
         if !filter.is_empty() {
             let candidate_count = index.mux_candidates_for_session(session_id).len();
@@ -411,7 +451,10 @@ fn resolve_group_key(
         // Repo/Worktree/ScanRoot collapse the workspace level.
         // ScanRoot fallback to repo grouping until the runtime
         // wires scan roots into the builder.
-        SessionsGrouping::Repo | SessionsGrouping::Checkout | SessionsGrouping::ScanRoot => None,
+        SessionsGrouping::Repo
+        | SessionsGrouping::Checkout
+        | SessionsGrouping::ScanRoot
+        | SessionsGrouping::None => None,
     };
 
     let worktree = match grouping {
@@ -420,9 +463,10 @@ fn resolve_group_key(
         // the builder's repo-fan-out rule (≥ 2 worktrees) later.
         // We always include the worktree key here so the grouping
         // is stable; the rendering pass collapses it as needed.
-        SessionsGrouping::Graph | SessionsGrouping::Repo | SessionsGrouping::ScanRoot => {
-            Some(worktree_id.root.clone())
-        }
+        SessionsGrouping::Graph
+        | SessionsGrouping::Repo
+        | SessionsGrouping::ScanRoot
+        | SessionsGrouping::None => Some(worktree_id.root.clone()),
     };
 
     Some(GroupKey {
@@ -583,6 +627,7 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             short_id,
             harness_label: harness_label(&entry.node.harness_key),
             cwd_display,
+            project_display: project_display_for_session(&entry, ctx.index, ctx.grouping),
             recency: format_recency(ctx.now, entry.node.last_active_epoch),
             activity_epoch: entry.node.last_active_epoch,
             mux_state,
@@ -629,6 +674,32 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             });
         }
     }
+}
+
+fn project_display_for_session(
+    entry: &SessionEntry<'_>,
+    index: &SessionsIndex<'_>,
+    grouping: SessionsGrouping,
+) -> Option<String> {
+    if !matches!(grouping, SessionsGrouping::None) {
+        return None;
+    }
+    let cwd = entry.node.cwd.as_deref()?;
+    index
+        .checkout_for_cwd(cwd)
+        .and_then(|(worktree_id, _worktree)| {
+            let project_path = index.repo_display_path(&worktree_id.repo);
+            project_name_from_path(&project_path)
+        })
+        .or_else(|| project_name_from_path(cwd))
+}
+
+fn project_name_from_path(path: &str) -> Option<String> {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
 }
 
 fn mux_session_label(node: &MuxSessionNode) -> String {
@@ -931,6 +1002,68 @@ mod tests {
 
         assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
         assert_eq!(tree.rows[1].depth, 1);
+    }
+
+    #[test]
+    fn none_grouping_emits_flat_recency_sorted_session_rows_with_project_labels() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/alpha/.git",
+            "/home/op/src/alpha",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/alpha/.git", "/home/op/src/alpha"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/beta/.git",
+            "/home/op/src/beta",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/beta/.git", "/home/op/src/beta"));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "older",
+            Some("/home/op/src/alpha"),
+            100,
+        ));
+        snapshot.nodes.push(agent_session_with_activity(
+            "claude-code",
+            "/state",
+            "newer",
+            Some("/home/op/src/beta"),
+            200,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::None,
+            home: Some(home().as_path()),
+            now: Some(300),
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
+        assert!(tree.rows.iter().all(|row| row.depth == 0));
+        assert!(
+            tree.rows
+                .iter()
+                .all(|row| matches!(row.kind, RowKind::AgentSession(_)))
+        );
+        let first = match &tree.rows[0].kind {
+            RowKind::AgentSession(session) => session,
+            other => panic!("expected session row, got {other:?}"),
+        };
+        let second = match &tree.rows[1].kind {
+            RowKind::AgentSession(session) => session,
+            other => panic!("expected session row, got {other:?}"),
+        };
+        assert_eq!(first.session.session_key, "newer");
+        assert_eq!(first.project_display.as_deref(), Some("beta"));
+        assert_eq!(second.session.session_key, "older");
+        assert_eq!(second.project_display.as_deref(), Some("alpha"));
     }
 
     #[test]

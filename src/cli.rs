@@ -1373,6 +1373,7 @@ enum SessionsGroupingFlag {
     Repo,
     Checkout,
     ScanRoot,
+    None,
 }
 
 impl SessionsGroupingFlag {
@@ -1383,6 +1384,7 @@ impl SessionsGroupingFlag {
             SessionsGroupingFlag::Repo => Grouping::Sessions(SessionsGrouping::Repo),
             SessionsGroupingFlag::Checkout => Grouping::Sessions(SessionsGrouping::Checkout),
             SessionsGroupingFlag::ScanRoot => Grouping::Sessions(SessionsGrouping::ScanRoot),
+            SessionsGroupingFlag::None => Grouping::Sessions(SessionsGrouping::None),
         }
     }
 }
@@ -1588,14 +1590,21 @@ impl TuiArgs {
             _ => conspectus::tui::SessionsGrouping::Graph,
         };
 
+        let default_sort = match self.sort {
+            SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
+            SortFlag::Recency => conspectus::tui::Sort::Recency,
+        };
+        let default_sort = if sessions_grouping == conspectus::tui::SessionsGrouping::None {
+            conspectus::tui::Sort::Recency
+        } else {
+            default_sort
+        };
+
         let config = conspectus::tui::RunConfig {
             scan_roots,
             cwd: Some(cwd),
             default_view: view,
-            default_sort: match self.sort {
-                SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
-                SortFlag::Recency => conspectus::tui::Sort::Recency,
-            },
+            default_sort,
             sessions_grouping,
             initial_filter,
             refresh_interval,
@@ -2040,6 +2049,12 @@ mod tests {
         assert_eq!(
             args.to_grouping(View::Sessions).expect("parse"),
             Some(Grouping::Sessions(SessionsGrouping::Repo))
+        );
+
+        let args = filter_args_with(vec![], None, vec![], Some("none"));
+        assert_eq!(
+            args.to_grouping(View::Sessions).expect("parse"),
+            Some(Grouping::Sessions(SessionsGrouping::None))
         );
     }
 

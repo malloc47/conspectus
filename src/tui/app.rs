@@ -198,6 +198,10 @@ pub enum Msg {
 impl App {
     /// Build a fresh app at the start of the run.
     pub fn new(config: RunConfig) -> Self {
+        let mut config = config;
+        if matches!(config.sessions_grouping, super::SessionsGrouping::None) {
+            config.default_sort = super::Sort::Recency;
+        }
         let sort = config.default_sort;
         let filter = config.initial_filter.clone();
         let grouping = super::Grouping::Sessions(config.sessions_grouping);
@@ -271,6 +275,7 @@ impl App {
         if let super::Grouping::Sessions(g) = self.grouping {
             self.config.sessions_grouping = g;
         }
+        self.force_recency_for_flat_sessions();
         // Mirror the active filter into config so refresh() picks
         // it up when it rebuilds the row tree.
         self.config.initial_filter = self.filter.clone();
@@ -431,6 +436,7 @@ impl App {
                 self.grouping = g;
                 if let super::Grouping::Sessions(g) = g {
                     self.config.sessions_grouping = g;
+                    self.force_recency_for_flat_sessions();
                 }
             }
             ControlsAction::SetFilter(filter) => {
@@ -438,9 +444,27 @@ impl App {
                 self.config.initial_filter = filter;
             }
             ControlsAction::SetSort(sort) => {
+                let sort = if matches!(
+                    self.grouping,
+                    super::Grouping::Sessions(super::SessionsGrouping::None)
+                ) {
+                    super::Sort::Recency
+                } else {
+                    sort
+                };
                 self.sort = sort;
                 self.config.default_sort = sort;
             }
+        }
+    }
+
+    fn force_recency_for_flat_sessions(&mut self) {
+        if matches!(
+            self.grouping,
+            super::Grouping::Sessions(super::SessionsGrouping::None)
+        ) {
+            self.sort = super::Sort::Recency;
+            self.config.default_sort = super::Sort::Recency;
         }
     }
 
@@ -1242,6 +1266,38 @@ mod tests {
             View::Mux,
         ));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Sessions,
+        ));
+        assert_eq!(app.sort(), crate::tui::Sort::Recency);
+    }
+
+    #[test]
+    fn flat_sessions_grouping_forces_recency_sort() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::None),
+        ));
+        assert_eq!(app.sort(), crate::tui::Sort::Recency);
+
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetSort(
+            crate::tui::Sort::Hierarchy,
+        ));
+        assert_eq!(app.sort(), crate::tui::Sort::Recency);
+    }
+
+    #[test]
+    fn returning_to_flat_sessions_grouping_restores_recency_sort() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::None),
+        ));
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
+            View::Mux,
+        ));
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetSort(
+            crate::tui::Sort::Hierarchy,
+        ));
         app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
             View::Sessions,
         ));

@@ -402,6 +402,7 @@ mod tests {
                 short_id: key.to_string(),
                 harness_label: "claude-code".to_string(),
                 cwd_display: Some("~/proj".to_string()),
+                project_display: None,
                 recency: None,
                 activity_epoch: None,
                 mux_state: MuxIndicator::Unmuxed,

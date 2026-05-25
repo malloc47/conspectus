@@ -123,6 +123,7 @@ pub enum SessionsGrouping {
     Repo,
     Checkout,
     ScanRoot,
+    None,
 }
 
 /// Top-level grouping in the mux view. The row-tree builder lands
@@ -213,6 +214,7 @@ impl Grouping {
             Self::Sessions(SessionsGrouping::Repo) | Self::Union(UnionGrouping::Repo) => "repo",
             Self::Sessions(SessionsGrouping::Checkout) => "checkout",
             Self::Sessions(SessionsGrouping::ScanRoot) => "scan-root",
+            Self::Sessions(SessionsGrouping::None) => "none",
             Self::Mux(MuxGrouping::Session) => "session",
             Self::Mux(MuxGrouping::Workspace)
             | Self::Union(UnionGrouping::Workspace)
@@ -250,6 +252,7 @@ impl Grouping {
                 Self::Sessions(SessionsGrouping::Repo),
                 Self::Sessions(SessionsGrouping::Checkout),
                 Self::Sessions(SessionsGrouping::ScanRoot),
+                Self::Sessions(SessionsGrouping::None),
             ],
             View::Mux => &[
                 Self::Mux(MuxGrouping::Session),

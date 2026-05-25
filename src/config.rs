@@ -1007,6 +1007,26 @@ mod tests {
     }
 
     #[test]
+    fn tui_views_grouping_accepts_none_sessions_grouping() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.views.sessions]\ngrouping = \"none\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        assert_eq!(
+            outcome.config.tui.views.sessions.grouping,
+            Some(Grouping::Sessions(crate::tui::SessionsGrouping::None))
+        );
+    }
+
+    #[test]
     fn tui_views_grouping_rejects_value_from_other_view() {
         let temp = TempDir::new().expect("temp dir");
         let project = temp.path().join("project");

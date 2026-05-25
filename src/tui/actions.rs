@@ -154,9 +154,7 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
         AttachDisabled::UnsupportedRow => {
             "attach: selected row has no mux to attach to".to_string()
         }
-        AttachDisabled::UnmuxedSession => {
-            "attach: session is not attached to any mux".to_string()
-        }
+        AttachDisabled::UnmuxedSession => "attach: session is not attached to any mux".to_string(),
         AttachDisabled::MuxNodeMissing => {
             "attach: mux node missing from snapshot — try `r` to refresh".to_string()
         }

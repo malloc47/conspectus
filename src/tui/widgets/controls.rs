@@ -683,10 +683,10 @@ fn sort_label(sort: Sort) -> &'static str {
 pub fn centered_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
     let max_height = area.height.saturating_sub(2);
-    // Content is 5 view rows + 4 grouping rows + 4 filter rows +
+    // Content is 5 view rows + 5 grouping rows + 4 filter rows +
     // 2 sort rows + 4 section headers + 4 blank lines + 1 footer +
-    // 1 blank-before-footer = 25 lines, plus 2 for the border.
-    let desired = 27;
+    // 1 blank-before-footer = 26 lines, plus 2 for the border.
+    let desired = 28;
     let height = (desired as u16).clamp(8, max_height.max(8));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -749,15 +749,15 @@ mod tests {
             Sort::Hierarchy,
         );
         let mut state = ControlsOverlayState::new(&ctx);
-        // Five views + 4 sessions groupings + 4 filter rows + 2 sort
-        // rows = 15 actionable rows.
-        for _ in 0..15 {
+        // Five views + 5 sessions groupings + 4 filter rows + 2 sort
+        // rows = 16 actionable rows.
+        for _ in 0..16 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(
             state.cursor(),
             ControlsCursor::View(0),
-            "down wraps back to the top after 15 presses",
+            "down wraps back to the top after 16 presses",
         );
     }
 

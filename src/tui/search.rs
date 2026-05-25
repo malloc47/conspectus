@@ -263,6 +263,9 @@ fn agent_haystack(session: &crate::tui::rows::AgentSessionRow) -> String {
     if let Some(cwd) = session.cwd_display.as_deref() {
         parts.push(cwd);
     }
+    if let Some(project) = session.project_display.as_deref() {
+        parts.push(project);
+    }
     if let Some(preview) = session.preview.as_deref() {
         parts.push(preview);
     }
@@ -287,6 +290,7 @@ mod tests {
                 short_id: key.to_string(),
                 harness_label: harness.to_string(),
                 cwd_display: Some("~/proj".to_string()),
+                project_display: None,
                 recency: None,
                 activity_epoch: None,
                 mux_state: MuxIndicator::Unmuxed,

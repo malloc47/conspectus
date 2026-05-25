@@ -567,6 +567,11 @@ grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
 backs config, CLI flags, and TUI controls.
 
+The sessions view also supports `grouping = "none"`. This renders a flat,
+table-like session list rather than workspace/repo/checkout group rows. The
+flat list carries an inline project-name column before the preview text and
+uses recency order; hierarchy sorting is not applicable without group rows.
+
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).
 Single-key accelerators are layered on top and surfaced in the

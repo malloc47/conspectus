@@ -33,6 +33,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
+use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
@@ -365,23 +366,45 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
         Focus::Left => "[left]",
         Focus::Right => "[right]",
     };
-    let chip_text = render_filter_chips(app.filter());
-    let line = if chip_text.is_empty() {
-        Line::from(Span::styled(
-            format!("{scope} {hints}"),
+    let settings = render_view_state_chips(app);
+    let line = Line::from(vec![
+        Span::styled(
+            format!("{scope} "),
             Style::default().add_modifier(theme.placeholder),
-        ))
-    } else {
-        Line::from(vec![
-            Span::styled(
-                format!("{scope} {hints} · "),
-                Style::default().add_modifier(theme.placeholder),
-            ),
-            Span::styled(chip_text, Style::default().fg(theme.cwd_mark)),
-        ])
-    };
+        ),
+        Span::styled(settings, Style::default().fg(theme.cwd_mark)),
+        Span::styled(
+            format!(" · {hints}"),
+            Style::default().add_modifier(theme.placeholder),
+        ),
+    ]);
     let widget = Paragraph::new(line);
     frame.render_widget(widget, area);
+}
+
+/// Render the active view state in a compact, always-visible form
+/// so grouping / filtering / sorting are discoverable without
+/// opening the controls overlay.
+fn render_view_state_chips(app: &App) -> String {
+    let filter = render_filter_chips(app.filter());
+    let filter = if filter.is_empty() {
+        "all".to_string()
+    } else {
+        filter
+    };
+    format!(
+        "group:{} · filter:{} · sort:{}",
+        app.grouping().as_str(),
+        filter,
+        sort_chip_label(app.sort())
+    )
+}
+
+fn sort_chip_label(sort: crate::tui::Sort) -> &'static str {
+    match sort {
+        crate::tui::Sort::Hierarchy => "hierarchy",
+        crate::tui::Sort::Recency => "recency",
+    }
 }
 
 /// Render the active filter as a compact chip-strip:
@@ -699,8 +722,13 @@ fn render_left_row(
 ) -> Line<'static> {
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::raw(row_indent(row.depth)));
-    spans.push(disclosure_span(row, app));
+    let flat_sessions = matches!(app.config().sessions_grouping, SessionsGrouping::None);
+    if flat_sessions && matches!(row.kind, RowKind::AgentSession(_)) {
+        spans.push(disclosure_span(row, app));
+    } else {
+        spans.push(Span::raw(row_indent(row.depth)));
+        spans.push(disclosure_span(row, app));
+    }
 
     match &row.kind {
         RowKind::Group(group) => {
@@ -774,6 +802,16 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         spans.push(Span::styled(
             format!("  {alias}"),
             Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(project) = session
+        .project_display
+        .as_deref()
+        .filter(|project| !project.is_empty())
+    {
+        spans.push(Span::styled(
+            format!("  {:<16}", truncate_to_width(project, 16)),
+            Style::default().fg(theme.secondary_text),
         ));
     }
     spans
@@ -1313,7 +1351,7 @@ fn contextual_status_text(app: &App) -> String {
         }
         Err(reason) => attach_disabled_reason(&reason),
     };
-    format!("{focus_hint} · {action_hint} · Tab focus · r refresh · q quit")
+    format!("{action_hint} · {focus_hint} · Tab focus · r refresh · q quit")
 }
 
 fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
@@ -1771,6 +1809,7 @@ mod tests {
             short_id: "abcdef".into(),
             harness_label: "codex".into(),
             cwd_display: None,
+            project_display: None,
             recency: None,
             activity_epoch: None,
             mux_state: MuxIndicator::Unmuxed,
@@ -1800,6 +1839,7 @@ mod tests {
             short_id: "abcdef".into(),
             harness_label: "codex".into(),
             cwd_display: None,
+            project_display: None,
             recency: None,
             activity_epoch: None,
             mux_state: MuxIndicator::Unmuxed,
@@ -1827,6 +1867,39 @@ mod tests {
     }
 
     #[test]
+    fn session_project_column_renders_before_inline_preview() {
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+        let row = AgentSessionRow {
+            session: AgentSessionId::new("codex", "/state", "abc"),
+            short_id: "abcdef".into(),
+            harness_label: "codex".into(),
+            cwd_display: None,
+            project_display: Some("conspectus".into()),
+            recency: None,
+            activity_epoch: None,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: Some("latest message".into()),
+            title: None,
+            alias: None,
+            primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        };
+
+        let mut spans = render_session_spans(&row, &theme, now);
+        append_session_preview(&mut spans, &row, 120, &theme);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        let project_idx = rendered.find("conspectus").expect("project rendered");
+        let preview_idx = rendered
+            .find("latest message")
+            .expect("inline preview rendered");
+        assert!(
+            project_idx < preview_idx,
+            "project column should precede preview: {rendered}"
+        );
+    }
+
+    #[test]
     fn session_recency_span_picks_bucket_style_from_theme() {
         // Build a minimal AgentSessionRow directly so we can pin the
         // activity_epoch and assert the recency span's style without
@@ -1841,6 +1914,7 @@ mod tests {
             short_id: "abcdef".into(),
             harness_label: "codex".into(),
             cwd_display: None,
+            project_display: None,
             recency: recency.map(|s| s.to_string()),
             activity_epoch: epoch,
             mux_state: MuxIndicator::Unmuxed,
@@ -2080,6 +2154,36 @@ mod tests {
         assert!(
             !text.contains("resume"),
             "status line should not describe R as resume: {text}"
+        );
+    }
+
+    #[test]
+    fn status_bar_shows_group_filter_and_sort_settings() {
+        let mut app = seeded_app();
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::None),
+        ));
+        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
+            crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+                ..crate::filter::RowFilter::default()
+            },
+        ));
+
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("group:none"),
+            "grouping chip missing from status bar: {text}"
+        );
+        assert!(
+            text.contains("filter:harness:codex"),
+            "filter chip missing from status bar: {text}"
+        );
+        assert!(
+            text.contains("sort:recency"),
+            "sort chip missing from status bar: {text}"
         );
     }
 
