@@ -770,6 +770,12 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     spans.push(Span::styled(format!("{recency:>4}"), recency_style));
     spans.push(Span::raw("  "));
     spans.push(mux_indicator_span(session.mux_state, theme));
+    if let Some(alias) = session.alias.as_deref().filter(|alias| !alias.is_empty()) {
+        spans.push(Span::styled(
+            format!("  {alias}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
     spans
 }
 
@@ -1785,6 +1791,42 @@ mod tests {
     }
 
     #[test]
+    fn session_alias_renders_after_mux_glyph_in_left_row() {
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+        let row = AgentSessionRow {
+            session: AgentSessionId::new("codex", "/state", "abc"),
+            short_id: "abcdef".into(),
+            harness_label: "codex".into(),
+            cwd_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: None,
+            title: Some("harness title".into()),
+            alias: Some("ingest-refactor".into()),
+            primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        };
+
+        let spans = render_session_spans(&row, &theme, now);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert!(
+            rendered.contains("◯  ingest-refactor"),
+            "alias should render after the mux glyph: {rendered}"
+        );
+        assert!(
+            rendered.starts_with("abcdef  "),
+            "short id should remain the fixed leading column: {rendered}"
+        );
+        let alias = spans
+            .iter()
+            .find(|span| span.content.trim() == "ingest-refactor")
+            .expect("alias span present");
+        assert!(alias.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
     fn session_recency_span_picks_bucket_style_from_theme() {
         // Build a minimal AgentSessionRow directly so we can pin the
         // activity_epoch and assert the recency span's style without
@@ -2034,6 +2076,10 @@ mod tests {
         assert!(
             text.contains("attach: session is not attached to any mux"),
             "expected contextual attach-disabled reason: {text}"
+        );
+        assert!(
+            !text.contains("resume"),
+            "status line should not describe R as resume: {text}"
         );
     }
 

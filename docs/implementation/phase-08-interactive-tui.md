@@ -308,6 +308,7 @@ bar rather than offered through a separate menu.
 | `1`–`5`            | Switch view: sessions, mux, union, prs, forks |
 | `/`                | Open in-view fuzzy search overlay            |
 | `r`                | Refresh discovery now                        |
+| `R`                | Rename the selected agent session            |
 | `?`                | Help overlay                                 |
 | `q` / Ctrl-C       | Quit (restores terminal)                     |
 | `v`                | Open the controls overlay (ADR 0031)         |
@@ -357,12 +358,15 @@ The v1 action surface is intentionally narrow and read-only-with-attach:
   on an agent row whose preferred `LinkedToMux` resolves).
 - **Copy the selected node's short id** (`i`).
 - **Open the selected PR in `$BROWSER`** (`o`).
+- **Rename the selected agent session** (`R`) via the Conspectus alias
+  overlay, with optional tmux lockstep rename when the session has a
+  single resolved mux.
 
 Explicit non-goals for v1:
 
 - creating mux sessions, windows, or panes
 - starting new agent sessions (`n`)
-- resuming an un-muxed agent into a new or existing mux (`R`)
+- resuming an un-muxed agent into a new or existing mux
 - creating checkouts
 - merging branches
 - creating or commenting on PRs
@@ -504,8 +508,8 @@ contract.
   mode replaces it later without UI changes.
 - **`Enter` on a row**: expand / collapse parent rows. Attach is `a`
   (or `Enter` on a leaf row that has a single resolved mux target).
-- **Resume an un-muxed agent**: deferred to its own story (`P8-011`)
-  with the `R` key reserved.
+- **Resume an un-muxed agent**: deferred to its own story (`P8-011`).
+  The `R` key is already assigned to rename.
 
 ### From the P8-001a walkthrough
 

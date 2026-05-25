@@ -108,6 +108,13 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(&mut lines, "?", "This help");
     blank(&mut lines);
 
+    section(&mut lines, "Actions");
+    bind(&mut lines, "a", "Attach to the selected mux");
+    bind(&mut lines, "R", "Rename the selected agent session");
+    bind(&mut lines, "r", "Refresh discovery now");
+    bind(&mut lines, "q / Ctrl-C", "Quit");
+    blank(&mut lines);
+
     section(&mut lines, "View switching");
     bind(
         &mut lines,
@@ -154,13 +161,6 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         "Cycle focus between left tree and right panel",
     );
     bind(&mut lines, "J / K", "Scroll the right-panel preview");
-    blank(&mut lines);
-
-    section(&mut lines, "Actions");
-    bind(&mut lines, "a", "Attach to the selected mux");
-    bind(&mut lines, "R", "Rename the selected agent session");
-    bind(&mut lines, "r", "Refresh discovery now");
-    bind(&mut lines, "q / Ctrl-C", "Quit");
     blank(&mut lines);
 
     lines.push(Line::from(Span::styled(
@@ -261,14 +261,19 @@ mod tests {
             .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))
             .collect::<Vec<_>>()
             .join(" ");
-        // Spot-check the new ADR 0031 / T8-017 keys.
+        // Spot-check the new ADR 0031 / T8-017 keys plus the
+        // rename action, which must stay visible in the help popup.
         for needle in [
-            "v ", "f ", "F ", "Ctrl-G", "] / [", "/ ", "1 – 5", "Tab", "?",
+            "v ", "a ", "R ", "r ", "f ", "F ", "Ctrl-G", "] / [", "/ ", "1 – 5", "Tab", "?",
         ] {
             assert!(
                 rendered.contains(needle),
                 "help text missing `{needle}` reference; full text:\n{rendered}"
             );
         }
+        assert!(
+            rendered.contains("Rename the selected agent session"),
+            "help text should document R as rename; full text:\n{rendered}"
+        );
     }
 }
