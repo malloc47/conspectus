@@ -47,6 +47,12 @@ use crate::tui::rows::{
 /// side-by-side split to a vertical stack (left-on-top per the
 /// phase-08 layout note).
 const NARROW_LAYOUT_THRESHOLD: u16 = 100;
+/// Cell budget reserved for the harness-label slot inside the badge.
+/// The longest currently-known label (`opencode`) needs 8 cells; the
+/// badge widget pads shorter labels with unstyled trailing space so
+/// the recency column lands at the same horizontal position
+/// regardless of which harness owns the row.
+const HARNESS_LABEL_COLUMN_WIDTH: usize = 8;
 
 /// Render one frame. Pure with respect to `app`; the runtime calls
 /// this on every loop iteration.
@@ -444,12 +450,13 @@ fn render_left_row(
 }
 
 fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> Vec<Span<'static>> {
+    use crate::tui::widgets::badge::{harness_badge, harness_badge_padding};
     let mut spans = Vec::new();
     spans.push(Span::raw(format!("{}  ", session.short_id)));
-    spans.push(Span::styled(
-        format!("{:8}", session.harness_label),
-        Style::default().fg(theme.harness_color(&session.harness_label)),
-    ));
+    spans.push(harness_badge(&session.harness_label, theme));
+    if let Some(pad) = harness_badge_padding(&session.harness_label, HARNESS_LABEL_COLUMN_WIDTH) {
+        spans.push(pad);
+    }
     spans.push(Span::raw("  "));
     let recency = session.recency.clone().unwrap_or_else(|| "—".to_string());
     let recency_style = recency_bucket(Some(now), session.activity_epoch)
@@ -1131,6 +1138,47 @@ mod tests {
     }
 
     #[test]
+    fn session_harness_span_renders_as_filled_badge() {
+        // Per Phase 4 of the styling overhaul, the harness label
+        // becomes a ` label ` pill carrying REVERSED+BOLD over the
+        // harness color, so it reads as a chip rather than plain
+        // colored text. The badge span owns its own padding cells;
+        // any trailing-space alignment is plain (unstyled).
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+        let row = AgentSessionRow {
+            session: AgentSessionId::new("codex", "/state", "abc"),
+            short_id: "abcdef".into(),
+            harness_label: "codex".into(),
+            cwd_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: None,
+            title: None,
+            alias: None,
+            primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        };
+        let spans = render_session_spans(&row, &theme, now);
+        let badge = spans
+            .iter()
+            .find(|s| s.content == " codex ")
+            .expect("harness badge span present");
+        assert_eq!(badge.style.fg, Some(theme.harness_color("codex")));
+        assert!(badge.style.add_modifier.contains(Modifier::REVERSED));
+        assert!(badge.style.add_modifier.contains(Modifier::BOLD));
+        // Codex's label is 5 chars; HARNESS_LABEL_COLUMN_WIDTH is 8,
+        // so the badge is followed by a 3-cell unstyled pad to keep
+        // the recency column aligned across sibling rows.
+        let pad = spans
+            .iter()
+            .find(|s| s.content == "   ")
+            .expect("trailing pad span present");
+        assert_eq!(pad.style, Style::default());
+    }
+
+    #[test]
     fn session_recency_span_picks_bucket_style_from_theme() {
         // Build a minimal AgentSessionRow directly so we can pin the
         // activity_epoch and assert the recency span's style without
@@ -1153,24 +1201,36 @@ mod tests {
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
         };
+        // Locate the recency span by its formatted content (4-cell
+        // right-aligned tag). Index varies with harness label length
+        // once the badge widget pads short labels — looking up by
+        // content keeps the test resilient to badge layout changes.
+        fn recency_span<'a>(spans: &'a [Span<'static>], rendered: &str) -> &'a Span<'static> {
+            spans
+                .iter()
+                .find(|s| s.content.trim() == rendered.trim())
+                .expect("recency span present")
+        }
+
         let fresh = make_row(Some("1m"), Some(now - 60));
         let spans = render_session_spans(&fresh, &theme, now);
-        let recency_span = &spans[3];
-        assert_eq!(recency_span.content.trim(), "1m");
         assert_eq!(
-            recency_span.style,
+            recency_span(&spans, "1m").style,
             theme.recency_fresh.into_style(),
             "fresh row should inherit recency_fresh from the theme",
         );
 
         let cold = make_row(Some("3d"), Some(now - 3 * 24 * 60 * 60));
         let spans = render_session_spans(&cold, &theme, now);
-        assert_eq!(spans[3].style, theme.recency_cold.into_style());
+        assert_eq!(
+            recency_span(&spans, "3d").style,
+            theme.recency_cold.into_style(),
+        );
 
         let unknown = make_row(None, None);
         let spans = render_session_spans(&unknown, &theme, now);
         assert_eq!(
-            spans[3].style,
+            recency_span(&spans, "—").style,
             Style::default().add_modifier(theme.placeholder),
             "missing activity_epoch falls back to placeholder dimming",
         );

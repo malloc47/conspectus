@@ -1,5 +1,6 @@
 //! Reusable Ratatui widgets owned by the TUI runtime.
 
+pub mod badge;
 pub mod controls;
 pub mod help;
 pub mod input;
