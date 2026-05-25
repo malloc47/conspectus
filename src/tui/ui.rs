@@ -501,11 +501,13 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     }
 
     let now = current_unix_epoch_for_render();
+    let summaries = compute_group_summaries(app.tree());
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
     let mut selected_primary_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
-        let primary = render_left_row(row, app, is_selected, inner.width as usize, now);
+        let summary = summaries.get(&row.id).copied();
+        let primary = render_left_row(row, app, is_selected, inner.width as usize, now, summary);
         if is_selected {
             selected_primary_line = Some(lines.len());
         }
@@ -546,6 +548,77 @@ fn empty_left_panel_text(app: &App) -> String {
     "No sessions discovered.\nPress `r` to refresh or `q` to quit.".to_string()
 }
 
+/// Per-group aggregates surfaced as right-aligned chips on group
+/// rows (Phase 7). Counts walk the full row tree (not just visible
+/// rows) so a collapsed group still advertises what's inside.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+struct GroupSummary {
+    agents: usize,
+    attached: usize,
+    ambiguous: usize,
+    unmuxed: usize,
+}
+
+/// Walk the row tree once and compute the [`GroupSummary`] for every
+/// group row. Each group's summary aggregates every `AgentSession`
+/// row that sits below it in the flat tree (continuous depth >
+/// group depth) until the next sibling-or-shallower row.
+fn compute_group_summaries(
+    tree: &crate::tui::rows::RowTree,
+) -> std::collections::HashMap<RowId, GroupSummary> {
+    let mut out = std::collections::HashMap::new();
+    let rows = &tree.rows;
+    for (i, row) in rows.iter().enumerate() {
+        if !matches!(row.kind, RowKind::Group(_)) {
+            continue;
+        }
+        let parent_depth = row.depth;
+        let mut summary = GroupSummary::default();
+        for child in &rows[i + 1..] {
+            if child.depth <= parent_depth {
+                break;
+            }
+            if let RowKind::AgentSession(session) = &child.kind {
+                summary.agents += 1;
+                match session.mux_state {
+                    MuxIndicator::Attached => summary.attached += 1,
+                    MuxIndicator::Ambiguous { .. } => summary.ambiguous += 1,
+                    MuxIndicator::Unmuxed => summary.unmuxed += 1,
+                }
+            }
+        }
+        out.insert(row.id.clone(), summary);
+    }
+    out
+}
+
+/// Append the right-aligned summary chips to a group row's span
+/// list. Renders nothing when the group contains no sessions so
+/// workspace-only ancestors stay quiet.
+fn append_group_summary_spans(
+    spans: &mut Vec<Span<'static>>,
+    summary: GroupSummary,
+    theme: &Theme,
+) {
+    if summary.agents == 0 {
+        return;
+    }
+    spans.push(Span::styled(
+        format!("  ({})", summary.agents),
+        Style::default().add_modifier(theme.placeholder),
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled("◉", Style::default().fg(theme.mux_attached)));
+    spans.push(Span::raw(format!(" {} ", summary.attached)));
+    spans.push(Span::styled("◐", Style::default().fg(theme.mux_ambiguous)));
+    spans.push(Span::raw(format!(" {} ", summary.ambiguous)));
+    spans.push(Span::styled(
+        "◯",
+        Style::default().add_modifier(theme.mux_unmuxed),
+    ));
+    spans.push(Span::raw(format!(" {}", summary.unmuxed)));
+}
+
 /// Build the rendered line for a single visible row.
 fn render_left_row(
     row: &crate::tui::rows::Row,
@@ -553,6 +626,7 @@ fn render_left_row(
     is_selected: bool,
     width: usize,
     now: i64,
+    group_summary: Option<GroupSummary>,
 ) -> Line<'static> {
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -579,6 +653,9 @@ fn render_left_row(
                         .fg(theme.cwd_mark)
                         .add_modifier(theme.placeholder),
                 ));
+            }
+            if let Some(summary) = group_summary {
+                append_group_summary_spans(&mut spans, summary, theme);
             }
         }
         RowKind::AgentSession(session) => {
@@ -1392,6 +1469,33 @@ mod tests {
         assert!(
             !header.contains('◉') && !header.contains('◐') && !header.contains('◯'),
             "mux chips should be dropped at narrow width: {header}",
+        );
+    }
+
+    #[test]
+    fn group_rows_carry_mux_state_summary_chips() {
+        // Phase 7: each group row aggregates the mux-state breakdown
+        // of its sessions and surfaces it as a right-aligned chip
+        // strip. seeded_app's project group contains one unmuxed
+        // codex session, so the workspace/repo group row should
+        // show `(1)` plus a mux-state breakdown with ◯ 1 set.
+        let app = seeded_app();
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        // The group row appears on the line that contains
+        // `~/src/proj` (the seeded project path).
+        let group_line = text
+            .lines()
+            .find(|l| l.contains("~/src/proj"))
+            .expect("group line present");
+        assert!(
+            group_line.contains("(1)"),
+            "group should advertise its agent count: {group_line}",
+        );
+        assert!(
+            group_line.contains('◉') && group_line.contains('◐') && group_line.contains('◯'),
+            "group should carry all three mux-state glyphs: {group_line}",
         );
     }
 
