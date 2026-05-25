@@ -270,6 +270,56 @@ pub fn format_recency(now: Option<i64>, activity_epoch: Option<i64>) -> Option<S
     Some(format!("{days}d"))
 }
 
+/// Coarse activity buckets (Phase 3 of the styling overhaul). The
+/// renderer maps each bucket to a [`Theme`] style so the recency
+/// column carries a freshness signal in color in addition to the
+/// numeric label. Bucket boundaries:
+///
+/// - `< 5m`   → [`RecencyBucket::Fresh`]
+/// - `< 1h`   → [`RecencyBucket::Active`]
+/// - `< 1d`   → [`RecencyBucket::Recent`]
+/// - `≥ 1d`   → [`RecencyBucket::Cold`]
+///
+/// Returns `None` when either side of the delta is missing so the
+/// caller can fall back to placeholder styling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecencyBucket {
+    Fresh,
+    Active,
+    Recent,
+    Cold,
+}
+
+pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<RecencyBucket> {
+    let now = now?;
+    let then = activity_epoch?;
+    let delta = (now - then).max(0);
+    Some(if delta < 5 * 60 {
+        RecencyBucket::Fresh
+    } else if delta < 60 * 60 {
+        RecencyBucket::Active
+    } else if delta < 24 * 60 * 60 {
+        RecencyBucket::Recent
+    } else {
+        RecencyBucket::Cold
+    })
+}
+
+impl RecencyBucket {
+    /// Build the [`ratatui::style::Style`] for this bucket from the
+    /// active [`Theme`]. The mapping pulls the per-bucket `StyleSpec`
+    /// directly so operators who override a single bucket through
+    /// `[tui.theme]` see the change immediately.
+    pub fn style(self, theme: &crate::tui::Theme) -> ratatui::style::Style {
+        match self {
+            Self::Fresh => theme.recency_fresh.into_style(),
+            Self::Active => theme.recency_active.into_style(),
+            Self::Recent => theme.recency_recent.into_style(),
+            Self::Cold => theme.recency_cold.into_style(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,5 +390,51 @@ mod tests {
     fn format_recency_is_none_when_either_side_missing() {
         assert_eq!(format_recency(None, Some(100)), None);
         assert_eq!(format_recency(Some(100), None), None);
+    }
+
+    #[test]
+    fn recency_bucket_picks_bucket_per_age() {
+        let now = Some(1_000_000);
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 60)),
+            Some(RecencyBucket::Fresh),
+            "1m ago is Fresh",
+        );
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 5 * 60)),
+            Some(RecencyBucket::Active),
+            "exactly 5m ago crosses Fresh→Active",
+        );
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 30 * 60)),
+            Some(RecencyBucket::Active),
+            "30m ago is Active",
+        );
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 60 * 60)),
+            Some(RecencyBucket::Recent),
+            "exactly 1h ago crosses Active→Recent",
+        );
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 12 * 60 * 60)),
+            Some(RecencyBucket::Recent),
+            "12h ago is Recent",
+        );
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 24 * 60 * 60)),
+            Some(RecencyBucket::Cold),
+            "exactly 1d ago crosses Recent→Cold",
+        );
+        assert_eq!(
+            recency_bucket(now, Some(1_000_000 - 7 * 24 * 60 * 60)),
+            Some(RecencyBucket::Cold),
+            "7d ago is Cold",
+        );
+    }
+
+    #[test]
+    fn recency_bucket_is_none_when_either_side_missing() {
+        assert_eq!(recency_bucket(None, Some(100)), None);
+        assert_eq!(recency_bucket(Some(100), None), None);
     }
 }

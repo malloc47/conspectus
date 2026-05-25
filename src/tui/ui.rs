@@ -40,7 +40,7 @@ use crate::tui::app::{App, Focus};
 use crate::tui::detail::{HeaderField, NodeDetail};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
-    AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency,
+    AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency, recency_bucket,
 };
 
 /// Terminal width threshold below which the body switches from a
@@ -341,11 +341,12 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     }
 
+    let now = current_unix_epoch_for_render();
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
     let mut selected_primary_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
-        let primary = render_left_row(row, app, is_selected, inner.width as usize);
+        let primary = render_left_row(row, app, is_selected, inner.width as usize, now);
         if is_selected {
             selected_primary_line = Some(lines.len());
         }
@@ -392,6 +393,7 @@ fn render_left_row(
     app: &App,
     is_selected: bool,
     width: usize,
+    now: i64,
 ) -> Line<'static> {
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -421,7 +423,7 @@ fn render_left_row(
             }
         }
         RowKind::AgentSession(session) => {
-            spans.extend(render_session_spans(session, theme));
+            spans.extend(render_session_spans(session, theme, now));
             append_session_preview(&mut spans, session, width, theme);
         }
         RowKind::AgentSessionMuxCandidate(candidate) => {
@@ -441,7 +443,7 @@ fn render_left_row(
     line
 }
 
-fn render_session_spans(session: &AgentSessionRow, theme: &Theme) -> Vec<Span<'static>> {
+fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     spans.push(Span::raw(format!("{}  ", session.short_id)));
     spans.push(Span::styled(
@@ -450,10 +452,10 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme) -> Vec<Span<'s
     ));
     spans.push(Span::raw("  "));
     let recency = session.recency.clone().unwrap_or_else(|| "—".to_string());
-    spans.push(Span::styled(
-        format!("{recency:>4}"),
-        Style::default().add_modifier(theme.placeholder),
-    ));
+    let recency_style = recency_bucket(Some(now), session.activity_epoch)
+        .map(|bucket| bucket.style(theme))
+        .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
+    spans.push(Span::styled(format!("{recency:>4}"), recency_style));
     spans.push(Span::raw("  "));
     spans.push(mux_indicator_span(session.mux_state, theme));
     spans
@@ -1125,6 +1127,52 @@ mod tests {
         assert!(
             text.contains("Loading"),
             "expected loading placeholder: {text}"
+        );
+    }
+
+    #[test]
+    fn session_recency_span_picks_bucket_style_from_theme() {
+        // Build a minimal AgentSessionRow directly so we can pin the
+        // activity_epoch and assert the recency span's style without
+        // staging a full snapshot. The render_session_spans helper is
+        // intentionally cheap to call from the test module.
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+
+        let make_row = |recency: Option<&str>, epoch: Option<i64>| AgentSessionRow {
+            session: AgentSessionId::new("codex", "/state", "abc"),
+            short_id: "abcdef".into(),
+            harness_label: "codex".into(),
+            cwd_display: None,
+            recency: recency.map(|s| s.to_string()),
+            activity_epoch: epoch,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: None,
+            title: None,
+            alias: None,
+            primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        };
+        let fresh = make_row(Some("1m"), Some(now - 60));
+        let spans = render_session_spans(&fresh, &theme, now);
+        let recency_span = &spans[3];
+        assert_eq!(recency_span.content.trim(), "1m");
+        assert_eq!(
+            recency_span.style,
+            theme.recency_fresh.into_style(),
+            "fresh row should inherit recency_fresh from the theme",
+        );
+
+        let cold = make_row(Some("3d"), Some(now - 3 * 24 * 60 * 60));
+        let spans = render_session_spans(&cold, &theme, now);
+        assert_eq!(spans[3].style, theme.recency_cold.into_style());
+
+        let unknown = make_row(None, None);
+        let spans = render_session_spans(&unknown, &theme, now);
+        assert_eq!(
+            spans[3].style,
+            Style::default().add_modifier(theme.placeholder),
+            "missing activity_epoch falls back to placeholder dimming",
         );
     }
 
