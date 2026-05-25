@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
-    AgentSessionNode, CheckoutId, CheckoutNode, GraphLink, GraphNode, GraphSnapshot,
-    MuxSessionNode, NodeId, RelationKind, RepoId, RepoNode, WorkspaceId,
+    AgentSessionNode, CheckoutId, GraphSnapshot, MuxSessionNode, NodeId, RepoId, SnapshotIndex,
+    WorkspaceId, path_is_ancestor_of, pick_preferred,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -57,7 +57,7 @@ pub struct SessionsBuildInputs<'a> {
 /// Build the sessions row tree. Pure: depends only on the inputs,
 /// no I/O, no clock reads, no env access.
 pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
-    let index = SessionsIndex::new(inputs.snapshot);
+    let index = SnapshotIndex::new(inputs.snapshot);
     let mut tree = RowTree {
         view: ViewLabel::Sessions,
         ..RowTree::default()
@@ -213,209 +213,15 @@ fn node_id_path(id: &NodeId) -> Option<&str> {
     }
 }
 
-/// Component-wise prefix match so `/a/b` does **not** count as an
-/// ancestor of `/a/barbecue`.
-fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
-    let mut anc_iter = ancestor.components();
-    let mut desc_iter = descendant.components();
-    loop {
-        match (anc_iter.next(), desc_iter.next()) {
-            (Some(a), Some(d)) if a == d => continue,
-            (Some(_), Some(_)) => return false,
-            (Some(_), None) => return false,
-            (None, _) => return true,
-        }
-    }
-}
-
 /// Bundle of mutable + read-only context threaded through the emit
 /// helpers so each helper isn't an 8-argument signature.
 struct EmitCtx<'a, 'snap> {
     tree: &'a mut RowTree,
-    index: &'a SessionsIndex<'snap>,
+    index: &'a SnapshotIndex<'snap>,
     short_ids: &'a mut ShortIds,
     home: Option<&'a Path>,
     now: Option<i64>,
     grouping: SessionsGrouping,
-}
-
-// -----------------------------------------------------------------------------
-// Index built once per build call
-// -----------------------------------------------------------------------------
-
-struct SessionsIndex<'a> {
-    snapshot: &'a GraphSnapshot,
-    agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
-    mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
-    repos: BTreeMap<NodeId, &'a RepoNode>,
-    worktrees: BTreeMap<NodeId, &'a CheckoutNode>,
-    /// `(source, relation)` → all *active* candidate links. Mirrors
-    /// `SnapshotView::by_source_relation` in `output::table` but
-    /// scoped to the TUI's needs.
-    by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
-}
-
-impl<'a> SessionsIndex<'a> {
-    fn new(snapshot: &'a GraphSnapshot) -> Self {
-        let mut agent_sessions = BTreeMap::new();
-        let mut mux_sessions = BTreeMap::new();
-        let mut repos = BTreeMap::new();
-        let mut worktrees = BTreeMap::new();
-
-        for node in &snapshot.nodes {
-            let id = node.id();
-            match node {
-                GraphNode::AgentSession(session) => {
-                    agent_sessions.insert(id, session);
-                }
-                GraphNode::MuxSession(mux) => {
-                    mux_sessions.insert(id, mux);
-                }
-                GraphNode::Repo(repo) => {
-                    repos.insert(id, repo);
-                }
-                GraphNode::Checkout(worktree) => {
-                    worktrees.insert(id, worktree);
-                }
-                _ => {}
-            }
-        }
-
-        let mut by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&GraphLink>> =
-            BTreeMap::new();
-        for link in &snapshot.candidate_links {
-            if !matches!(link.state, crate::model::LinkState::Active) {
-                continue;
-            }
-            by_source_relation
-                .entry((link.source.clone(), link.relation.clone()))
-                .or_default()
-                .push(link);
-        }
-
-        Self {
-            snapshot,
-            agent_sessions,
-            mux_sessions,
-            repos,
-            worktrees,
-            by_source_relation,
-        }
-    }
-
-    /// Find the deepest worktree node whose root contains `cwd`.
-    /// Mirrors the behavior of `output::table::session_checkout_root`.
-    fn checkout_for_cwd(&self, cwd: &str) -> Option<(&CheckoutId, &CheckoutNode)> {
-        let cwd = Path::new(cwd);
-        self.worktrees
-            .iter()
-            .filter_map(|(id, node)| match id {
-                NodeId::Checkout(wt_id) if path_is_ancestor_of(Path::new(&wt_id.root), cwd) => {
-                    Some((wt_id, *node))
-                }
-                _ => None,
-            })
-            .max_by_key(|(wt_id, _)| Path::new(&wt_id.root).components().count())
-    }
-
-    /// Count worktrees that belong to `repo`. Used to apply the
-    /// "show worktree level only when ≥ 2 worktrees" rule.
-    fn checkout_count_for_repo(&self, repo: &RepoId) -> usize {
-        self.worktrees
-            .keys()
-            .filter(|id| match id {
-                NodeId::Checkout(wt_id) => &wt_id.repo == repo,
-                _ => false,
-            })
-            .count()
-    }
-
-    /// Resolve the workspace that contains `repo`, if the graph
-    /// records one via `WorkspaceContainsRepo`. Returns the first
-    /// preferred-by-provenance link's target.
-    fn workspace_for_repo(&self, repo: &NodeId) -> Option<&WorkspaceId> {
-        for ((source, relation), links) in &self.by_source_relation {
-            if *relation != RelationKind::WorkspaceContainsRepo {
-                continue;
-            }
-            for link in links {
-                if let crate::model::LinkEndpoint::Node { id } = &link.target
-                    && id == repo
-                    && let NodeId::Workspace(ws_id) = source
-                {
-                    return Some(ws_id);
-                }
-            }
-        }
-        None
-    }
-
-    /// Resolve the workspace context directly associated with a
-    /// session. This uses resolved `AssociatedWith` relationships so
-    /// workspace membership can come from logical/canonical workspace
-    /// member paths rather than only repo-level membership evidence.
-    fn workspace_for_session(&self, session: &NodeId) -> Option<WorkspaceId> {
-        self.snapshot
-            .resolved_relationships
-            .iter()
-            .find_map(|relationship| {
-                if relationship.source != *session
-                    || relationship.relation != RelationKind::AssociatedWith
-                {
-                    return None;
-                }
-                match &relationship.target {
-                    NodeId::Workspace(workspace) => Some(workspace.clone()),
-                    _ => None,
-                }
-            })
-    }
-
-    fn repo_display_path(&self, repo_id: &RepoId) -> String {
-        // For a non-bare repo, `common_dir` is `<canonical>/.git`, and
-        // the parent IS the canonical checkout — prefer it
-        // unconditionally so the repo row stably labels with the
-        // canonical path even when a non-canonical worktree (e.g. an
-        // agent-deck multi-repo checkout) was probed first and its
-        // path is the only one in `source_paths`. Fall back to
-        // `source_paths.first()` only for bare repos, where the
-        // common_dir has no `/.git` suffix to strip.
-        let common_dir = &repo_id.common_dir;
-        if let Some(canonical) = common_dir.strip_suffix("/.git") {
-            return canonical.to_string();
-        }
-        let node_id = NodeId::Repo(repo_id.clone());
-        self.repos
-            .get(&node_id)
-            .and_then(|repo| repo.source_paths.first())
-            .cloned()
-            .unwrap_or_else(|| common_dir.clone())
-    }
-
-    /// Active `LinkedToMux` candidate links sourced at this agent
-    /// session, de-duplicated by target mux. Multiple evidence links
-    /// to the same mux should not make the row look ambiguous.
-    fn mux_candidates_for_session(&self, session: &NodeId) -> Vec<&'a GraphLink> {
-        let Some(links) = self
-            .by_source_relation
-            .get(&(session.clone(), RelationKind::LinkedToMux))
-        else {
-            return Vec::new();
-        };
-
-        let mut by_target: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
-        for link in links {
-            let Some(target) = link.target_node_id() else {
-                continue;
-            };
-            by_target.entry(target.clone()).or_default().push(*link);
-        }
-
-        by_target
-            .into_values()
-            .filter_map(|links| pick_preferred_link(&links))
-            .collect()
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -448,11 +254,11 @@ struct SessionEntry<'a> {
 
 fn resolve_group_key(
     entry: &SessionEntry<'_>,
-    index: &SessionsIndex<'_>,
+    index: &SnapshotIndex<'_>,
     grouping: SessionsGrouping,
 ) -> Option<GroupKey> {
     let cwd = entry.node.cwd.as_deref()?;
-    let (worktree_id, _worktree) = index.checkout_for_cwd(cwd)?;
+    let (worktree_id, _worktree) = index.checkout_for_path(cwd)?;
     let repo_id = worktree_id.repo.clone();
     let repo_node_id = NodeId::Repo(repo_id.clone());
     let workspace = match grouping {
@@ -616,7 +422,7 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
 
 fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
     let candidates = ctx.index.mux_candidates_for_session(&entry.id);
-    let preferred = pick_preferred_link(&candidates);
+    let preferred = pick_preferred(&candidates);
     let mux_state = match candidates.len() {
         0 => MuxIndicator::Unmuxed,
         1 => MuxIndicator::Attached,
@@ -690,7 +496,7 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
 
 fn project_display_for_session(
     entry: &SessionEntry<'_>,
-    index: &SessionsIndex<'_>,
+    index: &SnapshotIndex<'_>,
     grouping: SessionsGrouping,
 ) -> Option<String> {
     if !matches!(grouping, SessionsGrouping::None) {
@@ -698,7 +504,7 @@ fn project_display_for_session(
     }
     let cwd = entry.node.cwd.as_deref()?;
     index
-        .checkout_for_cwd(cwd)
+        .checkout_for_path(cwd)
         .and_then(|(worktree_id, _worktree)| {
             let project_path = index.repo_display_path(&worktree_id.repo);
             project_name_from_path(&project_path)
@@ -741,19 +547,6 @@ fn compare_sessions(a: &SessionEntry<'_>, b: &SessionEntry<'_>) -> std::cmp::Ord
         .cmp(&a.node.last_active_epoch)
         .then_with(|| a.node.harness_key.cmp(&b.node.harness_key))
         .then_with(|| a.id.cmp(&b.id))
-}
-
-fn pick_preferred_link<'a>(links: &[&'a GraphLink]) -> Option<&'a GraphLink> {
-    let mut ranked: Vec<&GraphLink> = links.to_vec();
-    ranked.sort_by(|left, right| {
-        right
-            .provenance
-            .precedence()
-            .cmp(&left.provenance.precedence())
-            .then_with(|| right.confidence.cmp(&left.confidence))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    ranked.into_iter().next()
 }
 
 // -----------------------------------------------------------------------------
@@ -839,8 +632,8 @@ mod tests {
     use super::*;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink,
-        GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId,
-        RepoNode, WorkspaceId, WorkspaceNode,
+        GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+        Provenance, RelationKind, RepoId, RepoNode, WorkspaceId, WorkspaceNode,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -1145,6 +938,65 @@ mod tests {
         };
         assert_eq!(group.display_path, "~/src/proj");
         assert!(group.is_launch_context);
+    }
+
+    #[test]
+    fn repo_group_prefers_canonical_over_non_canonical_source_path() {
+        // Regression: when the only known `source_path` is a
+        // non-canonical worktree (e.g. an agent-deck multi-repo
+        // checkout that was probed before the canonical clone), the
+        // repo row should still label with the canonical path derived
+        // from the git common dir — otherwise the canonical
+        // checkout appears visually nested *under* the agent-deck
+        // path when both worktrees fan out as group rows.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/proj/.git",
+            "/home/op/.agent-deck/multi-repo-worktrees/feat-x/proj",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/src/proj/.git",
+            "/home/op/.agent-deck/multi-repo-worktrees/feat-x/proj",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj/.git", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "a",
+            Some("/home/op/.agent-deck/multi-repo-worktrees/feat-x/proj"),
+            None,
+            None,
+        ));
+        snapshot.nodes.push(agent_session(
+            "claude-code",
+            "/state",
+            "b",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let repo_row = tree
+            .rows
+            .iter()
+            .find(|row| matches!(&row.kind, RowKind::Group(g) if matches!(&g.primary_node, Some(NodeId::Repo(_)))))
+            .expect("repo group row");
+        let group = match &repo_row.kind {
+            RowKind::Group(g) => g,
+            _ => unreachable!(),
+        };
+        assert_eq!(group.display_path, "~/src/proj");
     }
 
     #[test]
