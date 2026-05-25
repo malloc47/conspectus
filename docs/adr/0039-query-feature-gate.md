@@ -98,6 +98,39 @@ release-binary size delta from the feature is captured in ADR 0040.
   current feature gate is the natural seam from which D3 becomes a
   later refactor rather than an upfront cost.
 
+## P9-001 Spike Amendment
+
+The P9-001 implementation spike surfaced one factual correction to
+this ADR's wording: `rusqlite` is **already** an unconditional
+dependency of `conspectus`, used by `src/hook.rs` (the hook sidecar,
+ADR 0028) and `src/discovery/harness/opencode.rs` (the OpenCode
+session-store adapter, ADR 0013). The `query` Cargo feature
+therefore does **not** "pull in `rusqlite`" — the dependency line
+stays declared at the top level and remains always-on. The feature
+gates only the new query-engine *code* under `src/query/` and the
+forthcoming `conspectus query` subcommand registration.
+
+The practical implications:
+
+- The release-binary delta from enabling the feature is ~5.7 KB
+  (measured on `x86_64-linux-gnu` in P9-001), not the
+  ~1 MB the original ADR text implied. The 1 MB native library
+  cost is paid regardless of the feature.
+- The ADR-D recommendation (`D2` — feature gate) is still correct
+  in spirit: gating the new query-engine code is the principled
+  separation of concerns that this ADR captures. The cost-case
+  argument simply collapses to "near-zero" rather than "small."
+- The Cargo manifest declares `query` as the default feature so
+  library consumers who explicitly `default-features = false`
+  exclude only the new query-engine code, not the broader SQLite
+  dependency. A future `conspectus-core` split (named in the
+  open questions below) would be the place to also unwind the
+  unconditional dependency if a truly SQLite-free build line ever
+  becomes necessary.
+
+This amendment does not change the ADR's decision; it corrects the
+wording on what the feature gate technically does.
+
 ## Open Questions Answered
 
 - **What does Atelier need to do?** Nothing. Atelier's current
