@@ -933,19 +933,20 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
 
+    let mux_runtime = mux_runtime_rows(app);
     let split = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             // Give the header exactly the height its fields need
             // (title + blank + one row per HeaderField), clamped
             // so the preview zone keeps a minimum of two rows.
-            Constraint::Length(header_zone_height(detail, inner.height)),
+            Constraint::Length(header_zone_height(detail, mux_runtime.len(), inner.height)),
             Constraint::Length(1),
             Constraint::Min(0),
         ])
         .split(inner);
 
-    draw_detail_header(detail, frame, split[0], app.theme());
+    draw_detail_header(detail, &mux_runtime, frame, split[0], app.theme());
     frame.render_widget(
         Paragraph::new(preview_divider_line(
             app,
@@ -968,19 +969,28 @@ fn empty_right_panel_text(app: &App) -> &'static str {
 /// Natural height of the right-panel header (title + blank + one
 /// row per field), clamped so the preview zone keeps room for at
 /// least the separator and two body rows.
-fn header_zone_height(detail: &NodeDetail, panel_height: u16) -> u16 {
+fn header_zone_height(detail: &NodeDetail, extra_mux_rows: usize, panel_height: u16) -> u16 {
     // Per Phase 6 / ADR 0033: sectioned layout adds one labeled
     // divider before each section after the first. Budget grows
     // accordingly so the preview pane below doesn't get squeezed.
+    // `extra_mux_rows` covers runtime-derived rows the detail
+    // view-model can't know about (currently the `captured` row
+    // injected from the per-mux preview cache).
     let sections = detail.sections();
     let field_count: usize = sections.iter().map(|s| s.fields.len()).sum();
     let divider_count = sections.len().saturating_sub(1);
-    let natural = (field_count + divider_count + 2) as u16;
+    let natural = (field_count + divider_count + extra_mux_rows + 2) as u16;
     let max = panel_height.saturating_sub(3);
     natural.min(max).max(3)
 }
 
-fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
+fn draw_detail_header(
+    detail: &NodeDetail,
+    extra_mux_rows: &[HeaderField],
+    frame: &mut Frame<'_>,
+    area: Rect,
+    theme: &Theme,
+) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![Span::styled(
         detail.title_line.clone(),
@@ -1001,9 +1011,61 @@ fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect, th
         for field in &section.fields {
             lines.push(render_header_field(field, section.kind, theme));
         }
+        // The Mux section absorbs runtime-only rows derived from
+        // the per-mux preview cache (capture freshness). They sit
+        // below the static fields so the source-of-truth `mux` row
+        // stays first.
+        if section.kind == SectionKind::Mux {
+            for field in extra_mux_rows {
+                lines.push(render_header_field(field, section.kind, theme));
+            }
+        }
     }
     let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+}
+
+/// Build runtime-only rows for the Mux section: capture freshness
+/// from the per-mux preview cache. Returned as `HeaderField`s so
+/// they render through the same colorization path as the static
+/// fields. Empty when no attach target resolves or no capture has
+/// landed yet.
+fn mux_runtime_rows(app: &App) -> Vec<HeaderField> {
+    let Ok(target) = resolve_attach_target(app) else {
+        return Vec::new();
+    };
+    let Some(entry) = app.mux_preview(&target.mux) else {
+        return Vec::new();
+    };
+    let Some(captured) = entry.captured_at else {
+        return Vec::new();
+    };
+    let elapsed = format_elapsed(captured.elapsed().as_secs());
+    vec![HeaderField {
+        label: "captured",
+        value: format!("{elapsed} ago"),
+        placeholder: false,
+        annotation: None,
+    }]
+}
+
+/// Short-form elapsed-duration formatter used by the runtime Mux
+/// rows. Mirrors the recency formatter in `rows/mod.rs` but takes
+/// a `Duration::as_secs` payload rather than an epoch delta so the
+/// preview cache's `Instant::elapsed` value plugs in directly.
+fn format_elapsed(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{minutes}m");
+    }
+    let hours = minutes / 60;
+    if hours < 24 {
+        return format!("{hours}h");
+    }
+    format!("{}d", hours / 24)
 }
 
 /// Right-anchored labeled rule used between detail sections. Wraps
