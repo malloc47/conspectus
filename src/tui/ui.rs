@@ -124,14 +124,167 @@ fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 // -----------------------------------------------------------------------------
 
 fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let theme = app.theme();
     let view_label = view_label(app.config().default_view);
-    let (agents, mux) = snapshot_counts(app.snapshot().map(|s| s.as_ref()));
+    let (agents_total, mux_total) = snapshot_counts(app.snapshot().map(|s| s.as_ref()));
     let visible_sessions = visible_agent_session_count(app);
     let freshness = header_freshness(app);
-    let agent_cell = format_count_with_filtered(visible_sessions, agents);
-    let title = format!("Conspectus · {view_label} ─ {freshness}{agent_cell} agents · {mux} mux",);
-    let widget = Paragraph::new(title).style(Style::default().add_modifier(Modifier::BOLD));
+    let agent_cell = format_count_with_filtered(visible_sessions, agents_total);
+
+    // Identity prefix is always rendered in bold; chips after it
+    // carry their own colors and stay independent of the prefix
+    // style so theme overrides land cleanly.
+    let prefix =
+        format!("Conspectus · {view_label} · {freshness}{agent_cell} agents · {mux_total} mux");
+    let prefix_width = prefix.chars().count();
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(
+        prefix,
+        Style::default().add_modifier(Modifier::BOLD),
+    )];
+
+    // Append per-harness and per-mux-state chips when the terminal
+    // has the room. Drops chip labels first (counts only) and then
+    // skips chips entirely when even the counts would overflow, so
+    // the prefix above stays legible at every width.
+    let counts = HeaderCounts::from_app(app);
+    let budget = (area.width as usize).saturating_sub(prefix_width);
+    append_header_chips(&mut spans, &counts, theme, budget);
+
+    let widget = Paragraph::new(Line::from(spans));
     frame.render_widget(widget, area);
+}
+
+/// Per-harness and per-mux-state row aggregates used by the dense
+/// header. Walks the currently-visible row tree so the chips
+/// reflect "what's on screen" rather than raw discovery — matches
+/// the existing `visible_sessions of total` rule on the agent
+/// count.
+#[derive(Default, Debug, Clone)]
+struct HeaderCounts {
+    by_harness: Vec<(String, usize)>,
+    mux_attached: usize,
+    mux_ambiguous: usize,
+    mux_unmuxed: usize,
+}
+
+impl HeaderCounts {
+    fn from_app(app: &App) -> Self {
+        use std::collections::BTreeMap;
+        let mut by_harness: BTreeMap<String, usize> = BTreeMap::new();
+        let mut counts = HeaderCounts::default();
+        for row in &app.tree().rows {
+            if let RowKind::AgentSession(session) = &row.kind {
+                *by_harness.entry(session.harness_label.clone()).or_default() += 1;
+                match session.mux_state {
+                    MuxIndicator::Attached => counts.mux_attached += 1,
+                    MuxIndicator::Ambiguous { .. } => counts.mux_ambiguous += 1,
+                    MuxIndicator::Unmuxed => counts.mux_unmuxed += 1,
+                }
+            }
+        }
+        counts.by_harness = by_harness.into_iter().collect();
+        counts
+    }
+}
+
+/// Width of one harness chip (` <label> ` + ` <count>`). Mirrors the
+/// badge widget's contract so the layout math stays in step.
+fn harness_chip_width(label: &str, count: usize) -> usize {
+    crate::tui::widgets::badge::harness_badge_width(label) + 1 + count_digits(count)
+}
+
+fn count_digits(value: usize) -> usize {
+    if value == 0 {
+        1
+    } else {
+        let mut n = value;
+        let mut d = 0;
+        while n > 0 {
+            n /= 10;
+            d += 1;
+        }
+        d
+    }
+}
+
+/// Mux chips are `<glyph> <count>` with the glyph colored from the
+/// theme. Always 3 visible cells per chip (1 glyph + 1 space + 1-2
+/// digit count); we underestimate digit width as 1 for layout math
+/// since the difference is at most one cell per chip.
+const MUX_CHIP_BASE_WIDTH: usize = 3;
+const CHIP_SEPARATOR: &str = "  ";
+const SECTION_SEPARATOR: &str = "  ·  ";
+
+fn append_header_chips(
+    spans: &mut Vec<Span<'static>>,
+    counts: &HeaderCounts,
+    theme: &Theme,
+    budget: usize,
+) {
+    use crate::tui::widgets::badge::harness_badge;
+    if counts.by_harness.is_empty()
+        && counts.mux_attached == 0
+        && counts.mux_ambiguous == 0
+        && counts.mux_unmuxed == 0
+    {
+        return;
+    }
+
+    let harness_section_width: usize = counts
+        .by_harness
+        .iter()
+        .map(|(label, n)| harness_chip_width(label, *n))
+        .sum::<usize>()
+        + counts.by_harness.len().saturating_sub(1) * CHIP_SEPARATOR.len();
+
+    let mux_section_width = MUX_CHIP_BASE_WIDTH * 3 + CHIP_SEPARATOR.len() * 2;
+
+    let want = SECTION_SEPARATOR.len()
+        + harness_section_width
+        + SECTION_SEPARATOR.len()
+        + mux_section_width;
+
+    if budget < SECTION_SEPARATOR.len() + mux_section_width {
+        // Not enough room for even the mux chip section; bail out
+        // and keep the bare prefix.
+        return;
+    }
+
+    let include_harness = budget >= want;
+
+    spans.push(Span::raw(SECTION_SEPARATOR));
+
+    if include_harness {
+        let mut first = true;
+        for (label, count) in &counts.by_harness {
+            if !first {
+                spans.push(Span::raw(CHIP_SEPARATOR));
+            }
+            first = false;
+            spans.push(harness_badge(label, theme));
+            spans.push(Span::raw(format!(" {count}")));
+        }
+        spans.push(Span::raw(SECTION_SEPARATOR));
+    }
+
+    // Mux chip section: one chip per state with the theme-colored glyph.
+    spans.push(Span::styled(
+        "◉".to_string(),
+        Style::default().fg(theme.mux_attached),
+    ));
+    spans.push(Span::raw(format!(" {}", counts.mux_attached)));
+    spans.push(Span::raw(CHIP_SEPARATOR));
+    spans.push(Span::styled(
+        "◐".to_string(),
+        Style::default().fg(theme.mux_ambiguous),
+    ));
+    spans.push(Span::raw(format!(" {}", counts.mux_ambiguous)));
+    spans.push(Span::raw(CHIP_SEPARATOR));
+    spans.push(Span::styled(
+        "◯".to_string(),
+        Style::default().add_modifier(theme.mux_unmuxed),
+    ));
+    spans.push(Span::raw(format!(" {}", counts.mux_unmuxed)));
 }
 
 /// Render the header's agents count. When a filter is active and the
@@ -1123,6 +1276,46 @@ mod tests {
             "right-panel title row missing: {text}"
         );
         assert!(text.contains("─ preview ─"), "preview separator missing");
+    }
+
+    #[test]
+    fn header_renders_per_harness_and_per_mux_state_chips_at_wide_width() {
+        // Phase 5: dense header. With a single codex session that's
+        // un-muxed, the chip row should carry one `[codex] 1` chip
+        // plus the three mux-state glyphs (◉/◐/◯) with counts.
+        let app = seeded_app();
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let header = text.lines().next().expect("header line");
+
+        assert!(header.contains("codex"), "harness chip missing: {header}");
+        assert!(header.contains("◉"), "mux attached glyph missing: {header}",);
+        assert!(
+            header.contains("◐"),
+            "mux ambiguous glyph missing: {header}",
+        );
+        assert!(header.contains("◯"), "mux unmuxed glyph missing: {header}",);
+        // One codex session, all three mux counts are visible.
+        assert!(header.contains(" 1"), "codex count missing: {header}");
+    }
+
+    #[test]
+    fn header_falls_back_to_prefix_only_at_very_narrow_width() {
+        // When the terminal is narrower than the chip section can
+        // afford, the header collapses to just the prefix (no chips).
+        // The existing "N agents · M mux" tail still shows so the
+        // operator sees their counts even without the chip detail.
+        let app = seeded_app();
+        let area = Rect::new(0, 0, 40, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let header = text.lines().next().expect("header line");
+
+        assert!(
+            !header.contains('◉') && !header.contains('◐') && !header.contains('◯'),
+            "mux chips should be dropped at narrow width: {header}",
+        );
     }
 
     #[test]
