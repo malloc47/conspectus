@@ -3839,34 +3839,47 @@ long-running server.
 Dependency shape inside the phase:
 
 ```
-P7-001 (snapshot ADR) ────┐
-                          ├──→ P7-003 (warm-start save/load) ─┐
-P7-002 (provenance/       │                                   │
-        freshness model)──┤──→ P7-005 (partial eviction) ─────┤
-                          │                                   │
-P7-004 (server ADR) ──────┴───────────────────────────────────┴──→ P7-006 (serve) ──→ P7-007 (CLI ↔ server)
-                                                                                 ├──→ P7-008 (status/inspection)
-                                                                                 └──→ P7-009 (event-driven, stretch)
+Phase 9 ADR-A (engine selection) ──→ P7-001 (snapshot ADR) ──┐
+                                                             ├──→ P7-003 (warm-start save/load) ─┐
+P7-002 (provenance/freshness model) ─────────────────────────┤──→ P7-005 (partial eviction) ─────┤
+                                                             │                                   │
+P7-001 ──→ P7-004 (server ADR) ──────────────────────────────┴───────────────────────────────────┴──→ P7-006 (serve) ──→ P7-007 (CLI ↔ server)
+                                                                                                                    ├──→ P7-008 (status/inspection)
+                                                                                                                    └──→ P7-009 (event-driven, stretch)
 ```
 
-P7-001 and P7-004 can land in parallel. P7-002 is foundational and
-should land before any persistence or eviction code.
+Under the Stage 3 SQLite pivot (Phase 9), `P7-001` (persistence
+ADR) and `P7-004` (server transport ADR) are no longer parallel:
+the engine selection ADR (Phase 9 ADR-A) settles the storage
+choice; `P7-001` then absorbs the SQLite persistence model; and
+`P7-004` builds on the persistence shape to settle the WAL-based
+read path plus Unix-socket write path. `P7-002` is still
+foundational and should land before any persistence or eviction
+code.
 
 - [ ] `P7-001` ADR: graph snapshot persistence format and lifecycle.
-  - Scope: settle the on-disk snapshot format and lifecycle. Concrete
-    decisions: (a) the versioned JSON shape (resolved `GraphSnapshot`
-    plus schema version plus per-provider freshness map), (b) the
-    location under `$XDG_DATA_HOME/conspectus/snapshots/` and the
-    naming / rotation policy, (c) atomic-write semantics
-    (temp-file + rename within the same directory), (d) the schema-
-    version migration policy (drop and rebuild vs in-place upgrade vs
-    field-by-field), (e) the `--no-cache` / `--refresh` CLI flag
-    surface and their interaction with the warm-start path. Record
-    as a new ADR under `docs/adr/`.
+  - Scope: settle the on-disk snapshot format and lifecycle. Under
+    the Stage 3 SQLite pivot (Phase 9), the canonical persisted
+    store is `$XDG_DATA_HOME/conspectus/graph.sqlite` plus its
+    `-wal` and `-shm` sidecars under WAL mode; the versioned JSON
+    document survives as a peer export
+    (`conspectus dump --format json`). Concrete decisions: (a) the
+    SQLite schema version recorded via `PRAGMA user_version`,
+    aligned with the in-memory `GraphSnapshot` schema version,
+    (b) the location under `$XDG_DATA_HOME/conspectus/`, (c) atomic-
+    write semantics delegated to SQLite transactions (no temp+rename
+    dance for the primary store), (d) the schema-migration policy
+    (forward-only, with `rusqlite_migration` or a hand-rolled
+    `user_version`-driven applier), (e) the `--no-cache` /
+    `--refresh` CLI flag surface and their interaction with the
+    warm-start path, (f) snapshot rotation via `VACUUM INTO` for
+    debugging backups. Record as a new ADR under `docs/adr/`. This
+    ADR absorbs the persistence-model decisions previously listed in
+    the Stage 3 plan as ADR-B.
   - Tests: none directly; ADR is the deliverable. A scaffold
-    serializer / deserializer pair may land alongside as a compile
-    check that the chosen shape round-trips.
-  - Blockers: none.
+    schema-apply test may land alongside as a compile check.
+  - Blockers: ADR-A (Stage 3 engine selection, the SQLite ADR) must
+    land first since the format-vs-engine decision is now joint.
 
 - [ ] `P7-002` Add provider provenance and freshness metadata to graph
   nodes and candidate links.
@@ -3910,21 +3923,34 @@ should land before any persistence or eviction code.
   - Blockers: `P7-001`, `P7-002`.
 
 - [ ] `P7-004` ADR: continuous server mode architecture and transport.
-  - Scope: settle the architecture of `conspectus serve`. Concrete
-    decisions: (a) CLI ↔ server transport — Unix domain socket at
-    `$XDG_RUNTIME_DIR/conspectus/server.sock`, file-based snapshot
-    polling, or both — and the protocol (line-delimited JSON,
-    length-prefixed, or a small framing layer), (b) whether the
-    server reuses the one-shot discovery code path 1:1 or forks
-    into a coordinator with its own concurrency primitives, (c) the
-    `[server]` and `[server.intervals]` TOML config shape and
-    per-provider interval defaults, (d) provider failure isolation
-    (per-provider back-off, surfaced via diagnostics), (e) server
-    lifecycle expectations (user-managed; no auto-spawn from CLI;
-    documented systemd / launchd integrations later). Record as a
-    new ADR under `docs/adr/`.
+  - Scope: settle the architecture of `conspectus serve`. Under the
+    Stage 3 SQLite pivot (Phase 9), WAL-mode handles concurrent
+    reads natively, so the transport surface collapses to writes
+    only. Concrete decisions: (a) read path — every process opens
+    `graph.sqlite` in read-only mode (`SQLITE_OPEN_READONLY`) and
+    relies on WAL for concurrent reader semantics; no IPC for
+    queries, (b) write path — when the server is running, it owns
+    the writer connection; one-shot CLI mutations (rename,
+    declared-link CRUD) route through a Unix domain socket at
+    `$XDG_RUNTIME_DIR/conspectus/server.sock`; when absent, the
+    one-shot CLI takes the writer lock directly, (c) IPC protocol —
+    length-prefixed JSON request/response for the mutation surface
+    only, (d) the standard pragma triplet on every connection
+    (`synchronous=NORMAL`, `busy_timeout=5000`,
+    `wal_autocheckpoint=1000`), (e) the `[server]` and
+    `[server.intervals]` TOML config shape and per-provider interval
+    defaults, (f) provider failure isolation (per-provider back-off,
+    surfaced via diagnostics), (g) server lifecycle expectations
+    (user-managed; no auto-spawn from CLI; documented systemd /
+    launchd integrations later). Record as a new ADR under
+    `docs/adr/`. This ADR absorbs the transport-model decisions
+    previously listed in the Stage 3 plan as ADR-C. The
+    "absence of a server is not an error" guarantee is preserved by
+    construction since reads never require the server.
   - Tests: none directly; ADR is the deliverable.
-  - Blockers: none (parallel to `P7-001`).
+  - Blockers: ADR-A (Stage 3 engine selection) and `P7-001`. P7-001
+    must settle the persistence format before the transport ADR can
+    cite it concretely.
 
 - [ ] `P7-005` Implement partial graph eviction at provider granularity.
   - Scope: introduce a graph-merge primitive that, given an existing
@@ -5079,6 +5105,176 @@ settles.
   - Blockers: supersedes `T8-015`'s open scope. Coordinate with
     `T8-009` (preview throttle) so the expanded mode's extra
     capture work plays nicely with the cadence story.
+
+## Phase 9: Embedded Query Engine
+
+Source plan: `plans/stage-3-sqlite-query-engine.md` (the activation of
+ADR 0035 stage 3). Phase goal: deliver `conspectus query <sql>` — a
+user-facing SQL surface over the resolved graph — backed by an
+embedded SQLite engine. The phase introduces a new on-disk artifact
+(`graph.sqlite`), a typed SQL schema mirroring the Rust model, a
+loader driven by `SnapshotIndex`, a small library of saved views, and
+a fixture-driven regression suite.
+
+This phase is gated on an ADR cluster (engine selection, persistence
+model, server transport, library API gating, distribution amendment,
+resolver-stays-in-Rust). Two of those (persistence, transport) are
+the SQLite-aware re-scopes of `P7-001` and `P7-004`; the rest are
+new ADRs.
+
+Dependency shape inside the phase:
+
+```
+ADR cluster (engine/persistence/transport/lib-api/dist/resolver) ─┐
+                                                                  │
+P9-001 (spike) ──→ P9-002 (schema) ──┬──→ P9-003 (loader) ──→ P9-004 (query MVP) ──┬──→ P9-006 (saved views)
+                                     │                                             ├──→ P9-005 (result fmts)
+                                     │                                             └──→ P9-007 (fixture corpus)
+                                     │
+                                     └──→ P9-007 in parallel after P9-002
+
+P9-008 (vector search via sqlite-vec) gated on a future ADR-G.
+```
+
+The TUI workstream (Phase 8 open stories) is explicitly **independent**
+of this phase. `SnapshotIndex` remains the in-process selector layer
+for the TUI; SQLite is a consumer of resolver output, not a
+replacement.
+
+- [ ] `P9-001` SQLite integration spike (bundled build, WAL, lifecycle).
+  - Scope: integrate the `rusqlite` crate behind a `query` Cargo feature
+    (per ADR-D) with the `bundled` sub-feature on. Confirm SQLite
+    3.51.3+ ships and add a CI assertion that fails the build below
+    that floor (the 3.51.3 fix addresses the WAL-reset corruption bug
+    that affected 3.7.0–3.51.2 in multi-writer / multi-checkpointer
+    scenarios — exactly our server + CLI pattern). Measure
+    release-binary size with and without the feature. Validate that
+    `nix develop` produces a working build. Confirm WAL mode behavior
+    by running a two-process smoke test (process A holds a writer
+    connection while process B opens a reader; assert no blocking).
+    Record findings as a short note appended to the distribution ADR.
+    No graph schema yet; the spike is operational.
+  - Tests: integration tests that open an in-memory connection, run
+    `SELECT 1`, and that open a file-backed WAL-mode connection from
+    two processes. Build matrix check that the non-feature build is
+    unchanged. CI assertion on bundled SQLite version.
+  - Manual checks: `cargo build` with and without `--features query`;
+    inspect release binary size; run the two-process smoke test
+    manually.
+  - Blockers: ADR-A (engine selection), ADR-D (library API), ADR-E
+    (distribution amendment).
+
+- [ ] `P9-002` Define the SQL schema for the resolved graph.
+  - Scope: produce a DDL for tables `nodes`, `node_repos`,
+    `node_checkouts`, `node_workspaces`, `node_agent_sessions`,
+    `node_mux_sessions`, `node_branches`, `node_forks`,
+    `node_forge_prs`, `candidate_links`, `resolved_relationships`,
+    `diagnostics`, `aliases`, `provider_state`. One table per node
+    kind for queryability; a `v_nodes` view that unions them by
+    `node_id` and `node_kind`. Columns mirror the Rust model
+    field-for-field where possible; polymorphic blobs
+    (`SourceMetadata.fields`, `UnresolvedEndpoint.metadata`) land in
+    `TEXT` columns holding JSON, queryable via `JSON_EXTRACT`. Stable
+    indexes on `(source_node_id, relation)`,
+    `(target_node_id, relation)`, `(provider, freshness_epoch)`,
+    `(last_active_epoch DESC)`. Schema version recorded via
+    `PRAGMA user_version` aligned with `GraphSnapshot`'s schema
+    version. DDL lives under `src/query/schema.sql` (or a Rust
+    constant) so the loader can apply it deterministically.
+  - Tests: a DDL apply test that runs the schema against a fresh
+    in-memory connection and confirms no errors. A test asserting
+    every `NodeKind` and `RelationKind` variant maps to a column /
+    enum entry in the DDL so adding a new variant fails compilation.
+  - Manual checks: `sqlite3 :memory: < schema.sql` lists the expected
+    tables / indexes.
+  - Blockers: `P9-001`.
+
+- [ ] `P9-003` Implement the GraphSnapshot → SQLite loader.
+  - Scope: take a `&GraphSnapshot` and a `&mut Connection`,
+    populate every table per `P9-002`, in one transaction. Drive from
+    `SnapshotIndex` (ADR 0035) to avoid re-walking the snapshot.
+    Idempotency: re-running the loader replaces all rows
+    (`DELETE FROM ...` followed by `INSERT`) inside the transaction.
+    For partial eviction (`P7-005`), the loader takes an optional
+    `provider` filter and only touches rows owned by that provider.
+    Use prepared statements + bind parameters; no string-built SQL.
+    Performance target: a 1k-node / 5k-link graph loads in under
+    50ms on a typical dev machine.
+  - Tests: round-trip tests — load each fixture snapshot, then
+    `SELECT *` and compare against the Rust-side projection.
+    Per-node-kind tests confirming every field survives a round trip.
+    Idempotency tests (load, re-load, identical result).
+    Provider-scoped reload tests confirming only the named provider's
+    rows change.
+  - Manual checks: load a real snapshot and run a few `SELECT`s
+    against it; confirm row counts match Rust-side counts.
+  - Blockers: `P9-002`.
+
+- [ ] `P9-004` Implement `conspectus query <sql>` MVP.
+  - Scope: a new CLI subcommand that (a) opens
+    `$XDG_DATA_HOME/conspectus/graph.sqlite` in read-only mode (via
+    `SQLITE_OPEN_READONLY`), falling back to building an in-memory
+    snapshot from cold discovery if the file is absent, (b) executes
+    the user's SQL with the standard pragma triplet
+    (`synchronous=NORMAL`, `busy_timeout=5000`,
+    `wal_autocheckpoint=1000`), (c) renders the result. Read-only
+    enforcement: the read-only open mode rejects mutations at the
+    SQLite layer (no DML, no DDL, no `ATTACH ... AS rw`). Render to a
+    plain text table by default. `--format json` for machine output.
+    `--format` flag value list expands in `P9-005`.
+  - Tests: CLI integration tests for `conspectus query 'SELECT count(*)
+    FROM nodes'`, a join across `candidate_links` and
+    `node_agent_sessions`, a recursive CTE for fork ancestry, and
+    expected-failure tests for `INSERT`, `UPDATE`, `DELETE`,
+    `CREATE`, `DROP`. Snapshot tests over the fixture corpus.
+  - Manual checks: ad-hoc `conspectus query` invocations against a
+    populated graph; confirm output readability and that mutation
+    statements fail with a clean error.
+  - Blockers: `P9-003`, `P7-003` (for the warm-start file existing).
+
+- [ ] `P9-005` Result formatters for query output.
+  - Scope: support `--format table` (default, columnar, width-aware
+    via the existing renderer's truncation helpers), `--format json`
+    (one object per row), `--format csv`, `--format tsv`. Width-aware
+    output mirrors the existing `conspectus table` behavior
+    (ADR 0020). Color codes per ADR 0022 when stdout is a TTY.
+  - Tests: format snapshots over fixture queries; width-aware
+    truncation snapshots at 80 and 160 columns.
+  - Manual checks: pipe each format to a file and inspect.
+  - Blockers: `P9-004`.
+
+- [ ] `P9-006` Saved views: a library of common queries.
+  - Scope: ship a small set of named views (CREATE VIEW under the
+    DDL) that name the joins users would write by hand:
+    `v_sessions_with_repo`, `v_mux_attachments`, `v_pr_by_branch`,
+    `v_fork_ancestry` (recursive), `v_workspace_member_repos`. The
+    view set is small and curated — not a contract. Document each in
+    `docs/query-guide.md`. `conspectus query --list-views` enumerates
+    them.
+  - Tests: each named view selectable; query against each returns
+    expected fixture rows; `--list-views` snapshot test.
+  - Manual checks: `conspectus query 'SELECT * FROM v_fork_ancestry'`
+    on a populated graph.
+  - Blockers: `P9-002`.
+
+- [ ] `P9-007` Fixture corpus and query regression suite.
+  - Scope: a small library of representative graph fixtures
+    (sparse-orphan-session, multi-checkout-repo, fork-ancestry-chain,
+    workspace-with-prs, ambiguous-mux-candidates) and a fixture-driven
+    test that runs a battery of canned queries against each, asserting
+    stable result shapes. Lives alongside the existing snapshot
+    fixtures.
+  - Tests: itself — this is the regression net.
+  - Blockers: `P9-002`, `P9-003`.
+
+- [ ] `P9-008` Vector search via `sqlite-vec` (deferred).
+  - Scope: gated on a future ADR-G covering embedding sources, dim
+    budget, and ingestion lifecycle. Add embedding columns to
+    `node_agent_sessions` (session preview embeddings) and
+    `node_forge_prs` (PR title/body embeddings). Index via `vec0`
+    virtual tables. Expose through `conspectus query` and a new
+    `--similar-to <node-id>` flag.
+  - Blockers: ADR-G (not yet drafted).
 
 ## Later
 
