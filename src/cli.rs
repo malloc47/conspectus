@@ -33,7 +33,7 @@ pub struct Cli {
 
 impl Cli {
     pub fn run(self) -> Result<()> {
-        match self.command.unwrap_or(Command::Graph(GraphArgs::default())) {
+        match self.command.unwrap_or_else(default_command) {
             Command::Graph(args) => args.run(),
             Command::Table(args) => args.run(),
             Command::Declared(args) => args.run(),
@@ -45,6 +45,10 @@ impl Cli {
             Command::Alias(args) => args.run(),
         }
     }
+}
+
+fn default_command() -> Command {
+    Command::Tui(TuiArgs::default())
 }
 
 #[derive(Debug, Subcommand)]
@@ -1733,6 +1737,14 @@ mod tests {
     fn parse_tui_duration_rejects_negative_or_non_integer() {
         assert!(parse_tui_duration("-5s").is_err());
         assert!(parse_tui_duration("1.5s").is_err());
+    }
+
+    #[test]
+    fn no_subcommand_defaults_to_tui() {
+        let cli = Cli::parse_from(["conspectus"]);
+        assert!(matches!(cli.command, None));
+        let command = cli.command.unwrap_or_else(default_command);
+        assert!(matches!(command, Command::Tui(_)));
     }
 
     #[test]

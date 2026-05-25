@@ -12,12 +12,15 @@ config.
 ## CLI
 
 ```sh
+conspectus
+conspectus tui [--view {sessions|mux|union|prs|forks}] [--scan-root PATH]...
 conspectus graph --format json [--scan-root PATH]...
 conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
 
 conspectus declared list [--store {all|project|user}] [--scan-root PATH]...
 ```
 
+Running `conspectus` without a subcommand opens the interactive TUI.
 `graph` emits the full evidence-preserving graph document. `session` renders
 agent-, mux-, or union-oriented table projections after resolution. The
 `declared` subcommands can pin, ignore, remove, confirm, or override
