@@ -28,8 +28,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub use crate::config::Projection;
 use crate::model::{
-    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, MuxSessionNode, NodeId, Provenance, RelationKind,
+    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphLink, GraphSnapshot, LinkEndpoint,
+    MuxSessionNode, NodeId, Provenance, RelationKind, SnapshotIndex, pick_preferred,
 };
 
 /// Rendering knobs for the text-table projections.
@@ -271,21 +271,14 @@ fn confidence_code(confidence: Confidence) -> &'static str {
     }
 }
 
-/// A pre-computed view of one snapshot keyed by node id so the
-/// projection renderers don't each rebuild it.
+/// Per-snapshot view used by the table renderers. Wraps the shared
+/// [`SnapshotIndex`] (see ADR 0035) and adds the inverse `mux_id →
+/// [(agent_label, preferred_link)]` map that only the agents-attached-
+/// to-this-mux cell needs. Implementing [`Deref`] lets existing call
+/// sites read `view.by_source_relation`, `view.preferred_link(...)`,
+/// etc. directly without churn.
 struct SnapshotView<'a> {
-    /// Underlying snapshot — kept so column extractors can walk
-    /// non-active links (`by_source_relation` filters those out).
-    snapshot: &'a GraphSnapshot,
-    agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
-    mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
-    forge_prs: BTreeMap<NodeId, &'a ForgePrNode>,
-    forks: BTreeMap<NodeId, &'a ForkNode>,
-    /// `(source_node_id, relation_kind)` → all active candidate links
-    /// for that pair, in stable order. Non-active links (ignored /
-    /// overridden) are skipped; extractors that need them walk
-    /// `snapshot.candidate_links` directly.
-    by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
+    index: SnapshotIndex<'a>,
     /// Pre-computed `mux_id → [(agent_label, preferred_link)]` map for
     /// the agents-attached-to-this-mux cell. Built once at view
     /// construction so per-row column extractors don't each rebuild it.
@@ -294,43 +287,10 @@ struct SnapshotView<'a> {
 
 impl<'a> SnapshotView<'a> {
     fn new(snapshot: &'a GraphSnapshot) -> Self {
-        let mut agent_sessions = BTreeMap::new();
-        let mut mux_sessions = BTreeMap::new();
-        let mut forge_prs = BTreeMap::new();
-        let mut forks = BTreeMap::new();
-
-        for node in &snapshot.nodes {
-            match node {
-                GraphNode::AgentSession(session) => {
-                    agent_sessions.insert(node.id(), session);
-                }
-                GraphNode::MuxSession(mux) => {
-                    mux_sessions.insert(node.id(), mux);
-                }
-                GraphNode::ForgePr(pr) => {
-                    forge_prs.insert(node.id(), pr);
-                }
-                GraphNode::Fork(fork) => {
-                    forks.insert(node.id(), fork);
-                }
-                _ => {}
-            }
-        }
-
-        let mut by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&GraphLink>> =
-            BTreeMap::new();
-        for link in &snapshot.candidate_links {
-            if !matches!(link.state, crate::model::LinkState::Active) {
-                continue;
-            }
-            by_source_relation
-                .entry((link.source.clone(), link.relation.clone()))
-                .or_default()
-                .push(link);
-        }
+        let index = SnapshotIndex::new(snapshot);
 
         let mut attached_to_mux: BTreeMap<NodeId, Vec<(String, &GraphLink)>> = BTreeMap::new();
-        for ((source, relation), links) in &by_source_relation {
+        for ((source, relation), links) in &index.by_source_relation {
             if *relation != RelationKind::LinkedToMux {
                 continue;
             }
@@ -340,7 +300,7 @@ impl<'a> SnapshotView<'a> {
             let Some(target_id) = preferred.target_node_id() else {
                 continue;
             };
-            if let Some(session) = agent_sessions.get(source) {
+            if let Some(session) = index.agent_sessions.get(source) {
                 attached_to_mux
                     .entry(target_id.clone())
                     .or_default()
@@ -349,49 +309,18 @@ impl<'a> SnapshotView<'a> {
         }
 
         Self {
-            snapshot,
-            agent_sessions,
-            mux_sessions,
-            forge_prs,
-            forks,
-            by_source_relation,
+            index,
             attached_to_mux,
         }
     }
-
-    fn preferred_link(&self, source: &NodeId, relation: RelationKind) -> Option<&GraphLink> {
-        self.by_source_relation
-            .get(&(source.clone(), relation))
-            .and_then(|links| pick_preferred(links))
-    }
-
-    fn candidates_for(&self, source: &NodeId, relation: RelationKind) -> &[&'a GraphLink] {
-        self.by_source_relation
-            .get(&(source.clone(), relation))
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
-    }
 }
 
-/// For display, "preferred" is the resolver's first candidate. The
-/// resolver itself does the real ranking; for table output we just
-/// need the same first-place pick, so we sort by the same generic
-/// recipe (provenance precedence then confidence then id).
-fn pick_preferred<'a>(links: &[&'a GraphLink]) -> Option<&'a GraphLink> {
-    let mut ranked: Vec<&GraphLink> = links
-        .iter()
-        .copied()
-        .filter(|link| matches!(link.state, crate::model::LinkState::Active))
-        .collect();
-    ranked.sort_by(|left, right| {
-        right
-            .provenance
-            .precedence()
-            .cmp(&left.provenance.precedence())
-            .then_with(|| right.confidence.cmp(&left.confidence))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    ranked.into_iter().next()
+impl<'a> std::ops::Deref for SnapshotView<'a> {
+    type Target = SnapshotIndex<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.index
+    }
 }
 
 // -----------------------------------------------------------------------------
