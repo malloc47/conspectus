@@ -517,33 +517,89 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(widget, inner);
 }
 
+/// Render the left pane title as a lazydocker-style tab strip
+/// showing every view, with the active one accented. Operators see
+/// the available views at a glance instead of having to remember
+/// the `1`–`5` accelerators or open the controls overlay.
 fn left_panel_title(app: &App) -> Line<'static> {
-    panel_title(app, Focus::Left, view_label(app.config().default_view))
-}
-
-fn right_panel_title(app: &App) -> Line<'static> {
-    panel_title(app, Focus::Right, "detail")
-}
-
-/// Render a panel title with a subtle focus marker. The active pane
-/// is prefixed with `▸ ` styled in `theme.panel_focus_accent`; the
-/// label itself stays in default fg + BOLD on both panes so the
-/// inactive pane's content keeps its normal colors. Pane focus is
-/// also redundantly surfaced in the status-bar `[left]`/`[right]`
-/// chip — this title marker is the spatial cue.
-fn panel_title(app: &App, panel: Focus, label: &'static str) -> Line<'static> {
     let theme = app.theme();
-    let focused = app.focus() == panel;
-    let marker = Span::styled(
-        if focused { "▸ " } else { "  " }.to_string(),
-        Style::default().fg(theme.panel_focus_accent),
-    );
+    let active = app.config().default_view;
+    let mut spans = vec![Span::raw(" "), focus_marker_span(app, Focus::Left)];
+    let mut first = true;
+    for view in [
+        View::Sessions,
+        View::Mux,
+        View::Union,
+        View::Prs,
+        View::Forks,
+    ] {
+        if !first {
+            spans.push(Span::styled(
+                " · ",
+                Style::default().fg(theme.secondary_text),
+            ));
+        }
+        first = false;
+        let label = view_label(view);
+        if view == active {
+            spans.push(Span::styled(
+                label,
+                Style::default()
+                    .fg(theme.panel_focus_accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                label,
+                Style::default().fg(theme.secondary_text),
+            ));
+        }
+    }
+    spans.push(Span::raw(" "));
+    Line::from(spans)
+}
+
+/// Render the right pane title with the kind of node currently
+/// being inspected (`session`, `mux`, `pr`, …) so the operator can
+/// tell what they're looking at without re-reading the body.
+/// Falls back to `detail` while no selection is resolved.
+fn right_panel_title(app: &App) -> Line<'static> {
+    let label = right_panel_kind_label(app);
     Line::from(vec![
         Span::raw(" "),
-        marker,
+        focus_marker_span(app, Focus::Right),
         Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" "),
     ])
+}
+
+fn right_panel_kind_label(app: &App) -> &'static str {
+    let Some(detail) = app.detail() else {
+        return "detail";
+    };
+    match detail.kind_label {
+        "agent_session" => "session",
+        "mux_session" => "mux",
+        "forge_pr" => "pr",
+        "fork" => "fork",
+        "repo" => "repo",
+        "checkout" => "checkout",
+        "workspace" => "workspace",
+        "branch" => "branch",
+        _ => "detail",
+    }
+}
+
+/// `▸ ` when the given panel has focus, two-space pad otherwise.
+/// Keeps title widths consistent across focus states so the tab
+/// strip and right-pane label sit at the same offset before and
+/// after `Tab`.
+fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
+    let focused = app.focus() == panel;
+    Span::styled(
+        if focused { "▸ " } else { "  " }.to_string(),
+        Style::default().fg(app.theme().panel_focus_accent),
+    )
 }
 
 fn empty_left_panel_text(app: &App) -> String {
@@ -891,11 +947,11 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     draw_detail_header(detail, frame, split[0], app.theme());
     frame.render_widget(
-        // No explicit fg color so the preview separator inherits
-        // the terminal theme's default; theme.divider fades it
-        // predictably on both light and dark backgrounds.
-        Paragraph::new(preview_separator(app))
-            .style(Style::default().add_modifier(app.theme().divider)),
+        Paragraph::new(preview_divider_line(
+            app,
+            split[1].width as usize,
+            app.theme(),
+        )),
         split[1],
     );
     draw_detail_preview(app, detail, frame, split[2]);
@@ -950,18 +1006,32 @@ fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect, th
     frame.render_widget(widget, area);
 }
 
-/// Right-anchored labeled rule used between detail sections. The
-/// label is rendered as a filled chip (badge modifier over the
-/// panel focus accent), echoing the section-divider treatment in
-/// claude-code's pane chrome. Rules to either side use
-/// `theme.divider` (default `DIM`).
+/// Right-anchored labeled rule used between detail sections. Wraps
+/// [`chip_divider_line`] with the section's static label.
 fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<'static> {
-    let label = kind.label();
+    chip_divider_line(kind.label(), None, width, theme)
+}
+
+/// Build a right-anchored divider with a filled-chip label and an
+/// optional dim suffix between the chip and the trailing rule.
+/// Used by the section dividers in the detail header and by the
+/// preview divider that separates the header from the preview
+/// body. The suffix surface lets the preview divider keep its
+/// captured-time / pane-target context inline without breaking the
+/// uniform chip treatment.
+fn chip_divider_line(
+    label: &str,
+    suffix: Option<&str>,
+    width: usize,
+    theme: &Theme,
+) -> Line<'static> {
     let chip_text = format!(" {label} ");
     let chip_width = chip_text.chars().count();
+    let suffix_text = suffix.map(|s| format!(" {s} ")).unwrap_or_default();
+    let suffix_width = suffix_text.chars().count();
     let trailing_rule = 2;
-    let leading_rule = width.saturating_sub(chip_width + trailing_rule);
-    let mut spans = Vec::with_capacity(3);
+    let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
+    let mut spans = Vec::with_capacity(4);
     if leading_rule > 0 {
         spans.push(Span::styled(
             "─".repeat(leading_rule),
@@ -974,6 +1044,12 @@ fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<
             .fg(theme.panel_focus_accent)
             .add_modifier(theme.badge),
     ));
+    if suffix_width > 0 {
+        spans.push(Span::styled(
+            suffix_text,
+            Style::default().fg(theme.secondary_text),
+        ));
+    }
     spans.push(Span::styled(
         "─".repeat(trailing_rule),
         Style::default().add_modifier(theme.divider),
@@ -1181,24 +1257,37 @@ fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
     }
 }
 
-fn preview_separator(app: &App) -> String {
-    let Some(target) = resolve_attach_target(app).ok() else {
-        return "─ preview ─".to_string();
-    };
+/// Build the chip-style divider above the preview body. Reuses the
+/// section divider so the preview anchor matches Session / Mux /
+/// PR / Lineage visually; the suffix carries the live attachment
+/// context (`tmux:editor · captured 2s ago`) so the operator still
+/// sees what the preview is sourced from.
+fn preview_divider_line(app: &App, width: usize, theme: &Theme) -> Line<'static> {
+    let suffix = preview_context_suffix(app);
+    chip_divider_line("Preview", suffix.as_deref(), width, theme)
+}
+
+/// Compose the dim-rendered context that sits between the
+/// `[ Preview ]` chip and the trailing rule: the target's mux label
+/// plus a captured-time freshness tag when the runtime has one.
+/// Returns `None` when no attach target is resolved (un-muxed
+/// preview, or no selection).
+fn preview_context_suffix(app: &App) -> Option<String> {
+    let target = resolve_attach_target(app).ok()?;
     let label = compact_mux_label(&format!("{}:{}", target.backend, target.native_id));
     let freshness = app
         .mux_preview(&target.mux)
         .and_then(|entry| entry.captured_at)
         .map(|captured| {
             format!(
-                " · captured {}",
+                " · captured {} ago",
                 format_elapsed(captured.elapsed().as_secs())
             )
         });
-    match freshness {
-        Some(freshness) => format!("─ preview · {label}{freshness} ago ─"),
-        None => format!("─ preview · {label} ─"),
-    }
+    Some(match freshness {
+        Some(f) => format!("{label}{f}"),
+        None => label,
+    })
 }
 
 fn format_elapsed(seconds: u64) -> String {
@@ -1442,7 +1531,7 @@ mod tests {
             text.contains("Phase 8 walkthrough"),
             "right-panel title row missing: {text}"
         );
-        assert!(text.contains("─ preview ─"), "preview separator missing");
+        assert!(text.contains(" Preview "), "preview chip missing: {text}");
     }
 
     #[test]
@@ -1486,36 +1575,97 @@ mod tests {
     }
 
     #[test]
+    fn left_panel_title_renders_a_view_tab_strip() {
+        // Phase 11: the left pane title lists every view as a tab
+        // strip (sessions · mux · union · prs · forks) with the
+        // active one accented. Operators see the available views at
+        // a glance instead of having to remember the 1–5
+        // accelerators.
+        let app = seeded_app();
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let title_line = text
+            .lines()
+            .find(|l| l.contains("union") && l.contains("forks"))
+            .expect("left pane tab strip line present");
+        for label in ["sessions", "mux", "union", "prs", "forks"] {
+            assert!(
+                title_line.contains(label),
+                "tab strip missing `{label}`: {title_line}",
+            );
+        }
+    }
+
+    #[test]
+    fn right_panel_title_names_the_selected_node_kind() {
+        // Phase 11: instead of a constant `detail`, the right pane
+        // title carries the kind of node currently being inspected
+        // — `session` for an agent session, `repo` / `mux` / `pr` /
+        // etc. for other kinds — so the operator can tell what
+        // they're looking at without re-reading the body.
+        let mut app = seeded_app();
+        app.update(Msg::NavDown);
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let title_line = text
+            .lines()
+            .find(|l| l.contains("session ") && l.contains("───"))
+            .expect("right-pane title with session kind");
+        assert!(
+            !title_line.contains("detail"),
+            "right title should drop the generic `detail` label: {title_line}",
+        );
+    }
+
+    #[test]
     fn focus_marker_prefixes_only_the_active_pane_title() {
         // Phase 9 refinement: focus is signaled by a `▸ ` glyph on
         // the active pane's title rather than by holistically
         // styling the panel. The inactive pane gets two-space
         // padding so titles align column-wise and content colors
-        // stay untouched between focus states.
+        // stay untouched between focus states. The right-pane label
+        // varies by selection kind (Phase 11) so the assertion is
+        // on the *count* of `▸` markers, not on a specific suffix.
         let area = Rect::new(0, 0, 160, 24);
         let app = seeded_app();
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
-        assert!(
-            text.contains("▸ sessions"),
-            "left-focused app should mark the left title: {text}",
+        assert_eq!(
+            text.matches('▸').count(),
+            1,
+            "exactly one focus marker should be visible: {text}",
         );
+        let header_band = text.lines().take(3).collect::<Vec<_>>().join("\n");
+        let left_border = header_band
+            .lines()
+            .nth(1)
+            .map(|l| l.split('│').next().unwrap_or(""))
+            .unwrap_or("");
         assert!(
-            !text.contains("▸ detail"),
-            "right title should be unmarked when left is focused: {text}",
+            left_border.contains('▸'),
+            "marker should sit in the left pane's title when left is focused: \
+             left border was `{left_border}` and full header was:\n{header_band}",
         );
 
         let mut app = seeded_app();
         app.update(Msg::CycleFocus);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
-        assert!(
-            text.contains("▸ detail"),
-            "right-focused app should mark the right title: {text}",
+        assert_eq!(
+            text.matches('▸').count(),
+            1,
+            "exactly one focus marker should still be visible after CycleFocus: {text}",
         );
+        // After CycleFocus the marker moves from the left tab strip
+        // to the right pane title — its column position shifts past
+        // the panel split (well to the right of column 0).
+        let header_line = text.lines().nth(1).expect("header line");
+        let marker_col = header_line.find('▸').expect("marker present");
         assert!(
-            !text.contains("▸ sessions"),
-            "left title should be unmarked after CycleFocus: {text}",
+            marker_col > 60,
+            "marker should sit in the right pane after CycleFocus (col={marker_col}): {header_line}",
         );
     }
 
@@ -1876,12 +2026,21 @@ mod tests {
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
-            text.contains("preview · tmux:agentdeck_conspectus-very-lo"),
-            "expected compact mux preview header: {text}"
+            text.contains("Preview"),
+            "expected `Preview` chip on the divider: {text}"
         );
         assert!(
-            preview_separator(&app).contains("captured"),
-            "freshness label missing from full preview separator"
+            text.contains("tmux:agentdeck_conspectus-very-lo"),
+            "expected mux pane label inline with the divider: {text}"
+        );
+        // The buffer divider may truncate the captured-time suffix
+        // at narrow widths; assert on the helper that composes the
+        // suffix directly so the test is independent of layout
+        // math.
+        let suffix = preview_context_suffix(&app).expect("preview suffix composed");
+        assert!(
+            suffix.contains("captured"),
+            "expected captured-time tag on the preview suffix: {suffix}"
         );
         assert!(
             !text.contains("line 1"),
