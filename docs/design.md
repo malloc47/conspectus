@@ -599,9 +599,11 @@ This is the explicit layer between graph and view: a future ADR 0031
 view (Mux / Union / Prs / Forks) defines itself as `pick a starting
 selector → chain filter/group-by → enrich → render`, not as another
 ad-hoc walk over `snapshot.nodes` and `snapshot.candidate_links`.
-Escalation to a Datalog (Ascent) or SQL (DuckDB/CozoDB) layer is named
-in ADR 0035 with explicit triggers; the selector module is the
-substrate for either path.
+Stage 2 (compile-time Datalog via Ascent) remains gated on ADR 0035's
+recursion trigger. Stage 3 (a user-facing query surface) is settled by
+ADR 0036 in favor of SQLite; the `SnapshotIndex` selectors remain the
+loader source feeding the SQL schema, and the Rust resolver remains the
+source of truth (ADR 0041) — SQL is a consumer.
 
 ## Continuous Operation Mode
 
@@ -638,13 +640,20 @@ The server lifecycle is user-managed (systemd user unit, launchd agent,
 or a manual `conspectus serve &`). The CLI must not auto-spawn a daemon
 on regular invocations; absence of a server is not an error.
 
-Transport between the CLI and the server is an open question (Unix
-domain socket, file-based snapshot polling, or both); the immediate
-constraint is that it work for a single user on a single machine.
+Transport between the CLI and the server is settled by ADR 0038. Reads
+go straight to the SQLite database file (see "Graph Snapshot
+Persistence" below) under WAL mode's concurrent-reader semantics; no
+IPC is involved. Writes route through a Unix domain socket at
+`$XDG_RUNTIME_DIR/conspectus/server.sock` when the server is running,
+falling back to a direct SQLite writer lock when the server is absent.
+The socket carries only mutation commands (rename, declared-link CRUD,
+`--refresh` cold rebuilds) using length-prefixed JSON framing. The
+"absence is not an error" guarantee is preserved by construction since
+reads never require the server.
 
 Configuration extends the existing TOML config with a `[server]` table
 plus per-provider interval keys; specific keys and defaults belong in
-the corresponding ADR.
+ADR 0038.
 
 ## Graph Snapshot Persistence
 
@@ -653,43 +662,106 @@ when discovery touches many harness state directories, many repos, or
 expensive forge calls. Both the continuous server and the one-shot CLI
 benefit from persisting the resolved graph between runs.
 
-- Snapshots live under `$XDG_DATA_HOME/conspectus/snapshots/`. They are
-  never written inside project trees.
-- Format is a versioned JSON document: the resolved `GraphSnapshot`
-  shape extended with a schema version and a per-provider freshness
-  map. JSON keeps snapshots hand-inspectable; a binary format may be
-  reconsidered later if size or load latency become real concerns.
-- Writes are atomic: write to a temp file in the same directory, then
-  rename. A crash mid-save must not corrupt the snapshot.
-- A small number of rotated snapshots are retained for debugging;
-  older snapshots are pruned on each save.
+Per ADR 0037, the canonical persisted graph artifact is a SQLite
+database at `$XDG_DATA_HOME/conspectus/graph.sqlite` in WAL mode
+(with the usual `-wal` and `-shm` sidecars). JSON survives as a peer
+export format via `conspectus dump --format json` for hand-inspection
+and portability; JSON is not on the warm-start read path.
 
-Each node and candidate link in the persisted graph carries the
-provider that produced it and a freshness timestamp. This provenance
-is what makes partial eviction possible:
+- The database file is never written inside project trees.
+- Atomicity is delegated to SQLite transactions (no temp-file +
+  rename dance). Crash recovery is SQLite's WAL replay.
+- Schema versioning lives in `PRAGMA user_version`, aligned with the
+  in-memory `GraphSnapshot` schema version. Migrations apply
+  forward-only; opening a database written by a newer binary on an
+  older binary fails fast with a clear error.
+- Each connection applies the standard pragma triplet:
+  `synchronous = NORMAL`, `busy_timeout = 5000`,
+  `wal_autocheckpoint = 1000`.
+- Numbered backups under `$XDG_DATA_HOME/conspectus/backups/` are
+  produced by `VACUUM INTO` after each full rebuild; the most
+  recent five are retained for debugging. Backups are not on the
+  warm-start read path.
+
+Each node, candidate link, and resolved relationship carries the
+producing provider's stable identifier and a freshness timestamp. A
+`provider_state` table holds per-provider refresh-cycle bookkeeping.
+This provenance is what makes partial eviction possible:
 
 - The unit of refresh is a single provider's slice of the graph.
-- Re-running a provider discards that provider's prior nodes and
-  candidate links and merges its new output back in; declared links,
-  other providers' slices, and the resolver's prior output remain.
-- The resolver re-runs against the merged candidate-link set whenever
-  any provider slice changes. Re-run cadence (eager, batched, or lazy)
-  is left to the implementing ADR.
+- Re-running a provider is one transaction: delete the provider's
+  prior rows from `nodes`, `candidate_links`, and
+  `resolved_relationships`; insert the new rows; update
+  `provider_state`. Declared links, other providers' slices, and
+  resolver winners for unrelated keys remain untouched.
+- The resolver re-runs against the merged candidate-link set
+  whenever any provider slice changes and writes its
+  `resolved_relationships` rows back through the same transaction
+  (or a tightly-paired follow-up). Re-run cadence (eager, batched,
+  or lazy) is left to ADR 0037 and the implementing stories.
 
 The one-shot CLI's warm-start path:
 
-1. Load the most recent snapshot if its schema version matches.
-2. For each provider, compare its freshness timestamp against its
-   configured TTL.
+1. Open `graph.sqlite` if it exists and the schema version matches.
+2. For each provider, compare its `last_run_at` in `provider_state`
+   against its configured TTL.
 3. Re-run only providers whose TTL has expired; reuse the rest.
 4. Re-resolve and render.
 
-If no snapshot exists, the schema version differs, or `--no-cache` /
+If no database exists, the schema version differs, or `--no-cache` /
 `--refresh` is requested, fall back to a cold rebuild.
 
-Snapshot persistence is independent of the server. Both modes share
-the same on-disk format. The server is the only writer when it is
-running; the one-shot CLI is the writer otherwise.
+Server / one-shot CLI coexistence (ADR 0038) is built on top of
+this persistence model. Readers open `graph.sqlite` in read-only
+mode and benefit from WAL's concurrent-reader guarantees regardless
+of whether a server is running. The server holds the writer
+connection for the lifetime of its process; one-shot CLI mutations
+either route through the Unix socket to the server or take the
+writer lock directly when the server is absent.
+
+## Query Surface
+
+Per ADR 0036, Conspectus ships a user-facing SQL query surface
+backed by SQLite. The shape:
+
+- **CLI entry point**: `conspectus query <sql>`. Opens
+  `graph.sqlite` in read-only mode (per the persistence section
+  above) and runs the supplied query against the schema described
+  in P9-002. Reads never need a running server.
+- **Read-only enforcement**: the connection is opened with
+  `SQLITE_OPEN_READONLY`, which rejects DML, DDL, and writable
+  `ATTACH` attempts at the SQLite layer. Mutation of graph state
+  is reserved for the structured rename / declared-link CRUD
+  commands, which route through the server's Unix socket or take
+  the writer lock when the server is absent (ADR 0038).
+- **Schema shape**: one table per node kind (`node_repos`,
+  `node_agent_sessions`, `node_mux_sessions`, …) for
+  queryability, plus `candidate_links`, `resolved_relationships`,
+  `diagnostics`, `aliases`, and `provider_state`. A `v_nodes`
+  view unions the per-kind tables by `(node_id, node_kind)`.
+  Polymorphic blobs (`SourceMetadata.fields`,
+  `UnresolvedEndpoint.metadata`) land in `TEXT` columns holding
+  JSON, queryable via `JSON_EXTRACT`. The schema mirrors the
+  in-Rust model field-for-field; the Rust source remains the
+  source of truth (ADR 0041).
+- **Output formats**: `--format table` (width-aware columnar, per
+  ADR 0020), `--format json` (one object per row),
+  `--format csv`, `--format tsv`. Color codes per ADR 0022 when
+  stdout is a TTY.
+- **Saved views**: a small curated library
+  (`v_sessions_with_repo`, `v_mux_attachments`, `v_pr_by_branch`,
+  `v_fork_ancestry` (recursive), `v_workspace_member_repos`)
+  names the joins that exploratory users would otherwise have to
+  write by hand. `conspectus query --list-views` enumerates them.
+  The set is curated, not a contract.
+- **Build configuration**: the query surface lives behind the
+  `query` Cargo feature (ADR 0039). The shipped binary always
+  builds with the feature on; library consumers of
+  `conspectus::api` opt in.
+- **Resolver boundary**: SQL is a consumer of resolver output, not
+  a replacement for it (ADR 0041). Saved views may join or filter
+  on `resolved_relationships` but should not duplicate the
+  resolver's precedence logic.
 
 ## Migration Plan
 
