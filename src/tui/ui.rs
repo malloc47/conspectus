@@ -47,12 +47,6 @@ use crate::tui::rows::{
 /// side-by-side split to a vertical stack (left-on-top per the
 /// phase-08 layout note).
 const NARROW_LAYOUT_THRESHOLD: u16 = 100;
-/// Cell budget reserved for the harness-label slot inside the badge.
-/// The longest currently-known label (`opencode`) needs 8 cells; the
-/// badge widget pads shorter labels with unstyled trailing space so
-/// the recency column lands at the same horizontal position
-/// regardless of which harness owns the row.
-const HARNESS_LABEL_COLUMN_WIDTH: usize = 8;
 
 /// Render one frame. Pure with respect to `app`; the runtime calls
 /// this on every loop iteration.
@@ -650,7 +644,7 @@ fn render_left_row(
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::raw(row_indent(row.depth)));
-    spans.push(Span::raw(disclosure_glyph(row, app)));
+    spans.push(disclosure_span(row, app));
 
     match &row.kind {
         RowKind::Group(group) => {
@@ -699,7 +693,7 @@ fn render_left_row(
 }
 
 fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> Vec<Span<'static>> {
-    use crate::tui::widgets::badge::{harness_badge, harness_badge_padding};
+    use crate::tui::widgets::badge::harness_badge;
     let mut spans = Vec::new();
     // Short id is a recognition aid, not a primary column — render
     // it in the secondary fg so it stays readable but lighter than
@@ -708,10 +702,10 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         format!("{}  ", session.short_id),
         Style::default().fg(theme.secondary_text),
     ));
+    // The badge widget pads internally so every chip is the same
+    // width regardless of label length; no external padding span
+    // needed.
     spans.push(harness_badge(&session.harness_label, theme));
-    if let Some(pad) = harness_badge_padding(&session.harness_label, HARNESS_LABEL_COLUMN_WIDTH) {
-        spans.push(pad);
-    }
     spans.push(Span::raw("  "));
     let recency = session.recency.clone().unwrap_or_else(|| "—".to_string());
     let recency_style = recency_bucket(Some(now), session.activity_epoch)
@@ -782,15 +776,16 @@ fn mux_indicator_span(state: MuxIndicator, theme: &Theme) -> Span<'static> {
     }
 }
 
-fn disclosure_glyph(row: &crate::tui::rows::Row, app: &App) -> &'static str {
+fn disclosure_span(row: &crate::tui::rows::Row, app: &App) -> Span<'static> {
     if !row.expandable {
-        return "  ";
+        return Span::raw("  ");
     }
-    if app.is_expanded(&row.id) {
+    let glyph = if app.is_expanded(&row.id) {
         "▼ "
     } else {
         "▶ "
-    }
+    };
+    Span::styled(glyph, Style::default().fg(app.theme().disclosure))
 }
 
 fn row_indent(depth: u8) -> String {
@@ -956,16 +951,17 @@ fn draw_detail_header(detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect, th
 }
 
 /// Right-anchored labeled rule used between detail sections. The
-/// rule is rendered with `theme.divider` (default `DIM`) and the
-/// label is bold default-fg so it pops against the rule.
+/// label is rendered as a filled chip (badge modifier over the
+/// panel focus accent), echoing the section-divider treatment in
+/// claude-code's pane chrome. Rules to either side use
+/// `theme.divider` (default `DIM`).
 fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<'static> {
     let label = kind.label();
+    let chip_text = format!(" {label} ");
+    let chip_width = chip_text.chars().count();
     let trailing_rule = 2;
-    let trailing_pad = 1;
-    let label_section = label.chars().count() + 2; // 1 space each side
-    let total_used = label_section + trailing_rule + trailing_pad;
-    let leading_rule = width.saturating_sub(total_used);
-    let mut spans = Vec::with_capacity(4);
+    let leading_rule = width.saturating_sub(chip_width + trailing_rule);
+    let mut spans = Vec::with_capacity(3);
     if leading_rule > 0 {
         spans.push(Span::styled(
             "─".repeat(leading_rule),
@@ -973,8 +969,10 @@ fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<
         ));
     }
     spans.push(Span::styled(
-        format!(" {label} "),
-        Style::default().add_modifier(Modifier::BOLD),
+        chip_text,
+        Style::default()
+            .fg(theme.panel_focus_accent)
+            .add_modifier(theme.badge),
     ));
     spans.push(Span::styled(
         "─".repeat(trailing_rule),
@@ -1579,12 +1577,13 @@ mod tests {
 
     #[test]
     fn session_harness_span_renders_as_filled_badge() {
-        // Per Phase 4 of the styling overhaul, the harness label
-        // becomes a ` label ` pill carrying REVERSED+BOLD over the
-        // harness color, so it reads as a chip rather than plain
-        // colored text. The badge span owns its own padding cells;
-        // any trailing-space alignment is plain (unstyled).
+        // Phase 4 + Phase 10 refinement: the harness label renders
+        // as a single fixed-width pill — padding cells included —
+        // styled REVERSED+BOLD over the harness color. Every badge
+        // is the same visible width regardless of label length so
+        // the recency column lands at the same column on every row.
         use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        use crate::tui::widgets::badge::HARNESS_BADGE_WIDTH;
         let theme = Theme::default();
         let now: i64 = 1_700_000_000;
         let row = AgentSessionRow {
@@ -1603,19 +1602,12 @@ mod tests {
         let spans = render_session_spans(&row, &theme, now);
         let badge = spans
             .iter()
-            .find(|s| s.content == " codex ")
+            .find(|s| s.content.trim() == "codex")
             .expect("harness badge span present");
+        assert_eq!(badge.content.chars().count(), HARNESS_BADGE_WIDTH);
         assert_eq!(badge.style.fg, Some(theme.harness_color("codex")));
         assert!(badge.style.add_modifier.contains(Modifier::REVERSED));
         assert!(badge.style.add_modifier.contains(Modifier::BOLD));
-        // Codex's label is 5 chars; HARNESS_LABEL_COLUMN_WIDTH is 8,
-        // so the badge is followed by a 3-cell unstyled pad to keep
-        // the recency column aligned across sibling rows.
-        let pad = spans
-            .iter()
-            .find(|s| s.content == "   ")
-            .expect("trailing pad span present");
-        assert_eq!(pad.style, Style::default());
     }
 
     #[test]

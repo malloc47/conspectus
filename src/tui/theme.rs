@@ -58,6 +58,11 @@ pub struct Theme {
     /// because the `DIM` modifier renders inconsistently across
     /// terminals (no effect in some popular configurations).
     pub secondary_text: Color,
+    /// Color for the ▶ / ▼ disclosure glyphs so the affordance is
+    /// distinct from the label text it sits next to. Subtle accent
+    /// by default; operators can swap for a dimmer color if the
+    /// glyph competes with their group labels.
+    pub disclosure: Color,
     pub divider: Modifier,
     pub warning: Color,
     pub error: Color,
@@ -153,6 +158,7 @@ impl Default for Theme {
             link_id: Color::Blue,
             placeholder: Modifier::DIM,
             secondary_text: Color::DarkGray,
+            disclosure: Color::Cyan,
             divider: Modifier::DIM,
             warning: Color::Yellow,
             error: Color::Red,
@@ -292,6 +298,10 @@ impl Theme {
                 kind: Color,
             },
             ThemeKey {
+                name: "disclosure",
+                kind: Color,
+            },
+            ThemeKey {
                 name: "divider",
                 kind: Modifier,
             },
@@ -346,6 +356,7 @@ impl Theme {
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,
             "secondary_text" => self.secondary_text = color,
+            "disclosure" => self.disclosure = color,
             "warning" => self.warning = color,
             "error" => self.error = color,
             "success" => self.success = color,
