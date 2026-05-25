@@ -9,6 +9,10 @@
 //! consumers who do not want the engine surface set
 //! `default-features = false`.
 
+pub mod schema;
+
+pub use schema::{SCHEMA_SQL, SCHEMA_VERSION, apply_schema, read_user_version};
+
 use rusqlite::Connection;
 
 /// Bundled libsqlite3 floor. Below this version, the WAL-reset
