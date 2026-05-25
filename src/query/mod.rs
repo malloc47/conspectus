@@ -9,8 +9,10 @@
 //! consumers who do not want the engine surface set
 //! `default-features = false`.
 
+pub mod loader;
 pub mod schema;
 
+pub use loader::load;
 pub use schema::{SCHEMA_SQL, SCHEMA_VERSION, apply_schema, read_user_version};
 
 use rusqlite::Connection;

@@ -9,7 +9,9 @@
 
 use rusqlite::Connection;
 
-use crate::model::{GraphNode, NodeId, RelationKind};
+use crate::model::{
+    Confidence, Diagnostic, Freshness, GraphNode, LinkState, NodeId, Provenance, RelationKind,
+};
 
 /// Embedded DDL text.
 pub const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -87,6 +89,59 @@ pub fn node_kind_tag(id: &NodeId) -> &'static str {
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
         NodeId::ForgePr(_) => "forge_pr",
+    }
+}
+
+/// The serde tag string for a [`Provenance`]. Exhaustive over every
+/// variant so adding a new value breaks the build until the schema's
+/// `provenance` column is considered.
+pub fn provenance_tag(value: Provenance) -> &'static str {
+    match value {
+        Provenance::LocalDeclared => "local_declared",
+        Provenance::GlobalDeclared => "global_declared",
+        Provenance::StrongDiscovered => "strong_discovered",
+        Provenance::Discovered => "discovered",
+        Provenance::Convention => "convention",
+        Provenance::Cached => "cached",
+    }
+}
+
+/// The serde tag string for a [`Confidence`].
+pub fn confidence_tag(value: Confidence) -> &'static str {
+    match value {
+        Confidence::High => "high",
+        Confidence::Medium => "medium",
+        Confidence::Low => "low",
+    }
+}
+
+/// The serde tag string for a [`Freshness`].
+pub fn freshness_tag(value: Freshness) -> &'static str {
+    match value {
+        Freshness::Fresh => "fresh",
+        Freshness::Stale => "stale",
+        Freshness::Unknown => "unknown",
+    }
+}
+
+/// The discriminator string written into the `state` column for a
+/// [`LinkState`]. The variant's payload fields are written into
+/// `state_reason` and `state_overridden_by` separately by the loader.
+pub fn link_state_tag(state: &LinkState) -> &'static str {
+    match state {
+        LinkState::Active => "active",
+        LinkState::Ignored { .. } => "ignored",
+        LinkState::Overridden { .. } => "overridden",
+    }
+}
+
+/// The discriminator string written into the `kind` column of the
+/// `diagnostics` table for each [`Diagnostic`] variant.
+pub fn diagnostic_kind_tag(diagnostic: &Diagnostic) -> &'static str {
+    match diagnostic {
+        Diagnostic::UnresolvedEndpoint { .. } => "unresolved_endpoint",
+        Diagnostic::Config { .. } => "config",
+        Diagnostic::Conflict { .. } => "conflict",
     }
 }
 
