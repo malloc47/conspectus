@@ -4576,6 +4576,12 @@ work. `P8-014` is post-v1 polish that does not block the release.
     right-panel detail now receives `$HOME` for path shortening.
     Duplicate-basename disambiguation and shared view-model helpers
     remain open.
+  - **further slice from styling overhaul (Phase 7)**: group rows
+    now carry agent + mux-state summary chips
+    (`(N) ◉ a ◐ b ◯ c`) so the operator gets density without
+    reading the path. Remaining work: duplicate-basename
+    disambiguation and shared view-model helpers across CLI and
+    TUI surfaces.
 
 - [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
     ancestor when neither CLI nor config specifies one. Low
@@ -5018,6 +5024,61 @@ settles.
     exactly which predicates are active.
   - Tests: snapshot test for the empty frame across each view.
   - Blockers: `F8-004`, `F8-007`, `T8-003`.
+
+- [ ] `T8-022` Detect session live status (running / waiting / idle /
+  error) and surface it as a row glyph and per-status header chip.
+  - Scope: this is the agent-deck signal the styling overhaul
+    deliberately did not invent (color buckets stand in for v1).
+    Real status detection wants a data-layer feature: observe mux
+    pane changes (delta against last capture; tied into the throttle
+    work in `T8-009`), join hook-sidecar evidence (ADR 0028) when
+    the harness exposes a "waiting on permission" or "tool error"
+    state, and expose a new `SessionStatus` enum on the row
+    view-model. The renderer reads it through the existing `Theme`
+    additions (`status_running`, `status_waiting`, `status_idle`,
+    `status_error` — already reserved in the badge widget's color
+    vocabulary). Header chips swap their per-mux-state breakdown
+    for per-status counts when the operator opts in via
+    `[tui.show_status]`.
+  - Tests: pane-delta detector unit tests, hook-sidecar status
+    extraction tests, reducer tests for the new `Msg::SessionStatus`,
+    Ratatui snapshots for the colored row glyph and header chip
+    variants.
+  - Blockers: needs its own ADR (decision: where status lives in the
+    graph; whether it's a candidate-link relation or a property on
+    `AgentSessionNode`; cadence + cost of pane-delta polling). Lives
+    downstream of `T8-009` so the throttle/freshen work pays for the
+    extra capture cadence.
+
+- [ ] `T8-023` Ship preset theme variants on top of ADR 0032.
+  - Scope: layer named palette presets (`tokyo-night`, `dracula`,
+    `solarized-light`, `default-dark`) on top of the flat
+    `[tui.theme]` schema. Implementation can stay purely additive
+    (config-snippet files shipped in `examples/` that operators
+    paste into their config) before any code-level
+    `[tui.theme.preset] = "tokyo-night"` selector lands. The latter
+    needs a small follow-on ADR clarifying preset precedence vs
+    per-key overrides.
+  - Tests: parse-and-apply tests over each shipped snippet; visual
+    diff snapshots for one representative session view per preset
+    (only after preset selector wiring lands).
+  - Blockers: ADR 0032 (landed).
+
+- [ ] `T8-024` Add sessions-tree density modes — folds `T8-015` into
+  the theme-aware renderer landed by the styling overhaul.
+  - Scope: now that the renderer reads its palette and structural
+    cues from `Theme`, density modes can live in the same shape:
+    a `[tui].density` setting plus a runtime toggle that picks one
+    of `compact` / `balanced` / `expanded`. `compact` drops the
+    per-session same-line preview and tightens the badge column;
+    `expanded` enables multi-line previews and the future
+    section-pane treatment for inline detail (depends on
+    `H-TRANSCRIPT-008`).
+  - Tests: row-tree/render snapshots per density at 80×24 and
+    160×40; reducer tests for the runtime toggle key.
+  - Blockers: supersedes `T8-015`'s open scope. Coordinate with
+    `T8-009` (preview throttle) so the expanded mode's extra
+    capture work plays nicely with the cadence story.
 
 ## Later
 

@@ -321,6 +321,52 @@ resolved. They fold into the phase-08 plan on the next pass.
    right-panel preview beyond the graph-resident snippet. Option
    **(a)** from the open question.
 
+## Refined In The Styling Overhaul
+
+The styling overhaul (ADR 0032, ADR 0033) refines the mockup above
+while preserving every locked decision. Plan-of-record:
+`~/.claude/plans/let-s-brainstorm-improvements-to-cozy-bengio.md`.
+
+What the overhaul changed visually:
+
+- **Header is one dense line**: original `Conspectus · sessions ·
+  updated 12s ago · N agents · M mux` prefix stays as the BOLD
+  identity, with per-harness badge chips and per-mux-state count
+  chips appended when terminal width allows (`[claude] 12  [codex]
+  8  …  ◉ 2  ◐ 1  ◯ 0`). Width-aware dropoff drops the harness chip
+  section first, then the mux chips, before truncating the prefix.
+- **Session recency colors by activity bucket** (Fresh < 5m / Active
+  < 1h / Recent < 1d / Cold ≥ 1d). The recency text is unchanged
+  per locked decision 4 — only the color carries the new freshness
+  cue.
+- **Harness label renders as a filled chip** (` codex `, REVERSED +
+  BOLD over the harness color). Shorter labels get plain trailing
+  padding so the recency column stays aligned.
+- **Group rows carry agent + mux summary chips** (`(N)  ◉ a ◐ b ◯
+  c`). Workspace-only ancestors with no sessions stay quiet.
+- **Right-panel detail splits into labeled sections** (Session, Mux,
+  PR, Lineage) with right-anchored dividers `────── Session ──`.
+  Sections whose fields are all blank placeholders are suppressed,
+  so sparse sessions get a shorter pane instead of rows of dashes.
+  Per-section field colorization: `cwd` → cyan, titles → bold, PR
+  state colors from the ADR 0022 palette, identifiers blue,
+  ambiguous-mux annotation yellow.
+- **Every color is overridable** under `[tui.theme]` per ADR 0032.
+  Unknown keys and malformed values surface as warnings; the TUI
+  never aborts on theme errors.
+
+What the overhaul kept locked:
+
+- Single-line session rows (no card layout).
+- No fabricated per-session live status (running/waiting/idle). The
+  recency color buckets stand in for liveness; real status detection
+  is tracked separately as a follow-on backlog item.
+- Mux glyph set (`◉`/`◐`/`◯`) and color semantics.
+- `updated Ns ago` freshness wording in the header.
+- `~`-shortening upstream in row tree and detail view-models.
+- Selection highlight via `REVERSED` so it works on both light and
+  dark terminals.
+
 ## Things The Mockup Doesn't Show
 
 - **Search overlay** (`/`). Probably modal-bottom, prompt-style:

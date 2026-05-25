@@ -125,6 +125,67 @@ run. The legacy `[session]` section (pre-ADR 0021) is recognized
 solely to emit a one-line diagnostic pointing at the new schema; its
 contents are ignored.
 
+### `[tui.theme]` — palette overrides (ADR 0032)
+
+`conspectus tui` ships a centralized `Theme` covering every color
+and modifier the renderer reads. Each field is overridable in
+config:
+
+```toml
+[tui.theme]
+# Per-harness colors used by the row badge and header chip.
+harness_claude   = "magenta"
+harness_codex    = "cyan"
+harness_opencode = "green"
+harness_aider    = "red"
+
+# Activity buckets coloring the session recency column.
+# Accepts `color`, `color,mod`, or `mod` alone.
+recency_fresh  = "bright_green,bold"
+recency_active = "green"
+recency_recent = "yellow"
+recency_cold   = "dim"
+
+# Mux-state glyphs (◉ attached, ◐ ambiguous, ◯ un-muxed).
+mux_attached  = "green"
+mux_ambiguous = "yellow"
+mux_unmuxed   = "dim"
+
+# Detail-pane and structural cues.
+cwd_mark           = "cyan"
+link_id            = "blue"
+divider            = "dim"
+panel_focus_accent = "cyan"
+
+# PR-state coloring (matches the ADR 0022 table palette defaults).
+pr_open   = "green"
+pr_closed = "red"
+pr_merged = "magenta"
+pr_draft  = "yellow"
+
+# Badge composition; default `REVERSED | BOLD` is the chip look.
+badge              = "reversed,bold"
+selection_active   = "reversed,bold"
+selection_inactive = "bold"
+```
+
+Each value is a single string that may be:
+
+- a named ANSI color: `red`, `magenta`, `cyan`, `bright_green`, …
+  plus the alias `default` (or `reset`) for the terminal's default
+  foreground;
+- an indexed 256-color: `ansi256:42` (0–255);
+- a truecolor hex: `#ff8800` (case-insensitive);
+- a comma-joined modifier list: `bold`, `dim,italic`, `reversed`,
+  `crossed_out`, …;
+- a color followed by modifiers: `green,bold`, `#ff8800,italic`.
+
+Unknown keys and malformed values both surface as `ConfigDiagnostic`
+warnings; the field falls back to its built-in default and the rest
+of `[tui.theme]` continues to load. The TUI never aborts on theme
+errors. The `[table]` palette (ADR 0022) is **not** affected by
+`[tui.theme]` — table CLI output keeps its own colors.
+
 ## CLI Surface
 
 ```sh
