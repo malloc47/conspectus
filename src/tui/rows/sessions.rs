@@ -372,12 +372,24 @@ impl<'a> SessionsIndex<'a> {
     }
 
     fn repo_display_path(&self, repo_id: &RepoId) -> String {
+        // For a non-bare repo, `common_dir` is `<canonical>/.git`, and
+        // the parent IS the canonical checkout — prefer it
+        // unconditionally so the repo row stably labels with the
+        // canonical path even when a non-canonical worktree (e.g. an
+        // agent-deck multi-repo checkout) was probed first and its
+        // path is the only one in `source_paths`. Fall back to
+        // `source_paths.first()` only for bare repos, where the
+        // common_dir has no `/.git` suffix to strip.
+        let common_dir = &repo_id.common_dir;
+        if let Some(canonical) = common_dir.strip_suffix("/.git") {
+            return canonical.to_string();
+        }
         let node_id = NodeId::Repo(repo_id.clone());
         self.repos
             .get(&node_id)
             .and_then(|repo| repo.source_paths.first())
             .cloned()
-            .unwrap_or_else(|| repo_display_path_from_common_dir(&repo_id.common_dir).to_string())
+            .unwrap_or_else(|| common_dir.clone())
     }
 
     /// Active `LinkedToMux` candidate links sourced at this agent
