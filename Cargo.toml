@@ -5,6 +5,17 @@ edition = "2024"
 license = "MIT"
 description = "AI work graph status tool"
 
+[features]
+# The user-facing SQLite query surface (ADR 0036, 0037, 0038, 0039).
+# Default-on so the shipped binary always exposes `conspectus query`.
+# Library consumers who do not want the engine surface use
+# `default-features = false`. Note that rusqlite itself is unconditional
+# (the hook sidecar in src/hook.rs and the OpenCode adapter in
+# src/discovery/harness/opencode.rs depend on it independently); the
+# feature gate covers only the new query-engine code in src/query/.
+default = ["query"]
+query = []
+
 [dependencies]
 ansi-to-tui = { version = "8.0.1", default-features = false }
 anstyle = "1.0"

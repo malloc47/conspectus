@@ -9,6 +9,8 @@ pub mod filter;
 pub mod hook;
 pub mod model;
 pub mod output;
+#[cfg(feature = "query")]
+pub mod query;
 pub mod rename;
 pub mod resolve;
 pub mod tui;
