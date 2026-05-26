@@ -5360,7 +5360,7 @@ this phase migrates whichever ones exist when each story lands.
     columns populate; inspect with `sqlite3` to verify shape.
   - Blockers: `P10-001`.
 
-- [ ] `P10-003` Extract the shared rendering substrate.
+- [x] `P10-003` Extract the shared rendering substrate.
   - Scope: lift `RenderOptions`, `Layout`, the `ColumnSpec`
     registries, `render_rows`, `format_relative_age`,
     `node_short_id_from_display`, `unique_prefix_len`, `header_label`
@@ -5378,6 +5378,15 @@ this phase migrates whichever ones exist when each story lands.
     query` (verifies the substrate compiles without the in-memory
     renderer when the cfg is set up to allow it).
   - Blockers: ADR 0043.
+  - Outcome: substrate now lives at `src/output/render.rs`.
+    `output::table` re-exports the public surface so external callers
+    (`cli`, `node_show`, `tui`, `query::runner`) keep compiling
+    unchanged. `agent_sqlite.rs` imports from `super::render`
+    directly; the `SESSIONS_COLUMNS_PUBLIC` workaround is gone.
+    The `substrate_has_no_model_deps` test reads `render.rs` via
+    `include_str!` and flags any `use … crate::model` line that
+    sneaks in. All 732 lib tests pass byte-for-byte; full suite
+    green.
 
 - [ ] `P10-004` Migrate the CLI agent projection to SQLite.
   - Scope: replace `render_with(snapshot, Projection::Agent, opts)`'s
