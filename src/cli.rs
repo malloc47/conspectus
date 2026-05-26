@@ -43,6 +43,7 @@ impl Cli {
             Command::Hook(args) => args.run(),
             Command::Rename(args) => args.run(),
             Command::Alias(args) => args.run(),
+            Command::Query(args) => args.run(),
         }
     }
 }
@@ -71,6 +72,8 @@ enum Command {
     Rename(RenameArgs),
     /// Inspect operator-authored session aliases.
     Alias(AliasArgs),
+    /// Run a read-only SQL query against the graph (ADR 0036).
+    Query(QueryArgs),
 }
 
 #[derive(Debug, Args)]
@@ -3392,4 +3395,42 @@ fn _selection_display(selection: &DeclaredStoreSelection) -> String {
         DeclaredStoreKind::User => "user",
     };
     format!("{kind} {}", selection.path.display())
+}
+
+#[derive(Debug, Args)]
+struct QueryArgs {
+    /// SQL to run against the graph database (read-only).
+    sql: String,
+    /// Output format for the result. `table` is the default
+    /// columnar text rendering; `json` emits one object per row.
+    /// Additional formats land in P9-005.
+    #[arg(long, value_enum, default_value_t = QueryFormatFlag::Table)]
+    format: QueryFormatFlag,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum QueryFormatFlag {
+    Table,
+    Json,
+}
+
+impl From<QueryFormatFlag> for conspectus::query::OutputFormat {
+    fn from(value: QueryFormatFlag) -> Self {
+        match value {
+            QueryFormatFlag::Table => Self::Table,
+            QueryFormatFlag::Json => Self::Json,
+        }
+    }
+}
+
+impl QueryArgs {
+    fn run(self) -> Result<()> {
+        let rendered = conspectus::query::run_query(conspectus::query::QueryInputs {
+            sql: &self.sql,
+            format: self.format.into(),
+            db_path: None,
+        })?;
+        print!("{rendered}");
+        Ok(())
+    }
 }
