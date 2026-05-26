@@ -17,12 +17,11 @@
 
 use rusqlite::Connection;
 
-use super::table::{
-    RenderOptions, SESSIONS_COLUMNS_PUBLIC as SESSIONS_COLUMNS, current_epoch, default_columns,
-    format_relative_age, header_label, render_rows, unique_prefix_len,
+use super::render::{
+    RenderOptions, SESSIONS_COLUMNS, current_epoch, default_columns, format_relative_age,
+    header_label, node_short_id_from_display, render_rows, unique_prefix_len,
 };
 use crate::config::Projection;
-use crate::output::table::node_short_id_from_display;
 
 /// One typed row produced by the agent-projection query. Field-for-
 /// field shape of the join that drives the renderer. Optionals reflect

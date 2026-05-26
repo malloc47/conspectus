@@ -7,6 +7,7 @@ use crate::model::GraphSnapshot;
 #[cfg(feature = "query")]
 pub mod agent_sqlite;
 pub mod node_show;
+pub mod render;
 pub mod table;
 
 pub fn render_graph_json(snapshot: &GraphSnapshot) -> Result<String> {
