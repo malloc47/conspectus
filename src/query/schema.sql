@@ -243,3 +243,120 @@ CREATE TABLE IF NOT EXISTS provider_state (
     last_outcome TEXT NOT NULL,                             -- 'success' | 'error' | 'skipped'
     last_error   TEXT                                       -- nullable detail
 );
+
+-- =============================================================
+-- Saved views (P9-006)
+-- =============================================================
+--
+-- A small curated library of named joins that the in-Rust view code
+-- already encodes. Surfaced through `conspectus query --list-views`.
+-- The set is curated, not a contract — bumping `SCHEMA_VERSION` is
+-- required when a view's column shape changes. See
+-- `docs/query-guide.md` for prose descriptions and example queries.
+
+-- Agent sessions joined to the deepest checkout whose root contains
+-- the session's cwd. Mirrors the join the TUI sessions view does;
+-- sessions without a matching checkout still appear with NULL
+-- checkout columns (LEFT JOIN preserves them).
+CREATE VIEW IF NOT EXISTS v_sessions_with_repo AS
+SELECT
+    s.node_id            AS session_node_id,
+    s.harness_key,
+    s.state_scope,
+    s.session_key,
+    s.cwd,
+    s.last_active_epoch,
+    c.node_id            AS checkout_node_id,
+    c.root               AS checkout_root,
+    c.repo_common_dir    AS repo_common_dir
+FROM node_agent_sessions s
+LEFT JOIN node_checkouts c
+    ON c.node_id = (
+        SELECT c2.node_id
+        FROM node_checkouts c2
+        WHERE s.cwd IS NOT NULL
+          AND (s.cwd = c2.root OR s.cwd LIKE c2.root || '/%')
+        ORDER BY length(c2.root) DESC
+        LIMIT 1
+    );
+
+-- One row per active `LinkedToMux` candidate link, joined to its
+-- mux. Each mux can carry multiple attached agent sessions (one row
+-- per attachment).
+CREATE VIEW IF NOT EXISTS v_mux_attachments AS
+SELECT
+    m.node_id            AS mux_node_id,
+    m.backend,
+    m.native_id,
+    cl.source_node_id    AS agent_session_node_id,
+    cl.link_id,
+    cl.provenance,
+    cl.confidence,
+    cl.freshness
+FROM node_mux_sessions m
+JOIN candidate_links cl
+    ON cl.target_node_id = m.node_id
+    AND cl.relation = 'linked_to_mux'
+    AND cl.state = 'active';
+
+-- Branches joined to their forge PRs via the `BranchHasForgePr`
+-- relation. Branches without a PR still appear with NULL PR
+-- columns (LEFT JOIN).
+CREATE VIEW IF NOT EXISTS v_pr_by_branch AS
+SELECT
+    b.node_id            AS branch_node_id,
+    b.repo_common_dir,
+    b.refname,
+    pr.node_id           AS pr_node_id,
+    pr.provider_name     AS pr_provider,
+    pr.host              AS pr_host,
+    pr.owner             AS pr_owner,
+    pr.repo              AS pr_repo,
+    pr.number            AS pr_number,
+    pr.state             AS pr_state,
+    pr.is_draft          AS pr_is_draft,
+    pr.url               AS pr_url
+FROM node_branches b
+LEFT JOIN candidate_links cl
+    ON cl.source_node_id = b.node_id
+    AND cl.relation = 'branch_has_forge_pr'
+    AND cl.state = 'active'
+LEFT JOIN node_forge_prs pr
+    ON pr.node_id = cl.target_node_id;
+
+-- Transitive `ParentFork` closure: for each Fork node, one row per
+-- (self, ancestor, depth) triple. Depth 0 is the fork itself; each
+-- next row follows one `parent_fork` candidate link further up.
+CREATE VIEW IF NOT EXISTS v_fork_ancestry AS
+WITH RECURSIVE ancestry(fork_node_id, ancestor_node_id, depth) AS (
+    SELECT node_id, node_id, 0 FROM node_forks
+    UNION ALL
+    SELECT
+        a.fork_node_id,
+        cl.target_node_id,
+        a.depth + 1
+    FROM ancestry a
+    JOIN candidate_links cl
+        ON cl.source_node_id = a.ancestor_node_id
+        AND cl.relation = 'parent_fork'
+        AND cl.state = 'active'
+)
+SELECT fork_node_id, ancestor_node_id, depth FROM ancestry;
+
+-- Workspaces with their member repos via the
+-- `WorkspaceContainsRepo` relation. Inner join — workspaces that do
+-- not contain any repos do not appear.
+CREATE VIEW IF NOT EXISTS v_workspace_member_repos AS
+SELECT
+    w.node_id            AS workspace_node_id,
+    w.root               AS workspace_root,
+    w.provider_name      AS workspace_provider,
+    r.node_id            AS repo_node_id,
+    r.common_dir         AS repo_common_dir
+FROM node_workspaces w
+JOIN candidate_links cl
+    ON cl.source_node_id = w.node_id
+    AND cl.relation = 'workspace_contains_repo'
+    AND cl.state = 'active'
+JOIN node_repos r
+    ON r.node_id = cl.target_node_id;

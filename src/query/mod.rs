@@ -14,8 +14,12 @@ pub mod runner;
 pub mod schema;
 
 pub use loader::load;
-pub use runner::{OutputFormat, QueryInputs, run_query, run_query_against_snapshot};
-pub use schema::{SCHEMA_SQL, SCHEMA_VERSION, apply_schema, read_user_version};
+pub use runner::{
+    OutputFormat, QueryInputs, render_saved_views_list, run_query, run_query_against_snapshot,
+};
+pub use schema::{
+    SAVED_VIEWS, SCHEMA_SQL, SCHEMA_VERSION, SavedView, apply_schema, read_user_version,
+};
 
 use rusqlite::Connection;
 

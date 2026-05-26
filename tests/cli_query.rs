@@ -115,3 +115,31 @@ fn query_table_width_truncates_long_cells_with_ellipsis() {
         // unit tests.
         .stdout(predicate::str::contains("…"));
 }
+
+#[test]
+fn query_list_views_prints_every_curated_view() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args(["query", "--list-views"])
+        .current_dir(home.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("v_sessions_with_repo"))
+        .stdout(predicate::str::contains("v_mux_attachments"))
+        .stdout(predicate::str::contains("v_pr_by_branch"))
+        .stdout(predicate::str::contains("v_fork_ancestry"))
+        .stdout(predicate::str::contains("v_workspace_member_repos"));
+}
+
+#[test]
+fn query_without_sql_or_list_views_fails_with_usage_error() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args(["query"])
+        .current_dir(home.path())
+        .assert()
+        .failure()
+        // clap exits with a usage message naming the missing
+        // required argument.
+        .stderr(predicate::str::contains("required"));
+}

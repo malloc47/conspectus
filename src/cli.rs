@@ -3399,8 +3399,10 @@ fn _selection_display(selection: &DeclaredStoreSelection) -> String {
 
 #[derive(Debug, Args)]
 struct QueryArgs {
-    /// SQL to run against the graph database (read-only).
-    sql: String,
+    /// SQL to run against the graph database (read-only). Required
+    /// unless `--list-views` is set.
+    #[arg(required_unless_present = "list_views")]
+    sql: Option<String>,
     /// Output format for the result. `table` is the default
     /// width-aware columnar text rendering; `json` emits one object
     /// per row; `csv` emits RFC-4180-compliant CSV; `tsv` emits
@@ -3423,6 +3425,11 @@ struct QueryArgs {
     /// forces it off. Currently affects only the `table` format.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
+    /// Print the curated saved-view library and exit, instead of
+    /// running SQL. See `docs/query-guide.md` for descriptions and
+    /// example queries.
+    #[arg(long, conflicts_with_all = ["sql", "format", "width", "wide"])]
+    list_views: bool,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -3446,11 +3453,21 @@ impl From<QueryFormatFlag> for conspectus::query::OutputFormat {
 
 impl QueryArgs {
     fn run(self) -> Result<()> {
+        if self.list_views {
+            print!("{}", conspectus::query::render_saved_views_list());
+            return Ok(());
+        }
         let stdout_is_tty = io::stdout().is_terminal();
         let color = resolve_color_from_env(self.color, stdout_is_tty);
         let width = resolve_query_width(self.width, self.wide, stdout_is_tty);
+        // `sql` is `required_unless_present = "list_views"`, so clap
+        // has already enforced that we have a string here.
+        let sql = self
+            .sql
+            .as_deref()
+            .expect("clap guarantees sql is present without --list-views");
         let rendered = conspectus::query::run_query(conspectus::query::QueryInputs {
-            sql: &self.sql,
+            sql,
             format: self.format.into(),
             db_path: None,
             width,

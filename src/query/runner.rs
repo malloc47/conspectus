@@ -81,6 +81,25 @@ pub fn run_query(inputs: QueryInputs<'_>) -> Result<String> {
     execute(&conn, inputs.sql, inputs.format, inputs.width, inputs.color)
 }
 
+/// Render the curated [`crate::query::SAVED_VIEWS`] registry as an
+/// aligned two-column text listing for `conspectus query --list-views`.
+/// Output is byte-deterministic so snapshot tests stay stable.
+pub fn render_saved_views_list() -> String {
+    use crate::query::SAVED_VIEWS;
+
+    let name_width = SAVED_VIEWS.iter().map(|v| v.name.len()).max().unwrap_or(0);
+    let mut out = String::new();
+    for view in SAVED_VIEWS {
+        out.push_str(view.name);
+        let pad = name_width.saturating_sub(view.name.len());
+        out.extend(std::iter::repeat_n(' ', pad));
+        out.push_str("  ");
+        out.push_str(view.description);
+        out.push('\n');
+    }
+    out
+}
+
 /// Same as [`run_query`] but takes a pre-built snapshot. Useful in tests
 /// that want to assert query behavior against a known fixture without
 /// touching cold discovery or the filesystem.
@@ -750,5 +769,230 @@ mod tests {
         let body = tsv.lines().nth(1).unwrap();
         // First column empty, tab, then `next`.
         assert_eq!(body, "\tnext");
+    }
+
+    // -------------------------------------------------------------
+    // P9-006: saved views + --list-views.
+    // -------------------------------------------------------------
+
+    use crate::model::{
+        BranchId, BranchNode, CheckoutId, CheckoutNode, ForgePrId, ForgePrNode, RepoId, RepoNode,
+        WorkspaceId, WorkspaceNode,
+    };
+
+    fn fixture_with_session_under_checkout() -> GraphSnapshot {
+        let mut snap = GraphSnapshot::empty();
+        let repo_common = "/r/.git";
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo_common))));
+        snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_common), "/r"),
+            root: "/r".into(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        // Nested checkout so the deepest-wins join in v_sessions_with_repo
+        // has something to disambiguate.
+        snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_common), "/r/sub"),
+            root: "/r/sub".into(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("claude-code", "default", "s1"),
+            harness_key: "claude-code".into(),
+            cwd: Some("/r/sub/deep/path".into()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_700_000_000),
+        }));
+        snap
+    }
+
+    #[test]
+    fn v_sessions_with_repo_picks_deepest_checkout() {
+        let snap = fixture_with_session_under_checkout();
+        let out = run_query_against_snapshot(
+            &snap,
+            "SELECT session_node_id, checkout_root, repo_common_dir \
+             FROM v_sessions_with_repo",
+            OutputFormat::Json,
+        )
+        .unwrap();
+        let line = out.lines().next().expect("one row");
+        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(
+            parsed["session_node_id"]
+                .as_str()
+                .unwrap()
+                .starts_with("agent_session:claude-code:")
+        );
+        // Deepest matching checkout root for cwd /r/sub/deep/path is /r/sub,
+        // not /r — the correlated subquery in the view picks it.
+        assert_eq!(parsed["checkout_root"], "/r/sub");
+        assert_eq!(parsed["repo_common_dir"], "/r/.git");
+    }
+
+    #[test]
+    fn v_mux_attachments_returns_one_row_per_active_link() {
+        let snap = snapshot_with_session_and_mux();
+        let out = run_query_against_snapshot(
+            &snap,
+            "SELECT agent_session_node_id, backend, native_id, provenance, confidence \
+             FROM v_mux_attachments",
+            OutputFormat::Json,
+        )
+        .unwrap();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed["backend"], "tmux");
+        assert_eq!(parsed["native_id"], "tmux:0");
+        assert_eq!(parsed["provenance"], "strong_discovered");
+        assert_eq!(parsed["confidence"], "high");
+    }
+
+    fn fixture_with_pr_on_branch() -> GraphSnapshot {
+        let mut snap = GraphSnapshot::empty();
+        let repo = "/r/.git";
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo))));
+        let branch_id = BranchId::new(RepoId::new(repo), "refs/heads/feature");
+        snap.nodes.push(GraphNode::Branch(BranchNode {
+            id: branch_id.clone(),
+            refname: "refs/heads/feature".into(),
+            current_commit: None,
+            upstream: None,
+        }));
+        let pr = ForgePrNode {
+            id: ForgePrId::new("github", "github.com", "owner", "repo", 42),
+            provider: "github".into(),
+            host: "github.com".into(),
+            owner: "owner".into(),
+            repo: "repo".into(),
+            number: 42,
+            state: Some("open".into()),
+            url: Some("https://github.com/owner/repo/pull/42".into()),
+            updated_epoch: None,
+            is_draft: false,
+        };
+        snap.nodes.push(GraphNode::ForgePr(pr.clone()));
+        snap.candidate_links.push(GraphLink {
+            id: "L1".into(),
+            source: NodeId::Branch(branch_id),
+            target: LinkEndpoint::Node {
+                id: NodeId::ForgePr(pr.id.clone()),
+            },
+            relation: RelationKind::BranchHasForgePr,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        snap
+    }
+
+    #[test]
+    fn v_pr_by_branch_joins_branches_to_their_prs() {
+        let snap = fixture_with_pr_on_branch();
+        let out = run_query_against_snapshot(
+            &snap,
+            "SELECT refname, pr_state, pr_number FROM v_pr_by_branch",
+            OutputFormat::Json,
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+        assert_eq!(parsed["refname"], "refs/heads/feature");
+        assert_eq!(parsed["pr_state"], "open");
+        assert_eq!(parsed["pr_number"], 42);
+    }
+
+    #[test]
+    fn v_fork_ancestry_returns_self_plus_chain() {
+        let snap = snapshot_with_fork_chain();
+        let out = run_query_against_snapshot(
+            &snap,
+            "SELECT fork_node_id, ancestor_node_id, depth \
+             FROM v_fork_ancestry \
+             WHERE fork_node_id = 'fork:c' \
+             ORDER BY depth",
+            OutputFormat::Json,
+        )
+        .unwrap();
+        let parsed: Vec<serde_json::Value> = out
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(parsed.len(), 3, "self + 2 ancestors");
+        assert_eq!(parsed[0]["ancestor_node_id"], "fork:c");
+        assert_eq!(parsed[0]["depth"], 0);
+        assert_eq!(parsed[1]["ancestor_node_id"], "fork:b");
+        assert_eq!(parsed[2]["ancestor_node_id"], "fork:a");
+    }
+
+    fn fixture_with_workspace_containing_repo() -> GraphSnapshot {
+        let mut snap = GraphSnapshot::empty();
+        let repo = "/r/.git";
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo))));
+        snap.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new("/w"),
+            root: "/w".into(),
+            provider: Some("atelier".into()),
+            name: None,
+        }));
+        snap.candidate_links.push(GraphLink {
+            id: "wcr".into(),
+            source: NodeId::Workspace(WorkspaceId::new("/w")),
+            target: LinkEndpoint::Node {
+                id: NodeId::Repo(RepoId::new(repo)),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        snap
+    }
+
+    #[test]
+    fn v_workspace_member_repos_joins_workspaces_to_their_repos() {
+        let snap = fixture_with_workspace_containing_repo();
+        let out = run_query_against_snapshot(
+            &snap,
+            "SELECT workspace_root, workspace_provider, repo_common_dir \
+             FROM v_workspace_member_repos",
+            OutputFormat::Json,
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+        assert_eq!(parsed["workspace_root"], "/w");
+        assert_eq!(parsed["workspace_provider"], "atelier");
+        assert_eq!(parsed["repo_common_dir"], "/r/.git");
+    }
+
+    #[test]
+    fn render_saved_views_list_lists_every_registered_view() {
+        let rendered = render_saved_views_list();
+        for view in crate::query::SAVED_VIEWS {
+            assert!(
+                rendered.contains(view.name),
+                "missing {} in:\n{rendered}",
+                view.name
+            );
+            assert!(
+                rendered.contains(view.description),
+                "missing description for {} in rendered output",
+                view.name
+            );
+        }
+        // Same number of lines as registered views (one per line, no
+        // blank trailing line).
+        let line_count = rendered.lines().count();
+        assert_eq!(line_count, crate::query::SAVED_VIEWS.len());
     }
 }

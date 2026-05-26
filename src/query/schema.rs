@@ -25,6 +25,45 @@ pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 /// provenance fields), both versions advance together.
 pub const SCHEMA_VERSION: u32 = 1;
 
+/// One curated saved view defined in `schema.sql`. The registry below
+/// is the single source of truth that `conspectus query --list-views`
+/// reads from and that `docs/query-guide.md` documents.
+#[derive(Copy, Clone, Debug)]
+pub struct SavedView {
+    /// SQL view name. Always prefixed with `v_`.
+    pub name: &'static str,
+    /// One-line description rendered by `--list-views` and used as the
+    /// section heading in `docs/query-guide.md`.
+    pub description: &'static str,
+}
+
+/// All saved views shipped with the current schema. The exhaustive
+/// `saved_views_match_schema` test pins this slice against
+/// `sqlite_master` so adding a view to `schema.sql` without updating
+/// the registry (or vice versa) fails the test suite.
+pub const SAVED_VIEWS: &[SavedView] = &[
+    SavedView {
+        name: "v_sessions_with_repo",
+        description: "Agent sessions joined to the deepest checkout containing the session's cwd.",
+    },
+    SavedView {
+        name: "v_mux_attachments",
+        description: "Active `linked_to_mux` candidate links joined to their mux session.",
+    },
+    SavedView {
+        name: "v_pr_by_branch",
+        description: "Branches joined to their forge PRs via the `branch_has_forge_pr` relation.",
+    },
+    SavedView {
+        name: "v_fork_ancestry",
+        description: "Transitive `parent_fork` closure: one (fork, ancestor, depth) row per chain step.",
+    },
+    SavedView {
+        name: "v_workspace_member_repos",
+        description: "Workspaces joined to their member repos via `workspace_contains_repo`.",
+    },
+];
+
 /// Apply `SCHEMA_SQL` to `conn` and record `SCHEMA_VERSION` in
 /// `PRAGMA user_version`. Idempotent: every `CREATE` statement uses
 /// `IF NOT EXISTS` so re-running it on a populated database is safe.
@@ -415,5 +454,72 @@ mod tests {
             "RelationKind variant count changed; update ALL_RELATION_KINDS and \
              relation_kind_tag together"
         );
+    }
+
+    #[test]
+    fn saved_views_registry_matches_schema_views() {
+        // Every name in SAVED_VIEWS must correspond to a CREATE VIEW
+        // in schema.sql, and vice versa. Drift in either direction
+        // fails this test.
+        let conn = fresh_conn();
+        for view in SAVED_VIEWS {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'view' AND name = ?1",
+                    [view.name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                exists, 1,
+                "registered saved view {} missing from schema",
+                view.name
+            );
+            assert!(
+                !view.description.is_empty(),
+                "empty description for {}",
+                view.name
+            );
+        }
+
+        // Inverse: every `v_*` view (excluding the polymorphic
+        // `v_nodes` union) must appear in the registry. This catches
+        // a new view in schema.sql that the registry forgot to name.
+        let view_names: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type = 'view' AND name LIKE 'v_%' AND name != 'v_nodes' \
+                 ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let registered: std::collections::HashSet<&str> =
+            SAVED_VIEWS.iter().map(|v| v.name).collect();
+        for name in &view_names {
+            assert!(
+                registered.contains(name.as_str()),
+                "schema view {name} missing from SAVED_VIEWS registry"
+            );
+        }
+        assert_eq!(view_names.len(), SAVED_VIEWS.len());
+    }
+
+    #[test]
+    fn every_saved_view_selects_from_empty_schema() {
+        // Each view must execute against the empty schema without
+        // SQL errors. Catches missing columns / table names / typos
+        // even when no fixture data exercises the view's body.
+        let conn = fresh_conn();
+        for view in SAVED_VIEWS {
+            let sql = format!("SELECT * FROM {} LIMIT 1", view.name);
+            conn.prepare(&sql)
+                .unwrap_or_else(|err| panic!("prepare {sql}: {err}"))
+                .query_map([], |_row| Ok(()))
+                .unwrap_or_else(|err| panic!("execute {sql}: {err}"))
+                .for_each(drop);
+        }
     }
 }
