@@ -10,10 +10,12 @@
 //! `default-features = false`.
 
 pub mod loader;
+pub mod reader;
 pub mod runner;
 pub mod schema;
 
 pub use loader::load;
+pub use reader::read_snapshot;
 pub use runner::{
     DEFAULT_SIMILAR_TO_FIELD, DEFAULT_SIMILAR_TO_LIMIT, OutputFormat, QueryInputs, SimilarToInputs,
     blob_to_vec, render_saved_views_list, run_query, run_query_against_snapshot, run_similar_to,
