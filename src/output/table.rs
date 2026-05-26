@@ -170,10 +170,19 @@ const SHORT_ID_FLOOR: usize = 6;
 /// Exposed for `node show` (H-TBL-005), which accepts a copy-pasted
 /// short id and resolves it to a `NodeId`.
 pub fn node_short_id(node_id: &NodeId) -> String {
+    node_short_id_from_display(&node_id.to_string())
+}
+
+/// FNV-1a 64-bit over the [`NodeId`]'s `Display` form, as a string.
+/// Used by the SQLite-backed renderer (`super::agent_sqlite`) which
+/// already holds the `Display` form as `TEXT` from the database and
+/// would otherwise have to round-trip through a parser to call
+/// [`node_short_id`].
+pub fn node_short_id_from_display(node_id_text: &str) -> String {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x100000001b3;
     let mut hash = OFFSET;
-    for &byte in node_id.to_string().as_bytes() {
+    for &byte in node_id_text.as_bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(PRIME);
     }
@@ -184,7 +193,7 @@ pub fn node_short_id(node_id: &NodeId) -> String {
 /// `full_ids` against the others, floored at [`SHORT_ID_FLOOR`]. All
 /// inputs are expected to be the 16-char hex output of
 /// [`node_short_id`]; the cap is therefore 16.
-fn unique_prefix_len(full_ids: &[String]) -> usize {
+pub(crate) fn unique_prefix_len(full_ids: &[String]) -> usize {
     if full_ids.len() <= 1 {
         return SHORT_ID_FLOOR;
     }
@@ -339,6 +348,13 @@ pub struct ColumnSpec {
     /// `true` when the column is part of the row-type's default set.
     pub default: bool,
 }
+
+/// Crate-internal alias for the agent-projection column registry,
+/// exposed so the SQLite-backed spike renderer
+/// (`super::agent_sqlite`) can resolve header labels without
+/// duplicating the registry. Will be removed if the spike's direction
+/// is adopted and the registry moves to a shared location.
+pub(crate) const SESSIONS_COLUMNS_PUBLIC: &[ColumnSpec] = SESSIONS_COLUMNS;
 
 const SESSIONS_COLUMNS: &[ColumnSpec] = &[
     ColumnSpec {
@@ -827,7 +843,7 @@ pub fn render_columns_listing(projection: Projection, color: bool) -> String {
     out
 }
 
-fn header_label(registry: &[ColumnSpec], key: &str) -> String {
+pub(crate) fn header_label(registry: &[ColumnSpec], key: &str) -> String {
     registry
         .iter()
         .find(|spec| spec.key == key)
@@ -1424,7 +1440,7 @@ fn union_cell(key: &str, ctx: &UnionRowCtx<'_, '_>) -> String {
 /// claude-code) populate it with a long conversation topic that
 /// doesn't fit a leading cell. Title surfaces through the opt-in
 /// `title` column instead (H-TBL-015).
-fn agent_session_label(session: &AgentSessionNode) -> String {
+pub(crate) fn agent_session_label(session: &AgentSessionNode) -> String {
     format!(
         "{}:{}",
         session.harness_key,
@@ -1671,7 +1687,7 @@ fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<St
 /// Format `then_epoch` relative to `now_epoch` as a compact recency
 /// string (`12s`, `5m`, `2h`, `3d`, `4w`). Future-dated values render
 /// as `now`.
-fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
+pub(crate) fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
     let delta = now_epoch.saturating_sub(then_epoch);
     if delta < 0 {
         return "now".to_string();
@@ -1690,7 +1706,7 @@ fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
     }
 }
 
-fn current_epoch() -> i64 {
+pub(crate) fn current_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -1971,7 +1987,7 @@ pub(crate) const COLUMN_GAP_WIDTH: usize = 2;
 /// to 4 so a column can still emit `xxx…` after truncation.
 pub(crate) const MIN_COLUMN_BUDGET: usize = 4;
 
-fn render_rows(
+pub(crate) fn render_rows(
     rows: Vec<Vec<String>>,
     columns: &[&'static str],
     options: &RenderOptions,

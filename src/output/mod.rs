@@ -4,6 +4,8 @@ use anyhow::Result;
 
 use crate::model::GraphSnapshot;
 
+#[cfg(feature = "query")]
+pub mod agent_sqlite;
 pub mod node_show;
 pub mod table;
 
