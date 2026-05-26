@@ -5276,6 +5276,208 @@ replacement.
     `--similar-to <node-id>` flag.
   - Blockers: ADR-G (not yet drafted).
 
+## Phase 10: SQLite As Sole Consumption Surface
+
+Gated on ADR 0043. Phase goal: collapse the dual read path (in-memory
+`SnapshotIndex` + SQLite) into one. All view, render, and inspection
+code reads from a `rusqlite::Connection`; `GraphSnapshot` is demoted
+to a producer-side intermediate scoped to the discovery → resolver →
+loader pipeline.
+
+The spike on `phase-9-sqlite-spike` proved out the shape:
+`src/query/reader.rs` rounds-trips the loader fixtures losslessly,
+and `src/output/agent_sqlite.rs` reimplements 9 of 17 agent-projection
+cells against `v_sessions_with_repo` + a `LEFT JOIN`, reusing the
+existing `RenderOptions` / `render_rows` substrate unchanged. The
+spike code is a reference, not the production landing — Phase 10
+stories formalize it.
+
+Dependency shape inside the phase:
+
+```
+ADR 0043 ──→ P10-001 (round-trip + read exhaustiveness) ──┬──→ P10-002 (structured-id columns)
+                                                          │
+                                                          └──→ P10-003 (shared render substrate)
+
+P10-002 + P10-003 ──→ P10-004 (agent) ──┬──→ P10-005..009 (per-renderer migration, parallel after agent)
+                                        │
+                                        └──→ P10-010..012 (TUI migration, parallel after agent)
+
+(all migrations) ──→ P10-013 (retire indexes) ──→ P10-014 (demote GraphSnapshot)
+```
+
+The Phase 8 ADR 0031 TUI views (Mux/Union/Prs/Forks) are independent;
+this phase migrates whichever ones exist when each story lands.
+
+- [ ] `P10-001` Promote reader + add compile-time read exhaustiveness.
+  - Scope: take the spike's `src/query/reader.rs` to production
+    quality. Keep the round-trip equality test (`canonicalize()` on
+    both sides) as the regression net. Add a per-table read helper
+    (trait or macro) that pairs column-list constants with typed-row
+    mappers so adding a column to `schema.sql` without updating the
+    reader fails compilation — symmetric to the loader's exhaustive
+    `let RepoNode { … } = repo;` destructuring. Move the spike's
+    `parse_node_id` to the reader module unchanged; it survives only
+    until `P10-002` lands.
+  - Tests: round-trip equality over the existing loader fixture
+    corpus (empty, full, link state variants, diagnostic variants,
+    aliases). One synthetic test per node table that asserts adding
+    a column without updating the reader fails to compile
+    (`#[deny(unused)]` against the typed-row helper or equivalent).
+  - Manual checks: `conspectus dump --format json` against a real
+    `graph.sqlite` reads back a snapshot that re-serializes equal
+    to the JSON the loader produced from.
+  - Blockers: ADR 0043.
+
+- [ ] `P10-002` Structured-id columns for foreign references.
+  - Scope: replace the `node_id TEXT` foreign-reference columns in
+    `candidate_links`, `resolved_relationships`, `diagnostics`, and
+    `aliases` with structured `*_kind` + per-kind structural
+    columns (analogous to how `node_checkouts.repo_common_dir`
+    denormalizes `CheckoutId.repo`). Update the loader's
+    `insert_candidate_links` / `insert_resolved` / `insert_diagnostics`
+    / `insert_aliases` to write the new columns from the typed
+    `NodeId` it already holds. Update the reader to consume them.
+    Remove `reader::parse_node_id`. Bump `SCHEMA_VERSION`.
+  - Tests: round-trip equality holds with the new shape. Add a test
+    covering a `RepoId` whose `common_dir` contains `@`, `:`, and
+    `#` — values the spike parser would mishandle — and confirm the
+    new shape preserves them. Update `saved_views_match_schema`-style
+    invariant tests if the affected views read these columns.
+  - Manual checks: run a fresh discovery cycle and confirm the new
+    columns populate; inspect with `sqlite3` to verify shape.
+  - Blockers: `P10-001`.
+
+- [ ] `P10-003` Extract the shared rendering substrate.
+  - Scope: lift `RenderOptions`, `Layout`, the `ColumnSpec`
+    registries, `render_rows`, `format_relative_age`,
+    `node_short_id_from_display`, `unique_prefix_len`, `header_label`
+    out of `src/output/table.rs` into a backend-agnostic module
+    (`src/output/render/` or `src/output/substrate.rs`) consumed by
+    both the in-memory and SQLite renderers during the migration.
+    No behavior change; this is structural so the migration stories
+    can land incrementally without circular dependencies. The
+    `*_PUBLIC` aliases introduced by the spike are removed in favor
+    of clean re-exports.
+  - Tests: existing renderer snapshot tests stay green byte-for-byte.
+    A new module-boundary test confirms the substrate has no
+    `crate::model::*` dependencies.
+  - Manual checks: `cargo build --no-default-features --features
+    query` (verifies the substrate compiles without the in-memory
+    renderer when the cfg is set up to allow it).
+  - Blockers: ADR 0043.
+
+- [ ] `P10-004` Migrate the CLI agent projection to SQLite.
+  - Scope: replace `render_with(snapshot, Projection::Agent, opts)`'s
+    code path with a `Connection`-driven implementation modeled on
+    `src/output/agent_sqlite.rs` from the spike. All 17 cells
+    covered (the spike's 9 plus `mux`, `mux-conf`, `pr`, `pr-conf`,
+    `lineage`, `workspace`, `fork`, `declared`). Extend
+    `v_sessions_with_repo` (or add sibling views) for the
+    `pick_preferred`-mediated cells; lean on `resolved_relationships`
+    so the resolver's tie-break stays authoritative. `RowFilter`
+    sits on top of the result set — no SQL filter pushdown in v1.
+  - Tests: parity test that runs the old and new renderers from the
+    same fixture and asserts byte-equal output across the existing
+    `output::table` snapshot corpus. Width-aware truncation
+    snapshots unchanged. Filter behavior preserved.
+  - Manual checks: `conspectus table --rows sessions` against a
+    real `graph.sqlite`; visually compare to the prior output.
+  - Blockers: `P10-002`, `P10-003`.
+
+- [ ] `P10-005` Migrate the CLI mux projection to SQLite.
+  - Scope: same pattern as `P10-004` for `Projection::Mux`. Use
+    `v_mux_attachments` (extended if needed) for the agents-attached-
+    to-this-mux cell.
+  - Tests: parity with the existing mux-projection snapshots.
+  - Blockers: `P10-004` (substrate validated by the agent migration).
+
+- [ ] `P10-006` Migrate the CLI union projection to SQLite.
+  - Scope: same pattern for `Projection::Union`. Composes the
+    agent/mux query paths over a `UNION ALL` shape.
+  - Tests: parity with existing union snapshots.
+  - Blockers: `P10-004`, `P10-005`.
+
+- [ ] `P10-007` Migrate the CLI PRs projection to SQLite.
+  - Scope: same pattern for `Projection::Pr`. Use `v_pr_by_branch`.
+  - Tests: parity with existing PR snapshots.
+  - Blockers: `P10-004`.
+
+- [ ] `P10-008` Migrate the CLI forks projection to SQLite.
+  - Scope: same pattern for `Projection::Fork`. Use
+    `v_fork_ancestry`.
+  - Tests: parity with existing fork snapshots.
+  - Blockers: `P10-004`.
+
+- [ ] `P10-009` Migrate `node show` to SQLite.
+  - Scope: replace the snapshot walks in `src/output/node_show.rs`
+    with `Connection`-driven queries per node kind. Short-id
+    resolution (`H-TBL-005`) keeps its current shape; the lookup
+    moves to `SELECT … WHERE node_id LIKE ?`.
+  - Tests: parity with the existing `node show` snapshot corpus
+    across every node kind.
+  - Blockers: `P10-002`.
+
+- [ ] `P10-010` Migrate the TUI detail pane to SQLite.
+  - Scope: replace the snapshot walks in `src/tui/detail.rs` with
+    `Connection`-driven queries. The detail pane sections from
+    ADR 0033 stay; only the data source changes.
+  - Tests: parity with the existing detail-pane snapshots; runtime
+    smoke test confirms the pane still re-renders on selection
+    changes.
+  - Blockers: `P10-003`, `P10-009` (so the typed-row patterns are
+    settled before the TUI consumes them).
+
+- [ ] `P10-011` Migrate the TUI sessions row builder to SQLite.
+  - Scope: replace `build_sessions_tree` (`src/tui/rows/sessions.rs`)
+    and its `SessionsBuildInputs` with a `Connection`-driven
+    builder. Grouping/bucketing logic (ADR 0024) stays in Rust on
+    top of the result set. `RowFilter` continues to gate per session
+    before bucketing. Performance check: the TUI refresh loop
+    should stay under its current latency budget on the fixture
+    corpus.
+  - Tests: parity with the existing sessions-tree snapshots over the
+    fixture corpus; refresh-loop latency measurement on the largest
+    fixture.
+  - Blockers: `P10-004`.
+
+- [ ] `P10-012` Migrate the TUI Mux/Union/Prs/Forks builders to
+  SQLite.
+  - Scope: same as `P10-011` for whichever ADR 0031 views have
+    landed when this story is picked up. Each builder is its own
+    sub-story; group here for tracking.
+  - Blockers: `P10-011`, plus the ADR 0031 stories that introduce
+    the relevant builder.
+
+- [ ] `P10-013` Retire `SnapshotIndex`, `SnapshotView`,
+  `SessionsIndex`.
+  - Scope: delete the in-memory selector layer once no consumer
+    depends on it. Producer-side discovery and the resolver may
+    keep an internal selector if useful (the loader doesn't need
+    one). Remove the dual-renderer plumbing; delete
+    `src/output/agent_sqlite.rs` (its production replacement is
+    `src/output/table.rs`'s new implementation).
+  - Tests: `cargo build` succeeds; the existing test suite stays
+    green; `cargo +nightly udeps`-style dead-code sweep finds
+    nothing residual.
+  - Blockers: `P10-005`..`P10-012` complete.
+
+- [ ] `P10-014` Demote `GraphSnapshot` to producer-only.
+  - Scope: gate the public re-export so library callers who only
+    want to render get a `Connection`-flavored API, not a snapshot.
+    `GraphSnapshot` remains the resolver's input/output type and
+    `conspectus dump --format json`'s wire shape (built via
+    `read_snapshot()`), but no consumer holds it across a CLI
+    invocation. Update `src/api.rs` accordingly. Refresh
+    `docs/library-api.md` and `docs/design.md` to reflect the
+    consumer-side contract.
+  - Tests: library-API surface tests confirm `GraphSnapshot` is no
+    longer reachable from rendering entry points.
+  - Manual checks: review the updated library-API doc; confirm an
+    external Rust caller building a TUI substitute can succeed
+    against the new surface.
+  - Blockers: `P10-013`.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
