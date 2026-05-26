@@ -210,6 +210,247 @@ pub fn relation_kind_tag(kind: &RelationKind) -> &'static str {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Per-table column lists (P10-001 schema-drift enforcement, ADR 0043)
+// -----------------------------------------------------------------------------
+//
+// One slice per table or view in `schema.sql`, in CREATE TABLE /
+// CREATE VIEW column order. The `schema_columns_match_constants` test
+// runs `PRAGMA table_info(...)` against each name and asserts the
+// returned column list matches — adding a column in `schema.sql`
+// without updating the constant here (or vice versa) fails the test
+// suite.
+//
+// This is the schema-side counterpart to the loader's exhaustive
+// destructure of typed `*Node` structs (which catches model field
+// additions). Together the two enforce that the model, the schema,
+// and the loader/reader stay aligned.
+
+pub const NODE_REPOS_COLUMNS: &[&str] = &[
+    "node_id",
+    "common_dir",
+    "source_paths",
+    "remotes",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_CHECKOUTS_COLUMNS: &[&str] = &[
+    "node_id",
+    "repo_common_dir",
+    "root",
+    "git_dir",
+    "current_branch_repo_common_dir",
+    "current_branch_refname",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_WORKSPACES_COLUMNS: &[&str] = &[
+    "node_id",
+    "root",
+    "provider_name",
+    "name",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_AGENT_SESSIONS_COLUMNS: &[&str] = &[
+    "node_id",
+    "harness_key",
+    "state_scope",
+    "session_key",
+    "cwd",
+    "title",
+    "last_message_preview",
+    "last_active_epoch",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_MUX_SESSIONS_COLUMNS: &[&str] = &[
+    "node_id",
+    "native_id",
+    "backend",
+    "cwd",
+    "active_pane_command",
+    "active_pane_pid",
+    "active_pane_current_path",
+    "active_pane_start_command",
+    "activity_epoch",
+    "created_epoch",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_BRANCHES_COLUMNS: &[&str] = &[
+    "node_id",
+    "repo_common_dir",
+    "refname",
+    "current_commit",
+    "upstream",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_FORKS_COLUMNS: &[&str] = &[
+    "node_id",
+    "provider_source_key",
+    "provider_name",
+    "name",
+    "scope",
+    "capabilities",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_FORGE_PRS_COLUMNS: &[&str] = &[
+    "node_id",
+    "provider_name",
+    "host",
+    "owner",
+    "repo",
+    "number",
+    "state",
+    "url",
+    "updated_epoch",
+    "is_draft",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const CANDIDATE_LINKS_COLUMNS: &[&str] = &[
+    "link_id",
+    "source_node_id",
+    "target_kind",
+    "target_node_id",
+    "target_node_type",
+    "target_harness_key",
+    "target_native_id",
+    "target_state_scope",
+    "target_path",
+    "target_metadata",
+    "relation",
+    "provenance",
+    "confidence",
+    "freshness",
+    "state",
+    "state_reason",
+    "state_overridden_by",
+    "source_adapter",
+    "source_evidence",
+    "source_fields",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const RESOLVED_RELATIONSHIPS_COLUMNS: &[&str] = &[
+    "source_node_id",
+    "target_node_id",
+    "relation",
+    "selected_link_id",
+    "competing_link_ids",
+];
+
+pub const DIAGNOSTICS_COLUMNS: &[&str] = &[
+    "kind",
+    "link_id",
+    "relation",
+    "config_path",
+    "config_message",
+    "conflict_source_node_id",
+    "conflict_selected_link_id",
+    "conflict_competing_link_ids",
+];
+
+pub const ALIASES_COLUMNS: &[&str] = &["node_id", "display_name"];
+
+pub const PROVIDER_STATE_COLUMNS: &[&str] =
+    &["provider", "last_run_at", "last_outcome", "last_error"];
+
+pub const EMBEDDINGS_COLUMNS: &[&str] = &["node_id", "source_field", "model", "dim", "vector"];
+
+pub const V_NODES_COLUMNS: &[&str] = &[
+    "node_id",
+    "node_kind",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const V_SESSIONS_WITH_REPO_COLUMNS: &[&str] = &[
+    "session_node_id",
+    "harness_key",
+    "state_scope",
+    "session_key",
+    "cwd",
+    "last_active_epoch",
+    "checkout_node_id",
+    "checkout_root",
+    "repo_common_dir",
+];
+
+pub const V_MUX_ATTACHMENTS_COLUMNS: &[&str] = &[
+    "mux_node_id",
+    "backend",
+    "native_id",
+    "agent_session_node_id",
+    "link_id",
+    "provenance",
+    "confidence",
+    "freshness",
+];
+
+pub const V_PR_BY_BRANCH_COLUMNS: &[&str] = &[
+    "branch_node_id",
+    "repo_common_dir",
+    "refname",
+    "pr_node_id",
+    "pr_provider",
+    "pr_host",
+    "pr_owner",
+    "pr_repo",
+    "pr_number",
+    "pr_state",
+    "pr_is_draft",
+    "pr_url",
+];
+
+pub const V_FORK_ANCESTRY_COLUMNS: &[&str] = &["fork_node_id", "ancestor_node_id", "depth"];
+
+pub const V_WORKSPACE_MEMBER_REPOS_COLUMNS: &[&str] = &[
+    "workspace_node_id",
+    "workspace_root",
+    "workspace_provider",
+    "repo_node_id",
+    "repo_common_dir",
+];
+
+/// `(table_or_view_name, column_list)` for every relation created by
+/// `apply_schema`. `schema_columns_match_constants` iterates this
+/// slice; new tables/views land by extending it.
+pub const TABLE_COLUMNS: &[(&str, &[&str])] = &[
+    ("node_repos", NODE_REPOS_COLUMNS),
+    ("node_checkouts", NODE_CHECKOUTS_COLUMNS),
+    ("node_workspaces", NODE_WORKSPACES_COLUMNS),
+    ("node_agent_sessions", NODE_AGENT_SESSIONS_COLUMNS),
+    ("node_mux_sessions", NODE_MUX_SESSIONS_COLUMNS),
+    ("node_branches", NODE_BRANCHES_COLUMNS),
+    ("node_forks", NODE_FORKS_COLUMNS),
+    ("node_forge_prs", NODE_FORGE_PRS_COLUMNS),
+    ("candidate_links", CANDIDATE_LINKS_COLUMNS),
+    ("resolved_relationships", RESOLVED_RELATIONSHIPS_COLUMNS),
+    ("diagnostics", DIAGNOSTICS_COLUMNS),
+    ("aliases", ALIASES_COLUMNS),
+    ("provider_state", PROVIDER_STATE_COLUMNS),
+    ("embeddings", EMBEDDINGS_COLUMNS),
+    ("v_nodes", V_NODES_COLUMNS),
+    ("v_sessions_with_repo", V_SESSIONS_WITH_REPO_COLUMNS),
+    ("v_mux_attachments", V_MUX_ATTACHMENTS_COLUMNS),
+    ("v_pr_by_branch", V_PR_BY_BRANCH_COLUMNS),
+    ("v_fork_ancestry", V_FORK_ANCESTRY_COLUMNS),
+    ("v_workspace_member_repos", V_WORKSPACE_MEMBER_REPOS_COLUMNS),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,6 +748,64 @@ mod tests {
             );
         }
         assert_eq!(view_names.len(), SAVED_VIEWS.len());
+    }
+
+    #[test]
+    fn schema_columns_match_constants() {
+        // For every entry in `TABLE_COLUMNS`, run `PRAGMA table_info`
+        // and confirm SQLite reports the same columns in the same
+        // order. Drift in either direction (column added/removed in
+        // schema.sql but not in the constant, or vice versa) fails
+        // this test — the schema-side counterpart to the loader's
+        // exhaustive struct destructure (which enforces model-side
+        // alignment). See ADR 0043 §"Schema work required" / P10-001.
+        let conn = fresh_conn();
+        for (table, expected) in TABLE_COLUMNS {
+            let actual: Vec<String> = conn
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .unwrap_or_else(|err| panic!("prepare PRAGMA for {table}: {err}"))
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap_or_else(|err| panic!("execute PRAGMA for {table}: {err}"))
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap_or_else(|err| panic!("collect PRAGMA rows for {table}: {err}"));
+            let expected_owned: Vec<String> = expected.iter().map(|s| (*s).to_string()).collect();
+            assert_eq!(
+                actual, expected_owned,
+                "column drift in `{table}`: schema.sql and TABLE_COLUMNS disagree"
+            );
+        }
+    }
+
+    #[test]
+    fn table_columns_covers_every_relation_in_schema() {
+        // Catches the inverse case from `schema_columns_match_constants`:
+        // a CREATE TABLE / CREATE VIEW that lands in schema.sql with
+        // no corresponding entry in `TABLE_COLUMNS`. Without this
+        // assertion, adding a relation could escape drift detection
+        // entirely by simply never being listed.
+        let conn = fresh_conn();
+        let mut relations: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type IN ('table', 'view') \
+                   AND name NOT LIKE 'sqlite_%' \
+                 ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        relations.sort();
+        let mut registered: Vec<String> = TABLE_COLUMNS
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        registered.sort();
+        assert_eq!(
+            relations, registered,
+            "sqlite_master relations disagree with TABLE_COLUMNS registry"
+        );
     }
 
     #[test]
