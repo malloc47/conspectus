@@ -245,6 +245,29 @@ CREATE TABLE IF NOT EXISTS provider_state (
 );
 
 -- =============================================================
+-- Embeddings (P9-008 / ADR 0042)
+-- =============================================================
+--
+-- One row per (node, embedded source field, model) triple. The
+-- vector is stored as little-endian float32, dim * 4 bytes. The
+-- loader does not touch this table — embeddings are an additive
+-- overlay maintained outside the discovery / resolver lifecycle.
+-- See `docs/vector-search.md` for ingestion and `--similar-to`
+-- usage.
+
+CREATE TABLE IF NOT EXISTS embeddings (
+    node_id      TEXT    NOT NULL,
+    source_field TEXT    NOT NULL,                          -- e.g. 'last_message_preview'
+    model        TEXT    NOT NULL,                          -- model identifier, opaque to conspectus
+    dim          INTEGER NOT NULL,                          -- vector dimensionality
+    vector       BLOB    NOT NULL,                          -- float32 little-endian, dim * 4 bytes
+    PRIMARY KEY (node_id, source_field, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_source_field
+    ON embeddings(source_field, model);
+
+-- =============================================================
 -- Saved views (P9-006)
 -- =============================================================
 --

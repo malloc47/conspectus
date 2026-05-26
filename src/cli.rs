@@ -3400,8 +3400,8 @@ fn _selection_display(selection: &DeclaredStoreSelection) -> String {
 #[derive(Debug, Args)]
 struct QueryArgs {
     /// SQL to run against the graph database (read-only). Required
-    /// unless `--list-views` is set.
-    #[arg(required_unless_present = "list_views")]
+    /// unless `--list-views` or `--similar-to` is set.
+    #[arg(required_unless_present_any = ["list_views", "similar_to"])]
     sql: Option<String>,
     /// Output format for the result. `table` is the default
     /// width-aware columnar text rendering; `json` emits one object
@@ -3428,8 +3428,29 @@ struct QueryArgs {
     /// Print the curated saved-view library and exit, instead of
     /// running SQL. See `docs/query-guide.md` for descriptions and
     /// example queries.
-    #[arg(long, conflicts_with_all = ["sql", "format", "width", "wide"])]
+    #[arg(long, conflicts_with_all = ["sql", "format", "width", "wide", "similar_to"])]
     list_views: bool,
+    /// Find embeddings nearest to the named node. Cosine-distance
+    /// linear scan over the `embeddings` table (ADR 0042). Result
+    /// columns are `node_id`, `source_field`, `model`, `distance`
+    /// (ordered ascending; lower is more similar). Mutually
+    /// exclusive with `sql` and `--list-views`.
+    #[arg(long, value_name = "NODE_ID", conflicts_with_all = ["sql", "list_views"])]
+    similar_to: Option<String>,
+    /// Embedded field to compare against when running `--similar-to`.
+    /// Defaults to `last_message_preview`. Ignored when
+    /// `--similar-to` is absent.
+    #[arg(long, value_name = "FIELD", requires = "similar_to")]
+    field: Option<String>,
+    /// Maximum nearest-neighbor results to return. Defaults to 10.
+    /// Ignored when `--similar-to` is absent.
+    #[arg(long, value_name = "N", requires = "similar_to")]
+    limit: Option<usize>,
+    /// Load a SQLite loadable extension (e.g. `sqlite-vec`, ADR 0042)
+    /// after opening the connection. The extension's functions and
+    /// virtual tables then become available to the user's SQL.
+    #[arg(long = "load-extension", value_name = "PATH")]
+    load_extension: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -3460,18 +3481,38 @@ impl QueryArgs {
         let stdout_is_tty = io::stdout().is_terminal();
         let color = resolve_color_from_env(self.color, stdout_is_tty);
         let width = resolve_query_width(self.width, self.wide, stdout_is_tty);
-        // `sql` is `required_unless_present = "list_views"`, so clap
-        // has already enforced that we have a string here.
+        if let Some(target) = self.similar_to.as_deref() {
+            let rendered = conspectus::query::run_similar_to(conspectus::query::SimilarToInputs {
+                target_node_id: target,
+                source_field: self
+                    .field
+                    .as_deref()
+                    .unwrap_or(conspectus::query::DEFAULT_SIMILAR_TO_FIELD),
+                limit: self
+                    .limit
+                    .unwrap_or(conspectus::query::DEFAULT_SIMILAR_TO_LIMIT),
+                format: self.format.into(),
+                db_path: None,
+                width,
+                color,
+                load_extension: self.load_extension,
+            })?;
+            print!("{rendered}");
+            return Ok(());
+        }
+        // `sql` is `required_unless_present_any = ["list_views", "similar_to"]`,
+        // so clap has already enforced that we have a string here.
         let sql = self
             .sql
             .as_deref()
-            .expect("clap guarantees sql is present without --list-views");
+            .expect("clap guarantees sql is present without --list-views/--similar-to");
         let rendered = conspectus::query::run_query(conspectus::query::QueryInputs {
             sql,
             format: self.format.into(),
             db_path: None,
             width,
             color,
+            load_extension: self.load_extension,
         })?;
         print!("{rendered}");
         Ok(())

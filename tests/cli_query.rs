@@ -143,3 +143,36 @@ fn query_without_sql_or_list_views_fails_with_usage_error() {
         // required argument.
         .stderr(predicate::str::contains("required"));
 }
+
+#[test]
+fn query_similar_to_missing_target_emits_clear_error() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args([
+            "query",
+            "--similar-to",
+            "agent_session:nonexistent:default:zzz",
+        ])
+        .current_dir(home.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no embedding found"));
+}
+
+#[test]
+fn query_load_extension_with_bogus_path_fails_cleanly() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args([
+            "query",
+            "--load-extension",
+            "/nonexistent/extension.so",
+            "SELECT 1",
+        ])
+        .current_dir(home.path())
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("load extension").or(predicate::str::contains("not allowed")),
+        );
+}

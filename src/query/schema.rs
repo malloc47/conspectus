@@ -23,7 +23,7 @@ pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 /// the bump. Aligned with the in-memory `GraphSnapshot` schema version;
 /// when the model gains breaking changes (e.g. P7-002's provider-
 /// provenance fields), both versions advance together.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// One curated saved view defined in `schema.sql`. The registry below
 /// is the single source of truth that `conspectus query --list-views`
@@ -342,6 +342,7 @@ mod tests {
             "diagnostics",
             "aliases",
             "provider_state",
+            "embeddings",
         ];
         for table in expected {
             let count: i64 = conn
@@ -363,6 +364,7 @@ mod tests {
             "idx_candidate_links_source_relation",
             "idx_candidate_links_target_relation",
             "idx_candidate_links_provider_fresh",
+            "idx_embeddings_source_field",
             "idx_resolved_relationships_source_relation",
             "idx_resolved_relationships_target_relation",
         ];

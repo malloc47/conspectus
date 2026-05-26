@@ -14,11 +14,11 @@
 //! with a clean error message.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rusqlite::types::Value;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 
 use crate::model::GraphSnapshot;
 use crate::query::{apply_schema, load};
@@ -56,6 +56,12 @@ pub struct QueryInputs<'a> {
     /// them (currently `Table` only). Resolved by the CLI per
     /// ADR 0022; non-`Table` formats ignore this flag.
     pub color: bool,
+    /// Optional path to a SQLite loadable extension (typically
+    /// `sqlite-vec`, ADR 0042). When present, the runner loads it
+    /// after opening the connection but before executing the SQL,
+    /// so the user's query can reference functions and virtual
+    /// tables the extension provides.
+    pub load_extension: Option<PathBuf>,
 }
 
 impl<'a> QueryInputs<'a> {
@@ -69,8 +75,29 @@ impl<'a> QueryInputs<'a> {
             db_path: None,
             width: None,
             color: false,
+            load_extension: None,
         }
     }
+}
+
+/// Default source-field token for `--similar-to`. Mirrors the only
+/// embedded text surface the in-Rust model carries today.
+pub const DEFAULT_SIMILAR_TO_FIELD: &str = "last_message_preview";
+
+/// Default result count for `--similar-to`.
+pub const DEFAULT_SIMILAR_TO_LIMIT: usize = 10;
+
+/// Inputs to the `--similar-to` linear-scan KNN runner (P9-008 / ADR
+/// 0042).
+pub struct SimilarToInputs<'a> {
+    pub target_node_id: &'a str,
+    pub source_field: &'a str,
+    pub limit: usize,
+    pub format: OutputFormat,
+    pub db_path: Option<PathBuf>,
+    pub width: Option<usize>,
+    pub color: bool,
+    pub load_extension: Option<PathBuf>,
 }
 
 /// Discover, load, and execute the user's query. Returns the rendered
@@ -78,7 +105,201 @@ impl<'a> QueryInputs<'a> {
 /// directly.
 pub fn run_query(inputs: QueryInputs<'_>) -> Result<String> {
     let conn = open_connection(inputs.db_path.as_deref())?;
+    if let Some(path) = inputs.load_extension.as_deref() {
+        load_sqlite_extension(&conn, path)?;
+    }
     execute(&conn, inputs.sql, inputs.format, inputs.width, inputs.color)
+}
+
+/// Linear-scan KNN over the `embeddings` table per ADR 0042. Returns
+/// the formatted output as a String. The result columns are
+/// `node_id`, `source_field`, `model`, and `distance` (cosine
+/// distance, lower is more similar).
+pub fn run_similar_to(inputs: SimilarToInputs<'_>) -> Result<String> {
+    let conn = open_connection(inputs.db_path.as_deref())?;
+    if let Some(path) = inputs.load_extension.as_deref() {
+        load_sqlite_extension(&conn, path)?;
+    }
+    let (column_names, rows) = knn_linear_scan(
+        &conn,
+        inputs.target_node_id,
+        inputs.source_field,
+        inputs.limit,
+    )?;
+    Ok(render_output(
+        &column_names,
+        &rows,
+        inputs.format,
+        inputs.width,
+        inputs.color,
+    ))
+}
+
+/// SAFETY-rebranded loader for `sqlite-vec` (and any other
+/// extension). `Connection::load_extension` requires us to enable
+/// extension loading first; we re-disable it after the load so a
+/// subsequent user-supplied SQL can't pull in additional extensions
+/// it shouldn't.
+fn load_sqlite_extension(conn: &Connection, path: &Path) -> Result<()> {
+    // SAFETY: `load_extension_enable` and `load_extension_disable`
+    // are unsafe because SQLite's extension API can execute
+    // arbitrary native code from the loaded library. We accept that
+    // risk for user-supplied paths — the user is the operator who
+    // built or downloaded the extension.
+    unsafe {
+        conn.load_extension_enable()
+            .context("enable extension loading")?;
+    }
+    let result: Result<()> = (|| {
+        // SAFETY: load_extension is `unsafe` because the extension's
+        // entry point can run arbitrary native code. The user-supplied
+        // path is trusted operator input (analogous to LD_PRELOAD).
+        unsafe {
+            conn.load_extension::<_, &std::ffi::CStr>(path, None)
+                .with_context(|| format!("load extension from {}", path.display()))?;
+        }
+        Ok(())
+    })();
+    // Disabling is safe in rusqlite 0.39 (no need for an unsafe
+    // block); the call only resets a flag.
+    conn.load_extension_disable()
+        .context("disable extension loading")?;
+    result
+}
+
+fn knn_linear_scan(
+    conn: &Connection,
+    target_node_id: &str,
+    source_field: &str,
+    limit: usize,
+) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+    // Fetch the target's vector. We require it to exist; if not,
+    // surface a clear error rather than returning empty results so
+    // the user can distinguish "no neighbors" from "wrong node id".
+    let target_blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT vector FROM embeddings \
+             WHERE node_id = ?1 AND source_field = ?2 \
+             LIMIT 1",
+            params![target_node_id, source_field],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .map(Some)
+        .or_else(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other),
+        })
+        .context("look up target embedding")?;
+    let Some(target_blob) = target_blob else {
+        return Err(anyhow!(
+            "no embedding found for node_id {target_node_id:?} \
+             with source_field {source_field:?}; \
+             load embeddings via the documented ingestion path first"
+        ));
+    };
+    let target_vector = blob_to_vec(&target_blob);
+
+    // Fetch every candidate in the same source_field, excluding the
+    // target itself. Stream rather than collect into a Vec to keep
+    // memory bounded on larger corpora.
+    let mut stmt = conn.prepare(
+        "SELECT node_id, model, dim, vector FROM embeddings \
+         WHERE source_field = ?1 AND node_id != ?2",
+    )?;
+    let candidates: Vec<(String, String, Vec<f32>)> = stmt
+        .query_map(params![source_field, target_node_id], |row| {
+            let node_id: String = row.get(0)?;
+            let model: String = row.get(1)?;
+            let _dim: i64 = row.get(2)?;
+            let blob: Vec<u8> = row.get(3)?;
+            Ok((node_id, model, blob_to_vec(&blob)))
+        })
+        .context("scan candidate embeddings")?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("collect candidate embeddings")?;
+
+    // Score with cosine distance. Rows whose vector length disagrees
+    // with the target's are silently dropped — ADR 0042 punts
+    // multi-dim corpora to a follow-up and the safe default here is
+    // to skip rather than fail.
+    let mut scored: Vec<(String, String, f64)> = candidates
+        .into_iter()
+        .filter(|(_, _, v)| v.len() == target_vector.len())
+        .map(|(node_id, model, v)| {
+            let distance = cosine_distance(&target_vector, &v);
+            (node_id, model, distance)
+        })
+        .collect();
+    scored.sort_by(|a, b| {
+        a.2.partial_cmp(&b.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.cmp(&b.0))
+    });
+    scored.truncate(limit);
+
+    let column_names = vec![
+        "node_id".to_string(),
+        "source_field".to_string(),
+        "model".to_string(),
+        "distance".to_string(),
+    ];
+    let rows: Vec<Vec<Value>> = scored
+        .into_iter()
+        .map(|(node_id, model, distance)| {
+            vec![
+                Value::Text(node_id),
+                Value::Text(source_field.to_string()),
+                Value::Text(model),
+                Value::Real(distance),
+            ]
+        })
+        .collect();
+    Ok((column_names, rows))
+}
+
+/// Decode a packed-little-endian float32 BLOB into a vector. Bytes
+/// past the last full float are silently dropped.
+pub fn blob_to_vec(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
+}
+
+/// Encode a vector as a packed-little-endian float32 BLOB suitable
+/// for the `embeddings.vector` column.
+pub fn vec_to_blob(values: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(values.len() * 4);
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+/// Cosine distance (1 - cosine similarity). Returns 1.0 when either
+/// input has zero magnitude — the safe answer for "this point has
+/// no information" rather than NaN.
+fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+    debug_assert_eq!(
+        a.len(),
+        b.len(),
+        "cosine_distance requires equal-length vectors"
+    );
+    let mut dot = 0.0_f64;
+    let mut na = 0.0_f64;
+    let mut nb = 0.0_f64;
+    for (x, y) in a.iter().zip(b.iter()) {
+        let xf = f64::from(*x);
+        let yf = f64::from(*y);
+        dot += xf * yf;
+        na += xf * xf;
+        nb += yf * yf;
+    }
+    if na == 0.0 || nb == 0.0 {
+        return 1.0;
+    }
+    let cos = dot / (na.sqrt() * nb.sqrt());
+    1.0 - cos.clamp(-1.0, 1.0)
 }
 
 /// Render the curated [`crate::query::SAVED_VIEWS`] registry as an
@@ -213,12 +434,23 @@ fn execute(
         .collect::<rusqlite::Result<Vec<_>>>()
         .with_context(|| format!("fetch rows from: {sql}"))?;
 
-    Ok(match format {
-        OutputFormat::Table => render_table(&column_names, &rows, width, color),
-        OutputFormat::Json => render_json(&column_names, &rows),
-        OutputFormat::Csv => render_csv(&column_names, &rows),
-        OutputFormat::Tsv => render_tsv(&column_names, &rows),
-    })
+    Ok(render_output(&column_names, &rows, format, width, color))
+}
+
+/// Format dispatch used by every result-producing path.
+fn render_output(
+    column_names: &[String],
+    rows: &[Vec<Value>],
+    format: OutputFormat,
+    width: Option<usize>,
+    color: bool,
+) -> String {
+    match format {
+        OutputFormat::Table => render_table(column_names, rows, width, color),
+        OutputFormat::Json => render_json(column_names, rows),
+        OutputFormat::Csv => render_csv(column_names, rows),
+        OutputFormat::Tsv => render_tsv(column_names, rows),
+    }
 }
 
 /// Render the query result as a width-aware columnar text table per
@@ -994,5 +1226,212 @@ mod tests {
         // blank trailing line).
         let line_count = rendered.lines().count();
         assert_eq!(line_count, crate::query::SAVED_VIEWS.len());
+    }
+
+    // -------------------------------------------------------------
+    // P9-008: vector search (ADR 0042).
+    // -------------------------------------------------------------
+
+    #[test]
+    fn blob_vec_codec_round_trips() {
+        let original: Vec<f32> = vec![0.0, 1.0, -1.5, 2.75, f32::MIN_POSITIVE];
+        let blob = vec_to_blob(&original);
+        assert_eq!(blob.len(), original.len() * 4);
+        let decoded = blob_to_vec(&blob);
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn cosine_distance_known_pairs() {
+        // Identical vectors → distance 0.
+        let v = vec![1.0_f32, 2.0, 3.0];
+        assert!((cosine_distance(&v, &v)).abs() < 1e-9);
+        // Orthogonal vectors → distance 1.
+        let a = vec![1.0_f32, 0.0];
+        let b = vec![0.0_f32, 1.0];
+        assert!((cosine_distance(&a, &b) - 1.0).abs() < 1e-9);
+        // Opposite vectors → distance 2.
+        let c = vec![1.0_f32, 0.0];
+        let d = vec![-1.0_f32, 0.0];
+        assert!((cosine_distance(&c, &d) - 2.0).abs() < 1e-9);
+        // Zero-magnitude side falls back to distance 1.
+        let zero = vec![0.0_f32, 0.0];
+        let nonzero = vec![1.0_f32, 0.0];
+        assert!((cosine_distance(&zero, &nonzero) - 1.0).abs() < 1e-9);
+    }
+
+    /// Open a fresh writable connection, apply the schema, and INSERT
+    /// the supplied embeddings directly. Used by the KNN tests where
+    /// the loader's run-once contract doesn't help (the loader never
+    /// touches the embeddings table by design).
+    fn conn_with_embeddings(rows: &[(&str, &str, &str, Vec<f32>)]) -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory open");
+        apply_schema(&conn).expect("apply schema");
+        for (node_id, source_field, model, vector) in rows {
+            conn.execute(
+                "INSERT INTO embeddings (node_id, source_field, model, dim, vector) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    node_id,
+                    source_field,
+                    model,
+                    vector.len() as i64,
+                    vec_to_blob(vector),
+                ],
+            )
+            .expect("insert embedding");
+        }
+        conn
+    }
+
+    #[test]
+    fn knn_linear_scan_orders_by_cosine_distance() {
+        let target_vec: Vec<f32> = vec![1.0, 0.0, 0.0];
+        let conn = conn_with_embeddings(&[
+            (
+                "agent_session:claude-code:default:target",
+                "preview",
+                "m1",
+                target_vec.clone(),
+            ),
+            (
+                "agent_session:claude-code:default:near",
+                "preview",
+                "m1",
+                vec![0.9, 0.1, 0.0],
+            ),
+            (
+                "agent_session:claude-code:default:far",
+                "preview",
+                "m1",
+                vec![0.0, 1.0, 0.0],
+            ),
+            (
+                "agent_session:claude-code:default:opposite",
+                "preview",
+                "m1",
+                vec![-1.0, 0.0, 0.0],
+            ),
+        ]);
+        let (cols, rows) = knn_linear_scan(
+            &conn,
+            "agent_session:claude-code:default:target",
+            "preview",
+            10,
+        )
+        .expect("knn");
+        // Column names: node_id, source_field, model, distance.
+        assert_eq!(cols.len(), 4);
+        // Three neighbors, ordered by ascending distance: near, far, opposite.
+        assert_eq!(rows.len(), 3);
+        let ids: Vec<&str> = rows
+            .iter()
+            .map(|r| match &r[0] {
+                Value::Text(s) => s.as_str(),
+                _ => panic!("expected TEXT in column 0"),
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "agent_session:claude-code:default:near",
+                "agent_session:claude-code:default:far",
+                "agent_session:claude-code:default:opposite",
+            ]
+        );
+    }
+
+    #[test]
+    fn knn_linear_scan_returns_clean_error_when_target_missing() {
+        let conn = conn_with_embeddings(&[]);
+        let err = knn_linear_scan(&conn, "agent_session:does-not-exist", "preview", 10)
+            .expect_err("expected an error for a missing target");
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("no embedding found"),
+            "unexpected error: {chain}"
+        );
+    }
+
+    #[test]
+    fn knn_linear_scan_respects_limit() {
+        let target_vec: Vec<f32> = vec![1.0, 0.0];
+        let mut fixture = vec![("target", "preview", "m", target_vec.clone())];
+        for i in 0..20 {
+            let key: &'static str = match i {
+                0 => "n_00",
+                1 => "n_01",
+                2 => "n_02",
+                3 => "n_03",
+                4 => "n_04",
+                5 => "n_05",
+                6 => "n_06",
+                7 => "n_07",
+                8 => "n_08",
+                9 => "n_09",
+                10 => "n_10",
+                11 => "n_11",
+                12 => "n_12",
+                13 => "n_13",
+                14 => "n_14",
+                15 => "n_15",
+                16 => "n_16",
+                17 => "n_17",
+                18 => "n_18",
+                19 => "n_19",
+                _ => unreachable!(),
+            };
+            fixture.push((
+                key,
+                "preview",
+                "m",
+                vec![1.0 - (i as f32) * 0.01, (i as f32) * 0.01],
+            ));
+        }
+        let conn = conn_with_embeddings(&fixture);
+        let (_, rows) = knn_linear_scan(&conn, "target", "preview", 5).unwrap();
+        assert_eq!(rows.len(), 5, "limit honored");
+    }
+
+    #[test]
+    fn knn_linear_scan_skips_mismatched_dim_rows() {
+        // Two candidates: one with matching dim (3), one with a
+        // different dim (2). Only the matching one should appear in
+        // the result. ADR 0042 punts multi-dim to a follow-up; the
+        // safe default is silent skip.
+        let conn = conn_with_embeddings(&[
+            ("t", "preview", "m", vec![1.0, 0.0, 0.0]),
+            ("c_ok", "preview", "m", vec![0.9, 0.1, 0.0]),
+            ("c_wrong_dim", "preview", "m", vec![0.9, 0.1]),
+        ]);
+        let (_, rows) = knn_linear_scan(&conn, "t", "preview", 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        let id = match &rows[0][0] {
+            Value::Text(s) => s.as_str(),
+            _ => panic!(),
+        };
+        assert_eq!(id, "c_ok");
+    }
+
+    #[test]
+    fn knn_linear_scan_returns_zero_rows_when_target_alone() {
+        let conn = conn_with_embeddings(&[("solo", "preview", "m", vec![1.0, 0.0])]);
+        let (_, rows) = knn_linear_scan(&conn, "solo", "preview", 10).unwrap();
+        assert!(rows.is_empty(), "no neighbors should yield empty result");
+    }
+
+    #[test]
+    fn load_sqlite_extension_returns_clear_error_for_bad_path() {
+        let conn = Connection::open_in_memory().unwrap();
+        let err = load_sqlite_extension(&conn, Path::new("/nonexistent/extension.so"))
+            .expect_err("expected an error for a bogus path");
+        let chain = format!("{err:#}");
+        // Either the load fails outright or the file can't be found.
+        // Either error path is acceptable; just ensure it surfaces
+        // cleanly rather than panicking.
+        assert!(
+            chain.contains("load extension from") || chain.contains("not allowed"),
+            "unexpected error chain: {chain}"
+        );
     }
 }

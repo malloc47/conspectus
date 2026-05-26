@@ -15,7 +15,9 @@ pub mod schema;
 
 pub use loader::load;
 pub use runner::{
-    OutputFormat, QueryInputs, render_saved_views_list, run_query, run_query_against_snapshot,
+    DEFAULT_SIMILAR_TO_FIELD, DEFAULT_SIMILAR_TO_LIMIT, OutputFormat, QueryInputs, SimilarToInputs,
+    blob_to_vec, render_saved_views_list, run_query, run_query_against_snapshot, run_similar_to,
+    vec_to_blob,
 };
 pub use schema::{
     SAVED_VIEWS, SCHEMA_SQL, SCHEMA_VERSION, SavedView, apply_schema, read_user_version,
