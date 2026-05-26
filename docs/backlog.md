@@ -5309,7 +5309,7 @@ P10-002 + P10-003 ──→ P10-004 (agent) ──┬──→ P10-005..009 (per
 The Phase 8 ADR 0031 TUI views (Mux/Union/Prs/Forks) are independent;
 this phase migrates whichever ones exist when each story lands.
 
-- [ ] `P10-001` Promote reader + add compile-time read exhaustiveness.
+- [x] `P10-001` Promote reader + add compile-time read exhaustiveness.
   - Scope: take the spike's `src/query/reader.rs` to production
     quality. Keep the round-trip equality test (`canonicalize()` on
     both sides) as the regression net. Add a per-table read helper
@@ -5328,6 +5328,18 @@ this phase migrates whichever ones exist when each story lands.
     `graph.sqlite` reads back a snapshot that re-serializes equal
     to the JSON the loader produced from.
   - Blockers: ADR 0043.
+  - Outcome: spike reader promoted in place (module doc updated,
+    dead `_row` parameters dropped). Compile-time exhaustiveness
+    against the model is provided by the existing
+    `Ok(NodeKind { … })` constructions (a model field addition
+    breaks the build the same way the loader's destructure does).
+    Schema-side drift detection lives in `schema::TABLE_COLUMNS`
+    plus the new `schema_columns_match_constants` and
+    `table_columns_covers_every_relation_in_schema` tests — adding
+    or renaming a column / table / view in `schema.sql` without
+    updating the constants (or vice versa) fails the suite.
+    `parse_node_id` stays with a comment noting it disappears in
+    P10-002.
 
 - [ ] `P10-002` Structured-id columns for foreign references.
   - Scope: replace the `node_id TEXT` foreign-reference columns in
