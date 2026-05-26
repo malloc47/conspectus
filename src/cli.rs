@@ -1761,7 +1761,7 @@ mod tests {
     #[test]
     fn no_subcommand_defaults_to_tui() {
         let cli = Cli::parse_from(["conspectus"]);
-        assert!(matches!(cli.command, None));
+        assert!(cli.command.is_none());
         let command = cli.command.unwrap_or_else(default_command);
         let Command::Tui(args) = command else {
             panic!("expected default command to be tui");
