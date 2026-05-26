@@ -1,0 +1,8 @@
+---
+source: tests/query_regression.rs
+assertion_line: 271
+expression: "json(&snap, \"SELECT repo_common_dir, root FROM node_checkouts ORDER BY root\")"
+---
+{"repo_common_dir":"/r/.git","root":"/r"}
+{"repo_common_dir":"/r/.git","root":"/r/other"}
+{"repo_common_dir":"/r/.git","root":"/r/sub"}

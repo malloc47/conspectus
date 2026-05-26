@@ -1,0 +1,7 @@
+---
+source: tests/query_regression.rs
+assertion_line: 382
+expression: "json(&snap,\n\"SELECT link_id, target_node_id, provenance, confidence, state \\\n             FROM candidate_links WHERE relation = 'linked_to_mux' ORDER BY link_id\")"
+---
+{"confidence":"medium","link_id":"L_mux_0","provenance":"strong_discovered","state":"active","target_node_id":"mux_session:tmux:0"}
+{"confidence":"medium","link_id":"L_mux_1","provenance":"discovered","state":"active","target_node_id":"mux_session:tmux:1"}

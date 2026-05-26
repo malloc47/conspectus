@@ -1,0 +1,15 @@
+---
+source: tests/query_regression.rs
+assertion_line: 295
+expression: "json(&snap,\n\"SELECT fork_node_id, ancestor_node_id, depth \\\n             FROM v_fork_ancestry \\\n             ORDER BY fork_node_id, depth\")"
+---
+{"ancestor_node_id":"fork:a","depth":0,"fork_node_id":"fork:a"}
+{"ancestor_node_id":"fork:b","depth":0,"fork_node_id":"fork:b"}
+{"ancestor_node_id":"fork:a","depth":1,"fork_node_id":"fork:b"}
+{"ancestor_node_id":"fork:c","depth":0,"fork_node_id":"fork:c"}
+{"ancestor_node_id":"fork:b","depth":1,"fork_node_id":"fork:c"}
+{"ancestor_node_id":"fork:a","depth":2,"fork_node_id":"fork:c"}
+{"ancestor_node_id":"fork:d","depth":0,"fork_node_id":"fork:d"}
+{"ancestor_node_id":"fork:c","depth":1,"fork_node_id":"fork:d"}
+{"ancestor_node_id":"fork:b","depth":2,"fork_node_id":"fork:d"}
+{"ancestor_node_id":"fork:a","depth":3,"fork_node_id":"fork:d"}

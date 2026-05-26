@@ -1,0 +1,7 @@
+---
+source: tests/query_regression.rs
+assertion_line: 351
+expression: "json(&snap,\n\"SELECT b.refname, pr.number AS pr_number, pr.state AS pr_state \\\n             FROM node_branches b \\\n             JOIN candidate_links cl ON cl.source_node_id = b.node_id \\\n                                     AND cl.relation = 'branch_has_forge_pr' \\\n                                     AND cl.state = 'active' \\\n             JOIN node_forge_prs pr ON pr.node_id = cl.target_node_id \\\n             ORDER BY pr.number\")"
+---
+{"pr_number":1,"pr_state":"open","refname":"refs/heads/main"}
+{"pr_number":2,"pr_state":"open","refname":"refs/heads/feature"}

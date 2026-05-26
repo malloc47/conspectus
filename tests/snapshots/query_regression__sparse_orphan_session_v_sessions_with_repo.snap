@@ -1,0 +1,6 @@
+---
+source: tests/query_regression.rs
+assertion_line: 246
+expression: "json(&snap,\n\"SELECT harness_key, session_key, cwd, checkout_node_id, repo_common_dir \\\n             FROM v_sessions_with_repo ORDER BY session_key\")"
+---
+{"checkout_node_id":null,"cwd":"/tmp/scratch","harness_key":"claude-code","repo_common_dir":null,"session_key":"orphan"}

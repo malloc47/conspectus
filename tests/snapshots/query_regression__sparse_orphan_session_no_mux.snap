@@ -1,0 +1,6 @@
+---
+source: tests/query_regression.rs
+assertion_line: 259
+expression: "json(&snap, \"SELECT COUNT(*) AS attachments FROM v_mux_attachments\")"
+---
+{"attachments":0}

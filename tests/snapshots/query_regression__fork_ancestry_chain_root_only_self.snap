@@ -1,0 +1,6 @@
+---
+source: tests/query_regression.rs
+assertion_line: 309
+expression: "json(&snap,\n\"SELECT ancestor_node_id, depth FROM v_fork_ancestry \\\n             WHERE fork_node_id = 'fork:a' ORDER BY depth\")"
+---
+{"ancestor_node_id":"fork:a","depth":0}

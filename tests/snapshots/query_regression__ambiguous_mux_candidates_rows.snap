@@ -1,0 +1,7 @@
+---
+source: tests/query_regression.rs
+assertion_line: 369
+expression: "json(&snap,\n\"SELECT native_id, provenance, confidence \\\n             FROM v_mux_attachments ORDER BY native_id\")"
+---
+{"confidence":"medium","native_id":"tmux:0","provenance":"strong_discovered"}
+{"confidence":"medium","native_id":"tmux:1","provenance":"discovered"}

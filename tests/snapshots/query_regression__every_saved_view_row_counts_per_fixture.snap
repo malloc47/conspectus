@@ -1,0 +1,30 @@
+---
+source: tests/query_regression.rs
+assertion_line: 421
+expression: report
+---
+sparse_orphan_session.v_sessions_with_repo -> {"n":1}
+sparse_orphan_session.v_mux_attachments -> {"n":0}
+sparse_orphan_session.v_pr_by_branch -> {"n":0}
+sparse_orphan_session.v_fork_ancestry -> {"n":0}
+sparse_orphan_session.v_workspace_member_repos -> {"n":0}
+multi_checkout_repo.v_sessions_with_repo -> {"n":0}
+multi_checkout_repo.v_mux_attachments -> {"n":0}
+multi_checkout_repo.v_pr_by_branch -> {"n":0}
+multi_checkout_repo.v_fork_ancestry -> {"n":0}
+multi_checkout_repo.v_workspace_member_repos -> {"n":0}
+fork_ancestry_chain.v_sessions_with_repo -> {"n":0}
+fork_ancestry_chain.v_mux_attachments -> {"n":0}
+fork_ancestry_chain.v_pr_by_branch -> {"n":0}
+fork_ancestry_chain.v_fork_ancestry -> {"n":10}
+fork_ancestry_chain.v_workspace_member_repos -> {"n":0}
+workspace_with_prs.v_sessions_with_repo -> {"n":0}
+workspace_with_prs.v_mux_attachments -> {"n":0}
+workspace_with_prs.v_pr_by_branch -> {"n":2}
+workspace_with_prs.v_fork_ancestry -> {"n":0}
+workspace_with_prs.v_workspace_member_repos -> {"n":2}
+ambiguous_mux_candidates.v_sessions_with_repo -> {"n":1}
+ambiguous_mux_candidates.v_mux_attachments -> {"n":2}
+ambiguous_mux_candidates.v_pr_by_branch -> {"n":0}
+ambiguous_mux_candidates.v_fork_ancestry -> {"n":0}
+ambiguous_mux_candidates.v_workspace_member_repos -> {"n":0}

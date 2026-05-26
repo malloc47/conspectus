@@ -1,0 +1,7 @@
+---
+source: tests/query_regression.rs
+assertion_line: 283
+expression: "json(&snap,\n\"SELECT node_kind, COUNT(*) AS n FROM v_nodes GROUP BY node_kind ORDER BY node_kind\")"
+---
+{"n":3,"node_kind":"checkout"}
+{"n":1,"node_kind":"repo"}
