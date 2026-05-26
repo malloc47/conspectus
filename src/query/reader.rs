@@ -1,21 +1,33 @@
-//! SQLite → GraphSnapshot reader (spike, ADR 0043 candidate).
+//! SQLite → GraphSnapshot reader (P10-001 / ADR 0043).
 //!
 //! Inverse of [`crate::query::loader::load`]. Reads every table the
-//! loader writes into and reconstructs a [`GraphSnapshot`]. The point
-//! of this module is to validate the loader is *lossless* end-to-end:
+//! loader writes into and reconstructs a [`GraphSnapshot`]. The
+//! loader is lossless end-to-end:
 //! `snapshot → load(conn) → read_snapshot(conn)` round-trips to an
-//! equal snapshot after canonicalization.
+//! equal snapshot after `canonicalize()` (see the round-trip tests
+//! at the bottom of this module).
 //!
 //! Strategy: typed `*Node` structs are rebuilt from the per-kind table
 //! columns (the structural source of truth), not by parsing the
 //! `node_id` text. The `node_id` text *is* parsed for foreign
 //! references inside `candidate_links`, `resolved_relationships`,
-//! `diagnostics`, and `aliases` where only the [`fmt::Display`] form
-//! is stored. See `parse_node_id`.
+//! `diagnostics`, and `aliases` where only the [`std::fmt::Display`]
+//! form is stored. The parser survives only until P10-002 lands
+//! structured-id columns and removes it.
+//!
+//! Compile-time exhaustiveness lives in two complementary places:
+//!
+//! - Model-side: the `Ok(NodeKind { … })` constructions below specify
+//!   every field of every typed `*Node` struct, so adding a field to
+//!   the model breaks this module's build.
+//! - Schema-side: `schema::TABLE_COLUMNS` plus the
+//!   `schema_columns_match_constants` test catches column drift
+//!   between `schema.sql` and the column lists that the loader and
+//!   this reader expect.
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, Row};
+use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::aliases::AliasOverlay;
@@ -287,7 +299,7 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
 
         let target = match target_kind.as_str() {
             "node" => LinkEndpoint::Node {
-                id: parse_node_id_row(target_node_id.as_deref(), row)?,
+                id: parse_node_id_row(target_node_id.as_deref())?,
             },
             "unresolved" => LinkEndpoint::Unresolved {
                 evidence: UnresolvedEndpoint {
@@ -327,12 +339,12 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
 
         Ok(GraphLink {
             id: link_id,
-            source: parse_node_id_str(&source_node_id, row)?,
+            source: parse_node_id_str(&source_node_id)?,
             target,
-            relation: deserialize_tag::<RelationKind>(&relation, row, 10)?,
-            provenance: deserialize_tag::<Provenance>(&provenance, row, 11)?,
-            confidence: deserialize_tag::<Confidence>(&confidence, row, 12)?,
-            freshness: deserialize_tag::<Freshness>(&freshness, row, 13)?,
+            relation: deserialize_tag::<RelationKind>(&relation, 10)?,
+            provenance: deserialize_tag::<Provenance>(&provenance, 11)?,
+            confidence: deserialize_tag::<Confidence>(&confidence, 12)?,
+            freshness: deserialize_tag::<Freshness>(&freshness, 13)?,
             source_metadata: SourceMetadata {
                 adapter: source_adapter,
                 evidence: source_evidence,
@@ -356,9 +368,9 @@ fn read_resolved(conn: &Connection) -> rusqlite::Result<Vec<ResolvedRelationship
         let selected: String = row.get(3)?;
         let competing: String = row.get(4)?;
         Ok(ResolvedRelationship {
-            source: parse_node_id_str(&source, row)?,
-            target: parse_node_id_str(&target, row)?,
-            relation: deserialize_tag::<RelationKind>(&relation, row, 2)?,
+            source: parse_node_id_str(&source)?,
+            target: parse_node_id_str(&target)?,
+            relation: deserialize_tag::<RelationKind>(&relation, 2)?,
             selected_link_id: selected,
             competing_link_ids: parse_json_str_array(&competing),
         })
@@ -379,7 +391,6 @@ fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
                 link_id: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 relation: deserialize_tag::<RelationKind>(
                     &row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    row,
                     2,
                 )?,
             }),
@@ -388,13 +399,9 @@ fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
                 message: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
             }),
             "conflict" => Ok(Diagnostic::Conflict {
-                source: parse_node_id_str(
-                    &row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    row,
-                )?,
+                source: parse_node_id_str(&row.get::<_, Option<String>>(5)?.unwrap_or_default())?,
                 relation: deserialize_tag::<RelationKind>(
                     &row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    row,
                     2,
                 )?,
                 selected_link_id: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
@@ -417,7 +424,7 @@ fn read_aliases(conn: &Connection) -> rusqlite::Result<AliasOverlay> {
     let rows = stmt.query_map([], |row| {
         let node_id: String = row.get(0)?;
         let display_name: String = row.get(1)?;
-        Ok((parse_node_id_str(&node_id, row)?, display_name))
+        Ok((parse_node_id_str(&node_id)?, display_name))
     })?;
     let mut overlay = AliasOverlay::new();
     for entry in rows {
@@ -440,7 +447,7 @@ fn parse_metadata(s: &str) -> Metadata {
     parsed
 }
 
-fn deserialize_tag<T>(s: &str, _row: &Row<'_>, idx: usize) -> rusqlite::Result<T>
+fn deserialize_tag<T>(s: &str, idx: usize) -> rusqlite::Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -454,7 +461,7 @@ where
     })
 }
 
-fn parse_node_id_row(text: Option<&str>, row: &Row<'_>) -> rusqlite::Result<NodeId> {
+fn parse_node_id_row(text: Option<&str>) -> rusqlite::Result<NodeId> {
     let s = text.ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
             3,
@@ -464,14 +471,15 @@ fn parse_node_id_row(text: Option<&str>, row: &Row<'_>) -> rusqlite::Result<Node
             )),
         )
     })?;
-    parse_node_id_str(s, row)
+    parse_node_id_str(s)
 }
 
-/// Spike-local NodeId parser. Splits the [`fmt::Display`] form back
-/// into typed pieces. Not robust to common_dir / refname / path values
-/// containing `:` / `@` / `#` / `/` — the existing fixtures don't hit
-/// those, and the ADR write-up notes the limitation.
-fn parse_node_id_str(s: &str, _row: &Row<'_>) -> rusqlite::Result<NodeId> {
+/// NodeId parser. Splits the [`fmt::Display`] form back into typed
+/// pieces. Not robust to `common_dir` / refname / path values
+/// containing `:` / `@` / `#` / `/`; surviving until P10-002 lands
+/// structured-id columns and removes the parser entirely. See
+/// ADR 0043 §"Schema work required" for the migration plan.
+fn parse_node_id_str(s: &str) -> rusqlite::Result<NodeId> {
     parse_node_id(s).map_err(|reason| {
         rusqlite::Error::FromSqlConversionFailure(
             1,
