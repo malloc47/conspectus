@@ -3402,16 +3402,35 @@ struct QueryArgs {
     /// SQL to run against the graph database (read-only).
     sql: String,
     /// Output format for the result. `table` is the default
-    /// columnar text rendering; `json` emits one object per row.
-    /// Additional formats land in P9-005.
+    /// width-aware columnar text rendering; `json` emits one object
+    /// per row; `csv` emits RFC-4180-compliant CSV; `tsv` emits
+    /// tab-separated values with embedded tabs/newlines escaped.
     #[arg(long, value_enum, default_value_t = QueryFormatFlag::Table)]
     format: QueryFormatFlag,
+    /// Target total width in display columns for the `table` format.
+    /// When unset and stdout is a TTY, falls back to the detected
+    /// terminal width; otherwise renders untruncated. Mirrors the
+    /// `--width` flag on `conspectus table`.
+    #[arg(long, value_name = "N")]
+    width: Option<usize>,
+    /// Render untruncated regardless of TTY width detection. Useful
+    /// when piping to a file or pager. Conflicts with `--width`.
+    #[arg(long, conflicts_with = "width")]
+    wide: bool,
+    /// When to colorize output. `auto` (default) emits ANSI only when
+    /// stdout is a TTY (and respects `NO_COLOR`, `CLICOLOR`,
+    /// `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces it on; `never`
+    /// forces it off. Currently affects only the `table` format.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
 enum QueryFormatFlag {
     Table,
     Json,
+    Csv,
+    Tsv,
 }
 
 impl From<QueryFormatFlag> for conspectus::query::OutputFormat {
@@ -3419,18 +3438,43 @@ impl From<QueryFormatFlag> for conspectus::query::OutputFormat {
         match value {
             QueryFormatFlag::Table => Self::Table,
             QueryFormatFlag::Json => Self::Json,
+            QueryFormatFlag::Csv => Self::Csv,
+            QueryFormatFlag::Tsv => Self::Tsv,
         }
     }
 }
 
 impl QueryArgs {
     fn run(self) -> Result<()> {
+        let stdout_is_tty = io::stdout().is_terminal();
+        let color = resolve_color_from_env(self.color, stdout_is_tty);
+        let width = resolve_query_width(self.width, self.wide, stdout_is_tty);
         let rendered = conspectus::query::run_query(conspectus::query::QueryInputs {
             sql: &self.sql,
             format: self.format.into(),
             db_path: None,
+            width,
+            color,
         })?;
         print!("{rendered}");
         Ok(())
+    }
+}
+
+/// Resolve the effective table-render width for `conspectus query`,
+/// matching `conspectus table`'s behavior (ADR 0020): explicit
+/// `--width N` wins; `--wide` forces untruncated; otherwise detect
+/// from the terminal when stdout is a TTY; otherwise return `None`.
+fn resolve_query_width(explicit: Option<usize>, wide: bool, stdout_is_tty: bool) -> Option<usize> {
+    if wide {
+        return None;
+    }
+    if let Some(w) = explicit {
+        return Some(w);
+    }
+    if stdout_is_tty {
+        terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
+    } else {
+        None
     }
 }

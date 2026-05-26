@@ -73,3 +73,45 @@ fn query_rejects_create_with_readonly_error() {
         .failure()
         .stderr(predicate::str::contains("readonly").or(predicate::str::contains("read-only")));
 }
+
+#[test]
+fn query_csv_emits_header_and_crlf() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args(["query", "--format", "csv", "SELECT 1 AS x, 'two' AS y"])
+        .current_dir(home.path())
+        .assert()
+        .success()
+        // CSV header line: `x,y` followed by CRLF; body row follows.
+        .stdout(predicate::str::starts_with("x,y\r\n1,two\r\n"));
+}
+
+#[test]
+fn query_tsv_emits_tab_separated_header() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args(["query", "--format", "tsv", "SELECT 1 AS x, 'two' AS y"])
+        .current_dir(home.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("x\ty\n1\ttwo\n"));
+}
+
+#[test]
+fn query_table_width_truncates_long_cells_with_ellipsis() {
+    let home = tempdir().expect("temp HOME");
+    isolated_cmd(home.path())
+        .args([
+            "query",
+            "--width",
+            "20",
+            "SELECT '012345678901234567890123' AS very_long_label",
+        ])
+        .current_dir(home.path())
+        .assert()
+        .success()
+        // Ellipsis (`…`) appears somewhere when the cell exceeds the
+        // budget. The exact column layout is covered by the runner's
+        // unit tests.
+        .stdout(predicate::str::contains("…"));
+}

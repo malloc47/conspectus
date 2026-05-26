@@ -26,10 +26,19 @@ use crate::query::{apply_schema, load};
 /// Output format for the query result.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum OutputFormat {
-    /// Plain-text columnar table with a header row and aligned cells.
+    /// Plain-text columnar table with a header row and aligned cells,
+    /// truncated with `…` to honor the width budget (ADR 0020).
     Table,
     /// One JSON object per line, keyed by column name.
     Json,
+    /// RFC-4180-style CSV: comma-separated, double-quote-wrapped when
+    /// the cell contains a delimiter, quote, or newline. CRLF row
+    /// terminator.
+    Csv,
+    /// Tab-separated values. Tabs and newlines inside cells are
+    /// replaced with literal `\t` and `\n` escapes; the rendering
+    /// stays line-oriented at the cost of a one-way escape.
+    Tsv,
 }
 
 /// Inputs to the executor. `db_path` overrides the default XDG path
@@ -39,6 +48,29 @@ pub struct QueryInputs<'a> {
     pub sql: &'a str,
     pub format: OutputFormat,
     pub db_path: Option<PathBuf>,
+    /// Target total width in display columns for the [`Table`] format,
+    /// per ADR 0020. `None` renders untruncated (the right default for
+    /// pipes and machine-readable formats).
+    pub width: Option<usize>,
+    /// Whether to emit ANSI color escapes when the format supports
+    /// them (currently `Table` only). Resolved by the CLI per
+    /// ADR 0022; non-`Table` formats ignore this flag.
+    pub color: bool,
+}
+
+impl<'a> QueryInputs<'a> {
+    /// Construct an inputs struct with the format-friendly defaults
+    /// (no width truncation, color off). Tests use this; the CLI sets
+    /// width/color explicitly.
+    pub fn plain(sql: &'a str, format: OutputFormat) -> Self {
+        Self {
+            sql,
+            format,
+            db_path: None,
+            width: None,
+            color: false,
+        }
+    }
 }
 
 /// Discover, load, and execute the user's query. Returns the rendered
@@ -46,7 +78,7 @@ pub struct QueryInputs<'a> {
 /// directly.
 pub fn run_query(inputs: QueryInputs<'_>) -> Result<String> {
     let conn = open_connection(inputs.db_path.as_deref())?;
-    execute(&conn, inputs.sql, inputs.format)
+    execute(&conn, inputs.sql, inputs.format, inputs.width, inputs.color)
 }
 
 /// Same as [`run_query`] but takes a pre-built snapshot. Useful in tests
@@ -57,12 +89,25 @@ pub fn run_query_against_snapshot(
     sql: &str,
     format: OutputFormat,
 ) -> Result<String> {
+    run_query_against_snapshot_with(snapshot, sql, format, None, false)
+}
+
+/// Same as [`run_query_against_snapshot`] but exposes the width and
+/// color knobs for snapshot tests over the [`OutputFormat::Table`]
+/// renderer.
+pub fn run_query_against_snapshot_with(
+    snapshot: &GraphSnapshot,
+    sql: &str,
+    format: OutputFormat,
+    width: Option<usize>,
+    color: bool,
+) -> Result<String> {
     let mut conn = Connection::open_in_memory().context("open in-memory database")?;
     apply_schema(&conn).context("apply schema")?;
     load(snapshot, &mut conn).context("load snapshot")?;
     lock_read_only(&conn)?;
     apply_query_pragmas(&conn)?;
-    execute(&conn, sql, format)
+    execute(&conn, sql, format, width, color)
 }
 
 fn open_connection(override_path: Option<&std::path::Path>) -> Result<Connection> {
@@ -123,7 +168,13 @@ fn lock_read_only(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn execute(conn: &Connection, sql: &str, format: OutputFormat) -> Result<String> {
+fn execute(
+    conn: &Connection,
+    sql: &str,
+    format: OutputFormat,
+    width: Option<usize>,
+    color: bool,
+) -> Result<String> {
     let mut stmt = conn
         .prepare(sql)
         .with_context(|| format!("prepare SQL: {sql}"))?;
@@ -144,61 +195,78 @@ fn execute(conn: &Connection, sql: &str, format: OutputFormat) -> Result<String>
         .with_context(|| format!("fetch rows from: {sql}"))?;
 
     Ok(match format {
-        OutputFormat::Table => render_table(&column_names, &rows),
+        OutputFormat::Table => render_table(&column_names, &rows, width, color),
         OutputFormat::Json => render_json(&column_names, &rows),
+        OutputFormat::Csv => render_csv(&column_names, &rows),
+        OutputFormat::Tsv => render_tsv(&column_names, &rows),
     })
 }
 
-fn render_table(headers: &[String], rows: &[Vec<Value>]) -> String {
-    let widths: Vec<usize> = headers
-        .iter()
-        .enumerate()
-        .map(|(i, h)| {
-            let header_w = h.chars().count();
-            rows.iter()
-                .map(|r| value_to_string(&r[i]).chars().count())
-                .max()
-                .unwrap_or(0)
-                .max(header_w)
-        })
-        .collect();
+/// Render the query result as a width-aware columnar text table per
+/// ADR 0020. Reuses the `natural_widths` / `fit_to_width` /
+/// `truncate_to_width` primitives from `output::table` so the
+/// budget arithmetic and Unicode handling stay byte-identical across
+/// `conspectus query` and the existing `conspectus table`.
+fn render_table(
+    headers: &[String],
+    rows: &[Vec<Value>],
+    width: Option<usize>,
+    color: bool,
+) -> String {
+    use crate::output::table::{
+        COLUMN_GAP, display_width, fit_to_width, header_style, natural_widths, push_styled,
+        truncate_to_width,
+    };
+
+    let column_count = headers.len();
+    if column_count == 0 {
+        return String::new();
+    }
+
+    // Layer header + body into one Vec<Vec<String>> so the width
+    // arithmetic and truncation step apply uniformly.
+    let mut display_rows: Vec<Vec<String>> = Vec::with_capacity(rows.len() + 1);
+    display_rows.push(headers.to_vec());
+    for row in rows {
+        display_rows.push(row.iter().map(value_to_string).collect());
+    }
+
+    let naturals = natural_widths(&display_rows, column_count);
+    let budgets = match width {
+        None => naturals,
+        Some(target) => fit_to_width(&naturals, &display_rows[0], target),
+    };
 
     let mut out = String::new();
-    write_row(&mut out, headers.iter().map(String::as_str), &widths);
-    write_separator(&mut out, &widths);
-    for row in rows {
-        let cells: Vec<String> = row.iter().map(value_to_string).collect();
-        write_row(&mut out, cells.iter().map(String::as_str), &widths);
+    for (row_idx, row) in display_rows.iter().enumerate() {
+        for (col_idx, cell) in row.iter().enumerate() {
+            if col_idx > 0 {
+                out.push_str(COLUMN_GAP);
+            }
+            let budget = budgets[col_idx];
+            let truncated = truncate_to_width(cell, budget);
+            if row_idx == 0 {
+                push_styled(&mut out, &truncated, header_style(), color);
+            } else {
+                out.push_str(&truncated);
+            }
+            if col_idx + 1 < column_count {
+                let pad = budget.saturating_sub(display_width(&truncated));
+                out.extend(std::iter::repeat_n(' ', pad));
+            }
+        }
+        out.push('\n');
+        if row_idx == 0 {
+            for (col_idx, w) in budgets.iter().enumerate() {
+                if col_idx > 0 {
+                    out.push_str(COLUMN_GAP);
+                }
+                out.extend(std::iter::repeat_n('-', *w));
+            }
+            out.push('\n');
+        }
     }
     out
-}
-
-fn write_row<'a>(out: &mut String, cells: impl Iterator<Item = &'a str>, widths: &[usize]) {
-    let mut first = true;
-    for (cell, width) in cells.zip(widths.iter()) {
-        if !first {
-            out.push_str("  ");
-        }
-        first = false;
-        let cell_w = cell.chars().count();
-        out.push_str(cell);
-        if cell_w < *width {
-            out.extend(std::iter::repeat_n(' ', *width - cell_w));
-        }
-    }
-    out.push('\n');
-}
-
-fn write_separator(out: &mut String, widths: &[usize]) {
-    let mut first = true;
-    for width in widths {
-        if !first {
-            out.push_str("  ");
-        }
-        first = false;
-        out.extend(std::iter::repeat_n('-', *width));
-    }
-    out.push('\n');
 }
 
 fn render_json(headers: &[String], rows: &[Vec<Value>]) -> String {
@@ -214,6 +282,88 @@ fn render_json(headers: &[String], rows: &[Vec<Value>]) -> String {
         out.push('\n');
     }
     out
+}
+
+/// RFC 4180 CSV: comma-separated, CRLF row terminator. Fields are
+/// wrapped in double quotes when they contain a delimiter, double
+/// quote, CR, or LF; embedded quotes are doubled.
+fn render_csv(headers: &[String], rows: &[Vec<Value>]) -> String {
+    let mut out = String::new();
+    write_csv_row(&mut out, headers.iter().map(String::as_str));
+    let cell_strings: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| row.iter().map(value_to_string).collect())
+        .collect();
+    for row in &cell_strings {
+        write_csv_row(&mut out, row.iter().map(String::as_str));
+    }
+    out
+}
+
+fn write_csv_row<'a, I>(out: &mut String, cells: I)
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut first = true;
+    for cell in cells {
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let needs_quote = cell.chars().any(|c| matches!(c, ',' | '"' | '\n' | '\r'));
+        if needs_quote {
+            out.push('"');
+            for c in cell.chars() {
+                if c == '"' {
+                    out.push('"');
+                }
+                out.push(c);
+            }
+            out.push('"');
+        } else {
+            out.push_str(cell);
+        }
+    }
+    out.push_str("\r\n");
+}
+
+/// Tab-separated values. Embedded tabs and newlines become literal
+/// `\t` / `\n` escapes so the rendering stays line-oriented; embedded
+/// backslashes are doubled so the escape is unambiguous.
+fn render_tsv(headers: &[String], rows: &[Vec<Value>]) -> String {
+    let mut out = String::new();
+    write_tsv_row(&mut out, headers.iter().map(String::as_str));
+    let cell_strings: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| row.iter().map(value_to_string).collect())
+        .collect();
+    for row in &cell_strings {
+        write_tsv_row(&mut out, row.iter().map(String::as_str));
+    }
+    out
+}
+
+fn write_tsv_row<'a, I>(out: &mut String, cells: I)
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut first = true;
+    for cell in cells {
+        if !first {
+            out.push('\t');
+        }
+        first = false;
+        for c in cell.chars() {
+            match c {
+                '\\' => out.push_str("\\\\"),
+                '\t' => out.push_str("\\t"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                other => out.push(other),
+            }
+        }
+    }
+    out.push('\n');
 }
 
 fn value_to_string(value: &Value) -> String {
@@ -456,5 +606,149 @@ mod tests {
         // ending in conspectus/graph.sqlite.
         let path = graph_db_path();
         assert!(path.ends_with("conspectus/graph.sqlite"));
+    }
+
+    // -------------------------------------------------------------
+    // P9-005: format snapshots, width-aware truncation, color codes,
+    // CSV / TSV escaping.
+    // -------------------------------------------------------------
+
+    #[test]
+    fn table_natural_width_pads_short_cells() {
+        let out = empty_snapshot_run(
+            "SELECT 'hi' AS greeting, 'longer-value' AS body",
+            OutputFormat::Table,
+        )
+        .unwrap();
+        // header + separator + one row. The shorter "hi" cell pads
+        // to match its column's natural width ("greeting").
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 3);
+        // Body row: "hi      " (8 chars to match "greeting") + 2 gap +
+        // "longer-value"
+        assert_eq!(lines[2], "hi        longer-value");
+    }
+
+    #[test]
+    fn table_truncates_to_width_budget_with_ellipsis() {
+        // Two columns where each natural width is 24. At target width
+        // 20 the renderer must shrink at least one column to fit.
+        let out = run_query_against_snapshot_with(
+            &GraphSnapshot::empty(),
+            "SELECT '012345678901234567890123' AS a, 'abcdefghijklmnopqrstuvwx' AS b",
+            OutputFormat::Table,
+            Some(20),
+            false,
+        )
+        .unwrap();
+        let lines: Vec<&str> = out.lines().collect();
+        // The header line carries `…` somewhere in at least one cell.
+        assert!(
+            lines[2].contains('…'),
+            "expected truncation ellipsis in: {}",
+            lines[2]
+        );
+        // Total rendered width of the body row should not exceed 20
+        // columns. We rely on `display_width` (re-used from
+        // `output::table`) for the measurement to match the renderer's
+        // own arithmetic.
+        let body_width = crate::output::table::display_width(lines[2]);
+        assert!(
+            body_width <= 20,
+            "body row width {body_width} exceeds budget 20"
+        );
+    }
+
+    #[test]
+    fn table_color_wraps_header_in_bold_ansi() {
+        let out = run_query_against_snapshot_with(
+            &GraphSnapshot::empty(),
+            "SELECT 1 AS x",
+            OutputFormat::Table,
+            None,
+            true,
+        )
+        .unwrap();
+        // Bold opens with ESC[1m and closes with the reset sequence.
+        // We do not pin the exact bytes (anstyle's reset is a known
+        // sequence but we don't want to couple the test to its
+        // formatting); just assert both an ESC opener and a reset
+        // appear around the header text.
+        let header_line = out.lines().next().unwrap();
+        assert!(
+            header_line.contains("\x1b["),
+            "no ANSI opener: {header_line:?}"
+        );
+        assert!(
+            header_line.contains("\x1b[0m") || header_line.contains("\x1b[m"),
+            "no ANSI reset: {header_line:?}"
+        );
+    }
+
+    #[test]
+    fn table_color_disabled_emits_no_ansi() {
+        let out = empty_snapshot_run("SELECT 1 AS x", OutputFormat::Table).unwrap();
+        assert!(!out.contains('\x1b'), "unexpected ANSI in: {out:?}");
+    }
+
+    #[test]
+    fn csv_emits_crlf_and_quotes_only_when_needed() {
+        let out = empty_snapshot_run(
+            "SELECT 'plain' AS a, 'with,comma' AS b, 'with\"quote' AS c",
+            OutputFormat::Csv,
+        )
+        .unwrap();
+        // Header line ends in CRLF.
+        let header_end = out.find("\r\n").unwrap();
+        assert_eq!(&out[..header_end], "a,b,c");
+        // Body row: plain field unquoted; comma field quoted; quote
+        // field quoted with the embedded `"` doubled.
+        let rest = &out[header_end + 2..];
+        let body_end = rest.find("\r\n").unwrap();
+        assert_eq!(&rest[..body_end], "plain,\"with,comma\",\"with\"\"quote\"");
+    }
+
+    #[test]
+    fn csv_quotes_fields_containing_newlines() {
+        let out = empty_snapshot_run(
+            "SELECT 'line1' || char(10) || 'line2' AS multi",
+            OutputFormat::Csv,
+        )
+        .unwrap();
+        // The body row is wrapped in quotes because of the embedded
+        // newline. The newline survives between the quotes.
+        let parts: Vec<&str> = out.split("\r\n").collect();
+        // parts = [header, body, ""]
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "multi");
+        assert_eq!(parts[1], "\"line1\nline2\"");
+    }
+
+    #[test]
+    fn tsv_escapes_tab_newline_and_backslash() {
+        let out = empty_snapshot_run(
+            "SELECT 'a' || char(9) || 'b' AS tabbed, \
+             'x' || char(10) || 'y' AS newlined, \
+             'one\\two' AS slashed",
+            OutputFormat::Tsv,
+        )
+        .unwrap();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "tabbed\tnewlined\tslashed");
+        assert_eq!(lines[1], "a\\tb\tx\\ny\tone\\\\two");
+    }
+
+    #[test]
+    fn null_renders_as_empty_in_csv_and_tsv() {
+        let csv = empty_snapshot_run("SELECT NULL AS x, 'next' AS y", OutputFormat::Csv).unwrap();
+        let body = csv.lines().nth(1).unwrap();
+        // CSV body row: empty field, comma, "next", then \r is stripped
+        // by .lines(). Leading empty before the comma is the NULL.
+        assert!(body.starts_with(",next") || body == ",next");
+
+        let tsv = empty_snapshot_run("SELECT NULL AS x, 'next' AS y", OutputFormat::Tsv).unwrap();
+        let body = tsv.lines().nth(1).unwrap();
+        // First column empty, tab, then `next`.
+        assert_eq!(body, "\tnext");
     }
 }

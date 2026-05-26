@@ -1963,13 +1963,13 @@ fn build_union_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Ve
     rows
 }
 
-const COLUMN_GAP: &str = "  ";
-const COLUMN_GAP_WIDTH: usize = 2;
+pub(crate) const COLUMN_GAP: &str = "  ";
+pub(crate) const COLUMN_GAP_WIDTH: usize = 2;
 /// Floor on a column's minimum budget before truncation. Header width is
 /// also considered: a column with a wider header keeps the header's width
 /// as its floor when its natural content is wider than this constant. Set
 /// to 4 so a column can still emit `xxx…` after truncation.
-const MIN_COLUMN_BUDGET: usize = 4;
+pub(crate) const MIN_COLUMN_BUDGET: usize = 4;
 
 fn render_rows(
     rows: Vec<Vec<String>>,
@@ -2077,7 +2077,7 @@ fn render_columnar(
     out
 }
 
-fn natural_widths(rows: &[Vec<String>], columns: usize) -> Vec<usize> {
+pub(crate) fn natural_widths(rows: &[Vec<String>], columns: usize) -> Vec<usize> {
     let mut widths = vec![0usize; columns];
     for row in rows {
         for (idx, cell) in row.iter().enumerate() {
@@ -2095,7 +2095,7 @@ fn natural_widths(rows: &[Vec<String>], columns: usize) -> Vec<usize> {
 /// columns settle at their floors; the final row may exceed `target`, which
 /// is intentional — narrow terminals get a best-effort fit rather than
 /// degenerate output.
-fn fit_to_width(naturals: &[usize], header: &[String], target: usize) -> Vec<usize> {
+pub(crate) fn fit_to_width(naturals: &[usize], header: &[String], target: usize) -> Vec<usize> {
     let columns = naturals.len();
     if columns == 0 {
         return Vec::new();
@@ -2140,14 +2140,14 @@ fn fit_to_width(naturals: &[usize], header: &[String], target: usize) -> Vec<usi
     budgets
 }
 
-fn display_width(s: &str) -> usize {
+pub(crate) fn display_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
 /// Truncate `s` to fit within `budget` display columns, appending `…` when
 /// truncation actually happens. `budget == 0` yields an empty string;
 /// `budget == 1` yields a bare `…`.
-fn truncate_to_width(s: &str, budget: usize) -> String {
+pub(crate) fn truncate_to_width(s: &str, budget: usize) -> String {
     if budget == 0 {
         return String::new();
     }
