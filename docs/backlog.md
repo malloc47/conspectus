@@ -5523,16 +5523,49 @@ this phase migrates whichever ones exist when each story lands.
     snapshot tests are the parity check; all 731 lib tests pass
     byte-for-byte and the full integration suite is green.
 
-- [ ] `P10-007` Migrate the CLI PRs projection to SQLite.
+- [x] `P10-007` Migrate the CLI PRs projection to SQLite.
   - Scope: same pattern for `Projection::Pr`. Use `v_pr_by_branch`.
   - Tests: parity with existing PR snapshots.
   - Blockers: `P10-004`.
+  - Outcome: production renderer at `src/output/prs.rs` covers all
+    8 cells. The `attached` cell composes three small lookups —
+    preferred branch per PR (pick_strongest over
+    `branch_has_forge_pr` candidates from PR sources), checkout
+    roots per branch (active `checked_out_branch` candidates), and
+    agent sessions with a cwd — then matches each PR's branch's
+    checkout roots against agent cwd via `path_is_ancestor_of`
+    (lifted from `crate::model`). `strip_branch_prefix` is
+    promoted to `output::render`'s substrate now that two
+    renderers (agent + prs) need it. The in-memory `PrRowCtx`,
+    `pr_cell`, `pr_preferred_branch_id`, `pr_branch_label`,
+    `pr_attached_session_labels`, `build_pr_rows`,
+    `path_is_ancestor_of`, `agent_session_label`, `forge_pr_label`
+    are all deleted. Existing `output::table` snapshot tests are
+    the parity check.
 
-- [ ] `P10-008` Migrate the CLI forks projection to SQLite.
+- [x] `P10-008` Migrate the CLI forks projection to SQLite.
   - Scope: same pattern for `Projection::Fork`. Use
     `v_fork_ancestry`.
   - Tests: parity with existing fork snapshots.
   - Blockers: `P10-004`.
+  - Outcome: production renderer at `src/output/forks.rs` covers
+    all 7 cells. Primary query against `node_forks`, plus
+    side-lookups for `parent` (pick_strongest over
+    `parent_session` candidates with the same resolved-vs-unresolved
+    label branching the in-memory `fork_parent_session_label`
+    used) and `children` (a GROUP BY count of active
+    `child_session` candidates targeting agent_session nodes or
+    unresolved endpoints). `v_fork_ancestry` was not needed for
+    this projection — that view supports recursive parent walks,
+    not per-fork rendering. The in-memory `ForkRowCtx`,
+    `fork_cell`, `fork_label`, `fork_parent_session_label`,
+    `fork_child_session_count`, `build_fork_rows` are deleted.
+    With this story, `render_with` no longer constructs a
+    `SnapshotView` for any projection — the struct, its `Deref`
+    impl, and the `SnapshotView::new` helper are all removed from
+    `output::table`. Existing `output::table` snapshot tests are
+    the parity check; all 731 lib tests pass byte-for-byte, full
+    integration suite green.
 
 - [ ] `P10-009` Migrate `node show` to SQLite.
   - Scope: replace the snapshot walks in `src/output/node_show.rs`
