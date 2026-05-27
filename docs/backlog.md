@@ -5474,12 +5474,29 @@ this phase migrates whichever ones exist when each story lands.
     `output::table` snapshot tests are the parity assertion; all
     731 lib tests pass byte-for-byte, full integration suite green.
 
-- [ ] `P10-005` Migrate the CLI mux projection to SQLite.
+- [x] `P10-005` Migrate the CLI mux projection to SQLite.
   - Scope: same pattern as `P10-004` for `Projection::Mux`. Use
     `v_mux_attachments` (extended if needed) for the agents-attached-
     to-this-mux cell.
   - Tests: parity with the existing mux-projection snapshots.
   - Blockers: `P10-004` (substrate validated by the agent migration).
+  - Outcome: production renderer at `src/output/mux.rs` covers all
+    8 cells (`id`, `mux`, `cwd`, `agents`, `preview`,
+    `attached-count`, `activity`, `created`). One primary query
+    (`SELECT … FROM node_mux_sessions`) plus a per-mux attachment
+    lookup that mirrors `SnapshotView::attached_to_mux` (pick the
+    preferred `linked_to_mux` candidate per source agent, group by
+    mux `node_id`, preserve BTreeMap-by-source ordering) and a
+    per-agent ambiguity count for the per-attachment indicator's
+    `*` marker. `attached_to_mux` is removed from `SnapshotView`;
+    the in-memory `mux_cell` / `build_mux_rows` /
+    `first_attached_agent_preview` / `MuxRowCtx` are deleted. The
+    `v_mux_attachments` saved view didn't need extension — the
+    renderer's queries are inlined since the view's columns don't
+    include `preview` and adding it would broaden the view's
+    contract beyond what callers asked for. Existing
+    `output::table` snapshot tests are the parity check; all 731
+    lib tests pass byte-for-byte, full integration suite green.
 
 - [ ] `P10-006` Migrate the CLI union projection to SQLite.
   - Scope: same pattern for `Projection::Union`. Composes the
