@@ -5341,7 +5341,7 @@ this phase migrates whichever ones exist when each story lands.
     `parse_node_id` stays with a comment noting it disappears in
     P10-002.
 
-- [ ] `P10-002` JSON-encoded NodeId foreign references (ADR 0044).
+- [x] `P10-002` JSON-encoded NodeId foreign references (ADR 0044).
   - Scope: replace the `*_node_id TEXT` foreign-reference columns in
     `candidate_links`, `resolved_relationships`, `diagnostics`, and
     `aliases` with a JSON column holding the serde-serialized typed
@@ -5374,6 +5374,29 @@ this phase migrates whichever ones exist when each story lands.
     confirm `--similar-to` and the existing saved-view queries
     behave identically.
   - Blockers: `P10-001`. ADR: 0044.
+  - Outcome: `candidate_links`, `resolved_relationships`,
+    `diagnostics`, and `aliases` now store endpoints as JSON via
+    `serde_json::to_string(&node_id)`. STORED GENERATED `*_kind`
+    columns expose `json_extract(col, '$.type')` for indexed
+    filtering; `schema_columns_match_constants` runs against
+    `PRAGMA table_xinfo` so generated columns participate in
+    drift detection. `parse_node_id` is gone; the reader uses
+    `serde_json::from_str::<NodeId>` everywhere. `SCHEMA_VERSION`
+    bumped 2 → 3. Saved views `v_mux_attachments`,
+    `v_pr_by_branch`, `v_fork_ancestry`, and
+    `v_workspace_member_repos` rewritten to use structural joins
+    via `json_extract` against the typed node tables; the
+    `idx_candidate_links_target_mux_native_id` expression index
+    supports `v_mux_attachments`'s join path. The
+    `every_node_id_variant_round_trips_through_json` test in
+    `query::reader` covers every NodeId variant; the
+    `endpoints_with_separator_chars_round_trip_through_json` test
+    confirms `RepoId` / `BranchId` / `ForgePrId` values containing
+    `:` `@` `#` `/` round-trip losslessly through the load → read
+    cycle (which the old `Display`-parser approach could not
+    have done). `docs/query-guide.md` updated for the new column
+    set and the recursive-CTE example. 733 lib tests pass; all
+    integration test binaries green.
 
 - [x] `P10-003` Extract the shared rendering substrate.
   - Scope: lift `RenderOptions`, `Layout`, the `ColumnSpec`
