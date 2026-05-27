@@ -5341,24 +5341,39 @@ this phase migrates whichever ones exist when each story lands.
     `parse_node_id` stays with a comment noting it disappears in
     P10-002.
 
-- [ ] `P10-002` Structured-id columns for foreign references.
-  - Scope: replace the `node_id TEXT` foreign-reference columns in
+- [ ] `P10-002` JSON-encoded NodeId foreign references (ADR 0044).
+  - Scope: replace the `*_node_id TEXT` foreign-reference columns in
     `candidate_links`, `resolved_relationships`, `diagnostics`, and
-    `aliases` with structured `*_kind` + per-kind structural
-    columns (analogous to how `node_checkouts.repo_common_dir`
-    denormalizes `CheckoutId.repo`). Update the loader's
-    `insert_candidate_links` / `insert_resolved` / `insert_diagnostics`
-    / `insert_aliases` to write the new columns from the typed
-    `NodeId` it already holds. Update the reader to consume them.
-    Remove `reader::parse_node_id`. Bump `SCHEMA_VERSION`.
-  - Tests: round-trip equality holds with the new shape. Add a test
-    covering a `RepoId` whose `common_dir` contains `@`, `:`, and
-    `#` — values the spike parser would mishandle — and confirm the
-    new shape preserves them. Update `saved_views_match_schema`-style
-    invariant tests if the affected views read these columns.
-  - Manual checks: run a fresh discovery cycle and confirm the new
-    columns populate; inspect with `sqlite3` to verify shape.
-  - Blockers: `P10-001`.
+    `aliases` with a JSON column holding the serde-serialized typed
+    value plus a `GENERATED ALWAYS AS (json_extract(col, '$.type'))
+    STORED` discriminator column. The loader writes via
+    `serde_json::to_string(&link.source)` etc.; the reader recovers
+    typed values via `serde_json::from_str::<NodeId>` and
+    `reader::parse_node_id` is deleted. `resolved_relationships` PK
+    becomes `(source, relation, target)`; `aliases` PK becomes
+    `node`. Rewrite `v_mux_attachments`, `v_pr_by_branch`,
+    `v_fork_ancestry`, and `v_workspace_member_repos` to use
+    `json_extract` for structural joins; `v_sessions_with_repo` and
+    `v_nodes` are unaffected. Add expression indexes for each
+    rewritten view's access pattern. Bump `SCHEMA_VERSION` from 2
+    to 3. Update `TABLE_COLUMNS` for the new shape; the
+    `schema_columns_match_constants` test from P10-001 catches the
+    schema-side drift.
+  - Tests: round-trip equality test from P10-001 stays green
+    byte-for-byte. Add `every_node_id_variant_round_trips_through_json`
+    covering all 8 `NodeId` variants (catches serde shape drift
+    that the schema-side test cannot see). Add a test covering a
+    `RepoId` whose `common_dir` contains `@`, `:`, `#`, and `/` —
+    values `parse_node_id` would mishandle — and confirm the JSON
+    encoding preserves them losslessly through load → read. Saved
+    view smoke tests stay green; add a fixture-driven test that
+    asserts `v_mux_attachments` returns the same rows after the
+    JOIN rewrite.
+  - Manual checks: run a fresh discovery cycle on a real corpus
+    and confirm endpoint columns inspect cleanly via `sqlite3`;
+    confirm `--similar-to` and the existing saved-view queries
+    behave identically.
+  - Blockers: `P10-001`. ADR: 0044.
 
 - [x] `P10-003` Extract the shared rendering substrate.
   - Scope: lift `RenderOptions`, `Layout`, the `ColumnSpec`
