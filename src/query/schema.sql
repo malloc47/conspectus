@@ -148,11 +148,22 @@ CREATE VIEW IF NOT EXISTS v_nodes AS
 
 CREATE TABLE IF NOT EXISTS candidate_links (
     link_id                   TEXT PRIMARY KEY,             -- GraphLink.id
-    source_node_id            TEXT NOT NULL,
+
+    -- Source endpoint: serde-serialized typed NodeId (ADR 0044).
+    -- `source_kind` is a STORED GENERATED column over the `$.type`
+    -- discriminator so kind-filtered queries hit an index without
+    -- evaluating json_extract per row.
+    source                    TEXT NOT NULL,                -- serde_json(&link.source)
+    source_kind               TEXT NOT NULL GENERATED ALWAYS AS
+                                  (json_extract(source, '$.type')) STORED,
 
     -- LinkEndpoint: discriminator + node-id variant + unresolved-evidence variant.
     target_kind               TEXT NOT NULL,                -- 'node' | 'unresolved'
-    target_node_id            TEXT,                         -- populated when target_kind = 'node'
+    target_node               TEXT,                         -- serde_json(&id) when target_kind = 'node'
+    target_node_kind          TEXT GENERATED ALWAYS AS
+                                  (CASE WHEN target_kind = 'node'
+                                        THEN json_extract(target_node, '$.type')
+                                   END) STORED,
     target_node_type          TEXT,                         -- UnresolvedEndpoint.node_type when 'unresolved'
     target_harness_key        TEXT,
     target_native_id          TEXT,
@@ -179,30 +190,39 @@ CREATE TABLE IF NOT EXISTS candidate_links (
     discovery_freshness_epoch INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_candidate_links_source_relation
-    ON candidate_links(source_node_id, relation);
-CREATE INDEX IF NOT EXISTS idx_candidate_links_target_relation
-    ON candidate_links(target_node_id, relation);
+CREATE INDEX IF NOT EXISTS idx_candidate_links_source_kind_relation
+    ON candidate_links(source_kind, relation);
+CREATE INDEX IF NOT EXISTS idx_candidate_links_target_node_kind_relation
+    ON candidate_links(target_node_kind, relation);
 CREATE INDEX IF NOT EXISTS idx_candidate_links_provider_fresh
     ON candidate_links(discovery_provider, discovery_freshness_epoch);
+-- Expression index supporting `v_mux_attachments` (and any other
+-- query that filters mux-target links by native_id).
+CREATE INDEX IF NOT EXISTS idx_candidate_links_target_mux_native_id
+    ON candidate_links(json_extract(target_node, '$.native_id'))
+    WHERE target_node_kind = 'mux_session';
 
 -- =============================================================
 -- Resolved relationships (resolver output, ADR 0041)
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS resolved_relationships (
-    source_node_id     TEXT NOT NULL,
-    target_node_id     TEXT NOT NULL,
+    source             TEXT NOT NULL,                       -- serde_json(&NodeId)
+    source_kind        TEXT NOT NULL GENERATED ALWAYS AS
+                           (json_extract(source, '$.type')) STORED,
+    target             TEXT NOT NULL,                       -- serde_json(&NodeId)
+    target_kind        TEXT NOT NULL GENERATED ALWAYS AS
+                           (json_extract(target, '$.type')) STORED,
     relation           TEXT NOT NULL,
     selected_link_id   TEXT NOT NULL,
     competing_link_ids TEXT NOT NULL DEFAULT '[]',          -- JSON array of link ids
-    PRIMARY KEY (source_node_id, relation, target_node_id)
+    PRIMARY KEY (source, relation, target)
 );
 
-CREATE INDEX IF NOT EXISTS idx_resolved_relationships_source_relation
-    ON resolved_relationships(source_node_id, relation);
-CREATE INDEX IF NOT EXISTS idx_resolved_relationships_target_relation
-    ON resolved_relationships(target_node_id, relation);
+CREATE INDEX IF NOT EXISTS idx_resolved_relationships_source_kind_relation
+    ON resolved_relationships(source_kind, relation);
+CREATE INDEX IF NOT EXISTS idx_resolved_relationships_target_kind_relation
+    ON resolved_relationships(target_kind, relation);
 
 -- =============================================================
 -- Diagnostics
@@ -219,7 +239,9 @@ CREATE TABLE IF NOT EXISTS diagnostics (
     config_path                  TEXT,
     config_message               TEXT,
     -- Conflict
-    conflict_source_node_id      TEXT,
+    conflict_source              TEXT,                      -- serde_json(&NodeId) when kind='conflict'
+    conflict_source_kind         TEXT GENERATED ALWAYS AS
+                                     (json_extract(conflict_source, '$.type')) STORED,
     conflict_selected_link_id    TEXT,
     conflict_competing_link_ids  TEXT                       -- JSON array
 );
@@ -229,7 +251,9 @@ CREATE TABLE IF NOT EXISTS diagnostics (
 -- =============================================================
 
 CREATE TABLE IF NOT EXISTS aliases (
-    node_id      TEXT PRIMARY KEY,
+    node         TEXT PRIMARY KEY,                          -- serde_json(&NodeId)
+    node_kind    TEXT NOT NULL GENERATED ALWAYS AS
+                     (json_extract(node, '$.type')) STORED,
     display_name TEXT NOT NULL
 );
 
@@ -305,26 +329,36 @@ LEFT JOIN node_checkouts c
 
 -- One row per active `LinkedToMux` candidate link, joined to its
 -- mux. Each mux can carry multiple attached agent sessions (one row
--- per attachment).
+-- per attachment). Filtered to `source_kind = 'agent_session'`
+-- since that is the only source kind today's discovery emits for
+-- this relation. The agent-session structural fields are surfaced
+-- as columns so consumers do not need to `json_extract` the JSON.
 CREATE VIEW IF NOT EXISTS v_mux_attachments AS
 SELECT
-    m.node_id            AS mux_node_id,
+    m.node_id                                       AS mux_node_id,
     m.backend,
     m.native_id,
-    cl.source_node_id    AS agent_session_node_id,
+    cl.source                                       AS agent_session,
+    json_extract(cl.source, '$.harness_key')        AS agent_session_harness_key,
+    json_extract(cl.source, '$.state_scope')        AS agent_session_state_scope,
+    json_extract(cl.source, '$.session_key')        AS agent_session_session_key,
     cl.link_id,
     cl.provenance,
     cl.confidence,
     cl.freshness
 FROM node_mux_sessions m
 JOIN candidate_links cl
-    ON cl.target_node_id = m.node_id
+    ON cl.target_node_kind = 'mux_session'
+    AND json_extract(cl.target_node, '$.native_id') = m.native_id
+    AND cl.source_kind = 'agent_session'
     AND cl.relation = 'linked_to_mux'
     AND cl.state = 'active';
 
 -- Branches joined to their forge PRs via the `BranchHasForgePr`
 -- relation. Branches without a PR still appear with NULL PR
--- columns (LEFT JOIN).
+-- columns (LEFT JOIN). Join keys are structural: branch identity
+-- is (repo.common_dir, refname); PR identity is the composite
+-- (provider, host, owner, repo, number).
 CREATE VIEW IF NOT EXISTS v_pr_by_branch AS
 SELECT
     b.node_id            AS branch_node_id,
@@ -341,30 +375,47 @@ SELECT
     pr.url               AS pr_url
 FROM node_branches b
 LEFT JOIN candidate_links cl
-    ON cl.source_node_id = b.node_id
+    ON cl.source_kind = 'branch'
+    AND json_extract(cl.source, '$.repo.common_dir') = b.repo_common_dir
+    AND json_extract(cl.source, '$.refname')         = b.refname
     AND cl.relation = 'branch_has_forge_pr'
     AND cl.state = 'active'
 LEFT JOIN node_forge_prs pr
-    ON pr.node_id = cl.target_node_id;
+    ON cl.target_node_kind = 'forge_pr'
+    AND json_extract(cl.target_node, '$.provider') = pr.provider_name
+    AND json_extract(cl.target_node, '$.host')     = pr.host
+    AND json_extract(cl.target_node, '$.owner')    = pr.owner
+    AND json_extract(cl.target_node, '$.repo')     = pr.repo
+    AND json_extract(cl.target_node, '$.number')   = pr.number;
 
 -- Transitive `ParentFork` closure: for each Fork node, one row per
 -- (self, ancestor, depth) triple. Depth 0 is the fork itself; each
 -- next row follows one `parent_fork` candidate link further up.
+-- The recursive state carries the `provider_source_key` structural
+-- identity directly (forks are uniquely keyed on it); the final
+-- SELECT reconstructs the `node_id` Display form so consumers can
+-- join back to `node_forks.node_id` if they want.
 CREATE VIEW IF NOT EXISTS v_fork_ancestry AS
-WITH RECURSIVE ancestry(fork_node_id, ancestor_node_id, depth) AS (
-    SELECT node_id, node_id, 0 FROM node_forks
+WITH RECURSIVE ancestry(fork_psk, ancestor_psk, depth) AS (
+    SELECT provider_source_key, provider_source_key, 0 FROM node_forks
     UNION ALL
     SELECT
-        a.fork_node_id,
-        cl.target_node_id,
+        a.fork_psk,
+        json_extract(cl.target_node, '$.provider_source_key'),
         a.depth + 1
     FROM ancestry a
     JOIN candidate_links cl
-        ON cl.source_node_id = a.ancestor_node_id
+        ON cl.source_kind = 'fork'
+        AND json_extract(cl.source, '$.provider_source_key') = a.ancestor_psk
+        AND cl.target_node_kind = 'fork'
         AND cl.relation = 'parent_fork'
         AND cl.state = 'active'
 )
-SELECT fork_node_id, ancestor_node_id, depth FROM ancestry;
+SELECT
+    'fork:' || fork_psk      AS fork_node_id,
+    'fork:' || ancestor_psk  AS ancestor_node_id,
+    depth
+FROM ancestry;
 
 -- Workspaces with their member repos via the
 -- `WorkspaceContainsRepo` relation. Inner join — workspaces that do
@@ -378,8 +429,10 @@ SELECT
     r.common_dir         AS repo_common_dir
 FROM node_workspaces w
 JOIN candidate_links cl
-    ON cl.source_node_id = w.node_id
+    ON cl.source_kind = 'workspace'
+    AND json_extract(cl.source, '$.root') = w.root
     AND cl.relation = 'workspace_contains_repo'
     AND cl.state = 'active'
 JOIN node_repos r
-    ON r.node_id = cl.target_node_id;
+    ON cl.target_node_kind = 'repo'
+    AND json_extract(cl.target_node, '$.common_dir') = r.common_dir;

@@ -1,4 +1,4 @@
-//! SQLite → GraphSnapshot reader (P10-001 / ADR 0043).
+//! SQLite → GraphSnapshot reader (ADR 0043 / ADR 0044).
 //!
 //! Inverse of [`crate::query::loader::load`]. Reads every table the
 //! loader writes into and reconstructs a [`GraphSnapshot`]. The
@@ -7,13 +7,17 @@
 //! equal snapshot after `canonicalize()` (see the round-trip tests
 //! at the bottom of this module).
 //!
-//! Strategy: typed `*Node` structs are rebuilt from the per-kind table
-//! columns (the structural source of truth), not by parsing the
-//! `node_id` text. The `node_id` text *is* parsed for foreign
-//! references inside `candidate_links`, `resolved_relationships`,
-//! `diagnostics`, and `aliases` where only the [`std::fmt::Display`]
-//! form is stored. The parser survives only until P10-002 lands
-//! structured-id columns and removes it.
+//! Strategy:
+//!
+//! - Typed `*Node` structs are rebuilt from the per-kind `node_<kind>`
+//!   table columns (the structural source of truth).
+//! - `NodeId` foreign references inside `candidate_links`,
+//!   `resolved_relationships`, `diagnostics`, and `aliases` are
+//!   recovered via `serde_json::from_str::<NodeId>` from the JSON
+//!   text the loader writes via `serde_json::to_string(&node_id)`
+//!   (ADR 0044). The previous `Display`-form parser is gone — serde
+//!   handles structural recovery for every variant including ones
+//!   with separator characters in their structural fields.
 //!
 //! Compile-time exhaustiveness lives in two complementary places:
 //!
@@ -23,7 +27,10 @@
 //! - Schema-side: `schema::TABLE_COLUMNS` plus the
 //!   `schema_columns_match_constants` test catches column drift
 //!   between `schema.sql` and the column lists that the loader and
-//!   this reader expect.
+//!   this reader expect. The
+//!   `every_node_id_variant_round_trips_through_json` test in this
+//!   module catches serde-contract drift in the JSON payloads
+//!   themselves.
 
 use std::collections::BTreeMap;
 
@@ -267,7 +274,7 @@ fn read_forge_prs(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::Resu
 
 fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
     let mut stmt = conn.prepare(
-        "SELECT link_id, source_node_id, target_kind, target_node_id, \
+        "SELECT link_id, source, target_kind, target_node, \
                 target_node_type, target_harness_key, target_native_id, \
                 target_state_scope, target_path, target_metadata, \
                 relation, provenance, confidence, freshness, \
@@ -277,9 +284,9 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
     )?;
     let rows = stmt.query_map([], |row| {
         let link_id: String = row.get(0)?;
-        let source_node_id: String = row.get(1)?;
+        let source_json: String = row.get(1)?;
         let target_kind: String = row.get(2)?;
-        let target_node_id: Option<String> = row.get(3)?;
+        let target_node_json: Option<String> = row.get(3)?;
         let target_node_type: Option<String> = row.get(4)?;
         let target_harness_key: Option<String> = row.get(5)?;
         let target_native_id: Option<String> = row.get(6)?;
@@ -299,7 +306,7 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
 
         let target = match target_kind.as_str() {
             "node" => LinkEndpoint::Node {
-                id: parse_node_id_row(target_node_id.as_deref())?,
+                id: parse_node_id_json_required(target_node_json.as_deref(), 3)?,
             },
             "unresolved" => LinkEndpoint::Unresolved {
                 evidence: UnresolvedEndpoint {
@@ -339,7 +346,7 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
 
         Ok(GraphLink {
             id: link_id,
-            source: parse_node_id_str(&source_node_id)?,
+            source: parse_node_id_json(&source_json, 1)?,
             target,
             relation: deserialize_tag::<RelationKind>(&relation, 10)?,
             provenance: deserialize_tag::<Provenance>(&provenance, 11)?,
@@ -358,8 +365,8 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
 
 fn read_resolved(conn: &Connection) -> rusqlite::Result<Vec<ResolvedRelationship>> {
     let mut stmt = conn.prepare(
-        "SELECT source_node_id, target_node_id, relation, selected_link_id, competing_link_ids \
-         FROM resolved_relationships ORDER BY source_node_id, relation, target_node_id",
+        "SELECT source, target, relation, selected_link_id, competing_link_ids \
+         FROM resolved_relationships ORDER BY source, relation, target",
     )?;
     let rows = stmt.query_map([], |row| {
         let source: String = row.get(0)?;
@@ -368,8 +375,8 @@ fn read_resolved(conn: &Connection) -> rusqlite::Result<Vec<ResolvedRelationship
         let selected: String = row.get(3)?;
         let competing: String = row.get(4)?;
         Ok(ResolvedRelationship {
-            source: parse_node_id_str(&source)?,
-            target: parse_node_id_str(&target)?,
+            source: parse_node_id_json(&source, 0)?,
+            target: parse_node_id_json(&target, 1)?,
             relation: deserialize_tag::<RelationKind>(&relation, 2)?,
             selected_link_id: selected,
             competing_link_ids: parse_json_str_array(&competing),
@@ -381,7 +388,7 @@ fn read_resolved(conn: &Connection) -> rusqlite::Result<Vec<ResolvedRelationship
 fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
     let mut stmt = conn.prepare(
         "SELECT kind, link_id, relation, config_path, config_message, \
-                conflict_source_node_id, conflict_selected_link_id, conflict_competing_link_ids \
+                conflict_source, conflict_selected_link_id, conflict_competing_link_ids \
          FROM diagnostics ORDER BY kind, link_id, conflict_selected_link_id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -399,7 +406,10 @@ fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
                 message: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
             }),
             "conflict" => Ok(Diagnostic::Conflict {
-                source: parse_node_id_str(&row.get::<_, Option<String>>(5)?.unwrap_or_default())?,
+                source: parse_node_id_json(
+                    &row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                    5,
+                )?,
                 relation: deserialize_tag::<RelationKind>(
                     &row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     2,
@@ -420,11 +430,11 @@ fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
 }
 
 fn read_aliases(conn: &Connection) -> rusqlite::Result<AliasOverlay> {
-    let mut stmt = conn.prepare("SELECT node_id, display_name FROM aliases ORDER BY node_id")?;
+    let mut stmt = conn.prepare("SELECT node, display_name FROM aliases ORDER BY node")?;
     let rows = stmt.query_map([], |row| {
-        let node_id: String = row.get(0)?;
+        let node_json: String = row.get(0)?;
         let display_name: String = row.get(1)?;
-        Ok((parse_node_id_str(&node_id)?, display_name))
+        Ok((parse_node_id_json(&node_json, 0)?, display_name))
     })?;
     let mut overlay = AliasOverlay::new();
     for entry in rows {
@@ -461,95 +471,33 @@ where
     })
 }
 
-fn parse_node_id_row(text: Option<&str>) -> rusqlite::Result<NodeId> {
-    let s = text.ok_or_else(|| {
+/// Deserialize a JSON-encoded [`NodeId`] from a non-NULL endpoint
+/// column (ADR 0044). Inverse of `json_node_id` in
+/// [`crate::query::loader`].
+fn parse_node_id_json(s: &str, idx: usize) -> rusqlite::Result<NodeId> {
+    serde_json::from_str::<NodeId>(s).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
-            3,
+            idx,
             rusqlite::types::Type::Text,
-            Box::new(BadEnum(
-                "target_node_id required for target_kind=node".into(),
-            )),
-        )
-    })?;
-    parse_node_id_str(s)
-}
-
-/// NodeId parser. Splits the [`fmt::Display`] form back into typed
-/// pieces. Not robust to `common_dir` / refname / path values
-/// containing `:` / `@` / `#` / `/`; surviving until P10-002 lands
-/// structured-id columns and removes the parser entirely. See
-/// ADR 0043 §"Schema work required" for the migration plan.
-fn parse_node_id_str(s: &str) -> rusqlite::Result<NodeId> {
-    parse_node_id(s).map_err(|reason| {
-        rusqlite::Error::FromSqlConversionFailure(
-            1,
-            rusqlite::types::Type::Text,
-            Box::new(BadEnum(format!("node_id={s}: {reason}"))),
+            Box::new(BadEnum(format!("NodeId JSON: {err} (input was: {s})"))),
         )
     })
 }
 
-fn parse_node_id(s: &str) -> Result<NodeId, String> {
-    let (kind, rest) = s
-        .split_once(':')
-        .ok_or_else(|| format!("missing kind prefix in {s}"))?;
-    match kind {
-        "repo" => Ok(NodeId::Repo(RepoId::new(rest))),
-        "workspace" => Ok(NodeId::Workspace(WorkspaceId::new(rest))),
-        "mux_session" => Ok(NodeId::MuxSession(MuxSessionId::new(rest))),
-        "fork" => Ok(NodeId::Fork(ForkId::new(rest))),
-        "agent_session" => {
-            let mut parts = rest.splitn(3, ':');
-            let harness = parts.next().ok_or("missing harness_key")?;
-            let scope = parts.next().ok_or("missing state_scope")?;
-            let session = parts.next().ok_or("missing session_key")?;
-            Ok(NodeId::AgentSession(AgentSessionId::new(
-                harness, scope, session,
-            )))
-        }
-        "checkout" => {
-            // rest = "repo:<common_dir>@<root>"
-            let rest = rest
-                .strip_prefix("repo:")
-                .ok_or("checkout body missing repo: prefix")?;
-            let (common_dir, root) = rest
-                .rsplit_once('@')
-                .ok_or("checkout body missing @ separator")?;
-            Ok(NodeId::Checkout(CheckoutId::new(
-                RepoId::new(common_dir),
-                root,
-            )))
-        }
-        "branch" => {
-            // rest = "repo:<common_dir>@<refname>"
-            let rest = rest
-                .strip_prefix("repo:")
-                .ok_or("branch body missing repo: prefix")?;
-            let (common_dir, refname) = rest
-                .rsplit_once('@')
-                .ok_or("branch body missing @ separator")?;
-            Ok(NodeId::Branch(BranchId::new(
-                RepoId::new(common_dir),
-                refname,
-            )))
-        }
-        "forge_pr" => {
-            // rest = "<provider>:<host>/<owner>/<repo>#<number>"
-            let (provider, rest2) = rest.split_once(':').ok_or("forge_pr missing provider")?;
-            let (path, number_s) = rest2.rsplit_once('#').ok_or("forge_pr missing #")?;
-            let mut parts = path.splitn(3, '/');
-            let host = parts.next().ok_or("forge_pr missing host")?;
-            let owner = parts.next().ok_or("forge_pr missing owner")?;
-            let repo = parts.next().ok_or("forge_pr missing repo")?;
-            let number: u64 = number_s
-                .parse()
-                .map_err(|e| format!("forge_pr number parse: {e}"))?;
-            Ok(NodeId::ForgePr(ForgePrId::new(
-                provider, host, owner, repo, number,
-            )))
-        }
-        other => Err(format!("unknown node kind {other}")),
-    }
+/// Variant of [`parse_node_id_json`] for a nullable column that must
+/// be populated when its sibling discriminator says so (i.e.
+/// `target_node` when `target_kind = 'node'`). Errors if NULL.
+fn parse_node_id_json_required(text: Option<&str>, idx: usize) -> rusqlite::Result<NodeId> {
+    let s = text.ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            idx,
+            rusqlite::types::Type::Text,
+            Box::new(BadEnum(
+                "target_node required when target_kind='node'".into(),
+            )),
+        )
+    })?;
+    parse_node_id_json(s, idx)
 }
 
 #[derive(Debug)]
@@ -598,22 +546,76 @@ mod tests {
         round_trip(GraphSnapshot::empty());
     }
 
+    /// Variant-coverage guard for ADR 0044: every `NodeId` variant
+    /// must serde-round-trip through the JSON encoding the loader
+    /// writes and the reader reads. This is the symmetric companion
+    /// to `schema_columns_match_constants` — the schema test catches
+    /// column shape drift; this one catches serde-contract drift
+    /// inside the JSON payloads.
     #[test]
-    fn parses_known_node_id_forms() {
-        let cases = [
-            "repo:/r/.git",
-            "workspace:/w",
-            "mux_session:tmux:0",
-            "fork:provider:src",
-            "agent_session:claude-code:default:abc",
-            "checkout:repo:/r/.git@/r",
-            "branch:repo:/r/.git@refs/heads/main",
-            "forge_pr:github:github.com/owner/repo#42",
+    fn every_node_id_variant_round_trips_through_json() {
+        use crate::model::{
+            AgentSessionId, BranchId, CheckoutId, ForgePrId, ForkId, MuxSessionId, RepoId,
+            WorkspaceId,
+        };
+        let cases = vec![
+            NodeId::Repo(RepoId::new("/r/.git")),
+            NodeId::Workspace(WorkspaceId::new("/w")),
+            NodeId::MuxSession(MuxSessionId::new("tmux:0")),
+            NodeId::Fork(ForkId::new("provider:src")),
+            NodeId::AgentSession(AgentSessionId::new("claude-code", "default", "abc")),
+            NodeId::Checkout(CheckoutId::new(RepoId::new("/r/.git"), "/r")),
+            NodeId::Branch(BranchId::new(RepoId::new("/r/.git"), "refs/heads/main")),
+            NodeId::ForgePr(ForgePrId::new("github", "github.com", "owner", "repo", 42)),
         ];
-        for case in cases {
-            let id = parse_node_id(case).unwrap_or_else(|e| panic!("parse {case}: {e}"));
-            assert_eq!(id.to_string(), case, "round-trip {case}");
+        for original in cases {
+            let encoded = serde_json::to_string(&original).expect("serialize");
+            let decoded =
+                parse_node_id_json(&encoded, 0).unwrap_or_else(|e| panic!("decode {encoded}: {e}"));
+            assert_eq!(decoded, original, "round-trip {encoded}");
         }
+    }
+
+    /// ADR 0044's central correctness claim: structural fields that
+    /// would break the prior `Display`-form parser (separator chars
+    /// inside `common_dir` / refname / path) round-trip losslessly
+    /// through the JSON encoding. Picks values containing every
+    /// separator the old parser keyed on: `:`, `@`, `#`, `/`.
+    #[test]
+    fn endpoints_with_separator_chars_round_trip_through_json() {
+        use crate::model::{
+            BranchId, CheckoutId, ForgePrId, GraphLink, GraphSnapshot, LinkEndpoint, NodeId,
+            RepoId, ResolvedRelationship, SourceMetadata,
+        };
+
+        let repo_id = RepoId::new("/weird@repo:path#with/separators/.git");
+        let checkout_id = CheckoutId::new(repo_id.clone(), "/weird@repo:path#with/separators");
+        let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature/@odd:tag");
+        let pr_id = ForgePrId::new("github", "github.com", "owner", "repo:with#weird@chars", 7);
+
+        let mut snap = GraphSnapshot::empty();
+        snap.candidate_links.push(GraphLink {
+            id: "link-weird".into(),
+            source: NodeId::Checkout(checkout_id.clone()),
+            target: LinkEndpoint::Node {
+                id: NodeId::Branch(branch_id.clone()),
+            },
+            relation: crate::model::RelationKind::CheckedOutBranch,
+            provenance: crate::model::Provenance::Discovered,
+            confidence: crate::model::Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: crate::model::LinkState::Active,
+        });
+        snap.resolved_relationships.push(ResolvedRelationship {
+            source: NodeId::Branch(branch_id),
+            target: NodeId::ForgePr(pr_id),
+            relation: crate::model::RelationKind::BranchHasForgePr,
+            selected_link_id: "winner".into(),
+            competing_link_ids: vec![],
+        });
+
+        round_trip(snap);
     }
 
     #[test]

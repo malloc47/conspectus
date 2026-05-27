@@ -302,8 +302,8 @@ fn insert_forge_prs(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result
 fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO candidate_links (\
-           link_id, source_node_id, \
-           target_kind, target_node_id, target_node_type, target_harness_key, \
+           link_id, source, \
+           target_kind, target_node, target_node_type, target_harness_key, \
            target_native_id, target_state_scope, target_path, target_metadata, \
            relation, provenance, confidence, freshness, \
            state, state_reason, state_overridden_by, \
@@ -314,8 +314,8 @@ fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Re
          )",
     )?;
     for link in links {
-        let (target_kind, target_node_id, evidence) = match &link.target {
-            LinkEndpoint::Node { id } => ("node", Some(id.to_string()), None),
+        let (target_kind, target_node_json, evidence) = match &link.target {
+            LinkEndpoint::Node { id } => ("node", Some(json_node_id(id)), None),
             LinkEndpoint::Unresolved { evidence } => ("unresolved", None, Some(evidence)),
         };
         let (state_reason, state_overridden_by) = match &link.state {
@@ -333,9 +333,9 @@ fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Re
             .unwrap_or_else(|| "{}".into());
         stmt.execute(params![
             link.id,
-            link.source.to_string(),
+            json_node_id(&link.source),
             target_kind,
-            target_node_id,
+            target_node_json,
             target_node_type,
             target_harness_key,
             target_native_id,
@@ -360,13 +360,13 @@ fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Re
 fn insert_resolved(tx: &Transaction, items: &[ResolvedRelationship]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO resolved_relationships (\
-           source_node_id, target_node_id, relation, selected_link_id, competing_link_ids\
+           source, target, relation, selected_link_id, competing_link_ids\
          ) VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     for r in items {
         stmt.execute(params![
-            r.source.to_string(),
-            r.target.to_string(),
+            json_node_id(&r.source),
+            json_node_id(&r.target),
             relation_kind_tag(&r.relation),
             r.selected_link_id,
             json_array(&r.competing_link_ids),
@@ -379,7 +379,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
     let mut stmt = tx.prepare(
         "INSERT INTO diagnostics (\
            kind, link_id, relation, config_path, config_message, \
-           conflict_source_node_id, conflict_selected_link_id, conflict_competing_link_ids\
+           conflict_source, conflict_selected_link_id, conflict_competing_link_ids\
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
     for d in items {
@@ -421,7 +421,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     relation_kind_tag(relation),
                     None::<&str>,
                     None::<&str>,
-                    source.to_string(),
+                    json_node_id(source),
                     selected_link_id,
                     json_array(competing_link_ids),
                 ])?;
@@ -432,9 +432,9 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
 }
 
 fn insert_aliases(tx: &Transaction, aliases: &AliasOverlay) -> rusqlite::Result<()> {
-    let mut stmt = tx.prepare("INSERT INTO aliases (node_id, display_name) VALUES (?1, ?2)")?;
+    let mut stmt = tx.prepare("INSERT INTO aliases (node, display_name) VALUES (?1, ?2)")?;
     for (node_id, display_name) in aliases.iter() {
-        stmt.execute(params![node_id.to_string(), display_name])?;
+        stmt.execute(params![json_node_id(node_id), display_name])?;
     }
     Ok(())
 }
@@ -445,6 +445,13 @@ fn json_array(values: &[String]) -> String {
 
 fn json_object(metadata: &crate::model::Metadata) -> String {
     serde_json::to_string(metadata).expect("Metadata serializes")
+}
+
+/// Serialize a [`NodeId`] to its canonical JSON form for storage in
+/// the endpoint columns (ADR 0044). Inverse: `serde_json::from_str`
+/// in [`crate::query::reader`].
+fn json_node_id(node_id: &crate::model::NodeId) -> String {
+    serde_json::to_string(node_id).expect("NodeId serializes")
 }
 
 #[cfg(test)]
@@ -721,7 +728,17 @@ mod tests {
         snap.candidate_links
             .push(make_node_link(source.clone(), target.clone()));
         load(&snap, &mut conn).unwrap();
-        let (target_kind, target_node_id, relation, provenance, confidence, freshness, state): (
+        let (
+            target_kind,
+            target_node_json,
+            target_node_kind,
+            relation,
+            provenance,
+            confidence,
+            freshness,
+            state,
+        ): (
+            String,
             String,
             String,
             String,
@@ -731,8 +748,8 @@ mod tests {
             String,
         ) = conn
             .query_row(
-                "SELECT target_kind, target_node_id, relation, provenance, confidence, \
-                 freshness, state FROM candidate_links",
+                "SELECT target_kind, target_node, target_node_kind, relation, provenance, \
+                 confidence, freshness, state FROM candidate_links",
                 [],
                 |row| {
                     Ok((
@@ -743,12 +760,15 @@ mod tests {
                         row.get(4)?,
                         row.get(5)?,
                         row.get(6)?,
+                        row.get(7)?,
                     ))
                 },
             )
             .unwrap();
         assert_eq!(target_kind, "node");
-        assert_eq!(target_node_id, target.to_string());
+        assert_eq!(target_node_kind, "mux_session");
+        let decoded: crate::model::NodeId = serde_json::from_str(&target_node_json).unwrap();
+        assert_eq!(decoded, target);
         assert_eq!(relation, "linked_to_mux");
         assert_eq!(provenance, "strong_discovered");
         assert_eq!(confidence, "high");
@@ -842,9 +862,17 @@ mod tests {
             competing_link_ids: vec!["a".into(), "b".into()],
         });
         load(&snap, &mut conn).unwrap();
-        let (s, t, r, sel, comp): (String, String, String, String, String) = conn
+        let (s_json, s_kind, t_json, t_kind, r, sel, comp): (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        ) = conn
             .query_row(
-                "SELECT source_node_id, target_node_id, relation, selected_link_id, \
+                "SELECT source, source_kind, target, target_kind, relation, selected_link_id, \
                  competing_link_ids FROM resolved_relationships",
                 [],
                 |row| {
@@ -854,12 +882,18 @@ mod tests {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
                     ))
                 },
             )
             .unwrap();
-        assert_eq!(s, source.to_string());
-        assert_eq!(t, target.to_string());
+        let s_decoded: crate::model::NodeId = serde_json::from_str(&s_json).unwrap();
+        let t_decoded: crate::model::NodeId = serde_json::from_str(&t_json).unwrap();
+        assert_eq!(s_decoded, source);
+        assert_eq!(t_decoded, target);
+        assert_eq!(s_kind, "agent_session");
+        assert_eq!(t_kind, "mux_session");
         assert_eq!(r, "linked_to_mux");
         assert_eq!(sel, "winner");
         assert_eq!(comp, "[\"a\",\"b\"]");
@@ -898,7 +932,7 @@ mod tests {
         let rows: Vec<DiagnosticRow> = conn
             .prepare(
                 "SELECT kind, link_id, relation, config_path, config_message, \
-                 conflict_source_node_id, conflict_selected_link_id, conflict_competing_link_ids \
+                 conflict_source, conflict_selected_link_id, conflict_competing_link_ids \
                  FROM diagnostics ORDER BY kind",
             )
             .unwrap()
@@ -927,7 +961,9 @@ mod tests {
 
         // conflict
         assert_eq!(rows[1].2.as_deref(), Some("associated_with"));
-        assert_eq!(rows[1].5.as_deref(), Some(source.to_string().as_str()));
+        let conflict_source_decoded: crate::model::NodeId =
+            serde_json::from_str(rows[1].5.as_deref().unwrap()).unwrap();
+        assert_eq!(conflict_source_decoded, source);
         assert_eq!(rows[1].6.as_deref(), Some("winner"));
         assert_eq!(rows[1].7.as_deref(), Some("[\"a\"]"));
 
@@ -943,12 +979,16 @@ mod tests {
         let agent = NodeId::AgentSession(AgentSessionId::new("h", "s", "k"));
         snap.aliases.insert(agent.clone(), "Alias Name".into());
         load(&snap, &mut conn).unwrap();
-        let (node_id, display_name): (String, String) = conn
-            .query_row("SELECT node_id, display_name FROM aliases", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
+        let (node_json, node_kind, display_name): (String, String, String) = conn
+            .query_row(
+                "SELECT node, node_kind, display_name FROM aliases",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
             .unwrap();
-        assert_eq!(node_id, agent.to_string());
+        let decoded: crate::model::NodeId = serde_json::from_str(&node_json).unwrap();
+        assert_eq!(decoded, agent);
+        assert_eq!(node_kind, "agent_session");
         assert_eq!(display_name, "Alias Name");
     }
 

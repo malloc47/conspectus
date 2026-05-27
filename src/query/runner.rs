@@ -768,12 +768,19 @@ mod tests {
 
     #[test]
     fn join_candidate_links_against_node_agent_sessions() {
+        // Demonstrates the ADR 0044 join shape: candidate_links'
+        // source endpoint is JSON, so structural joins to typed node
+        // tables match on json_extract paths.
         let snap = snapshot_with_session_and_mux();
         let out = run_query_against_snapshot(
             &snap,
-            "SELECT s.harness_key, l.relation, l.target_node_id \
+            "SELECT s.harness_key, l.relation, l.target_node_kind \
              FROM node_agent_sessions s \
-             JOIN candidate_links l ON l.source_node_id = s.node_id",
+             JOIN candidate_links l \
+               ON l.source_kind = 'agent_session' \
+               AND json_extract(l.source, '$.harness_key') = s.harness_key \
+               AND json_extract(l.source, '$.state_scope') = s.state_scope \
+               AND json_extract(l.source, '$.session_key') = s.session_key",
             OutputFormat::Json,
         )
         .unwrap();
@@ -781,12 +788,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
         assert_eq!(parsed["harness_key"], "claude-code");
         assert_eq!(parsed["relation"], "linked_to_mux");
-        assert!(
-            parsed["target_node_id"]
-                .as_str()
-                .unwrap()
-                .starts_with("mux_session:")
-        );
+        assert_eq!(parsed["target_node_kind"], "mux_session");
     }
 
     fn snapshot_with_fork_chain() -> GraphSnapshot {
@@ -824,17 +826,23 @@ mod tests {
 
     #[test]
     fn recursive_cte_walks_fork_ancestry() {
+        // Hand-rolled equivalent of `v_fork_ancestry` — useful as a
+        // documentation example for users writing their own recursive
+        // queries against the JSON-encoded endpoint columns.
         let snap = snapshot_with_fork_chain();
         let out = run_query_against_snapshot(
             &snap,
-            "WITH RECURSIVE ancestry(node_id, depth) AS ( \
-               SELECT 'fork:c', 0 \
+            "WITH RECURSIVE ancestry(psk, depth) AS ( \
+               SELECT 'c', 0 \
                UNION ALL \
-               SELECT cl.target_node_id, ancestry.depth + 1 \
+               SELECT json_extract(cl.target_node, '$.provider_source_key'), ancestry.depth + 1 \
                  FROM candidate_links cl \
-                 JOIN ancestry ON cl.source_node_id = ancestry.node_id \
+                 JOIN ancestry \
+                   ON cl.source_kind = 'fork' \
+                   AND json_extract(cl.source, '$.provider_source_key') = ancestry.psk \
                  WHERE cl.relation = 'parent_fork' \
-             ) SELECT node_id, depth FROM ancestry ORDER BY depth",
+                   AND cl.target_node_kind = 'fork' \
+             ) SELECT 'fork:' || psk AS node_id, depth FROM ancestry ORDER BY depth",
             OutputFormat::Json,
         )
         .unwrap();
@@ -1071,7 +1079,8 @@ mod tests {
         let snap = snapshot_with_session_and_mux();
         let out = run_query_against_snapshot(
             &snap,
-            "SELECT agent_session_node_id, backend, native_id, provenance, confidence \
+            "SELECT agent_session_harness_key, agent_session_session_key, \
+                    backend, native_id, provenance, confidence \
              FROM v_mux_attachments",
             OutputFormat::Json,
         )
@@ -1079,6 +1088,7 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 1);
         let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed["agent_session_harness_key"], "claude-code");
         assert_eq!(parsed["backend"], "tmux");
         assert_eq!(parsed["native_id"], "tmux:0");
         assert_eq!(parsed["provenance"], "strong_discovered");

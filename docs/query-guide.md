@@ -62,10 +62,13 @@ ORDER BY n DESC;
 
 Active `linked_to_mux` candidate links joined to their mux session.
 One row per attachment; muxes with multiple attached agent sessions
-appear with one row each.
+appear with one row each. Filtered to `source_kind = 'agent_session'`
+(the only source kind today's discovery emits for this relation).
 
-Columns: `mux_node_id`, `backend`, `native_id`, `agent_session_node_id`,
-`link_id`, `provenance`, `confidence`, `freshness`.
+Columns: `mux_node_id`, `backend`, `native_id`, `agent_session`
+(the source endpoint as JSON), `agent_session_harness_key`,
+`agent_session_state_scope`, `agent_session_session_key`, `link_id`,
+`provenance`, `confidence`, `freshness`.
 
 ```sql
 SELECT native_id, COUNT(*) AS attached_agents
@@ -127,12 +130,22 @@ ORDER BY member_count DESC;
 A few things to know when writing queries directly against the
 underlying tables:
 
-- **Node identity**: every `*.node_id` is the `NodeId::Display`
-  form (e.g. `agent_session:claude-code:default:abc`). The
-  per-kind tables (`node_repos`, `node_agent_sessions`, …) all
-  carry this as their primary key, and the `v_nodes` view unions
-  them so `SELECT node_id, node_kind FROM v_nodes` walks every
-  node.
+- **Node identity, typed tables**: every `node_<kind>.node_id` is
+  the `NodeId::Display` form (e.g.
+  `agent_session:claude-code:default:abc`). The per-kind tables
+  (`node_repos`, `node_agent_sessions`, …) all carry this as their
+  primary key, and the `v_nodes` view unions them so
+  `SELECT node_id, node_kind FROM v_nodes` walks every node.
+- **Node identity, link tables (ADR 0044)**: `candidate_links`,
+  `resolved_relationships`, `diagnostics`, and `aliases` store
+  their endpoint references as JSON columns
+  (`source`, `target_node`, `node`, `conflict_source`). Each has
+  a sibling `*_kind` discriminator column generated from
+  `json_extract(col, '$.type')` so kind-filtered queries hit an
+  index without per-row JSON parsing. Pull structural pieces with
+  `json_extract(source, '$.harness_key')` etc.; the
+  `RelationKind`/`NodeId` serde derives in `src/model/mod.rs`
+  document the field shape per kind.
 - **Relation strings**: the `relation` column on `candidate_links`
   and `resolved_relationships` uses the serde snake_case tags
   (`linked_to_mux`, `branch_has_forge_pr`, `parent_fork`, …).
@@ -166,23 +179,38 @@ canonical example. For session-lineage chains, use the same shape
 against the `parent_session` relation:
 
 ```sql
-WITH RECURSIVE chain(child, parent, depth) AS (
-    SELECT s.node_id, NULL, 0 FROM node_agent_sessions s
+-- Each step joins by structural session identity
+-- (harness_key + state_scope + session_key) since candidate_links
+-- stores endpoints as JSON (ADR 0044). The recursive state carries
+-- the three structural fields directly; the final SELECT
+-- reconstructs the NodeId Display form for display.
+WITH RECURSIVE chain(child_harness, child_scope, child_key, depth) AS (
+    SELECT harness_key, state_scope, session_key, 0
+    FROM node_agent_sessions
     UNION ALL
     SELECT
-        c.child,
-        cl.target_node_id,
+        json_extract(cl.target_node, '$.harness_key'),
+        json_extract(cl.target_node, '$.state_scope'),
+        json_extract(cl.target_node, '$.session_key'),
         c.depth + 1
     FROM chain c
     JOIN candidate_links cl
-        ON cl.source_node_id = COALESCE(c.parent, c.child)
+        ON cl.source_kind = 'agent_session'
+        AND json_extract(cl.source, '$.harness_key') = c.child_harness
+        AND json_extract(cl.source, '$.state_scope') = c.child_scope
+        AND json_extract(cl.source, '$.session_key') = c.child_key
+        AND cl.target_node_kind = 'agent_session'
         AND cl.relation = 'parent_session'
         AND cl.state = 'active'
     WHERE c.depth < 32       -- safety bound
 )
-SELECT * FROM chain
+SELECT
+    'agent_session:' || child_harness || ':' || child_scope || ':' || child_key
+        AS child_node_id,
+    depth
+FROM chain
 WHERE depth > 0
-ORDER BY child, depth;
+ORDER BY child_node_id, depth;
 ```
 
 The deepest known cycle in conspectus's data is a few hops, so a

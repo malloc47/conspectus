@@ -352,7 +352,9 @@ fn workspace_with_prs_pr_by_branch() {
 fn workspace_with_prs_branch_to_pr_join_via_candidate_links() {
     // Raw join over the tables rather than the saved view — exercises
     // the schema directly so a v_pr_by_branch refactor that drifts
-    // from the underlying tables surfaces on either path.
+    // from the underlying tables surfaces on either path. Joins are
+    // structural via json_extract over the JSON endpoint columns
+    // (ADR 0044).
     let snap = fixture_workspace_with_prs();
     insta::assert_snapshot!(
         "workspace_with_prs_raw_branch_pr_join",
@@ -360,10 +362,19 @@ fn workspace_with_prs_branch_to_pr_join_via_candidate_links() {
             &snap,
             "SELECT b.refname, pr.number AS pr_number, pr.state AS pr_state \
              FROM node_branches b \
-             JOIN candidate_links cl ON cl.source_node_id = b.node_id \
-                                     AND cl.relation = 'branch_has_forge_pr' \
-                                     AND cl.state = 'active' \
-             JOIN node_forge_prs pr ON pr.node_id = cl.target_node_id \
+             JOIN candidate_links cl \
+               ON cl.source_kind = 'branch' \
+               AND json_extract(cl.source, '$.repo.common_dir') = b.repo_common_dir \
+               AND json_extract(cl.source, '$.refname') = b.refname \
+               AND cl.relation = 'branch_has_forge_pr' \
+               AND cl.state = 'active' \
+             JOIN node_forge_prs pr \
+               ON cl.target_node_kind = 'forge_pr' \
+               AND json_extract(cl.target_node, '$.provider') = pr.provider_name \
+               AND json_extract(cl.target_node, '$.host') = pr.host \
+               AND json_extract(cl.target_node, '$.owner') = pr.owner \
+               AND json_extract(cl.target_node, '$.repo') = pr.repo \
+               AND json_extract(cl.target_node, '$.number') = pr.number \
              ORDER BY pr.number"
         )
     );
@@ -389,7 +400,9 @@ fn ambiguous_mux_candidates_candidate_links_table_directly() {
         "ambiguous_mux_candidates_links_table",
         json(
             &snap,
-            "SELECT link_id, target_node_id, provenance, confidence, state \
+            "SELECT link_id, target_node_kind, \
+                    json_extract(target_node, '$.native_id') AS target_native_id, \
+                    provenance, confidence, state \
              FROM candidate_links WHERE relation = 'linked_to_mux' ORDER BY link_id"
         )
     );

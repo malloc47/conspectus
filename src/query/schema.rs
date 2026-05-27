@@ -23,7 +23,7 @@ pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 /// the bump. Aligned with the in-memory `GraphSnapshot` schema version;
 /// when the model gains breaking changes (e.g. P7-002's provider-
 /// provenance fields), both versions advance together.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// One curated saved view defined in `schema.sql`. The registry below
 /// is the single source of truth that `conspectus query --list-views`
@@ -321,9 +321,11 @@ pub const NODE_FORGE_PRS_COLUMNS: &[&str] = &[
 
 pub const CANDIDATE_LINKS_COLUMNS: &[&str] = &[
     "link_id",
-    "source_node_id",
+    "source",
+    "source_kind",
     "target_kind",
-    "target_node_id",
+    "target_node",
+    "target_node_kind",
     "target_node_type",
     "target_harness_key",
     "target_native_id",
@@ -345,8 +347,10 @@ pub const CANDIDATE_LINKS_COLUMNS: &[&str] = &[
 ];
 
 pub const RESOLVED_RELATIONSHIPS_COLUMNS: &[&str] = &[
-    "source_node_id",
-    "target_node_id",
+    "source",
+    "source_kind",
+    "target",
+    "target_kind",
     "relation",
     "selected_link_id",
     "competing_link_ids",
@@ -358,12 +362,13 @@ pub const DIAGNOSTICS_COLUMNS: &[&str] = &[
     "relation",
     "config_path",
     "config_message",
-    "conflict_source_node_id",
+    "conflict_source",
+    "conflict_source_kind",
     "conflict_selected_link_id",
     "conflict_competing_link_ids",
 ];
 
-pub const ALIASES_COLUMNS: &[&str] = &["node_id", "display_name"];
+pub const ALIASES_COLUMNS: &[&str] = &["node", "node_kind", "display_name"];
 
 pub const PROVIDER_STATE_COLUMNS: &[&str] =
     &["provider", "last_run_at", "last_outcome", "last_error"];
@@ -393,7 +398,10 @@ pub const V_MUX_ATTACHMENTS_COLUMNS: &[&str] = &[
     "mux_node_id",
     "backend",
     "native_id",
-    "agent_session_node_id",
+    "agent_session",
+    "agent_session_harness_key",
+    "agent_session_state_scope",
+    "agent_session_session_key",
     "link_id",
     "provenance",
     "confidence",
@@ -602,12 +610,13 @@ mod tests {
         let conn = fresh_conn();
         let expected = &[
             "idx_node_agent_sessions_last_active",
-            "idx_candidate_links_source_relation",
-            "idx_candidate_links_target_relation",
+            "idx_candidate_links_source_kind_relation",
+            "idx_candidate_links_target_node_kind_relation",
+            "idx_candidate_links_target_mux_native_id",
             "idx_candidate_links_provider_fresh",
             "idx_embeddings_source_field",
-            "idx_resolved_relationships_source_relation",
-            "idx_resolved_relationships_target_relation",
+            "idx_resolved_relationships_source_kind_relation",
+            "idx_resolved_relationships_target_kind_relation",
         ];
         for index in expected {
             let count: i64 = conn
@@ -759,10 +768,14 @@ mod tests {
         // this test — the schema-side counterpart to the loader's
         // exhaustive struct destructure (which enforces model-side
         // alignment). See ADR 0043 §"Schema work required" / P10-001.
+        //
+        // Uses `table_xinfo` (not `table_info`) so STORED GENERATED
+        // columns introduced by ADR 0044 — `source_kind`,
+        // `target_node_kind`, etc. — are also covered.
         let conn = fresh_conn();
         for (table, expected) in TABLE_COLUMNS {
             let actual: Vec<String> = conn
-                .prepare(&format!("PRAGMA table_info({table})"))
+                .prepare(&format!("PRAGMA table_xinfo({table})"))
                 .unwrap_or_else(|err| panic!("prepare PRAGMA for {table}: {err}"))
                 .query_map([], |row| row.get::<_, String>(1))
                 .unwrap_or_else(|err| panic!("execute PRAGMA for {table}: {err}"))

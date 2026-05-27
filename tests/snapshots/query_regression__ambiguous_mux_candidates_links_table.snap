@@ -1,7 +1,7 @@
 ---
 source: tests/query_regression.rs
-assertion_line: 382
-expression: "json(&snap,\n\"SELECT link_id, target_node_id, provenance, confidence, state \\\n             FROM candidate_links WHERE relation = 'linked_to_mux' ORDER BY link_id\")"
+assertion_line: 399
+expression: "json(&snap,\n\"SELECT link_id, target_node_kind, \\\n                    json_extract(target_node, '$.native_id') AS target_native_id, \\\n                    provenance, confidence, state \\\n             FROM candidate_links WHERE relation = 'linked_to_mux' ORDER BY link_id\")"
 ---
-{"confidence":"medium","link_id":"L_mux_0","provenance":"strong_discovered","state":"active","target_node_id":"mux_session:tmux:0"}
-{"confidence":"medium","link_id":"L_mux_1","provenance":"discovered","state":"active","target_node_id":"mux_session:tmux:1"}
+{"confidence":"medium","link_id":"L_mux_0","provenance":"strong_discovered","state":"active","target_native_id":"tmux:0","target_node_kind":"mux_session"}
+{"confidence":"medium","link_id":"L_mux_1","provenance":"discovered","state":"active","target_native_id":"tmux:1","target_node_kind":"mux_session"}
