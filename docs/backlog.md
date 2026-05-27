@@ -5426,7 +5426,7 @@ this phase migrates whichever ones exist when each story lands.
     sneaks in. All 732 lib tests pass byte-for-byte; full suite
     green.
 
-- [ ] `P10-004` Migrate the CLI agent projection to SQLite.
+- [x] `P10-004` Migrate the CLI agent projection to SQLite.
   - Scope: replace `render_with(snapshot, Projection::Agent, opts)`'s
     code path with a `Connection`-driven implementation modeled on
     `src/output/agent_sqlite.rs` from the spike. All 17 cells
@@ -5443,6 +5443,36 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: `conspectus table --rows sessions` against a
     real `graph.sqlite`; visually compare to the prior output.
   - Blockers: `P10-002`, `P10-003`.
+  - Outcome: production renderer at `src/output/agent.rs` covers
+    all 17 cells. `render_with(snapshot, Projection::Agent, opts)`
+    routes through `agent::build_agent_rows_from_snapshot` via the
+    new `query::materialize_snapshot` helper; the in-memory
+    `build_agent_rows` / `agent_cell` / `lineage_cell` /
+    `preferred_pr_for_session` / `session_*` helpers are deleted.
+    Cells assemble from one primary query (sessions joined to
+    `v_sessions_with_repo` and `aliases`) plus seven per-cell
+    side-lookups (`fetch_mux_lookup`, `fetch_branch_lookup`,
+    `fetch_lineage_lookup`, `fetch_workspace_lookup`,
+    `fetch_fork_lookup`, `fetch_declared_lookup`, plus a global
+    `fetch_global_pr`).
+    `RowFilter` runs on top of the result set; mux candidate count
+    feeds the filter's MuxStateKey input. The spike's
+    `src/output/agent_sqlite.rs` is removed.
+    Two latent P10-002 bugs surfaced and were fixed here:
+    `branch_has_forge_pr` saved view (`v_pr_by_branch`) had the
+    direction wrong — production discovery and the in-memory
+    `preferred_pr_for_session` both build the link source=ForgePr,
+    target=Branch (despite the relation name suggesting the
+    opposite); the saved view now joins that way. And saved view
+    JOINs that compared structural columns on `node_<kind>` tables
+    (e.g. `m.native_id`) were brittle: production discovery
+    routinely sets `MuxSessionNode.native_id` to a value distinct
+    from `MuxSessionId.native_id` (id is `tmux:<name>`, structural
+    is just `<name>`). All such JOINs in both `agent.rs` and the
+    saved views now reconstruct the Display form from the endpoint
+    JSON and compare against `node_<kind>.node_id`. Existing
+    `output::table` snapshot tests are the parity assertion; all
+    731 lib tests pass byte-for-byte, full integration suite green.
 
 - [ ] `P10-005` Migrate the CLI mux projection to SQLite.
   - Scope: same pattern as `P10-004` for `Projection::Mux`. Use
