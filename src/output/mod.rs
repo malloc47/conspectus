@@ -11,6 +11,8 @@ pub mod mux;
 pub mod node_show;
 pub mod render;
 pub mod table;
+#[cfg(feature = "query")]
+pub mod union;
 
 pub fn render_graph_json(snapshot: &GraphSnapshot) -> Result<String> {
     Ok(serde_json::to_string_pretty(snapshot)?)

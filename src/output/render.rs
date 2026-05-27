@@ -1216,6 +1216,37 @@ pub fn provenance_precedence(tag: &str) -> u8 {
     }
 }
 
+/// Numeric precedence for a confidence serde tag (`high` > `medium`
+/// > `low`). Substrate-safe.
+pub fn confidence_precedence(tag: &str) -> u8 {
+    match tag {
+        "high" => 3,
+        "medium" => 2,
+        "low" => 1,
+        _ => 0,
+    }
+}
+
+/// Pick the strongest candidate by (provenance precedence,
+/// confidence precedence, link id ascending) — the same comparator
+/// `crate::model::pick_preferred` applies to typed `GraphLink`
+/// values. String-driven so SQL-backed renderers can rank candidate
+/// rows pulled from `candidate_links` without round-tripping through
+/// typed `GraphLink`.
+pub fn pick_strongest<T>(
+    candidates: Vec<T>,
+    accessor: impl Fn(&T) -> (&String, &String, &String),
+) -> Option<T> {
+    candidates.into_iter().max_by(|a, b| {
+        let (ap, ac, ai) = accessor(a);
+        let (bp, bc, bi) = accessor(b);
+        provenance_precedence(ap)
+            .cmp(&provenance_precedence(bp))
+            .then(confidence_precedence(ac).cmp(&confidence_precedence(bc)))
+            .then(ai.cmp(bi))
+    })
+}
+
 pub fn provenance_code_from_tag(tag: &str) -> &'static str {
     match tag {
         "local_declared" => "LD",

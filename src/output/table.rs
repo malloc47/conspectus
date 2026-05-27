@@ -29,8 +29,8 @@
 use std::path::Path;
 
 use crate::model::{
-    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphSnapshot, LinkEndpoint,
-    MuxSessionNode, NodeId, Provenance, RelationKind, SnapshotIndex, pick_preferred,
+    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphSnapshot, LinkEndpoint, NodeId,
+    Provenance, RelationKind, SnapshotIndex, pick_preferred,
 };
 
 // Re-exports of the backend-agnostic surface that external callers
@@ -46,7 +46,7 @@ pub use super::render::{
 
 // Crate-internal substrate access used by the projection builders /
 // cell extractors below.
-use super::render::{FORKS_COLUMNS, PRS_COLUMNS, UNION_COLUMNS};
+use super::render::{FORKS_COLUMNS, PRS_COLUMNS};
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
 /// a stable short row identifier for table output (H-TBL-002).
@@ -87,7 +87,11 @@ pub fn render_with(
         // P10-005: mux projection now reads from SQLite. Same
         // materialization bridge as above.
         Projection::Mux => super::mux::build_mux_rows_from_snapshot(snapshot, &columns, options),
-        Projection::Union => build_union_rows(&SnapshotView::new(snapshot), &columns),
+        // P10-006: union projection now reads from SQLite via
+        // v_nodes — the merge is in SQL, not Rust.
+        Projection::Union => {
+            super::union::build_union_rows_from_snapshot(snapshot, &columns, options)
+        }
         Projection::Pr => build_pr_rows(&SnapshotView::new(snapshot), &columns),
         Projection::Fork => build_fork_rows(&SnapshotView::new(snapshot), &columns),
     };
@@ -156,23 +160,6 @@ impl<'a> std::ops::Deref for SnapshotView<'a> {
 // Per-row-type column extractors
 // -----------------------------------------------------------------------------
 
-/// Render the `title` column for an agent-session row per ADR 0029's
-/// `alias > title > id-suffix` precedence. The id-suffix tier degrades
-/// to `—` here because the `id` column carries the short id already.
-fn session_display_title(
-    view: &SnapshotView<'_>,
-    node_id: &NodeId,
-    session: &AgentSessionNode,
-) -> String {
-    crate::aliases::resolve_display_label(
-        Some(&view.snapshot.aliases),
-        node_id,
-        session.title.as_deref(),
-    )
-    .map(str::to_string)
-    .unwrap_or_else(|| "—".to_string())
-}
-
 fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
     let mut anc_iter = ancestor.components();
     let mut desc_iter = descendant.components();
@@ -183,68 +170,6 @@ fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
             (Some(_), None) => return false,
             (None, _) => return true,
         }
-    }
-}
-
-enum UnionRowSource<'a> {
-    Agent {
-        node_id: &'a NodeId,
-        session: &'a AgentSessionNode,
-    },
-    Mux {
-        mux: &'a MuxSessionNode,
-    },
-}
-
-struct UnionRowCtx<'view, 'snap> {
-    view: &'view SnapshotView<'snap>,
-    source: UnionRowSource<'view>,
-    short_id: &'view str,
-}
-
-fn union_cell(key: &str, ctx: &UnionRowCtx<'_, '_>) -> String {
-    match (key, &ctx.source) {
-        ("id", _) => ctx.short_id.to_string(),
-        ("kind", UnionRowSource::Agent { .. }) => "agent".to_string(),
-        ("kind", UnionRowSource::Mux { .. }) => "mux".to_string(),
-        ("label", UnionRowSource::Agent { session, .. }) => agent_session_label(session),
-        ("label", UnionRowSource::Mux { mux }) => mux_session_label(mux),
-        ("cwd", UnionRowSource::Agent { session, .. }) => {
-            session.cwd.clone().unwrap_or_else(|| "—".to_string())
-        }
-        ("cwd", UnionRowSource::Mux { mux }) => mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
-        ("relationship", UnionRowSource::Agent { node_id, .. }) => {
-            let mux_link = ctx.view.preferred_link(node_id, RelationKind::LinkedToMux);
-            let mux_count = ctx
-                .view
-                .candidates_for(node_id, RelationKind::LinkedToMux)
-                .len();
-            match mux_link {
-                Some(link) => {
-                    let target = link
-                        .target_node_id()
-                        .and_then(|id| ctx.view.mux_sessions.get(id))
-                        .map(|mux| mux_session_label(mux))
-                        .unwrap_or_else(|| "—".to_string());
-                    format!(
-                        "mux={target} [{ind}]",
-                        ind = indicator(link.provenance, link.confidence, mux_count > 1)
-                    )
-                }
-                None => "mux=—".to_string(),
-            }
-        }
-        ("relationship", UnionRowSource::Mux { .. }) => "—".to_string(),
-        ("preview", UnionRowSource::Agent { session, .. }) => session
-            .last_message_preview
-            .clone()
-            .unwrap_or_else(|| "—".to_string()),
-        ("preview", UnionRowSource::Mux { .. }) => "—".to_string(),
-        ("title", UnionRowSource::Agent { node_id, session }) => {
-            session_display_title(ctx.view, node_id, session)
-        }
-        ("title", UnionRowSource::Mux { .. }) => "—".to_string(),
-        _ => "—".to_string(),
     }
 }
 
@@ -278,10 +203,6 @@ pub(crate) fn agent_session_key_for_label(key: &str) -> String {
     } else {
         short_session_id(key)
     }
-}
-
-fn mux_session_label(mux: &MuxSessionNode) -> String {
-    format!("{}:{}", mux.backend, mux.native_id)
 }
 
 fn forge_pr_label(pr: &ForgePrNode) -> String {
@@ -543,58 +464,6 @@ pub(crate) fn short_session_id(key: &str) -> String {
         let tail: String = chars[chars.len() - TAIL..].iter().collect();
         format!("…{tail}")
     }
-}
-
-fn build_union_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
-    // The union projection mixes agent and mux rows; compute one prefix
-    // length across the combined id set so collisions across kinds are
-    // disambiguated too.
-    let body_full_ids: Vec<String> = view
-        .agent_sessions
-        .keys()
-        .chain(view.mux_sessions.keys())
-        .map(node_short_id)
-        .collect();
-    let id_len = unique_prefix_len(&body_full_ids);
-    let agent_count = view.agent_sessions.len();
-
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    rows.push(
-        columns
-            .iter()
-            .map(|key| header_label(UNION_COLUMNS, key))
-            .collect(),
-    );
-
-    for ((node_id, session), full_short) in view
-        .agent_sessions
-        .iter()
-        .zip(body_full_ids.iter().take(agent_count))
-    {
-        let short_id = &full_short[..id_len];
-        let ctx = UnionRowCtx {
-            view,
-            source: UnionRowSource::Agent { node_id, session },
-            short_id,
-        };
-        rows.push(columns.iter().map(|key| union_cell(key, &ctx)).collect());
-    }
-
-    for (mux, full_short) in view
-        .mux_sessions
-        .values()
-        .zip(body_full_ids.iter().skip(agent_count))
-    {
-        let short_id = &full_short[..id_len];
-        let ctx = UnionRowCtx {
-            view,
-            source: UnionRowSource::Mux { mux },
-            short_id,
-        };
-        rows.push(columns.iter().map(|key| union_cell(key, &ctx)).collect());
-    }
-
-    rows
 }
 
 #[cfg(test)]

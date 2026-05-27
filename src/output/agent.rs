@@ -41,7 +41,7 @@ use rusqlite::Connection;
 
 use super::render::{
     self, RenderOptions, SESSIONS_COLUMNS, current_epoch, format_relative_age, header_label,
-    node_short_id_from_display, unique_prefix_len,
+    node_short_id_from_display, pick_strongest, unique_prefix_len,
 };
 use super::table::{agent_session_key_for_label, short_session_id, strip_branch_prefix};
 use crate::filter::{MuxStateKey, SessionMatchInputs};
@@ -839,37 +839,6 @@ fn fetch_declared_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionK
         );
     }
     Ok(out)
-}
-
-// -----------------------------------------------------------------------------
-// pick_strongest helper — generic over the candidate type
-// -----------------------------------------------------------------------------
-
-/// Pick the strongest candidate by (`Provenance::precedence`,
-/// `Confidence`, `link_id`), matching `pick_preferred` in the model.
-/// The accessor returns refs into the candidate so we can rank
-/// without borrowing it twice.
-fn pick_strongest<T>(
-    candidates: Vec<T>,
-    accessor: impl Fn(&T) -> (&String, &String, &String),
-) -> Option<T> {
-    candidates.into_iter().max_by(|a, b| {
-        let (ap, ac, ai) = accessor(a);
-        let (bp, bc, bi) = accessor(b);
-        render::provenance_precedence(ap)
-            .cmp(&render::provenance_precedence(bp))
-            .then(confidence_precedence(ac).cmp(&confidence_precedence(bc)))
-            .then(ai.cmp(bi))
-    })
-}
-
-fn confidence_precedence(tag: &str) -> u8 {
-    match tag {
-        "high" => 3,
-        "medium" => 2,
-        "low" => 1,
-        _ => 0,
-    }
 }
 
 // -----------------------------------------------------------------------------
