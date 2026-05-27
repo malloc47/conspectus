@@ -5498,11 +5498,30 @@ this phase migrates whichever ones exist when each story lands.
     `output::table` snapshot tests are the parity check; all 731
     lib tests pass byte-for-byte, full integration suite green.
 
-- [ ] `P10-006` Migrate the CLI union projection to SQLite.
+- [x] `P10-006` Migrate the CLI union projection to SQLite.
   - Scope: same pattern for `Projection::Union`. Composes the
     agent/mux query paths over a `UNION ALL` shape.
   - Tests: parity with existing union snapshots.
   - Blockers: `P10-004`, `P10-005`.
+  - Outcome: production renderer at `src/output/union.rs` covers
+    all 7 cells. The agent/mux merge happens in SQL via the
+    pre-existing `v_nodes` view (a `UNION ALL` over every typed
+    node table) joined left to `node_agent_sessions`,
+    `node_mux_sessions`, and `aliases`; one query produces the
+    full ordered row stream and the cell extractor dispatches on
+    the row's `node_kind`. `ORDER BY` puts every agent row before
+    every mux row and breaks ties within a kind by Display-form
+    `node_id`. The `relationship` cell still uses a per-agent
+    preferred-`linked_to_mux` lookup that mirrors
+    `output::agent::fetch_mux_lookup`.
+    Substrate refactor: `pick_strongest` and
+    `confidence_precedence` are pulled into `output::render` so
+    agent / mux / union share one definition instead of three.
+    The in-memory `UnionRowSource`, `UnionRowCtx`, `union_cell`,
+    `build_union_rows`, `session_display_title`, and
+    `mux_session_label` are deleted. Existing `output::table`
+    snapshot tests are the parity check; all 731 lib tests pass
+    byte-for-byte and the full integration suite is green.
 
 - [ ] `P10-007` Migrate the CLI PRs projection to SQLite.
   - Scope: same pattern for `Projection::Pr`. Use `v_pr_by_branch`.
