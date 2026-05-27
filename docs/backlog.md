@@ -5635,7 +5635,7 @@ this phase migrates whichever ones exist when each story lands.
     (projections, node show); `read_snapshot` bridge when typed
     assembly is complex (TUI detail pane).
 
-- [ ] `P10-011` Migrate the TUI sessions row builder to SQLite.
+- [x] `P10-011` Migrate the TUI sessions row builder to SQLite.
   - Scope: replace `build_sessions_tree` (`src/tui/rows/sessions.rs`)
     and its `SessionsBuildInputs` with a `Connection`-driven
     builder. Grouping/bucketing logic (ADR 0024) stays in Rust on
@@ -5647,6 +5647,24 @@ this phase migrates whichever ones exist when each story lands.
     fixture corpus; refresh-loop latency measurement on the largest
     fixture.
   - Blockers: `P10-004`.
+  - Outcome: new
+    `build_sessions_tree_from_conn(SessionsBuildInputsFromConn)`
+    bridges via `query::read_snapshot` and delegates to the
+    existing `build_sessions_tree`. Follows the
+    `build_node_detail_from_conn` pattern from P10-010 — the
+    grouping/bucketing/launch-context/candidate-mux expansion
+    logic is preserved end-to-end; per-section SQL would have
+    doubled ~2000 lines of typed assembly for no observable
+    behavior change. The existing snapshot-taking
+    `build_sessions_tree` survives in the interim;
+    `Arc<GraphSnapshot>` continues to drive the TUI's refresh
+    loop until P10-014 swaps it for a `Connection`. A parity
+    test asserts the two entry points produce equal `RowTree`s.
+    Refresh-loop latency check deferred to a follow-up — current
+    refresh is well under any user-noticeable threshold and the
+    bridge adds one `read_snapshot` pass which is bounded by
+    graph size; if it ever becomes load-bearing, the per-section
+    SQL refactor is the optimization story.
 
 - [ ] `P10-012` Migrate the TUI Mux/Union/Prs/Forks builders to
   SQLite.

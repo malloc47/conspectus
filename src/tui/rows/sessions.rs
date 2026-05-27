@@ -54,6 +54,46 @@ pub struct SessionsBuildInputs<'a> {
     pub filter: RowFilter,
 }
 
+/// SQLite-backed inputs (P10-011 / ADR 0043). Mirrors
+/// [`SessionsBuildInputs`] but takes a `Connection` instead of a
+/// `&GraphSnapshot`.
+#[derive(Debug)]
+pub struct SessionsBuildInputsFromConn<'a> {
+    pub conn: &'a rusqlite::Connection,
+    pub grouping: SessionsGrouping,
+    pub home: Option<&'a Path>,
+    pub now: Option<i64>,
+    pub cwd: Option<&'a Path>,
+    pub filter: RowFilter,
+}
+
+/// SQLite-backed sessions row-tree builder (P10-011 / ADR 0043).
+///
+/// Consumes from SQLite via [`crate::query::read_snapshot`] per-call
+/// and delegates to [`build_sessions_tree`]. The
+/// grouping / bucketing / launch-context-highlight / candidate-mux
+/// expansion logic (ADR 0024 and follow-ups) lives in the typed
+/// builder below and is preserved end-to-end — see the rationale on
+/// `crate::tui::detail::build_node_detail_from_conn` for why this
+/// migration follows the bridge pattern rather than per-section SQL.
+///
+/// Once P10-014 swaps the TUI's stored `Arc<GraphSnapshot>` for a
+/// `Connection`, this function becomes the only call site; the
+/// snapshot-taking [`build_sessions_tree`] survives in the interim.
+pub fn build_sessions_tree_from_conn(
+    inputs: SessionsBuildInputsFromConn<'_>,
+) -> rusqlite::Result<RowTree> {
+    let snapshot = crate::query::read_snapshot(inputs.conn)?;
+    Ok(build_sessions_tree(SessionsBuildInputs {
+        snapshot: &snapshot,
+        grouping: inputs.grouping,
+        home: inputs.home,
+        now: inputs.now,
+        cwd: inputs.cwd,
+        filter: inputs.filter,
+    }))
+}
+
 /// Build the sessions row tree. Pure: depends only on the inputs,
 /// no I/O, no clock reads, no env access.
 pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
@@ -640,6 +680,42 @@ mod tests {
 
     fn home() -> PathBuf {
         PathBuf::from("/home/op")
+    }
+
+    /// Parity guard for the SQLite-backed entry point: the two
+    /// builders should produce identical `RowTree`s for the same
+    /// fixture. Catches drift if a future story refactors only one
+    /// path. See `crate::tui::detail` for the same pattern on the
+    /// detail pane.
+    #[test]
+    fn from_conn_matches_snapshot_path_for_basic_fixture() {
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                repo("/r/.git"),
+                worktree("/r/.git", "/r"),
+                agent_session("codex", "/state", "alpha", Some("/r/sub"), None, None),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let direct = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Repo,
+            home: Some(home().as_path()),
+            now: Some(1_700_000_000),
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+        let via_conn = build_sessions_tree_from_conn(SessionsBuildInputsFromConn {
+            conn: &conn,
+            grouping: SessionsGrouping::Repo,
+            home: Some(home().as_path()),
+            now: Some(1_700_000_000),
+            cwd: None,
+            filter: RowFilter::default(),
+        })
+        .expect("from_conn ok");
+        assert_eq!(direct, via_conn);
     }
 
     fn repo(common_dir: &str) -> GraphNode {
