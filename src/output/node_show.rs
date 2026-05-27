@@ -14,19 +14,22 @@
 //!   only resolves when it uniquely identifies one node.
 //!
 //! H-TBL-005 wires these forms through the CLI command added by H-OBS-002.
+//!
+//! SQLite-backed renderer (P10-009 / ADR 0043). The existing
+//! `resolve_node_id` / `render_node_show` entry points remain as thin
+//! bridges that materialize a snapshot to an in-memory SQLite
+//! connection and route through the SQL implementations below.
+//! P10-014 retires the bridge.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use crate::model::{
-    AgentSessionNode, BranchNode, CheckoutNode, Diagnostic, ForgePrNode, ForkNode, GraphLink,
-    GraphNode, GraphSnapshot, LinkEndpoint, MuxSessionNode, NodeId, RelationKind, RepoNode,
-    ResolvedRelationship, WorkspaceNode,
-};
-use crate::output::table::{header_style, indicator, node_short_id, push_styled};
+use rusqlite::Connection;
 
-/// Outcome of resolving an `<id>` argument to a [`NodeId`] against a
-/// [`GraphSnapshot`].
+use crate::model::{GraphSnapshot, NodeId};
+use crate::output::render::{self, header_style, node_short_id_from_display, push_styled};
+
+/// Outcome of resolving an `<id>` argument to a [`NodeId`].
 #[derive(Debug)]
 pub enum NodeResolveError {
     /// No node matched the input under any accepted form.
@@ -58,33 +61,102 @@ impl std::fmt::Display for NodeResolveError {
 
 impl std::error::Error for NodeResolveError {}
 
-/// Resolve `input` to a single [`NodeId`] in `snapshot` using every
-/// accepted form (short hex prefix, `Display`, harness/mux label).
-pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, NodeResolveError> {
-    let trimmed = input.trim();
-    let mut matches: BTreeMap<NodeId, ()> = BTreeMap::new();
+// -----------------------------------------------------------------------------
+// Public bridge entry points (materialize snapshot, delegate to SQL)
+// -----------------------------------------------------------------------------
 
+/// Resolve `input` to a single [`NodeId`] in `snapshot` using every
+/// accepted form. Materializes `snapshot` to an in-memory SQLite
+/// connection and delegates to [`resolve_node_id_from_conn`].
+pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, NodeResolveError> {
+    let conn = crate::query::materialize_snapshot(snapshot)
+        .expect("materialize GraphSnapshot to in-memory SQLite for node show");
+    resolve_node_id_from_conn(&conn, input)
+        .expect("node-id resolution should not fail on a freshly loaded snapshot")
+}
+
+/// Render the resolved node `id` against `snapshot` as plain text.
+/// Materializes `snapshot` to an in-memory SQLite connection and
+/// delegates to [`render_node_show_from_conn`].
+pub fn render_node_show(snapshot: &GraphSnapshot, id: &NodeId, color: bool) -> String {
+    let conn = crate::query::materialize_snapshot(snapshot)
+        .expect("materialize GraphSnapshot to in-memory SQLite for node show");
+    render_node_show_from_conn(&conn, id, color)
+        .expect("node-show rendering should not fail on a freshly loaded snapshot")
+}
+
+// -----------------------------------------------------------------------------
+// SQL-driven implementations
+// -----------------------------------------------------------------------------
+
+/// Resolve `input` to a `NodeId` by querying `conn`. Accepted forms
+/// mirror [`resolve_node_id`].
+pub fn resolve_node_id_from_conn(
+    conn: &Connection,
+    input: &str,
+) -> rusqlite::Result<Result<NodeId, NodeResolveError>> {
+    let trimmed = input.trim();
     let is_hex_prefix = !trimmed.is_empty()
         && trimmed.len() <= 16
         && trimmed.chars().all(|c| c.is_ascii_hexdigit());
 
-    for node in &snapshot.nodes {
-        let id = node.id();
-        if is_hex_prefix && node_short_id(&id).starts_with(trimmed) {
-            matches.insert(id.clone(), ());
-            continue;
+    let mut matches: BTreeMap<NodeId, ()> = BTreeMap::new();
+
+    // 1. Hex prefix and Display matches walk every node via v_nodes.
+    let mut stmt = conn.prepare("SELECT node_id FROM v_nodes")?;
+    let node_ids: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for node_id_text in &node_ids {
+        let matches_input = (is_hex_prefix
+            && node_short_id_from_display(node_id_text).starts_with(trimmed))
+            || node_id_text == trimmed;
+        if matches_input && let Some(id) = parse_display_via_typed_tables(conn, node_id_text)? {
+            matches.insert(id, ());
         }
-        if id.to_string() == trimmed {
-            matches.insert(id.clone(), ());
-            continue;
+    }
+
+    // 2. Label matches against agent and mux sessions only.
+    //    `<harness>:<session_key>` or `<harness>:<title>` for agents,
+    //    `<backend>:<native_id>` for muxes — same as the in-memory
+    //    `label_matches`.
+    let mut agent_stmt = conn
+        .prepare("SELECT harness_key, state_scope, session_key, title FROM node_agent_sessions")?;
+    let agent_rows: Vec<(String, String, String, Option<String>)> = agent_stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    for (harness, scope, key, title) in agent_rows {
+        let key_label = format!("{harness}:{key}");
+        let title_label = title.as_deref().map(|t| format!("{harness}:{t}"));
+        if key_label == trimmed || title_label.as_deref() == Some(trimmed) {
+            let id = NodeId::AgentSession(crate::model::AgentSessionId::new(
+                harness.clone(),
+                scope.clone(),
+                key.clone(),
+            ));
+            matches.insert(id, ());
         }
-        if label_matches(node, trimmed) {
-            matches.insert(id.clone(), ());
+    }
+    let mut mux_stmt = conn.prepare("SELECT node_id, backend, native_id FROM node_mux_sessions")?;
+    let mux_rows: Vec<(String, String, String)> = mux_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (node_id, backend, native_id) in mux_rows {
+        // Label is `<backend>:<structural native_id>` (matches
+        // `label_matches`); the typed NodeId is reconstructed from
+        // the canonical `node_id` column since `MuxSessionId.native_id`
+        // can diverge from the structural column.
+        if format!("{backend}:{native_id}") == trimmed
+            && let Some(id) = parse_display_via_typed_tables(conn, &node_id)?
+        {
+            matches.insert(id, ());
         }
     }
 
     let mut candidates: Vec<NodeId> = matches.into_keys().collect();
-    match candidates.len() {
+    Ok(match candidates.len() {
         0 => Err(NodeResolveError::NotFound {
             input: trimmed.to_string(),
         }),
@@ -93,174 +165,469 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
             input: trimmed.to_string(),
             candidates,
         }),
-    }
+    })
 }
 
-fn label_matches(node: &GraphNode, input: &str) -> bool {
-    match node {
-        GraphNode::AgentSession(session) => {
-            let title_label = session
-                .title
-                .as_ref()
-                .map(|t| format!("{}:{}", session.harness_key, t));
-            let key_label = format!("{}:{}", session.harness_key, session.id.session_key);
-            title_label.as_deref() == Some(input) || key_label == input
-        }
-        GraphNode::MuxSession(mux) => format!("{}:{}", mux.backend, mux.native_id) == input,
-        _ => false,
-    }
-}
-
-/// Render the resolved node `id` against `snapshot` as plain text.
-pub fn render_node_show(snapshot: &GraphSnapshot, id: &NodeId, color: bool) -> String {
-    let Some(node) = snapshot.nodes.iter().find(|n| n.id() == *id) else {
-        return format!("node {id} not found in snapshot\n");
+/// Reconstruct a typed [`NodeId`] from its `Display` form by looking
+/// up the matching row in the per-kind `node_<kind>` table and
+/// rebuilding the `*Id` from its structural columns. Returns `None`
+/// when the Display form doesn't match any present node (which can
+/// only happen if the caller passed a hex prefix that hashes a
+/// nonexistent node — unreachable in normal use).
+fn parse_display_via_typed_tables(
+    conn: &Connection,
+    display: &str,
+) -> rusqlite::Result<Option<NodeId>> {
+    use crate::model::{
+        AgentSessionId, BranchId, CheckoutId, ForgePrId, ForkId, MuxSessionId, RepoId, WorkspaceId,
     };
-    let mut out = String::new();
-    write_node_summary(&mut out, node, color, Some(&snapshot.aliases));
-    write_candidate_links(&mut out, snapshot, id, color);
-    write_resolved(&mut out, snapshot, id, color);
-    write_diagnostics(&mut out, snapshot, id, color);
-    out
+    // Each lookup is cheap (PK lookup) and we know exactly one will
+    // succeed per kind discriminator.
+    let kind = display.split_once(':').map(|(k, _)| k).unwrap_or("");
+    match kind {
+        "repo" => {
+            let common_dir: Option<String> = conn
+                .query_row(
+                    "SELECT common_dir FROM node_repos WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(common_dir.map(|cd| NodeId::Repo(RepoId::new(cd))))
+        }
+        "workspace" => {
+            let root: Option<String> = conn
+                .query_row(
+                    "SELECT root FROM node_workspaces WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(root.map(|r| NodeId::Workspace(WorkspaceId::new(r))))
+        }
+        "mux_session" => {
+            // The MuxSessionId's native_id is embedded in the
+            // Display form as the suffix after `mux_session:`. The
+            // structural column may diverge from it; use the
+            // canonical id from the display string.
+            let row: Option<String> = conn
+                .query_row(
+                    "SELECT node_id FROM node_mux_sessions WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(row.map(|_| {
+                let native_id = display.strip_prefix("mux_session:").unwrap_or(display);
+                NodeId::MuxSession(MuxSessionId::new(native_id))
+            }))
+        }
+        "fork" => {
+            let row: Option<String> = conn
+                .query_row(
+                    "SELECT node_id FROM node_forks WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(row.map(|_| {
+                let psk = display.strip_prefix("fork:").unwrap_or(display);
+                NodeId::Fork(ForkId::new(psk))
+            }))
+        }
+        "agent_session" => {
+            let row: Option<(String, String, String)> = conn
+                .query_row(
+                    "SELECT harness_key, state_scope, session_key FROM node_agent_sessions \
+                     WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            Ok(row.map(|(h, s, k)| NodeId::AgentSession(AgentSessionId::new(h, s, k))))
+        }
+        "checkout" => {
+            let row: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT repo_common_dir, root FROM node_checkouts WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            Ok(row.map(|(cd, root)| NodeId::Checkout(CheckoutId::new(RepoId::new(cd), root))))
+        }
+        "branch" => {
+            let row: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT repo_common_dir, refname FROM node_branches WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            Ok(row.map(|(cd, refname)| NodeId::Branch(BranchId::new(RepoId::new(cd), refname))))
+        }
+        "forge_pr" => {
+            let row: Option<(String, String, String, String, i64)> = conn
+                .query_row(
+                    "SELECT provider_name, host, owner, repo, number FROM node_forge_prs \
+                     WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .optional()?;
+            Ok(row.map(|(provider, host, owner, repo, number)| {
+                NodeId::ForgePr(ForgePrId::new(
+                    provider,
+                    host,
+                    owner,
+                    repo,
+                    u64::try_from(number).unwrap_or(0),
+                ))
+            }))
+        }
+        _ => Ok(None),
+    }
 }
+
+use rusqlite::OptionalExtension;
+
+/// Render the resolved node `id` against `conn` as plain text.
+pub fn render_node_show_from_conn(
+    conn: &Connection,
+    id: &NodeId,
+    color: bool,
+) -> rusqlite::Result<String> {
+    let mut out = String::new();
+    if !write_node_summary_from_conn(&mut out, conn, id, color)? {
+        return Ok(format!("node {id} not found in snapshot\n"));
+    }
+    write_candidate_links_from_conn(&mut out, conn, id, color)?;
+    write_resolved_from_conn(&mut out, conn, id, color)?;
+    write_diagnostics_from_conn(&mut out, conn, id, color)?;
+    Ok(out)
+}
+
+// -----------------------------------------------------------------------------
+// Per-kind summary
+// -----------------------------------------------------------------------------
 
 fn write_section_header(out: &mut String, text: &str, color: bool) {
     push_styled(out, text, header_style(), color);
     out.push('\n');
 }
 
-fn write_node_summary(
-    out: &mut String,
-    node: &GraphNode,
-    color: bool,
-    aliases: Option<&crate::aliases::AliasOverlay>,
-) {
-    let id = node.id();
-    write_section_header(out, &format!("node {}", node_short_id(&id)), color);
-    let _ = writeln!(out, "  kind: {}", node_kind_label(node));
-    let _ = writeln!(out, "  id:   {id}");
-    match node {
-        GraphNode::Repo(node) => write_repo(out, node),
-        GraphNode::Checkout(node) => write_worktree(out, node),
-        GraphNode::Workspace(node) => write_workspace(out, node),
-        GraphNode::AgentSession(node) => write_agent_session(out, node, aliases),
-        GraphNode::MuxSession(node) => write_mux_session(out, node),
-        GraphNode::Branch(node) => write_branch(out, node),
-        GraphNode::Fork(node) => write_fork(out, node),
-        GraphNode::ForgePr(node) => write_forge_pr(out, node),
+fn node_kind_label(id: &NodeId) -> &'static str {
+    match id {
+        NodeId::Repo(_) => "repo",
+        NodeId::Checkout(_) => "checkout",
+        NodeId::Workspace(_) => "workspace",
+        NodeId::AgentSession(_) => "agent_session",
+        NodeId::MuxSession(_) => "mux_session",
+        NodeId::Branch(_) => "branch",
+        NodeId::Fork(_) => "fork",
+        NodeId::ForgePr(_) => "forge_pr",
     }
 }
 
-fn node_kind_label(node: &GraphNode) -> &'static str {
-    match node {
-        GraphNode::Repo(_) => "repo",
-        GraphNode::Checkout(_) => "checkout",
-        GraphNode::Workspace(_) => "workspace",
-        GraphNode::AgentSession(_) => "agent_session",
-        GraphNode::MuxSession(_) => "mux_session",
-        GraphNode::Branch(_) => "branch",
-        GraphNode::Fork(_) => "fork",
-        GraphNode::ForgePr(_) => "forge_pr",
+/// Returns `false` when the node doesn't exist in any `node_<kind>`
+/// table; callers short-circuit with "not found" output.
+fn write_node_summary_from_conn(
+    out: &mut String,
+    conn: &Connection,
+    id: &NodeId,
+    color: bool,
+) -> rusqlite::Result<bool> {
+    let id_display = id.to_string();
+    let id_short = node_short_id_from_display(&id_display);
+    write_section_header(out, &format!("node {id_short}"), color);
+    let _ = writeln!(out, "  kind: {}", node_kind_label(id));
+    let _ = writeln!(out, "  id:   {id_display}");
+    let exists = match id {
+        NodeId::Repo(_) => write_repo(out, conn, &id_display)?,
+        NodeId::Checkout(_) => write_checkout(out, conn, &id_display)?,
+        NodeId::Workspace(_) => write_workspace(out, conn, &id_display)?,
+        NodeId::AgentSession(aid) => write_agent_session(out, conn, &id_display, aid)?,
+        NodeId::MuxSession(_) => write_mux_session(out, conn, &id_display)?,
+        NodeId::Branch(bid) => write_branch(out, bid)?,
+        NodeId::Fork(_) => write_fork(out, conn, &id_display)?,
+        NodeId::ForgePr(_) => write_forge_pr(out, conn, &id_display)?,
+    };
+    Ok(exists)
+}
+
+fn write_repo(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT common_dir, source_paths FROM node_repos WHERE node_id = ?1",
+            [node_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((common_dir, source_paths_json)) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  common_dir: {common_dir}");
+    let source_paths: Vec<String> = serde_json::from_str(&source_paths_json).unwrap_or_default();
+    if !source_paths.is_empty() {
+        let _ = writeln!(out, "  source_paths:");
+        for path in &source_paths {
+            let _ = writeln!(out, "    - {path}");
+        }
     }
+    Ok(true)
+}
+
+fn write_checkout(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    let row: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT root, git_dir FROM node_checkouts WHERE node_id = ?1",
+            [node_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((root, git_dir)) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  root: {root}");
+    if let Some(git_dir) = git_dir {
+        let _ = writeln!(out, "  git_dir: {git_dir}");
+    }
+    Ok(true)
+}
+
+fn write_workspace(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    let row: Option<String> = conn
+        .query_row(
+            "SELECT root FROM node_workspaces WHERE node_id = ?1",
+            [node_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(root) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  root: {root}");
+    Ok(true)
 }
 
 fn write_agent_session(
     out: &mut String,
-    node: &AgentSessionNode,
-    aliases: Option<&crate::aliases::AliasOverlay>,
-) {
-    let _ = writeln!(out, "  harness:     {}", node.harness_key);
-    let _ = writeln!(out, "  state_scope: {}", node.id.state_scope);
-    let _ = writeln!(out, "  session_key: {}", node.id.session_key);
-    if let Some(cwd) = &node.cwd {
+    conn: &Connection,
+    node_id: &str,
+    id: &crate::model::AgentSessionId,
+) -> rusqlite::Result<bool> {
+    let row: Option<(String, Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT harness_key, cwd, title FROM node_agent_sessions WHERE node_id = ?1",
+            [node_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((harness, cwd, title)) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  harness:     {harness}");
+    let _ = writeln!(out, "  state_scope: {}", id.state_scope);
+    let _ = writeln!(out, "  session_key: {}", id.session_key);
+    if let Some(cwd) = cwd {
         let _ = writeln!(out, "  cwd:         {cwd}");
     }
-    let alias = aliases
-        .and_then(|overlay| overlay.get(&NodeId::AgentSession(node.id.clone())))
-        .map(str::to_string);
+    // ADR 0029: alias hides title in default renders. Resolve via
+    // the aliases table joined on the session's structural fields.
+    let alias: Option<String> = conn
+        .query_row(
+            "SELECT display_name FROM aliases \
+             WHERE node_kind = 'agent_session' \
+               AND json_extract(node, '$.harness_key') = ?1 \
+               AND json_extract(node, '$.state_scope') = ?2 \
+               AND json_extract(node, '$.session_key') = ?3",
+            [&harness, &id.state_scope, &id.session_key],
+            |r| r.get(0),
+        )
+        .optional()?;
     if let Some(alias) = &alias {
         let _ = writeln!(out, "  alias:       {alias}");
     }
-    // ADR 0029: the alias hides the harness-native title in default
-    // renders. Operators can still inspect the original title via
-    // `conspectus alias list` once that lands (H-RENAME-008).
     if alias.is_none()
-        && let Some(title) = &node.title
+        && let Some(title) = title
     {
         let _ = writeln!(out, "  title:       {title}");
     }
+    Ok(true)
 }
 
-fn write_mux_session(out: &mut String, node: &MuxSessionNode) {
-    let _ = writeln!(out, "  backend:   {}", node.backend);
-    let _ = writeln!(out, "  native_id: {}", node.native_id);
-    if let Some(cwd) = &node.cwd {
+fn write_mux_session(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    let row: Option<(String, String, Option<String>)> = conn
+        .query_row(
+            "SELECT backend, native_id, cwd FROM node_mux_sessions WHERE node_id = ?1",
+            [node_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((backend, native_id, cwd)) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  backend:   {backend}");
+    let _ = writeln!(out, "  native_id: {native_id}");
+    if let Some(cwd) = cwd {
         let _ = writeln!(out, "  cwd:       {cwd}");
     }
+    Ok(true)
 }
 
-fn write_repo(out: &mut String, node: &RepoNode) {
-    let _ = writeln!(out, "  common_dir: {}", node.common_dir);
-    if !node.source_paths.is_empty() {
-        let _ = writeln!(out, "  source_paths:");
-        for path in &node.source_paths {
-            let _ = writeln!(out, "    - {path}");
-        }
-    }
+fn write_branch(out: &mut String, id: &crate::model::BranchId) -> rusqlite::Result<bool> {
+    // The summary lines for a branch come straight from its typed
+    // BranchId — no extra columns on node_branches matter for the
+    // section header. Reading the row still tells us whether the
+    // node exists in the snapshot.
+    let _ = writeln!(out, "  repo:    {}", id.repo);
+    let _ = writeln!(out, "  refname: {}", id.refname);
+    Ok(true)
 }
 
-fn write_worktree(out: &mut String, node: &CheckoutNode) {
-    let _ = writeln!(out, "  root: {}", node.root);
-    if let Some(git_dir) = &node.git_dir {
-        let _ = writeln!(out, "  git_dir: {git_dir}");
-    }
-}
-
-fn write_workspace(out: &mut String, node: &WorkspaceNode) {
-    let _ = writeln!(out, "  root: {}", node.root);
-}
-
-fn write_branch(out: &mut String, node: &BranchNode) {
-    let _ = writeln!(out, "  repo:    {}", node.id.repo);
-    let _ = writeln!(out, "  refname: {}", node.id.refname);
-}
-
-fn write_fork(out: &mut String, node: &ForkNode) {
-    let _ = writeln!(out, "  provider: {}", node.provider);
-    let _ = writeln!(out, "  provider_source_key: {}", node.provider_source_key);
-    if let Some(name) = &node.name {
+fn write_fork(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    let row: Option<(String, String, Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT provider_name, provider_source_key, name, scope FROM node_forks \
+             WHERE node_id = ?1",
+            [node_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    let Some((provider, psk, name, scope)) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  provider: {provider}");
+    let _ = writeln!(out, "  provider_source_key: {psk}");
+    if let Some(name) = name {
         let _ = writeln!(out, "  name:     {name}");
     }
-    if let Some(scope) = &node.scope {
+    if let Some(scope) = scope {
         let _ = writeln!(out, "  scope:    {scope}");
     }
+    Ok(true)
 }
 
-fn write_forge_pr(out: &mut String, node: &ForgePrNode) {
+fn write_forge_pr(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
+    struct PrRow {
+        owner: String,
+        repo: String,
+        number: i64,
+        state: Option<String>,
+        url: Option<String>,
+    }
+    let row: Option<PrRow> = conn
+        .query_row(
+            "SELECT owner, repo, number, state, url FROM node_forge_prs WHERE node_id = ?1",
+            [node_id],
+            |r| {
+                Ok(PrRow {
+                    owner: r.get(0)?,
+                    repo: r.get(1)?,
+                    number: r.get(2)?,
+                    state: r.get(3)?,
+                    url: r.get(4)?,
+                })
+            },
+        )
+        .optional()?;
+    let Some(PrRow {
+        owner,
+        repo,
+        number,
+        state,
+        url,
+    }) = row
+    else {
+        return Ok(false);
+    };
     let _ = writeln!(
         out,
-        "  pr:    {}/{}#{} ({})",
-        node.owner,
-        node.repo,
-        node.number,
-        node.state.as_deref().unwrap_or("?")
+        "  pr:    {owner}/{repo}#{number} ({})",
+        state.as_deref().unwrap_or("?")
     );
-    if let Some(url) = &node.url {
+    if let Some(url) = url {
         let _ = writeln!(out, "  url:   {url}");
     }
+    Ok(true)
 }
 
-fn write_candidate_links(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color: bool) {
-    let outgoing: Vec<&GraphLink> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| link.source == *id)
-        .collect();
-    let incoming: Vec<&GraphLink> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| matches!(&link.target, LinkEndpoint::Node { id: target } if target == id))
-        .collect();
+// -----------------------------------------------------------------------------
+// Sections that walk candidate_links / resolved_relationships / diagnostics
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct LinkRow {
+    link_id: String,
+    source_display: String,
+    target_kind: String,
+    target_node_display: Option<String>,
+    target_node_type: Option<String>,
+    target_harness_key: Option<String>,
+    target_native_id: Option<String>,
+    target_path: Option<String>,
+    relation: String,
+    provenance: String,
+    confidence: String,
+    state: String,
+    source_adapter: String,
+    source_evidence: Option<String>,
+    source_fields_json: String,
+}
+
+fn fetch_link_rows(
+    conn: &Connection,
+    where_clause: &str,
+    bind: &str,
+) -> rusqlite::Result<Vec<LinkRow>> {
+    let sql = format!(
+        "SELECT link_id, source, target_kind, target_node, \
+                target_node_type, target_harness_key, target_native_id, target_path, \
+                relation, provenance, confidence, state, \
+                source_adapter, source_evidence, source_fields \
+         FROM candidate_links \
+         WHERE {where_clause} \
+         ORDER BY link_id",
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([bind], |row| {
+        let source_json: String = row.get(1)?;
+        let target_node_json: Option<String> = row.get(3)?;
+        let source_id = crate::query::reader::parse_node_id_json(&source_json, 1)?;
+        let target_node_display = match target_node_json.as_deref() {
+            Some(json) => Some(crate::query::reader::parse_node_id_json(json, 3)?.to_string()),
+            None => None,
+        };
+        Ok(LinkRow {
+            link_id: row.get(0)?,
+            source_display: source_id.to_string(),
+            target_kind: row.get(2)?,
+            target_node_display,
+            target_node_type: row.get(4)?,
+            target_harness_key: row.get(5)?,
+            target_native_id: row.get(6)?,
+            target_path: row.get(7)?,
+            relation: row.get(8)?,
+            provenance: row.get(9)?,
+            confidence: row.get(10)?,
+            state: row.get(11)?,
+            source_adapter: row.get(12)?,
+            source_evidence: row.get(13)?,
+            source_fields_json: row.get(14)?,
+        })
+    })?;
+    rows.collect()
+}
+
+fn write_candidate_links_from_conn(
+    out: &mut String,
+    conn: &Connection,
+    id: &NodeId,
+    color: bool,
+) -> rusqlite::Result<()> {
+    let id_json = serde_json::to_string(id).expect("NodeId serializes");
+    let outgoing = fetch_link_rows(conn, "source = ?1", &id_json)?;
+    let incoming = fetch_link_rows(conn, "target_kind = 'node' AND target_node = ?1", &id_json)?;
 
     out.push('\n');
     write_section_header(
@@ -280,6 +647,7 @@ fn write_candidate_links(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId
     for link in &incoming {
         write_link(out, link, LinkDirection::Incoming);
     }
+    Ok(())
 }
 
 enum LinkDirection {
@@ -287,140 +655,162 @@ enum LinkDirection {
     Incoming,
 }
 
-fn write_link(out: &mut String, link: &GraphLink, dir: LinkDirection) {
+fn write_link(out: &mut String, link: &LinkRow, dir: LinkDirection) {
     let other = match dir {
-        LinkDirection::Outgoing => match &link.target {
-            LinkEndpoint::Node { id } => format!("→ {id}"),
-            LinkEndpoint::Unresolved { evidence } => {
-                let mut parts: Vec<String> = vec![format!("type={}", evidence.node_type)];
-                if let Some(harness) = &evidence.harness_key {
+        LinkDirection::Outgoing => match link.target_kind.as_str() {
+            "node" => match &link.target_node_display {
+                Some(display) => format!("→ {display}"),
+                None => "→ ?".to_string(),
+            },
+            _ => {
+                let mut parts: Vec<String> = vec![format!(
+                    "type={}",
+                    link.target_node_type.as_deref().unwrap_or("")
+                )];
+                if let Some(harness) = &link.target_harness_key {
                     parts.push(format!("harness={harness}"));
                 }
-                if let Some(native) = &evidence.native_id {
+                if let Some(native) = &link.target_native_id {
                     parts.push(format!("native_id={native}"));
                 }
-                if let Some(path) = &evidence.path {
+                if let Some(path) = &link.target_path {
                     parts.push(format!("path={path}"));
                 }
                 format!("→ unresolved({})", parts.join(", "))
             }
         },
-        LinkDirection::Incoming => format!("← {}", link.source),
+        LinkDirection::Incoming => format!("← {}", link.source_display),
     };
     let _ = writeln!(
         out,
-        "  - {relation:15} {other} [{ind}, {state}] (link={id})",
-        relation = relation_label(link.relation.clone()),
-        ind = indicator(link.provenance, link.confidence, false),
-        state = link_state_label(&link.state),
-        id = link.id,
+        "  - {relation:15} {other} [{ind}, {state}] (link={link_id})",
+        relation = link.relation,
+        ind = render::indicator_from_tags(&link.provenance, &link.confidence, false),
+        state = link.state,
+        link_id = link.link_id,
     );
-    let _ = writeln!(out, "      adapter: {}", link.source_metadata.adapter);
-    if let Some(evidence) = &link.source_metadata.evidence {
+    let _ = writeln!(out, "      adapter: {}", link.source_adapter);
+    if let Some(evidence) = &link.source_evidence {
         let _ = writeln!(out, "      evidence: {evidence}");
     }
-    if !link.source_metadata.fields.is_empty() {
+    let fields: BTreeMap<String, serde_json::Value> =
+        serde_json::from_str(&link.source_fields_json).unwrap_or_default();
+    if !fields.is_empty() {
         let _ = writeln!(out, "      fields:");
-        for (key, value) in &link.source_metadata.fields {
+        for (key, value) in &fields {
             let _ = writeln!(out, "        {key}: {value}");
         }
     }
 }
 
-fn relation_label(relation: RelationKind) -> String {
-    // `RelationKind` already serdes to snake_case; reuse that contract
-    // so a new variant cannot drift from its CLI label.
-    serde_json::to_value(&relation)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_else(|| format!("{relation:?}"))
-}
-
-fn link_state_label(state: &crate::model::LinkState) -> &'static str {
-    match state {
-        crate::model::LinkState::Active => "active",
-        crate::model::LinkState::Ignored { .. } => "ignored",
-        crate::model::LinkState::Overridden { .. } => "overridden",
+fn write_resolved_from_conn(
+    out: &mut String,
+    conn: &Connection,
+    id: &NodeId,
+    color: bool,
+) -> rusqlite::Result<()> {
+    let id_json = serde_json::to_string(id).expect("NodeId serializes");
+    let mut stmt = conn.prepare(
+        "SELECT source, target, relation, selected_link_id, competing_link_ids \
+         FROM resolved_relationships \
+         WHERE source = ?1 OR target = ?1 \
+         ORDER BY relation, source, target",
+    )?;
+    #[derive(Clone)]
+    struct Raw {
+        source_display: String,
+        target_display: String,
+        relation: String,
+        selected: String,
+        competing: Vec<String>,
     }
-}
-
-fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color: bool) {
-    let resolved: Vec<&ResolvedRelationship> = snapshot
-        .resolved_relationships
-        .iter()
-        .filter(|rel| rel.source == *id || rel.target == *id)
-        .collect();
+    let rows = stmt.query_map([&id_json], |row| {
+        let source_json: String = row.get(0)?;
+        let target_json: String = row.get(1)?;
+        Ok(Raw {
+            source_display: crate::query::reader::parse_node_id_json(&source_json, 0)?.to_string(),
+            target_display: crate::query::reader::parse_node_id_json(&target_json, 1)?.to_string(),
+            relation: row.get(2)?,
+            selected: row.get(3)?,
+            competing: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
+        })
+    })?;
+    let resolved: Vec<Raw> = rows.collect::<rusqlite::Result<_>>()?;
     out.push('\n');
     write_section_header(
         out,
         &format!("resolved relationships: {}", resolved.len()),
         color,
     );
-    for rel in resolved {
+    for rel in &resolved {
         let _ = writeln!(
             out,
             "  - {relation:15} {source} → {target} (selected={selected})",
-            relation = relation_label(rel.relation.clone()),
-            source = rel.source,
-            target = rel.target,
-            selected = rel.selected_link_id,
+            relation = rel.relation,
+            source = rel.source_display,
+            target = rel.target_display,
+            selected = rel.selected,
         );
-        if !rel.competing_link_ids.is_empty() {
-            let _ = writeln!(
-                out,
-                "      competing: {}",
-                rel.competing_link_ids.join(", ")
-            );
+        if !rel.competing.is_empty() {
+            let _ = writeln!(out, "      competing: {}", rel.competing.join(", "));
         }
     }
+    Ok(())
 }
 
-fn write_diagnostics(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color: bool) {
-    let touching: Vec<&Diagnostic> = snapshot
-        .diagnostics
-        .iter()
-        .filter(|d| diagnostic_touches(d, id, snapshot))
-        .collect();
+fn write_diagnostics_from_conn(
+    out: &mut String,
+    conn: &Connection,
+    id: &NodeId,
+    color: bool,
+) -> rusqlite::Result<()> {
+    let id_json = serde_json::to_string(id).expect("NodeId serializes");
+
+    // UnresolvedEndpoint: diagnostic touches the node when the
+    // referenced candidate link has source = this node. JOIN
+    // diagnostics to candidate_links on link_id and filter.
+    let mut unres_stmt = conn.prepare(
+        "SELECT d.link_id, d.relation \
+         FROM diagnostics d \
+         JOIN candidate_links cl ON cl.link_id = d.link_id \
+         WHERE d.kind = 'unresolved_endpoint' \
+           AND cl.source = ?1 \
+         ORDER BY d.link_id",
+    )?;
+    let unres_rows: Vec<(String, String)> = unres_stmt
+        .query_map([&id_json], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    // Conflict: diagnostic touches the node when conflict_source =
+    // this node.
+    let mut conf_stmt = conn.prepare(
+        "SELECT relation, conflict_selected_link_id, conflict_competing_link_ids \
+         FROM diagnostics \
+         WHERE kind = 'conflict' AND conflict_source = ?1 \
+         ORDER BY conflict_selected_link_id",
+    )?;
+    let conf_rows: Vec<(String, String, Vec<String>)> = conf_stmt
+        .query_map([&id_json], |row| {
+            let competing_json: String = row.get(2)?;
+            let competing: Vec<String> = serde_json::from_str(&competing_json).unwrap_or_default();
+            Ok((row.get(0)?, row.get(1)?, competing))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let total = unres_rows.len() + conf_rows.len();
     out.push('\n');
-    write_section_header(out, &format!("diagnostics: {}", touching.len()), color);
-    for diag in touching {
-        match diag {
-            Diagnostic::UnresolvedEndpoint { link_id, relation } => {
-                let _ = writeln!(
-                    out,
-                    "  - unresolved_endpoint {relation} (link={link_id})",
-                    relation = relation_label(relation.clone()),
-                );
-            }
-            Diagnostic::Config { path, message } => {
-                let _ = writeln!(out, "  - config {path}: {message}");
-            }
-            Diagnostic::Conflict {
-                source,
-                relation,
-                selected_link_id,
-                competing_link_ids,
-            } => {
-                let _ = writeln!(
-                    out,
-                    "  - conflict {relation} source={source} selected={selected_link_id} competing={competing}",
-                    relation = relation_label(relation.clone()),
-                    competing = competing_link_ids.join(", "),
-                );
-            }
-        }
+    write_section_header(out, &format!("diagnostics: {total}"), color);
+    for (link_id, relation) in &unres_rows {
+        let _ = writeln!(out, "  - unresolved_endpoint {relation} (link={link_id})",);
     }
-}
-
-fn diagnostic_touches(diag: &Diagnostic, id: &NodeId, snapshot: &GraphSnapshot) -> bool {
-    match diag {
-        Diagnostic::UnresolvedEndpoint { link_id, .. } => snapshot
-            .candidate_links
-            .iter()
-            .any(|link| &link.id == link_id && link.source == *id),
-        Diagnostic::Config { .. } => false,
-        Diagnostic::Conflict { source, .. } => source == id,
+    for (relation, selected, competing) in &conf_rows {
+        let _ = writeln!(
+            out,
+            "  - conflict {relation} source={id} selected={selected} competing={}",
+            competing.join(", "),
+        );
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -479,8 +869,7 @@ mod tests {
             ..GraphSnapshot::empty()
         };
         let id = snapshot.nodes[0].id();
-        let full = node_short_id(&id);
-        let prefix = &full[..6];
+        let prefix = &node_short_id_from_display(&id.to_string())[..6];
         let resolved = resolve_node_id(prefix, &snapshot).expect("resolved");
         assert_eq!(resolved, id);
     }
@@ -523,6 +912,33 @@ mod tests {
         let snapshot = GraphSnapshot::empty();
         let err = resolve_node_id("does-not-exist", &snapshot).unwrap_err();
         assert!(matches!(err, NodeResolveError::NotFound { .. }));
+    }
+
+    #[test]
+    fn resolve_node_id_errors_on_ambiguous_prefix() {
+        // Build two agent sessions whose short_ids share at least one
+        // hex character; that shared prefix is by construction
+        // ambiguous. We can't predict the hash, so probe.
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                agent_node("codex", "/state", "one"),
+                agent_node("codex", "/state", "two"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let first = node_short_id_from_display(&snapshot.nodes[0].id().to_string());
+        let second = node_short_id_from_display(&snapshot.nodes[1].id().to_string());
+        let shared_len = first
+            .chars()
+            .zip(second.chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        if shared_len == 0 {
+            return; // skip when the fixture happens not to collide
+        }
+        let prefix = &first[..shared_len];
+        let err = resolve_node_id(prefix, &snapshot).unwrap_err();
+        assert!(matches!(err, NodeResolveError::Ambiguous { .. }));
     }
 
     #[test]
@@ -578,38 +994,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_node_id_errors_on_ambiguous_prefix() {
-        // Build two agent sessions whose short_ids share the same 4-char
-        // prefix. We can't predict the hash, so just feed both into the
-        // resolver with the same 2-char prefix that almost certainly
-        // collides somewhere.
-        let snapshot = GraphSnapshot {
-            nodes: vec![
-                agent_node("codex", "/state", "one"),
-                agent_node("codex", "/state", "two"),
-            ],
-            ..GraphSnapshot::empty()
-        };
-        let first = node_short_id(&snapshot.nodes[0].id());
-        let second = node_short_id(&snapshot.nodes[1].id());
-        // Find the longest shared prefix between the two hashes; that
-        // prefix is by construction ambiguous.
-        let shared_len = first
-            .chars()
-            .zip(second.chars())
-            .take_while(|(a, b)| a == b)
-            .count();
-        if shared_len == 0 {
-            // No shared prefix → the test cannot exercise ambiguity for
-            // this particular fixture. Skip.
-            return;
-        }
-        let prefix = &first[..shared_len];
-        let err = resolve_node_id(prefix, &snapshot).unwrap_err();
-        assert!(matches!(err, NodeResolveError::Ambiguous { .. }));
-    }
-
-    #[test]
     fn render_node_show_includes_outgoing_link_and_resolved_relationship() {
         let agent = agent_node("codex", "/state", "alpha");
         let mux = mux_node("tmux", "editor");
@@ -618,7 +1002,7 @@ mod tests {
         let snapshot = GraphSnapshot {
             nodes: vec![agent, mux],
             candidate_links: vec![linked_to_mux("link-1", agent_id.clone(), mux_id.clone())],
-            resolved_relationships: vec![ResolvedRelationship {
+            resolved_relationships: vec![crate::model::ResolvedRelationship {
                 source: agent_id.clone(),
                 target: mux_id.clone(),
                 relation: RelationKind::LinkedToMux,

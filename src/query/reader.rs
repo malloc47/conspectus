@@ -474,7 +474,7 @@ where
 /// Deserialize a JSON-encoded [`NodeId`] from a non-NULL endpoint
 /// column (ADR 0044). Inverse of `json_node_id` in
 /// [`crate::query::loader`].
-fn parse_node_id_json(s: &str, idx: usize) -> rusqlite::Result<NodeId> {
+pub(crate) fn parse_node_id_json(s: &str, idx: usize) -> rusqlite::Result<NodeId> {
     serde_json::from_str::<NodeId>(s).map_err(|err| {
         rusqlite::Error::FromSqlConversionFailure(
             idx,
