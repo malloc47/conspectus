@@ -41,9 +41,9 @@ use rusqlite::Connection;
 
 use super::render::{
     self, RenderOptions, SESSIONS_COLUMNS, current_epoch, format_relative_age, header_label,
-    node_short_id_from_display, pick_strongest, unique_prefix_len,
+    node_short_id_from_display, pick_strongest, strip_branch_prefix, unique_prefix_len,
 };
-use super::table::{agent_session_key_for_label, short_session_id, strip_branch_prefix};
+use super::table::{agent_session_key_for_label, short_session_id};
 use crate::filter::{MuxStateKey, SessionMatchInputs};
 
 /// Triple identifying an agent session structurally. Matches the

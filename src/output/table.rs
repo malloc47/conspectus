@@ -26,12 +26,7 @@
 //! `query::runner`) keep compiling unchanged while the consumer-side
 //! migration proceeds.
 
-use std::path::Path;
-
-use crate::model::{
-    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphSnapshot, LinkEndpoint, NodeId,
-    Provenance, RelationKind, SnapshotIndex, pick_preferred,
-};
+use crate::model::{Confidence, GraphSnapshot, NodeId, Provenance};
 
 // Re-exports of the backend-agnostic surface that external callers
 // reach for through `output::table::*`. New code should prefer
@@ -41,12 +36,9 @@ pub use super::render::{
     RenderOptions, SHORT_ID_FLOOR, columns_for, current_epoch, default_columns, display_width,
     fit_to_width, format_relative_age, header_label, header_style, natural_widths,
     node_short_id_from_display, parse_columns_spec, push_styled, render_columns_listing,
-    render_rows, resolve_explicit_columns, truncate_to_width, unique_prefix_len,
+    render_rows, resolve_explicit_columns, strip_branch_prefix, truncate_to_width,
+    unique_prefix_len,
 };
-
-// Crate-internal substrate access used by the projection builders /
-// cell extractors below.
-use super::render::{FORKS_COLUMNS, PRS_COLUMNS};
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
 /// a stable short row identifier for table output (H-TBL-002).
@@ -92,8 +84,13 @@ pub fn render_with(
         Projection::Union => {
             super::union::build_union_rows_from_snapshot(snapshot, &columns, options)
         }
-        Projection::Pr => build_pr_rows(&SnapshotView::new(snapshot), &columns),
-        Projection::Fork => build_fork_rows(&SnapshotView::new(snapshot), &columns),
+        // P10-007: prs projection now reads from SQLite.
+        Projection::Pr => super::prs::build_pr_rows_from_snapshot(snapshot, &columns, options),
+        // P10-008: forks projection now reads from SQLite. With
+        // this, render_with has no remaining in-memory projection.
+        Projection::Fork => {
+            super::forks::build_fork_rows_from_snapshot(snapshot, &columns, options)
+        }
     };
     render_rows(rows, &columns, options)
 }
@@ -130,67 +127,9 @@ fn confidence_code(confidence: Confidence) -> &'static str {
     }
 }
 
-/// Per-snapshot view used by the remaining in-memory table
-/// renderers (union, prs, forks). Wraps the shared [`SnapshotIndex`]
-/// (see ADR 0035); implementing [`Deref`] lets call sites read
-/// `view.by_source_relation`, `view.preferred_link(...)`, etc.
-/// directly. The agent and mux projections route through SQLite
-/// (P10-004 / P10-005) and do not touch this type.
-struct SnapshotView<'a> {
-    index: SnapshotIndex<'a>,
-}
-
-impl<'a> SnapshotView<'a> {
-    fn new(snapshot: &'a GraphSnapshot) -> Self {
-        Self {
-            index: SnapshotIndex::new(snapshot),
-        }
-    }
-}
-
-impl<'a> std::ops::Deref for SnapshotView<'a> {
-    type Target = SnapshotIndex<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.index
-    }
-}
-
 // -----------------------------------------------------------------------------
 // Per-row-type column extractors
 // -----------------------------------------------------------------------------
-
-fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
-    let mut anc_iter = ancestor.components();
-    let mut desc_iter = descendant.components();
-    loop {
-        match (anc_iter.next(), desc_iter.next()) {
-            (Some(a), Some(d)) if a == d => continue,
-            (Some(_), Some(_)) => return false,
-            (Some(_), None) => return false,
-            (None, _) => return true,
-        }
-    }
-}
-
-/// Render the AGENT-cell label as `harness:<short-or-full session-key>`.
-/// The harness adapter's session key is the stable identifier; long
-/// UUIDs (claude-code, codex) collapse to `…<last-8>` via
-/// [`agent_session_key_for_label`] so the column stays scannable.
-/// Shorter human-readable session keys
-/// (atelier-style `session-alpha`, opencode short ids) pass through
-/// verbatim. The `AgentSessionNode.title` field is intentionally
-/// **not** part of the label — opencode (and post-compaction
-/// claude-code) populate it with a long conversation topic that
-/// doesn't fit a leading cell. Title surfaces through the opt-in
-/// `title` column instead (H-TBL-015).
-pub(crate) fn agent_session_label(session: &AgentSessionNode) -> String {
-    format!(
-        "{}:{}",
-        session.harness_key,
-        agent_session_key_for_label(&session.id.session_key)
-    )
-}
 
 /// Truncation threshold for AGENT-label session keys. UUIDs (32
 /// hex chars + 4 dashes = 36) sit above this and collapse via
@@ -203,251 +142,6 @@ pub(crate) fn agent_session_key_for_label(key: &str) -> String {
     } else {
         short_session_id(key)
     }
-}
-
-fn forge_pr_label(pr: &ForgePrNode) -> String {
-    let state = pr.state.as_deref().unwrap_or("?");
-    let draft = if pr.is_draft { " draft" } else { "" };
-    format!("{}/{}#{} ({state}{draft})", pr.owner, pr.repo, pr.number)
-}
-
-struct ForkRowCtx<'view, 'snap> {
-    view: &'view SnapshotView<'snap>,
-    fork_id: &'view NodeId,
-    fork: &'view ForkNode,
-    short_id: &'view str,
-}
-
-fn fork_cell(key: &str, ctx: &ForkRowCtx<'_, '_>) -> String {
-    match key {
-        "id" => ctx.short_id.to_string(),
-        "fork" => fork_label(ctx.fork),
-        "provider" => ctx.fork.provider.clone(),
-        "scope" => ctx.fork.scope.clone().unwrap_or_else(|| "—".to_string()),
-        "parent" => {
-            fork_parent_session_label(ctx.view, ctx.fork_id).unwrap_or_else(|| "—".to_string())
-        }
-        "children" => {
-            let count = fork_child_session_count(ctx.view, ctx.fork_id);
-            if count == 0 {
-                "—".to_string()
-            } else {
-                count.to_string()
-            }
-        }
-        "capabilities" => {
-            if ctx.fork.capabilities.is_empty() {
-                "—".to_string()
-            } else {
-                ctx.fork.capabilities.join(", ")
-            }
-        }
-        _ => "—".to_string(),
-    }
-}
-
-fn fork_label(fork: &ForkNode) -> String {
-    match &fork.name {
-        Some(name) => format!("{}:{}", fork.provider, name),
-        None => fork.provider_source_key.clone(),
-    }
-}
-
-/// Render the preferred `parent_session` target as a short label.
-/// Returns `Some` only when the candidate resolves to an
-/// `AgentSession` endpoint; unresolved or non-session targets render
-/// as `None` so the cell falls back to `—`.
-fn fork_parent_session_label(view: &SnapshotView<'_>, fork_id: &NodeId) -> Option<String> {
-    let link = view.preferred_link(fork_id, RelationKind::ParentSession)?;
-    match &link.target {
-        LinkEndpoint::Node {
-            id: NodeId::AgentSession(agent_id),
-        } => Some(short_session_id(&agent_id.session_key)),
-        LinkEndpoint::Unresolved { evidence } => evidence
-            .native_id
-            .as_deref()
-            .map(short_session_id)
-            .map(|short| format!("?{short}")),
-        _ => None,
-    }
-}
-
-/// Number of `child_session` candidates from this fork that target
-/// agent-session endpoints (resolved or unresolved).
-fn fork_child_session_count(view: &SnapshotView<'_>, fork_id: &NodeId) -> usize {
-    view.by_source_relation
-        .get(&(fork_id.clone(), RelationKind::ChildSession))
-        .map(|links| {
-            links
-                .iter()
-                .filter(|link| {
-                    matches!(
-                        &link.target,
-                        LinkEndpoint::Node {
-                            id: NodeId::AgentSession(_)
-                        } | LinkEndpoint::Unresolved { .. }
-                    )
-                })
-                .count()
-        })
-        .unwrap_or(0)
-}
-
-fn build_fork_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
-    let body_full_ids: Vec<String> = view.forks.keys().map(node_short_id).collect();
-    let id_len = unique_prefix_len(&body_full_ids);
-
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    rows.push(
-        columns
-            .iter()
-            .map(|key| header_label(FORKS_COLUMNS, key))
-            .collect(),
-    );
-
-    for ((fork_id, fork), full_short) in view.forks.iter().zip(body_full_ids.iter()) {
-        let short_id = &full_short[..id_len];
-        let ctx = ForkRowCtx {
-            view,
-            fork_id,
-            fork,
-            short_id,
-        };
-        rows.push(columns.iter().map(|key| fork_cell(key, &ctx)).collect());
-    }
-
-    rows
-}
-
-struct PrRowCtx<'view, 'snap> {
-    view: &'view SnapshotView<'snap>,
-    pr_id: &'view NodeId,
-    pr: &'view ForgePrNode,
-    short_id: &'view str,
-}
-
-fn pr_cell(key: &str, ctx: &PrRowCtx<'_, '_>) -> String {
-    match key {
-        "id" => ctx.short_id.to_string(),
-        "pr" => forge_pr_label(ctx.pr),
-        "state" => ctx.pr.state.clone().unwrap_or_else(|| "—".to_string()),
-        "draft" => if ctx.pr.is_draft { "draft" } else { "—" }.to_string(),
-        "branch" => pr_branch_label(ctx.view, ctx.pr_id).unwrap_or_else(|| "—".to_string()),
-        "repo" => format!("{}/{}", ctx.pr.owner, ctx.pr.repo),
-        "updated" => ctx
-            .pr
-            .updated_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(|| "—".to_string()),
-        "attached" => {
-            let sessions = pr_attached_session_labels(ctx.view, ctx.pr_id);
-            if sessions.is_empty() {
-                "—".to_string()
-            } else {
-                sessions.join(", ")
-            }
-        }
-        _ => "—".to_string(),
-    }
-}
-
-/// Look up the preferred branch this PR points at.
-fn pr_preferred_branch_id(
-    view: &SnapshotView<'_>,
-    pr_id: &NodeId,
-) -> Option<crate::model::BranchId> {
-    let links = view
-        .by_source_relation
-        .get(&(pr_id.clone(), RelationKind::BranchHasForgePr))?;
-    let preferred = pick_preferred(links)?;
-    match preferred.target_node_id()? {
-        NodeId::Branch(branch_id) => Some(branch_id.clone()),
-        _ => None,
-    }
-}
-
-fn pr_branch_label(view: &SnapshotView<'_>, pr_id: &NodeId) -> Option<String> {
-    let branch = pr_preferred_branch_id(view, pr_id)?;
-    Some(strip_branch_prefix(&branch.refname).to_string())
-}
-
-pub(crate) fn strip_branch_prefix(refname: &str) -> &str {
-    refname.strip_prefix("refs/heads/").unwrap_or(refname)
-}
-
-/// Find agent-session labels whose checkout has this PR's branch
-/// checked out. Walks `CheckedOutBranch` candidate links to locate
-/// worktrees, then matches sessions whose cwd is at or under that
-/// checkout root.
-fn pr_attached_session_labels(view: &SnapshotView<'_>, pr_id: &NodeId) -> Vec<String> {
-    let Some(branch_id) = pr_preferred_branch_id(view, pr_id) else {
-        return Vec::new();
-    };
-    let branch_node_id = NodeId::Branch(branch_id);
-
-    // Worktrees whose CheckedOutBranch link points at this branch.
-    let checkout_roots: Vec<&str> = view
-        .by_source_relation
-        .iter()
-        .flat_map(|((_, relation), links)| {
-            if *relation != RelationKind::CheckedOutBranch {
-                return Vec::new();
-            }
-            links
-                .iter()
-                .filter(|link| {
-                    matches!(
-                        &link.target,
-                        LinkEndpoint::Node { id } if id == &branch_node_id
-                    )
-                })
-                .filter_map(|link| match &link.source {
-                    NodeId::Checkout(w) => Some(w.root.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect();
-
-    let mut labels: Vec<String> = Vec::new();
-    for session in view.agent_sessions.values() {
-        let Some(cwd) = session.cwd.as_deref() else {
-            continue;
-        };
-        if checkout_roots
-            .iter()
-            .any(|root| path_is_ancestor_of(Path::new(root), Path::new(cwd)))
-        {
-            labels.push(agent_session_label(session));
-        }
-    }
-    labels
-}
-
-fn build_pr_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
-    let body_full_ids: Vec<String> = view.forge_prs.keys().map(node_short_id).collect();
-    let id_len = unique_prefix_len(&body_full_ids);
-
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    rows.push(
-        columns
-            .iter()
-            .map(|key| header_label(PRS_COLUMNS, key))
-            .collect(),
-    );
-
-    for ((pr_id, pr), full_short) in view.forge_prs.iter().zip(body_full_ids.iter()) {
-        let short_id = &full_short[..id_len];
-        let ctx = PrRowCtx {
-            view,
-            pr_id,
-            pr,
-            short_id,
-        };
-        rows.push(columns.iter().map(|key| pr_cell(key, &ctx)).collect());
-    }
-
-    rows
 }
 
 /// Shorten a session id for human display: keep short ids whole, abbreviate
@@ -470,9 +164,9 @@ pub(crate) fn short_session_id(key: &str) -> String {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForgePrNode, Freshness,
-        GraphLink, GraphNode, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
-        Provenance, RelationKind, RepoId, SourceMetadata, WorkspaceId,
+        AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForgePrNode, ForkNode,
+        Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+        NodeId, Provenance, RelationKind, RepoId, SourceMetadata, WorkspaceId,
     };
     use crate::resolve::resolve_snapshot;
 

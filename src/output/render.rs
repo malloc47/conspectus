@@ -1200,6 +1200,13 @@ pub fn indicator_from_tags(provenance_tag: &str, confidence_tag: &str, ambiguous
     buf
 }
 
+/// Strip the `refs/heads/` prefix from a branch refname for human
+/// display (`refs/heads/main` → `main`). Other refspecs
+/// (`refs/remotes/...`, `refs/tags/...`) pass through unchanged.
+pub fn strip_branch_prefix(refname: &str) -> &str {
+    refname.strip_prefix("refs/heads/").unwrap_or(refname)
+}
+
 /// Numeric precedence for a provenance serde tag, mirroring the
 /// `Provenance::precedence` mapping in `crate::model`. Higher beats
 /// lower; ties on `LocalDeclared` `>` `GlobalDeclared` `>`

@@ -7,8 +7,12 @@ use crate::model::GraphSnapshot;
 #[cfg(feature = "query")]
 pub mod agent;
 #[cfg(feature = "query")]
+pub mod forks;
+#[cfg(feature = "query")]
 pub mod mux;
 pub mod node_show;
+#[cfg(feature = "query")]
+pub mod prs;
 pub mod render;
 pub mod table;
 #[cfg(feature = "query")]
