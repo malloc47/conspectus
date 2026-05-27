@@ -349,7 +349,13 @@ SELECT
 FROM node_mux_sessions m
 JOIN candidate_links cl
     ON cl.target_node_kind = 'mux_session'
-    AND json_extract(cl.target_node, '$.native_id') = m.native_id
+    -- Join on the Display-form `node_id` (rather than `m.native_id`)
+    -- because `MuxSessionId.native_id` (in the JSON) may differ from
+    -- the structural `MuxSessionNode.native_id` column. Discovery's
+    -- tmux adapter sets `id` to `tmux:<name>` while leaving the
+    -- structural field as `<name>` — joining structurally would
+    -- silently drop those attachments.
+    AND ('mux_session:' || json_extract(cl.target_node, '$.native_id')) = m.node_id
     AND cl.source_kind = 'agent_session'
     AND cl.relation = 'linked_to_mux'
     AND cl.state = 'active';
@@ -373,20 +379,30 @@ SELECT
     pr.state             AS pr_state,
     pr.is_draft          AS pr_is_draft,
     pr.url               AS pr_url
+-- Display-form joins (see `v_mux_attachments` note): the JSON-form
+-- typed ID fields may differ from the structural columns on the
+-- node tables, so we compare reconstructed `node_id` strings.
+--
+-- Note: `branch_has_forge_pr` is stored with source=ForgePr,
+-- target=Branch in production (see `discovery::forge::github` and
+-- the in-memory `preferred_pr_for_session`). The relation name
+-- reads "branch has forge pr" but the link points PR → branch.
 FROM node_branches b
 LEFT JOIN candidate_links cl
-    ON cl.source_kind = 'branch'
-    AND json_extract(cl.source, '$.repo.common_dir') = b.repo_common_dir
-    AND json_extract(cl.source, '$.refname')         = b.refname
+    ON cl.target_node_kind = 'branch'
+    AND ('branch:repo:' ||
+         json_extract(cl.target_node, '$.repo.common_dir') || '@' ||
+         json_extract(cl.target_node, '$.refname')) = b.node_id
+    AND cl.source_kind = 'forge_pr'
     AND cl.relation = 'branch_has_forge_pr'
     AND cl.state = 'active'
 LEFT JOIN node_forge_prs pr
-    ON cl.target_node_kind = 'forge_pr'
-    AND json_extract(cl.target_node, '$.provider') = pr.provider_name
-    AND json_extract(cl.target_node, '$.host')     = pr.host
-    AND json_extract(cl.target_node, '$.owner')    = pr.owner
-    AND json_extract(cl.target_node, '$.repo')     = pr.repo
-    AND json_extract(cl.target_node, '$.number')   = pr.number;
+    ON ('forge_pr:' ||
+        json_extract(cl.source, '$.provider') || ':' ||
+        json_extract(cl.source, '$.host') || '/' ||
+        json_extract(cl.source, '$.owner') || '/' ||
+        json_extract(cl.source, '$.repo') || '#' ||
+        json_extract(cl.source, '$.number')) = pr.node_id;
 
 -- Transitive `ParentFork` closure: for each Fork node, one row per
 -- (self, ancestor, depth) triple. Depth 0 is the fork itself; each
@@ -427,12 +443,13 @@ SELECT
     w.provider_name      AS workspace_provider,
     r.node_id            AS repo_node_id,
     r.common_dir         AS repo_common_dir
+-- Display-form joins (see `v_mux_attachments` note).
 FROM node_workspaces w
 JOIN candidate_links cl
     ON cl.source_kind = 'workspace'
-    AND json_extract(cl.source, '$.root') = w.root
+    AND ('workspace:' || json_extract(cl.source, '$.root')) = w.node_id
     AND cl.relation = 'workspace_contains_repo'
     AND cl.state = 'active'
 JOIN node_repos r
     ON cl.target_node_kind = 'repo'
-    AND json_extract(cl.target_node, '$.common_dir') = r.common_dir;
+    AND ('repo:' || json_extract(cl.target_node, '$.common_dir')) = r.node_id;

@@ -47,7 +47,7 @@ pub use super::render::{
 
 // Crate-internal substrate access used by the projection builders /
 // cell extractors below.
-use super::render::{FORKS_COLUMNS, MUX_COLUMNS, PRS_COLUMNS, SESSIONS_COLUMNS, UNION_COLUMNS};
+use super::render::{FORKS_COLUMNS, MUX_COLUMNS, PRS_COLUMNS, UNION_COLUMNS};
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
 /// a stable short row identifier for table output (H-TBL-002).
@@ -73,17 +73,22 @@ pub fn render_with(
     projection: Projection,
     options: &RenderOptions,
 ) -> String {
-    let view = SnapshotView::new(snapshot);
     let columns: Vec<&'static str> = options
         .columns
         .clone()
         .unwrap_or_else(|| default_columns(projection));
     let rows = match projection {
-        Projection::Agent => build_agent_rows(&view, &columns, options),
-        Projection::Mux => build_mux_rows(&view, &columns),
-        Projection::Union => build_union_rows(&view, &columns),
-        Projection::Pr => build_pr_rows(&view, &columns),
-        Projection::Fork => build_fork_rows(&view, &columns),
+        // P10-004: agent projection now reads from SQLite. We
+        // materialize an in-memory connection from the snapshot so
+        // existing callers (CLI, tests) keep their `&GraphSnapshot`
+        // signature; P10-014 demotes that intermediate step.
+        Projection::Agent => {
+            super::agent::build_agent_rows_from_snapshot(snapshot, &columns, options)
+        }
+        Projection::Mux => build_mux_rows(&SnapshotView::new(snapshot), &columns),
+        Projection::Union => build_union_rows(&SnapshotView::new(snapshot), &columns),
+        Projection::Pr => build_pr_rows(&SnapshotView::new(snapshot), &columns),
+        Projection::Fork => build_fork_rows(&SnapshotView::new(snapshot), &columns),
     };
     render_rows(rows, &columns, options)
 }
@@ -176,79 +181,6 @@ impl<'a> std::ops::Deref for SnapshotView<'a> {
 // Per-row-type column extractors
 // -----------------------------------------------------------------------------
 
-struct AgentRowCtx<'view, 'snap> {
-    view: &'view SnapshotView<'snap>,
-    node_id: &'view NodeId,
-    session: &'view AgentSessionNode,
-    short_id: &'view str,
-}
-
-fn agent_cell(key: &str, ctx: &AgentRowCtx<'_, '_>) -> String {
-    match key {
-        "id" => ctx.short_id.to_string(),
-        "agent" => agent_session_label(ctx.session),
-        "cwd" => ctx.session.cwd.clone().unwrap_or_else(|| "—".to_string()),
-        "mux" => {
-            let link = ctx
-                .view
-                .preferred_link(ctx.node_id, RelationKind::LinkedToMux);
-            link.and_then(|link| match &link.target {
-                LinkEndpoint::Node {
-                    id: NodeId::MuxSession(_),
-                } => ctx
-                    .view
-                    .mux_sessions
-                    .get(link.target_node_id()?)
-                    .map(|mux| mux_session_label(mux)),
-                _ => None,
-            })
-            .unwrap_or_else(|| "—".to_string())
-        }
-        "mux-conf" => {
-            let link = ctx
-                .view
-                .preferred_link(ctx.node_id, RelationKind::LinkedToMux);
-            let count = ctx
-                .view
-                .candidates_for(ctx.node_id, RelationKind::LinkedToMux)
-                .len();
-            match link {
-                Some(link) => indicator(link.provenance, link.confidence, count > 1),
-                None => "—".to_string(),
-            }
-        }
-        "pr" => preferred_pr_for_session(ctx.view, ctx.node_id).0,
-        "pr-conf" => preferred_pr_for_session(ctx.view, ctx.node_id).1,
-        "lineage" => lineage_cell(ctx.view, ctx.node_id),
-        "workspace" => {
-            session_workspace_identifier(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
-        }
-        "checkout" => {
-            session_checkout_root(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string())
-        }
-        "branch" => session_branch_label(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
-        "repo" => session_repo_identifier(ctx.view, ctx.session).unwrap_or_else(|| "—".to_string()),
-        "fork" => {
-            session_owning_fork_label(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
-        }
-        "declared" => {
-            session_declared_state(ctx.view, ctx.node_id).unwrap_or_else(|| "—".to_string())
-        }
-        "preview" => ctx
-            .session
-            .last_message_preview
-            .clone()
-            .unwrap_or_else(|| "—".to_string()),
-        "title" => session_display_title(ctx.view, ctx.node_id, ctx.session),
-        "activity" => ctx
-            .session
-            .last_active_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(|| "—".to_string()),
-        _ => "—".to_string(),
-    }
-}
-
 /// Render the `title` column for an agent-session row per ADR 0029's
 /// `alias > title > id-suffix` precedence. The id-suffix tier degrades
 /// to `—` here because the `id` column carries the short id already.
@@ -266,87 +198,6 @@ fn session_display_title(
     .unwrap_or_else(|| "—".to_string())
 }
 
-/// Find the checkout whose root contains the session's cwd. Walks
-/// `snapshot.nodes` once per call; row counts are bounded so the cost
-/// stays small.
-fn session_checkout_root(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    Some(session_checkout_id(view, session)?.root.clone())
-}
-
-fn session_workspace_identifier(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
-    let mut workspaces = view
-        .snapshot
-        .resolved_relationships
-        .iter()
-        .filter_map(|relationship| {
-            if relationship.source != *session_id
-                || relationship.relation != RelationKind::AssociatedWith
-            {
-                return None;
-            }
-            match &relationship.target {
-                NodeId::Workspace(workspace) => Some(workspace.root.clone()),
-                _ => None,
-            }
-        })
-        .collect::<Vec<_>>();
-    workspaces.sort();
-    workspaces.dedup();
-    match workspaces.len() {
-        0 => None,
-        _ => Some(workspaces.join(",")),
-    }
-}
-
-/// Resolve the session's checkout and follow `CheckedOutBranch` to the
-/// branch, returning the refname with `refs/heads/` stripped.
-fn session_branch_label(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    let session_checkout = session_checkout_id(view, session)?;
-    for ((source, relation), links) in &view.by_source_relation {
-        if *relation != RelationKind::CheckedOutBranch {
-            continue;
-        }
-        let NodeId::Checkout(worktree_id) = source else {
-            continue;
-        };
-        if worktree_id != session_checkout {
-            continue;
-        }
-        let preferred = pick_preferred(links)?;
-        if let LinkEndpoint::Node {
-            id: NodeId::Branch(branch_id),
-        } = &preferred.target
-        {
-            return Some(strip_branch_prefix(&branch_id.refname).to_string());
-        }
-    }
-    None
-}
-
-/// Resolve the session's checkout and return its repo identifier
-/// (`RepoId.common_dir`).
-fn session_repo_identifier(view: &SnapshotView<'_>, session: &AgentSessionNode) -> Option<String> {
-    Some(session_checkout_id(view, session)?.repo.common_dir.clone())
-}
-
-fn session_checkout_id<'a>(
-    view: &'a SnapshotView<'_>,
-    session: &AgentSessionNode,
-) -> Option<&'a crate::model::CheckoutId> {
-    let cwd = Path::new(session.cwd.as_deref()?);
-    view.by_source_relation
-        .keys()
-        .filter_map(|(source, _relation)| match source {
-            NodeId::Checkout(worktree_id)
-                if path_is_ancestor_of(Path::new(&worktree_id.root), cwd) =>
-            {
-                Some(worktree_id)
-            }
-            _ => None,
-        })
-        .max_by_key(|worktree_id| Path::new(&worktree_id.root).components().count())
-}
-
 fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
     let mut anc_iter = ancestor.components();
     let mut desc_iter = descendant.components();
@@ -358,60 +209,6 @@ fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
             (None, _) => return true,
         }
     }
-}
-
-/// When a fork records this session as a `child_session` target, return
-/// the fork's display label.
-fn session_owning_fork_label(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
-    for ((source, relation), links) in &view.by_source_relation {
-        if *relation != RelationKind::ChildSession {
-            continue;
-        }
-        if !matches!(source, NodeId::Fork(_)) {
-            continue;
-        }
-        for link in links {
-            if let LinkEndpoint::Node { id } = &link.target
-                && id == session_id
-                && let Some(fork) = view.forks.get(source)
-            {
-                return Some(fork_label(fork));
-            }
-        }
-    }
-    None
-}
-
-/// Map the strongest declared candidate for `session_id` to a one-word
-/// state label. Walks `snapshot.candidate_links` directly so ignored
-/// and overridden declared links surface in the cell. Returns `None`
-/// when no declared candidate exists.
-fn session_declared_state(view: &SnapshotView<'_>, session_id: &NodeId) -> Option<String> {
-    let mut best: Option<&GraphLink> = None;
-    for link in &view.snapshot.candidate_links {
-        if &link.source != session_id {
-            continue;
-        }
-        if !matches!(
-            link.provenance,
-            Provenance::LocalDeclared | Provenance::GlobalDeclared
-        ) {
-            continue;
-        }
-        match best {
-            None => best = Some(link),
-            Some(current) if link.provenance.precedence() > current.provenance.precedence() => {
-                best = Some(link);
-            }
-            _ => {}
-        }
-    }
-    let link = best?;
-    Some(match &link.state {
-        crate::model::LinkState::Active => "declared".to_string(),
-        crate::model::LinkState::Ignored { .. } => "ignored".to_string(),
-        crate::model::LinkState::Overridden { .. } => "overridden".to_string(),
-    })
 }
 
 struct MuxRowCtx<'view, 'snap> {
@@ -576,7 +373,7 @@ pub(crate) fn agent_session_label(session: &AgentSessionNode) -> String {
 /// hex chars + 4 dashes = 36) sit above this and collapse via
 /// [`short_session_id`]; anything ≤ 32 chars renders verbatim so
 /// human-readable session keys aren't truncated unnecessarily.
-fn agent_session_key_for_label(key: &str) -> String {
+pub(crate) fn agent_session_key_for_label(key: &str) -> String {
     const UUID_THRESHOLD: usize = 32;
     if key.chars().count() <= UUID_THRESHOLD {
         key.to_string()
@@ -755,7 +552,7 @@ fn pr_branch_label(view: &SnapshotView<'_>, pr_id: &NodeId) -> Option<String> {
     Some(strip_branch_prefix(&branch.refname).to_string())
 }
 
-fn strip_branch_prefix(refname: &str) -> &str {
+pub(crate) fn strip_branch_prefix(refname: &str) -> &str {
     refname.strip_prefix("refs/heads/").unwrap_or(refname)
 }
 
@@ -834,117 +631,10 @@ fn build_pr_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<S
     rows
 }
 
-fn build_agent_rows(
-    view: &SnapshotView<'_>,
-    columns: &[&'static str],
-    options: &RenderOptions,
-) -> Vec<Vec<String>> {
-    // Apply the active row filter (ADR 0031) before building rows so
-    // narrowed listings collapse the data they exclude rather than
-    // computing it.
-    let filtered: Vec<(&NodeId, &AgentSessionNode)> = view
-        .agent_sessions
-        .iter()
-        .filter(|(node_id, session)| agent_row_matches(view, options, node_id, session))
-        .map(|(id, s)| (id, *s))
-        .collect();
-
-    let body_full_ids: Vec<String> = filtered.iter().map(|(id, _)| node_short_id(id)).collect();
-    let id_len = unique_prefix_len(&body_full_ids);
-
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    rows.push(
-        columns
-            .iter()
-            .map(|key| header_label(SESSIONS_COLUMNS, key))
-            .collect(),
-    );
-
-    for ((node_id, session), full_short) in filtered.iter().zip(body_full_ids.iter()) {
-        let short_id = &full_short[..id_len];
-        let ctx = AgentRowCtx {
-            view,
-            node_id,
-            session,
-            short_id,
-        };
-        rows.push(columns.iter().map(|key| agent_cell(key, &ctx)).collect());
-    }
-
-    rows
-}
-
-/// Evaluate the active filter against one agent session. Mirrors the
-/// TUI row-tree's matching logic so a `--harness claude --max-age 7d`
-/// invocation narrows the table and the TUI identically.
-fn agent_row_matches(
-    view: &SnapshotView<'_>,
-    options: &RenderOptions,
-    node_id: &NodeId,
-    session: &AgentSessionNode,
-) -> bool {
-    if options.filter.is_empty() {
-        return true;
-    }
-    let candidate_count = view
-        .candidates_for(node_id, RelationKind::LinkedToMux)
-        .len();
-    let inputs = crate::filter::SessionMatchInputs {
-        harness_key: &session.harness_key,
-        now_epoch: options.now_epoch,
-        last_active_epoch: session.last_active_epoch,
-        mux_state: crate::filter::MuxStateKey::from_candidate_count(candidate_count),
-    };
-    options.filter.matches_session(&inputs)
-}
-
-/// Lineage cell for the agent projection (ADR 0018). Shows the preferred
-/// `parent_session` for the row:
-///
-/// - `—` when no parent_session candidate exists.
-/// - `<short>` when the parent is a discovered `AgentSession`.
-/// - `?<short>` when the parent is preserved as unresolved-endpoint evidence.
-/// - Trailing `←` when the parent itself has a parent, signalling a chain
-///   longer than one hop.
-fn lineage_cell(view: &SnapshotView<'_>, session_id: &NodeId) -> String {
-    let Some(link) = view.preferred_link(session_id, RelationKind::ParentSession) else {
-        return "—".to_string();
-    };
-
-    let (label, parent_node) = match &link.target {
-        LinkEndpoint::Node {
-            id: parent_id @ NodeId::AgentSession(agent_id),
-        } => (short_session_id(&agent_id.session_key), Some(parent_id)),
-        LinkEndpoint::Unresolved { evidence } => {
-            let label = evidence
-                .native_id
-                .as_deref()
-                .map(short_session_id)
-                .map(|short| format!("?{short}"))
-                .unwrap_or_else(|| "?".to_string());
-            (label, None)
-        }
-        _ => return "—".to_string(),
-    };
-
-    let has_grandparent = parent_node
-        .map(|parent| {
-            view.preferred_link(parent, RelationKind::ParentSession)
-                .is_some()
-        })
-        .unwrap_or(false);
-
-    if has_grandparent {
-        format!("{label}←")
-    } else {
-        label
-    }
-}
-
 /// Shorten a session id for human display: keep short ids whole, abbreviate
 /// long ones (typical UUIDs) to a `…<last-8>` suffix so adjacent rows stay
 /// distinguishable without dominating the table width.
-fn short_session_id(key: &str) -> String {
+pub(crate) fn short_session_id(key: &str) -> String {
     const FULL_MAX: usize = 12;
     const TAIL: usize = 8;
 
@@ -955,45 +645,6 @@ fn short_session_id(key: &str) -> String {
         let tail: String = chars[chars.len() - TAIL..].iter().collect();
         format!("…{tail}")
     }
-}
-
-/// Walk session → fork associations → branches → PRs to find the
-/// preferred PR for an agent session, if any. This covers the case
-/// where a session lives in a checkout whose branch has an open PR.
-fn preferred_pr_for_session(view: &SnapshotView<'_>, session_id: &NodeId) -> (String, String) {
-    let session_cwd = match view.agent_sessions.get(session_id) {
-        Some(session) => session.cwd.as_deref(),
-        None => return ("—".to_string(), "—".to_string()),
-    };
-    let Some(session_cwd) = session_cwd else {
-        return ("—".to_string(), "—".to_string());
-    };
-
-    // PRs are keyed off the branch node; the session's cwd is the
-    // checkout path, but we don't have a direct session→branch link
-    // yet. For now match PRs whose link source metadata points to
-    // a branch whose ref name appears in `session_cwd`. This is
-    // intentionally conservative: when we add session→branch links
-    // in a later phase the lookup gets replaced.
-    for ((source, relation), links) in &view.by_source_relation {
-        if *relation != RelationKind::BranchHasForgePr {
-            continue;
-        }
-        let _ = source;
-        let _ = session_cwd;
-        let count = links.len();
-        if let Some(preferred) = pick_preferred(links)
-            && let NodeId::ForgePr(pr_id) = &preferred.source
-            && let Some(pr) = view.forge_prs.get(&NodeId::ForgePr(pr_id.clone()))
-        {
-            return (
-                forge_pr_label(pr),
-                indicator(preferred.provenance, preferred.confidence, count > 1),
-            );
-        }
-    }
-
-    ("—".to_string(), "—".to_string())
 }
 
 fn build_mux_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {

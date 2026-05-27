@@ -1178,6 +1178,71 @@ pub fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Provenance/confidence indicator (ADR 0006)
+// -----------------------------------------------------------------------------
+
+/// Compact `provenance/confidence[*]` cell, given the serde tag
+/// strings (e.g. `"strong_discovered"`, `"high"`). String-driven so
+/// the substrate stays free of `crate::model::{Provenance,
+/// Confidence}` dependencies; SQL-backed renderers in
+/// [`super::agent`] read the tag columns directly. The typed-enum
+/// variant lives at `super::table::indicator` for callers that
+/// already hold typed values.
+pub fn indicator_from_tags(provenance_tag: &str, confidence_tag: &str, ambiguous: bool) -> String {
+    let mut buf = String::with_capacity(6);
+    buf.push_str(provenance_code_from_tag(provenance_tag));
+    buf.push('/');
+    buf.push_str(confidence_code_from_tag(confidence_tag));
+    if ambiguous {
+        buf.push('*');
+    }
+    buf
+}
+
+/// Numeric precedence for a provenance serde tag, mirroring the
+/// `Provenance::precedence` mapping in `crate::model`. Higher beats
+/// lower; ties on `LocalDeclared` `>` `GlobalDeclared` `>`
+/// `StrongDiscovered` `>` `Discovered` = `Convention` `>` `Cached`
+/// are resolved by the caller. Substrate-safe (no model dep).
+pub fn provenance_precedence(tag: &str) -> u8 {
+    match tag {
+        "local_declared" => 5,
+        "global_declared" => 4,
+        "strong_discovered" => 3,
+        "discovered" | "convention" => 2,
+        "cached" => 1,
+        _ => 0,
+    }
+}
+
+pub fn provenance_code_from_tag(tag: &str) -> &'static str {
+    match tag {
+        "local_declared" => "LD",
+        "global_declared" => "GD",
+        "strong_discovered" => "SD",
+        "discovered" => "D",
+        "convention" => "C",
+        "cached" => "$",
+        _ => "?",
+    }
+}
+
+pub fn confidence_code_from_tag(tag: &str) -> &'static str {
+    match tag {
+        "high" => "H",
+        "medium" => "M",
+        "low" => "L",
+        _ => "?",
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Recency formatter
+// -----------------------------------------------------------------------------
+
+// (kept below for context; format_relative_age moved earlier in the file)
+
 pub fn current_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

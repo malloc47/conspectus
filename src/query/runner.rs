@@ -1120,11 +1120,16 @@ mod tests {
             is_draft: false,
         };
         snap.nodes.push(GraphNode::ForgePr(pr.clone()));
+        // Production discovery (forge::github) and the in-memory
+        // `preferred_pr_for_session` both build branch_has_forge_pr
+        // with source=ForgePr, target=Branch — despite the relation
+        // name reading "branch has forge pr". v_pr_by_branch joins
+        // against that direction; this fixture mirrors it.
         snap.candidate_links.push(GraphLink {
             id: "L1".into(),
-            source: NodeId::Branch(branch_id),
+            source: NodeId::ForgePr(pr.id.clone()),
             target: LinkEndpoint::Node {
-                id: NodeId::ForgePr(pr.id.clone()),
+                id: NodeId::Branch(branch_id),
             },
             relation: RelationKind::BranchHasForgePr,
             provenance: Provenance::Discovered,

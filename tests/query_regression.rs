@@ -150,11 +150,13 @@ fn fixture_workspace_with_prs() -> GraphSnapshot {
             source_metadata: SourceMetadata::default(),
             state: LinkState::Active,
         });
+        // branch_has_forge_pr is stored PR → Branch (see
+        // discovery::forge::github and ADR 0044 §P10-004 notes).
         snap.candidate_links.push(GraphLink {
             id: format!("L_bpr_{idx}"),
-            source: NodeId::Branch(branch_id),
+            source: NodeId::ForgePr(pr.id.clone()),
             target: LinkEndpoint::Node {
-                id: NodeId::ForgePr(pr.id.clone()),
+                id: NodeId::Branch(branch_id),
             },
             relation: RelationKind::BranchHasForgePr,
             provenance: Provenance::Discovered,
@@ -353,8 +355,10 @@ fn workspace_with_prs_branch_to_pr_join_via_candidate_links() {
     // Raw join over the tables rather than the saved view — exercises
     // the schema directly so a v_pr_by_branch refactor that drifts
     // from the underlying tables surfaces on either path. Joins are
-    // structural via json_extract over the JSON endpoint columns
-    // (ADR 0044).
+    // Display-form against node_<kind>.node_id (per P10-004's
+    // findings: ID structural fields can diverge from node_*
+    // structural columns, so structural JOINs on those columns are
+    // not reliable). branch_has_forge_pr links go PR → Branch.
     let snap = fixture_workspace_with_prs();
     insta::assert_snapshot!(
         "workspace_with_prs_raw_branch_pr_join",
@@ -363,18 +367,20 @@ fn workspace_with_prs_branch_to_pr_join_via_candidate_links() {
             "SELECT b.refname, pr.number AS pr_number, pr.state AS pr_state \
              FROM node_branches b \
              JOIN candidate_links cl \
-               ON cl.source_kind = 'branch' \
-               AND json_extract(cl.source, '$.repo.common_dir') = b.repo_common_dir \
-               AND json_extract(cl.source, '$.refname') = b.refname \
+               ON cl.target_node_kind = 'branch' \
+               AND ('branch:repo:' || \
+                    json_extract(cl.target_node, '$.repo.common_dir') || '@' || \
+                    json_extract(cl.target_node, '$.refname')) = b.node_id \
+               AND cl.source_kind = 'forge_pr' \
                AND cl.relation = 'branch_has_forge_pr' \
                AND cl.state = 'active' \
              JOIN node_forge_prs pr \
-               ON cl.target_node_kind = 'forge_pr' \
-               AND json_extract(cl.target_node, '$.provider') = pr.provider_name \
-               AND json_extract(cl.target_node, '$.host') = pr.host \
-               AND json_extract(cl.target_node, '$.owner') = pr.owner \
-               AND json_extract(cl.target_node, '$.repo') = pr.repo \
-               AND json_extract(cl.target_node, '$.number') = pr.number \
+               ON ('forge_pr:' || \
+                   json_extract(cl.source, '$.provider') || ':' || \
+                   json_extract(cl.source, '$.host') || '/' || \
+                   json_extract(cl.source, '$.owner') || '/' || \
+                   json_extract(cl.source, '$.repo') || '#' || \
+                   json_extract(cl.source, '$.number')) = pr.node_id \
              ORDER BY pr.number"
         )
     );
