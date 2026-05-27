@@ -26,11 +26,10 @@
 //! `query::runner`) keep compiling unchanged while the consumer-side
 //! migration proceeds.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::model::{
-    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphLink, GraphSnapshot, LinkEndpoint,
+    AgentSessionNode, Confidence, ForgePrNode, ForkNode, GraphSnapshot, LinkEndpoint,
     MuxSessionNode, NodeId, Provenance, RelationKind, SnapshotIndex, pick_preferred,
 };
 
@@ -47,7 +46,7 @@ pub use super::render::{
 
 // Crate-internal substrate access used by the projection builders /
 // cell extractors below.
-use super::render::{FORKS_COLUMNS, MUX_COLUMNS, PRS_COLUMNS, UNION_COLUMNS};
+use super::render::{FORKS_COLUMNS, PRS_COLUMNS, UNION_COLUMNS};
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
 /// a stable short row identifier for table output (H-TBL-002).
@@ -85,7 +84,9 @@ pub fn render_with(
         Projection::Agent => {
             super::agent::build_agent_rows_from_snapshot(snapshot, &columns, options)
         }
-        Projection::Mux => build_mux_rows(&SnapshotView::new(snapshot), &columns),
+        // P10-005: mux projection now reads from SQLite. Same
+        // materialization bridge as above.
+        Projection::Mux => super::mux::build_mux_rows_from_snapshot(snapshot, &columns, options),
         Projection::Union => build_union_rows(&SnapshotView::new(snapshot), &columns),
         Projection::Pr => build_pr_rows(&SnapshotView::new(snapshot), &columns),
         Projection::Fork => build_fork_rows(&SnapshotView::new(snapshot), &columns),
@@ -125,46 +126,20 @@ fn confidence_code(confidence: Confidence) -> &'static str {
     }
 }
 
-/// Per-snapshot view used by the table renderers. Wraps the shared
-/// [`SnapshotIndex`] (see ADR 0035) and adds the inverse `mux_id →
-/// [(agent_label, preferred_link)]` map that only the agents-attached-
-/// to-this-mux cell needs. Implementing [`Deref`] lets existing call
-/// sites read `view.by_source_relation`, `view.preferred_link(...)`,
-/// etc. directly without churn.
+/// Per-snapshot view used by the remaining in-memory table
+/// renderers (union, prs, forks). Wraps the shared [`SnapshotIndex`]
+/// (see ADR 0035); implementing [`Deref`] lets call sites read
+/// `view.by_source_relation`, `view.preferred_link(...)`, etc.
+/// directly. The agent and mux projections route through SQLite
+/// (P10-004 / P10-005) and do not touch this type.
 struct SnapshotView<'a> {
     index: SnapshotIndex<'a>,
-    /// Pre-computed `mux_id → [(agent_label, preferred_link)]` map for
-    /// the agents-attached-to-this-mux cell. Built once at view
-    /// construction so per-row column extractors don't each rebuild it.
-    attached_to_mux: BTreeMap<NodeId, Vec<(String, &'a GraphLink)>>,
 }
 
 impl<'a> SnapshotView<'a> {
     fn new(snapshot: &'a GraphSnapshot) -> Self {
-        let index = SnapshotIndex::new(snapshot);
-
-        let mut attached_to_mux: BTreeMap<NodeId, Vec<(String, &GraphLink)>> = BTreeMap::new();
-        for ((source, relation), links) in &index.by_source_relation {
-            if *relation != RelationKind::LinkedToMux {
-                continue;
-            }
-            let Some(preferred) = pick_preferred(links) else {
-                continue;
-            };
-            let Some(target_id) = preferred.target_node_id() else {
-                continue;
-            };
-            if let Some(session) = index.agent_sessions.get(source) {
-                attached_to_mux
-                    .entry(target_id.clone())
-                    .or_default()
-                    .push((agent_session_label(session), preferred));
-            }
-        }
-
         Self {
-            index,
-            attached_to_mux,
+            index: SnapshotIndex::new(snapshot),
         }
     }
 }
@@ -209,83 +184,6 @@ fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
             (None, _) => return true,
         }
     }
-}
-
-struct MuxRowCtx<'view, 'snap> {
-    view: &'view SnapshotView<'snap>,
-    mux_id: &'view NodeId,
-    mux: &'view MuxSessionNode,
-    short_id: &'view str,
-}
-
-fn mux_cell(key: &str, ctx: &MuxRowCtx<'_, '_>) -> String {
-    match key {
-        "id" => ctx.short_id.to_string(),
-        "mux" => mux_session_label(ctx.mux),
-        "cwd" => ctx.mux.cwd.clone().unwrap_or_else(|| "—".to_string()),
-        "agents" => match ctx.view.attached_to_mux.get(ctx.mux_id) {
-            Some(entries) if !entries.is_empty() => entries
-                .iter()
-                .map(|(label, link)| {
-                    let ambiguous = ctx
-                        .view
-                        .candidates_for(&link.source, RelationKind::LinkedToMux)
-                        .len()
-                        > 1;
-                    format!(
-                        "{label} [{ind}]",
-                        ind = indicator(link.provenance, link.confidence, ambiguous)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-            _ => "—".to_string(),
-        },
-        "attached-count" => {
-            let count = ctx
-                .view
-                .attached_to_mux
-                .get(ctx.mux_id)
-                .map(Vec::len)
-                .unwrap_or(0);
-            if count == 0 {
-                "—".to_string()
-            } else {
-                count.to_string()
-            }
-        }
-        "activity" => ctx
-            .mux
-            .activity_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(|| "—".to_string()),
-        "created" => ctx
-            .mux
-            .created_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(|| "—".to_string()),
-        "preview" => {
-            first_attached_agent_preview(ctx.view, ctx.mux_id).unwrap_or_else(|| "—".to_string())
-        }
-        _ => "—".to_string(),
-    }
-}
-
-/// Read the `last_message_preview` of the first agent session
-/// resolved as attached to this mux. The mux projection's `preview`
-/// column shows this lone preview rather than joining all attached
-/// agents' previews — per ADR 0023, joining would push the cell
-/// past any reasonable width budget.
-fn first_attached_agent_preview(view: &SnapshotView<'_>, mux_id: &NodeId) -> Option<String> {
-    let entries = view.attached_to_mux.get(mux_id)?;
-    for (_label, link) in entries {
-        if let Some(session) = view.agent_sessions.get(&link.source)
-            && let Some(preview) = &session.last_message_preview
-        {
-            return Some(preview.clone());
-        }
-    }
-    None
 }
 
 enum UnionRowSource<'a> {
@@ -645,32 +543,6 @@ pub(crate) fn short_session_id(key: &str) -> String {
         let tail: String = chars[chars.len() - TAIL..].iter().collect();
         format!("…{tail}")
     }
-}
-
-fn build_mux_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {
-    let body_full_ids: Vec<String> = view.mux_sessions.keys().map(node_short_id).collect();
-    let id_len = unique_prefix_len(&body_full_ids);
-
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    rows.push(
-        columns
-            .iter()
-            .map(|key| header_label(MUX_COLUMNS, key))
-            .collect(),
-    );
-
-    for ((mux_id, mux), full_short) in view.mux_sessions.iter().zip(body_full_ids.iter()) {
-        let short_id = &full_short[..id_len];
-        let ctx = MuxRowCtx {
-            view,
-            mux_id,
-            mux,
-            short_id,
-        };
-        rows.push(columns.iter().map(|key| mux_cell(key, &ctx)).collect());
-    }
-
-    rows
 }
 
 fn build_union_rows(view: &SnapshotView<'_>, columns: &[&'static str]) -> Vec<Vec<String>> {

@@ -6,6 +6,8 @@ use crate::model::GraphSnapshot;
 
 #[cfg(feature = "query")]
 pub mod agent;
+#[cfg(feature = "query")]
+pub mod mux;
 pub mod node_show;
 pub mod render;
 pub mod table;
