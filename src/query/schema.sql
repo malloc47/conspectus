@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS node_agent_sessions (
     title                     TEXT,
     last_message_preview      TEXT,
     last_active_epoch         INTEGER,
+    session_kind              TEXT,
     discovery_provider        TEXT NOT NULL DEFAULT 'unknown',
     discovery_freshness_epoch INTEGER NOT NULL DEFAULT 0
 );

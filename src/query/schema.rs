@@ -264,6 +264,7 @@ pub const NODE_AGENT_SESSIONS_COLUMNS: &[&str] = &[
     "title",
     "last_message_preview",
     "last_active_epoch",
+    "session_kind",
     "discovery_provider",
     "discovery_freshness_epoch",
 ];
@@ -517,6 +518,7 @@ mod tests {
                 title: None,
                 last_message_preview: None,
                 last_active_epoch: None,
+                session_kind: None,
             }),
             GraphNode::MuxSession(MuxSessionNode {
                 id: MuxSessionId::new("tmux:0"),

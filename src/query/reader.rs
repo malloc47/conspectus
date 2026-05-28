@@ -142,13 +142,19 @@ fn read_workspaces(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::Res
 fn read_agent_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::Result<()> {
     let mut stmt = conn.prepare(
         "SELECT harness_key, state_scope, session_key, cwd, title, \
-                last_message_preview, last_active_epoch \
+                last_message_preview, last_active_epoch, session_kind \
          FROM node_agent_sessions ORDER BY node_id",
     )?;
     let rows = stmt.query_map([], |row| {
         let harness_key: String = row.get(0)?;
         let state_scope: String = row.get(1)?;
         let session_key: String = row.get(2)?;
+        let raw_kind: Option<String> = row.get(7)?;
+        let session_kind = raw_kind.and_then(|k| match k.as_str() {
+            "subagent" => Some(crate::model::SessionKind::Subagent),
+            "human" => Some(crate::model::SessionKind::Human),
+            _ => None,
+        });
         Ok(AgentSessionNode {
             id: AgentSessionId::new(&harness_key, state_scope, session_key),
             harness_key,
@@ -156,6 +162,7 @@ fn read_agent_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite:
             title: row.get(4)?,
             last_message_preview: row.get(5)?,
             last_active_epoch: row.get(6)?,
+            session_kind,
         })
     })?;
     for session in rows {
@@ -664,6 +671,7 @@ mod tests {
             title: Some("title".into()),
             last_message_preview: Some("hello".into()),
             last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
         }));
 
         snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {

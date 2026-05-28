@@ -159,8 +159,8 @@ fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Res
     let mut stmt = tx.prepare(
         "INSERT INTO node_agent_sessions (\
            node_id, harness_key, state_scope, session_key, cwd, title, \
-           last_message_preview, last_active_epoch\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+           last_message_preview, last_active_epoch, session_kind\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
     for node in nodes {
         let GraphNode::AgentSession(session) = node else {
@@ -174,7 +174,12 @@ fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Res
             title,
             last_message_preview,
             last_active_epoch,
+            session_kind,
         } = session;
+        let session_kind_str = session_kind.map(|k| match k {
+            crate::model::SessionKind::Human => "human".to_string(),
+            crate::model::SessionKind::Subagent => "subagent".to_string(),
+        });
         stmt.execute(params![
             node_id.to_string(),
             harness_key,
@@ -184,6 +189,7 @@ fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Res
             title,
             last_message_preview,
             last_active_epoch,
+            session_kind_str,
         ])?;
     }
     Ok(())
@@ -542,6 +548,7 @@ mod tests {
             title: Some("title".into()),
             last_message_preview: Some("hello".into()),
             last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
         }
     }
 
