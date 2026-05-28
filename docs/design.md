@@ -584,26 +584,18 @@ until a follow-on ADR retires it.
 
 ### Graph-to-View Slicing
 
-Per ADR 0035, every view that renders the snapshot funnels its joins
-through a single read-only `SnapshotIndex` (`src/model/index.rs`) built
-once per snapshot build. The index carries typed node maps per
-[`NodeKind`], a `(source, relation)` map over active candidate links, and
-named selectors for the joins that more than one view was already coding
-by hand (`workspace_for_repo`, `workspace_for_session`,
-`checkout_for_path`, `mux_candidates_for_session`, `preferred_link`,
-…). View-specific inverse indexes — such as the table renderer's
-`attached_to_mux` — are built on top of the shared index in the view
-that needs them rather than duplicating its construction loop.
+Per ADR 0043, every view, renderer, and inspection surface consumes
+SQLite rather than a long-lived `GraphSnapshot`. The producer pipeline
+still discovers and resolves a typed snapshot, then loads it into
+SQLite; after that, table projections, `node show`, TUI detail, and TUI
+row builders read from a `rusqlite::Connection`.
 
-This is the explicit layer between graph and view: a future ADR 0031
-view (Mux / Union / Prs / Forks) defines itself as `pick a starting
-selector → chain filter/group-by → enrich → render`, not as another
-ad-hoc walk over `snapshot.nodes` and `snapshot.candidate_links`.
-Stage 2 (compile-time Datalog via Ascent) remains gated on ADR 0035's
-recursion trigger. Stage 3 (a user-facing query surface) is settled by
-ADR 0036 in favor of SQLite; the `SnapshotIndex` selectors remain the
-loader source feeding the SQL schema, and the Rust resolver remains the
-source of truth (ADR 0041) — SQL is a consumer.
+Filter, grouping, selection, and row-view-model assembly stay in Rust on
+top of the SQL result set. The Rust resolver remains the source of truth
+for relationship selection (ADR 0041); SQLite is the read surface and
+saved-view library, not a replacement resolver. Future ADR 0031 views
+(Mux / Union / Prs / Forks) should be built directly against the
+connection surface instead of introducing a new in-memory selector layer.
 
 ## Continuous Operation Mode
 

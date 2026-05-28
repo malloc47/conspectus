@@ -20,12 +20,10 @@ pub use reader::read_snapshot;
 use crate::model::GraphSnapshot;
 
 /// Build an in-memory SQLite connection populated with `snapshot`'s
-/// contents. Used by the consumer-side renderers during the
-/// Phase 10 migration to ADR 0043 — they receive a `GraphSnapshot`
-/// from existing callers, materialize it here, and run SQL queries
-/// against the result. After P10-014 demotes `GraphSnapshot` to a
-/// producer-only type, callers will pass a real `graph.sqlite`
-/// connection and this helper becomes test-only.
+/// contents. Production consumers should prefer an existing
+/// `graph.sqlite` connection; this helper is for one-shot cold builds
+/// and fixture-heavy tests that still begin with producer-side
+/// snapshots.
 pub fn materialize_snapshot(snapshot: &GraphSnapshot) -> rusqlite::Result<rusqlite::Connection> {
     let mut conn = rusqlite::Connection::open_in_memory()?;
     schema::apply_schema(&conn)?;

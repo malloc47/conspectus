@@ -56,9 +56,11 @@ pub enum AttachDisabled {
 /// against [`App`] state, does not touch the terminal or the
 /// network.
 pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> {
-    let Some(snapshot) = app.snapshot().cloned() else {
+    let Some(database) = app.graph_db().cloned() else {
         return Err(AttachDisabled::NoSelection);
     };
+    let snapshot =
+        crate::query::read_snapshot(database.conn()).map_err(|_| AttachDisabled::MuxNodeMissing)?;
     let Some(selection) = app.selection() else {
         return Err(AttachDisabled::NoSelection);
     };
@@ -73,7 +75,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         (RowKind::AgentSessionMuxCandidate(candidate), _) => candidate.mux.clone(),
         (RowKind::AgentSession(session), _) => {
             let session_node = NodeId::AgentSession(session.session.clone());
-            match preferred_mux_for_session(snapshot.as_ref(), &session_node) {
+            match preferred_mux_for_session(&snapshot, &session_node) {
                 Some(id) => id,
                 None => return Err(AttachDisabled::UnmuxedSession),
             }
@@ -88,7 +90,6 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
     };
 
     let mux_node = snapshot
-        .as_ref()
         .nodes
         .iter()
         .find_map(|node| match node {
@@ -170,7 +171,7 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
 /// Helper: format the target's display label for diagnostics (e.g.
 /// `tmux:editor`). Uses the **raw** native_id so the label matches
 /// what the operator would see in `tmux list-sessions`.
-pub fn target_label(_snapshot: &GraphSnapshot, target: &AttachTarget) -> String {
+pub fn target_label(target: &AttachTarget) -> String {
     format!("{}:{}", target.backend, target.native_id)
 }
 
@@ -196,10 +197,9 @@ mod tests {
         Provenance, RepoId, RepoNode,
     };
     use crate::resolve::resolve_snapshot;
-    use crate::tui::app::Msg;
+    use crate::tui::app::{GraphDb, Msg};
     use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
     use crate::tui::{RunConfig, SessionsGrouping, View};
-    use std::sync::Arc;
 
     fn build_app(snapshot: GraphSnapshot) -> App {
         let snapshot = resolve_snapshot(snapshot);
@@ -215,7 +215,7 @@ mod tests {
         cfg.default_view = View::Sessions;
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: Arc::new(snapshot),
+            snapshot: GraphDb::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -388,7 +388,7 @@ mod tests {
         cfg.current_tmux_session = Some("editor".to_string());
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: Arc::new(snapshot),
+            snapshot: GraphDb::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,

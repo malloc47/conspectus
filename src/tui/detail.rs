@@ -10,10 +10,8 @@
 //! [`build_node_detail_from_conn`] is the production entry point —
 //! it consumes from SQLite via [`crate::query::read_snapshot`]
 //! per-call, then runs the typed-Rust view-model assembly below.
-//! [`build_node_detail`] survives as a thin bridge that materializes
-//! the passed snapshot through `materialize_snapshot` so existing
-//! TUI call sites keep their `&GraphSnapshot` signature until
-//! P10-014 swaps the TUI's stored snapshot for a `Connection`.
+//! [`build_node_detail`] survives for fixture-heavy tests and
+//! producer-side callers that still start from a typed snapshot.
 //!
 //! The trade-off vs. per-section SQL: the detail builder's typed
 //! view-model assembly (header fields with kind dispatch, mux/pr/
@@ -70,9 +68,7 @@ pub struct DetailInputs<'a> {
 /// SQLite-backed detail builder (P10-010 / ADR 0043). Materializes
 /// a fresh typed snapshot from `conn` via
 /// [`crate::query::read_snapshot`] and runs the typed-Rust assembly
-/// below. The TUI will call this directly once P10-014 swaps its
-/// stored `GraphSnapshot` for a `Connection`; today
-/// [`build_node_detail`] is the bridge call sites use.
+/// below.
 pub fn build_node_detail_from_conn(
     conn: &rusqlite::Connection,
     target: &NodeId,
@@ -90,11 +86,8 @@ pub fn build_node_detail_from_conn(
 /// `None` when the node isn't in the snapshot (e.g. selection
 /// pointed at a row that was just removed by a refresh).
 ///
-/// Today this is the call site used by the TUI. The body still
-/// walks the typed snapshot directly so the TUI's existing
-/// `Arc<GraphSnapshot>` continues to drive renders; P10-014 will
-/// retire that storage and route through
-/// [`build_node_detail_from_conn`] instead.
+/// This remains useful for fixture-heavy tests and producer-side
+/// callers. Runtime TUI code uses [`build_node_detail_from_conn`].
 pub fn build_node_detail(inputs: DetailInputs<'_>) -> Option<NodeDetail> {
     let node = inputs
         .snapshot

@@ -59,7 +59,7 @@ struct MuxRow {
 }
 
 /// One attached-agent entry, captured in iteration order matching
-/// the in-memory `SnapshotView::attached_to_mux` build.
+/// the former in-memory mux attachment build.
 #[derive(Debug, Clone)]
 struct AttachedAgent {
     /// Pre-formatted `<harness>:<session_key>` label.
@@ -210,7 +210,7 @@ fn fetch_mux_rows(conn: &Connection) -> rusqlite::Result<Vec<MuxRow>> {
 
 /// Active `linked_to_mux` candidate links joined to their source
 /// agent session, grouped by mux `node_id`. Mirrors
-/// `SnapshotView::attached_to_mux`: include only attachments whose
+/// the former in-memory attachment selector: include only attachments whose
 /// source agent session is present in `node_agent_sessions`, keep
 /// the iteration order the BTreeMap-keyed in-memory walk produces
 /// (sorted by source agent NodeId, i.e. by AgentSessionId tuple),

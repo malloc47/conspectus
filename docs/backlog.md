@@ -5111,16 +5111,19 @@ settles.
 Source plan: `plans/stage-3-sqlite-query-engine.md` (the activation of
 ADR 0035 stage 3). Phase goal: deliver `conspectus query <sql>` — a
 user-facing SQL surface over the resolved graph — backed by an
-embedded SQLite engine. The phase introduces a new on-disk artifact
-(`graph.sqlite`), a typed SQL schema mirroring the Rust model, a
-loader driven by `SnapshotIndex`, a small library of saved views, and
-a fixture-driven regression suite.
+embedded SQLite engine. The phase introduced a typed SQL schema
+mirroring the Rust model, a loader, a query runner, a small library of
+saved views, and a fixture-driven regression suite. The future
+file-backed `graph.sqlite` warm-start lifecycle is tracked under
+Phase 7; the current one-shot CLI can materialize a resolved snapshot
+into an in-memory SQLite database when no persisted graph exists.
 
-This phase is gated on an ADR cluster (engine selection, persistence
+This phase was gated on an ADR cluster (engine selection, persistence
 model, server transport, library API gating, distribution amendment,
-resolver-stays-in-Rust). Two of those (persistence, transport) are
-the SQLite-aware re-scopes of `P7-001` and `P7-004`; the rest are
-new ADRs.
+resolver-stays-in-Rust, and vector search). The engine, query feature,
+distribution amendment, resolver-boundary, vector-search, and
+consumer-surface ADRs have landed. The persistence and transport
+pieces remain the SQLite-aware re-scopes of `P7-001` and `P7-004`.
 
 Dependency shape inside the phase:
 
@@ -5133,15 +5136,15 @@ P9-001 (spike) ──→ P9-002 (schema) ──┬──→ P9-003 (loader) ─�
                                      │
                                      └──→ P9-007 in parallel after P9-002
 
-P9-008 (vector search via sqlite-vec) gated on a future ADR-G.
+P9-008 (vector search via sqlite-vec) ──→ P9-FU-001 (embedding import)
 ```
 
-The TUI workstream (Phase 8 open stories) is explicitly **independent**
-of this phase. `SnapshotIndex` remains the in-process selector layer
-for the TUI; SQLite is a consumer of resolver output, not a
-replacement.
+The TUI workstream (Phase 8 open stories) began independently, but
+Phase 10 later made SQLite the sole consumer-side read surface. The
+remaining producer-side `GraphSnapshot` shape stays scoped to
+discovery, resolution, JSON dump, and fixture setup.
 
-- [ ] `P9-001` SQLite integration spike (bundled build, WAL, lifecycle).
+- [x] `P9-001` SQLite integration spike (bundled build, WAL, lifecycle).
   - Scope: integrate the `rusqlite` crate behind a `query` Cargo feature
     (per ADR-D) with the `bundled` sub-feature on. Confirm SQLite
     3.51.3+ ships and add a CI assertion that fails the build below
@@ -5163,8 +5166,13 @@ replacement.
     manually.
   - Blockers: ADR-A (engine selection), ADR-D (library API), ADR-E
     (distribution amendment).
+  - Outcome: accepted ADRs 0036, 0039, 0040, and 0041; added the
+    default-on `query` feature and the SQLite query module. The spike
+    coverage now includes a bundled SQLite version floor
+    (`MIN_SQLITE_VERSION = 3.51.3`), an in-memory `SELECT 1` smoke
+    test, and a WAL reader/writer concurrency smoke test.
 
-- [ ] `P9-002` Define the SQL schema for the resolved graph.
+- [x] `P9-002` Define the SQL schema for the resolved graph.
   - Scope: produce a DDL for tables `nodes`, `node_repos`,
     `node_checkouts`, `node_workspaces`, `node_agent_sessions`,
     `node_mux_sessions`, `node_branches`, `node_forks`,
@@ -5188,11 +5196,19 @@ replacement.
   - Manual checks: `sqlite3 :memory: < schema.sql` lists the expected
     tables / indexes.
   - Blockers: `P9-001`.
+  - Outcome: added `src/query/schema.sql` and `src/query/schema.rs`
+    with typed node tables, candidate/resolved/diagnostic/alias
+    tables, curated saved views, schema versioning, generated
+    endpoint-kind columns, JSON-encoded endpoint references, and
+    schema-drift tests that compare the DDL against Rust constants.
+    ADR 0044 records the JSON endpoint decision.
 
-- [ ] `P9-003` Implement the GraphSnapshot → SQLite loader.
+- [x] `P9-003` Implement the GraphSnapshot → SQLite loader.
   - Scope: take a `&GraphSnapshot` and a `&mut Connection`,
-    populate every table per `P9-002`, in one transaction. Drive from
-    `SnapshotIndex` (ADR 0035) to avoid re-walking the snapshot.
+    populate every table per `P9-002`, in one transaction. The
+    original plan expected to drive from `SnapshotIndex`; P10 later
+    removed that selector layer, so the loader now walks the producer
+    snapshot directly.
     Idempotency: re-running the loader replaces all rows
     (`DELETE FROM ...` followed by `INSERT`) inside the transaction.
     For partial eviction (`P7-005`), the loader takes an optional
@@ -5209,8 +5225,14 @@ replacement.
   - Manual checks: load a real snapshot and run a few `SELECT`s
     against it; confirm row counts match Rust-side counts.
   - Blockers: `P9-002`.
+  - Outcome: added `src/query/loader.rs`, `query::load`, and
+    `query::materialize_snapshot`. The loader writes graph nodes,
+    candidate links, resolved relationships, diagnostics, and aliases
+    with prepared statements and is covered by fixture round-trip tests
+    through the reader. `P10-013` later removed the `SnapshotIndex`
+    dependency; the loader now iterates producer snapshots directly.
 
-- [ ] `P9-004` Implement `conspectus query <sql>` MVP.
+- [x] `P9-004` Implement `conspectus query <sql>` MVP.
   - Scope: a new CLI subcommand that (a) opens
     `$XDG_DATA_HOME/conspectus/graph.sqlite` in read-only mode (via
     `SQLITE_OPEN_READONLY`), falling back to building an in-memory
@@ -5230,9 +5252,17 @@ replacement.
   - Manual checks: ad-hoc `conspectus query` invocations against a
     populated graph; confirm output readability and that mutation
     statements fail with a clean error.
-  - Blockers: `P9-003`, `P7-003` (for the warm-start file existing).
+  - Blockers: `P9-003`; persisted warm-start remains tracked by
+    `P7-003`.
+  - Outcome: added the `conspectus query` subcommand and
+    `src/query/runner.rs`. The runner opens a read-only
+    `graph.sqlite` when present, otherwise performs cold discovery
+    into an in-memory SQLite database, sets `PRAGMA query_only = 1`,
+    runs user SQL, and returns clear read-only errors for mutation
+    attempts. CLI smoke tests cover table and JSON output plus
+    rejected `INSERT` / `CREATE` statements.
 
-- [ ] `P9-005` Result formatters for query output.
+- [x] `P9-005` Result formatters for query output.
   - Scope: support `--format table` (default, columnar, width-aware
     via the existing renderer's truncation helpers), `--format json`
     (one object per row), `--format csv`, `--format tsv`. Width-aware
@@ -5242,8 +5272,12 @@ replacement.
     truncation snapshots at 80 and 160 columns.
   - Manual checks: pipe each format to a file and inspect.
   - Blockers: `P9-004`.
+  - Outcome: query output supports `--format table|json|csv|tsv`.
+    Table output reuses the shared width-aware rendering substrate and
+    honors `--width`, `--wide`, and `--color`; CLI and runner tests
+    cover each format and truncation behavior.
 
-- [ ] `P9-006` Saved views: a library of common queries.
+- [x] `P9-006` Saved views: a library of common queries.
   - Scope: ship a small set of named views (CREATE VIEW under the
     DDL) that name the joins users would write by hand:
     `v_sessions_with_repo`, `v_mux_attachments`, `v_pr_by_branch`,
@@ -5256,8 +5290,13 @@ replacement.
   - Manual checks: `conspectus query 'SELECT * FROM v_fork_ancestry'`
     on a populated graph.
   - Blockers: `P9-002`.
+  - Outcome: schema and registry now ship `v_sessions_with_repo`,
+    `v_mux_attachments`, `v_pr_by_branch`, `v_fork_ancestry`, and
+    `v_workspace_member_repos`; `conspectus query --list-views`
+    renders the curated registry. `docs/query-guide.md` documents the
+    views, and query regression snapshots exercise each saved view.
 
-- [ ] `P9-007` Fixture corpus and query regression suite.
+- [x] `P9-007` Fixture corpus and query regression suite.
   - Scope: a small library of representative graph fixtures
     (sparse-orphan-session, multi-checkout-repo, fork-ancestry-chain,
     workspace-with-prs, ambiguous-mux-candidates) and a fixture-driven
@@ -5266,15 +5305,37 @@ replacement.
     fixtures.
   - Tests: itself — this is the regression net.
   - Blockers: `P9-002`, `P9-003`.
+  - Outcome: added `tests/query_regression.rs` plus snapshots for
+    sparse orphan sessions, multi-checkout repos, fork ancestry,
+    workspace PRs, ambiguous mux candidates, and saved-view row counts.
+    The suite runs canned SQL against fixture snapshots materialized
+    through the query loader.
 
-- [ ] `P9-008` Vector search via `sqlite-vec` (deferred).
-  - Scope: gated on a future ADR-G covering embedding sources, dim
-    budget, and ingestion lifecycle. Add embedding columns to
-    `node_agent_sessions` (session preview embeddings) and
-    `node_forge_prs` (PR title/body embeddings). Index via `vec0`
-    virtual tables. Expose through `conspectus query` and a new
-    `--similar-to <node-id>` flag.
-  - Blockers: ADR-G (not yet drafted).
+- [x] `P9-008` Vector search via `sqlite-vec` (deferred).
+  - Scope: settle embedding sources, dim budget, ingestion lifecycle,
+    and `sqlite-vec` integration. Add an embedding overlay table,
+    expose `conspectus query --similar-to <node-id>`, and keep actual
+    embedding computation outside Conspectus.
+  - Blockers: ADR-G, now accepted as ADR 0042.
+  - Outcome: accepted ADR 0042. The schema now includes an
+    `embeddings` overlay table, the query runner can load a SQLite
+    extension with `--load-extension`, and `conspectus query
+    --similar-to <node-id>` performs a built-in cosine-distance
+    nearest-neighbor scan over imported embedding blobs. Runtime
+    distribution of `sqlite-vec` and embedding ingestion remain
+    follow-ups rather than normal discovery behavior.
+
+- [ ] `P9-FU-001` Add an embedding import command.
+  - Scope: implement the ADR 0042 import path for external embedding
+    pipelines: read JSON Lines from stdin with `node_id`,
+    `source_field`, `model`, and `vector` fields, validate dimensions,
+    and insert/update rows in the `embeddings` table through the
+    writer path. Keep embedding computation out of Conspectus.
+  - Tests: CLI tests for valid imports, malformed JSON, unknown node
+    IDs, mixed dimensions, duplicate replacement, and subsequent
+    `--similar-to` results.
+  - Blockers: none; future server writer routing may refine the
+    mutation path.
 
 ## Phase 10: SQLite As Sole Consumption Surface
 
@@ -5301,7 +5362,7 @@ ADR 0043 ──→ P10-001 (round-trip + read exhaustiveness) ──┬──→
 
 P10-002 + P10-003 ──→ P10-004 (agent) ──┬──→ P10-005..009 (per-renderer migration, parallel after agent)
                                         │
-                                        └──→ P10-010..012 (TUI migration, parallel after agent)
+                                        └──→ P10-010..011 (TUI migration, parallel after agent)
 
 (all migrations) ──→ P10-013 (retire indexes) ──→ P10-014 (demote GraphSnapshot)
 ```
@@ -5615,10 +5676,9 @@ this phase migrates whichever ones exist when each story lands.
     `build_node_detail_from_conn(conn, target, home) -> Result<Option<NodeDetail>>`
     is the SQLite consumer surface. It calls
     `query::read_snapshot` per-call and runs the existing typed-Rust
-    view-model assembly. `build_node_detail` survives as a thin
-    bridge that materializes the passed snapshot through
-    `materialize_snapshot` so the TUI's `Arc<GraphSnapshot>` keeps
-    working until P10-014 swaps it for a `Connection`.
+    view-model assembly. `build_node_detail` survives for
+    fixture-heavy tests and producer-side callers that still start
+    from a typed snapshot.
     Trade-off vs. per-section SQL (which P10-009 used): the detail
     builder's view-model assembly (kind-dispatched header fields,
     mux/pr/lineage subqueries with ambiguity counts, link summaries
@@ -5656,25 +5716,31 @@ this phase migrates whichever ones exist when each story lands.
     logic is preserved end-to-end; per-section SQL would have
     doubled ~2000 lines of typed assembly for no observable
     behavior change. The existing snapshot-taking
-    `build_sessions_tree` survives in the interim;
-    `Arc<GraphSnapshot>` continues to drive the TUI's refresh
-    loop until P10-014 swaps it for a `Connection`. A parity
-    test asserts the two entry points produce equal `RowTree`s.
+    `build_sessions_tree` survives for fixture-heavy tests and typed
+    assembly reuse. A parity test asserts the two entry points
+    produce equal `RowTree`s.
     Refresh-loop latency check deferred to a follow-up — current
     refresh is well under any user-noticeable threshold and the
     bridge adds one `read_snapshot` pass which is bounded by
     graph size; if it ever becomes load-bearing, the per-section
     SQL refactor is the optimization story.
 
-- [ ] `P10-012` Migrate the TUI Mux/Union/Prs/Forks builders to
-  SQLite.
-  - Scope: same as `P10-011` for whichever ADR 0031 views have
-    landed when this story is picked up. Each builder is its own
-    sub-story; group here for tracking.
-  - Blockers: `P10-011`, plus the ADR 0031 stories that introduce
-    the relevant builder.
+- [x] `P10-012` Decide whether TUI Mux/Union/Prs/Forks builders need
+  SQLite-specific migration work.
+  - Scope: intentionally skip this during Phase 10 closeout. The
+    corresponding ADR 0031 TUI row builders have not landed yet, so
+    there is no active in-memory consumer to migrate. Revisit after
+    `P10-013` / `P10-014` settle the consumer-side contract and decide
+    whether the future Mux/Union/Prs/Forks interfaces need any
+    P10-specific context or can be built directly on the post-P10
+    `Connection` surface.
+  - Blockers: ADR 0031 stories that introduce the relevant builders.
+  - Outcome: no Phase 10 migration work is needed for these builders.
+    Future TUI Mux/Union/Prs/Forks row builders should be implemented
+    directly against the post-P10 `Connection` surface instead of
+    adding snapshot-first builders and migrating them later.
 
-- [ ] `P10-013` Retire `SnapshotIndex`, `SnapshotView`,
+- [x] `P10-013` Retire `SnapshotIndex`, `SnapshotView`,
   `SessionsIndex`.
   - Scope: delete the in-memory selector layer once no consumer
     depends on it. Producer-side discovery and the resolver may
@@ -5685,9 +5751,16 @@ this phase migrates whichever ones exist when each story lands.
   - Tests: `cargo build` succeeds; the existing test suite stays
     green; `cargo +nightly udeps`-style dead-code sweep finds
     nothing residual.
-  - Blockers: `P10-005`..`P10-012` complete.
+  - Blockers: `P10-005`..`P10-011` complete; `P10-012` is deferred
+    until the non-session TUI builders exist.
+  - Outcome: deleted `src/model/index.rs` and removed the
+    `SnapshotIndex` re-export. The SQLite loader now iterates
+    `GraphSnapshot.nodes` directly; the sessions TUI builder keeps a
+    private per-call data helper for its typed assembly instead of the
+    shared selector layer. `SnapshotView` / `SessionsIndex` already had
+    no production symbols left.
 
-- [ ] `P10-014` Demote `GraphSnapshot` to producer-only.
+- [x] `P10-014` Demote `GraphSnapshot` to producer-only.
   - Scope: gate the public re-export so library callers who only
     want to render get a `Connection`-flavored API, not a snapshot.
     `GraphSnapshot` remains the resolver's input/output type and
@@ -5702,6 +5775,35 @@ this phase migrates whichever ones exist when each story lands.
     external Rust caller building a TUI substitute can succeed
     against the new surface.
   - Blockers: `P10-013`.
+  - Outcome: TUI app state now stores a SQLite `GraphDb` wrapper and
+    recomputes detail from `build_node_detail_from_conn`; refresh
+    materializes the resolved producer snapshot into SQLite before
+    dispatching `SetData`. CLI table and `node show` paths materialize
+    SQLite and call the connection-backed render/inspection APIs.
+    `GraphSnapshot` is no longer re-exported from `api`; it remains
+    available from `model` for discovery/resolver/dump/test fixtures.
+    `output::table` exposes `render_conn` / `render_with_conn` as the
+    canonical renderer surface while preserving snapshot bridges for
+    fixture-heavy producer-side tests.
+
+- [ ] `P10-FU-001` Retire snapshot bridge APIs from consumer modules.
+  - Scope: remove compatibility entry points that accept
+    `GraphSnapshot` only to materialize an in-memory SQLite database
+    before rendering or building view-models. Candidate APIs include
+    `output::table::render`, `output::table::render_with`,
+    `output::node_show::resolve_node_id`,
+    `output::node_show::render_node_show`,
+    `tui::detail::build_node_detail`, and the snapshot-taking
+    `tui::rows::sessions::build_sessions_tree` test bridge. Keep
+    producer-side helpers such as `query::materialize_snapshot` when
+    they still serve discovery/resolver fixtures or one-shot cold
+    builds.
+  - Tests: update fixture-heavy tests to materialize SQLite explicitly
+    and call the `*_conn` entry points; full suite stays green.
+  - Manual checks: review `docs/library-api.md` and public exports so
+    rendering examples use connection-backed APIs only.
+  - Blockers: P10 has landed and downstream tests/users have had a
+    chance to move to `render_conn` / `render_with_conn`.
 
 ## Later
 

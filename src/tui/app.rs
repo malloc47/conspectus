@@ -16,13 +16,44 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::fmt;
+use std::rc::Rc;
 
-use crate::model::{GraphSnapshot, MuxSessionId};
-use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
+use crate::model::MuxSessionId;
+use crate::tui::detail::{NodeDetail, build_node_detail_from_conn};
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
+
+#[derive(Clone)]
+pub struct GraphDb(Rc<rusqlite::Connection>);
+
+impl GraphDb {
+    pub(crate) fn new(conn: rusqlite::Connection) -> Self {
+        Self(Rc::new(conn))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_snapshot(snapshot: &crate::model::GraphSnapshot) -> Self {
+        Self::new(crate::query::materialize_snapshot(snapshot).expect("materialize TUI snapshot"))
+    }
+
+    pub(crate) fn conn(&self) -> &rusqlite::Connection {
+        &self.0
+    }
+}
+
+impl fmt::Debug for GraphDb {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("GraphDb").field(&"<sqlite>").finish()
+    }
+}
+
+impl PartialEq for GraphDb {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 /// Top-level state. Owns the resolved run configuration plus the
 /// per-frame UI state.
@@ -30,9 +61,9 @@ use crate::tui::{RunConfig, View};
 pub struct App {
     config: RunConfig,
     should_quit: bool,
-    /// Latest discovery snapshot, wrapped in [`Arc`] so refresh
-    /// hand-off is cheap. `None` before the first `SetData`.
-    snapshot: Option<Arc<GraphSnapshot>>,
+    /// Latest materialized graph database. `None` before the first
+    /// `SetData`.
+    database: Option<GraphDb>,
     /// Latest row tree built from `snapshot`. Empty until `SetData`
     /// arrives.
     tree: RowTree,
@@ -42,7 +73,7 @@ pub struct App {
     /// Selected row by id. `None` when the tree is empty.
     selection: Option<RowId>,
     /// Detail view-model for the current selection. Recomputed
-    /// whenever selection or snapshot changes; the renderer reads
+    /// whenever selection or database changes; the renderer reads
     /// it directly.
     detail: Option<NodeDetail>,
     /// Which panel currently consumes navigation keys.
@@ -146,7 +177,7 @@ pub enum Msg {
     /// Operator asked to exit (`q`, Ctrl-C, fatal-error
     /// translations).
     Quit,
-    /// Background data loader produced a new snapshot + row tree.
+    /// Background data loader produced a new SQLite graph + row tree.
     /// The reducer retains current selection by `RowId` when the
     /// same id is present in the new tree, otherwise it snaps to
     /// the nearest visible row by index. `loaded_at_epoch` is the
@@ -158,7 +189,7 @@ pub enum Msg {
     /// later refreshes ignore the hint and prefer the retained
     /// selection.
     SetData {
-        snapshot: Arc<GraphSnapshot>,
+        snapshot: GraphDb,
         tree: RowTree,
         loaded_at_epoch: i64,
         initial_selection_hint: Option<RowId>,
@@ -208,7 +239,7 @@ impl App {
         Self {
             config,
             should_quit: false,
-            snapshot: None,
+            database: None,
             tree: RowTree::default(),
             expanded: BTreeSet::new(),
             selection: None,
@@ -515,10 +546,10 @@ impl App {
         self.preview_scroll
     }
 
-    /// Latest snapshot, if loaded. Mostly useful to other modules
+    /// Latest graph database, if loaded. Mostly useful to other modules
     /// that compute view-models against the same data.
-    pub fn snapshot(&self) -> Option<&Arc<GraphSnapshot>> {
-        self.snapshot.as_ref()
+    pub(crate) fn graph_db(&self) -> Option<&GraphDb> {
+        self.database.as_ref()
     }
 
     /// Unix-epoch seconds at which the latest snapshot was loaded.
@@ -639,7 +670,7 @@ impl App {
 
     fn set_data(
         &mut self,
-        snapshot: Arc<GraphSnapshot>,
+        snapshot: GraphDb,
         tree: RowTree,
         loaded_at_epoch: i64,
         initial_selection_hint: Option<RowId>,
@@ -653,7 +684,7 @@ impl App {
         if is_first_load {
             self.expanded = initial_expanded_rows(&tree);
         }
-        self.snapshot = Some(snapshot);
+        self.database = Some(snapshot);
         self.tree = tree;
 
         let visible = self.visible_rows_owned();
@@ -751,15 +782,12 @@ impl App {
         let Some(target) = target else {
             return;
         };
-        let Some(snapshot) = self.snapshot.as_ref() else {
+        let Some(database) = self.database.as_ref() else {
             return;
         };
         let home = home_for_config(&self.config);
-        self.detail = build_node_detail(DetailInputs {
-            snapshot: snapshot.as_ref(),
-            target: &target,
-            home: home.as_deref(),
-        });
+        self.detail = build_node_detail_from_conn(database.conn(), &target, home.as_deref())
+            .expect("detail builder should read current TUI database");
     }
 }
 
@@ -871,11 +899,11 @@ mod tests {
     }
 
     fn seeded_app(sessions: &[(&str, &str, &str)]) -> App {
-        let snap = Arc::new(make_snapshot_with(sessions));
+        let snap = make_snapshot_with(sessions);
         let tree = build_tree(&snap);
         let mut app = App::new(RunConfig::defaults());
         app.update(Msg::SetData {
-            snapshot: snap,
+            snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -887,7 +915,7 @@ mod tests {
     fn empty_tree_leaves_selection_none() {
         let mut app = App::new(RunConfig::defaults());
         app.update(Msg::SetData {
-            snapshot: Arc::new(GraphSnapshot::empty()),
+            snapshot: GraphDb::from_snapshot(&GraphSnapshot::empty()),
             tree: RowTree::default(),
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -913,10 +941,7 @@ mod tests {
         // group's id as the launch-context hint on first SetData.
         // The reducer should pre-select the hinted row instead of
         // the leading row.
-        let snap = Arc::new(make_snapshot_with(&[
-            ("codex", "a", "/p/proja"),
-            ("codex", "b", "/p/projb"),
-        ]));
+        let snap = make_snapshot_with(&[("codex", "a", "/p/proja"), ("codex", "b", "/p/projb")]);
         let tree = build_tree(&snap);
         // Pick a group row whose id is *not* the first visible row.
         let first_group_id = tree
@@ -936,7 +961,7 @@ mod tests {
 
         let mut app = App::new(RunConfig::defaults());
         app.update(Msg::SetData {
-            snapshot: snap,
+            snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: Some(hint.clone()),
@@ -946,10 +971,7 @@ mod tests {
 
     #[test]
     fn set_data_first_load_expands_only_launch_context_tree() {
-        let snap = Arc::new(make_snapshot_with(&[
-            ("codex", "a", "/p/proja"),
-            ("codex", "b", "/p/projb"),
-        ]));
+        let snap = make_snapshot_with(&[("codex", "a", "/p/proja"), ("codex", "b", "/p/projb")]);
         let tree = build_sessions_tree(SessionsBuildInputs {
             snapshot: &snap,
             grouping: SessionsGrouping::Graph,
@@ -969,7 +991,7 @@ mod tests {
 
         let mut app = App::new(RunConfig::defaults());
         app.update(Msg::SetData {
-            snapshot: snap,
+            snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: Some(hint),
@@ -999,7 +1021,7 @@ mod tests {
         app.update(Msg::End); // move selection to the last row
         let kept = app.selection().cloned().expect("selection present");
 
-        let snap = app.snapshot.clone().unwrap();
+        let snap = crate::query::read_snapshot(app.graph_db().unwrap().conn()).unwrap();
         let tree = build_tree(&snap);
         // Pick *some* other row id as the hint.
         let hint = tree
@@ -1009,7 +1031,7 @@ mod tests {
             .find(|id| id != &kept)
             .expect("at least one alternate row");
         app.update(Msg::SetData {
-            snapshot: snap,
+            snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_010,
             initial_selection_hint: Some(hint.clone()),
@@ -1155,10 +1177,10 @@ mod tests {
 
         // Rebuild from the same snapshot; the row tree is
         // deterministic, so RowId equality should retain selection.
-        let snap = app.snapshot.clone().unwrap();
+        let snap = crate::query::read_snapshot(app.graph_db().unwrap().conn()).unwrap();
         let tree = build_tree(&snap);
         app.update(Msg::SetData {
-            snapshot: snap,
+            snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -1173,10 +1195,10 @@ mod tests {
         let original_selection = app.selection().cloned().unwrap();
 
         // Build a snapshot that drops the previously-selected row.
-        let snap = Arc::new(make_snapshot_with(&[("codex", "a", "/p/proja")]));
+        let snap = make_snapshot_with(&[("codex", "a", "/p/proja")]);
         let tree = build_tree(&snap);
         app.update(Msg::SetData {
-            snapshot: snap,
+            snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,

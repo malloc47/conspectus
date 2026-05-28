@@ -6,13 +6,12 @@
 //!
 //! v1 discovery wiring (P8-008 minimal slice): the runtime runs
 //! `discover_local_at_roots` synchronously at startup and on
-//! manual `r` refresh, feeding the resulting snapshot + row tree
+//! manual `r` refresh, feeding the resulting SQLite graph + row tree
 //! into the reducer via [`crate::tui::Msg::SetData`]. The
 //! call blocks input briefly during discovery; the full
 //! background-task transport lands with the rest of P8-008.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -21,13 +20,13 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 
 use crate::discovery::discover_local_at_roots;
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
-use crate::model::{GraphSnapshot, MuxSessionId};
+use crate::model::MuxSessionId;
 use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{AttachTarget, attach_disabled_reason, resolve_attach_target};
-use crate::tui::app::{App, Msg};
+use crate::tui::app::{App, GraphDb, Msg};
 use crate::tui::preview::capture_via;
 use crate::tui::rows::RowTree;
-use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
+use crate::tui::rows::sessions::{SessionsBuildInputsFromConn, build_sessions_tree_from_conn};
 use crate::tui::{RunConfig, View, ui};
 
 /// Run the TUI to completion. Restores the terminal on normal exit,
@@ -262,18 +261,25 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
         Some(trimmed.clone())
     };
 
-    let snapshot = match app.snapshot() {
-        Some(snap) => snap,
+    let database = match app.graph_db() {
+        Some(database) => database,
         None => {
             app.update(Msg::SetStatus(Some(
-                "rename: no snapshot available".to_string(),
+                "rename: no graph database available".to_string(),
             )));
+            return;
+        }
+    };
+    let snapshot = match crate::query::read_snapshot(database.conn()) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
             return;
         }
     };
 
     let plan = match crate::rename::plan_session_rename(
-        snapshot.as_ref(),
+        &snapshot,
         &session_id,
         new_display_name.clone(),
         false,
@@ -290,10 +296,7 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
     );
     let loader = crate::config::ConfigLoader::from_env();
     let store_path = match crate::declared::select_store_for_declaration(
-        &endpoint,
-        &endpoint,
-        snapshot.as_ref(),
-        &loader,
+        &endpoint, &endpoint, &snapshot, &loader,
     ) {
         Some(selection) => selection.path,
         None => match loader.user_config_path() {
@@ -436,10 +439,10 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 fn refresh(app: &mut App, _seed: &RunConfig) {
     let config = app.config().clone();
     match discover_and_build(&config) {
-        Ok((snapshot, tree)) => {
+        Ok((database, tree)) => {
             let initial_selection_hint = launch_context_row_id(&tree);
             app.update(Msg::SetData {
-                snapshot: Arc::new(snapshot),
+                snapshot: database,
                 tree,
                 loaded_at_epoch: current_unix_epoch().unwrap_or(0),
                 initial_selection_hint,
@@ -464,7 +467,7 @@ fn launch_context_row_id(tree: &RowTree) -> Option<crate::tui::rows::RowId> {
     })
 }
 
-fn discover_and_build(config: &RunConfig) -> Result<(GraphSnapshot, RowTree)> {
+fn discover_and_build(config: &RunConfig) -> Result<(GraphDb, RowTree)> {
     let snapshot = if config.scan_roots.is_empty() {
         let cwd = std::env::current_dir()?;
         discover_local_at_roots([cwd])?
@@ -472,28 +475,30 @@ fn discover_and_build(config: &RunConfig) -> Result<(GraphSnapshot, RowTree)> {
         discover_local_at_roots(config.scan_roots.clone())?
     };
     let snapshot = resolve_snapshot(snapshot);
+    let database = GraphDb::new(crate::query::materialize_snapshot(&snapshot)?);
 
-    let tree = build_tree_for_view(&snapshot, config);
-    Ok((snapshot, tree))
+    let tree = build_tree_for_view(database.conn(), config)?;
+    Ok((database, tree))
 }
 
-fn build_tree_for_view(snapshot: &GraphSnapshot, config: &RunConfig) -> RowTree {
+fn build_tree_for_view(conn: &rusqlite::Connection, config: &RunConfig) -> Result<RowTree> {
     let home = home_dir();
-    match config.default_view {
-        View::Sessions => build_sessions_tree(SessionsBuildInputs {
-            snapshot,
+    let tree = match config.default_view {
+        View::Sessions => build_sessions_tree_from_conn(SessionsBuildInputsFromConn {
+            conn,
             grouping: config.sessions_grouping,
             home: home.as_deref(),
             now: current_unix_epoch(),
             cwd: config.cwd.as_deref(),
             filter: config.initial_filter.clone(),
-        }),
+        })?,
         // Mux / union / prs / forks builders land in the remaining
         // P8-004 commits; until then those views show an empty
         // placeholder. The renderer already labels the active view
         // in the header so the operator sees what's loaded.
         View::Mux | View::Union | View::Prs | View::Forks => RowTree::default(),
-    }
+    };
+    Ok(tree)
 }
 
 fn home_dir() -> Option<PathBuf> {

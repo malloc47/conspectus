@@ -865,7 +865,8 @@ impl NodeShowArgs {
             conspectus::discovery::discover_local_at_roots(self.scan_roots)?
         };
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
-        let id = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
+        let conn = conspectus::query::materialize_snapshot(&snapshot)?;
+        let id = match conspectus::output::node_show::resolve_node_id_from_conn(&conn, &self.id)? {
             Ok(id) => id,
             Err(err) => {
                 eprint!("conspectus: {err}");
@@ -873,7 +874,8 @@ impl NodeShowArgs {
             }
         };
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        let rendered = conspectus::output::node_show::render_node_show(&snapshot, &id, color);
+        let rendered =
+            conspectus::output::node_show::render_node_show_from_conn(&conn, &id, color)?;
         print_paged(
             &rendered,
             PagerOptions::from_flags(self.pager, self.no_pager),
@@ -1056,7 +1058,8 @@ impl TableRowsArgs {
             .with_color(color)
             .with_filter(cli_filter)
             .with_now_epoch(now_epoch);
-        let table = conspectus::output::table::render_with(&snapshot, projection, &options);
+        let conn = conspectus::query::materialize_snapshot(&snapshot)?;
+        let table = conspectus::output::table::render_with_conn(&conn, projection, &options)?;
         print_paged(&table, PagerOptions::from_flags(self.pager, self.no_pager));
         Ok(())
     }
@@ -2566,13 +2569,15 @@ impl RenameSessionArgs {
         let snapshot = discover_for_store_selection(&self.scan_roots)?;
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
 
-        let resolved = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
-            Ok(id) => id,
-            Err(err) => {
-                eprint!("conspectus: {err}");
-                std::process::exit(2);
-            }
-        };
+        let conn = conspectus::query::materialize_snapshot(&snapshot)?;
+        let resolved =
+            match conspectus::output::node_show::resolve_node_id_from_conn(&conn, &self.id)? {
+                Ok(id) => id,
+                Err(err) => {
+                    eprint!("conspectus: {err}");
+                    std::process::exit(2);
+                }
+            };
         let session_id = match resolved {
             NodeId::AgentSession(id) => id,
             other => bail!(
@@ -2624,13 +2629,15 @@ impl RenameMuxArgs {
         let snapshot = discover_for_store_selection(&self.scan_roots)?;
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
 
-        let resolved = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
-            Ok(id) => id,
-            Err(err) => {
-                eprint!("conspectus: {err}");
-                std::process::exit(2);
-            }
-        };
+        let conn = conspectus::query::materialize_snapshot(&snapshot)?;
+        let resolved =
+            match conspectus::output::node_show::resolve_node_id_from_conn(&conn, &self.id)? {
+                Ok(id) => id,
+                Err(err) => {
+                    eprint!("conspectus: {err}");
+                    std::process::exit(2);
+                }
+            };
         let mux_id = match resolved {
             NodeId::MuxSession(id) => id,
             other => bail!(

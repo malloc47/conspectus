@@ -46,9 +46,9 @@ pub use crate::discovery::{
 pub use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence,
     Diagnostic, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
-    GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId, Provenance,
-    RelationKind, RepoId, RepoNode, ResolvedRelationship, SourceMetadata, UnresolvedEndpoint,
-    WorkspaceId, WorkspaceNode,
+    LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind,
+    RepoId, RepoNode, ResolvedRelationship, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
+    WorkspaceNode,
 };
 pub use crate::output::{render_graph_json, table};
 pub use crate::rename::{

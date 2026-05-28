@@ -166,24 +166,28 @@ fn read_agent_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite:
 
 fn read_mux_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::Result<()> {
     let mut stmt = conn.prepare(
-        "SELECT native_id, backend, cwd, active_pane_command, active_pane_pid, \
+        "SELECT node_id, native_id, backend, cwd, active_pane_command, active_pane_pid, \
                 active_pane_current_path, active_pane_start_command, \
                 activity_epoch, created_epoch \
          FROM node_mux_sessions ORDER BY node_id",
     )?;
     let rows = stmt.query_map([], |row| {
-        let native_id: String = row.get(0)?;
+        let node_id: String = row.get(0)?;
+        let native_id: String = row.get(1)?;
+        let id_native = node_id
+            .strip_prefix("mux_session:")
+            .unwrap_or(native_id.as_str());
         Ok(MuxSessionNode {
-            id: MuxSessionId::new(&native_id),
+            id: MuxSessionId::new(id_native),
             native_id,
-            backend: row.get(1)?,
-            cwd: row.get(2)?,
-            active_pane_command: row.get(3)?,
-            active_pane_pid: row.get(4)?,
-            active_pane_current_path: row.get(5)?,
-            active_pane_start_command: row.get(6)?,
-            activity_epoch: row.get(7)?,
-            created_epoch: row.get(8)?,
+            backend: row.get(2)?,
+            cwd: row.get(3)?,
+            active_pane_command: row.get(4)?,
+            active_pane_pid: row.get(5)?,
+            active_pane_current_path: row.get(6)?,
+            active_pane_start_command: row.get(7)?,
+            activity_epoch: row.get(8)?,
+            created_epoch: row.get(9)?,
         })
     })?;
     for mux in rows {

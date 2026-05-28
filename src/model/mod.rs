@@ -1,15 +1,49 @@
 //! Core graph model boundaries.
 
-pub mod index;
-pub use index::{SnapshotIndex, path_is_ancestor_of, pick_preferred};
-
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub type Metadata = BTreeMap<String, Value>;
+
+/// Rank active candidate links by provenance precedence, then confidence,
+/// then link id, and return the first. Non-active links are skipped, so the
+/// helper is safe to call on either a list filtered ahead of time or a raw
+/// `Vec<&GraphLink>`.
+pub fn pick_preferred<'a>(links: &[&'a GraphLink]) -> Option<&'a GraphLink> {
+    let mut ranked: Vec<&GraphLink> = links
+        .iter()
+        .copied()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .collect();
+    ranked.sort_by(|left, right| {
+        right
+            .provenance
+            .precedence()
+            .cmp(&left.provenance.precedence())
+            .then_with(|| right.confidence.cmp(&left.confidence))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    ranked.into_iter().next()
+}
+
+/// Component-wise prefix match so `/a/b` does **not** count as an ancestor
+/// of `/a/barbecue`.
+pub fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
+    let mut anc_iter = ancestor.components();
+    let mut desc_iter = descendant.components();
+    loop {
+        match (anc_iter.next(), desc_iter.next()) {
+            (Some(a), Some(d)) if a == d => continue,
+            (Some(_), Some(_)) => return false,
+            (Some(_), None) => return false,
+            (None, _) => return true,
+        }
+    }
+}
 
 macro_rules! simple_id {
     ($name:ident, $kind:literal, $field:ident) => {

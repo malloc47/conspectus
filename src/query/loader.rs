@@ -1,9 +1,8 @@
 //! GraphSnapshot → SQLite loader (P9-003).
 //!
 //! Populates every table in the P9-002 schema from a snapshot, in one
-//! transaction. Drives node iteration from [`SnapshotIndex`] so the
-//! per-kind work is keyed off the same typed maps the in-process views
-//! use (ADR 0035, ADR 0036).
+//! transaction. Node iteration is direct over the producer-side
+//! [`GraphSnapshot`]; consumers read the resulting SQLite tables.
 //!
 //! Idempotency: every call clears the affected tables before inserting,
 //! so re-running the loader on the same snapshot reproduces the same
@@ -19,8 +18,8 @@ use rusqlite::{Connection, Transaction, params};
 use crate::aliases::AliasOverlay;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Diagnostic, ForgePrNode, ForkNode, GraphLink,
-    GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, RepoNode, ResolvedRelationship,
-    SnapshotIndex, WorkspaceNode,
+    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, RepoNode,
+    ResolvedRelationship, WorkspaceNode,
 };
 
 use super::schema::{
@@ -40,15 +39,14 @@ use super::schema::{
 pub fn load(snapshot: &GraphSnapshot, conn: &mut Connection) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     clear_all(&tx)?;
-    let index = SnapshotIndex::new(snapshot);
-    insert_repos(&tx, &index)?;
-    insert_checkouts(&tx, &index)?;
-    insert_workspaces(&tx, &index)?;
-    insert_agent_sessions(&tx, &index)?;
-    insert_mux_sessions(&tx, &index)?;
-    insert_branches(&tx, &index)?;
-    insert_forks(&tx, &index)?;
-    insert_forge_prs(&tx, &index)?;
+    insert_repos(&tx, &snapshot.nodes)?;
+    insert_checkouts(&tx, &snapshot.nodes)?;
+    insert_workspaces(&tx, &snapshot.nodes)?;
+    insert_agent_sessions(&tx, &snapshot.nodes)?;
+    insert_mux_sessions(&tx, &snapshot.nodes)?;
+    insert_branches(&tx, &snapshot.nodes)?;
+    insert_forks(&tx, &snapshot.nodes)?;
+    insert_forge_prs(&tx, &snapshot.nodes)?;
     insert_candidate_links(&tx, &snapshot.candidate_links)?;
     insert_resolved(&tx, &snapshot.resolved_relationships)?;
     insert_diagnostics(&tx, &snapshot.diagnostics)?;
@@ -76,12 +74,16 @@ fn clear_all(tx: &Transaction) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn insert_repos(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_repos(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_repos (node_id, common_dir, source_paths, remotes) \
          VALUES (?1, ?2, ?3, ?4)",
     )?;
-    for (node_id, repo) in &index.repos {
+    for node in nodes {
+        let GraphNode::Repo(repo) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let RepoNode {
             id: _,
             common_dir,
@@ -98,14 +100,18 @@ fn insert_repos(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()>
     Ok(())
 }
 
-fn insert_checkouts(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_checkouts(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_checkouts (\
            node_id, repo_common_dir, root, git_dir, \
            current_branch_repo_common_dir, current_branch_refname\
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
-    for (node_id, checkout) in &index.checkouts {
+    for node in nodes {
+        let GraphNode::Checkout(checkout) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let CheckoutNode {
             id,
             root,
@@ -128,12 +134,16 @@ fn insert_checkouts(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result
     Ok(())
 }
 
-fn insert_workspaces(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_workspaces(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_workspaces (node_id, root, provider_name, name) \
          VALUES (?1, ?2, ?3, ?4)",
     )?;
-    for (node_id, workspace) in &index.workspaces {
+    for node in nodes {
+        let GraphNode::Workspace(workspace) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let WorkspaceNode {
             id: _,
             root,
@@ -145,14 +155,18 @@ fn insert_workspaces(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Resul
     Ok(())
 }
 
-fn insert_agent_sessions(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_agent_sessions (\
            node_id, harness_key, state_scope, session_key, cwd, title, \
            last_message_preview, last_active_epoch\
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
-    for (node_id, session) in &index.agent_sessions {
+    for node in nodes {
+        let GraphNode::AgentSession(session) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let AgentSessionNode {
             id,
             harness_key,
@@ -175,7 +189,7 @@ fn insert_agent_sessions(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::R
     Ok(())
 }
 
-fn insert_mux_sessions(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_mux_sessions (\
            node_id, native_id, backend, cwd, \
@@ -183,7 +197,11 @@ fn insert_mux_sessions(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Res
            active_pane_start_command, activity_epoch, created_epoch\
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?;
-    for (node_id, mux) in &index.mux_sessions {
+    for node in nodes {
+        let GraphNode::MuxSession(mux) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let MuxSessionNode {
             id: _,
             native_id,
@@ -212,13 +230,17 @@ fn insert_mux_sessions(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Res
     Ok(())
 }
 
-fn insert_branches(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_branches(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_branches (\
            node_id, repo_common_dir, refname, current_commit, upstream\
          ) VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
-    for (node_id, branch) in &index.branches {
+    for node in nodes {
+        let GraphNode::Branch(branch) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let BranchNode {
             id,
             refname,
@@ -236,13 +258,17 @@ fn insert_branches(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<
     Ok(())
 }
 
-fn insert_forks(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_forks(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_forks (\
            node_id, provider_source_key, provider_name, name, scope, capabilities\
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
-    for (node_id, fork) in &index.forks {
+    for node in nodes {
+        let GraphNode::Fork(fork) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let ForkNode {
             id: _,
             provider,
@@ -263,14 +289,18 @@ fn insert_forks(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()>
     Ok(())
 }
 
-fn insert_forge_prs(tx: &Transaction, index: &SnapshotIndex) -> rusqlite::Result<()> {
+fn insert_forge_prs(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_forge_prs (\
            node_id, provider_name, host, owner, repo, number, \
            state, url, updated_epoch, is_draft\
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
     )?;
-    for (node_id, pr) in &index.forge_prs {
+    for node in nodes {
+        let GraphNode::ForgePr(pr) = node else {
+            continue;
+        };
+        let node_id = node.id();
         let ForgePrNode {
             id: _,
             provider,

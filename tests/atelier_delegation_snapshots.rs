@@ -16,6 +16,7 @@ use conspectus::api::{
 use conspectus::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
 use conspectus::discovery::tmux::FakeTmux;
+use conspectus::model::GraphSnapshot;
 
 #[test]
 fn atelier_delegation_comparison_fixture_snapshot() {
@@ -163,7 +164,7 @@ impl AtelierDelegationFixture {
         out
     }
 
-    fn normalize_snapshot_paths(&self, snapshot: &mut conspectus::api::GraphSnapshot) {
+    fn normalize_snapshot_paths(&self, snapshot: &mut GraphSnapshot) {
         for node in &mut snapshot.nodes {
             match node {
                 GraphNode::Repo(node) => {

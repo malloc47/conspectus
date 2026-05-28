@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
-    AgentSessionNode, CheckoutId, GraphSnapshot, MuxSessionNode, NodeId, RepoId, SnapshotIndex,
-    WorkspaceId, path_is_ancestor_of, pick_preferred,
+    AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxSessionNode,
+    NodeId, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -77,9 +77,9 @@ pub struct SessionsBuildInputsFromConn<'a> {
 /// `crate::tui::detail::build_node_detail_from_conn` for why this
 /// migration follows the bridge pattern rather than per-section SQL.
 ///
-/// Once P10-014 swaps the TUI's stored `Arc<GraphSnapshot>` for a
-/// `Connection`, this function becomes the only call site; the
-/// snapshot-taking [`build_sessions_tree`] survives in the interim.
+/// Runtime TUI code uses this entry point; the snapshot-taking
+/// [`build_sessions_tree`] remains for fixture-heavy tests and typed
+/// assembly reuse.
 pub fn build_sessions_tree_from_conn(
     inputs: SessionsBuildInputsFromConn<'_>,
 ) -> rusqlite::Result<RowTree> {
@@ -97,7 +97,7 @@ pub fn build_sessions_tree_from_conn(
 /// Build the sessions row tree. Pure: depends only on the inputs,
 /// no I/O, no clock reads, no env access.
 pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
-    let index = SnapshotIndex::new(inputs.snapshot);
+    let data = SessionsData::new(inputs.snapshot);
     let mut tree = RowTree {
         view: ViewLabel::Sessions,
         ..RowTree::default()
@@ -105,12 +105,12 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let filter = &inputs.filter;
 
     if matches!(inputs.grouping, SessionsGrouping::None) {
-        let mut sessions: Vec<_> = index
+        let mut sessions: Vec<_> = data
             .agent_sessions
             .iter()
             .filter_map(|(session_id, session)| {
                 if !filter.is_empty() {
-                    let candidate_count = index.mux_candidates_for_session(session_id).len();
+                    let candidate_count = data.mux_candidates_for_session(session_id).len();
                     let match_inputs = SessionMatchInputs {
                         harness_key: &session.harness_key,
                         now_epoch: inputs.now,
@@ -132,7 +132,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         let mut session_short_ids = ShortIds::from_sessions(sessions.iter());
         let mut ctx = EmitCtx {
             tree: &mut tree,
-            index: &index,
+            data: &data,
             short_ids: &mut session_short_ids,
             home: inputs.home,
             now: inputs.now,
@@ -152,9 +152,9 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut buckets: BTreeMap<GroupKey, Vec<SessionEntry<'_>>> = BTreeMap::new();
     let mut ungrouped: Vec<SessionEntry<'_>> = Vec::new();
 
-    for (session_id, session) in &index.agent_sessions {
+    for (session_id, session) in &data.agent_sessions {
         if !filter.is_empty() {
-            let candidate_count = index.mux_candidates_for_session(session_id).len();
+            let candidate_count = data.mux_candidates_for_session(session_id).len();
             let match_inputs = SessionMatchInputs {
                 harness_key: &session.harness_key,
                 now_epoch: inputs.now,
@@ -169,7 +169,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             id: session_id.clone(),
             node: session,
         };
-        match resolve_group_key(&entry, &index, inputs.grouping) {
+        match resolve_group_key(&entry, &data, inputs.grouping) {
             Some(key) => buckets.entry(key).or_default().push(entry),
             None => ungrouped.push(entry),
         }
@@ -180,7 +180,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
 
     let mut ctx = EmitCtx {
         tree: &mut tree,
-        index: &index,
+        data: &data,
         short_ids: &mut session_short_ids,
         home: inputs.home,
         now: inputs.now,
@@ -257,11 +257,156 @@ fn node_id_path(id: &NodeId) -> Option<&str> {
 /// helpers so each helper isn't an 8-argument signature.
 struct EmitCtx<'a, 'snap> {
     tree: &'a mut RowTree,
-    index: &'a SnapshotIndex<'snap>,
+    data: &'a SessionsData<'snap>,
     short_ids: &'a mut ShortIds,
     home: Option<&'a Path>,
     now: Option<i64>,
     grouping: SessionsGrouping,
+}
+
+struct SessionsData<'a> {
+    snapshot: &'a GraphSnapshot,
+    agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
+    mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
+    repos: BTreeMap<NodeId, &'a crate::model::RepoNode>,
+    checkouts: BTreeMap<NodeId, &'a crate::model::CheckoutNode>,
+    by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
+}
+
+impl<'a> SessionsData<'a> {
+    fn new(snapshot: &'a GraphSnapshot) -> Self {
+        let mut agent_sessions = BTreeMap::new();
+        let mut mux_sessions = BTreeMap::new();
+        let mut repos = BTreeMap::new();
+        let mut checkouts = BTreeMap::new();
+
+        for node in &snapshot.nodes {
+            let id = node.id();
+            match node {
+                GraphNode::AgentSession(n) => {
+                    agent_sessions.insert(id, n);
+                }
+                GraphNode::MuxSession(n) => {
+                    mux_sessions.insert(id, n);
+                }
+                GraphNode::Repo(n) => {
+                    repos.insert(id, n);
+                }
+                GraphNode::Checkout(n) => {
+                    checkouts.insert(id, n);
+                }
+                _ => {}
+            }
+        }
+
+        let mut by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&GraphLink>> =
+            BTreeMap::new();
+        for link in &snapshot.candidate_links {
+            if !matches!(link.state, LinkState::Active) {
+                continue;
+            }
+            by_source_relation
+                .entry((link.source.clone(), link.relation.clone()))
+                .or_default()
+                .push(link);
+        }
+
+        Self {
+            snapshot,
+            agent_sessions,
+            mux_sessions,
+            repos,
+            checkouts,
+            by_source_relation,
+        }
+    }
+
+    fn mux_candidates_for_session(&self, session: &NodeId) -> Vec<&'a GraphLink> {
+        let Some(links) = self
+            .by_source_relation
+            .get(&(session.clone(), RelationKind::LinkedToMux))
+        else {
+            return Vec::new();
+        };
+
+        let mut by_target: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
+        for link in links {
+            let Some(target) = link.target_node_id() else {
+                continue;
+            };
+            by_target.entry(target.clone()).or_default().push(*link);
+        }
+
+        by_target
+            .into_values()
+            .filter_map(|links| pick_preferred(&links))
+            .collect()
+    }
+
+    fn checkout_for_path(
+        &self,
+        path: &str,
+    ) -> Option<(CheckoutId, &'a crate::model::CheckoutNode)> {
+        let path = Path::new(path);
+        self.checkouts
+            .iter()
+            .filter_map(|(id, node)| match id {
+                NodeId::Checkout(wt_id) if path_is_ancestor_of(Path::new(&wt_id.root), path) => {
+                    Some((wt_id.clone(), *node))
+                }
+                _ => None,
+            })
+            .max_by_key(|(wt_id, _)| Path::new(&wt_id.root).components().count())
+    }
+
+    fn checkout_count_for_repo(&self, repo: &RepoId) -> usize {
+        self.checkouts
+            .keys()
+            .filter(|id| match id {
+                NodeId::Checkout(wt_id) => &wt_id.repo == repo,
+                _ => false,
+            })
+            .count()
+    }
+
+    fn workspace_for_repo(&self, repo: &NodeId) -> Option<&WorkspaceId> {
+        for ((source, relation), links) in &self.by_source_relation {
+            if *relation != RelationKind::WorkspaceContainsRepo {
+                continue;
+            }
+            if links.iter().any(|link| link.target_node_id() == Some(repo))
+                && let NodeId::Workspace(ws) = source
+            {
+                return Some(ws);
+            }
+        }
+        None
+    }
+
+    fn workspace_for_session(&self, session: &NodeId) -> Option<&WorkspaceId> {
+        self.by_source_relation
+            .get(&(session.clone(), RelationKind::AssociatedWith))
+            .and_then(|links| {
+                links.iter().find_map(|link| match link.target_node_id()? {
+                    NodeId::Workspace(ws) => Some(ws),
+                    _ => None,
+                })
+            })
+    }
+
+    fn repo_display_path(&self, repo: &RepoId) -> String {
+        let node_id = NodeId::Repo(repo.clone());
+        let common_dir = repo_display_path_from_common_dir(&repo.common_dir).to_string();
+        self.repos
+            .get(&node_id)
+            .and_then(|repo| {
+                repo.source_paths
+                    .iter()
+                    .find(|path| !path.contains("/.agent-deck/multi-repo-worktrees/"))
+            })
+            .cloned()
+            .unwrap_or(common_dir)
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -294,18 +439,18 @@ struct SessionEntry<'a> {
 
 fn resolve_group_key(
     entry: &SessionEntry<'_>,
-    index: &SnapshotIndex<'_>,
+    data: &SessionsData<'_>,
     grouping: SessionsGrouping,
 ) -> Option<GroupKey> {
     let cwd = entry.node.cwd.as_deref()?;
-    let (worktree_id, _worktree) = index.checkout_for_path(cwd)?;
+    let (worktree_id, _worktree) = data.checkout_for_path(cwd)?;
     let repo_id = worktree_id.repo.clone();
     let repo_node_id = NodeId::Repo(repo_id.clone());
     let workspace = match grouping {
-        SessionsGrouping::Graph => index
+        SessionsGrouping::Graph => data
             .workspace_for_session(&entry.id)
-            .or_else(|| index.workspace_for_repo(&repo_node_id).cloned())
-            .map(|ws| ws.root),
+            .or_else(|| data.workspace_for_repo(&repo_node_id))
+            .map(|ws| ws.root.clone()),
         // Repo/Worktree/ScanRoot collapse the workspace level.
         // ScanRoot fallback to repo grouping until the runtime
         // wires scan roots into the builder.
@@ -330,7 +475,7 @@ fn resolve_group_key(
     Some(GroupKey {
         workspace,
         repo: repo_id.common_dir.clone(),
-        repo_display_path: index.repo_display_path(&repo_id),
+        repo_display_path: data.repo_display_path(&repo_id),
         repo_id,
         worktree,
     })
@@ -366,7 +511,7 @@ fn emit_checkout_bucket(
     let repo_depth = depth;
 
     let checkout_should_render = matches!(ctx.grouping, SessionsGrouping::Checkout)
-        || ctx.index.checkout_count_for_repo(&key.repo_id) >= 2;
+        || ctx.data.checkout_count_for_repo(&key.repo_id) >= 2;
     let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {
         push_checkout_row(
             ctx.tree,
@@ -461,7 +606,7 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
 }
 
 fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
-    let candidates = ctx.index.mux_candidates_for_session(&entry.id);
+    let candidates = ctx.data.mux_candidates_for_session(&entry.id);
     let preferred = pick_preferred(&candidates);
     let mux_state = match candidates.len() {
         0 => MuxIndicator::Unmuxed,
@@ -485,18 +630,13 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             short_id,
             harness_label: harness_label(&entry.node.harness_key),
             cwd_display,
-            project_display: project_display_for_session(&entry, ctx.index, ctx.grouping),
+            project_display: project_display_for_session(&entry, ctx.data, ctx.grouping),
             recency: format_recency(ctx.now, entry.node.last_active_epoch),
             activity_epoch: entry.node.last_active_epoch,
             mux_state,
             preview: entry.node.last_message_preview.clone(),
             title: entry.node.title.clone(),
-            alias: ctx
-                .index
-                .snapshot
-                .aliases
-                .get(&entry.id)
-                .map(str::to_string),
+            alias: ctx.data.snapshot.aliases.get(&entry.id).map(str::to_string),
             primary_node: entry.id.clone(),
         }),
     });
@@ -511,7 +651,7 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
                 NodeId::MuxSession(id) => id.clone(),
                 _ => continue,
             };
-            let mux_node = ctx.index.mux_sessions.get(target).copied();
+            let mux_node = ctx.data.mux_sessions.get(target).copied();
             let mux_label = mux_node
                 .map(mux_session_label)
                 .unwrap_or_else(|| format!("{}:{}", mux_id.native_id, mux_id.native_id));
@@ -536,17 +676,16 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
 
 fn project_display_for_session(
     entry: &SessionEntry<'_>,
-    index: &SnapshotIndex<'_>,
+    data: &SessionsData<'_>,
     grouping: SessionsGrouping,
 ) -> Option<String> {
     if !matches!(grouping, SessionsGrouping::None) {
         return None;
     }
     let cwd = entry.node.cwd.as_deref()?;
-    index
-        .checkout_for_path(cwd)
+    data.checkout_for_path(cwd)
         .and_then(|(worktree_id, _worktree)| {
-            let project_path = index.repo_display_path(&worktree_id.repo);
+            let project_path = data.repo_display_path(&worktree_id.repo);
             project_name_from_path(&project_path)
         })
         .or_else(|| project_name_from_path(cwd))

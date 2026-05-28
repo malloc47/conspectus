@@ -32,12 +32,12 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{GraphNode, GraphSnapshot, MuxSessionId, NodeId};
+use crate::model::{MuxSessionId, NodeId};
 use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
-use crate::tui::app::{App, Focus};
+use crate::tui::app::{App, Focus, GraphDb};
 use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
@@ -121,7 +121,7 @@ fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let theme = app.theme();
     let view_label = view_label(app.config().default_view);
-    let (agents_total, mux_total) = snapshot_counts(app.snapshot().map(|s| s.as_ref()));
+    let (agents_total, mux_total) = snapshot_counts(app.graph_db());
     let visible_sessions = visible_agent_session_count(app);
     let freshness = header_freshness(app);
     let agent_cell = format_count_with_filtered(visible_sessions, agents_total);
@@ -465,19 +465,26 @@ fn view_label(view: View) -> &'static str {
     }
 }
 
-fn snapshot_counts(snapshot: Option<&GraphSnapshot>) -> (usize, usize) {
-    let Some(snapshot) = snapshot else {
+fn snapshot_counts(database: Option<&GraphDb>) -> (usize, usize) {
+    let Some(database) = database else {
         return (0, 0);
     };
-    let mut agents = 0;
-    let mut mux = 0;
-    for node in &snapshot.nodes {
-        match node {
-            GraphNode::AgentSession(_) => agents += 1,
-            GraphNode::MuxSession(_) => mux += 1,
-            _ => {}
-        }
-    }
+    let agents = database
+        .conn()
+        .query_row("SELECT COUNT(*) FROM node_agent_sessions", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .ok()
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0);
+    let mux = database
+        .conn()
+        .query_row("SELECT COUNT(*) FROM node_mux_sessions", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .ok()
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0);
     (agents, mux)
 }
 
@@ -626,7 +633,7 @@ fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
 }
 
 fn empty_left_panel_text(app: &App) -> String {
-    if app.snapshot().is_none() {
+    if app.graph_db().is_none() {
         return "Loading discovery…".to_string();
     }
     if !app.filter().is_empty() {
@@ -1003,7 +1010,7 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn empty_right_panel_text(app: &App) -> &'static str {
-    if app.snapshot().is_none() {
+    if app.graph_db().is_none() {
         "Loading…"
     } else {
         "Select a row to view its detail."
@@ -1338,10 +1345,7 @@ fn contextual_status_text(app: &App) -> String {
     };
     let action_hint = match resolve_attach_target(app) {
         Ok(target) => {
-            let label = app
-                .snapshot()
-                .map(|snapshot| target_label(snapshot.as_ref(), &target))
-                .unwrap_or_else(|| format!("{}:{}", target.backend, target.native_id));
+            let label = target_label(&target);
             match selected_mux_state(app) {
                 Some(MuxIndicator::Ambiguous { .. }) => {
                     format!("a attach preferred {label} · m choose")
@@ -1434,7 +1438,6 @@ mod tests {
     use crate::tui::app::Msg;
     use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
     use crate::tui::{RunConfig, View};
-    use std::sync::Arc;
 
     fn seeded_app() -> App {
         let mut snapshot = GraphSnapshot::empty();
@@ -1474,7 +1477,7 @@ mod tests {
         config.default_view = View::Sessions;
         let mut app = App::new(config);
         app.update(Msg::SetData {
-            snapshot: Arc::new(snapshot),
+            snapshot: GraphDb::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -1550,7 +1553,7 @@ mod tests {
         config.default_view = View::Sessions;
         let mut app = App::new(config);
         app.update(Msg::SetData {
-            snapshot: Arc::new(snapshot),
+            snapshot: GraphDb::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -2074,7 +2077,7 @@ mod tests {
         config.live_preview_enabled = false;
         let mut app = App::new(config);
         app.update(Msg::SetData {
-            snapshot: Arc::new(snapshot),
+            snapshot: GraphDb::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -2347,7 +2350,7 @@ mod tests {
         config.default_view = View::Sessions;
         let mut app = App::new(config);
         app.update(Msg::SetData {
-            snapshot: Arc::new(snapshot),
+            snapshot: GraphDb::from_snapshot(&snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,

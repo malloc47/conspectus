@@ -1,4 +1,4 @@
-//! In-memory plain-text table renderer over a resolved [`GraphSnapshot`].
+//! Plain-text table renderer over the SQLite graph read surface.
 //!
 //! See ADR 0006 for the projection vocabulary. Three projections are
 //! supported:
@@ -26,6 +26,8 @@
 //! `query::runner`) keep compiling unchanged while the consumer-side
 //! migration proceeds.
 
+use rusqlite::Connection;
+
 use crate::model::{Confidence, GraphSnapshot, NodeId, Provenance};
 
 // Re-exports of the backend-agnostic surface that external callers
@@ -50,49 +52,50 @@ pub fn node_short_id(node_id: &NodeId) -> String {
     node_short_id_from_display(&node_id.to_string())
 }
 
-/// Render `snapshot` as an untruncated plain-text table using `projection`.
+/// Render `conn` as an untruncated plain-text table using `projection`.
 ///
-/// Convenience wrapper for [`render_with`] with [`RenderOptions::wide`].
-/// Callers that need width-aware truncation should use [`render_with`].
-pub fn render(snapshot: &GraphSnapshot, projection: Projection) -> String {
-    render_with(snapshot, projection, &RenderOptions::wide())
+/// Convenience wrapper for [`render_with_conn`] with [`RenderOptions::wide`].
+/// Callers that need width-aware truncation should use [`render_with_conn`].
+pub fn render_conn(conn: &Connection, projection: Projection) -> rusqlite::Result<String> {
+    render_with_conn(conn, projection, &RenderOptions::wide())
 }
 
-/// Render `snapshot` as a plain-text table using `projection` and `options`.
-pub fn render_with(
-    snapshot: &GraphSnapshot,
+/// Render `conn` as a plain-text table using `projection` and `options`.
+pub fn render_with_conn(
+    conn: &Connection,
     projection: Projection,
     options: &RenderOptions,
-) -> String {
+) -> rusqlite::Result<String> {
     let columns: Vec<&'static str> = options
         .columns
         .clone()
         .unwrap_or_else(|| default_columns(projection));
     let rows = match projection {
-        // P10-004: agent projection now reads from SQLite. We
-        // materialize an in-memory connection from the snapshot so
-        // existing callers (CLI, tests) keep their `&GraphSnapshot`
-        // signature; P10-014 demotes that intermediate step.
-        Projection::Agent => {
-            super::agent::build_agent_rows_from_snapshot(snapshot, &columns, options)
-        }
-        // P10-005: mux projection now reads from SQLite. Same
-        // materialization bridge as above.
-        Projection::Mux => super::mux::build_mux_rows_from_snapshot(snapshot, &columns, options),
-        // P10-006: union projection now reads from SQLite via
-        // v_nodes — the merge is in SQL, not Rust.
-        Projection::Union => {
-            super::union::build_union_rows_from_snapshot(snapshot, &columns, options)
-        }
-        // P10-007: prs projection now reads from SQLite.
-        Projection::Pr => super::prs::build_pr_rows_from_snapshot(snapshot, &columns, options),
-        // P10-008: forks projection now reads from SQLite. With
-        // this, render_with has no remaining in-memory projection.
-        Projection::Fork => {
-            super::forks::build_fork_rows_from_snapshot(snapshot, &columns, options)
-        }
+        Projection::Agent => super::agent::build_agent_rows_from_conn(conn, &columns, options)?,
+        Projection::Mux => super::mux::build_mux_rows_from_conn(conn, &columns, options)?,
+        Projection::Union => super::union::build_union_rows_from_conn(conn, &columns, options)?,
+        Projection::Pr => super::prs::build_pr_rows_from_conn(conn, &columns, options)?,
+        Projection::Fork => super::forks::build_fork_rows_from_conn(conn, &columns, options)?,
     };
-    render_rows(rows, &columns, options)
+    Ok(render_rows(rows, &columns, options))
+}
+
+/// Compatibility bridge for fixture-heavy tests and producer-side callers that
+/// still start from a freshly resolved snapshot.
+pub fn render(snapshot: &GraphSnapshot, projection: Projection) -> String {
+    render_with(snapshot, projection, &RenderOptions::wide())
+}
+
+/// Compatibility bridge for fixture-heavy tests and producer-side callers that
+/// still start from a freshly resolved snapshot.
+pub fn render_with(
+    snapshot: &GraphSnapshot,
+    projection: Projection,
+    options: &RenderOptions,
+) -> String {
+    let conn = crate::query::materialize_snapshot(snapshot)
+        .expect("materialize GraphSnapshot to in-memory SQLite for table rendering");
+    render_with_conn(&conn, projection, options).expect("SQLite-backed table render")
 }
 
 /// Compact `provenance/confidence[*]` cell, e.g. `LD/H*`. Used in
