@@ -10,6 +10,12 @@
 //! links between two `AgentSession` endpoints. Older databases that lack
 //! the column degrade by reading sessions without lineage rather than
 //! dropping everything.
+//!
+//! Subagent sessions (openCode `@explore` / `@general` workers) are
+//! classified via a schema probe for the `kind` column, with a title-
+//! pattern heuristic as fallback when the column is absent. Subagent
+//! sessions carry `session_kind: Subagent` on their `AgentSessionNode` so
+//! downstream TUI and resolver code can nest, filter, or suppress them.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -24,8 +30,8 @@ use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, LinkEndpoint,
-    LinkState, Metadata, NodeId, Provenance, RelationKind, SourceMetadata, UnresolvedEndpoint,
-    normalize_last_message_preview,
+    LinkState, Metadata, NodeId, Provenance, RelationKind, SessionKind, SourceMetadata,
+    UnresolvedEndpoint, normalize_last_message_preview,
 };
 
 pub const HARNESS_KEY: &str = "opencode";
@@ -75,6 +81,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             title: info.title.clone(),
             last_message_preview: info.last_message_preview.clone(),
             last_active_epoch: info.last_active_epoch,
+            session_kind: info.session_kind,
         }));
     }
 
@@ -127,6 +134,11 @@ struct SessionInfo {
     /// the same shape under `time.updated` / `time.created`.
     #[serde(default)]
     last_active_epoch: Option<i64>,
+    /// Harness-level session classification. Populated from the `kind`
+    /// column when the schema carries it, otherwise inferred via a
+    /// title-pattern heuristic for subagent detection.
+    #[serde(default)]
+    session_kind: Option<SessionKind>,
     #[serde(default)]
     time: Option<SessionTime>,
 }
@@ -156,29 +168,48 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
     };
 
     let Ok(rows) = query.statement.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let directory: Option<String> = row.get(1)?;
+        let title: Option<String> = row.get(2)?;
+        let mut col: usize = 3;
+
+        let parent_id = if query.has_parent {
+            let val = row.get::<_, Option<String>>(col)?;
+            col += 1;
+            val
+        } else {
+            None
+        };
+
+        let raw_kind = if query.has_kind {
+            let val = row.get::<_, Option<String>>(col)?;
+            col += 1;
+            val
+        } else {
+            None
+        };
+
+        let (time_updated, time_created) = if query.has_time {
+            let u = row.get::<_, Option<i64>>(col)?;
+            let c = row.get::<_, Option<i64>>(col + 1)?;
+            (u, c)
+        } else {
+            (None, None)
+        };
+
+        let last_active_epoch = epoch_ms_to_seconds(time_updated.or(time_created));
+
+        let session_kind =
+            classify_session_kind(raw_kind.as_deref(), parent_id.as_deref(), title.as_deref());
+
         Ok(SessionInfo {
-            id: row.get::<_, String>(0)?,
-            directory: row.get::<_, Option<String>>(1)?,
-            title: row.get::<_, Option<String>>(2)?,
-            parent_id: if query.has_parent {
-                row.get::<_, Option<String>>(3)?
-            } else {
-                None
-            },
-            last_active_epoch: if query.has_time && query.has_parent {
-                epoch_ms_to_seconds(
-                    row.get::<_, Option<i64>>(4)?
-                        .or(row.get::<_, Option<i64>>(5)?),
-                )
-            } else if query.has_time {
-                epoch_ms_to_seconds(
-                    row.get::<_, Option<i64>>(3)?
-                        .or(row.get::<_, Option<i64>>(4)?),
-                )
-            } else {
-                None
-            },
+            id,
+            directory,
+            title,
+            parent_id,
+            last_active_epoch,
             last_message_preview: None,
+            session_kind,
             time: None,
         })
     }) else {
@@ -214,38 +245,60 @@ struct SessionQuery<'conn> {
     statement: rusqlite::Statement<'conn>,
     has_parent: bool,
     has_time: bool,
+    has_kind: bool,
 }
 
 fn session_query(connection: &Connection) -> Option<SessionQuery<'_>> {
+    // Probe for the `kind` column first (openCode ≥ some-future-version that
+    // tags subagent sessions with a dedicated field). If the column exists the
+    // adapter reads it directly; otherwise it falls back to a title-pattern
+    // heuristic keyed on `parent_id` presence.
     let candidates = [
         (
-            "SELECT id, directory, title, parent_id, time_updated, time_created FROM session ORDER BY id",
+            "SELECT id, directory, title, parent_id, kind, time_updated, time_created FROM session ORDER BY id",
+            true,
             true,
             true,
         ),
         (
+            "SELECT id, directory, title, parent_id, kind FROM session ORDER BY id",
+            true,
+            false,
+            true,
+        ),
+        (
+            "SELECT id, directory, title, parent_id, time_updated, time_created FROM session ORDER BY id",
+            true,
+            true,
+            false,
+        ),
+        (
             "SELECT id, directory, title, parent_id FROM session ORDER BY id",
             true,
+            false,
             false,
         ),
         (
             "SELECT id, directory, title, time_updated, time_created FROM session ORDER BY id",
             false,
             true,
+            false,
         ),
         (
             "SELECT id, directory, title FROM session ORDER BY id",
             false,
             false,
+            false,
         ),
     ];
 
-    for (sql, has_parent, has_time) in candidates {
+    for (sql, has_parent, has_time, has_kind) in candidates {
         if let Ok(statement) = connection.prepare(sql) {
             return Some(SessionQuery {
                 statement,
                 has_parent,
                 has_time,
+                has_kind,
             });
         }
     }
@@ -288,6 +341,47 @@ fn read_last_message_previews(connection: &Connection) -> BTreeMap<String, Strin
         out.insert(row.0, row.1);
     }
     out
+}
+
+/// True when the title contains an openCode-convention subagent marker:
+/// `(@<name> subagent)`.  Known variants are `@explore` and `@general`;
+/// the pattern matches any `(@`-prefixed name followed by ` subagent)` to
+/// survive subagent-type additions without code changes.
+fn title_contains_subagent_pattern(title: &str) -> bool {
+    let lower = title.to_ascii_lowercase();
+    // Fast path: known fixed patterns.
+    if lower.contains("(@explore subagent)") || lower.contains("(@general subagent)") {
+        return true;
+    }
+    // Catch any future `(@<name> subagent)` variant.
+    lower.contains("(@") && lower.contains(" subagent)")
+}
+
+/// Classify an openCode session as human-driven or a subagent worker.
+///
+/// Prefers the dedicated `kind` column when the schema carries it.
+/// Falls back to a title-pattern heuristic when only `parent_id` is
+/// available (e.g. `(@explore subagent)` / `(@general subagent)`).
+fn classify_session_kind(
+    raw_kind: Option<&str>,
+    parent_id: Option<&str>,
+    title: Option<&str>,
+) -> Option<SessionKind> {
+    if let Some(kind) = raw_kind {
+        return match kind {
+            "subagent" => Some(SessionKind::Subagent),
+            _ => Some(SessionKind::Human),
+        };
+    }
+
+    if parent_id.is_some()
+        && let Some(title) = title
+        && title_contains_subagent_pattern(title)
+    {
+        return Some(SessionKind::Subagent);
+    }
+
+    None
 }
 
 fn build_lineage_link(
@@ -575,16 +669,39 @@ mod tests {
     fn write_sqlite_session(path: &Path, id: &str, directory: Option<&str>, title: Option<&str>) {
         write_sqlite_sessions(
             path,
-            true,
+            SqliteSchemaConfig::with_parent(),
             &[SqliteSessionRow {
                 id,
                 directory,
                 title,
                 parent_id: None,
+                kind: None,
                 time_created: Some(1_600_000_000_000),
                 time_updated: Some(1_700_000_000_000),
             }],
         );
+    }
+
+    struct SqliteSchemaConfig {
+        has_parent: bool,
+        has_kind: bool,
+    }
+
+    impl SqliteSchemaConfig {
+        fn with_parent() -> Self {
+            Self {
+                has_parent: true,
+                has_kind: false,
+            }
+        }
+
+        #[allow(dead_code)]
+        fn with_parent_and_kind() -> Self {
+            Self {
+                has_parent: true,
+                has_kind: true,
+            }
+        }
     }
 
     struct SqliteSessionRow<'a> {
@@ -592,66 +709,72 @@ mod tests {
         directory: Option<&'a str>,
         title: Option<&'a str>,
         parent_id: Option<&'a str>,
+        kind: Option<&'a str>,
         time_created: Option<i64>,
         time_updated: Option<i64>,
     }
 
-    fn write_sqlite_sessions(path: &Path, with_parent_column: bool, rows: &[SqliteSessionRow<'_>]) {
+    fn write_sqlite_sessions(
+        path: &Path,
+        config: SqliteSchemaConfig,
+        rows: &[SqliteSessionRow<'_>],
+    ) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("db parent");
         }
         let connection = Connection::open(path).expect("open sqlite fixture");
-        let schema = if with_parent_column {
-            "CREATE TABLE session (
-                id TEXT,
-                directory TEXT,
-                title TEXT,
-                time_created INTEGER,
-                time_updated INTEGER,
-                parent_id TEXT
-            )"
-        } else {
-            "CREATE TABLE session (
-                id TEXT,
-                directory TEXT,
-                title TEXT,
-                time_created INTEGER,
-                time_updated INTEGER
-            )"
-        };
+
+        let mut columns = vec!["id TEXT", "directory TEXT", "title TEXT"];
+        if config.has_kind {
+            columns.push("kind TEXT");
+        }
+        columns.push("time_created INTEGER");
+        columns.push("time_updated INTEGER");
+        if config.has_parent {
+            columns.push("parent_id TEXT");
+        }
+        let schema = format!("CREATE TABLE session ({})", columns.join(", "));
         connection
-            .execute(schema, [])
+            .execute(&schema, [])
             .expect("create session table");
 
         for row in rows {
-            if with_parent_column {
-                connection
-                    .execute(
-                        "INSERT INTO session (id, directory, title, time_created, time_updated, parent_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        (
-                            row.id,
-                            row.directory,
-                            row.title,
-                            row.time_created,
-                            row.time_updated,
-                            row.parent_id,
-                        ),
-                    )
-                    .expect("insert session row with parent_id");
-            } else {
-                connection
-                    .execute(
-                        "INSERT INTO session (id, directory, title, time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5)",
-                        (
-                            row.id,
-                            row.directory,
-                            row.title,
-                            row.time_created,
-                            row.time_updated,
-                        ),
-                    )
-                    .expect("insert session row");
+            let mut col_names = vec!["id", "directory", "title"];
+            if config.has_kind {
+                col_names.push("kind");
             }
+            col_names.push("time_created");
+            col_names.push("time_updated");
+            if config.has_parent {
+                col_names.push("parent_id");
+            }
+            let placeholders: Vec<String> =
+                (1..=col_names.len()).map(|n| format!("?{n}")).collect();
+            let sql = format!(
+                "INSERT INTO session ({}) VALUES ({})",
+                col_names.join(", "),
+                placeholders.join(", ")
+            );
+
+            let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+                Box::new(row.id),
+                Box::new(row.directory),
+                Box::new(row.title),
+            ];
+            if config.has_kind {
+                params.push(Box::new(row.kind));
+            }
+            params.push(Box::new(row.time_created));
+            params.push(Box::new(row.time_updated));
+            if config.has_parent {
+                params.push(Box::new(row.parent_id));
+            }
+
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
+            connection
+                .execute(&sql, param_refs.as_slice())
+                .unwrap_or_else(|e| panic!("insert session row: {e}"));
         }
     }
 
@@ -669,13 +792,14 @@ mod tests {
         let (context, fixture) = context_with_state(&temp);
         write_sqlite_sessions(
             &fixture.opencode_state_root().join("opencode.db"),
-            true,
+            SqliteSchemaConfig::with_parent(),
             &[
                 SqliteSessionRow {
                     id: "parent",
                     directory: Some("/work/repo"),
                     title: Some("parent"),
                     parent_id: None,
+                    kind: None,
                     time_created: None,
                     time_updated: None,
                 },
@@ -684,6 +808,7 @@ mod tests {
                     directory: Some("/work/repo"),
                     title: Some("child"),
                     parent_id: Some("parent"),
+                    kind: None,
                     time_created: None,
                     time_updated: None,
                 },
@@ -724,12 +849,13 @@ mod tests {
         let (context, fixture) = context_with_state(&temp);
         write_sqlite_sessions(
             &fixture.opencode_state_root().join("opencode.db"),
-            true,
+            SqliteSchemaConfig::with_parent(),
             &[SqliteSessionRow {
                 id: "orphan",
                 directory: Some("/work/repo"),
                 title: None,
                 parent_id: Some("pruned-parent"),
+                kind: None,
                 time_created: None,
                 time_updated: None,
             }],
@@ -753,12 +879,13 @@ mod tests {
         let (context, fixture) = context_with_state(&temp);
         write_sqlite_sessions(
             &fixture.opencode_state_root().join("opencode.db"),
-            true,
+            SqliteSchemaConfig::with_parent(),
             &[SqliteSessionRow {
                 id: "loop",
                 directory: Some("/work/repo"),
                 title: None,
                 parent_id: Some("loop"),
+                kind: None,
                 time_created: None,
                 time_updated: None,
             }],
@@ -779,12 +906,16 @@ mod tests {
         let (context, fixture) = context_with_state(&temp);
         write_sqlite_sessions(
             &fixture.opencode_state_root().join("opencode.db"),
-            false,
+            SqliteSchemaConfig {
+                has_parent: false,
+                has_kind: false,
+            },
             &[SqliteSessionRow {
                 id: "legacy",
                 directory: Some("/work/repo"),
                 title: Some("legacy session"),
                 parent_id: None,
+                kind: None,
                 time_created: None,
                 time_updated: None,
             }],
@@ -1005,5 +1136,153 @@ mod tests {
         let preview = session.last_message_preview.expect("non-empty");
         assert_eq!(preview.chars().count(), 200);
         assert!(preview.ends_with('…'));
+    }
+
+    // --- Subagent detection tests ---
+
+    #[test]
+    fn subagent_detected_via_kind_column() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        write_sqlite_sessions(
+            &fixture.opencode_state_root().join("opencode.db"),
+            SqliteSchemaConfig::with_parent_and_kind(),
+            &[
+                SqliteSessionRow {
+                    id: "parent",
+                    directory: Some("/work/repo"),
+                    title: Some("main session"),
+                    parent_id: None,
+                    kind: Some("human"),
+                    time_created: None,
+                    time_updated: None,
+                },
+                SqliteSessionRow {
+                    id: "sub",
+                    directory: Some("/work/repo"),
+                    title: Some("Find exact_cwd_match code (@explore subagent)"),
+                    parent_id: Some("parent"),
+                    kind: Some("subagent"),
+                    time_created: None,
+                    time_updated: None,
+                },
+            ],
+        );
+
+        let fragment = OpenCodeAdapter::new().discover(&context).expect("discover");
+        let sessions: BTreeMap<&str, &AgentSessionNode> = fragment
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                GraphNode::AgentSession(s) => Some((s.id.session_key.as_str(), s)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(sessions["parent"].session_kind, Some(SessionKind::Human));
+        assert_eq!(sessions["sub"].session_kind, Some(SessionKind::Subagent));
+    }
+
+    #[test]
+    fn subagent_detected_via_title_heuristic() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        write_sqlite_sessions(
+            &fixture.opencode_state_root().join("opencode.db"),
+            SqliteSchemaConfig::with_parent(),
+            &[
+                SqliteSessionRow {
+                    id: "parent",
+                    directory: Some("/work/repo"),
+                    title: Some("main session"),
+                    parent_id: None,
+                    kind: None,
+                    time_created: None,
+                    time_updated: None,
+                },
+                SqliteSessionRow {
+                    id: "explore-sub",
+                    directory: Some("/work/repo"),
+                    title: Some("Find exact_cwd_match code (@explore subagent)"),
+                    parent_id: Some("parent"),
+                    kind: None,
+                    time_created: None,
+                    time_updated: None,
+                },
+                SqliteSessionRow {
+                    id: "general-sub",
+                    directory: Some("/work/repo"),
+                    title: Some("General task (@general subagent)"),
+                    parent_id: Some("parent"),
+                    kind: None,
+                    time_created: None,
+                    time_updated: None,
+                },
+            ],
+        );
+
+        let fragment = OpenCodeAdapter::new().discover(&context).expect("discover");
+        let sessions: BTreeMap<&str, &AgentSessionNode> = fragment
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                GraphNode::AgentSession(s) => Some((s.id.session_key.as_str(), s)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(sessions["parent"].session_kind, None);
+        assert_eq!(
+            sessions["explore-sub"].session_kind,
+            Some(SessionKind::Subagent)
+        );
+        assert_eq!(
+            sessions["general-sub"].session_kind,
+            Some(SessionKind::Subagent)
+        );
+    }
+
+    #[test]
+    fn session_without_parent_id_is_not_classified_as_subagent() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        write_sqlite_sessions(
+            &fixture.opencode_state_root().join("opencode.db"),
+            SqliteSchemaConfig::with_parent(),
+            &[SqliteSessionRow {
+                id: "standalone",
+                directory: Some("/work/repo"),
+                title: Some("This looks like (@explore subagent) but no parent"),
+                parent_id: None,
+                kind: None,
+                time_created: None,
+                time_updated: None,
+            }],
+        );
+
+        let session = discover_session(&context, "standalone");
+        assert_eq!(session.session_kind, None);
+    }
+
+    #[test]
+    fn subagent_title_pattern_matches_future_subagent_types() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        write_sqlite_sessions(
+            &fixture.opencode_state_root().join("opencode.db"),
+            SqliteSchemaConfig::with_parent(),
+            &[SqliteSessionRow {
+                id: "future-sub",
+                directory: Some("/work/repo"),
+                title: Some("(@future subagent) something"),
+                parent_id: Some("parent"),
+                kind: None,
+                time_created: None,
+                time_updated: None,
+            }],
+        );
+
+        let session = discover_session(&context, "future-sub");
+        assert_eq!(session.session_kind, Some(SessionKind::Subagent));
     }
 }
