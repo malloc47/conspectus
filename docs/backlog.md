@@ -3296,7 +3296,7 @@ failure:
     Claude settings, preserves unrelated hooks, and installs a command
     that invokes `conspectus hook write claude-code`.
 
-- [ ] `H-MUXPROC-018` Dedupe hook records by pane and drop the
+- [x] `H-MUXPROC-018` Dedupe hook records by pane and drop the
   15-minute emission gate.
   - Problem: in-app `/resume` between two Claude Code sessions in the
     same tmux pane leaves both sessions linked to the mux. Each
@@ -3337,6 +3337,16 @@ failure:
   - Related: `H-MUXPROC-015` (the original in-process `/resume`
     drift fix scope), ADR 0028 (hook sidecar attribution).
   - Blockers: none.
+  - Outcome: `apply_hook_sidecars` now sorts hook records newest
+    first, groups candidates by `(resolved_mux.id, pane_id)`, keeps
+    the freshest record active, and marks older same-pane records
+    `Overridden` with the planned reason. Records no longer expire
+    solely because they are older than the former 15-minute TTL; old
+    records still link when no fresher same-pane record supersedes
+    them. Pane-command and mux-created-after-observation guards still
+    ignore clearly stale records. ADR 0028 now documents the pane
+    dedupe semantics. Unit tests cover old-record retention,
+    fresher-same-pane override, and different-pane independence.
 
 - [ ] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
@@ -3547,7 +3557,7 @@ up after row expansion, scrolling, or attach resolution.
   - Blockers: `TEST-001` for replay integration; the corpus can start
     with parser-only tests before the replay harness is complete.
 
-- [ ] `TEST-003` Replay recent MUXPROC drift and stale-evidence bugs.
+- [x] `TEST-003` Replay recent MUXPROC drift and stale-evidence bugs.
   - Scope: encode the recent bugfix history as replay scenarios:
     launch argv names session A while stronger hook/fd evidence names
     B; multiple same-pane hook records where the freshest wins; stale
@@ -3565,6 +3575,20 @@ up after row expansion, scrolling, or attach resolution.
     checks remain useful only when adding a new real-world failure to
     the corpus.
   - Blockers: `TEST-001`; benefits from `TEST-002`.
+  - Outcome: added two replay scenarios in `tests/testing_replay.rs`.
+    `same_pane_hook_supersession_freshest_wins_and_tui_shows_active`
+    replays a Claude Code pane where hook record A is superseded by
+    fresher hook record B; asserts exactly one Active hook-sidecar
+    link, one Overridden, and the sessions row tree shows B as
+    `Attached`. `codex_fd_evidence_beats_stale_argv_and_tui_follows
+    _current_rollout` replays a Codex pane where the launch
+    `start_command` references a stale session but injected fd evidence
+    names the current rollout; asserts `active_pane_fd_session_match`
+    exists, the resolver prefers it, and the row projection attaches
+    the current session. Also added a TEST-004-style invariant helper
+    `assert_at_most_one_active_hook_link_per_mux_pane` that verifies
+    at most one Active hook-sidecar `LinkedToMux` per `(mux, pane_id)`,
+    called from the hook supersession test.
 
 - [ ] `TEST-004` Add graph and row-projection invariant tests.
   - Scope: add table-driven and, where practical, property-style

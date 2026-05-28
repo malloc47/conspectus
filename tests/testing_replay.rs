@@ -1,7 +1,9 @@
 mod support;
 
+use std::collections::HashMap;
+
 use conspectus::hook::{HookRecord, HookTmuxRecord, SCHEMA_VERSION};
-use conspectus::model::{GraphLink, LinkState, RelationKind};
+use conspectus::model::{GraphLink, GraphSnapshot, LinkState, RelationKind};
 use conspectus::tui::rows::{MuxIndicator, RowKind};
 use support::replay::{ReplayWorld, TmuxReplayRow};
 
@@ -136,8 +138,193 @@ fn replay_normalizes_temp_paths_for_stable_snapshots() {
     assert_eq!(world.normalize(raw), "/fixture/work\n/fixture/hooks");
 }
 
-fn linked_to_mux(snapshot: &conspectus::model::GraphSnapshot) -> impl Iterator<Item = &GraphLink> {
+fn linked_to_mux(snapshot: &GraphSnapshot) -> impl Iterator<Item = &GraphLink> {
     snapshot.candidate_links.iter().filter(|link| {
         link.relation == RelationKind::LinkedToMux && matches!(link.state, LinkState::Active)
     })
+}
+
+fn find_session_row<'a>(
+    result: &'a support::replay::ReplayResult,
+    session_key: &str,
+) -> Option<&'a conspectus::tui::rows::AgentSessionRow> {
+    result.sessions.rows.iter().find_map(|row| match &row.kind {
+        RowKind::AgentSession(session) if session.session.session_key == session_key => {
+            Some(session)
+        }
+        _ => None,
+    })
+}
+
+// --- TEST-003 scenarios --------------------------------------------------
+
+#[test]
+fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    let session_a = "aaaaaaaa-1111-2222-3333-444444444444";
+    let session_b = "bbbbbbbb-1111-2222-3333-444444444444";
+
+    world.write_claude_code_session(session_a, &work);
+    world.write_claude_code_session(session_b, &work);
+    world.add_tmux_row(
+        TmuxReplayRow::new("editor")
+            .with_cwd(&work)
+            .with_active_pane("claude", 123, &work, "claude"),
+    );
+
+    let make_hook = |session_key: &str, observed_epoch: i64| HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "claude-code".to_string(),
+        session_key: session_key.to_string(),
+        cwd: Some(work.to_string_lossy().to_string()),
+        pid: Some(123),
+        ppid: Some(456),
+        tmux: Some(HookTmuxRecord {
+            session_name: Some("editor".to_string()),
+            native_id: None,
+            pane_id: Some("%1".to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch,
+        harness_version: Some("1.0.0".to_string()),
+    };
+
+    world.write_hook_record(make_hook(session_a, 1_700_000_500));
+    world.write_hook_record(make_hook(session_b, 1_700_000_600));
+
+    let result = world.run();
+
+    let active_hook_links: Vec<_> = result
+        .snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.source_metadata.adapter == "hook_sidecar"
+                && matches!(link.state, LinkState::Active)
+        })
+        .collect();
+    assert_eq!(
+        active_hook_links.len(),
+        1,
+        "exactly one active hook-sidecar link expected, got {:?}",
+        active_hook_links
+    );
+
+    let overridden_hook_links: Vec<_> = result
+        .snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.source_metadata.adapter == "hook_sidecar"
+                && matches!(link.state, LinkState::Overridden { .. })
+        })
+        .collect();
+    assert_eq!(
+        overridden_hook_links.len(),
+        1,
+        "exactly one overridden hook-sidecar link expected, got {:?}",
+        overridden_hook_links
+    );
+
+    let session_b_row =
+        find_session_row(&result, session_b).expect("session B should appear in row tree");
+    assert_eq!(
+        session_b_row.mux_state,
+        MuxIndicator::Attached,
+        "session B (fresher hook) should be Attached"
+    );
+
+    assert_at_most_one_active_hook_link_per_mux_pane(&result.snapshot);
+}
+
+#[test]
+fn codex_fd_evidence_beats_stale_argv_and_tui_follows_current_rollout() {
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    let session_current = "b0000000-1111-2222-3333-444444444444";
+
+    world.write_codex_session(session_current, &work);
+    world.add_tmux_row(
+        TmuxReplayRow::new("editor")
+            .with_cwd(&work)
+            .with_active_pane(
+                "codex",
+                4242,
+                &work,
+                "codex resume a0000000-1111-2222-3333-444444444444",
+            ),
+    );
+    world.add_fd_paths(
+        4242,
+        [format!(
+            "{}/.codex/sessions/2026/05/26/rollout-{session_current}.jsonl",
+            world.root().display()
+        )],
+    );
+
+    let result = world.run();
+
+    let fd_link = linked_to_mux(&result.snapshot)
+        .find(|link| {
+            link.source_metadata.evidence.as_deref() == Some("active_pane_fd_session_match")
+        })
+        .expect("fd evidence link must exist");
+
+    assert!(
+        result.resolved.resolved_relationships.iter().any(|rel| {
+            rel.relation == RelationKind::LinkedToMux && rel.selected_link_id == fd_link.id
+        }),
+        "fd evidence should win resolution: {:#?}",
+        result.resolved.resolved_relationships
+    );
+
+    let session_current_row = find_session_row(&result, session_current)
+        .expect("session-current should appear in row tree");
+    assert_eq!(
+        session_current_row.mux_state,
+        MuxIndicator::Attached,
+        "session-current (fd evidence) should be Attached"
+    );
+}
+
+// --- TEST-004 invariants -------------------------------------------------
+
+fn assert_at_most_one_active_hook_link_per_mux_pane(snapshot: &GraphSnapshot) {
+    let mut active_count: HashMap<(String, Option<String>), usize> = HashMap::new();
+
+    for link in &snapshot.candidate_links {
+        if link.source_metadata.adapter != "hook_sidecar" {
+            continue;
+        }
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if link.relation != RelationKind::LinkedToMux {
+            continue;
+        }
+        let Some(mux_node_id) = link.target_node_id() else {
+            continue;
+        };
+        let mux_id = mux_node_id.to_string();
+        let pane_id = link
+            .source_metadata
+            .fields
+            .get("hook_pane_id")
+            .or_else(|| link.source_metadata.fields.get("pane_id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let key = (mux_id, pane_id);
+        *active_count.entry(key).or_default() += 1;
+    }
+
+    for ((mux_id, pane_id), count) in &active_count {
+        assert!(
+            *count <= 1,
+            "at most one active hook-sidecar LinkedToMux per (mux, pane_id): \
+             found {count} active links for mux={mux_id:?} pane={pane_id:?}"
+        );
+    }
 }
