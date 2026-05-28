@@ -1,0 +1,2 @@
+project work	/home/user/My Projects/active	1717000000	1716900000	codex	12348	/home/user/My Projects/active	codex --resume parent-session
+dotfiles with spaces	/home/user/.config with spaces/	1716999000	1716800000	bash	12349	/home/user/.config with spaces/	vim ~/.bashrc

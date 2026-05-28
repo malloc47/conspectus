@@ -1,0 +1,8 @@
+/home/user/.codex/sessions/2026/05/26/rollout-aaaaaaaa-1111-2222-3333-444444444444.jsonl
+/home/user/.claude/projects/home-user-projects-my-project/cccccccc-1111-2222-3333-444444444444.jsonl
+/home/user/.local/share/opencode/storage/session/ffffffff-1111-2222-3333-444444444444/part/1/msg.jsonl
+socket:[12345]
+pipe:[67890]
+/home/user/projects/my-project/output.log (deleted)
+anon_inode:[eventfd]
+/dev/pts/5

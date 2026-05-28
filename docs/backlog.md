@@ -3539,7 +3539,7 @@ up after row expansion, scrolling, or attach resolution.
     session plus one mux, hook SQLite record insertion, fake fd
     evidence injection, and temp-path normalization.
 
-- [ ] `TEST-002` Add a sanitized real-state fixture corpus.
+- [x] `TEST-002` Add a sanitized real-state fixture corpus.
   - Scope: create checked-in fixture directories for representative
     real provider shapes that synthetic builders have historically
     missed: Codex rollout JSONL files, Claude Code transcript
@@ -3556,6 +3556,17 @@ up after row expansion, scrolling, or attach resolution.
     free of private transcript text.
   - Blockers: `TEST-001` for replay integration; the corpus can start
     with parser-only tests before the replay harness is complete.
+  - Outcome: added `tests/fixtures/` with sanitized corpus files for
+    Codex (full, minimal, forked rollouts), Claude Code (basic,
+    resume, fork transcripts), hook payloads (Claude SessionStart,
+    Claude ephemeral, Codex SessionStart), tmux discovery rows (multi-
+    session, paths-with-spaces), and `/proc/<pid>/fd` targets
+    (rollout, task, opencode paths plus socket/pipe/anon-inode
+    descriptors). Added `tests/fixture_corpus.rs` with 13 fixture-load
+    tests that parse every corpus file through the actual adapter,
+    hook-parser, and row-parser paths and assert expected node/link
+    shapes and edge-case field handling. A 7-step sanitization
+    workflow is documented in the test file header.
 
 - [x] `TEST-003` Replay recent MUXPROC drift and stale-evidence bugs.
   - Scope: encode the recent bugfix history as replay scenarios:

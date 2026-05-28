@@ -1,0 +1,2 @@
+{"sessionId":"33333333-aaaa-2222-bbbb-333333333333","cwd":"/home/user/projects/my-project"}
+{"type":"user","uuid":"ee000000-1111-2222-3333-444444444444","forkedFrom":{"sessionId":"11111111-aaaa-2222-bbbb-333333333333","messageUuid":"aa000000-1111-2222-3333-444444444444"},"message":{"role":"user","content":[{"type":"text","text":"Starting from a fork of the previous session."}]}}

@@ -1,0 +1,9 @@
+{
+  "session_id": "dddddddd-1111-2222-3333-444444444444",
+  "transcript_path": null,
+  "cwd": "/home/user/projects/temp-experiment",
+  "hook_event_name": "SessionStart",
+  "model": "claude-sonnet-4-20250514",
+  "permission_mode": "default",
+  "source": "user"
+}
