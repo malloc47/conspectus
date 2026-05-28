@@ -15,13 +15,13 @@
 //!   "Ungrouped" bucket (one synthetic group at the top level,
 //!   regardless of `SessionsGrouping`).
 //!
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxSessionNode,
-    NodeId, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
+    NodeId, RelationKind, RepoId, SessionKind, WorkspaceId, path_is_ancestor_of, pick_preferred,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -109,6 +109,9 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             .agent_sessions
             .iter()
             .filter_map(|(session_id, session)| {
+                if data.is_subagent_nested(session_id) {
+                    return None;
+                }
                 if !filter.is_empty() {
                     let candidate_count = data.mux_candidates_for_session(session_id).len();
                     let match_inputs = SessionMatchInputs {
@@ -153,6 +156,9 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut ungrouped: Vec<SessionEntry<'_>> = Vec::new();
 
     for (session_id, session) in &data.agent_sessions {
+        if data.is_subagent_nested(session_id) {
+            continue;
+        }
         if !filter.is_empty() {
             let candidate_count = data.mux_candidates_for_session(session_id).len();
             let match_inputs = SessionMatchInputs {
@@ -271,6 +277,22 @@ struct SessionsData<'a> {
     repos: BTreeMap<NodeId, &'a crate::model::RepoNode>,
     checkouts: BTreeMap<NodeId, &'a crate::model::CheckoutNode>,
     by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
+    /// Parent `NodeId` → subagent children `(NodeId, &AgentSessionNode)`.
+    /// Populated from `ParentSession` links where the child has
+    /// `session_kind == Subagent`.
+    subagent_children: BTreeMap<NodeId, Vec<(NodeId, &'a AgentSessionNode)>>,
+    /// Set of subagent child node ids that are nested under a parent.
+    subagent_ids: HashSet<NodeId>,
+}
+
+impl<'a> SessionsData<'a> {
+    fn subagent_children_for(&self, parent: &NodeId) -> Option<&[(NodeId, &'a AgentSessionNode)]> {
+        self.subagent_children.get(parent).map(Vec::as_slice)
+    }
+
+    fn is_subagent_nested(&self, id: &NodeId) -> bool {
+        self.subagent_ids.contains(id)
+    }
 }
 
 impl<'a> SessionsData<'a> {
@@ -311,6 +333,37 @@ impl<'a> SessionsData<'a> {
                 .push(link);
         }
 
+        let mut subagent_children: BTreeMap<NodeId, Vec<(NodeId, &AgentSessionNode)>> =
+            BTreeMap::new();
+        let mut subagent_ids = HashSet::new();
+
+        for link in &snapshot.candidate_links {
+            if link.relation != RelationKind::ParentSession
+                || !matches!(link.state, LinkState::Active)
+            {
+                continue;
+            }
+            let NodeId::AgentSession(child_id) = &link.source else {
+                continue;
+            };
+            let Some(NodeId::AgentSession(parent_id)) = link.target_node_id() else {
+                continue;
+            };
+            let Some(child_node) = agent_sessions.get(&NodeId::AgentSession(child_id.clone()))
+            else {
+                continue;
+            };
+            if child_node.session_kind != Some(SessionKind::Subagent) {
+                continue;
+            }
+            let parent_node_id = NodeId::AgentSession(parent_id.clone());
+            subagent_children
+                .entry(parent_node_id.clone())
+                .or_default()
+                .push((link.source.clone(), *child_node));
+            subagent_ids.insert(link.source.clone());
+        }
+
         Self {
             snapshot,
             agent_sessions,
@@ -318,6 +371,8 @@ impl<'a> SessionsData<'a> {
             repos,
             checkouts,
             by_source_relation,
+            subagent_children,
+            subagent_ids,
         }
     }
 
@@ -613,7 +668,8 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
         1 => MuxIndicator::Attached,
         n => MuxIndicator::Ambiguous { candidate_count: n },
     };
-    let expandable = candidates.len() >= 2;
+    let has_subagent_children = ctx.data.subagent_children_for(&entry.id).is_some();
+    let expandable = candidates.len() >= 2 || has_subagent_children;
     let short_id = ctx.short_ids.short_id(&entry.id);
     let cwd_display = entry
         .node
@@ -641,7 +697,22 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
         }),
     });
 
-    if expandable {
+    if has_subagent_children {
+        let children = ctx
+            .data
+            .subagent_children_for(&entry.id)
+            .unwrap_or(&[])
+            .to_vec();
+        for (sub_id, sub_node) in children {
+            let sub_entry = SessionEntry {
+                id: sub_id,
+                node: sub_node,
+            };
+            emit_session(ctx, depth.saturating_add(1), sub_entry);
+        }
+    }
+
+    if candidates.len() >= 2 {
         let preferred_target = preferred.and_then(|link| link.target_node_id().cloned());
         for link in candidates {
             let Some(target) = link.target_node_id() else {
@@ -900,6 +971,7 @@ mod tests {
             title: title.map(str::to_string),
             last_message_preview: preview.map(str::to_string),
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 
@@ -2247,5 +2319,127 @@ mod tests {
             .count();
         assert_eq!(group_count, 1, "{:#?}", tree.rows);
         assert_eq!(session_rows(&tree).len(), 1);
+    }
+
+    // --- Subagent nesting tests ---
+
+    fn agent_session_with_kind(
+        harness: &str,
+        scope: &str,
+        key: &str,
+        cwd: Option<&str>,
+        title: Option<&str>,
+        session_kind: Option<SessionKind>,
+    ) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new(harness, scope, key),
+            harness_key: harness.to_string(),
+            cwd: cwd.map(str::to_string),
+            title: title.map(str::to_string),
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind,
+        })
+    }
+
+    fn parent_session_link(child: &NodeId, parent: &NodeId) -> GraphLink {
+        GraphLink {
+            id: format!("test:lineage:{child}:parent_session:{parent}"),
+            source: child.clone(),
+            target: LinkEndpoint::Node { id: parent.clone() },
+            relation: RelationKind::ParentSession,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata {
+                adapter: "opencode".to_string(),
+                evidence: Some("opencode session.parent_id unknown".to_string()),
+                fields: Default::default(),
+            },
+            state: LinkState::Active,
+        }
+    }
+
+    fn checkout_node(repo_common_dir: &str, root: &str) -> GraphNode {
+        let repo_id = RepoId {
+            common_dir: repo_common_dir.to_string(),
+        };
+        GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId {
+                repo: repo_id,
+                root: root.to_string(),
+            },
+            root: root.to_string(),
+            git_dir: None,
+            current_branch: None,
+        })
+    }
+
+    #[test]
+    fn subagent_sessions_are_nested_under_parent_in_row_tree() {
+        let parent = agent_session_with_kind(
+            "opencode",
+            "/state",
+            "parent",
+            Some("/work/repo"),
+            Some("Parent session"),
+            None,
+        );
+        let subagent = agent_session_with_kind(
+            "opencode",
+            "/state",
+            "sub",
+            Some("/work/repo"),
+            Some("(@explore subagent) Find files"),
+            Some(SessionKind::Subagent),
+        );
+        let parent_id = parent.id();
+        let sub_id = subagent.id();
+
+        let checkout = checkout_node("/work/repo/.git", "/work/repo");
+        let resolves = crate::resolve::resolve_snapshot;
+
+        let snapshot = resolves(GraphSnapshot {
+            nodes: vec![parent, subagent, checkout],
+            candidate_links: vec![parent_session_link(&sub_id, &parent_id)],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        // Parent should be at depth 2 (workspace → repo → agent)
+        // Subagent should be at depth 3 (under parent, but since no mux,
+        // it's just depth+1)
+        let parent_row = tree.rows.iter().find(
+            |r| matches!(&r.kind, RowKind::AgentSession(s) if s.session.session_key == "parent"),
+        );
+        let subagent_row = tree.rows.iter().find(
+            |r| matches!(&r.kind, RowKind::AgentSession(s) if s.session.session_key == "sub"),
+        );
+
+        assert!(parent_row.is_some(), "parent session should appear in tree");
+        assert!(subagent_row.is_some(), "subagent should appear in tree");
+
+        let parent_row = parent_row.unwrap();
+        let subagent_row = subagent_row.unwrap();
+
+        assert!(
+            parent_row.expandable,
+            "parent should be expandable (has subagent child)"
+        );
+        assert!(
+            subagent_row.depth > parent_row.depth,
+            "subagent depth {subagent_depth} should be > parent depth {parent_depth}, rows: {rows:#?}",
+            subagent_depth = subagent_row.depth,
+            parent_depth = parent_row.depth,
+            rows = tree.rows
+        );
     }
 }
