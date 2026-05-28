@@ -1,2 +1,2 @@
-{"sessionId":"22222222-aaaa-2222-bbbb-333333333333","cwd":"/home/user/projects/my-project"}
-{"cwd":"/home/user/projects/my-project","type":"assistant","uuid":"dd000000-1111-2222-3333-444444444444","parentUuid":"aa000000-1111-2222-3333-444444444444","message":{"role":"assistant","content":[{"type":"text","text":"Continuing the review from where we left off."}]}}
+{"type":"file-history-snapshot"}
+{"cwd":"/home/user/projects/my-project","sessionId":"22222222-aaaa-2222-bbbb-333333333333","type":"system","uuid":"dd000000-1111-2222-3333-444444444444","parentUuid":"aa000000-1111-2222-3333-444444444444","message":{"role":"system","content":[{"type":"text","text":"Resuming from prior context."}]}}

@@ -1,0 +1,3 @@
+{"type":"file-history-snapshot"}
+{"cwd":"/home/user/projects/my-project","sessionId":"44444444-aaaa-2222-bbbb-333333333333","type":"system","uuid":"ff000000-1111-2222-3333-444444444444","parentUuid":null,"message":{"role":"system","content":[{"type":"text","text":"System context initialization."}]}}
+{"cwd":"/home/user/projects/my-project","sessionId":"44444444-aaaa-2222-bbbb-333333333333","type":"user","uuid":"00aaaaaa-1111-2222-3333-444444444444","parentUuid":"ff000000-1111-2222-3333-444444444444","message":{"role":"user","content":[{"type":"text","text":"Start a new task."}]}}

@@ -1,2 +1,3 @@
-{"sessionId":"11111111-aaaa-2222-bbbb-333333333333","cwd":"/home/user/projects/my-project","type":"user","uuid":"aa000000-1111-2222-3333-444444444444","message":{"role":"user","content":[{"type":"text","text":"Review the project structure."}]}}
-{"type":"assistant","uuid":"bb000000-1111-2222-3333-444444444444","message":{"role":"assistant","content":[{"type":"text","text":"I'll review the structure now."}]}}
+{"type":"file-history-snapshot"}
+{"cwd":"/home/user/projects/my-project","sessionId":"11111111-aaaa-2222-bbbb-333333333333","type":"user","uuid":"aa000000-1111-2222-3333-444444444444","parentUuid":null,"message":{"role":"user","content":[{"type":"text","text":"Review the project structure."}]}}
+{"cwd":"/home/user/projects/my-project","sessionId":"11111111-aaaa-2222-bbbb-333333333333","type":"assistant","uuid":"bb000000-1111-2222-3333-444444444444","parentUuid":"aa000000-1111-2222-3333-444444444444","message":{"role":"assistant","content":[{"type":"text","text":"I'll review the structure now."}]}}

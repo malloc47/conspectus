@@ -309,6 +309,42 @@ fn claude_fork_transcript_captures_forked_from() {
     );
 }
 
+#[test]
+fn claude_system_record_as_first_uuid_bearing_does_not_break_discovery() {
+    let (_temp, fragment) = claude_fixture_scenario(
+        "44444444-aaaa-2222-bbbb-333333333333",
+        "claude/transcript-system-first.jsonl",
+    );
+
+    let sessions: Vec<_> = fragment
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sessions.len(),
+        1,
+        "system-first transcript should discover the session"
+    );
+    assert_eq!(
+        sessions[0].id.session_key,
+        "44444444-aaaa-2222-bbbb-333333333333"
+    );
+    // The adapter should not emit a parent link when parentUuid is null on
+    // the first uuid-bearing record (which is a `system` record here).
+    let has_parent_lineage = fragment
+        .candidate_links
+        .iter()
+        .any(|link| link.source_metadata.fields.contains_key("parent_uuid"));
+    assert!(
+        !has_parent_lineage,
+        "system-first with parentUuid:null should not emit a parent link"
+    );
+}
+
 // ── Hook payload fixtures ───────────────────────────────────────────────
 
 #[test]
