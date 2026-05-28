@@ -28,10 +28,7 @@ flowchart TD
 
     PID -->|"Yes, session IS<br/>in match set"| EMIT_STRONG["Emit candidate link<br/>• provenance: StrongDiscovered<br/>• confidence: High<br/>• evidence rank: 30–50"]
     PID -->|"Yes, session NOT<br/>in match set"| SKIP["Skip (return None)<br/>Strong PID evidence<br/>excludes non-matches"]
-    PID -->|"No, no PID match<br/>found for this mux"| HARNESS{"Mux has a known<br/>agent harness?<br/>(opencode/codex/claude)"}
-
-    HARNESS -->|"Yes"| SKIP2["Skip (return None)<br/>Don't guess via CWD<br/>for known harnesses"]
-    HARNESS -->|"No (bash/vim/etc.)"| CWD{"session.cwd ==<br/>mux.cwd?"}
+    PID -->|"No, no PID match<br/>found for this mux"| CWD{"session.cwd ==<br/>mux.cwd?"}
 
     CWD -->|"Exact match"| EMIT_CWD["Emit candidate link<br/>• exact_cwd_match<br/>• provenance: StrongDiscovered<br/>• confidence: High<br/>• evidence rank: 20"]
     CWD -->|"Prefix match"| EMIT_PREFIX["Emit candidate link<br/>• cwd_prefix_match<br/>• provenance: Discovered<br/>• confidence: Medium<br/>• evidence rank: 10"]
@@ -49,11 +46,9 @@ flowchart TD
 
 The PID matcher also considers **lineage**: if the parent of a session is matched, the child session is included (covers `/resume` and fork scenarios).
 
-### Design rule: no CWD guessing for known harnesses
+### Design rule: no CWD filtering at discovery
 
-When the mux is running a recognizable agent harness (`opencode`, `codex`, `claude`) but we have no PID-based match, candidate generation returns `None`. A fresh unpersisted session should not be linked to historical sessions sharing the same directory.
-
-CWD matching exists as a **fallback for non-agent commands** (e.g. a `bash` pane). If this fallback is removed in the future, only PID-based matches and hook sidecar records would produce `linked_to_mux` candidates.
+CWD matching fires for **all** harnesses at the discovery layer — a mux session running `opencode` at `/work` will emit `exact_cwd_match` candidates to every agent session (codex, claude-code, opencode, etc.) sharing that directory. Discovery is intentionally indiscriminate; ambiguity is resolved at Phase 3 rather than suppressed prematurely.
 
 ---
 
@@ -99,7 +94,7 @@ Stronger evidence (`active_pane_fd_session_match`, `hook_session_match`, `contro
 
 `src/resolve/mod.rs` — `resolve_links()`
 
-Candidates are grouped by `(source, relation)`. For each group, the resolver picks one winner and emits diagnostics for ties.
+Candidates are grouped by `(source, relation)`. For each group, the resolver picks one winner. Then a global suppression pass removes CWD-based resolutions that are ambiguous.
 
 ```mermaid
 flowchart TD
@@ -112,8 +107,28 @@ flowchart TD
     PICK --> CHECK{"Multiple candidates<br/>at same score?"}
 
     CHECK -->|"Yes"| CONFLICT["Emit Conflict diagnostic<br/>(ambiguous mux)"]
-    CHECK -->|"No"| RESOLVE["Emit ResolvedRelationship"]
+    CHECK -->|"No"| SUPPRESS["Global CWD suppression pass"]
+
+    SUPPRESS --> COUNT["For each LinkedToMux<br/>resolved relationship:<br/>count distinct logical sessions<br/>per mux target"]
+    COUNT --> CWD_CHECK{"Winner is CWD-based<br/>AND mux target has<br/>&gt;1 distinct session?"}
+
+    CWD_CHECK -->|"Yes"| REMOVE["Suppress CWD resolution<br/>Emit Conflict diagnostic"]
+    CWD_CHECK -->|"No"| RESOLVE["Emit ResolvedRelationship"]
 ```
+
+### CWD ambiguity suppression
+
+CWD matching is indiscriminate at the discovery layer — a mux at `/work` gets linked to every session ever run from `/work`. The resolver corrects this by suppressing CWD-based resolutions when the mux target is claimed by **more than one distinct logical session** (identified by `harness_key` + `session_key`, collapsing across `state_scope` variations).
+
+This means CWD resolution passes through only in the one-to-one case:
+
+| Scenario | CWD winner? |
+|---|---|
+| One session has a CWD link to one mux | Passes |
+| Two sessions have CWD links to the same mux | Suppressed for both |
+| Session A has CWD to mux X, session B has FD match to mux X | CWD suppressed; FD match kept |
+| Two sessions have CWD links to different muxes | Both pass |
+| Declared link + CWD link to same mux, same logical session | CWD not suppressed (counts as one session) |
 
 ### MuxScore ordering
 

@@ -1,6 +1,6 @@
 //! Candidate-link resolution boundaries.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
     Confidence, Diagnostic, GraphLink, GraphSnapshot, LinkState, NodeId, Provenance, RelationKind,
@@ -84,9 +84,82 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
         });
     }
 
+    suppress_ambiguous_cwd_mux_links(candidates, &mut output);
+
     output.resolved_relationships.sort();
     output.diagnostics.sort();
     output
+}
+
+fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut ResolveOutput) {
+    let link_by_id: BTreeMap<&str, &GraphLink> = candidates
+        .iter()
+        .map(|link| (link.id.as_str(), link))
+        .collect();
+
+    let mut mux_all_keys: BTreeMap<&NodeId, BTreeSet<String>> = BTreeMap::new();
+
+    for link in candidates {
+        if link.state.is_ignored() || matches!(link.state, LinkState::Overridden { .. }) {
+            continue;
+        }
+        if link.relation != RelationKind::LinkedToMux {
+            continue;
+        }
+        if let Some(target) = link.target_node_id() {
+            if let Some(key) = session_logical_key(&link.source) {
+                mux_all_keys.entry(target).or_default().insert(key);
+            }
+        }
+    }
+
+    let mut suppressed: BTreeSet<String> = BTreeSet::new();
+
+    for rel in &output.resolved_relationships {
+        if rel.relation != RelationKind::LinkedToMux {
+            continue;
+        }
+        let Some(link) = link_by_id.get(rel.selected_link_id.as_str()) else {
+            continue;
+        };
+        if !is_cwd_evidence(link) {
+            continue;
+        }
+        let distinct_session_count = mux_all_keys
+            .get(&rel.target)
+            .map(|keys| keys.len())
+            .unwrap_or(0);
+        if distinct_session_count > 1 {
+            suppressed.insert(rel.selected_link_id.clone());
+            output.diagnostics.push(Diagnostic::Conflict {
+                source: rel.source.clone(),
+                relation: rel.relation.clone(),
+                selected_link_id: rel.selected_link_id.clone(),
+                competing_link_ids: vec![],
+            });
+        }
+    }
+
+    output.resolved_relationships.retain(|rel| {
+        rel.relation != RelationKind::LinkedToMux || !suppressed.contains(&rel.selected_link_id)
+    });
+}
+
+fn session_logical_key(source: &NodeId) -> Option<String> {
+    match source {
+        NodeId::AgentSession(id) => Some(format!("{}:{}", id.harness_key, id.session_key)),
+        _ => None,
+    }
+}
+
+fn is_cwd_evidence(link: &GraphLink) -> bool {
+    let match_kind = link
+        .source_metadata
+        .fields
+        .get("match_kind")
+        .and_then(|v| v.as_str())
+        .or(link.source_metadata.evidence.as_deref());
+    matches!(match_kind, Some("exact_cwd_match" | "cwd_prefix_match"))
 }
 
 fn multi_target_relation(relation: &RelationKind) -> bool {
@@ -1090,5 +1163,133 @@ mod tests {
 
         assert!(output.resolved_relationships.is_empty());
         assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn suppresses_cwd_link_when_multiple_sessions_resolve_to_same_mux() {
+        let cwd_a = linked_to_mux_link(
+            "cwd-a",
+            session("a"),
+            mux("tmux:one"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("exact_cwd_match"),
+        );
+        let cwd_b = linked_to_mux_link(
+            "cwd-b",
+            session("b"),
+            mux("tmux:one"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(2_000),
+            Some("exact_cwd_match"),
+        );
+
+        let output = resolve_links(&[cwd_a, cwd_b]);
+
+        assert!(output.resolved_relationships.is_empty());
+        assert_eq!(output.diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn allows_cwd_link_when_single_session_to_single_mux() {
+        let cwd = linked_to_mux_link(
+            "cwd",
+            session("a"),
+            mux("tmux:one"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("exact_cwd_match"),
+        );
+
+        let output = resolve_links(&[cwd]);
+
+        assert_eq!(output.resolved_relationships.len(), 1);
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "cwd");
+        assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn suppresses_cwd_link_when_stronger_evidence_exists_for_same_mux() {
+        let cwd_b = linked_to_mux_link(
+            "cwd-b",
+            session("b"),
+            mux("tmux:one"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("exact_cwd_match"),
+        );
+        let fd_a = linked_to_mux_link(
+            "fd-a",
+            session("a"),
+            mux("tmux:one"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(2_000),
+            Some("active_pane_fd_session_match"),
+        );
+
+        let output = resolve_links(&[cwd_b, fd_a]);
+
+        assert_eq!(output.resolved_relationships.len(), 1);
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "fd-a");
+        assert_eq!(output.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn allows_cwd_links_to_different_muxes() {
+        let cwd_a = linked_to_mux_link(
+            "cwd-a",
+            session("a"),
+            mux("tmux:one"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("exact_cwd_match"),
+        );
+        let cwd_b = linked_to_mux_link(
+            "cwd-b",
+            session("b"),
+            mux("tmux:two"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(2_000),
+            Some("exact_cwd_match"),
+        );
+
+        let output = resolve_links(&[cwd_a, cwd_b]);
+
+        assert_eq!(output.resolved_relationships.len(), 2);
+        assert!(output.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn suppresses_cwd_prefix_match_like_exact_cwd_match() {
+        let prefix_a = linked_to_mux_link(
+            "prefix-a",
+            session("a"),
+            mux("tmux:one"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(1_000),
+            Some("cwd_prefix_match"),
+        );
+        let prefix_b = linked_to_mux_link(
+            "prefix-b",
+            session("b"),
+            mux("tmux:one"),
+            Provenance::Discovered,
+            Confidence::Medium,
+            Some(2_000),
+            Some("cwd_prefix_match"),
+        );
+
+        let output = resolve_links(&[prefix_a, prefix_b]);
+
+        assert!(output.resolved_relationships.is_empty());
+        assert_eq!(output.diagnostics.len(), 2);
     }
 }
