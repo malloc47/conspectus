@@ -19,12 +19,13 @@
 //! No nodes are created here, and any `Unresolved` lineage endpoints already
 //! present in `candidate_links` are left untouched.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 
 use crate::model::{
     AgentSessionNode, CheckoutId, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SourceMetadata,
+    LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SessionKind,
+    SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "cross_link";
@@ -116,7 +117,83 @@ fn infer_with_fd_reader(
     }
 
     snapshot.candidate_links.extend(new_links);
+
+    suppress_subagent_mux_links(snapshot);
+
     snapshot.canonicalize();
+}
+
+/// When a subagent session and its human parent both match the same
+/// mux, the subagent's `LinkedToMux` candidate is overridden so the
+/// parent session wins mux attachment in the TUI and resolver.  Orphan
+/// subagents (no discovered parent) keep their candidates untouched.
+fn suppress_subagent_mux_links(snapshot: &mut GraphSnapshot) {
+    let mut parent_of: BTreeMap<NodeId, NodeId> = BTreeMap::new();
+    let mut is_subagent: HashSet<NodeId> = HashSet::new();
+
+    for node in &snapshot.nodes {
+        if let GraphNode::AgentSession(session) = node
+            && session.session_kind == Some(SessionKind::Subagent)
+        {
+            is_subagent.insert(node.id());
+        }
+    }
+
+    if is_subagent.is_empty() {
+        return;
+    }
+
+    for link in &snapshot.candidate_links {
+        if link.relation != RelationKind::ParentSession || !matches!(link.state, LinkState::Active)
+        {
+            continue;
+        }
+        if is_subagent.contains(&link.source)
+            && let Some(parent) = link.target_node_id()
+        {
+            parent_of.insert(link.source.clone(), parent.clone());
+        }
+    }
+
+    // Collect (subagent_id, parent_id, mux_id) triples for mux links
+    // that should be overridden.
+    let mut to_override: Vec<(usize, String)> = Vec::new();
+    for (idx, link) in snapshot.candidate_links.iter().enumerate() {
+        if link.relation != RelationKind::LinkedToMux || !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        let Some(subagent_parent) = parent_of.get(&link.source) else {
+            continue;
+        };
+        let Some(target_mux) = link.target_node_id() else {
+            continue;
+        };
+
+        // Check if the parent also has a LinkedToMux to the same mux.
+        let parent_has_match = snapshot.candidate_links.iter().any(|other| {
+            other.relation == RelationKind::LinkedToMux
+                && matches!(other.state, LinkState::Active)
+                && &other.source == subagent_parent
+                && other.target_node_id() == Some(target_mux)
+        });
+
+        if parent_has_match {
+            let reason = format!(
+                "overridden: subagent {} linked to mux {}; parent {} takes precedence",
+                link.source, target_mux, subagent_parent,
+            );
+            to_override.push((idx, reason));
+        }
+    }
+
+    for (idx, reason) in to_override {
+        if let Some(link) = snapshot.candidate_links.get_mut(idx) {
+            link.state = LinkState::Overridden {
+                by: "cross_link".to_string(),
+                reason: Some(reason),
+            };
+        }
+    }
 }
 
 fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
@@ -291,10 +368,17 @@ fn active_mux_sessions(
                 },
             );
         } else {
+            let direct_recent = most_recent_epoch(&direct_matches, sessions);
+            let child_recent = most_recent_epoch(&child_matches, sessions);
+            let sessions = if direct_recent >= child_recent {
+                direct_matches
+            } else {
+                child_matches
+            };
             active.insert(
                 mux.id.clone(),
                 ActiveMuxSessionMatch {
-                    sessions: child_matches,
+                    sessions,
                     evidence: evidence.link_evidence,
                 },
             );
@@ -302,6 +386,18 @@ fn active_mux_sessions(
     }
 
     active
+}
+
+fn most_recent_epoch(
+    matches: &BTreeSet<crate::model::AgentSessionId>,
+    sessions: &[&AgentSessionNode],
+) -> i64 {
+    sessions
+        .iter()
+        .filter(|s| matches.contains(&s.id))
+        .filter_map(|s| s.last_active_epoch)
+        .max()
+        .unwrap_or(0)
 }
 
 struct ActiveMuxSessionMatch {
@@ -710,6 +806,7 @@ mod tests {
             title: None,
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 
@@ -913,6 +1010,7 @@ mod tests {
                     title: None,
                     last_message_preview: None,
                     last_active_epoch: None,
+                    session_kind: None,
                 }),
                 GraphNode::AgentSession(AgentSessionNode {
                     id: AgentSessionId::new("codex", "/state", "b"),
@@ -921,6 +1019,7 @@ mod tests {
                     title: None,
                     last_message_preview: None,
                     last_active_epoch: None,
+                    session_kind: None,
                 }),
                 mux_with_active_command("one", Some("/work/repo"), "opencode"),
             ],
@@ -1002,11 +1101,29 @@ mod tests {
     }
 
     #[test]
-    fn active_pane_resume_target_prefers_lineage_child() {
+    fn active_pane_resume_target_prefers_lineage_child_when_more_recent() {
+        let parent = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", "parent"),
+            harness_key: "codex".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_000),
+            session_kind: None,
+        });
+        let child = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", "child"),
+            harness_key: "codex".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(2_000),
+            session_kind: None,
+        });
         let mut snapshot = GraphSnapshot {
             nodes: vec![
-                session("parent", Some("/work/repo")),
-                session("child", Some("/work/repo")),
+                parent,
+                child,
                 mux_with_active_command("one", Some("/work/repo"), "codex resume parent"),
             ],
             candidate_links: vec![parent_session_link("child", "parent")],
@@ -1024,6 +1141,50 @@ mod tests {
         assert_eq!(
             mux_links[0].source,
             NodeId::AgentSession(AgentSessionId::new("codex", "/state", "child"))
+        );
+    }
+
+    #[test]
+    fn active_pane_argv_match_prefers_parent_when_more_recent_than_child() {
+        let parent = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", "parent"),
+            harness_key: "codex".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(2_000),
+            session_kind: None,
+        });
+        let child = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", "child"),
+            harness_key: "codex".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_000),
+            session_kind: None,
+        });
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                parent,
+                child,
+                mux_with_active_command("one", Some("/work/repo"), "codex -s parent"),
+            ],
+            candidate_links: vec![parent_session_link("child", "parent")],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert_eq!(mux_links.len(), 1);
+        assert_eq!(
+            mux_links[0].source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "parent"))
         );
     }
 
@@ -1305,5 +1466,146 @@ mod tests {
         infer(&mut snapshot);
 
         assert!(snapshot.candidate_links.contains(&lineage));
+    }
+
+    // --- Subagent mux suppression tests ---
+
+    fn opencode_session(id: &str, cwd: Option<&str>) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "/state", id),
+            harness_key: "opencode".to_string(),
+            cwd: cwd.map(str::to_string),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        })
+    }
+
+    fn subagent_session(id: &str, cwd: Option<&str>, parent_id: &str) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "/state", id),
+            harness_key: "opencode".to_string(),
+            cwd: cwd.map(str::to_string),
+            title: Some(format!("(@general subagent) task from {parent_id}")),
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: Some(SessionKind::Subagent),
+        })
+    }
+
+    fn subagent_parent_link(child_key: &str, parent_key: &str) -> GraphLink {
+        let child = NodeId::AgentSession(AgentSessionId::new("opencode", "/state", child_key));
+        let parent = NodeId::AgentSession(AgentSessionId::new("opencode", "/state", parent_key));
+        GraphLink {
+            id: format!("opencode:lineage:{child_key}:parent_session:{parent_key}"),
+            source: child,
+            target: LinkEndpoint::Node { id: parent },
+            relation: RelationKind::ParentSession,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "opencode".to_string(),
+                evidence: Some("opencode session.parent_id unknown".to_string()),
+                fields: Default::default(),
+            },
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn subagent_mux_link_overridden_when_parent_matches_same_mux() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                opencode_session("parent", Some("/work/repo")),
+                subagent_session("child", Some("/work/repo"), "parent"),
+                mux("one", Some("/work/repo")),
+            ],
+            candidate_links: vec![subagent_parent_link("child", "parent")],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let child_mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source
+                        == NodeId::AgentSession(AgentSessionId::new("opencode", "/state", "child"))
+            })
+            .collect();
+
+        assert_eq!(child_mux_links.len(), 1);
+        assert!(
+            matches!(child_mux_links[0].state, LinkState::Overridden { .. }),
+            "subagent mux link should be overridden when parent matches same mux"
+        );
+    }
+
+    #[test]
+    fn subagent_mux_link_stays_active_when_parent_does_not_match_mux() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                opencode_session("parent", Some("/other")),
+                subagent_session("child", Some("/work/repo"), "parent"),
+                mux("one", Some("/work/repo")),
+            ],
+            // ParentSession link exists, but parent has no LinkedToMux — so
+            // the subagent's link should remain active.
+            candidate_links: vec![subagent_parent_link("child", "parent")],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let child_mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source
+                        == NodeId::AgentSession(AgentSessionId::new("opencode", "/state", "child"))
+            })
+            .collect();
+
+        assert_eq!(child_mux_links.len(), 1);
+        assert!(
+            matches!(child_mux_links[0].state, LinkState::Active),
+            "subagent mux link should stay active when parent doesn't match the same mux"
+        );
+    }
+
+    #[test]
+    fn orphan_subagent_mux_link_stays_active() {
+        // Subagent with no discovered parent should have normal mux linking.
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                subagent_session("orphan", Some("/work/repo"), "missing-parent"),
+                mux("one", Some("/work/repo")),
+            ],
+            // No ParentSession link (parent not discovered).
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let orphan_mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source
+                        == NodeId::AgentSession(AgentSessionId::new("opencode", "/state", "orphan"))
+            })
+            .collect();
+
+        assert_eq!(orphan_mux_links.len(), 1);
+        assert!(
+            matches!(orphan_mux_links[0].state, LinkState::Active),
+            "orphan subagent mux link should stay active"
+        );
     }
 }
