@@ -18,6 +18,7 @@ pub fn orphan_session_graph() -> GraphSnapshot {
             title: Some("orphan session".to_string()),
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         })],
         ..GraphSnapshot::empty()
     })
@@ -116,6 +117,7 @@ pub fn conflict_graph() -> GraphSnapshot {
                 title: None,
                 last_message_preview: None,
                 last_active_epoch: None,
+                session_kind: None,
             }),
             first,
             second,
@@ -170,6 +172,7 @@ pub fn mux_candidates_graph() -> GraphSnapshot {
                 title: None,
                 last_message_preview: None,
                 last_active_epoch: None,
+                session_kind: None,
             }),
             convention,
             strong,

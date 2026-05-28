@@ -1461,6 +1461,7 @@ mod tests {
                 title: Some("Phase 8 walkthrough".to_string()),
                 last_message_preview: Some("could you give me a bit more context?".to_string()),
                 last_active_epoch: None,
+                session_kind: None,
             }));
         let snapshot = resolve_snapshot(snapshot);
 
@@ -1512,6 +1513,7 @@ mod tests {
                 title: None,
                 last_message_preview: Some("stale msg".to_string()),
                 last_active_epoch: None,
+                session_kind: None,
             }));
         let mux_graph_id = MuxSessionId::new(native_id);
         snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
@@ -2036,6 +2038,7 @@ mod tests {
                 title: None,
                 last_message_preview: Some("stale msg".to_string()),
                 last_active_epoch: None,
+                session_kind: None,
             }));
         snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
             id: MuxSessionId::new("editor"),
@@ -2334,6 +2337,7 @@ mod tests {
                     title: None,
                     last_message_preview: None,
                     last_active_epoch: None,
+                    session_kind: None,
                 }));
         }
         let snapshot = crate::resolve::resolve_snapshot(snapshot);

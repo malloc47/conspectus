@@ -148,6 +148,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                     title: meta.summary,
                     last_message_preview,
                     last_active_epoch,
+                    session_kind: None,
                 },
                 parent_uuid: meta.parent_uuid,
                 cross_session_record_type: meta.cross_session_record_type,

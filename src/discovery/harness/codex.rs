@@ -98,6 +98,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             title: None,
             last_message_preview: previews.get(&meta.id).cloned(),
             last_active_epoch: activity.get(&meta.id).copied(),
+            session_kind: None,
         }));
 
         let Some(parent_id) = meta.forked_from_id.as_deref() else {

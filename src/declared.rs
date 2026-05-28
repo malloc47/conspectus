@@ -979,6 +979,7 @@ mod tests {
                     title: None,
                     last_message_preview: None,
                     last_active_epoch: None,
+                    session_kind: None,
                 }),
             ],
             ..GraphSnapshot::empty()

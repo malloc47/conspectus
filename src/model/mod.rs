@@ -327,6 +327,13 @@ pub struct AgentSessionNode {
     /// file mtimes or provider state when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_active_epoch: Option<i64>,
+    /// Harness-level session classification. Harnesses that spawn
+    /// subordinate worker sessions (openCode subagents) set `Subagent` so
+    /// the TUI and resolver can distinguish human-driven work from
+    /// auxiliary traffic. Harnesses without subagent semantics leave this
+    /// `None` (sparse default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_kind: Option<SessionKind>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -389,6 +396,18 @@ pub struct ForgePrNode {
     pub updated_epoch: Option<i64>,
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub is_draft: bool,
+}
+
+/// Harness-level classification for agent sessions. Harnesses that spawn
+/// subordinate worker sessions (openCode `@explore` / `@general` subagents)
+/// set `Subagent` so the TUI and resolver can distinguish human-driven work
+/// from auxiliary traffic. Harnesses without subagent semantics leave this
+/// `None` (sparse default).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionKind {
+    Human,
+    Subagent,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]

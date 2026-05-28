@@ -54,6 +54,7 @@ impl HarnessAdapter for AiderAdapter {
                 // validate a heuristic parser against.
                 last_message_preview: None,
                 last_active_epoch: Some(last_active_epoch),
+                session_kind: None,
             }));
         }
 

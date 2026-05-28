@@ -436,6 +436,7 @@ mod tests {
                     title: None,
                     last_message_preview: None,
                     last_active_epoch: None,
+                    session_kind: None,
                 })],
                 candidate_links: vec![link.clone()],
                 diagnostics: Vec::new(),

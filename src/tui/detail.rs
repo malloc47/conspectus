@@ -853,6 +853,7 @@ mod tests {
             title: title.map(str::to_string),
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 

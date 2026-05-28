@@ -737,6 +737,7 @@ mod tests {
             title: None,
             last_message_preview: None,
             last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
         }));
         snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
             id: mux_id.clone(),
@@ -1046,6 +1047,7 @@ mod tests {
             title: None,
             last_message_preview: None,
             last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
         }));
         snap
     }

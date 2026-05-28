@@ -106,10 +106,10 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
         if link.relation != RelationKind::LinkedToMux {
             continue;
         }
-        if let Some(target) = link.target_node_id() {
-            if let Some(key) = session_logical_key(&link.source) {
-                mux_all_keys.entry(target).or_default().insert(key);
-            }
+        if let Some(target) = link.target_node_id()
+            && let Some(key) = session_logical_key(&link.source)
+        {
+            mux_all_keys.entry(target).or_default().insert(key);
         }
     }
 

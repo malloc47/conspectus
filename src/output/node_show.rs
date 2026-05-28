@@ -830,6 +830,7 @@ mod tests {
             title: None,
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 
@@ -951,6 +952,7 @@ mod tests {
                 title: Some("harness title that should be hidden".to_string()),
                 last_message_preview: None,
                 last_active_epoch: None,
+                session_kind: None,
             })],
             ..GraphSnapshot::empty()
         };
@@ -980,6 +982,7 @@ mod tests {
                 title: Some("Phase 8 mockup".to_string()),
                 last_message_preview: None,
                 last_active_epoch: None,
+                session_kind: None,
             })],
             ..GraphSnapshot::empty()
         };

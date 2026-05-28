@@ -166,6 +166,7 @@ fn ensure_session(snapshot: &mut GraphSnapshot, record: &HookRecord) -> Option<A
         title: None,
         last_message_preview: None,
         last_active_epoch: Some(record.observed_epoch),
+        session_kind: None,
     };
     snapshot
         .nodes
@@ -364,6 +365,7 @@ mod tests {
             title: None,
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 

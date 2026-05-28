@@ -33,6 +33,7 @@ fn fixture_sparse_orphan_session() -> GraphSnapshot {
         title: Some("orphan-session".into()),
         last_message_preview: None,
         last_active_epoch: Some(1_700_000_000),
+        session_kind: None,
     }));
     snap
 }
@@ -183,6 +184,7 @@ fn fixture_ambiguous_mux_candidates() -> GraphSnapshot {
         title: None,
         last_message_preview: None,
         last_active_epoch: Some(1_700_000_000),
+        session_kind: None,
     }));
     let agent_node_id = NodeId::AgentSession(agent_id);
 

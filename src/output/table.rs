@@ -181,6 +181,7 @@ mod tests {
             title: None,
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 
@@ -197,6 +198,7 @@ mod tests {
             title: None,
             last_message_preview: Some(preview.to_string()),
             last_active_epoch: None,
+            session_kind: None,
         })
     }
 
@@ -2046,6 +2048,7 @@ mod tests {
             title: Some("a very long conversation topic".to_string()),
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         });
         let snapshot = GraphSnapshot {
             nodes: vec![node],
@@ -2105,6 +2108,7 @@ mod tests {
             title: Some("clipboard sync over SSH".to_string()),
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         });
         let without = agent_session("codex", "no-title", Some("/work"));
         let snapshot = GraphSnapshot {
@@ -2144,6 +2148,7 @@ mod tests {
             title: Some("harness title that should be hidden".to_string()),
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         });
         let session_id = session.id();
         let mut snapshot = GraphSnapshot {
@@ -2183,6 +2188,7 @@ mod tests {
             title: Some("agent title".to_string()),
             last_message_preview: None,
             last_active_epoch: None,
+            session_kind: None,
         });
         let mux = mux_session("tmux", "editor", Some("/work"));
         let snapshot = GraphSnapshot {
