@@ -227,6 +227,11 @@ fn mux_match(
         });
     }
 
+    let mux_harnesses = active_pane_harnesses(mux);
+    if !mux_harnesses.is_empty() {
+        return None;
+    }
+
     if session_cwd == mux_cwd {
         return Some(linked_to_mux(
             session,
@@ -729,12 +734,13 @@ mod tests {
     }
 
     fn mux_with_active_command(native: &str, cwd: Option<&str>, command: &str) -> GraphNode {
+        let active_pane_command = command.split_whitespace().next().map(str::to_string);
         GraphNode::MuxSession(MuxSessionNode {
             id: MuxSessionId::new(format!("tmux:{native}")),
             backend: "tmux".to_string(),
             native_id: native.to_string(),
             cwd: cwd.map(str::to_string),
-            active_pane_command: Some("codex".to_string()),
+            active_pane_command,
             active_pane_pid: None,
             active_pane_current_path: cwd.map(str::to_string),
             active_pane_start_command: Some(command.to_string()),
@@ -899,6 +905,73 @@ mod tests {
         assert_eq!(link.relation, RelationKind::LinkedToMux);
         assert_eq!(link.provenance, Provenance::StrongDiscovered);
         assert_eq!(link.confidence, Confidence::High);
+    }
+
+    #[test]
+    fn cwd_match_skipped_when_mux_has_known_harness_but_no_pid_match() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("opencode", "/state", "a"),
+                    harness_key: "opencode".to_string(),
+                    cwd: Some("/work/repo".to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                }),
+                GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("codex", "/state", "b"),
+                    harness_key: "codex".to_string(),
+                    cwd: Some("/work/repo".to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                }),
+                GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("claude-code", "/state", "c"),
+                    harness_key: "claude-code".to_string(),
+                    cwd: Some("/work/repo".to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                }),
+                mux_with_active_command("one", Some("/work/repo"), "opencode"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn cwd_match_falls_back_when_mux_harness_unknown() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("a", Some("/work/repo")),
+                session("b", Some("/work/repo")),
+                mux("one", Some("/work/repo")),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref() == Some("exact_cwd_match")
+            })
+            .collect();
+        assert_eq!(links.len(), 2);
     }
 
     #[test]
