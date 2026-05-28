@@ -3860,7 +3860,78 @@ deserve their own ADR before any story lands.
     the operator accepts, edits, or dismisses.
   - Tests: detection trigger tests; config-gate tests; dismissal
     persistence tests.
-  - Blockers: `H-AI-NAMING-003`.
+   - Blockers: `H-AI-NAMING-003`.
+
+### Subagent Session Filtering
+
+OpenCode subagent invocations (`@explore`, `@general`) create persistent
+`AgentSession` rows in the SQLite store. These sessions appear alongside
+human-driven sessions in the TUI session list, cluttering the view and
+diluting the signal of the operator's actual work. Every subagent session
+carries a `parent_id` pointing back to the invoking human session, and the
+openCode convention names them with the subagent type in the title
+(e.g. `Find exact_cwd_match code (@explore subagent)`).
+
+The desired behavior is to either nest subagent sessions under their
+human session in the row tree, or hide them behind a toggle that defaults
+to collapsed/filtered. The resolver/mux pipeline should treat a subagent
+session's cwd/activity as owned by the parent when resolving mux
+attachments (a subagent running in a tmux pane should map to the human
+session that invoked it, not pollute mux resolution for that pane).
+
+Dependency shape inside the workstream:
+
+```
+H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
+                                       └──→ H-SUBAGENT-004
+```
+
+- [ ] `H-SUBAGENT-001` Determine how to detect subagent sessions from
+  opencode state.
+  - Scope: inspect opencode's `session` table schema for a dedicated
+    `kind`/`type`/`is_subagent` column. If one exists, prefer it. If
+    not, design a fallback heuristic based on `parent_id` presence plus
+    title patterns (`(@explore subagent)`, `(@general subagent)`). If
+    the schema is producer-maintained and stable, prefer the schema
+    field; if not, document the heuristic's boundary conditions and
+    decay story.
+  - Tests: fixture tests that confirm detection of known subagent
+    shapes and non-detection of human `/new` forks with the same
+    `parent_id` but no subagent title markers.
+  - Blockers: none.
+- [ ] `H-SUBAGENT-002` Thread subagent metadata into the graph model.
+  - Scope: add an optional boolean or enum field on `AgentSessionNode`
+    (e.g. `session_kind: Option<SessionKind>` with variants `Human` /
+    `Subagent`) so the classification survives into table rendering,
+    resolver logic, and TUI row construction. Decide during the story
+    whether to make this harness-agnostic or opencode-specific.
+  - Tests: model round-trip tests; sparse-serialization tests (absent
+    field stays absent for non-opencode sessions).
+  - Blockers: `H-SUBAGENT-001`.
+- [ ] `H-SUBAGENT-003` Filter and nest subagent sessions in the TUI.
+  - Scope: teach the session row tree to either nest subagent sessions
+    as expandable children under their parent session row, or collapse
+    them behind a toggle that defaults to hidden. The behavior must
+    not change the existing sort/recency order of human sessions.
+    Decide during the story whether nesting (per ADR 0018 lineage
+    edges) or flat filtering (per checkpoint-style visibility toggle)
+    is the right first pass.
+  - Tests: TUI row-tree tests for subagent nesting/collapsing under
+    parent, orphan subagent (parent not discovered) behavior, and
+    toggle persistence across views.
+  - Blockers: `H-SUBAGENT-002`, `H-LINEAGE-003`.
+- [ ] `H-SUBAGENT-004` Suppress subagent sessions from mux attachment
+  resolution.
+  - Scope: when a subagent session's cwd matches a mux session, the
+    resolver should prefer the human parent session for mux attachment
+    rather than the subagent itself. This prevents a subagent session
+    from "stealing" the mux link from its parent. If no parent is
+    discovered, a standalone subagent should resolve normally rather
+    than being left unmuxed.
+  - Tests: resolver tests for subagent-with-parent (parent preferred),
+    orphan subagent (resolves normally), and subagent-with-parent where
+    the parent has a stronger non-CWD link (parent still preferred).
+  - Blockers: `H-SUBAGENT-002`, existing `LinkedToMux` resolver tests.
 
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
