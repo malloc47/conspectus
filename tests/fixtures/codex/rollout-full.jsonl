@@ -1,3 +1,6 @@
-{"type":"session_meta","payload":{"id":"aaaaaaaa-1111-2222-3333-444444444444","cwd":"/home/user/projects/my-project","forked_from_id":null}}
-{"type":"user_message","uuid":"b0000000-1111-2222-3333-444444444444","payload":{"role":"user","content":[{"type":"input_text","text":"Please review the project structure and suggest improvements."}]}}
-{"type":"assistant_message","uuid":"c0000000-1111-2222-3333-444444444444","payload":{"role":"assistant","content":[{"type":"output_text","text":"I'll review the project structure. Let me start by looking at the directory layout."}]}}
+{"type":"session_meta","timestamp":"2026-05-25T10:00:00Z","payload":{"id":"aaaaaaaa-1111-2222-3333-444444444444","cwd":"/home/user/projects/my-project","forked_from_id":null,"timestamp":"2026-05-25T10:00:00Z","originator":"codex-tui","cli_version":"0.1.0","source":"cli","model_provider":"openai"}}
+{"type":"event_msg","timestamp":"2026-05-25T10:00:01Z","payload":{"type":"task_started"}}
+{"type":"response_item","timestamp":"2026-05-25T10:00:05Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review the project structure and suggest improvements."}]}}
+{"type":"event_msg","timestamp":"2026-05-25T10:00:05Z","payload":{"type":"exec_command_end"}}
+{"type":"response_item","timestamp":"2026-05-25T10:00:15Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll review the project structure. Let me start by looking at the directory layout."}]}}
+{"type":"event_msg","timestamp":"2026-05-25T10:00:15Z","payload":{"type":"task_complete"}}

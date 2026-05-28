@@ -28,7 +28,9 @@
 
 use std::fs;
 
-use conspectus::discovery::harness::{ClaudeCodeAdapter, CodexAdapter, HarnessAdapter};
+use conspectus::discovery::harness::{
+    ClaudeCodeAdapter, CodexAdapter, HarnessAdapter, OpenCodeAdapter,
+};
 use conspectus::discovery::tmux::parse_list_sessions;
 use conspectus::discovery::{DiscoveryContext, GraphFragment};
 use conspectus::hook::{
@@ -499,4 +501,58 @@ fn fd_targets_fixture_contains_all_expected_link_types() {
         "deleted file marker"
     );
     assert!(lines.iter().any(|l| l.starts_with("/dev/")), "device node");
+}
+
+// ── opencode SQLite fixture ─────────────────────────────────────────────
+
+#[test]
+fn opencode_sqlite_sessions_discovered_from_fixture() {
+    let temp = TempDir::new().expect("temp");
+    let state_root = temp.path().join("opencode");
+    fs::create_dir_all(&state_root).expect("create opencode root");
+
+    let db_path = state_root.join("opencode.db");
+    let sql = fs::read_to_string(fixture_path("opencode/state.sql")).unwrap();
+    let conn = rusqlite::Connection::open(&db_path).expect("create opencode.db");
+    conn.execute_batch(&sql)
+        .expect("execute opencode fixture SQL");
+
+    let context = DiscoveryContext::default()
+        .with_harness_state_root(OpenCodeAdapter::new().harness_key(), &state_root);
+    let fragment = OpenCodeAdapter::new()
+        .discover(&context)
+        .expect("discover opencode sessions");
+
+    let sessions: Vec<_> = fragment
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::AgentSession(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sessions.len(),
+        2,
+        "both opencode sessions should be discovered"
+    );
+
+    let session = sessions
+        .iter()
+        .find(|s| s.id.session_key == "ses_ffff1111aaaa2222bbbb33333333333")
+        .expect("first session");
+    assert_eq!(
+        session.cwd.as_deref(),
+        Some("/home/user/projects/my-project")
+    );
+
+    let has_parent = fragment.candidate_links.iter().any(|link| {
+        link.source_metadata
+            .fields
+            .get("parent_native_id")
+            .is_some_and(|v: &serde_json::Value| {
+                v.as_str() == Some("ses_ffff1111aaaa2222bbbb33333333333")
+            })
+    });
+    assert!(has_parent, "forked session should emit parent session link");
 }
