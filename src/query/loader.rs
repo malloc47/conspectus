@@ -200,8 +200,8 @@ fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Resul
         "INSERT INTO node_mux_sessions (\
            node_id, native_id, backend, cwd, \
            active_pane_command, active_pane_pid, active_pane_current_path, \
-           active_pane_start_command, activity_epoch, created_epoch\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+           active_pane_start_command, client_attached, activity_epoch, created_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )?;
     for node in nodes {
         let GraphNode::MuxSession(mux) = node else {
@@ -217,9 +217,11 @@ fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Resul
             active_pane_pid,
             active_pane_current_path,
             active_pane_start_command,
+            client_attached,
             activity_epoch,
             created_epoch,
         } = mux;
+        let client_attached = client_attached.map(i64::from);
         stmt.execute(params![
             node_id.to_string(),
             native_id,
@@ -229,6 +231,7 @@ fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Resul
             active_pane_pid,
             active_pane_current_path,
             active_pane_start_command,
+            client_attached,
             activity_epoch,
             created_epoch,
         ])?;
@@ -562,6 +565,7 @@ mod tests {
             active_pane_pid: Some(12345),
             active_pane_current_path: Some("/cwd/sub".into()),
             active_pane_start_command: Some("zsh -l".into()),
+            client_attached: None,
             activity_epoch: Some(1_700_000_001),
             created_epoch: Some(1_699_000_000),
         }

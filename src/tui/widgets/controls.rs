@@ -82,6 +82,10 @@ pub enum ControlsCursor {
     FilterHarness,
     FilterMaxAge,
     FilterMuxState,
+    /// Sessions-view-only checkbox: float muxed sessions to the top.
+    FilterFloatMuxedSessions,
+    /// Mux-view-only checkbox: float attached muxes to the top.
+    FilterFloatAttachedMuxes,
     FilterClear,
     /// Sort option at index in [`SORT_OPTIONS`].
     Sort(usize),
@@ -224,6 +228,16 @@ impl ControlsOverlayState {
             ControlsCursor::FilterMuxState => {
                 self.sub_editor = Some(SubEditor::MuxState(build_mux_state_editor(ctx.filter)));
                 ControlsOutcome::Continue
+            }
+            ControlsCursor::FilterFloatMuxedSessions => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.float_muxed_sessions_top = !new_filter.float_muxed_sessions_top;
+                ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
+            }
+            ControlsCursor::FilterFloatAttachedMuxes => {
+                let mut new_filter = ctx.filter.clone();
+                new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
+                ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
             }
             ControlsCursor::FilterClear => {
                 if ctx.filter.is_empty() {
@@ -450,6 +464,12 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     rows.push(ControlsCursor::FilterHarness);
     rows.push(ControlsCursor::FilterMaxAge);
     rows.push(ControlsCursor::FilterMuxState);
+    if matches!(ctx.view, View::Sessions) {
+        rows.push(ControlsCursor::FilterFloatMuxedSessions);
+    }
+    if matches!(ctx.view, View::Mux) {
+        rows.push(ControlsCursor::FilterFloatAttachedMuxes);
+    }
     rows.push(ControlsCursor::FilterClear);
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
@@ -578,6 +598,20 @@ impl ControlsOverlayWidget<'_> {
             mux_state_value(self.ctx.filter),
             cursor == ControlsCursor::FilterMuxState,
         ));
+        if matches!(self.ctx.view, View::Sessions) {
+            lines.push(checkbox_row(
+                "Float muxed sessions to top",
+                self.ctx.filter.float_muxed_sessions_top,
+                cursor == ControlsCursor::FilterFloatMuxedSessions,
+            ));
+        }
+        if matches!(self.ctx.view, View::Mux) {
+            lines.push(checkbox_row(
+                "Float attached muxes to top",
+                self.ctx.filter.float_attached_muxes_top,
+                cursor == ControlsCursor::FilterFloatAttachedMuxes,
+            ));
+        }
         lines.push(row_line(
             "Clear all filters".to_string(),
             false,
@@ -635,6 +669,19 @@ fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     ))
 }
 
+fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
+    let marker = if cursored { "> " } else { "  " };
+    let mut style = Style::default();
+    if cursored {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    if checked {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    let box_glyph = if checked { "[x]" } else { "[ ]" };
+    Line::from(Span::styled(format!("{marker}{box_glyph} {label}"), style))
+}
+
 fn harness_value(filter: &RowFilter) -> String {
     match &filter.harness {
         Some(HarnessFilter::Any(values)) if !values.is_empty() => values.join(", "),
@@ -683,10 +730,11 @@ fn sort_label(sort: Sort) -> &'static str {
 pub fn centered_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
     let max_height = area.height.saturating_sub(2);
-    // Content is 5 view rows + 5 grouping rows + 4 filter rows +
-    // 2 sort rows + 4 section headers + 4 blank lines + 1 footer +
-    // 1 blank-before-footer = 26 lines, plus 2 for the border.
-    let desired = 28;
+    // Content is 5 view rows + 5 grouping rows + 4 filter rows
+    // (+ 1 view-scoped checkbox on sessions/mux) + 2 sort rows +
+    // 4 section headers + 4 blank lines + 1 footer +
+    // 1 blank-before-footer = up to 27 lines, plus 2 for the border.
+    let desired = 29;
     let height = (desired as u16).clamp(8, max_height.max(8));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -749,15 +797,16 @@ mod tests {
             Sort::Hierarchy,
         );
         let mut state = ControlsOverlayState::new(&ctx);
-        // Five views + 5 sessions groupings + 4 filter rows + 2 sort
-        // rows = 16 actionable rows.
-        for _ in 0..16 {
+        // Five views + 5 sessions groupings + 5 filter rows
+        // (3 predicates + 1 sessions-only float checkbox + clear) +
+        // 2 sort rows = 17 actionable rows on Sessions.
+        for _ in 0..17 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(
             state.cursor(),
             ControlsCursor::View(0),
-            "down wraps back to the top after 16 presses",
+            "down wraps back to the top after one full cycle",
         );
     }
 
@@ -807,7 +856,7 @@ mod tests {
         for _ in 0..5 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
-        // Land on the second grouping row (Repo).
+        // Land on the second grouping row (Graph).
         state.handle_key(&ctx, key(KeyCode::Down));
         assert_eq!(state.cursor(), ControlsCursor::Grouping(1));
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
@@ -934,7 +983,9 @@ mod tests {
             Sort::Hierarchy,
         );
         let mut state = ControlsOverlayState::new_at_filters(&ctx);
-        for _ in 0..3 {
+        // Step past the three predicate rows and the sessions-only
+        // float checkbox to land on FilterClear.
+        for _ in 0..4 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(state.cursor(), ControlsCursor::FilterClear);
@@ -955,14 +1006,108 @@ mod tests {
             Sort::Hierarchy,
         );
         let mut state = ControlsOverlayState::new_at_filters(&ctx);
-        for _ in 0..3 {
+        for _ in 0..4 {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
+        assert_eq!(state.cursor(), ControlsCursor::FilterClear);
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
             ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(RowFilter::default()))
         );
+    }
+
+    #[test]
+    fn float_muxed_checkbox_only_appears_on_sessions_view() {
+        let filter = RowFilter::default();
+        let rows_sessions = flatten_rows(&ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        ));
+        assert!(rows_sessions.contains(&ControlsCursor::FilterFloatMuxedSessions));
+        assert!(!rows_sessions.contains(&ControlsCursor::FilterFloatAttachedMuxes));
+
+        let rows_mux = flatten_rows(&ctx_with(
+            View::Mux,
+            Grouping::default_for(View::Mux),
+            &filter,
+            Sort::Hierarchy,
+        ));
+        assert!(!rows_mux.contains(&ControlsCursor::FilterFloatMuxedSessions));
+        assert!(rows_mux.contains(&ControlsCursor::FilterFloatAttachedMuxes));
+
+        for view in [View::Union, View::Prs, View::Forks] {
+            let rows = flatten_rows(&ctx_with(
+                view,
+                Grouping::default_for(view),
+                &filter,
+                Sort::Hierarchy,
+            ));
+            assert!(!rows.contains(&ControlsCursor::FilterFloatMuxedSessions));
+            assert!(!rows.contains(&ControlsCursor::FilterFloatAttachedMuxes));
+        }
+    }
+
+    #[test]
+    fn enter_on_float_muxed_sessions_toggles_bool() {
+        let filter = RowFilter::default();
+        let ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let mut state = ControlsOverlayState::new_at_filters(&ctx);
+        for _ in 0..3 {
+            state.handle_key(&ctx, key(KeyCode::Down));
+        }
+        assert_eq!(state.cursor(), ControlsCursor::FilterFloatMuxedSessions);
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        match outcome {
+            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(f)) => {
+                assert!(f.float_muxed_sessions_top);
+                assert!(!f.float_attached_muxes_top);
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn enter_on_float_attached_muxes_toggles_bool() {
+        let filter = RowFilter {
+            float_attached_muxes_top: true,
+            ..RowFilter::default()
+        };
+        let ctx = ctx_with(
+            View::Mux,
+            Grouping::default_for(View::Mux),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let mut state = ControlsOverlayState::new_at_filters(&ctx);
+        for _ in 0..3 {
+            state.handle_key(&ctx, key(KeyCode::Down));
+        }
+        assert_eq!(state.cursor(), ControlsCursor::FilterFloatAttachedMuxes);
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        match outcome {
+            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(f)) => {
+                assert!(!f.float_attached_muxes_top, "Enter toggles bool off");
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ordering_bool_keeps_filter_non_empty_for_clear_all() {
+        let filter = RowFilter {
+            float_muxed_sessions_top: true,
+            ..RowFilter::default()
+        };
+        assert!(!filter.is_empty());
+        assert!(!filter.has_narrowing_predicates());
     }
 
     #[test]

@@ -26,7 +26,11 @@ use std::path::Path;
 use crate::model::{AgentSessionId, MuxSessionId, NodeId};
 use crate::tui::View;
 
+pub mod forks;
+pub mod mux;
+pub mod prs;
 pub mod sessions;
+pub mod union;
 
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -112,6 +116,9 @@ pub enum RowKind {
     Group(GroupRow),
     AgentSession(AgentSessionRow),
     AgentSessionMuxCandidate(MuxCandidateRow),
+    MuxSession(MuxSessionRow),
+    Pr(PrRow),
+    Fork(ForkRow),
 }
 
 /// A workspace / repo / worktree label row.
@@ -204,6 +211,57 @@ pub struct MuxCandidateRow {
     /// True when this candidate is the resolver-preferred one for
     /// the parent agent session.
     pub is_preferred: bool,
+    pub primary_node: NodeId,
+}
+
+/// A mux-session row in the mux or union view.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MuxSessionRow {
+    pub mux: MuxSessionId,
+    pub backend: String,
+    pub native_id: String,
+    pub client_attached: Option<bool>,
+    pub cwd_display: Option<String>,
+    pub attached_count: usize,
+    pub ambiguous_count: usize,
+    pub recency: Option<String>,
+    pub activity_epoch: Option<i64>,
+    /// Unique harness labels for visible agent sessions linked to
+    /// this mux. Renderers use these as the primary mux-row labels so
+    /// mux rows scan like session rows without repeating session IDs.
+    pub agent_labels: Vec<String>,
+    /// Last-message preview of the sole attached agent session,
+    /// populated only when exactly one visible agent is linked to this
+    /// mux. Renderers flow it into the trailing space after the CWD so
+    /// single-session muxes carry an inline content cue; multi-session
+    /// muxes expose sessions as child rows where each preview is shown
+    /// individually.
+    pub single_session_preview: Option<String>,
+    pub primary_node: NodeId,
+}
+
+/// A PR row in the prs view.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrRow {
+    pub pr_number: u64,
+    pub repo_display: String,
+    pub state: Option<String>,
+    pub is_draft: bool,
+    pub branch_name: Option<String>,
+    pub updated_recency: Option<String>,
+    pub attached_count: usize,
+    pub url: Option<String>,
+    pub primary_node: NodeId,
+}
+
+/// A fork row in the forks view.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForkRow {
+    pub fork_label: String,
+    pub provider: String,
+    pub scope: Option<String>,
+    pub parent_label: Option<String>,
+    pub child_count: usize,
     pub primary_node: NodeId,
 }
 

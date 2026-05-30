@@ -23,7 +23,7 @@ pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 /// the bump. Aligned with the in-memory `GraphSnapshot` schema version;
 /// when the model gains breaking changes (e.g. P7-002's provider-
 /// provenance fields), both versions advance together.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// One curated saved view defined in `schema.sql`. The registry below
 /// is the single source of truth that `conspectus query --list-views`
@@ -278,6 +278,7 @@ pub const NODE_MUX_SESSIONS_COLUMNS: &[&str] = &[
     "active_pane_pid",
     "active_pane_current_path",
     "active_pane_start_command",
+    "client_attached",
     "activity_epoch",
     "created_epoch",
     "discovery_provider",
@@ -529,6 +530,7 @@ mod tests {
                 active_pane_pid: None,
                 active_pane_current_path: None,
                 active_pane_start_command: None,
+                client_attached: None,
                 activity_epoch: None,
                 created_epoch: None,
             }),

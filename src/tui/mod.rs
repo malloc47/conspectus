@@ -27,6 +27,7 @@ pub mod actions;
 mod app;
 pub mod detail;
 pub mod preview;
+pub mod resume;
 pub mod rows;
 mod runtime;
 pub mod search;
@@ -55,6 +56,8 @@ pub struct RunConfig {
     pub default_sort: Sort,
     /// Top-level grouping in the sessions tree.
     pub sessions_grouping: SessionsGrouping,
+    /// Top-level grouping in the mux tree.
+    pub mux_grouping: MuxGrouping,
     /// Initial row filter (ADR 0031). Applies to the sessions view
     /// in v1; F8-003 generalizes to per-view state. Empty filter
     /// admits every row.
@@ -85,7 +88,8 @@ impl RunConfig {
             cwd: None,
             default_view: View::Sessions,
             default_sort: Sort::Hierarchy,
-            sessions_grouping: SessionsGrouping::Graph,
+            sessions_grouping: SessionsGrouping::Repo,
+            mux_grouping: MuxGrouping::Session,
             initial_filter: RowFilter::default(),
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
@@ -135,6 +139,7 @@ pub enum MuxGrouping {
     Session,
     Workspace,
     Host,
+    Repo,
 }
 
 /// Top-level grouping in the union view (per ADR 0031).
@@ -193,12 +198,12 @@ impl Grouping {
         }
     }
 
-    /// The default grouping for a view, matching today's
-    /// `[tui].sessions_grouping = "graph"` and the locked first
-    /// entries from ADR 0031.
+    /// The default grouping for a view. Sessions defaults to
+    /// location-first `repo`; `graph` remains available for the
+    /// richer workspace / lineage topology.
     pub fn default_for(view: View) -> Self {
         match view {
-            View::Sessions => Self::Sessions(SessionsGrouping::Graph),
+            View::Sessions => Self::Sessions(SessionsGrouping::Repo),
             View::Mux => Self::Mux(MuxGrouping::Session),
             View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Repo),
@@ -211,7 +216,9 @@ impl Grouping {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sessions(SessionsGrouping::Graph) => "graph",
-            Self::Sessions(SessionsGrouping::Repo) | Self::Union(UnionGrouping::Repo) => "repo",
+            Self::Sessions(SessionsGrouping::Repo)
+            | Self::Mux(MuxGrouping::Repo)
+            | Self::Union(UnionGrouping::Repo) => "repo",
             Self::Sessions(SessionsGrouping::Checkout) => "checkout",
             Self::Sessions(SessionsGrouping::ScanRoot) => "scan-root",
             Self::Sessions(SessionsGrouping::None) => "none",
@@ -248,8 +255,8 @@ impl Grouping {
     pub fn values_for(view: View) -> &'static [Grouping] {
         match view {
             View::Sessions => &[
-                Self::Sessions(SessionsGrouping::Graph),
                 Self::Sessions(SessionsGrouping::Repo),
+                Self::Sessions(SessionsGrouping::Graph),
                 Self::Sessions(SessionsGrouping::Checkout),
                 Self::Sessions(SessionsGrouping::ScanRoot),
                 Self::Sessions(SessionsGrouping::None),
@@ -258,6 +265,7 @@ impl Grouping {
                 Self::Mux(MuxGrouping::Session),
                 Self::Mux(MuxGrouping::Workspace),
                 Self::Mux(MuxGrouping::Host),
+                Self::Mux(MuxGrouping::Repo),
             ],
             View::Union => &[
                 Self::Union(UnionGrouping::Kind),
@@ -310,7 +318,7 @@ mod tests {
     fn default_for_each_view_matches_adr_first_entry() {
         assert_eq!(
             Grouping::default_for(View::Sessions),
-            Grouping::Sessions(SessionsGrouping::Graph)
+            Grouping::Sessions(SessionsGrouping::Repo)
         );
         assert_eq!(
             Grouping::default_for(View::Mux),

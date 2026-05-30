@@ -4,15 +4,15 @@
 //! terminal, so this module just sets up the loop and is the only
 //! place in the crate that touches stdout in raw mode.
 //!
-//! v1 discovery wiring (P8-008 minimal slice): the runtime runs
-//! `discover_local_at_roots` synchronously at startup and on
-//! manual `r` refresh, feeding the resulting SQLite graph + row tree
-//! into the reducer via [`crate::tui::Msg::SetData`]. The
-//! call blocks input briefly during discovery; the full
-//! background-task transport lands with the rest of P8-008.
+//! Discovery runs on a background thread per ADR 0024 (`mpsc` + no
+//! async runtime). The initial load still runs synchronously so the
+//! operator sees a populated tree on the first frame; subsequent
+//! refreshes (manual `r` or timer-driven) dispatch through the
+//! background channel and never block input.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use ratatui::DefaultTerminal;
@@ -25,9 +25,18 @@ use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{AttachTarget, attach_disabled_reason, resolve_attach_target};
 use crate::tui::app::{App, GraphDb, Msg};
 use crate::tui::preview::capture_via;
+use crate::tui::resume::{
+    ResumeTarget, launch_resume, resolve_resume_target, resume_disabled_reason,
+};
+use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputsFromConn, build_sessions_tree_from_conn};
 use crate::tui::{RunConfig, View, ui};
+
+/// Result of a completed background discovery run. The worker returns
+/// only the resolved snapshot; the main thread materializes SQLite and
+/// builds the row tree from the app's current view config.
+type DiscoveryResult = Result<crate::model::GraphSnapshot>;
 
 /// Run the TUI to completion. Restores the terminal on normal exit,
 /// errors, and panics (the panic path is covered by the hook
@@ -54,24 +63,72 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let mut app = App::new(config.clone());
     let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
 
-    // Initial synchronous discovery. Failure here surfaces as an
-    // empty tree + an error frame; the operator can still press
-    // `r` to retry once the underlying issue is fixed.
+    // Initial synchronous discovery.
     refresh(&mut app, &config);
     refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);
 
+    let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
+    let mut pending_refresh = false;
+    let refresh_interval = config.refresh_interval;
+    let mut last_refresh = Instant::now();
     let poll_timeout = Duration::from_millis(100);
+
     while !app.should_quit() {
         terminal.draw(|frame| ui::draw(&app, frame))?;
+
+        // Drain completed background discovery results without
+        // blocking. Only the most recent result wins.
+        while let Ok(result) = result_rx.try_recv() {
+            pending_refresh = false;
+            match result {
+                Ok(snapshot) => match crate::query::materialize_snapshot(&snapshot) {
+                    Ok(conn) => {
+                        let live_config = app.config().clone();
+                        match build_tree_for_view(&conn, &live_config) {
+                            Ok(tree) => {
+                                let database = GraphDb::new(conn);
+                                let initial_selection_hint = launch_context_row_id(&tree);
+                                app.update(Msg::SetData {
+                                    snapshot: database,
+                                    tree,
+                                    loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+                                    initial_selection_hint,
+                                });
+                                populate_provider_status(&mut app, &live_config);
+                            }
+                            Err(err) => {
+                                app.update(Msg::SetRefreshFailure(format!(
+                                    "last refresh failed; {err}"
+                                )));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        app.update(Msg::SetRefreshFailure(format!(
+                            "last refresh failed; {err}"
+                        )));
+                    }
+                },
+                Err(err) => {
+                    app.update(Msg::SetRefreshFailure(format!(
+                        "last refresh failed; {err}"
+                    )));
+                }
+            }
+        }
+
+        // Timer-driven auto-refresh. Only fires when no request is
+        // in-flight and at least `refresh_interval` has elapsed.
+        if !pending_refresh && last_refresh.elapsed() >= refresh_interval {
+            pending_refresh = true;
+            last_refresh = Instant::now();
+            spawn_discovery_worker(app.config(), &result_tx);
+        }
 
         if event::poll(poll_timeout)? {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            // Open overlays own key input while up. The controls
-            // overlay takes precedence over the bare keymap; the
-            // rename overlay does the same. Only one is open at a
-            // time in v1.
             let action = if app.help_overlay().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -105,8 +162,15 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             };
             match action {
                 Some(Action::Msg(msg)) => app.update(*msg),
-                Some(Action::Refresh) => refresh(&mut app, &config),
+                Some(Action::Refresh) => {
+                    if !pending_refresh {
+                        pending_refresh = true;
+                        last_refresh = Instant::now();
+                        spawn_discovery_worker(app.config(), &result_tx);
+                    }
+                }
                 Some(Action::Attach) => attach_action(terminal, &mut app, &config),
+                Some(Action::Resume) => resume_action(&mut app),
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
                     handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
@@ -175,6 +239,30 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Spawn a background thread that runs discovery and sends the resolved
+/// snapshot through `tx`. SQLite materialization and row-tree building
+/// stay on the main thread so they can use the app's current view state.
+fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>) {
+    let config = config.clone();
+    let tx = tx.clone();
+    std::thread::spawn(move || {
+        let result = discover_and_resolve(&config);
+        let _ = tx.send(result);
+    });
+}
+
+/// Run discovery and resolver on the calling thread, returning the
+/// resolved snapshot (no SQLite materialization).
+fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
+    let roots: Vec<PathBuf> = if config.scan_roots.is_empty() {
+        vec![std::env::current_dir()?]
+    } else {
+        config.scan_roots.clone()
+    };
+    let snapshot = discover_local_at_roots(roots)?;
+    Ok(resolve_snapshot(snapshot))
 }
 
 /// Resolve the current selection to an agent session and seed the
@@ -438,6 +526,7 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 /// no longer the source of truth after the first user action.
 fn refresh(app: &mut App, _seed: &RunConfig) {
     let config = app.config().clone();
+    populate_provider_status(app, &config);
     match discover_and_build(&config) {
         Ok((database, tree)) => {
             let initial_selection_hint = launch_context_row_id(&tree);
@@ -448,11 +537,29 @@ fn refresh(app: &mut App, _seed: &RunConfig) {
                 initial_selection_hint,
             });
         }
-        Err(_err) => {
-            // No status bar surface yet (P8-007 follow-on); silently
-            // retain the previous good state.
+        Err(err) => {
+            app.update(Msg::SetRefreshFailure(format!(
+                "last refresh failed; {}",
+                err
+            )));
         }
     }
+}
+
+/// Populate `App::provider_status` from the run config and (in a
+/// follow-up) from discovery-level diagnostics. Today the env-var
+/// toggles are the only source; tmux/forge availability is probed
+/// during discovery and surfaced later.
+fn populate_provider_status(app: &mut App, _config: &RunConfig) {
+    use std::env;
+    let mut status = crate::tui::app::ProviderStatus::default();
+    if env::var("CONSPECTUS_DISABLE_TMUX").is_ok_and(|v| !v.is_empty()) {
+        status.tmux_disabled = true;
+    }
+    if env::var("CONSPECTUS_DISABLE_FORGE").is_ok_and(|v| !v.is_empty()) {
+        status.forge_disabled = true;
+    }
+    app.update(Msg::SetProviderStatus(status));
 }
 
 /// Find the `RowId` of the group row marked as the launch-context
@@ -492,11 +599,39 @@ fn build_tree_for_view(conn: &rusqlite::Connection, config: &RunConfig) -> Resul
             cwd: config.cwd.as_deref(),
             filter: config.initial_filter.clone(),
         })?,
-        // Mux / union / prs / forks builders land in the remaining
-        // P8-004 commits; until then those views show an empty
-        // placeholder. The renderer already labels the active view
-        // in the header so the operator sees what's loaded.
-        View::Mux | View::Union | View::Prs | View::Forks => RowTree::default(),
+        View::Mux => crate::tui::rows::mux::build_mux_tree_from_conn(
+            crate::tui::rows::mux::MuxBuildInputsFromConn {
+                conn,
+                home: home.as_deref(),
+                now: current_unix_epoch(),
+                filter: config.initial_filter.clone(),
+                grouping: config.mux_grouping,
+            },
+        )?,
+        View::Union => crate::tui::rows::union::build_union_tree_from_conn(
+            crate::tui::rows::union::UnionBuildInputsFromConn {
+                conn,
+                home: home.as_deref(),
+                now: current_unix_epoch(),
+                filter: config.initial_filter.clone(),
+            },
+        )?,
+        View::Prs => crate::tui::rows::prs::build_prs_tree_from_conn(
+            crate::tui::rows::prs::PrsBuildInputsFromConn {
+                conn,
+                home: home.as_deref(),
+                now: current_unix_epoch(),
+                filter: config.initial_filter.clone(),
+            },
+        )?,
+        View::Forks => crate::tui::rows::forks::build_forks_tree_from_conn(
+            crate::tui::rows::forks::ForksBuildInputsFromConn {
+                conn,
+                home: home.as_deref(),
+                now: current_unix_epoch(),
+                filter: config.initial_filter.clone(),
+            },
+        )?,
     };
     Ok(tree)
 }
@@ -558,6 +693,9 @@ enum Action {
     OpenHelp,
     /// Forward a key event into the open help overlay.
     HelpOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Resume the selected un-muxed agent session in a new terminal
+    /// (launches the harness binary in the background).
+    Resume,
 }
 
 /// Dispatch a key into the open help overlay and close it on
@@ -706,6 +844,38 @@ fn attach_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConf
     }
 }
 
+/// Handle the resume action: resolve the selected agent session's
+/// resume command, launch it in the background, and surface the
+/// outcome as a status-bar message.
+fn resume_action(app: &mut App) {
+    let Some(selection) = app.selection().cloned() else {
+        app.update(Msg::SetStatus(Some("resume: nothing selected".to_string())));
+        return;
+    };
+    let session_id = match &selection {
+        RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
+        _ => {
+            app.update(Msg::SetStatus(Some(
+                "resume: select an agent session".to_string(),
+            )));
+            return;
+        }
+    };
+    let target = resolve_resume_target(&session_id);
+    match &target {
+        ResumeTarget::Launch { label, .. } => {
+            if launch_resume(&target) {
+                app.update(Msg::SetStatus(Some(format!("resumed: {label}"))));
+            } else {
+                app.update(Msg::SetStatus(Some("resume: failed to launch".to_string())));
+            }
+        }
+        _ => {
+            app.update(Msg::SetStatus(Some(resume_disabled_reason(&target))));
+        }
+    }
+}
+
 /// Outcome of a single attach attempt. Errors carry a
 /// human-readable reason for the status bar.
 #[derive(Debug)]
@@ -769,6 +939,7 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
             Msg::NavUp => Msg::ScrollPreviewBy(-1),
             Msg::PageDown(viewport) => Msg::ScrollPreviewBy(i32::from(viewport.max(1))),
             Msg::PageUp(viewport) => Msg::ScrollPreviewBy(-i32::from(viewport.max(1))),
+            Msg::ToggleExpand => Msg::ToggleLinkedDetails,
             other => other,
         })),
         other => other,
@@ -790,6 +961,8 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (_, KeyCode::Char('q')) => Some(Action::Msg(Box::new(Msg::Quit))),
             (m, KeyCode::Char('r')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Refresh),
             (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
+            (KeyModifiers::SHIFT, KeyCode::Char('S'))
+            | (KeyModifiers::NONE, KeyCode::Char('S')) => Some(Action::Resume),
             (KeyModifiers::SHIFT, KeyCode::Char('R'))
             | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
             // ADR 0031 / F8-005 accelerator surface. `v` opens the
@@ -841,6 +1014,9 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (_, KeyCode::Home) | (_, KeyCode::Char('g')) => Some(Action::Msg(Box::new(Msg::Home))),
             (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Box::new(Msg::End))),
             (_, KeyCode::Enter) => Some(Action::Msg(Box::new(Msg::ToggleExpand))),
+            (m, KeyCode::Char('e')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Msg(Box::new(Msg::ToggleLinkedDetails)))
+            }
             (_, KeyCode::Tab) => Some(Action::Msg(Box::new(Msg::CycleFocus))),
             (_, KeyCode::Char('J')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))),
             (_, KeyCode::Char('K')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(-1)))),
@@ -1094,16 +1270,16 @@ mod tests {
     }
 
     #[test]
-    fn remap_for_focus_right_leaves_non_nav_actions_alone() {
+    fn remap_for_focus_right_keeps_global_actions_and_expands_detail_links() {
         use crate::tui::app::Focus;
-        // Tab / Enter / quit should not be remapped.
+        // Tab / quit stay global; Enter targets the focused right pane.
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
             Action::Msg(Box::new(Msg::CycleFocus))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::ToggleExpand)), Focus::Right),
-            Action::Msg(Box::new(Msg::ToggleExpand))
+            Action::Msg(Box::new(Msg::ToggleLinkedDetails))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),

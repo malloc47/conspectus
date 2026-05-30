@@ -19,7 +19,7 @@ pub const TMUX_BACKEND: &str = "tmux";
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
 /// session roots can safely contain spaces.
-pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}";
+pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}";
 
 pub trait TmuxRunner: Send + Sync {
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
@@ -416,6 +416,7 @@ pub struct TmuxSessionRow {
     pub active_pane_pid: Option<i64>,
     pub active_pane_current_path: Option<String>,
     pub active_pane_start_command: Option<String>,
+    pub client_attached: Option<bool>,
 }
 
 pub fn parse_list_sessions(stdout: &str) -> Vec<TmuxSessionRow> {
@@ -440,6 +441,9 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     let active_pane_pid = optional_epoch(fields.next());
     let active_pane_current_path = optional_string(fields.next());
     let active_pane_start_command = optional_string(fields.next());
+    let attached_count = optional_usize(fields.next());
+    let attached_list = optional_string(fields.next());
+    let client_attached = interactive_client_attached(attached_count, attached_list.as_deref());
 
     Some(TmuxSessionRow {
         name,
@@ -450,6 +454,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
         active_pane_pid,
         active_pane_current_path,
         active_pane_start_command,
+        client_attached,
     })
 }
 
@@ -465,6 +470,29 @@ fn optional_string(value: Option<&str>) -> Option<String> {
 
 fn optional_epoch(value: Option<&str>) -> Option<i64> {
     optional_string(value)?.parse().ok()
+}
+
+fn optional_usize(value: Option<&str>) -> Option<usize> {
+    optional_string(value)?.parse().ok()
+}
+
+fn interactive_client_attached(
+    attached_count: Option<usize>,
+    attached_list: Option<&str>,
+) -> Option<bool> {
+    if let Some(attached_list) = attached_list {
+        return Some(
+            attached_list
+                .split(',')
+                .map(str::trim)
+                .any(looks_like_interactive_client),
+        );
+    }
+    attached_count.map(|count| count > 0)
+}
+
+fn looks_like_interactive_client(client_name: &str) -> bool {
+    client_name.starts_with('/')
 }
 
 #[derive(Clone, Debug)]
@@ -538,6 +566,7 @@ impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 active_pane_pid: row.active_pane_pid,
                 active_pane_current_path: row.active_pane_current_path.clone(),
                 active_pane_start_command: row.active_pane_start_command.clone(),
+                client_attached: row.client_attached,
                 activity_epoch: row.activity_epoch,
                 created_epoch: row.created_epoch,
             }));
@@ -650,6 +679,7 @@ mod tests {
                 active_pane_pid: None,
                 active_pane_current_path: None,
                 active_pane_start_command: None,
+                client_attached: None,
             }]
         );
     }
@@ -668,6 +698,31 @@ mod tests {
             rows[0].active_pane_start_command.as_deref(),
             Some("claude --resume abc")
         );
+    }
+
+    #[test]
+    fn parser_extracts_session_attached_flag() {
+        let rows = parse_list_sessions("alpha\t/work\t1700000500\t1700000000\t\t\t\t\t1\n");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].client_attached, Some(true));
+
+        let rows = parse_list_sessions("beta\t/work\t1700000500\t1700000000\t\t\t\t\t0\n");
+        assert_eq!(rows[0].client_attached, Some(false));
+    }
+
+    #[test]
+    fn parser_treats_attached_list_as_interactive_tty_signal() {
+        let rows = parse_list_sessions(
+            "alpha\t/work\t1700000500\t1700000000\t\t\t\t\t2\tclient-123,/dev/pts/1\n",
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].client_attached, Some(true));
+
+        let rows =
+            parse_list_sessions("beta\t/work\t1700000500\t1700000000\t\t\t\t\t1\tclient-123\n");
+        assert_eq!(rows[0].client_attached, Some(false));
     }
 
     #[test]

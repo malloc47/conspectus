@@ -202,6 +202,7 @@ fn fixture_ambiguous_mux_candidates() -> GraphSnapshot {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));

@@ -666,6 +666,7 @@ fn merge_view_filter_entries(
         harness: (!harnesses.is_empty()).then(|| HarnessFilter::from_values(harnesses)),
         max_age: max_age_secs.map(std::time::Duration::from_secs),
         mux_state: (!mux_states.is_empty()).then(|| MuxStateFilter::from_values(mux_states)),
+        ..RowFilter::default()
     }
 }
 

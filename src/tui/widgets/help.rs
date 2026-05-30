@@ -154,7 +154,16 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(&mut lines, "j / k / arrows", "Move selection down / up");
     bind(&mut lines, "PgDn / PgUp", "Page through the row tree");
     bind(&mut lines, "g / G", "First / last row");
-    bind(&mut lines, "Enter", "Expand / collapse a parent row");
+    bind(
+        &mut lines,
+        "Enter",
+        "Expand row; with right focus, expand linked details",
+    );
+    bind(
+        &mut lines,
+        "e",
+        "Expand / collapse linked entities in the detail pane",
+    );
     bind(
         &mut lines,
         "Tab",

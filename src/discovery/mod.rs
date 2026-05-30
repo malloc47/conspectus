@@ -341,6 +341,9 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
                 if let Some(cwd) = &mux.cwd {
                     roots.insert(PathBuf::from(cwd));
                 }
+                if let Some(cwd) = &mux.active_pane_current_path {
+                    roots.insert(PathBuf::from(cwd));
+                }
             }
             _ => {}
         }
@@ -451,6 +454,7 @@ mod tests {
                     active_pane_pid: None,
                     active_pane_current_path: None,
                     active_pane_start_command: None,
+                    client_attached: None,
                     activity_epoch: None,
                     created_epoch: None,
                 })],
@@ -478,6 +482,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         });

@@ -175,7 +175,7 @@ fn read_mux_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::R
     let mut stmt = conn.prepare(
         "SELECT node_id, native_id, backend, cwd, active_pane_command, active_pane_pid, \
                 active_pane_current_path, active_pane_start_command, \
-                activity_epoch, created_epoch \
+                client_attached, activity_epoch, created_epoch \
          FROM node_mux_sessions ORDER BY node_id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -193,8 +193,9 @@ fn read_mux_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::R
             active_pane_pid: row.get(5)?,
             active_pane_current_path: row.get(6)?,
             active_pane_start_command: row.get(7)?,
-            activity_epoch: row.get(8)?,
-            created_epoch: row.get(9)?,
+            client_attached: row.get::<_, Option<i64>>(8)?.map(|value| value != 0),
+            activity_epoch: row.get(9)?,
+            created_epoch: row.get(10)?,
         })
     })?;
     for mux in rows {
@@ -683,6 +684,7 @@ mod tests {
             active_pane_pid: Some(12345),
             active_pane_current_path: Some("/cwd/sub".into()),
             active_pane_start_command: Some("zsh -l".into()),
+            client_attached: None,
             activity_epoch: Some(1_700_000_001),
             created_epoch: Some(1_699_000_000),
         }));

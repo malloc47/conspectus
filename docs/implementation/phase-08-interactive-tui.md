@@ -160,13 +160,15 @@ conspectus tui [--scan-root PATH]... [--view sessions|mux|union|prs|forks]
   freshest contained agent session's activity. Configurable via
   `[tui].default_sort`; the flag overrides.
 - `--sessions-grouping` controls the top-level grouping in the
-  sessions tree. Default **`graph`** — derive group hierarchy from
-  the existing graph relationships (workspace →
-  `WorkspaceContainsRepo` → repo → `BelongsToRepo` → checkout →
-  cwd-matched agent session). Other values: `repo` (collapse
-  workspace, group by repo common-dir), `checkout` (group by
-  checkout root, no workspace/repo nesting), `scan-root` (group by
-  the configured discovery scan root). Configurable via
+  sessions tree. Default **`repo`** — group by repo common-dir,
+  adding checkout rows only when a repo has multiple checkouts in
+  the visible set. `graph` derives a richer hierarchy from existing
+  graph relationships (workspace → `WorkspaceContainsRepo` → repo →
+  `BelongsToRepo` → checkout → cwd-matched agent session) and nests
+  resolved `parent_session` lineage under the parent session. Other
+  values: `checkout` (group by checkout root, no workspace/repo
+  nesting), `scan-root` (group by the configured discovery scan
+  root). Configurable via
   `[tui].sessions_grouping`; the flag overrides. Orphan sessions
   (no resolved repo/checkout) fall into a single "Ungrouped" bucket
   regardless of mode.
@@ -213,8 +215,9 @@ and the responsive same-line preview behavior.
 
 The left panel renders one of the registered row-tree views:
 
-- `sessions` (**v1 default**): project (repo common-dir) → checkout →
-  agent session. Fork lineage nests under the parent session when known.
+- `sessions` (**v1 default**): repo common-dir → checkout → agent
+  session. In `graph` grouping, known session lineage nests under the
+  parent session.
 - `mux`: mux session → attached agent sessions, with pane/window labels
   when the mux adapter records them.
 - `union`: agent + mux rows side by side, equivalent to
@@ -514,9 +517,10 @@ contract.
 ### From the P8-001a walkthrough
 
 - **"Project" grouping** in the sessions tree: configurable from
-  day one. Default `graph` (derives the tree from
-  `WorkspaceContainsRepo` / `BelongsToRepo` / cwd-match
-  relationships); other values `repo`, `checkout`, `scan-root`.
+  day one. Default `repo` keeps the session list location-first.
+  `graph` derives the tree from `WorkspaceContainsRepo` /
+  `BelongsToRepo` / cwd-match relationships and follows resolved
+  session lineage; other values `checkout`, `scan-root`.
   Configurable via `[tui].sessions_grouping` and the
   `--sessions-grouping` flag. Orphan sessions always land in a
   single "Ungrouped" bucket.

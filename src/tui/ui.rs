@@ -41,7 +41,8 @@ use crate::tui::app::{App, Focus, GraphDb};
 use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
-    AgentSessionRow, MuxCandidateRow, MuxIndicator, RowId, RowKind, format_recency, recency_bucket,
+    AgentSessionRow, MuxCandidateRow, MuxIndicator, MuxSessionRow, RowId, RowKind, format_recency,
+    recency_bucket,
 };
 
 /// Terminal width threshold below which the body switches from a
@@ -361,13 +362,17 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
         frame.render_widget(widget, area);
         return;
     }
+
+    let stale = app.refresh_failure().is_some();
+
     let hints = contextual_status_text(app);
     let scope = match app.focus() {
         Focus::Left => "[left]",
         Focus::Right => "[right]",
     };
     let settings = render_view_state_chips(app);
-    let line = Line::from(vec![
+
+    let mut spans = vec![
         Span::styled(
             format!("{scope} "),
             Style::default().add_modifier(theme.placeholder),
@@ -377,9 +382,56 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
             format!(" · {hints}"),
             Style::default().add_modifier(theme.placeholder),
         ),
-    ]);
-    let widget = Paragraph::new(line);
+    ];
+
+    if stale {
+        spans.push(Span::styled(
+            "  stale",
+            Style::default()
+                .fg(theme.warning)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    push_provider_chips(app, theme, &mut spans);
+
+    let widget = Paragraph::new(Line::from(spans));
     frame.render_widget(widget, area);
+}
+
+/// Append right-side provider status chips to `spans` from
+/// `App::provider_status`.
+fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
+    let status = app.provider_status();
+    let mut leading_space = false;
+
+    let mut push_chip = |label: &str, style: Style| {
+        if !leading_space {
+            spans.push(Span::raw("  "));
+            leading_space = true;
+        }
+        spans.push(Span::styled(label.to_string(), style));
+    };
+
+    if status.tmux_disabled {
+        push_chip("tmux:off", Style::default().add_modifier(theme.placeholder));
+    } else if let Some(false) = status.tmux_available {
+        let reason = status.tmux_reason.as_deref().unwrap_or("unavailable");
+        push_chip(
+            &format!("tmux:{reason}"),
+            Style::default().fg(theme.warning),
+        );
+    }
+
+    if status.forge_disabled {
+        push_chip(
+            "forge:off",
+            Style::default().add_modifier(theme.placeholder),
+        );
+    } else if let Some(false) = status.forge_available {
+        let reason = status.forge_reason.as_deref().unwrap_or("error");
+        push_chip(&format!("gh:{reason}"), Style::default().fg(theme.warning));
+    }
 }
 
 /// Render the active view state in a compact, always-visible form
@@ -414,7 +466,7 @@ fn sort_chip_label(sort: crate::tui::Sort) -> &'static str {
 /// stable across runs (harness → max-age → mux-state) so the
 /// operator builds muscle memory for where each predicate lives.
 fn render_filter_chips(filter: &crate::filter::RowFilter) -> String {
-    if filter.is_empty() {
+    if !filter.has_narrowing_predicates() {
         return String::new();
     }
     let mut chips: Vec<String> = Vec::new();
@@ -769,6 +821,68 @@ fn render_left_row(
         RowKind::AgentSessionMuxCandidate(candidate) => {
             spans.extend(render_candidate_spans(candidate, theme))
         }
+        RowKind::MuxSession(mux) => {
+            let remaining = width.saturating_sub(spans_width(&spans));
+            spans.extend(render_mux_session_spans(mux, theme, now, remaining));
+        }
+        RowKind::Pr(pr) => {
+            spans.push(Span::styled(
+                pr.repo_display.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            if let Some(state) = pr.state.as_deref() {
+                let style = match state {
+                    "open" => Style::default().fg(theme.mux_attached),
+                    "closed" | "merged" => Style::default().add_modifier(theme.placeholder),
+                    _ => Style::default().fg(theme.secondary_text),
+                };
+                spans.push(Span::styled(format!("  {state}"), style));
+            }
+            if pr.is_draft {
+                spans.push(Span::styled(
+                    "  draft",
+                    Style::default().add_modifier(theme.placeholder),
+                ));
+            }
+            if let Some(branch) = &pr.branch_name {
+                spans.push(Span::styled(
+                    format!("  {branch}"),
+                    Style::default().add_modifier(theme.placeholder),
+                ));
+            }
+            if let Some(updated) = &pr.updated_recency {
+                spans.push(Span::styled(
+                    format!("  {updated}"),
+                    Style::default().fg(theme.secondary_text),
+                ));
+            }
+            spans.push(Span::styled(
+                format!("  ({})", pr.attached_count),
+                Style::default().add_modifier(theme.placeholder),
+            ));
+        }
+        RowKind::Fork(fork) => {
+            spans.push(Span::styled(
+                fork.fork_label.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            if let Some(parent) = &fork.parent_label {
+                spans.push(Span::styled(
+                    format!("  parent:{parent}"),
+                    Style::default().fg(theme.secondary_text),
+                ));
+            }
+            if let Some(scope) = &fork.scope {
+                spans.push(Span::styled(
+                    format!("  {scope}"),
+                    Style::default().add_modifier(theme.placeholder),
+                ));
+            }
+            spans.push(Span::styled(
+                format!("  ({})", fork.child_count),
+                Style::default().add_modifier(theme.placeholder),
+            ));
+        }
     }
 
     let mut line = Line::from(spans);
@@ -778,7 +892,11 @@ fn render_left_row(
         } else {
             theme.selection_inactive
         };
-        line = line.style(Style::default().add_modifier(modifiers));
+        let selection_style = Style::default().add_modifier(modifiers);
+        line = line.style(selection_style);
+        for span in &mut line.spans {
+            span.style = span.style.patch(selection_style);
+        }
     }
     line
 }
@@ -831,6 +949,146 @@ fn append_session_preview(
     theme: &Theme,
 ) {
     let Some(preview) = session.preview.as_deref().filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let used = spans_width(spans);
+    if width <= used + 8 {
+        return;
+    }
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        truncate_to_width(preview, width - used - 2),
+        Style::default()
+            .fg(theme.secondary_text)
+            .add_modifier(Modifier::ITALIC),
+    ));
+}
+
+fn render_mux_session_spans(
+    mux: &MuxSessionRow,
+    theme: &Theme,
+    now: i64,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    if width == 0 {
+        return spans;
+    }
+
+    // Column order mirrors the agent-session row so muxed and
+    // session rows scan as a single visual rhythm:
+    //   name · harness chip · recency · attached glyph · preview
+    // The mux name drops the backend prefix (e.g. `tmux:`) since
+    // every row in the view is the same backend and the prefix only
+    // steals horizontal space.
+    let label = compact_mux_native_id(&mux.native_id);
+    let label_width = mux_label_column_width(width);
+    spans.push(Span::styled(
+        pad_to_width(truncate_to_width_strict(&label, label_width), label_width),
+        Style::default().fg(theme.link_id),
+    ));
+
+    if width <= spans_width(&spans) + 4 {
+        return fit_spans_to_width(spans, width);
+    }
+
+    spans.push(Span::raw("  "));
+    append_mux_agent_labels(&mut spans, mux, theme, width);
+
+    if width <= spans_width(&spans) + 4 {
+        return fit_spans_to_width(spans, width);
+    }
+
+    let recency = mux.recency.clone().unwrap_or_else(|| "—".to_string());
+    let recency_style = recency_bucket(Some(now), mux.activity_epoch)
+        .map(|bucket| bucket.style(theme))
+        .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        format!("{:>4}", truncate_to_width_strict(&recency, 4)),
+        recency_style,
+    ));
+
+    spans.push(Span::raw("  "));
+    match mux.client_attached {
+        Some(true) => {
+            spans.push(Span::styled("◉", Style::default().fg(theme.mux_attached)));
+        }
+        Some(false) => {
+            spans.push(Span::styled(
+                "◯",
+                Style::default().add_modifier(theme.mux_unmuxed),
+            ));
+        }
+        None => {
+            spans.push(Span::styled(
+                "?",
+                Style::default().add_modifier(theme.placeholder),
+            ));
+        }
+    }
+    if mux.ambiguous_count > 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("◐", Style::default().fg(theme.mux_ambiguous)));
+    }
+
+    append_mux_single_session_preview(&mut spans, mux, theme, width);
+    fit_spans_to_width(spans, width)
+}
+
+fn append_mux_agent_labels(
+    spans: &mut Vec<Span<'static>>,
+    mux: &MuxSessionRow,
+    theme: &Theme,
+    width: usize,
+) {
+    use crate::tui::widgets::badge::harness_badge;
+
+    if mux.agent_labels.is_empty() {
+        spans.push(Span::styled(
+            " no agent ".to_string(),
+            Style::default().add_modifier(theme.placeholder),
+        ));
+        return;
+    }
+
+    let max_labels = if width >= 76 { 2 } else { 1 };
+    for (index, label) in mux.agent_labels.iter().take(max_labels).enumerate() {
+        if index > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(harness_badge(label, theme));
+    }
+
+    let hidden_labels = mux.agent_labels.len().saturating_sub(max_labels);
+    if hidden_labels > 0 {
+        spans.push(Span::styled(
+            format!(" +{hidden_labels}"),
+            Style::default().fg(theme.secondary_text),
+        ));
+    }
+}
+
+fn mux_label_column_width(width: usize) -> usize {
+    match width {
+        0..=38 => width.saturating_sub(14).clamp(10, 18),
+        39..=72 => 20,
+        73..=104 => 24,
+        _ => 30,
+    }
+}
+
+fn append_mux_single_session_preview(
+    spans: &mut Vec<Span<'static>>,
+    mux: &MuxSessionRow,
+    theme: &Theme,
+    width: usize,
+) {
+    let Some(preview) = mux
+        .single_session_preview
+        .as_deref()
+        .filter(|p| !p.is_empty())
+    else {
         return;
     };
     let used = spans_width(spans);
@@ -917,6 +1175,61 @@ fn truncate_to_width(text: &str, width: usize) -> String {
     out
 }
 
+fn truncate_to_width_strict(text: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width == 1 {
+        return "…".to_string();
+    }
+    let mut out = String::with_capacity(width);
+    let mut used = 0;
+    for ch in text.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > width - 1 {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    out.push('…');
+    out
+}
+
+fn pad_to_width(mut text: String, width: usize) -> String {
+    let used = UnicodeWidthStr::width(text.as_str());
+    if used < width {
+        text.push_str(&" ".repeat(width - used));
+    }
+    text
+}
+
+fn fit_spans_to_width(mut spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+    let mut used = 0;
+    let mut out = Vec::with_capacity(spans.len());
+    for span in spans.drain(..) {
+        let span_width = UnicodeWidthStr::width(span.content.as_ref());
+        if used + span_width <= width {
+            used += span_width;
+            out.push(span);
+            continue;
+        }
+        let remaining = width.saturating_sub(used);
+        if remaining > 0 {
+            let style = span.style;
+            out.push(Span::styled(
+                truncate_to_width_strict(span.content.as_ref(), remaining),
+                style,
+            ));
+        }
+        break;
+    }
+    out
+}
+
 fn compact_path_label(path: &str) -> String {
     if path == "Ungrouped" {
         return path.to_string();
@@ -947,23 +1260,28 @@ fn compact_path_secondary(path: &str) -> String {
 
 fn compact_mux_label(label: &str) -> String {
     let Some((backend, native)) = label.split_once(':') else {
-        return label.to_string();
+        return compact_mux_native_id(label);
     };
-    let short_native = if native.chars().count() > 36 {
-        let head: String = native.chars().take(28).collect();
-        let tail: String = native
-            .chars()
-            .rev()
-            .take(6)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        format!("{head}…{tail}")
-    } else {
-        native.to_string()
-    };
-    format!("{backend}:{short_native}")
+    format!("{backend}:{}", compact_mux_native_id(native))
+}
+
+/// Head…tail truncation for long mux native ids. Long pane/session
+/// ids would otherwise dominate the row; the head/tail shape keeps
+/// both ends recognizable at a glance.
+fn compact_mux_native_id(native: &str) -> String {
+    if native.chars().count() <= 36 {
+        return native.to_string();
+    }
+    let head: String = native.chars().take(28).collect();
+    let tail: String = native
+        .chars()
+        .rev()
+        .take(6)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    format!("{head}…{tail}")
 }
 
 // -----------------------------------------------------------------------------
@@ -991,13 +1309,26 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
             // Give the header exactly the height its fields need
             // (title + blank + one row per HeaderField), clamped
             // so the preview zone keeps a minimum of two rows.
-            Constraint::Length(header_zone_height(detail, mux_runtime.len(), inner.height)),
+            Constraint::Length(header_zone_height(
+                detail,
+                app.detail_links_expanded(),
+                &mux_runtime,
+                inner.height,
+                inner.width,
+            )),
             Constraint::Length(1),
             Constraint::Min(0),
         ])
         .split(inner);
 
-    draw_detail_header(detail, &mux_runtime, frame, split[0], app.theme());
+    draw_detail_header(
+        detail,
+        app.detail_links_expanded(),
+        &mux_runtime,
+        frame,
+        split[0],
+        app.theme(),
+    );
     frame.render_widget(
         Paragraph::new(preview_divider_line(
             app,
@@ -1017,50 +1348,183 @@ fn empty_right_panel_text(app: &App) -> &'static str {
     }
 }
 
-/// Natural height of the right-panel header (title + blank + one
-/// row per field), clamped so the preview zone keeps room for at
+/// Natural height of the right-panel header (one row per field plus
+/// section dividers), clamped so the preview zone keeps room for at
 /// least the separator and two body rows.
-fn header_zone_height(detail: &NodeDetail, extra_mux_rows: usize, panel_height: u16) -> u16 {
-    // Per Phase 6 / ADR 0033: sectioned layout adds one labeled
-    // divider before each section after the first. Budget grows
-    // accordingly so the preview pane below doesn't get squeezed.
-    // `extra_mux_rows` covers runtime-derived rows the detail
-    // view-model can't know about (currently the `captured` row
-    // injected from the per-mux preview cache).
-    let sections = detail.sections();
-    let field_count: usize = sections.iter().map(|s| s.fields.len()).sum();
-    let divider_count = sections.len().saturating_sub(1);
-    let natural = (field_count + divider_count + extra_mux_rows + 2) as u16;
+///
+/// The Paragraph widget wraps long field values onto extra terminal
+/// rows; the budget has to count those wrapped rows or sections
+/// below the wrap get clipped. Pre-`H-RIGHT-WRAP` this function
+/// assumed one terminal row per field, which produced a visible
+/// "Session section vanishes" bug on muxes whose `native_id` was
+/// long enough to wrap the `name` row.
+fn header_zone_height(
+    detail: &NodeDetail,
+    expand_linked: bool,
+    extra_mux_rows: &[HeaderField],
+    panel_height: u16,
+    panel_width: u16,
+) -> u16 {
+    let natural = count_detail_lines(
+        detail.kind_label,
+        &detail.header_fields,
+        extra_mux_rows,
+        expand_linked,
+        panel_width,
+        0,
+    ) as u16;
     let max = panel_height.saturating_sub(3);
     natural.min(max).max(3)
 }
 
+/// Mirrors [`emit_detail_section_lines`] so the layout budget tracks
+/// exactly what the renderer will emit — section dividers, wrap-aware
+/// field rows, runtime extras, and (when expanded) the recursive
+/// sub-detail with its own dividers and indent. Keeping the two
+/// functions structurally identical is how the wrap-aware fix avoids
+/// re-introducing the "Session row clipped" class of bug.
+fn count_detail_lines(
+    kind_label: &'static str,
+    fields: &[HeaderField],
+    extra_mux_rows: &[HeaderField],
+    expand_linked: bool,
+    panel_width: u16,
+    indent: usize,
+) -> usize {
+    let sections = crate::tui::detail::group_fields_into_sections(kind_label, fields);
+    let mut total = 0usize;
+    let mut first = true;
+    for section in &sections {
+        if !first {
+            total += 1;
+        }
+        first = false;
+        for field in &section.fields {
+            total += header_field_line_count(field, panel_width, indent);
+            if expand_linked
+                && let Some(sub_kind) = field.expanded_kind_label
+                && !field.expanded_fields.is_empty()
+            {
+                total += count_detail_lines(
+                    sub_kind,
+                    &field.expanded_fields,
+                    &[],
+                    false,
+                    panel_width,
+                    indent + 2,
+                );
+            }
+        }
+        if section.kind == SectionKind::Mux {
+            for field in extra_mux_rows {
+                total += header_field_line_count(field, panel_width, indent);
+            }
+        }
+    }
+    total
+}
+
+/// Approximate the number of terminal rows a header field rendered
+/// through [`render_header_field`] will occupy under `Paragraph::wrap`.
+/// The renderer produces a 10-cell label column; the inline-expansion
+/// path shifts that whole block right by `indent` cells so the
+/// effective row width is `panel_width - indent`.
+///
+/// `Paragraph::wrap` word-wraps at whitespace, and the label's
+/// right-padding is whitespace. So when the value can't share the
+/// label row, the wrap pushes the value to its own line, costing one
+/// extra terminal row beyond the simple `ceil((label + value) /
+/// effective_width)` formula. The original wrap-aware fix used the
+/// simple formula and still under-counted by one in the line-wrap
+/// case, which clipped the Session section's first row by one row
+/// off the bottom of the header zone.
+fn header_field_line_count(field: &HeaderField, panel_width: u16, indent: usize) -> usize {
+    const LABEL_WIDTH: usize = 10;
+    let effective_width = (panel_width as usize).saturating_sub(indent);
+    if effective_width == 0 {
+        return 1;
+    }
+    let value_width = UnicodeWidthStr::width(field.value.as_str());
+    let annotation_width = field
+        .annotation
+        .map(|annotation| 1 + UnicodeWidthStr::width(annotation))
+        .unwrap_or(0);
+    let total = LABEL_WIDTH + value_width + annotation_width;
+    if total <= effective_width {
+        return 1;
+    }
+    // Value doesn't share the label row: budget one line for the
+    // label plus however many wrap lines the value + annotation need
+    // on their own.
+    let value_lines = (value_width + annotation_width)
+        .div_ceil(effective_width)
+        .max(1);
+    1 + value_lines
+}
+
 fn draw_detail_header(
     detail: &NodeDetail,
+    expand_linked: bool,
     extra_mux_rows: &[HeaderField],
     frame: &mut Frame<'_>,
     area: Rect,
     theme: &Theme,
 ) {
+    let lines = emit_detail_section_lines(
+        detail.kind_label,
+        &detail.header_fields,
+        extra_mux_rows,
+        expand_linked,
+        area.width as usize,
+        0,
+        theme,
+    );
+    let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(widget, area);
+}
+
+/// Render a flat header-field list as the section-divided line
+/// stream the right-panel header expects. Shared between the
+/// top-level [`draw_detail_header`] entry point and the inline
+/// expansion path (`expand_linked`) so a linked entity's expanded
+/// view renders byte-for-byte like its standalone detail — same
+/// label widths, same colorization, same section dividers — only
+/// shifted right by `indent` cells per `H-RIGHT-EXPAND-UNIFY`.
+fn emit_detail_section_lines(
+    kind_label: &'static str,
+    fields: &[HeaderField],
+    extra_mux_rows: &[HeaderField],
+    expand_linked: bool,
+    panel_width: usize,
+    indent: usize,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let sections = crate::tui::detail::group_fields_into_sections(kind_label, fields);
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(vec![Span::styled(
-        detail.title_line.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-    )]));
-    lines.push(Line::raw(""));
-    let sections = detail.sections();
     let mut first = true;
+    let divider_width = panel_width.saturating_sub(indent);
     for section in &sections {
         if !first {
-            lines.push(section_divider_line(
-                section.kind,
-                area.width as usize,
-                theme,
-            ));
+            lines.push(section_divider_line(section.kind, divider_width, theme));
         }
         first = false;
         for field in &section.fields {
             lines.push(render_header_field(field, section.kind, theme));
+            if expand_linked
+                && let Some(sub_kind) = field.expanded_kind_label
+                && !field.expanded_fields.is_empty()
+            {
+                let sub_lines = emit_detail_section_lines(
+                    sub_kind,
+                    &field.expanded_fields,
+                    &[],
+                    false,
+                    panel_width,
+                    indent + 2,
+                    theme,
+                );
+                lines.extend(sub_lines);
+            }
         }
         // The Mux section absorbs runtime-only rows derived from
         // the per-mux preview cache (capture freshness). They sit
@@ -1072,8 +1536,13 @@ fn draw_detail_header(
             }
         }
     }
-    let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
+    if indent > 0 {
+        let indent_span = Span::raw(" ".repeat(indent));
+        for line in &mut lines {
+            line.spans.insert(0, indent_span.clone());
+        }
+    }
+    lines
 }
 
 /// Build runtime-only rows for the Mux section: capture freshness
@@ -1097,6 +1566,9 @@ fn mux_runtime_rows(app: &App) -> Vec<HeaderField> {
         value: format!("{elapsed} ago"),
         placeholder: false,
         annotation: None,
+        target: None,
+        expanded_kind_label: None,
+        expanded_fields: Vec::new(),
     }]
 }
 
@@ -1195,9 +1667,11 @@ fn field_value_style(section: SectionKind, field: &HeaderField, theme: &Theme) -
         return Style::default().add_modifier(theme.placeholder);
     }
     match (section, field.label) {
+        (SectionKind::Session, "id") => Style::default().fg(theme.link_id),
         (SectionKind::Session, "cwd") => Style::default().fg(theme.cwd_mark),
         (SectionKind::Session, "title") => Style::default().add_modifier(Modifier::BOLD),
-        (SectionKind::Mux, "native_id") => Style::default().fg(theme.link_id),
+        (SectionKind::Mux, "name") => Style::default().fg(theme.link_id),
+        (SectionKind::Mux, "mux") => Style::default().fg(theme.link_id),
         (SectionKind::Lineage, "lineage") => Style::default().fg(theme.link_id),
         (SectionKind::Pr, "pr") => pr_value_style(&field.value, theme),
         _ => Style::default(),
@@ -1266,6 +1740,7 @@ fn preview_text_for_selection(app: &App, height: usize) -> Text<'static> {
         RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, height),
         _ => match selection {
             RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
+            RowId::MuxSession(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
             _ => {
                 if live_preview {
                     Text::raw("no preview for this row")
@@ -1341,7 +1816,7 @@ fn contextual_status_text(app: &App) -> String {
         // When the right pane has focus, j/k are remapped to
         // preview scroll (T8-011 behavioral) — surface that so
         // operators know `Tab` changed what those keys do.
-        Focus::Right => "j/k scroll preview",
+        Focus::Right => "j/k scroll preview · Enter expand links",
     };
     let action_hint = match resolve_attach_target(app) {
         Ok(target) => {
@@ -1355,7 +1830,7 @@ fn contextual_status_text(app: &App) -> String {
         }
         Err(reason) => attach_disabled_reason(&reason),
     };
-    format!("{action_hint} · {focus_hint} · Tab focus · r refresh · q quit")
+    format!("{action_hint} · e links · {focus_hint} · Tab focus · r refresh · q quit")
 }
 
 fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
@@ -1525,6 +2000,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -1787,6 +2263,364 @@ mod tests {
     }
 
     #[test]
+    fn detail_pane_expands_linked_mux_details() {
+        let mut app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let collapsed = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            collapsed.contains("mux       tmux:editor"),
+            "collapsed linked mux row missing: {collapsed}"
+        );
+        assert!(
+            !collapsed.contains("backend   tmux"),
+            "linked mux details should start collapsed: {collapsed}"
+        );
+
+        app.update(Msg::ToggleLinkedDetails);
+        let expanded = buffer_to_string(&render_to_buffer(&app, area));
+        // Expanded rows mirror the top-level format (10-char bold
+        // label, natural-section colorization, dividers between
+        // sections) — only shifted right by a 2-cell indent.
+        assert!(
+            expanded.contains("  name      editor"),
+            "expanded mux name should mirror the standalone detail's \
+             10-char label, indented: {expanded}"
+        );
+        assert!(
+            expanded.contains("  backend   tmux"),
+            "expanded mux backend should mirror the standalone detail's \
+             10-char label, indented: {expanded}"
+        );
+        assert!(
+            expanded.contains("Session"),
+            "expanded mux should carry an indented Session divider \
+             above its attached-session rows: {expanded}"
+        );
+        assert!(
+            expanded.contains("  session   codex:abc"),
+            "expanded mux Session row should match the standalone \
+             detail's `session  <id>` line: {expanded}"
+        );
+    }
+
+    #[test]
+    fn header_field_line_count_grows_with_value_wrap() {
+        // Reproduces the "Session section vanishes" bug: the right
+        // pane's `name` field for a mux with a very long native_id
+        // wraps onto multiple terminal rows. Pre-fix the budget
+        // counted it as a single row and clipped the Session section
+        // below.
+        let short = HeaderField {
+            label: "name",
+            value: "editor".to_string(),
+            placeholder: false,
+            annotation: None,
+            target: None,
+            expanded_kind_label: None,
+            expanded_fields: Vec::new(),
+        };
+        let long = HeaderField {
+            label: "name",
+            value: "a".repeat(120),
+            placeholder: false,
+            annotation: None,
+            target: None,
+            expanded_kind_label: None,
+            expanded_fields: Vec::new(),
+        };
+        // 40-cell-wide panel: short value fits on one row, long
+        // value wraps onto multiple rows once the 10-cell label
+        // column is added.
+        assert_eq!(header_field_line_count(&short, 40, 0), 1);
+        assert!(header_field_line_count(&long, 40, 0) >= 3);
+        // The panel-width=0 edge case shouldn't divide by zero or
+        // claim zero lines — fall back to a single row.
+        assert_eq!(header_field_line_count(&long, 0, 0), 1);
+        // An indent shrinks the effective width: a value that fits at
+        // indent=0 should report more lines once it's nested.
+        let just_fits = HeaderField {
+            label: "name",
+            value: "a".repeat(28),
+            placeholder: false,
+            annotation: None,
+            target: None,
+            expanded_kind_label: None,
+            expanded_fields: Vec::new(),
+        };
+        assert_eq!(header_field_line_count(&just_fits, 40, 0), 1);
+        assert!(header_field_line_count(&just_fits, 40, 4) >= 2);
+    }
+
+    #[test]
+    fn header_zone_height_accounts_for_wrapped_field_values() {
+        use crate::tui::detail::SectionKind;
+
+        let mux_field = |value: &str| HeaderField {
+            label: "name",
+            value: value.to_string(),
+            placeholder: false,
+            annotation: None,
+            target: None,
+            expanded_kind_label: None,
+            expanded_fields: Vec::new(),
+        };
+        let session_field = HeaderField {
+            label: "session",
+            value: "codex:abc".to_string(),
+            placeholder: false,
+            annotation: None,
+            target: Some(NodeId::AgentSession(AgentSessionId::new(
+                "codex", "/state", "abc",
+            ))),
+            expanded_kind_label: None,
+            expanded_fields: Vec::new(),
+        };
+
+        let with_value = |value: &str| NodeDetail {
+            kind_label: "mux_session",
+            title_line: "tmux:editor".to_string(),
+            short_id: "deadbeef".to_string(),
+            full_id: NodeId::MuxSession(MuxSessionId::new("editor")),
+            header_fields: vec![mux_field(value), session_field.clone()],
+            outgoing_links: Vec::new(),
+            incoming_links: Vec::new(),
+            resolved: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+
+        // Sanity: each detail has both a Mux and a Session section.
+        let detail = with_value("short");
+        let sections = detail.sections();
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].kind, SectionKind::Mux);
+        assert_eq!(sections[1].kind, SectionKind::Session);
+
+        let short_height = header_zone_height(&with_value("short"), false, &[], 40, 80);
+        let long_height = header_zone_height(&with_value(&"x".repeat(200)), false, &[], 40, 80);
+        assert!(
+            long_height > short_height,
+            "long field value should grow the budget so the Session \
+             section below stays visible (short={short_height}, long={long_height})"
+        );
+    }
+
+    #[test]
+    fn mux_detail_session_section_shows_session_id_when_collapsed() {
+        // Regression: with a long mux native_id, the right pane's
+        // Session section originally vanished entirely. After the
+        // wrap-aware budget fix the section divider returned, but
+        // the operator reported the linked-session row still didn't
+        // render its id until they pressed `e`. This test pins the
+        // expectation that the collapsed Session row always carries
+        // the `session  <harness>:<key>` line, even when the panel
+        // is tall enough to need no clamp.
+        use crate::model::{
+            Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+            Provenance, RelationKind,
+        };
+        let long_native = "agentdeck_-local-command-caveat-Caveat-The-messages-\
+                           below-were-generated-by-the-user-while-running-local-\
+                           comm-Branch-_573ac208";
+        let mux_graph_id = MuxSessionId::new(long_native);
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "abc"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: mux_graph_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: long_native.to_string(),
+            cwd: Some("/home/op/src/proj".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: Some(true),
+            activity_epoch: Some(1_700_000_000),
+            created_epoch: None,
+        }));
+        snapshot.candidate_links.push(GraphLink {
+            id: "session-mux".to_string(),
+            source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            target: LinkEndpoint::Node {
+                id: NodeId::MuxSession(mux_graph_id.clone()),
+            },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snapshot = resolve_snapshot(snapshot);
+
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            filter: RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Session,
+        });
+
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Mux;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.update(Msg::NavDown);
+
+        // Render a generously tall area so the height clamp never
+        // kicks in — the bug should reproduce purely from the
+        // section-content path, not from vertical clamping.
+        let area = Rect::new(0, 0, 120, 40);
+        let collapsed = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            collapsed.contains("Session"),
+            "Session section divider should render: {collapsed}"
+        );
+        assert!(
+            collapsed.contains("session   codex:abc"),
+            "collapsed Session section should show the session id row: \
+             {collapsed}"
+        );
+    }
+
+    #[test]
+    fn expanded_session_under_mux_matches_standalone_session_detail() {
+        // The expanded representation should reuse the same
+        // section-divided, 10-char-bold-label rendering as a
+        // standalone session detail — only indented. This pins the
+        // per-row labels and the Mux divider so the two surfaces
+        // can't drift visually.
+        use crate::model::{
+            Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+            Provenance, RelationKind,
+        };
+        let mux_graph_id = MuxSessionId::new("editor");
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "abc"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: mux_graph_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: "editor".to_string(),
+            cwd: Some("/home/op/src/proj".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: Some(true),
+            activity_epoch: Some(1_700_000_000),
+            created_epoch: None,
+        }));
+        snapshot.candidate_links.push(GraphLink {
+            id: "session-mux".to_string(),
+            source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            target: LinkEndpoint::Node {
+                id: NodeId::MuxSession(mux_graph_id.clone()),
+            },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snapshot = resolve_snapshot(snapshot);
+
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snapshot,
+            home: Some(std::path::Path::new("/home/op")),
+            filter: RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Session,
+        });
+
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Mux;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.update(Msg::NavDown);
+        app.update(Msg::ToggleLinkedDetails);
+
+        let area = Rect::new(0, 0, 120, 40);
+        let expanded = buffer_to_string(&render_to_buffer(&app, area));
+        // Same row format the standalone session detail would emit:
+        // 10-char bold label, value, with the linked session block
+        // indented by two cells under the mux's `session` row.
+        assert!(
+            expanded.contains("  id        abc"),
+            "expanded session id row should match the standalone \
+             session detail's row format (`id  <session_key>`): {expanded}"
+        );
+        assert!(
+            expanded.contains("  harness   codex"),
+            "expanded session harness row missing: {expanded}"
+        );
+        // Section dividers should appear inside the expansion just
+        // like they do in the standalone session detail. Indented +
+        // right-anchored Mux divider before the `mux` row.
+        let mux_divider_index = expanded
+            .find("Mux")
+            .expect("expanded session expansion should carry a Mux divider");
+        let mux_row_index = expanded
+            .find("  mux       tmux:editor")
+            .expect("expanded session should expose its linked mux as the same row a standalone session detail would");
+        assert!(
+            mux_divider_index < mux_row_index,
+            "Mux divider should precede the indented mux row: {expanded}"
+        );
+    }
+
+    #[test]
     fn empty_app_renders_loading_placeholder() {
         let app = App::new(RunConfig::defaults());
         let area = Rect::new(0, 0, 120, 24);
@@ -1869,6 +2703,73 @@ mod tests {
             .find(|span| span.content.trim() == "ingest-refactor")
             .expect("alias span present");
         assert!(alias.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn mux_session_row_mirrors_session_column_order() {
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+        let row = MuxSessionRow {
+            mux: MuxSessionId::new("tmux:editor"),
+            backend: "tmux".into(),
+            native_id: "editor".into(),
+            client_attached: Some(true),
+            cwd_display: Some("~/src/conspectus".into()),
+            attached_count: 1,
+            ambiguous_count: 0,
+            recency: Some("3s".into()),
+            activity_epoch: Some(now - 3),
+            agent_labels: vec!["codex".into()],
+            single_session_preview: Some("running cargo test".into()),
+            primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+        };
+
+        let spans = render_mux_session_spans(&row, &theme, now, 100);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+
+        assert!(
+            UnicodeWidthStr::width(rendered.as_str()) <= 100,
+            "mux row should fit the given width: {rendered:?}"
+        );
+        assert!(
+            rendered.contains('◉'),
+            "attached glyph should still render: {rendered}"
+        );
+        assert!(
+            rendered.contains("  3s"),
+            "recency should render right-aligned: {rendered}"
+        );
+        assert!(
+            rendered.contains(" codex "),
+            "agent harness badge should label the mux row: {rendered}"
+        );
+        assert!(
+            rendered.contains("running cargo test"),
+            "preview should flow into the trailing column: {rendered}"
+        );
+        assert!(
+            !rendered.contains("~/src/conspectus"),
+            "cwd column was dropped from the mux row: {rendered}"
+        );
+        assert!(
+            !rendered.contains("tmux:"),
+            "backend prefix should be stripped from the mux label: {rendered}"
+        );
+
+        // Column order: native id label · harness chip · recency ·
+        // attached glyph · preview. Probe by substring index since the
+        // chip widget adds internal padding.
+        let label_idx = rendered.find("editor").expect("label present");
+        let chip_idx = rendered.find("codex").expect("harness chip present");
+        let recency_idx = rendered.find("3s").expect("recency present");
+        let glyph_idx = rendered.find('◉').expect("glyph present");
+        let preview_idx = rendered
+            .find("running cargo test")
+            .expect("preview present");
+        assert!(label_idx < chip_idx, "label before chip: {rendered}");
+        assert!(chip_idx < recency_idx, "chip before recency: {rendered}");
+        assert!(recency_idx < glyph_idx, "recency before glyph: {rendered}");
+        assert!(glyph_idx < preview_idx, "glyph before preview: {rendered}");
     }
 
     #[test]
@@ -2049,6 +2950,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -2105,13 +3007,14 @@ mod tests {
     fn right_focus_keeps_selected_row_highlighted_and_changes_status_scope() {
         let mut app = seeded_app();
         app.update(Msg::NavDown);
+        app.update(Msg::NavDown);
         app.update(Msg::CycleFocus);
 
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
-            text.contains("j/k scroll preview"),
+            text.contains("j/k scroll"),
             "right focus status hint missing: {text}"
         );
         assert!(
@@ -2120,19 +3023,13 @@ mod tests {
         );
 
         // Selected row should still carry the inactive-selection
-        // indicator (BOLD without REVERSED) — i.e. some cell on the
-        // codex row has BOLD set and the row is *not* in the
-        // REVERSED active-selection state.
+        // indicator (BOLD without REVERSED) in the left pane while
+        // focus is on the right pane.
         let selected_carries_inactive_indicator = (0..buffer.area.height).any(|y| {
-            let line: String = (0..buffer.area.width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect();
-            if !line.contains("codex") {
-                return false;
-            }
-            let any_bold = (0..buffer.area.width)
+            let left_width = buffer.area.width / 2;
+            let any_bold = (0..left_width)
                 .any(|x| buffer[(x, y)].style().add_modifier.contains(Modifier::BOLD));
-            let any_reversed = (0..buffer.area.width).any(|x| {
+            let any_reversed = (0..left_width).any(|x| {
                 buffer[(x, y)]
                     .style()
                     .add_modifier

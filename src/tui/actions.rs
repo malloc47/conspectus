@@ -86,6 +86,10 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
             let _ = group;
             id.clone()
         }
+        (RowKind::MuxSession(mux), RowId::MuxSession(NodeId::MuxSession(id))) => {
+            let _ = mux;
+            id.clone()
+        }
         _ => return Err(AttachDisabled::UnsupportedRow),
     };
 
@@ -248,6 +252,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         })
@@ -471,5 +476,36 @@ mod tests {
             target.native_id, "scratch",
             "attach respects the candidate row override"
         );
+    }
+
+    #[test]
+    fn mux_view_mux_row_resolves_attach_target() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        let snapshot = resolve_snapshot(snapshot);
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize snapshot");
+        let tree = crate::tui::rows::mux::build_mux_tree_from_conn(
+            crate::tui::rows::mux::MuxBuildInputsFromConn {
+                conn: &conn,
+                home: None,
+                now: None,
+                filter: RowFilter::default(),
+                grouping: crate::tui::MuxGrouping::Session,
+            },
+        )
+        .expect("build mux tree");
+        let mut cfg = RunConfig::defaults();
+        cfg.default_view = View::Mux;
+        let mut app = App::new(cfg);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::new(conn),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        let target = resolve_attach_target(&app).expect("mux row attachable");
+        assert_eq!(target.backend, "tmux");
+        assert_eq!(target.native_id, "editor");
     }
 }

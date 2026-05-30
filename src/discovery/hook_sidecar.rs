@@ -391,6 +391,7 @@ mod tests {
             active_pane_pid: Some(123),
             active_pane_current_path: Some("/work".to_string()),
             active_pane_start_command: Some("claude --resume old".to_string()),
+            client_attached: None,
             activity_epoch: Some(1_700_000_000),
             created_epoch,
         })

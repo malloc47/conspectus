@@ -282,3 +282,38 @@ common case.
   fork lineage, has-PR, has-fork, declared-link state) are
   follow-ups under the existing `RowFilter` shape and do not
   amend this ADR.
+
+## Amendment (2026-05-29): Filter modal carries view-scoped ordering toggles
+
+The Controls overlay's "Filters" section is the operator's discoverable
+home for *anything that changes which rows they see and how those rows
+are arranged*. The natural follow-on to v1 filtering is small
+view-scoped re-ordering controls — e.g., "float muxed sessions to the
+top of the sessions view" or "float attached muxes to the top of the
+mux view". These are not narrowing predicates (they never drop a row)
+but they share every other property with filters: they are persistent,
+per-view, surfaced through the same modal, and reset by "Clear all".
+
+Rather than introducing a parallel `RowOrder` struct plumbed alongside
+`RowFilter`, this amendment widens `RowFilter` to carry these ordering
+bools too. To keep the predicate semantics intact, the struct grows two
+helpers:
+
+- `has_narrowing_predicates()` — true when any of the original
+  predicate dimensions is set. All row-builder gates that previously
+  short-circuited on "no filter" now use this so an ordering toggle on
+  its own never drops rows.
+- `is_empty()` — true when *neither* a predicate nor an ordering
+  toggle is set. The modal's "Clear all" uses this so toggling on a
+  bool gives the operator something to clear.
+
+Ordering toggles do not participate in `matches_session` evaluation.
+They are interpreted by the per-view row builder (sessions, mux, …)
+as a stable primary sort key applied before the existing within-group
+order, so each group's internal ordering is preserved.
+
+Future ordering toggles that fit this shape (single bool, view-scoped,
+applied as a stable primary sort key) land as additional `RowFilter`
+fields without amending the ADR again. Anything richer — multi-valued
+ordering controls, cross-view ordering state, or ordering toggles
+exposed via CLI flags — warrants its own amendment.

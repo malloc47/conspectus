@@ -25,7 +25,6 @@ use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
 
-#[derive(Clone)]
 pub struct GraphDb(Rc<rusqlite::Connection>);
 
 impl GraphDb {
@@ -35,11 +34,18 @@ impl GraphDb {
 
     #[cfg(test)]
     pub(crate) fn from_snapshot(snapshot: &crate::model::GraphSnapshot) -> Self {
-        Self::new(crate::query::materialize_snapshot(snapshot).expect("materialize TUI snapshot"))
+        let conn = crate::query::materialize_snapshot(snapshot).expect("materialize TUI snapshot");
+        Self(Rc::new(conn))
     }
 
     pub(crate) fn conn(&self) -> &rusqlite::Connection {
         &self.0
+    }
+}
+
+impl Clone for GraphDb {
+    fn clone(&self) -> Self {
+        Self(Rc::clone(&self.0))
     }
 }
 
@@ -52,6 +58,27 @@ impl fmt::Debug for GraphDb {
 impl PartialEq for GraphDb {
     fn eq(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// Per-provider availability status for the right-side status-bar
+/// chips (T8-003, Phase 8 error-state table).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProviderStatus {
+    pub tmux_disabled: bool,
+    pub tmux_available: Option<bool>,
+    pub tmux_reason: Option<String>,
+    pub forge_disabled: bool,
+    pub forge_available: Option<bool>,
+    pub forge_reason: Option<String>,
+}
+
+impl ProviderStatus {
+    pub fn has_any_chip(&self) -> bool {
+        self.tmux_disabled
+            || !self.tmux_available.unwrap_or(true)
+            || self.forge_disabled
+            || !self.forge_available.unwrap_or(true)
     }
 }
 
@@ -76,6 +103,9 @@ pub struct App {
     /// whenever selection or database changes; the renderer reads
     /// it directly.
     detail: Option<NodeDetail>,
+    /// Whether linked-entity summary rows in the right-panel detail
+    /// are expanded in place.
+    detail_links_expanded: bool,
     /// Which panel currently consumes navigation keys.
     focus: Focus,
     /// Vertical scroll offset for the right-panel preview, in
@@ -87,10 +117,16 @@ pub struct App {
     loaded_at_epoch: Option<i64>,
     /// Transient status-bar message, e.g. the "disabled because…"
     /// reason for a key that didn't apply to the current selection.
-    /// Cleared on the next selection / focus change. The richer
-    /// status-bar surface (provider chips, error states) lands
-    /// with `T8-003`.
+    /// Cleared on the next selection / focus change.
     status_message: Option<String>,
+    /// Provider toggles and availability surfaced as status-bar
+    /// chips per the Phase 8 error-state table. Populated by the
+    /// runtime from discovery diagnostics and env-var toggles.
+    provider_status: ProviderStatus,
+    /// Human-readable reason for the most recent refresh failure.
+    /// `None` when the last refresh succeeded (or on first launch).
+    /// The status bar renders this as a stale/error marker.
+    refresh_failure: Option<String>,
     /// Cache of recent tmux pane captures, keyed by mux id. The
     /// renderer reads this for the right-panel preview when the
     /// selection points at a muxed agent session or a mux node.
@@ -208,6 +244,9 @@ pub enum Msg {
     /// Left panel: expand/collapse the selected row. No-op on a
     /// leaf row.
     ToggleExpand,
+    /// Right panel: expand/collapse linked entity details under the
+    /// selected node's compact link rows.
+    ToggleLinkedDetails,
     /// Move keyboard focus to the next panel.
     CycleFocus,
     /// Right panel: scroll preview by `delta` rows. Positive
@@ -224,6 +263,14 @@ pub enum Msg {
         mux: MuxSessionId,
         content: PreviewContent,
     },
+    /// Update the provider availability status surfaced as chips
+    /// in the status bar. The runtime populates this from
+    /// discovery diagnostics and env-var toggles (T8-003).
+    SetProviderStatus(ProviderStatus),
+    /// Record that the most recent refresh failed. The previous
+    /// good snapshot remains in place; this message surfaces a
+    /// stale indicator in the header or status bar (T8-003).
+    SetRefreshFailure(String),
 }
 
 impl App {
@@ -244,10 +291,13 @@ impl App {
             expanded: BTreeSet::new(),
             selection: None,
             detail: None,
+            detail_links_expanded: false,
             focus: Focus::Left,
             preview_scroll: 0,
             loaded_at_epoch: None,
             status_message: None,
+            provider_status: ProviderStatus::default(),
+            refresh_failure: None,
             preview_store: PreviewStore::new(),
             left_scroll: Cell::new(0),
             rename_overlay: None,
@@ -465,9 +515,17 @@ impl App {
             }
             ControlsAction::SetGrouping(g) => {
                 self.grouping = g;
-                if let super::Grouping::Sessions(g) = g {
-                    self.config.sessions_grouping = g;
-                    self.force_recency_for_flat_sessions();
+                match g {
+                    super::Grouping::Sessions(g) => {
+                        self.config.sessions_grouping = g;
+                        self.force_recency_for_flat_sessions();
+                    }
+                    super::Grouping::Mux(g) => {
+                        self.config.mux_grouping = g;
+                    }
+                    super::Grouping::Union(_)
+                    | super::Grouping::Prs(_)
+                    | super::Grouping::Forks(_) => {}
                 }
             }
             ControlsAction::SetFilter(filter) => {
@@ -531,6 +589,10 @@ impl App {
         self.detail.as_ref()
     }
 
+    pub fn detail_links_expanded(&self) -> bool {
+        self.detail_links_expanded
+    }
+
     /// Which panel currently has focus.
     pub fn focus(&self) -> Focus {
         self.focus
@@ -563,6 +625,17 @@ impl App {
     /// selection / focus change so messages don't linger.
     pub fn status_message(&self) -> Option<&str> {
         self.status_message.as_deref()
+    }
+
+    /// Current provider availability status used for right-side
+    /// status-bar chips (T8-003).
+    pub fn provider_status(&self) -> &ProviderStatus {
+        &self.provider_status
+    }
+
+    /// Reason for the most recent refresh failure, if any.
+    pub fn refresh_failure(&self) -> Option<&str> {
+        self.refresh_failure.as_deref()
     }
 
     /// Look up a cached mux preview. Returns `None` if the mux
@@ -647,6 +720,7 @@ impl App {
             Msg::Home => self.move_selection_to(0),
             Msg::End => self.move_selection_to(usize::MAX),
             Msg::ToggleExpand => self.toggle_expand_selected(),
+            Msg::ToggleLinkedDetails => self.toggle_linked_details(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
                     Focus::Left => Focus::Right,
@@ -665,6 +739,12 @@ impl App {
             Msg::SetMuxPreview { mux, content } => {
                 self.preview_store.insert(mux, content);
             }
+            Msg::SetProviderStatus(status) => {
+                self.provider_status = status;
+            }
+            Msg::SetRefreshFailure(reason) => {
+                self.refresh_failure = Some(reason);
+            }
         }
     }
 
@@ -675,6 +755,7 @@ impl App {
         loaded_at_epoch: i64,
         initial_selection_hint: Option<RowId>,
     ) {
+        self.refresh_failure = None;
         self.loaded_at_epoch = Some(loaded_at_epoch);
         let prev_selection = self.selection.take();
         let is_first_load = prev_selection.is_none();
@@ -715,6 +796,7 @@ impl App {
 
     fn move_selection(&mut self, delta: i32) {
         self.status_message = None;
+        self.detail_links_expanded = false;
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
@@ -734,6 +816,7 @@ impl App {
 
     fn move_selection_to(&mut self, index: usize) {
         self.status_message = None;
+        self.detail_links_expanded = false;
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
@@ -762,6 +845,21 @@ impl App {
 
     fn visible_rows_owned(&self) -> Vec<RowId> {
         self.visible_rows().iter().map(|r| r.id.clone()).collect()
+    }
+
+    fn toggle_linked_details(&mut self) {
+        let has_linked_details = self.detail.as_ref().is_some_and(|detail| {
+            detail
+                .header_fields
+                .iter()
+                .any(|field| !field.expanded_fields.is_empty())
+        });
+        if has_linked_details {
+            self.detail_links_expanded = !self.detail_links_expanded;
+            self.status_message = None;
+        } else {
+            self.status_message = Some("detail: no linked entities to expand".to_string());
+        }
     }
 
     fn recompute_detail(&mut self) {

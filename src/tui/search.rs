@@ -246,6 +246,21 @@ pub fn items_from_rows<'a>(rows: &'a [Row]) -> Vec<SearchItem<'a>> {
                 label: Cow::Owned(candidate.mux_label.clone()),
                 haystack: Cow::Owned(candidate.mux_label.clone()),
             },
+            RowKind::MuxSession(mux) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(format!("mux:{}", mux.native_id)),
+                haystack: Cow::Owned(mux.native_id.clone()),
+            },
+            RowKind::Pr(pr) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(pr.repo_display.clone()),
+                haystack: Cow::Owned(pr.repo_display.clone()),
+            },
+            RowKind::Fork(fork) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(fork.fork_label.clone()),
+                haystack: Cow::Owned(fork.fork_label.clone()),
+            },
         })
         .collect()
 }

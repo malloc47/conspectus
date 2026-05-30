@@ -295,7 +295,7 @@ fn row_matches(
     row: &SessionRow,
     mux_lookup: &HashMap<SessionKey, MuxInfo>,
 ) -> bool {
-    if options.filter.is_empty() {
+    if !options.filter.has_narrowing_predicates() {
         return true;
     }
     let candidate_count = mux_lookup

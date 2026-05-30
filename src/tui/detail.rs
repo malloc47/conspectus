@@ -3,8 +3,8 @@
 //! Right-panel header data for a single node, in a non-string form
 //! that the renderer can lay out at its own width. Mirrors the
 //! content of `conspectus node show <id>` (and reuses
-//! [`crate::output::table::node_short_id`] for the leading short id)
-//! while exposing the locked mockup-review behavior:
+//! [`crate::output::table::node_short_id`] for stable internal row
+//! identity) while exposing the locked mockup-review behavior:
 //!
 //! SQLite consumer surface (P10-010 / ADR 0043).
 //! [`build_node_detail_from_conn`] is the production entry point —
@@ -126,8 +126,8 @@ pub struct NodeDetail {
     /// `agent_session`, `mux_session`, `repo`, etc. Matches the
     /// snake-case label `node show` already prints.
     pub kind_label: &'static str,
-    /// Compact identity line for the top of the right panel
-    /// (e.g. `codex:…b4fdee8`, `tmux:editor`, `forge_pr:octo/repo#7`).
+    /// Compact identity label for callers that need a selected-node
+    /// display name outside the field list.
     pub title_line: String,
     /// FNV-1a 64-bit hex short id, floored at the H-TBL-002 length.
     pub short_id: String,
@@ -148,36 +148,46 @@ pub struct NodeDetail {
 impl NodeDetail {
     /// Group [`Self::header_fields`] into sections per ADR 0033.
     ///
-    /// Sections are emitted in canonical order (Session, Mux, PR,
-    /// Lineage). A section is omitted entirely when every field it
-    /// would contain is a no-annotation placeholder — operators see
-    /// a shorter pane rather than rows of dashes.
+    /// Sections are emitted in node-sensitive canonical order. Agent
+    /// session details mirror the sessions view (Session, Mux, PR,
+    /// Lineage); mux details lead with mux fields and put attached
+    /// agent session rows under a later Session divider. A section
+    /// is omitted entirely when every field it would contain is a
+    /// no-annotation placeholder — operators see a shorter pane
+    /// rather than rows of dashes.
     pub fn sections(&self) -> Vec<DetailSection> {
-        use SectionKind::*;
-        let mut grouped: std::collections::BTreeMap<SectionKind, Vec<HeaderField>> =
-            std::collections::BTreeMap::new();
-        for field in &self.header_fields {
-            let kind = section_for(self.kind_label, field.label);
-            grouped.entry(kind).or_default().push(field.clone());
-        }
-        let order = [Session, Mux, Pr, Lineage];
-        order
-            .iter()
-            .filter_map(|kind| {
-                let fields = grouped.remove(kind)?;
-                let all_blank_placeholders = fields
-                    .iter()
-                    .all(|f| f.placeholder && f.annotation.is_none());
-                if all_blank_placeholders {
-                    return None;
-                }
-                Some(DetailSection {
-                    kind: *kind,
-                    fields,
-                })
-            })
-            .collect()
+        group_fields_into_sections(self.kind_label, &self.header_fields)
     }
+}
+
+/// Section-group a flat header-field list under a given node kind.
+/// Shared between [`NodeDetail::sections`] and the inline expansion
+/// path so a linked entity's expanded view renders through the same
+/// section structure as its standalone detail.
+pub fn group_fields_into_sections(kind_label: &str, fields: &[HeaderField]) -> Vec<DetailSection> {
+    let mut grouped: std::collections::BTreeMap<SectionKind, Vec<HeaderField>> =
+        std::collections::BTreeMap::new();
+    for field in fields {
+        let kind = section_for(kind_label, field.label);
+        grouped.entry(kind).or_default().push(field.clone());
+    }
+    let order = section_order(kind_label);
+    order
+        .iter()
+        .filter_map(|kind| {
+            let fields = grouped.remove(kind)?;
+            let all_blank_placeholders = fields
+                .iter()
+                .all(|f| f.placeholder && f.annotation.is_none());
+            if all_blank_placeholders {
+                return None;
+            }
+            Some(DetailSection {
+                kind: *kind,
+                fields,
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -193,6 +203,19 @@ pub struct HeaderField {
     /// Optional trailing annotation: `⚠` for ambiguity, `⟳` for an
     /// async-enrichment in-flight, `(preferred)` markers, etc.
     pub annotation: Option<&'static str>,
+    /// Node referenced by this field, when the row is a compact
+    /// linked-entity summary that can expand in place.
+    pub target: Option<NodeId>,
+    /// `kind_label` of [`Self::target`] when the field carries an
+    /// expanded sub-detail. The renderer uses this to route
+    /// [`Self::expanded_fields`] into the same section grouping the
+    /// standalone detail of the target would produce, so the
+    /// expansion matches the normal detail view byte-for-byte.
+    pub expanded_kind_label: Option<&'static str>,
+    /// One-level detail rows for [`Self::target`]. These are
+    /// populated eagerly while the builder has the source snapshot;
+    /// the renderer decides whether to show them.
+    pub expanded_fields: Vec<HeaderField>,
 }
 
 /// Closed set of right-panel detail sections (ADR 0033). The
@@ -240,10 +263,19 @@ fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
         ("agent_session", "mux") => Mux,
         ("agent_session", "pr") => Pr,
         ("agent_session", "lineage") => Lineage,
-        ("mux_session", "mux" | "backend" | "native_id" | "attached") => Mux,
+        ("mux_session", "name" | "backend" | "cwd" | "attached") => Mux,
+        ("mux_session", "session" | "id" | "harness" | "alias" | "title") => Session,
         ("forge_pr", _) => Pr,
         ("fork", _) => Lineage,
         _ => Session,
+    }
+}
+
+fn section_order(kind_label: &str) -> &'static [SectionKind] {
+    use SectionKind::*;
+    match kind_label {
+        "mux_session" => &[Mux, Session, Pr, Lineage],
+        _ => &[Session, Mux, Pr, Lineage],
     }
 }
 
@@ -320,14 +352,8 @@ fn kind_label(node: &GraphNode) -> &'static str {
 }
 
 fn title_line(node: &GraphNode) -> String {
-    let id = node.id();
-    let short = node_short_id(&id);
-    let short_tail: String = short.chars().rev().take(7).collect();
-    let short_tail: String = short_tail.chars().rev().collect();
     match node {
-        GraphNode::AgentSession(session) => {
-            format!("{}:…{}", session.harness_key, short_tail)
-        }
+        GraphNode::AgentSession(session) => agent_session_display_id(session),
         GraphNode::MuxSession(mux) => mux_display_label(mux),
         GraphNode::ForgePr(pr) => format!("forge_pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => match &fork.name {
@@ -346,9 +372,22 @@ fn header_fields(
     node: &GraphNode,
     home: Option<&Path>,
 ) -> Vec<HeaderField> {
+    header_fields_inner(snapshot, node, home, true)
+}
+
+fn header_fields_inner(
+    snapshot: &GraphSnapshot,
+    node: &GraphNode,
+    home: Option<&Path>,
+    include_linked_details: bool,
+) -> Vec<HeaderField> {
     match node {
-        GraphNode::AgentSession(session) => agent_session_fields(snapshot, session, home),
-        GraphNode::MuxSession(mux) => mux_session_fields(snapshot, mux, home),
+        GraphNode::AgentSession(session) => {
+            agent_session_fields(snapshot, session, home, include_linked_details)
+        }
+        GraphNode::MuxSession(mux) => {
+            mux_session_fields(snapshot, mux, home, include_linked_details)
+        }
         GraphNode::ForgePr(pr) => forge_pr_fields(pr),
         GraphNode::Fork(fork) => fork_fields(fork),
         GraphNode::Repo(repo) => repo_fields(repo, home),
@@ -362,16 +401,14 @@ fn agent_session_fields(
     snapshot: &GraphSnapshot,
     session: &AgentSessionNode,
     home: Option<&Path>,
+    include_linked_details: bool,
 ) -> Vec<HeaderField> {
     let mut fields = Vec::new();
+    let session_id = NodeId::AgentSession(session.id.clone());
+    fields.push(plain("id", session.id.session_key.clone()));
     fields.push(plain("harness", session.harness_key.clone()));
     let cwd_value = match &session.cwd {
-        Some(cwd) => HeaderField {
-            label: "cwd",
-            value: shorten_home(cwd, home),
-            placeholder: false,
-            annotation: None,
-        },
+        Some(cwd) => plain("cwd", shorten_home(cwd, home)),
         None => placeholder("cwd", "— (unknown)"),
     };
     fields.push(cwd_value);
@@ -398,10 +435,12 @@ fn agent_session_fields(
         fields.push(plain("title", title.to_string()));
     }
 
-    let session_id = NodeId::AgentSession(session.id.clone());
     fields.push(session_mux_field(snapshot, &session_id));
     fields.push(session_pr_field(snapshot, &session_id, home));
     fields.push(session_lineage_field(snapshot, &session_id));
+    if include_linked_details {
+        attach_linked_details(snapshot, &mut fields, home);
+    }
 
     fields
 }
@@ -413,12 +452,7 @@ fn session_mux_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField 
         1 => {
             let preferred = candidates[0];
             let value = link_target_label(snapshot, preferred).unwrap_or_else(|| "—".to_string());
-            HeaderField {
-                label: "mux",
-                value,
-                placeholder: false,
-                annotation: None,
-            }
+            linked("mux", value, preferred.target_node_id().cloned())
         }
         n => {
             // The preferred-by-provenance candidate is shown; the
@@ -428,12 +462,13 @@ fn session_mux_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField 
             let label = preferred
                 .and_then(|link| link_target_label(snapshot, link))
                 .unwrap_or_else(|| format!("— ({n} candidates)"));
-            HeaderField {
-                label: "mux",
-                value: format!("{label}  ({n} candidates)"),
-                placeholder: false,
-                annotation: Some("⚠"),
-            }
+            let mut field = linked(
+                "mux",
+                format!("{label}  ({n} candidates)"),
+                preferred.and_then(|link| link.target_node_id().cloned()),
+            );
+            field.annotation = Some("⚠");
+            field
         }
     }
 }
@@ -473,15 +508,13 @@ fn session_pr_field(
     };
     let state = pr.state.as_deref().unwrap_or("?");
     let draft_marker = if pr.is_draft { " · draft" } else { "" };
-    HeaderField {
-        label: "pr",
-        value: format!(
+    plain(
+        "pr",
+        format!(
             "{}/{}#{} ({state}){draft_marker}",
             pr.owner, pr.repo, pr.number
         ),
-        placeholder: false,
-        annotation: None,
-    }
+    )
 }
 
 fn session_lineage_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField {
@@ -492,49 +525,36 @@ fn session_lineage_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderFi
     else {
         return placeholder("lineage", "— (no parent)");
     };
-    let short = node_short_id(&NodeId::AgentSession(parent.id.clone()));
-    let short_tail: String = short.chars().rev().take(7).collect::<String>();
-    let short_tail: String = short_tail.chars().rev().collect();
-    HeaderField {
-        label: "lineage",
-        value: format!("{}:…{}", parent.harness_key, short_tail),
-        placeholder: false,
-        annotation: None,
-    }
+    plain("lineage", agent_session_display_id(parent))
 }
 
 fn mux_session_fields(
     snapshot: &GraphSnapshot,
     mux: &MuxSessionNode,
     home: Option<&Path>,
+    include_linked_details: bool,
 ) -> Vec<HeaderField> {
     let mut fields = vec![
-        plain("mux", mux_display_label(mux)),
+        plain("name", mux.native_id.clone()),
         plain("backend", mux.backend.clone()),
     ];
-    if mux.native_id.chars().count() <= 36 {
-        fields.push(plain("native_id", mux.native_id.clone()));
-    }
     if let Some(cwd) = &mux.cwd {
-        fields.push(HeaderField {
-            label: "cwd",
-            value: shorten_home(cwd, home),
-            placeholder: false,
-            annotation: None,
-        });
+        fields.push(plain("cwd", shorten_home(cwd, home)));
     }
     let mux_id = NodeId::MuxSession(mux.id.clone());
-    let attached_count = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| matches!(link.state, LinkState::Active))
-        .filter(|link| link.relation == RelationKind::LinkedToMux)
-        .filter(|link| match &link.target {
-            LinkEndpoint::Node { id } => id == &mux_id,
-            _ => false,
-        })
-        .count();
+    let attached_sessions = attached_sessions_for_mux(snapshot, &mux_id);
+    let attached_count = attached_sessions.len();
     fields.push(plain("attached", format!("{attached_count}")));
+    for session in attached_sessions {
+        fields.push(linked(
+            "session",
+            agent_session_link_label(snapshot, session).unwrap_or_else(|| format!("{}", session)),
+            Some(session.clone()),
+        ));
+    }
+    if include_linked_details {
+        attach_linked_details(snapshot, &mut fields, home);
+    }
     fields
 }
 
@@ -571,28 +591,13 @@ fn fork_fields(fork: &ForkNode) -> Vec<HeaderField> {
 }
 
 fn repo_fields(repo: &RepoNode, home: Option<&Path>) -> Vec<HeaderField> {
-    vec![HeaderField {
-        label: "common_dir",
-        value: shorten_home(&repo.common_dir, home),
-        placeholder: false,
-        annotation: None,
-    }]
+    vec![plain("common_dir", shorten_home(&repo.common_dir, home))]
 }
 
 fn worktree_fields(worktree: &CheckoutNode, home: Option<&Path>) -> Vec<HeaderField> {
-    let mut fields = vec![HeaderField {
-        label: "root",
-        value: shorten_home(&worktree.root, home),
-        placeholder: false,
-        annotation: None,
-    }];
+    let mut fields = vec![plain("root", shorten_home(&worktree.root, home))];
     if let Some(git_dir) = &worktree.git_dir {
-        fields.push(HeaderField {
-            label: "git_dir",
-            value: shorten_home(git_dir, home),
-            placeholder: false,
-            annotation: None,
-        });
+        fields.push(plain("git_dir", shorten_home(git_dir, home)));
     }
     if let Some(branch) = &worktree.current_branch {
         fields.push(plain("branch", branch.refname.clone()));
@@ -601,12 +606,7 @@ fn worktree_fields(worktree: &CheckoutNode, home: Option<&Path>) -> Vec<HeaderFi
 }
 
 fn workspace_fields(workspace: &WorkspaceNode, home: Option<&Path>) -> Vec<HeaderField> {
-    let mut fields = vec![HeaderField {
-        label: "root",
-        value: shorten_home(&workspace.root, home),
-        placeholder: false,
-        annotation: None,
-    }];
+    let mut fields = vec![plain("root", shorten_home(&workspace.root, home))];
     if let Some(provider) = &workspace.provider {
         fields.push(plain("provider", provider.clone()));
     }
@@ -640,6 +640,9 @@ fn plain(label: &'static str, value: String) -> HeaderField {
         value,
         placeholder: false,
         annotation: None,
+        target: None,
+        expanded_kind_label: None,
+        expanded_fields: Vec::new(),
     }
 }
 
@@ -649,6 +652,45 @@ fn placeholder(label: &'static str, value: &str) -> HeaderField {
         value: value.to_string(),
         placeholder: true,
         annotation: None,
+        target: None,
+        expanded_kind_label: None,
+        expanded_fields: Vec::new(),
+    }
+}
+
+fn linked(label: &'static str, value: String, target: Option<NodeId>) -> HeaderField {
+    HeaderField {
+        label,
+        value,
+        placeholder: false,
+        annotation: None,
+        target,
+        expanded_kind_label: None,
+        expanded_fields: Vec::new(),
+    }
+}
+
+fn attach_linked_details(
+    snapshot: &GraphSnapshot,
+    fields: &mut [HeaderField],
+    home: Option<&Path>,
+) {
+    for field in fields {
+        let Some(target) = field.target.as_ref() else {
+            continue;
+        };
+        let Some(node) = snapshot.nodes.iter().find(|node| node.id() == *target) else {
+            continue;
+        };
+        let sub_kind_label = kind_label(node);
+        let mut expanded = header_fields_inner(snapshot, node, home, false);
+        for nested in &mut expanded {
+            nested.target = None;
+            nested.expanded_kind_label = None;
+            nested.expanded_fields.clear();
+        }
+        field.expanded_kind_label = Some(sub_kind_label);
+        field.expanded_fields = expanded;
     }
 }
 
@@ -707,23 +749,37 @@ fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<Strin
     }
 }
 
-fn mux_display_label(mux: &MuxSessionNode) -> String {
-    let native = if mux.native_id.chars().count() > 36 {
-        let head: String = mux.native_id.chars().take(28).collect();
-        let tail: String = mux
-            .native_id
-            .chars()
-            .rev()
-            .take(6)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        format!("{head}…{tail}")
-    } else {
-        mux.native_id.clone()
+fn attached_sessions_for_mux<'a>(snapshot: &'a GraphSnapshot, mux_id: &NodeId) -> Vec<&'a NodeId> {
+    let mut sessions: Vec<&NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| link.relation == RelationKind::LinkedToMux)
+        .filter(|link| match &link.target {
+            LinkEndpoint::Node { id } => id == mux_id,
+            _ => false,
+        })
+        .map(|link| &link.source)
+        .collect();
+    sessions.sort();
+    sessions.dedup();
+    sessions
+}
+
+fn agent_session_link_label(snapshot: &GraphSnapshot, session_id: &NodeId) -> Option<String> {
+    let GraphNode::AgentSession(session) = snapshot.nodes.iter().find(|n| n.id() == *session_id)?
+    else {
+        return None;
     };
-    format!("{}:{native}", mux.backend)
+    Some(agent_session_display_id(session))
+}
+
+fn agent_session_display_id(session: &AgentSessionNode) -> String {
+    format!("{}:{}", session.harness_key, session.id.session_key)
+}
+
+fn mux_display_label(mux: &MuxSessionNode) -> String {
+    format!("{}:{}", mux.backend, mux.native_id)
 }
 
 fn link_summaries(
@@ -918,16 +974,13 @@ mod tests {
 
         let detail = build(&snapshot, &target, Some(home().as_path()));
         assert_eq!(detail.kind_label, "agent_session");
-        assert_eq!(
-            detail.title_line,
-            format!("codex:…{}", &detail.short_id[detail.short_id.len() - 7..])
-        );
+        assert_eq!(detail.title_line, "codex:abc");
 
         // No title row when unset.
         assert!(detail.header_fields.iter().all(|f| f.label != "title"));
 
         let labels: Vec<&str> = detail.header_fields.iter().map(|f| f.label).collect();
-        assert_eq!(labels, vec!["harness", "cwd", "mux", "pr", "lineage"]);
+        assert_eq!(labels, vec!["id", "harness", "cwd", "mux", "pr", "lineage"]);
 
         let by_label = |label: &str| {
             detail
@@ -937,6 +990,7 @@ mod tests {
                 .unwrap()
                 .clone()
         };
+        assert_eq!(by_label("id").value, "abc");
         assert_eq!(by_label("harness").value, "codex");
         assert_eq!(by_label("cwd").value, "~/src/x");
         assert!(by_label("mux").placeholder);
@@ -954,7 +1008,7 @@ mod tests {
             "sparse session should hide placeholder-only sections",
         );
         let session_field_labels: Vec<&str> = sections[0].fields.iter().map(|f| f.label).collect();
-        assert_eq!(session_field_labels, vec!["harness", "cwd"]);
+        assert_eq!(session_field_labels, vec!["id", "harness", "cwd"]);
     }
 
     #[test]
@@ -981,6 +1035,7 @@ mod tests {
                 active_pane_pid: None,
                 active_pane_current_path: None,
                 active_pane_start_command: None,
+                client_attached: None,
                 activity_epoch: None,
                 created_epoch: None,
             }));
@@ -1025,7 +1080,7 @@ mod tests {
         let labels: Vec<&str> = detail.header_fields.iter().map(|f| f.label).collect();
         assert_eq!(
             labels,
-            vec!["harness", "cwd", "title", "mux", "pr", "lineage"]
+            vec!["id", "harness", "cwd", "title", "mux", "pr", "lineage"]
         );
         let title = detail
             .header_fields
@@ -1034,6 +1089,65 @@ mod tests {
             .unwrap();
         assert_eq!(title.value, "Phase 8 mockup");
         assert!(!title.placeholder);
+    }
+
+    #[test]
+    fn agent_session_detail_uses_full_native_session_id() {
+        let long_id = "019eced4-4fb0-70d1-b8f4-72de7c469e62";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(agent("codex", long_id, Some("/home/op/src/x"), None));
+        let snapshot = resolve_snapshot(snapshot);
+        let target = NodeId::AgentSession(AgentSessionId::new("codex", "/state", long_id));
+        let detail = build(&snapshot, &target, Some(home().as_path()));
+        let session = detail
+            .header_fields
+            .iter()
+            .find(|f| f.label == "id")
+            .expect("id field");
+
+        assert_eq!(session.value, long_id);
+        assert!(
+            !session.value.contains('…'),
+            "right pane session id should not be truncated: {}",
+            session.value
+        );
+    }
+
+    #[test]
+    fn mux_session_detail_uses_full_native_session_name() {
+        let long_native_id =
+            "agentdeck_worktrunk-multi-repo_d459b661-extra-long-copyable-session-name";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new(long_native_id),
+            backend: "tmux".into(),
+            native_id: long_native_id.into(),
+            cwd: Some("/home/op/src/worktrunk".into()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        let snapshot = resolve_snapshot(snapshot);
+        let target = NodeId::MuxSession(MuxSessionId::new(long_native_id));
+        let detail = build(&snapshot, &target, Some(home().as_path()));
+        let mux = detail
+            .header_fields
+            .iter()
+            .find(|f| f.label == "name")
+            .expect("name field");
+
+        assert_eq!(mux.value, long_native_id);
+        assert!(
+            !mux.value.contains('…'),
+            "right pane mux name should not be truncated: {}",
+            mux.value
+        );
     }
 
     #[test]
@@ -1055,7 +1169,7 @@ mod tests {
         let labels: Vec<&str> = detail.header_fields.iter().map(|f| f.label).collect();
         assert_eq!(
             labels,
-            vec!["harness", "cwd", "alias", "mux", "pr", "lineage"],
+            vec!["id", "harness", "cwd", "alias", "mux", "pr", "lineage"],
             "alias row replaces title row when both would be present"
         );
         let alias = detail
@@ -1084,6 +1198,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -1096,6 +1211,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -1228,6 +1344,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));
@@ -1263,12 +1380,93 @@ mod tests {
             .find(|f| f.label == "attached")
             .unwrap();
         assert_eq!(attached.value, "2");
+        let sections = detail.sections();
+        assert_eq!(
+            sections.iter().map(|s| s.kind).collect::<Vec<_>>(),
+            vec![SectionKind::Mux, SectionKind::Session],
+            "mux details should lead with mux fields, then attached sessions"
+        );
+        let mux_field_labels: Vec<&str> = sections[0].fields.iter().map(|f| f.label).collect();
+        assert_eq!(mux_field_labels, vec!["name", "backend", "cwd", "attached"]);
+        let session_field_labels: Vec<&str> = sections[1].fields.iter().map(|f| f.label).collect();
+        assert_eq!(session_field_labels, vec!["session", "session"]);
+        let session_values: Vec<&str> = sections[1]
+            .fields
+            .iter()
+            .map(|f| f.value.as_str())
+            .collect();
+        assert_eq!(session_values, vec!["codex:a", "codex:b"]);
+        let first_session = sections[1].fields.first().unwrap();
+        assert_eq!(
+            first_session
+                .expanded_fields
+                .iter()
+                .map(|field| field.label)
+                .collect::<Vec<_>>(),
+            vec!["id", "harness", "cwd", "mux", "pr", "lineage"],
+            "attached session row should carry one-level details for expansion"
+        );
         let cwd = detail
             .header_fields
             .iter()
             .find(|f| f.label == "cwd")
             .unwrap();
         assert_eq!(cwd.value, "~/src/x");
+    }
+
+    #[test]
+    fn agent_session_mux_row_carries_mux_detail_for_expansion() {
+        let mux_id = MuxSessionId::new("editor");
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: mux_id.clone(),
+            backend: "tmux".into(),
+            native_id: "editor".into(),
+            cwd: Some("/home/op/src/x".into()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        snapshot
+            .nodes
+            .push(agent("codex", "abc", Some("/home/op/src/x"), None));
+        snapshot.candidate_links.push(GraphLink {
+            id: "attached".into(),
+            source: session_id.clone(),
+            target: LinkEndpoint::Node {
+                id: NodeId::MuxSession(mux_id),
+            },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snapshot = resolve_snapshot(snapshot);
+        let detail = build(&snapshot, &session_id, Some(home().as_path()));
+        let mux = detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "mux")
+            .expect("mux field");
+
+        assert_eq!(
+            mux.target,
+            Some(NodeId::MuxSession(MuxSessionId::new("editor")))
+        );
+        assert_eq!(
+            mux.expanded_fields
+                .iter()
+                .map(|field| field.label)
+                .collect::<Vec<_>>(),
+            vec!["name", "backend", "cwd", "attached", "session"]
+        );
     }
 
     #[test]
@@ -1288,6 +1486,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         }));

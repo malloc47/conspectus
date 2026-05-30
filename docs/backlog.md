@@ -4715,6 +4715,55 @@ work. `P8-014` is post-v1 polish that does not block the release.
     disambiguation and shared view-model helpers across CLI and
     TUI surfaces.
 
+- [x] `T8-025` Show full session and mux IDs in the TUI.
+  - Scope: replace the TUI's agent-session id-suffix display with
+    the full harness-native session id and the full mux-native session
+    name anywhere the operator needs an identifier they can copy and
+    use outside Conspectus, especially the selected-row detail pane.
+    In the selected entity's own detail section, label these rows as
+    `id` for agent sessions and `name` for mux sessions, and omit the
+    redundant `harness:` / `backend:` prefix because those fields are
+    shown separately.
+    If a compact label is still needed in the left row tree, prefer a
+    leading-prefix abbreviation over a trailing suffix and keep the
+    full id visible in detail. Preserve alias/title-first display
+    labels from ADR 0029; this story is about the explicit id field,
+    not the human-readable session name.
+  - Tests: pure detail/row view-model tests proving the full
+    `AgentSessionId` value is available for selected agent rows and
+    mux-attached agent rows; Ratatui buffer snapshots covering a long
+    Codex-style id so the detail pane shows a copyable full id and does
+    not regress to `...<suffix>`.
+  - Manual checks: run `cargo run -- tui --view sessions`, select a
+    Codex or Claude session with a long native id, and confirm the
+    right pane exposes the whole id in display order from the beginning
+    of the id.
+  - Blockers: `P8-005`, `P8-007` v1 slices.
+  - Outcome: the TUI detail pane now renders full `session_key`
+    values in the explicit `id` row for selected agent sessions, full
+    mux session names in the explicit `name` row, and typed full
+    linked-entity labels in mux-attached session rows, session mux
+    rows, and parent-session lineage fields. The detail renderer no
+    longer uses the bold compact title line as the copyable identifier.
+
+- [x] `T8-026` Expand linked entities from the TUI detail pane.
+  - Scope: add a right-pane keybinding that expands linked entities in
+    place. For a selected agent session, the Mux section's linked
+    `tmux:<name>` row should expand into the mux's full detail fields.
+    For a selected mux session, the Session section's linked
+    `harness:<session_key>` rows should expand into each agent
+    session's full detail fields. Keep the compact linked rows by
+    default so the right pane remains scannable.
+  - Tests: reducer/keymap coverage for the new keybinding, detail
+    renderer tests for collapsed versus expanded linked entities, and
+    at least one mux-with-two-sessions case.
+  - Outcome: the detail view-model now attaches one-level target
+    details to linked mux/session summary rows. `e` toggles linked
+    details from either pane, and `Enter` does the same when the
+    right pane has focus. The expanded rows stay nested under the
+    existing Mux/Session section instead of changing the left-tree
+    selection.
+
 - [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
     ancestor when neither CLI nor config specifies one. Low
     priority.
@@ -5910,6 +5959,59 @@ this phase migrates whichever ones exist when each story lands.
     rendering examples use connection-backed APIs only.
   - Blockers: P10 has landed and downstream tests/users have had a
     chance to move to `render_conn` / `render_with_conn`.
+
+## Graph Visualization Workstream
+
+- [ ] `GV-001` Record graph visualization export decisions.
+  - Scope: write an ADR covering graph visualization outputs: Graphviz
+    DOT for static inspection and an HTML output for interactive,
+    navigable graph inspection. Decide how the HTML renderer loads its
+    JavaScript graph library (vendored asset, CDN, or generated
+    self-contained bundle), the minimum feature set, and how large
+    graphs should degrade.
+  - Tests: none; docs-only decision.
+  - Manual checks: review the ADR against `docs/design.md` and update
+    the design doc if the exported graph shape or CLI surface becomes
+    part of the product contract.
+  - Blockers: none.
+
+- [ ] `GV-002` Add `conspectus graph --format dot`.
+  - Scope: add a Graphviz DOT renderer for the resolved internal graph.
+    Include node kind, stable id/label, and enough styling to distinguish
+    repos, checkouts, workspaces, agent sessions, mux sessions, branches,
+    forks, and forge PRs. Render candidate links and resolved
+    relationships distinctly so ambiguity and resolver decisions are easy
+    to inspect.
+  - Tests: deterministic DOT snapshot tests for sparse graph, mux
+    candidate ambiguity, session lineage, fork ancestry, and branch→PR
+    fixtures.
+  - Manual checks: run `dot -Tsvg` on at least one generated fixture and
+    inspect that labels and edge kinds remain readable.
+  - Blockers: `GV-001`.
+
+- [ ] `GV-003` Add `conspectus graph --format html`.
+  - Scope: generate an HTML graph explorer backed by the same graph data
+    as the DOT export. The page should support pan/zoom, node selection,
+    neighbor highlighting, search/filter by node kind and text, and an
+    inspection panel showing node attributes and link evidence. Keep the
+    exported file usable offline if the ADR selects vendoring or
+    self-contained output.
+  - Tests: deterministic HTML fixture coverage with volatile generated
+    timestamps avoided or normalized; unit tests for the serialized graph
+    payload consumed by the page.
+  - Manual checks: open a generated HTML file for a real local graph and
+    verify navigation, search, filtering, and node detail inspection.
+  - Blockers: `GV-001`, `GV-002`.
+
+- [ ] `GV-004` Document graph visualization workflows.
+  - Scope: update `README.md`, `docs/operations.md`, or a focused
+    visualization guide with examples for generating DOT and HTML
+    outputs, rendering DOT through Graphviz, and using the HTML explorer
+    for debugging resolver behavior.
+  - Tests: docs-only `git diff --check`.
+  - Manual checks: run each documented command against a fixture or local
+    repo before marking complete.
+  - Blockers: `GV-002`, `GV-003`.
 
 ## Later
 

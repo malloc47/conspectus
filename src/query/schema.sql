@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS node_mux_sessions (
     active_pane_pid               INTEGER,
     active_pane_current_path      TEXT,
     active_pane_start_command     TEXT,
+    client_attached               INTEGER,
     activity_epoch                INTEGER,
     created_epoch                 INTEGER,
     discovery_provider            TEXT NOT NULL DEFAULT 'unknown',

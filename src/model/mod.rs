@@ -352,6 +352,8 @@ pub struct MuxSessionNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_pane_start_command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_attached: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity_epoch: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_epoch: Option<i64>,

@@ -20,18 +20,47 @@ use std::time::Duration;
 /// Set of independent dimension constraints. Each `None` field means
 /// "no constraint on this dimension"; multiple fields AND together at
 /// evaluation time.
+///
+/// In addition to the narrowing predicates, the struct also carries
+/// view-scoped *ordering* toggles surfaced through the same Controls
+/// overlay (ADR 0031, amendment 2026-05-29). These do not change which
+/// rows are visible — they re-order them — and so are skipped by
+/// [`Self::matches_session`]. They are included in [`Self::is_empty`]
+/// so the modal's "Clear all" affordance resets them alongside the
+/// narrowing dimensions.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RowFilter {
     pub harness: Option<HarnessFilter>,
     pub max_age: Option<Duration>,
     pub mux_state: Option<MuxStateFilter>,
+    /// Sessions view: float agent sessions resolved to a mux above
+    /// sessions that aren't. Within each of the two resulting groups
+    /// the existing within-group sort order is preserved.
+    pub float_muxed_sessions_top: bool,
+    /// Mux view: float mux sessions with at least one attached agent
+    /// session above muxes with none. Within each group the existing
+    /// within-group sort order is preserved.
+    pub float_attached_muxes_top: bool,
 }
 
 impl RowFilter {
-    /// True when no constraints are active. Lets callers skip the
-    /// per-row evaluation when no filter is set.
+    /// True when no constraints or ordering toggles are active. The
+    /// modal uses this to decide whether "Clear all" has anything to
+    /// clear; callers gating *row-narrowing work* (predicate
+    /// evaluation, empty-bucket suppression) should use
+    /// [`Self::has_narrowing_predicates`] instead so ordering-only
+    /// state doesn't change the visible row set.
     pub fn is_empty(&self) -> bool {
-        self.harness.is_none() && self.max_age.is_none() && self.mux_state.is_none()
+        !self.has_narrowing_predicates()
+            && !self.float_muxed_sessions_top
+            && !self.float_attached_muxes_top
+    }
+
+    /// True when at least one narrowing dimension is set. Distinct
+    /// from [`Self::is_empty`] in that ordering toggles do not count
+    /// — they re-order rows but never drop them.
+    pub fn has_narrowing_predicates(&self) -> bool {
+        self.harness.is_some() || self.max_age.is_some() || self.mux_state.is_some()
     }
 
     /// Evaluate the filter against an agent session's per-row data.
@@ -368,6 +397,7 @@ mod tests {
             harness: Some(HarnessFilter::from_values(["claude-code"])),
             max_age: Some(Duration::from_secs(60)),
             mux_state: Some(MuxStateFilter::from_values([MuxStateKey::Unmuxed])),
+            ..RowFilter::default()
         };
         let good = SessionMatchInputs {
             harness_key: "claude-code",

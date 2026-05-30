@@ -284,6 +284,10 @@ Expected cardinality and sparsity:
 - A mux session may contain multiple agent sessions in practice. The `agent`
   projection renders one row per agent session; the `mux` projection can render
   zero, one, or many linked agent sessions per mux.
+- Mux runtime state is distinct from agent-session linkage. For tmux, mux
+  discovery records whether the session currently has an attached tmux client;
+  TUI mux-row glyphs use that client state, while linked agent sessions render
+  as row text or child rows.
 - A branch can have zero, one, or many PR records. The table view should prefer
   open PRs and report ambiguity rather than collapsing it silently.
 
@@ -567,10 +571,14 @@ grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
 backs config, CLI flags, and TUI controls.
 
-The sessions view also supports `grouping = "none"`. This renders a flat,
-table-like session list rather than workspace/repo/checkout group rows. The
-flat list carries an inline project-name column before the preview text and
-uses recency order; hierarchy sorting is not applicable without group rows.
+The sessions view defaults to `grouping = "repo"` so the primary switcher is
+location-first. `grouping = "graph"` is the richer topology view: it includes
+workspace containment when known and nests resolved `parent_session` lineage
+under parent sessions across harnesses. The sessions view also supports
+`grouping = "none"`. This renders a flat, table-like session list rather than
+workspace/repo/checkout group rows. The flat list carries an inline project-name
+column before the preview text and uses recency order; hierarchy sorting is not
+applicable without group rows.
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).

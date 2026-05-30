@@ -166,6 +166,7 @@ pub struct TmuxReplayRow {
     active_pane_pid: Option<i64>,
     active_pane_current_path: Option<String>,
     active_pane_start_command: Option<String>,
+    client_attached: Option<bool>,
 }
 
 impl TmuxReplayRow {
@@ -221,6 +222,9 @@ impl TmuxReplayRow {
                 .unwrap_or_default(),
             self.active_pane_current_path.clone().unwrap_or_default(),
             self.active_pane_start_command.clone().unwrap_or_default(),
+            self.client_attached
+                .map(|attached| if attached { "1" } else { "0" }.to_string())
+                .unwrap_or_default(),
         ]
         .join("\t")
     }

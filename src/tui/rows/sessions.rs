@@ -3,7 +3,9 @@
 //! Implements the locked sessions-view rules from
 //! `docs/tui-sessions-mockup.md` / phase-08:
 //!
-//! - Workspace → repo → worktree → agent session lineage.
+//! - `graph` grouping renders workspace → repo → worktree → agent
+//!   session lineage.
+//! - `repo` grouping stays location-first and is the default.
 //! - The worktree level renders only when its repo has ≥ 2
 //!   worktrees inside the visible set.
 //! - Agent sessions with ≥ 2 active `LinkedToMux` candidates expose
@@ -21,7 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxSessionNode,
-    NodeId, RelationKind, RepoId, SessionKind, WorkspaceId, path_is_ancestor_of, pick_preferred,
+    NodeId, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -98,48 +100,53 @@ pub fn build_sessions_tree_from_conn(
 /// no I/O, no clock reads, no env access.
 pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let data = SessionsData::new(inputs.snapshot);
+    let filter = &inputs.filter;
+    let nest_lineage = should_nest_lineage(inputs.grouping);
+    let nested_lineage_ids = if nest_lineage {
+        data.nested_lineage_ids(filter, inputs.now)
+    } else {
+        HashSet::new()
+    };
     let mut tree = RowTree {
         view: ViewLabel::Sessions,
         ..RowTree::default()
     };
-    let filter = &inputs.filter;
 
     if matches!(inputs.grouping, SessionsGrouping::None) {
         let mut sessions: Vec<_> = data
             .agent_sessions
             .iter()
             .filter_map(|(session_id, session)| {
-                if data.is_subagent_nested(session_id) {
+                if nested_lineage_ids.contains(session_id) {
                     return None;
                 }
-                if !filter.is_empty() {
-                    let candidate_count = data.mux_candidates_for_session(session_id).len();
-                    let match_inputs = SessionMatchInputs {
-                        harness_key: &session.harness_key,
-                        now_epoch: inputs.now,
-                        last_active_epoch: session.last_active_epoch,
-                        mux_state: MuxStateKey::from_candidate_count(candidate_count),
-                    };
-                    if !filter.matches_session(&match_inputs) {
-                        return None;
-                    }
+                let mux_state = MuxStateKey::from_candidate_count(
+                    data.mux_candidates_for_session(session_id).len(),
+                );
+                if !session_matches_filter(session, mux_state, inputs.now, filter) {
+                    return None;
                 }
                 Some(SessionEntry {
                     id: session_id.clone(),
                     node: session,
+                    mux_state,
                 })
             })
             .collect();
-        sessions.sort_by(|a, b| compare_sessions(a, b));
+        sessions.sort_by(|a, b| compare_sessions(a, b, filter.float_muxed_sessions_top));
 
         let mut session_short_ids = ShortIds::from_sessions(sessions.iter());
         let mut ctx = EmitCtx {
             tree: &mut tree,
             data: &data,
             short_ids: &mut session_short_ids,
+            filter,
             home: inputs.home,
             now: inputs.now,
             grouping: inputs.grouping,
+            float_muxed_top: filter.float_muxed_sessions_top,
+            nest_lineage,
+            lineage_stack: HashSet::new(),
         };
         for entry in sessions {
             emit_session(&mut ctx, 0, entry);
@@ -156,24 +163,18 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut ungrouped: Vec<SessionEntry<'_>> = Vec::new();
 
     for (session_id, session) in &data.agent_sessions {
-        if data.is_subagent_nested(session_id) {
+        if nested_lineage_ids.contains(session_id) {
             continue;
         }
-        if !filter.is_empty() {
-            let candidate_count = data.mux_candidates_for_session(session_id).len();
-            let match_inputs = SessionMatchInputs {
-                harness_key: &session.harness_key,
-                now_epoch: inputs.now,
-                last_active_epoch: session.last_active_epoch,
-                mux_state: MuxStateKey::from_candidate_count(candidate_count),
-            };
-            if !filter.matches_session(&match_inputs) {
-                continue;
-            }
+        let mux_state =
+            MuxStateKey::from_candidate_count(data.mux_candidates_for_session(session_id).len());
+        if !session_matches_filter(session, mux_state, inputs.now, filter) {
+            continue;
         }
         let entry = SessionEntry {
             id: session_id.clone(),
             node: session,
+            mux_state,
         };
         match resolve_group_key(&entry, &data, inputs.grouping) {
             Some(key) => buckets.entry(key).or_default().push(entry),
@@ -188,9 +189,13 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         tree: &mut tree,
         data: &data,
         short_ids: &mut session_short_ids,
+        filter,
         home: inputs.home,
         now: inputs.now,
         grouping: inputs.grouping,
+        float_muxed_top: filter.float_muxed_sessions_top,
+        nest_lineage,
+        lineage_stack: HashSet::new(),
     };
 
     // Iterate worktree-keyed buckets while deduplicating their
@@ -250,6 +255,29 @@ fn mark_launch_context(tree: &mut RowTree, cwd: Option<&Path>) {
     }
 }
 
+fn should_nest_lineage(grouping: SessionsGrouping) -> bool {
+    matches!(grouping, SessionsGrouping::Graph)
+}
+
+fn session_matches_filter(
+    session: &AgentSessionNode,
+    mux_state: MuxStateKey,
+    now: Option<i64>,
+    filter: &RowFilter,
+) -> bool {
+    if !filter.has_narrowing_predicates() {
+        return true;
+    }
+
+    let match_inputs = SessionMatchInputs {
+        harness_key: &session.harness_key,
+        now_epoch: now,
+        last_active_epoch: session.last_active_epoch,
+        mux_state,
+    };
+    filter.matches_session(&match_inputs)
+}
+
 fn node_id_path(id: &NodeId) -> Option<&str> {
     match id {
         NodeId::Workspace(ws) => Some(ws.root.as_str()),
@@ -265,9 +293,13 @@ struct EmitCtx<'a, 'snap> {
     tree: &'a mut RowTree,
     data: &'a SessionsData<'snap>,
     short_ids: &'a mut ShortIds,
+    filter: &'a RowFilter,
     home: Option<&'a Path>,
     now: Option<i64>,
     grouping: SessionsGrouping,
+    float_muxed_top: bool,
+    nest_lineage: bool,
+    lineage_stack: HashSet<NodeId>,
 }
 
 struct SessionsData<'a> {
@@ -277,21 +309,51 @@ struct SessionsData<'a> {
     repos: BTreeMap<NodeId, &'a crate::model::RepoNode>,
     checkouts: BTreeMap<NodeId, &'a crate::model::CheckoutNode>,
     by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
-    /// Parent `NodeId` → subagent children `(NodeId, &AgentSessionNode)`.
-    /// Populated from `ParentSession` links where the child has
-    /// `session_kind == Subagent`.
-    subagent_children: BTreeMap<NodeId, Vec<(NodeId, &'a AgentSessionNode)>>,
-    /// Set of subagent child node ids that are nested under a parent.
-    subagent_ids: HashSet<NodeId>,
+    /// Parent `NodeId` → child sessions `(NodeId, &AgentSessionNode)`.
+    /// Populated from resolved active `ParentSession` links.
+    lineage_children: BTreeMap<NodeId, Vec<(NodeId, &'a AgentSessionNode)>>,
+    /// Child `NodeId` → parent session `NodeId`, used to suppress
+    /// nested rows from the top-level bucket only when the parent
+    /// is visible in the current build.
+    lineage_parent: BTreeMap<NodeId, NodeId>,
 }
 
 impl<'a> SessionsData<'a> {
-    fn subagent_children_for(&self, parent: &NodeId) -> Option<&[(NodeId, &'a AgentSessionNode)]> {
-        self.subagent_children.get(parent).map(Vec::as_slice)
+    fn lineage_children_for(&self, parent: &NodeId) -> Option<&[(NodeId, &'a AgentSessionNode)]> {
+        self.lineage_children.get(parent).map(Vec::as_slice)
     }
 
-    fn is_subagent_nested(&self, id: &NodeId) -> bool {
-        self.subagent_ids.contains(id)
+    fn nested_lineage_ids(&self, filter: &RowFilter, now: Option<i64>) -> HashSet<NodeId> {
+        let mut ids = HashSet::new();
+        for (child, parent) in &self.lineage_parent {
+            if self.is_lineage_cycle_member(child) {
+                continue;
+            }
+            let Some(parent_node) = self.agent_sessions.get(parent) else {
+                continue;
+            };
+            let mux_state =
+                MuxStateKey::from_candidate_count(self.mux_candidates_for_session(parent).len());
+            if session_matches_filter(parent_node, mux_state, now, filter) {
+                ids.insert(child.clone());
+            }
+        }
+        ids
+    }
+
+    fn is_lineage_cycle_member(&self, start: &NodeId) -> bool {
+        let mut seen = HashSet::new();
+        let mut current = start;
+        while let Some(parent) = self.lineage_parent.get(current) {
+            if parent == start {
+                return true;
+            }
+            if !seen.insert(parent) {
+                return false;
+            }
+            current = parent;
+        }
+        false
     }
 }
 
@@ -333,9 +395,9 @@ impl<'a> SessionsData<'a> {
                 .push(link);
         }
 
-        let mut subagent_children: BTreeMap<NodeId, Vec<(NodeId, &AgentSessionNode)>> =
+        let mut lineage_children: BTreeMap<NodeId, Vec<(NodeId, &AgentSessionNode)>> =
             BTreeMap::new();
-        let mut subagent_ids = HashSet::new();
+        let mut lineage_parent = BTreeMap::new();
 
         for link in &snapshot.candidate_links {
             if link.relation != RelationKind::ParentSession
@@ -353,15 +415,16 @@ impl<'a> SessionsData<'a> {
             else {
                 continue;
             };
-            if child_node.session_kind != Some(SessionKind::Subagent) {
+            let child_node_id = link.source.clone();
+            let parent_node_id = NodeId::AgentSession(parent_id.clone());
+            if !agent_sessions.contains_key(&parent_node_id) {
                 continue;
             }
-            let parent_node_id = NodeId::AgentSession(parent_id.clone());
-            subagent_children
+            lineage_children
                 .entry(parent_node_id.clone())
                 .or_default()
-                .push((link.source.clone(), *child_node));
-            subagent_ids.insert(link.source.clone());
+                .push((child_node_id.clone(), *child_node));
+            lineage_parent.insert(child_node_id, parent_node_id);
         }
 
         Self {
@@ -371,8 +434,8 @@ impl<'a> SessionsData<'a> {
             repos,
             checkouts,
             by_source_relation,
-            subagent_children,
-            subagent_ids,
+            lineage_children,
+            lineage_parent,
         }
     }
 
@@ -490,6 +553,12 @@ struct GroupKey {
 struct SessionEntry<'a> {
     id: NodeId,
     node: &'a AgentSessionNode,
+    /// Coarse mux-state for the session, derived once from
+    /// `mux_candidates_for_session`. Used by the comparator when the
+    /// "float muxed sessions to top" toggle is active so the sort key
+    /// is consistent across all call sites without re-walking the
+    /// graph at compare time.
+    mux_state: MuxStateKey,
 }
 
 fn resolve_group_key(
@@ -547,7 +616,7 @@ fn emit_checkout_bucket(
     last_workspace: &mut Option<Option<String>>,
     last_repo: &mut Option<RepoId>,
 ) {
-    sessions.sort_by(|a, b| compare_sessions(a, b));
+    sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
 
     let workspace_changed = last_workspace.as_ref() != Some(&key.workspace);
     let repo_changed = workspace_changed || last_repo.as_ref() != Some(&key.repo_id);
@@ -644,7 +713,7 @@ fn push_checkout_row(
 }
 
 fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>) {
-    sessions.sort_by(|a, b| compare_sessions(a, b));
+    sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
     ctx.tree.rows.push(Row {
         id: RowId::Synthetic("ungrouped"),
         depth: 0,
@@ -668,8 +737,10 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
         1 => MuxIndicator::Attached,
         n => MuxIndicator::Ambiguous { candidate_count: n },
     };
-    let has_subagent_children = ctx.data.subagent_children_for(&entry.id).is_some();
-    let expandable = candidates.len() >= 2 || has_subagent_children;
+    let mut lineage_children = visible_lineage_children(ctx, &entry.id);
+    lineage_children.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
+    let has_lineage_children = !lineage_children.is_empty();
+    let expandable = candidates.len() >= 2 || has_lineage_children;
     let short_id = ctx.short_ids.short_id(&entry.id);
     let cwd_display = entry
         .node
@@ -697,18 +768,13 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
         }),
     });
 
-    if has_subagent_children {
-        let children = ctx
-            .data
-            .subagent_children_for(&entry.id)
-            .unwrap_or(&[])
-            .to_vec();
-        for (sub_id, sub_node) in children {
-            let sub_entry = SessionEntry {
-                id: sub_id,
-                node: sub_node,
-            };
-            emit_session(ctx, depth.saturating_add(1), sub_entry);
+    if has_lineage_children {
+        let inserted = ctx.lineage_stack.insert(entry.id.clone());
+        for child in lineage_children {
+            emit_session(ctx, depth.saturating_add(1), child);
+        }
+        if inserted {
+            ctx.lineage_stack.remove(&entry.id);
         }
     }
 
@@ -743,6 +809,38 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             });
         }
     }
+}
+
+fn visible_lineage_children<'snap>(
+    ctx: &EmitCtx<'_, 'snap>,
+    parent: &NodeId,
+) -> Vec<SessionEntry<'snap>> {
+    if !ctx.nest_lineage {
+        return Vec::new();
+    }
+    let Some(children) = ctx.data.lineage_children_for(parent) else {
+        return Vec::new();
+    };
+
+    children
+        .iter()
+        .filter_map(|(child_id, child_node)| {
+            if child_id == parent || ctx.lineage_stack.contains(child_id) {
+                return None;
+            }
+            let mux_state = MuxStateKey::from_candidate_count(
+                ctx.data.mux_candidates_for_session(child_id).len(),
+            );
+            if !session_matches_filter(child_node, mux_state, ctx.now, ctx.filter) {
+                return None;
+            }
+            Some(SessionEntry {
+                id: child_id.clone(),
+                node: child_node,
+                mux_state,
+            })
+        })
+        .collect()
 }
 
 fn project_display_for_session(
@@ -791,7 +889,25 @@ fn mux_session_label(node: &MuxSessionNode) -> String {
 
 /// Sessions within a group sort by recency desc (None last), then
 /// alphabetical by harness then short id for a stable tie-breaker.
-fn compare_sessions(a: &SessionEntry<'_>, b: &SessionEntry<'_>) -> std::cmp::Ordering {
+/// When `float_muxed_top` is set, sessions with an attached mux
+/// candidate sort before sessions without one, with the existing
+/// within-group order preserved inside each of the two resulting
+/// halves.
+fn compare_sessions(
+    a: &SessionEntry<'_>,
+    b: &SessionEntry<'_>,
+    float_muxed_top: bool,
+) -> std::cmp::Ordering {
+    if float_muxed_top {
+        let muxed_priority = |state: MuxStateKey| match state {
+            MuxStateKey::Attached | MuxStateKey::Ambiguous => 0,
+            MuxStateKey::Unmuxed => 1,
+        };
+        let ord = muxed_priority(a.mux_state).cmp(&muxed_priority(b.mux_state));
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
     b.node
         .last_active_epoch
         .cmp(&a.node.last_active_epoch)
@@ -883,7 +999,7 @@ mod tests {
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink,
         GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
-        Provenance, RelationKind, RepoId, RepoNode, WorkspaceId, WorkspaceNode,
+        Provenance, RelationKind, RepoId, RepoNode, SessionKind, WorkspaceId, WorkspaceNode,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -999,6 +1115,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         })
@@ -1643,6 +1760,97 @@ mod tests {
     }
 
     #[test]
+    fn float_muxed_sessions_top_lifts_attached_above_unmuxed() {
+        let muxed_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "muxed-old"));
+        let mux_id = NodeId::MuxSession(MuxSessionId::new("tmux:editor"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        // Newest session is unmuxed — it should drop below the older
+        // muxed session when the bool is set, but stay on top within
+        // its own (unmuxed) half of the split.
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "unmuxed-new",
+            Some("/home/op/src/proj"),
+            2_000,
+        ));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "muxed-old",
+            Some("/home/op/src/proj"),
+            1_000,
+        ));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "unmuxed-old",
+            Some("/home/op/src/proj"),
+            500,
+        ));
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        snapshot.candidate_links.push(linked_to_mux(
+            &muxed_id,
+            &mux_id,
+            Provenance::Discovered,
+            "1",
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+
+        let baseline = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(3_000),
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let baseline_keys: Vec<&str> = baseline
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(session) => Some(session.session.session_key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            baseline_keys,
+            vec!["unmuxed-new", "muxed-old", "unmuxed-old"],
+            "baseline sort is recency desc"
+        );
+
+        let floated = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: Some(3_000),
+            cwd: None,
+            filter: RowFilter {
+                float_muxed_sessions_top: true,
+                ..RowFilter::default()
+            },
+        });
+        let floated_keys: Vec<&str> = floated
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(session) => Some(session.session.session_key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            floated_keys,
+            vec!["muxed-old", "unmuxed-new", "unmuxed-old"],
+            "muxed session rises above the newer unmuxed ones, \
+             and within the unmuxed half the recency order is preserved"
+        );
+    }
+
+    #[test]
     fn single_mux_link_yields_attached_indicator() {
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
         let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
@@ -2244,6 +2452,7 @@ mod tests {
                 mux_state: Some(crate::filter::MuxStateFilter::from_values([
                     crate::filter::MuxStateKey::Unmuxed,
                 ])),
+                ..RowFilter::default()
             },
         });
         // claude-code passes harness+age+mux; codex fails the age cut.
@@ -2440,6 +2649,97 @@ mod tests {
             subagent_depth = subagent_row.depth,
             parent_depth = parent_row.depth,
             rows = tree.rows
+        );
+    }
+
+    #[test]
+    fn graph_grouping_nests_resolved_lineage_for_regular_sessions() {
+        let parent =
+            agent_session_with_kind("codex", "/state", "parent", Some("/work/repo"), None, None);
+        let child =
+            agent_session_with_kind("codex", "/state", "child", Some("/work/repo"), None, None);
+        let parent_id = parent.id();
+        let child_id = child.id();
+        let checkout = checkout_node("/work/repo/.git", "/work/repo");
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![parent, child, checkout],
+            candidate_links: vec![parent_session_link(&child_id, &parent_id)],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let parent_row = tree.rows.iter().find(
+            |r| matches!(&r.kind, RowKind::AgentSession(s) if s.session.session_key == "parent"),
+        );
+        let child_row = tree.rows.iter().find(
+            |r| matches!(&r.kind, RowKind::AgentSession(s) if s.session.session_key == "child"),
+        );
+
+        let parent_row = parent_row.expect("parent session row");
+        let child_row = child_row.expect("child session row");
+        assert!(parent_row.expandable, "{:#?}", tree.rows);
+        assert!(
+            child_row.depth > parent_row.depth,
+            "child should nest under parent in graph grouping: {:#?}",
+            tree.rows
+        );
+    }
+
+    #[test]
+    fn repo_grouping_keeps_regular_lineage_sessions_flat_by_location() {
+        let parent = agent_session_with_kind(
+            "claude-code",
+            "/state",
+            "parent",
+            Some("/work/repo"),
+            None,
+            None,
+        );
+        let child = agent_session_with_kind(
+            "claude-code",
+            "/state",
+            "child",
+            Some("/work/repo"),
+            None,
+            None,
+        );
+        let parent_id = parent.id();
+        let child_id = child.id();
+        let checkout = checkout_node("/work/repo/.git", "/work/repo");
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![parent, child, checkout],
+            candidate_links: vec![parent_session_link(&child_id, &parent_id)],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Repo,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let session_rows: Vec<_> = tree
+            .rows
+            .iter()
+            .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
+            .collect();
+        assert_eq!(session_rows.len(), 2, "{:#?}", tree.rows);
+        assert_eq!(session_rows[0].depth, session_rows[1].depth);
+        assert!(
+            session_rows.iter().all(|row| !row.expandable),
+            "repo grouping should not expose lineage disclosure rows: {:#?}",
+            tree.rows
         );
     }
 }

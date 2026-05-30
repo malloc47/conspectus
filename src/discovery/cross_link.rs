@@ -304,6 +304,10 @@ fn mux_match(
         });
     }
 
+    if mux_has_non_harness_active_pane(mux) {
+        return None;
+    }
+
     if session_cwd == mux_cwd {
         return Some(linked_to_mux(
             session,
@@ -325,6 +329,13 @@ fn mux_match(
     }
 
     None
+}
+
+fn mux_has_non_harness_active_pane(mux: &MuxSessionNode) -> bool {
+    let has_active_pane = mux.active_pane_command.is_some()
+        || mux.active_pane_start_command.is_some()
+        || mux.active_pane_pid.is_some();
+    has_active_pane && active_pane_harnesses(mux).is_empty()
 }
 
 fn active_mux_sessions(
@@ -820,6 +831,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: None,
             active_pane_start_command: None,
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         })
@@ -836,6 +848,7 @@ mod tests {
             active_pane_pid: None,
             active_pane_current_path: cwd.map(str::to_string),
             active_pane_start_command: Some(command.to_string()),
+            client_attached: None,
             activity_epoch: None,
             created_epoch: None,
         })
@@ -997,6 +1010,28 @@ mod tests {
         assert_eq!(link.relation, RelationKind::LinkedToMux);
         assert_eq!(link.provenance, Provenance::StrongDiscovered);
         assert_eq!(link.confidence, Confidence::High);
+    }
+
+    #[test]
+    fn plain_shell_active_pane_suppresses_cwd_only_mux_links() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("stale", Some("/work/repo")),
+                mux_with_active_command("shell", Some("/work/repo"), "zsh"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .all(|link| link.relation != RelationKind::LinkedToMux),
+            "plain shell mux should not claim stale sessions by cwd: {:#?}",
+            snapshot.candidate_links
+        );
     }
 
     #[test]
