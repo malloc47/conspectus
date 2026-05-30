@@ -3045,6 +3045,24 @@ failure:
     are observed. Inotify / fanotify continuous-mode event ingestion
     remains deferred to the continuous server workstream.
 
+- [ ] `H-MUXPROC-FU-001` Evaluate first-class runtime process nodes.
+  - Scope: turn ADR 0047's proposed model into a concrete workstream
+    proposal if process evidence continues to accumulate resolver,
+    mux-cardinality, opencode subagent, server/proxy, or diagnostic
+    responsibilities. Compare keeping process evidence in
+    `GraphLink.source_metadata` against adding ephemeral
+    `RuntimeProcess` nodes and explicit mux/process/session links.
+  - Deliverable: either reject process nodes with updated rationale,
+    or split implementation into model/schema, discovery, resolver,
+    query, and TUI/detail slices with migration and snapshot-impact
+    notes.
+  - Tests: design-only until accepted. Any implementation should add
+    fixtures for single-agent, multi-agent, subagent, stale argv, and
+    unreadable process cases.
+  - Related: ADR 0047, ADR 0046, `H-MUXPROC-005`, `H-SUBAGENT-004`.
+  - Blockers: none; defer until the metadata-only process evidence
+    approach shows more sustained pressure.
+
 - [ ] `H-MUXPROC-004` Read harness state databases for live-session
   hints without mutating logs.
   - Scope: for harnesses that maintain sqlite or other indexed state,
