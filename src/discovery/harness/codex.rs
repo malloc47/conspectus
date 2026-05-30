@@ -1,26 +1,37 @@
 //! Codex harness discovery.
 //!
-//! Reads the first JSONL line (`session_meta`) of each rollout file under
-//! `$STATE_ROOT/sessions/**/rollout-*.jsonl` and emits one `AgentSession` per
-//! discovered session. Real Codex stores rollouts under
-//! `sessions/YYYY/MM/DD/`, so the scanner walks the tree recursively rather
-//! than only looking at the top-level directory. Malformed records and
-//! rollouts without a `session_meta` envelope are skipped silently so a single
-//! bad file cannot poison discovery.
+//! Per ADR 0048 v1 the adapter has two reader paths that feed a single merged
+//! view of Codex sessions:
 //!
-//! Per ADR 0018 the adapter also extracts the `forked_from_id` field from
-//! `session_meta.payload` when present and emits an intra-harness
-//! `parent_session` candidate. Codex does not currently expose a separate
-//! resume pointer; the rollout format only carries the fork ancestry, so
-//! resume-only lineage is left for a follow-up if and when codex publishes
-//! a distinguishable field.
+//! - The state-database reader opens `$STATE_ROOT/state_<N>.sqlite` (highest
+//!   numeric suffix wins), strictly read-only with `query_only` enabled, and
+//!   pulls indexed rows from the `threads` and `thread_spawn_edges` tables.
+//!   Column probing tolerates future schema additions and missing columns.
+//! - The rollout reader walks `$STATE_ROOT/sessions/**/rollout-*.jsonl`,
+//!   parses the first `session_meta` line for cwd/fork pointers, and tails
+//!   the file body for a `last_message_preview` (ADR 0023).
+//!
+//! State rows are authoritative for `cwd`, `title`, and `last_active_epoch`
+//! (millisecond precision via `updated_at_ms`/`created_at_ms`). The rollout
+//! reader still supplies `last_message_preview` because state has no preview
+//! column. Sessions present only in one source are emitted from that source
+//! alone.
+//!
+//! Lineage produces two distinct `lineage_kind` operations per ADR 0018:
+//! - `fork` from rollout `session_meta.forked_from_id` (user-initiated forks).
+//! - `spawn` from `thread_spawn_edges` (subagent spawn relationships).
+//!
+//! Both can coexist on the same session. Malformed records and rollouts
+//! without a `session_meta` envelope are skipped silently so a single bad
+//! file cannot poison discovery.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -63,60 +74,81 @@ impl HarnessAdapter for CodexAdapter {
 
 fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     let sessions_dir = state_root.join("sessions");
+    let state_db = pick_active_state_db(state_root);
 
-    if !sessions_dir.exists() {
+    // Both readers may be empty; degrade silently.
+    if !sessions_dir.exists() && state_db.is_none() {
         return Ok(GraphFragment::empty());
     }
 
     let state_scope = state_root.to_string_lossy().to_string();
-    let mut metas: Vec<SessionMetaPayload> = Vec::new();
+    let mut sessions: BTreeMap<String, MergedSession> = BTreeMap::new();
+    let mut spawn_edges: Vec<SpawnEdge> = Vec::new();
 
-    let mut previews: HashMap<String, String> = HashMap::new();
-    let mut activity: HashMap<String, i64> = HashMap::new();
-
-    visit_rollouts(&sessions_dir, &mut |path| {
-        if let Some(meta) = read_session_meta(path) {
-            if let Some(preview) = read_rollout_last_message_preview(path) {
-                previews.insert(meta.id.clone(), preview);
-            }
-            if let Some(epoch) = file_modified_epoch(path) {
-                activity.insert(meta.id.clone(), epoch);
-            }
-            metas.push(meta);
+    if let Some(db_path) = state_db.as_deref() {
+        let out = read_state_database(db_path);
+        for row in out.threads {
+            sessions.entry(row.id.clone()).or_default().merge_state(row);
         }
-    })?;
+        spawn_edges = out.spawn_edges;
+    }
 
-    let known_ids: HashMap<&str, ()> = metas.iter().map(|m| (m.id.as_str(), ())).collect();
-    let mut nodes = Vec::with_capacity(metas.len());
+    if sessions_dir.exists() {
+        visit_rollouts(&sessions_dir, &mut |path| {
+            if let Some(meta) = read_session_meta(path) {
+                let preview = read_rollout_last_message_preview(path);
+                let activity = file_modified_epoch(path);
+                sessions
+                    .entry(meta.id.clone())
+                    .or_default()
+                    .merge_rollout(&meta, preview, activity);
+            }
+        })?;
+    }
+
+    let known_ids: HashSet<&str> = sessions.keys().map(|k| k.as_str()).collect();
+    let mut nodes = Vec::with_capacity(sessions.len());
     let mut candidate_links = Vec::new();
 
-    for meta in &metas {
+    for (id, session) in &sessions {
         nodes.push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new(HARNESS_KEY, &state_scope, &meta.id),
+            id: AgentSessionId::new(HARNESS_KEY, &state_scope, id),
             harness_key: HARNESS_KEY.to_string(),
-            cwd: meta.cwd.clone(),
-            title: None,
-            last_message_preview: previews.get(&meta.id).cloned(),
-            last_active_epoch: activity.get(&meta.id).copied(),
+            cwd: session.cwd.clone(),
+            title: session.title.clone(),
+            last_message_preview: session.last_message_preview.clone(),
+            last_active_epoch: session.last_active_epoch,
             session_kind: None,
         }));
 
-        let Some(parent_id) = meta.forked_from_id.as_deref() else {
-            continue;
-        };
+        if let Some(parent) = session.forked_from_id.as_deref()
+            && parent != id
+            && !parent.is_empty()
+        {
+            let resolved = known_ids.get(parent).map(|_| parent);
+            candidate_links.push(build_lineage_link(
+                id,
+                parent,
+                &state_scope,
+                resolved,
+                LineageOp::Fork,
+            ));
+        }
+    }
 
-        if parent_id.is_empty() || parent_id == meta.id {
-            // Empty pointers carry no information; self-fork pointers would
-            // create a degenerate cycle.
+    for edge in &spawn_edges {
+        if edge.parent.is_empty() || edge.child.is_empty() || edge.parent == edge.child {
             continue;
         }
-
-        let resolved_parent = known_ids.get(parent_id).map(|_| parent_id);
+        let resolved = known_ids
+            .get(edge.parent.as_str())
+            .map(|_| edge.parent.as_str());
         candidate_links.push(build_lineage_link(
-            &meta.id,
-            parent_id,
+            &edge.child,
+            &edge.parent,
             &state_scope,
-            resolved_parent,
+            resolved,
+            LineageOp::Spawn,
         ));
     }
 
@@ -127,15 +159,96 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     })
 }
 
+/// Aggregated per-session data merged across the state DB and rollout files.
+/// State rows are authoritative for `cwd`, `title`, and `last_active_epoch`;
+/// rollouts contribute the `last_message_preview` and the fork pointer.
+#[derive(Default)]
+struct MergedSession {
+    cwd: Option<String>,
+    title: Option<String>,
+    last_message_preview: Option<String>,
+    last_active_epoch: Option<i64>,
+    forked_from_id: Option<String>,
+}
+
+impl MergedSession {
+    fn merge_state(&mut self, row: ThreadStateRow) {
+        if row.cwd.is_some() {
+            self.cwd = row.cwd;
+        }
+        if let Some(title) = row.title.filter(|t| !t.trim().is_empty()) {
+            self.title = Some(title);
+        } else if self.title.is_none()
+            && let Some(message) = row.first_user_message.as_deref()
+            && let Some(preview) = normalize_last_message_preview(message)
+        {
+            self.title = Some(preview);
+        }
+        if let Some(epoch_ms) = row.updated_at_ms.or(row.created_at_ms) {
+            self.last_active_epoch = Some(epoch_ms / 1000);
+        }
+    }
+
+    fn merge_rollout(
+        &mut self,
+        meta: &SessionMetaPayload,
+        preview: Option<String>,
+        activity: Option<i64>,
+    ) {
+        if self.cwd.is_none() {
+            self.cwd = meta.cwd.clone();
+        }
+        if self.last_message_preview.is_none() {
+            self.last_message_preview = preview;
+        }
+        if self.last_active_epoch.is_none() {
+            self.last_active_epoch = activity;
+        }
+        if self.forked_from_id.is_none() {
+            self.forked_from_id = meta.forked_from_id.clone();
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LineageOp {
+    Fork,
+    Spawn,
+}
+
+impl LineageOp {
+    fn as_str(self) -> &'static str {
+        match self {
+            LineageOp::Fork => "fork",
+            LineageOp::Spawn => "spawn",
+        }
+    }
+
+    fn evidence(self) -> &'static str {
+        match self {
+            LineageOp::Fork => "codex session_meta fork",
+            LineageOp::Spawn => "codex thread_spawn_edges",
+        }
+    }
+
+    fn link_segment(self) -> &'static str {
+        match self {
+            // Preserve the existing fork link-id shape for snapshot stability.
+            LineageOp::Fork => "",
+            LineageOp::Spawn => "spawn:",
+        }
+    }
+}
+
 fn build_lineage_link(
     child_session_key: &str,
     parent_session_key: &str,
     state_scope: &str,
     resolved_parent: Option<&str>,
+    op: LineageOp,
 ) -> GraphLink {
-    // Codex `forked_from_id` is a true fork pointer (multiple children can
-    // share one parent), so `fork` is the correct ADR 0018 operation type.
-    let lineage_kind = "fork";
+    let lineage_kind = op.as_str();
+    let segment = op.link_segment();
 
     let mut fields: Metadata = Metadata::new();
     fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
@@ -158,7 +271,7 @@ fn build_lineage_link(
                 LinkEndpoint::Node {
                     id: NodeId::AgentSession(parent_id),
                 },
-                format!("codex:lineage:{child_session_key}:parent_session:{parent_key}"),
+                format!("codex:lineage:{segment}{child_session_key}:parent_session:{parent_key}"),
             )
         }
         None => {
@@ -173,7 +286,7 @@ fn build_lineage_link(
             (
                 LinkEndpoint::Unresolved { evidence },
                 format!(
-                    "codex:lineage:{child_session_key}:parent_session:unresolved:{parent_session_key}"
+                    "codex:lineage:{segment}{child_session_key}:parent_session:unresolved:{parent_session_key}"
                 ),
             )
         }
@@ -189,11 +302,168 @@ fn build_lineage_link(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: HARNESS_KEY.to_string(),
-            evidence: Some(format!("codex session_meta {lineage_kind}")),
+            evidence: Some(op.evidence().to_string()),
             fields,
         },
         state: LinkState::Active,
     }
+}
+
+/// Pick the `state_<N>.sqlite` with the highest numeric suffix. Codex bumps
+/// the suffix on breaking schema changes, so the highest version is the file
+/// the live codex process is reading and writing.
+fn pick_active_state_db(state_root: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(state_root).ok()?;
+    let mut best: Option<(u32, PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(rest) = name
+            .strip_prefix("state_")
+            .and_then(|s| s.strip_suffix(".sqlite"))
+        else {
+            continue;
+        };
+        let Ok(n) = rest.parse::<u32>() else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(prev, _)| n > *prev) {
+            best = Some((n, path));
+        }
+    }
+    best.map(|(_, path)| path)
+}
+
+#[derive(Default)]
+struct StateReadOutput {
+    threads: Vec<ThreadStateRow>,
+    spawn_edges: Vec<SpawnEdge>,
+}
+
+#[derive(Clone, Debug)]
+struct ThreadStateRow {
+    id: String,
+    cwd: Option<String>,
+    title: Option<String>,
+    first_user_message: Option<String>,
+    updated_at_ms: Option<i64>,
+    created_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+struct SpawnEdge {
+    parent: String,
+    child: String,
+}
+
+fn read_state_database(db_path: &Path) -> StateReadOutput {
+    let Ok(connection) = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return StateReadOutput::default();
+    };
+
+    // Defense in depth: read_only flags already block writes, but
+    // `query_only` blocks any attached database or future allowance from
+    // mutating either. Errors here are non-fatal — the worst case is the
+    // pragma silently no-ops on an old SQLite, and we still cannot write.
+    let _ = connection.execute_batch("PRAGMA query_only = ON;");
+
+    let threads = read_threads(&connection);
+    let spawn_edges = read_spawn_edges(&connection);
+    StateReadOutput {
+        threads,
+        spawn_edges,
+    }
+}
+
+fn read_threads(connection: &Connection) -> Vec<ThreadStateRow> {
+    let columns = table_columns(connection, "threads");
+    if !columns.iter().any(|c| c == "id") {
+        return Vec::new();
+    }
+    let has_cwd = columns.iter().any(|c| c == "cwd");
+    let has_title = columns.iter().any(|c| c == "title");
+    let has_first_user_message = columns.iter().any(|c| c == "first_user_message");
+    let has_updated_ms = columns.iter().any(|c| c == "updated_at_ms");
+    let has_created_ms = columns.iter().any(|c| c == "created_at_ms");
+
+    let mut select = String::from("SELECT id");
+    select.push_str(if has_cwd { ", cwd" } else { ", NULL" });
+    select.push_str(if has_title { ", title" } else { ", NULL" });
+    select.push_str(if has_first_user_message {
+        ", first_user_message"
+    } else {
+        ", NULL"
+    });
+    select.push_str(if has_updated_ms {
+        ", updated_at_ms"
+    } else {
+        ", NULL"
+    });
+    select.push_str(if has_created_ms {
+        ", created_at_ms"
+    } else {
+        ", NULL"
+    });
+    select.push_str(" FROM threads");
+
+    let Ok(mut stmt) = connection.prepare(&select) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok(ThreadStateRow {
+            id: row.get::<_, String>(0)?,
+            cwd: row.get::<_, Option<String>>(1)?,
+            title: row.get::<_, Option<String>>(2)?,
+            first_user_message: row.get::<_, Option<String>>(3)?,
+            updated_at_ms: row.get::<_, Option<i64>>(4)?,
+            created_at_ms: row.get::<_, Option<i64>>(5)?,
+        })
+    }) else {
+        return Vec::new();
+    };
+
+    rows.filter_map(Result::ok)
+        .filter(|r| !r.id.trim().is_empty())
+        .collect()
+}
+
+fn read_spawn_edges(connection: &Connection) -> Vec<SpawnEdge> {
+    let columns = table_columns(connection, "thread_spawn_edges");
+    if !columns.iter().any(|c| c == "parent_thread_id")
+        || !columns.iter().any(|c| c == "child_thread_id")
+    {
+        return Vec::new();
+    }
+    let Ok(mut stmt) =
+        connection.prepare("SELECT parent_thread_id, child_thread_id FROM thread_spawn_edges")
+    else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| {
+        Ok(SpawnEdge {
+            parent: row.get::<_, String>(0)?,
+            child: row.get::<_, String>(1)?,
+        })
+    }) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+fn table_columns(connection: &Connection, table: &str) -> Vec<String> {
+    let sql = format!("PRAGMA table_info(\"{table}\")");
+    let Ok(mut stmt) = connection.prepare(&sql) else {
+        return Vec::new();
+    };
+    let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) else {
+        return Vec::new();
+    };
+    rows.filter_map(Result::ok).collect()
 }
 
 fn visit_rollouts(dir: &Path, on_rollout: &mut dyn FnMut(&Path)) -> Result<()> {
@@ -904,5 +1174,482 @@ mod tests {
             session.last_message_preview.as_deref(),
             Some("<html>this is not a marker</html>"),
         );
+    }
+
+    // ── state-database reader tests (ADR 0048) ────────────────────────────
+
+    #[derive(Default)]
+    struct StateThreadFixture {
+        id: String,
+        cwd: Option<String>,
+        title: Option<String>,
+        first_user_message: Option<String>,
+        updated_at_ms: Option<i64>,
+        created_at_ms: Option<i64>,
+    }
+
+    impl StateThreadFixture {
+        fn new(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                ..Self::default()
+            }
+        }
+
+        fn cwd(mut self, cwd: &str) -> Self {
+            self.cwd = Some(cwd.to_string());
+            self
+        }
+
+        fn title(mut self, title: &str) -> Self {
+            self.title = Some(title.to_string());
+            self
+        }
+
+        fn first_user_message(mut self, message: &str) -> Self {
+            self.first_user_message = Some(message.to_string());
+            self
+        }
+
+        fn updated_at_ms(mut self, ms: i64) -> Self {
+            self.updated_at_ms = Some(ms);
+            self
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct StateColumns {
+        cwd: bool,
+        title: bool,
+        first_user_message: bool,
+        updated_at_ms: bool,
+        created_at_ms: bool,
+    }
+
+    impl StateColumns {
+        fn full() -> Self {
+            Self {
+                cwd: true,
+                title: true,
+                first_user_message: true,
+                updated_at_ms: true,
+                created_at_ms: true,
+            }
+        }
+    }
+
+    fn write_state_db(
+        path: &Path,
+        columns: StateColumns,
+        threads: &[StateThreadFixture],
+        spawn_edges: &[(&str, &str)],
+    ) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("state db parent");
+        }
+        let conn = Connection::open(path).expect("open state db fixture");
+
+        let mut cols = vec!["id TEXT NOT NULL PRIMARY KEY"];
+        if columns.cwd {
+            cols.push("cwd TEXT");
+        }
+        if columns.title {
+            cols.push("title TEXT");
+        }
+        if columns.first_user_message {
+            cols.push("first_user_message TEXT");
+        }
+        if columns.updated_at_ms {
+            cols.push("updated_at_ms INTEGER");
+        }
+        if columns.created_at_ms {
+            cols.push("created_at_ms INTEGER");
+        }
+        conn.execute(&format!("CREATE TABLE threads ({})", cols.join(", ")), [])
+            .expect("create threads");
+
+        for row in threads {
+            let mut names: Vec<&str> = vec!["id"];
+            let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(row.id.clone())];
+            if columns.cwd {
+                names.push("cwd");
+                params.push(Box::new(row.cwd.clone()));
+            }
+            if columns.title {
+                names.push("title");
+                params.push(Box::new(row.title.clone()));
+            }
+            if columns.first_user_message {
+                names.push("first_user_message");
+                params.push(Box::new(row.first_user_message.clone()));
+            }
+            if columns.updated_at_ms {
+                names.push("updated_at_ms");
+                params.push(Box::new(row.updated_at_ms));
+            }
+            if columns.created_at_ms {
+                names.push("created_at_ms");
+                params.push(Box::new(row.created_at_ms));
+            }
+            let placeholders: Vec<String> = (1..=names.len()).map(|n| format!("?{n}")).collect();
+            let sql = format!(
+                "INSERT INTO threads ({}) VALUES ({})",
+                names.join(", "),
+                placeholders.join(", ")
+            );
+            let refs: Vec<&dyn rusqlite::types::ToSql> =
+                params.iter().map(|p| p.as_ref()).collect();
+            conn.execute(&sql, refs.as_slice()).expect("insert thread");
+        }
+
+        if !spawn_edges.is_empty() {
+            conn.execute(
+                "CREATE TABLE thread_spawn_edges (\
+                    parent_thread_id TEXT NOT NULL, \
+                    child_thread_id TEXT NOT NULL PRIMARY KEY, \
+                    status TEXT NOT NULL)",
+                [],
+            )
+            .expect("create spawn edges");
+            for (parent, child) in spawn_edges {
+                conn.execute(
+                    "INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id, status) \
+                     VALUES (?1, ?2, 'closed')",
+                    [parent, child],
+                )
+                .expect("insert spawn edge");
+            }
+        }
+    }
+
+    fn session_by_id(fragment: &GraphFragment, id: &str) -> Option<AgentSessionNode> {
+        fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::AgentSession(s) => Some(s.clone()),
+                _ => None,
+            })
+            .find(|s| s.id.session_key == id)
+    }
+
+    fn ensure_sessions_dir(fixture: &HarnessFixture) {
+        let dir = fixture.codex_state_root().join("sessions");
+        fs::create_dir_all(&dir).expect("sessions dir");
+    }
+
+    #[test]
+    fn state_db_threads_emit_sessions_with_cwd_title_and_activity() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("alpha")
+                .cwd("/work/alpha")
+                .title("Alpha thread")
+                .updated_at_ms(1_700_000_500_000)],
+            &[],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let alpha = session_by_id(&fragment, "alpha").expect("alpha");
+        assert_eq!(alpha.cwd.as_deref(), Some("/work/alpha"));
+        assert_eq!(alpha.title.as_deref(), Some("Alpha thread"));
+        // Millisecond updated_at_ms should land as second-precision epoch.
+        assert_eq!(alpha.last_active_epoch, Some(1_700_000_500));
+    }
+
+    #[test]
+    fn state_db_title_falls_back_to_first_user_message_when_title_empty() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("bare")
+                .title("   ")
+                .first_user_message("Investigate flaky test on CI")],
+            &[],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let bare = session_by_id(&fragment, "bare").expect("bare");
+        assert_eq!(bare.title.as_deref(), Some("Investigate flaky test on CI"),);
+    }
+
+    #[test]
+    fn state_db_higher_numeric_suffix_wins_when_multiple_state_files_present() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        // Older file: contains only a stale row.
+        write_state_db(
+            &fixture.codex_state_root().join("state_3.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("stale").cwd("/old")],
+            &[],
+        );
+        // Active file: contains the row we want to see.
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("fresh").cwd("/new")],
+            &[],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        assert!(session_by_id(&fragment, "fresh").is_some());
+        assert!(
+            session_by_id(&fragment, "stale").is_none(),
+            "stale lower-version row must not leak through"
+        );
+    }
+
+    #[test]
+    fn state_db_and_rollout_merge_state_authoritative_for_cwd_and_title() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+
+        // Rollout supplies cwd /from-rollout.
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("shared").with_cwd("/from-rollout"))
+            .expect("rollout");
+
+        // State row for same id overrides cwd and provides a title.
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("shared")
+                .cwd("/from-state")
+                .title("State title")
+                .updated_at_ms(1_750_000_000_000)],
+            &[],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let shared = session_by_id(&fragment, "shared").expect("shared");
+        assert_eq!(shared.cwd.as_deref(), Some("/from-state"));
+        assert_eq!(shared.title.as_deref(), Some("State title"));
+        // State's ms timestamp wins over rollout's mtime-derived epoch.
+        assert_eq!(shared.last_active_epoch, Some(1_750_000_000));
+    }
+
+    #[test]
+    fn state_only_session_emits_node_when_no_rollout_present() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("state-only").cwd("/sso")],
+            &[],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let node = session_by_id(&fragment, "state-only").expect("state-only");
+        assert_eq!(node.cwd.as_deref(), Some("/sso"));
+        assert!(node.last_message_preview.is_none());
+    }
+
+    #[test]
+    fn state_spawn_edges_emit_parent_session_with_spawn_lineage_kind() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[
+                StateThreadFixture::new("parent"),
+                StateThreadFixture::new("child"),
+            ],
+            &[("parent", "child")],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let lineage = lineage_links(&fragment);
+        assert_eq!(lineage.len(), 1);
+        assert_eq!(
+            lineage[0].source_metadata.fields.get("lineage_kind"),
+            Some(&json!("spawn"))
+        );
+        let target = match &lineage[0].target {
+            LinkEndpoint::Node { id } => id,
+            other => panic!("expected resolved parent, got {other:?}"),
+        };
+        let NodeId::AgentSession(parent_id) = target else {
+            panic!("expected AgentSession target");
+        };
+        assert_eq!(parent_id.session_key, "parent");
+    }
+
+    #[test]
+    fn state_spawn_edges_with_unknown_parent_emit_unresolved_endpoint() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[StateThreadFixture::new("orphan")],
+            &[("missing-parent", "orphan")],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let lineage = lineage_links(&fragment);
+        assert_eq!(lineage.len(), 1);
+        let evidence = match &lineage[0].target {
+            LinkEndpoint::Unresolved { evidence } => evidence,
+            other => panic!("expected unresolved endpoint, got {other:?}"),
+        };
+        assert_eq!(evidence.native_id.as_deref(), Some("missing-parent"));
+    }
+
+    #[test]
+    fn state_spawn_edges_skip_self_and_empty_pointers() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        // child_thread_id is PK in production, so use distinct children for
+        // the two degenerate cases instead of reusing the same one.
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[
+                StateThreadFixture::new("self-ref"),
+                StateThreadFixture::new("empty-parent-child"),
+            ],
+            &[("self-ref", "self-ref"), ("", "empty-parent-child")],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        assert!(lineage_links(&fragment).is_empty());
+    }
+
+    #[test]
+    fn state_fork_and_spawn_coexist_on_same_session() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+
+        // Rollout drives the fork lineage path.
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("fork-parent"))
+            .expect("fork parent rollout");
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("multi").with_forked_from("fork-parent"))
+            .expect("multi rollout");
+
+        // State drives the spawn lineage path for the same child.
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns::full(),
+            &[
+                StateThreadFixture::new("spawn-parent"),
+                StateThreadFixture::new("multi"),
+                StateThreadFixture::new("fork-parent"),
+            ],
+            &[("spawn-parent", "multi")],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let lineage = lineage_links(&fragment);
+        let kinds: Vec<_> = lineage
+            .iter()
+            .filter_map(|link| link.source_metadata.fields.get("lineage_kind"))
+            .cloned()
+            .collect();
+        assert!(
+            kinds.contains(&json!("fork")) && kinds.contains(&json!("spawn")),
+            "expected both fork and spawn kinds; got {kinds:?}"
+        );
+        // Two parent_session candidates from the same child are fine — they
+        // describe different lineage operations.
+        let multi_links: Vec<_> = lineage
+            .iter()
+            .filter(|link| match &link.source {
+                NodeId::AgentSession(id) => id.session_key == "multi",
+                _ => false,
+            })
+            .collect();
+        assert_eq!(multi_links.len(), 2);
+    }
+
+    #[test]
+    fn state_db_missing_optional_columns_degrades_to_supported_subset() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        ensure_sessions_dir(&fixture);
+
+        // Old schema: only id + cwd, none of the millisecond timestamps or
+        // first_user_message exist yet.
+        write_state_db(
+            &fixture.codex_state_root().join("state_5.sqlite"),
+            StateColumns {
+                cwd: true,
+                title: false,
+                first_user_message: false,
+                updated_at_ms: false,
+                created_at_ms: false,
+            },
+            &[StateThreadFixture::new("slim").cwd("/slim")],
+            &[],
+        );
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let slim = session_by_id(&fragment, "slim").expect("slim");
+        assert_eq!(slim.cwd.as_deref(), Some("/slim"));
+        assert!(slim.title.is_none());
+        assert!(slim.last_active_epoch.is_none());
+    }
+
+    #[test]
+    fn state_db_unreadable_falls_back_to_rollout_only() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("rollout-only").with_cwd("/r"))
+            .expect("rollout");
+
+        // Write a junk file at the state_5.sqlite path so open fails.
+        fs::write(
+            fixture.codex_state_root().join("state_5.sqlite"),
+            b"not a sqlite database",
+        )
+        .expect("junk state db");
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let rollout = session_by_id(&fragment, "rollout-only").expect("rollout-only");
+        assert_eq!(rollout.cwd.as_deref(), Some("/r"));
+    }
+
+    #[test]
+    fn state_db_missing_threads_table_degrades_to_rollout_only() {
+        let temp = TempDir::new().expect("temp");
+        let (context, fixture) = context_with_state(&temp);
+        fixture
+            .write_codex_session(&CodexSessionRecord::new("rollout-id").with_cwd("/r"))
+            .expect("rollout");
+
+        // Empty but valid sqlite (no threads table).
+        let db_path = fixture.codex_state_root().join("state_5.sqlite");
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).expect("state parent");
+        }
+        Connection::open(&db_path).expect("create empty db");
+
+        let fragment = CodexAdapter::new().discover(&context).expect("discover");
+        let rollout = session_by_id(&fragment, "rollout-id").expect("rollout-id");
+        assert_eq!(rollout.cwd.as_deref(), Some("/r"));
     }
 }

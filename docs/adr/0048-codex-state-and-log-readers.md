@@ -28,7 +28,12 @@ attribution evidence found anywhere in the audit:
   `git_branch`, `git_origin_url`, `model`, `cli_version`, millisecond
   timestamps, archival state, and a privacy-sensitive `first_user_message`.
 - `state_<N>.sqlite#thread_spawn_edges` records parent→child subagent
-  lineage, mirroring opencode's `session.parent_id`.
+  spawn lineage with a `status` column (`closed` for finished spawns in
+  observed data). Audit confirmed these edges are subagent spawns, not
+  user-initiated forks: real rows show one parent thread spawning several
+  distinct child threads. They are therefore distinct from the rollout
+  reader's `forked_from_id` (true user forks) and both can coexist on
+  the same `AgentSession`.
 - `logs_<N>.sqlite#logs.process_uuid` is encoded as the literal string
   `pid:<os_pid>:<random_uuid>`. Paired with `thread_id` per most-recent `ts`,
   this names the thread a live Codex process is currently writing — including
@@ -58,14 +63,27 @@ flag set and version-probe ladder as `opencode.rs`.
 A new harness-state slice reads `state_<N>.sqlite` and emits:
 
 - One `AgentSession` node per `threads` row, scoped by the resolved Codex
-  state root. Extracted fields: `id`, `rollout_path`, `cwd`, `title` (falling
-  back to `first_user_message` capped and normalized like opencode previews),
-  `updated_at_ms`/`created_at_ms`, `git_sha`, `git_branch`,
-  `git_origin_url`, `model`, `model_provider`, `cli_version`, `agent_role`,
-  `agent_nickname`, and `archived`/`archived_at` so the resolver can suppress
-  archived rows from "active" views.
+  state root. V1 populates only the existing sparse `AgentSessionNode`
+  shape: `id`, `cwd`, `title` (with `first_user_message` as a capped and
+  normalized fallback when title is empty), `last_active_epoch` from the
+  millisecond timestamps, and `last_message_preview` (deferred to the
+  existing rollout-tail extractor when state alone cannot produce one).
+  Archived rows are still emitted so resolved views can filter them; the
+  `archived` flag is carried in link source metadata where needed, not on
+  the node. The remaining `threads` columns (`rollout_path`, `git_sha`,
+  `git_branch`, `git_origin_url`, `model`, `model_provider`, `cli_version`,
+  `agent_role`, `agent_nickname`, `archived_at`, etc.) are present in the
+  query result but are not stored on the node because `AgentSessionNode`
+  has no slot for them today. Promoting them to first-class fields, or
+  routing `git_*` through `Repo` candidate links, is deferred to a
+  follow-up ADR; this slice does not introduce a node-side metadata
+  channel.
 - One intra-harness `parent_session` candidate link per `thread_spawn_edges`
-  row, matching ADR 0018's opencode lineage shape.
+  row using `lineage_kind = "spawn"`. The rollout reader's existing
+  `forked_from_id` path continues to emit `lineage_kind = "fork"`. Both
+  may coexist on the same `AgentSession` because they describe different
+  lineage operations; this matches the operation vocabulary ADR 0018
+  established.
 
 The reader globs `state_*.sqlite`, selects the highest numeric suffix as the
 active database, and falls back to the next-highest only if the active file
@@ -155,9 +173,9 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 - Codex `AgentSession` discovery becomes the indexed `threads` table rather
   than enumerating rollout JSONL files. The existing rollout-file reader can
   fall back when state is missing or unreadable.
-- Codex subagent lineage gets the same `parent_session` candidate-link
-  treatment opencode has had since ADR 0018, which lets the resolver and TUI
-  share a single subagent-handling code path across both harnesses.
+- Codex subagent spawn lineage gets first-class `parent_session` candidate
+  links with `lineage_kind = "spawn"`, distinct from existing rollout-fork
+  lineage. Resolver and TUI handling stays on the ADR 0018 surface.
 - A `(process_uuid, ts)` compound index would make the log lookup faster but
   is not required: the 15-minute floor and `idx_logs_thread_id` keep cost
   bounded. If real-world log volumes ever make this expensive, the linker can
@@ -171,10 +189,6 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 - The synthesized-session path follows the same shape as ADR 0028, so TUI
   and resolver code that already tolerates sparse hook-synthesized agent
   session nodes will tolerate log-synthesized nodes too.
-- The state reader exposes `git_sha`, `git_branch`, and `git_origin_url` per
-  Codex thread. ADR 0045 already governs how session-level repo signals
-  participate in repo binding; this ADR opts into that path without changing
-  the binding rules.
 - Records are rebuildable observations of harness-owned local state.
   Conspectus does not persist or cache them itself.
 
@@ -221,8 +235,14 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 - Codex log-derived current-session evidence overrides stale
   `active_pane_command_session_match` candidates for the same mux, matching
   the demotion rule established in ADR 0028.
-- Codex `thread_spawn_edges` participates in `parent_session` candidate
-  links on the same shape ADR 0018 defines for opencode.
+- Codex `thread_spawn_edges` rows produce `parent_session` candidate
+  links with `lineage_kind = "spawn"`, distinct from rollout
+  `forked_from_id` which continues to use `lineage_kind = "fork"`.
+- The richer `threads` columns (rollout_path, git_*, model, cli_version,
+  agent_*, archived_at) are read by the v1 reader but not stored on
+  `AgentSessionNode` because the node intentionally has no metadata
+  channel. Promoting any of those fields, or routing `git_*` through a
+  `Repo` candidate link, requires a separate ADR.
 - `logs.feedback_log_body` is privacy-sensitive and is never read.
 - Codex `remote_control_enrollments`, `jobs`, `agent_jobs`, and
   `thread_goals` are out of scope for this ADR. They remain available for

@@ -3069,11 +3069,18 @@ failure:
   - Scope: per ADR 0048, add two read-only Codex slices under the
     existing harness state-root discovery. The state-reader slice
     globs `state_*.sqlite`, selects the highest numeric suffix, and
-    emits one `AgentSession` per `threads` row (`id`, `rollout_path`,
-    `cwd`, title with `first_user_message` fallback, millisecond
-    timestamps, git metadata, model, cli_version, agent role/nickname,
-    archived flag) plus one intra-harness `parent_session` candidate
-    per `thread_spawn_edges` row on the ADR 0018 shape. The
+    emits one `AgentSession` per `threads` row populating the
+    existing sparse `AgentSessionNode` shape only: `id`, `cwd`,
+    `title` with capped/normalized `first_user_message` fallback,
+    `last_active_epoch` from millisecond timestamps, and previews via
+    the existing rollout-tail extractor. The richer threads columns
+    (`rollout_path`, `git_*`, `model`, `cli_version`, `agent_*`,
+    `archived_at`) are queried but not stored on the node; promoting
+    them needs a separate ADR. The state reader also emits one
+    intra-harness `parent_session` candidate per `thread_spawn_edges`
+    row with `lineage_kind = "spawn"`, distinct from the rollout
+    reader's existing `forked_from_id` candidates which keep
+    `lineage_kind = "fork"`. The
     log-linker slice reads `logs_*.sqlite` only to resolve the
     freshest `thread_id` for each live Codex pid by parsing
     `process_uuid` as `pid:<os_pid>:<uuid>` and querying within a
