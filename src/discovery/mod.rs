@@ -170,7 +170,11 @@ pub fn discover_local_with(
     let mut snapshot = providers.discover(&context)?;
     let cwd_git_fragment = observed_cwd_git_fragment(&snapshot);
     snapshot = merge_fragments([snapshot_fragment(snapshot), cwd_git_fragment]);
-    cross_link::infer(&mut snapshot);
+    if config.process_tree_enabled {
+        cross_link::infer(&mut snapshot);
+    } else {
+        cross_link::infer_without_process_tree(&mut snapshot);
+    }
     if let Some(root) = &config.hook_sidecar_root {
         hook_sidecar::apply_hook_sidecars(&mut snapshot, root, hook_sidecar::current_epoch());
     }
@@ -186,6 +190,7 @@ pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
     pub tmux_runner: Option<Box<dyn tmux::TmuxRunner>>,
     pub forge_runner: Option<Box<dyn forge::GhRunner>>,
+    pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
 }
@@ -226,6 +231,7 @@ impl LocalDiscoveryConfig {
             harness_state_roots,
             tmux_runner,
             forge_runner,
+            process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             declared_config_loader: Some(ConfigLoader::from_env()),
         }
@@ -236,6 +242,7 @@ impl LocalDiscoveryConfig {
             harness_state_roots: BTreeMap::new(),
             tmux_runner: None,
             forge_runner: None,
+            process_tree_enabled: false,
             hook_sidecar_root: None,
             declared_config_loader: None,
         }
@@ -268,6 +275,16 @@ impl LocalDiscoveryConfig {
 
     pub fn without_forge(mut self) -> Self {
         self.forge_runner = None;
+        self
+    }
+
+    pub fn with_process_tree(mut self) -> Self {
+        self.process_tree_enabled = true;
+        self
+    }
+
+    pub fn without_process_tree(mut self) -> Self {
+        self.process_tree_enabled = false;
         self
     }
 

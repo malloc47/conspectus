@@ -2921,7 +2921,7 @@ failure:
    path to fixing the Claude Code mapping drift seen in
    `H-MUXPROC-015`.
 
-- [ ] `H-MUXPROC-001` ADR: process-tree linker design and dependency
+- [x] `H-MUXPROC-001` ADR: process-tree linker design and dependency
   choice.
   - Scope: decide (1) whether to depend on the `sysinfo` crate or
     read `/proc` directly on Linux and an equivalent on macOS (and
@@ -2937,8 +2937,13 @@ failure:
     the existing tmux runner). Record as a new ADR per CLAUDE.md.
   - Tests: none directly; ADR is the deliverable.
   - Blockers: none.
+  - Outcome: ADR 0046 chooses a Linux-first, dependency-free `/proc`
+    reader with an injectable process snapshot seam, a four-edge
+    descendant walk from tmux active-pane PID, the supported harness
+    binary match set, `active_pane_process_match` evidence, and
+    `CONSPECTUS_DISABLE_PROCTREE` as the runtime kill switch.
 
-- [ ] `H-MUXPROC-002` Implement the process-tree linker as a
+- [x] `H-MUXPROC-002` Implement the process-tree linker as a
   discovery source.
   - Scope: build the linker per the `H-MUXPROC-001` ADR. Walk every
     discovered pane's process tree, match descendant commands
@@ -2989,6 +2994,16 @@ failure:
     fd matches ranks above `active_pane_command_session_match`, so
     argv / start-command session ids remain useful launch evidence
     without being treated as definitive current-session truth.
+  - Outcome: the remaining process-tree slice is now implemented per
+    ADR 0046. Cross-link inference can walk a Linux `/proc` snapshot
+    from each tmux active-pane PID, match supported harness binaries
+    through nested shell children, emit `active_pane_process_match`
+    `LinkedToMux` candidates for discovered same-harness/same-cwd
+    sessions, preserve unresolved agent evidence when no session node
+    exists yet, and skip the linker with `CONSPECTUS_DISABLE_PROCTREE`.
+    Tests cover direct and nested process matches, unknown binaries,
+    missing process data, unresolved evidence, and resolver ranking
+    above launch argv.
 
 - [ ] `H-MUXPROC-003` Add read-only session-file activity correlation.
   - Scope: improve fresh-session attribution without sending input to

@@ -14,16 +14,18 @@ never sets or modifies them.
 
 ### Provider toggles
 
-| Variable                    | Effect                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------ |
-| `CONSPECTUS_DISABLE_TMUX`   | When set (any value), the tmux provider is skipped entirely. No `MuxSession` nodes appear. |
-| `CONSPECTUS_DISABLE_FORGE`  | When set (any value), the GitHub forge provider is skipped. No `ForgePr` nodes appear.    |
+| Variable                       | Effect                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `CONSPECTUS_DISABLE_TMUX`      | When set (any value), the tmux provider is skipped entirely. No `MuxSession` nodes appear.      |
+| `CONSPECTUS_DISABLE_FORGE`     | When set (any value), the GitHub forge provider is skipped. No `ForgePr` nodes appear.         |
+| `CONSPECTUS_DISABLE_PROCTREE`  | When set (any value), active-pane process-tree linking is skipped. Other tmux evidence still runs. |
 
 Use these in CI, automated tests, or shells where running `tmux
-list-sessions` / `gh pr list` is unwanted, slow, or noisy. Both
-providers are otherwise best-effort: missing binaries, unauthenticated
-runs, and command failures degrade silently to "no rows for that
-provider" rather than aborting the whole graph.
+list-sessions`, walking `/proc`, or running `gh pr list` is unwanted,
+slow, or noisy. These providers are otherwise best-effort: missing
+binaries, unreadable processes, unauthenticated runs, and command
+failures degrade silently to "no rows for that provider" or "no
+process-tree evidence" rather than aborting the whole graph.
 
 ### Harness state-root overrides
 

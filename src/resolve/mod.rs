@@ -249,6 +249,7 @@ fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
         ) => 50,
         Some("active_pane_fd_command_session_match") => 45,
         Some("session_file_activity_match" | "harness_state_current_session_match") => 40,
+        Some("active_pane_process_match") => 35,
         Some("active_pane_command_session_match") => 30,
         Some("exact_cwd_match") => 20,
         Some("cwd_prefix_match") => 10,
@@ -734,6 +735,36 @@ mod tests {
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
             vec!["cwd".to_string()]
+        );
+    }
+
+    #[test]
+    fn session_mux_resolver_prefers_process_match_over_launch_argv() {
+        let launch_argv = linked_to_mux_link(
+            "launch-argv",
+            session("a"),
+            mux("tmux:launch"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(5_000),
+            Some("active_pane_command_session_match"),
+        );
+        let process = linked_to_mux_link(
+            "process",
+            session("a"),
+            mux("tmux:process"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("active_pane_process_match"),
+        );
+
+        let output = resolve_links(&[launch_argv, process]);
+
+        assert_eq!(output.resolved_relationships[0].selected_link_id, "process");
+        assert_eq!(
+            output.resolved_relationships[0].competing_link_ids,
+            vec!["launch-argv".to_string()]
         );
     }
 
