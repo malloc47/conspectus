@@ -251,6 +251,10 @@ Entity notes:
   mux provider can observe active-pane process hints, open session files,
   recent session-file activity, descendant harness processes, and
   start-command session keys may refine weak cwd-based session links.
+  Process cardinality gates multi-session attribution: a mux with zero or one
+  observed non-subagent harness process should have at most one human agent
+  session attributed to it; multiple session attributions are allowed only when
+  multiple harness processes are observed.
 - `ForgePr` is a forge pull request record. GitHub is the only v1 provider, but
   the entity should not encode GitHub-specific assumptions into the graph shape.
 - `GraphLink` is the canonical candidate/evidence edge record used for

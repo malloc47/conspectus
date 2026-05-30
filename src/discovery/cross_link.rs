@@ -510,6 +510,9 @@ fn active_mux_sessions(
 
     for mux in muxes {
         let mut matches = ActiveMuxSessionMatches::default();
+        let process_evidence = process_evidence_by_mux.get(&mux.id);
+        let enforce_single_agent_session =
+            process_snapshot.is_some() && controlling_agent_process_count(process_evidence) <= 1;
 
         if let Some(evidence) = active_pane_evidence(mux, fd_reader) {
             let direct_matches: BTreeSet<_> = sessions
@@ -518,7 +521,11 @@ fn active_mux_sessions(
                 .map(|session| session.id.clone())
                 .collect();
 
-            if !direct_matches.is_empty() {
+            if direct_matches.is_empty()
+                && evidence.link_evidence != "active_pane_command_session_match"
+            {
+                matches.unresolved_identity = true;
+            } else if !direct_matches.is_empty() {
                 let child_matches: BTreeSet<_> = sessions
                     .iter()
                     .filter(|session| {
@@ -529,7 +536,7 @@ fn active_mux_sessions(
                     .map(|session| session.id.clone())
                     .collect();
 
-                let sessions = if child_matches.is_empty() {
+                let matched_sessions = if child_matches.is_empty() {
                     direct_matches
                 } else {
                     let direct_recent = most_recent_epoch(&direct_matches, sessions);
@@ -541,14 +548,22 @@ fn active_mux_sessions(
                     }
                 };
 
+                let matched_sessions = if enforce_single_agent_session {
+                    freshest_human_session(&matched_sessions, sessions)
+                } else {
+                    matched_sessions
+                };
+
                 matches.identity = Some(ActiveMuxSessionMatch {
-                    sessions,
+                    sessions: matched_sessions,
                     evidence: evidence.link_evidence,
                 });
             }
         }
 
-        if let Some(process_evidence) = process_evidence_by_mux.get(&mux.id) {
+        if !matches.has_identity_evidence()
+            && let Some(process_evidence) = process_evidence
+        {
             for evidence in process_evidence {
                 let process_matches: BTreeSet<_> = sessions
                     .iter()
@@ -570,9 +585,13 @@ fn active_mux_sessions(
 
         if matches.identity.is_none()
             && let Some(activity_match) =
-                session_file_activity_match(mux, sessions, process_evidence_by_mux.get(&mux.id))
+                session_file_activity_match(mux, sessions, process_evidence)
         {
-            matches.identity = Some(activity_match);
+            matches.identity = Some(if enforce_single_agent_session {
+                activity_match.collapse_to_freshest_human_session(sessions)
+            } else {
+                activity_match
+            });
         }
 
         if matches.has_current_evidence() {
@@ -593,6 +612,19 @@ fn most_recent_epoch(
         .filter_map(|s| s.last_active_epoch)
         .max()
         .unwrap_or(0)
+}
+
+fn freshest_human_session(
+    matches: &BTreeSet<crate::model::AgentSessionId>,
+    sessions: &[&AgentSessionNode],
+) -> BTreeSet<crate::model::AgentSessionId> {
+    sessions
+        .iter()
+        .filter(|session| matches.contains(&session.id))
+        .filter(|session| session.session_kind != Some(SessionKind::Subagent))
+        .max_by_key(|session| (session.last_active_epoch.unwrap_or(0), session.id.clone()))
+        .map(|session| BTreeSet::from([session.id.clone()]))
+        .unwrap_or_else(|| matches.clone())
 }
 
 fn session_file_activity_match(
@@ -653,16 +685,31 @@ fn epoch_close(left: i64, right: i64) -> bool {
     left.abs_diff(right) <= SESSION_FILE_ACTIVITY_WINDOW_SECONDS as u64
 }
 
+fn controlling_agent_process_count(process_evidence: Option<&Vec<ProcessPaneEvidence>>) -> usize {
+    process_evidence
+        .into_iter()
+        .flatten()
+        .filter(|evidence| !evidence.is_opencode_subagent_process())
+        .map(|evidence| evidence.matched_pid)
+        .collect::<BTreeSet<_>>()
+        .len()
+}
+
 #[derive(Default)]
 struct ActiveMuxSessionMatches {
     identity: Option<ActiveMuxSessionMatch>,
     process: Vec<ActiveMuxProcessMatch>,
+    unresolved_identity: bool,
     unresolved_process: bool,
 }
 
 impl ActiveMuxSessionMatches {
     fn has_current_evidence(&self) -> bool {
-        self.identity.is_some() || !self.process.is_empty() || self.unresolved_process
+        self.has_identity_evidence() || !self.process.is_empty() || self.unresolved_process
+    }
+
+    fn has_identity_evidence(&self) -> bool {
+        self.identity.is_some() || self.unresolved_identity
     }
 
     fn identity_match_for(
@@ -687,6 +734,15 @@ impl ActiveMuxSessionMatches {
 struct ActiveMuxSessionMatch {
     sessions: BTreeSet<crate::model::AgentSessionId>,
     evidence: &'static str,
+}
+
+impl ActiveMuxSessionMatch {
+    fn collapse_to_freshest_human_session(self, sessions: &[&AgentSessionNode]) -> Self {
+        Self {
+            sessions: freshest_human_session(&self.sessions, sessions),
+            evidence: self.evidence,
+        }
+    }
 }
 
 struct ActiveMuxProcessMatch {
@@ -717,6 +773,10 @@ impl ProcessPaneEvidence {
             return false;
         };
         normalize_path(process_cwd) == normalize_path(session_cwd)
+    }
+
+    fn is_opencode_subagent_process(&self) -> bool {
+        self.harness_key == "opencode" && self.command.to_ascii_lowercase().contains(" subagent")
     }
 }
 
@@ -1824,6 +1884,133 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+    }
+
+    #[test]
+    fn active_pane_fd_session_suppresses_conflicting_process_resume_key() {
+        let fd_target = "019e7733-0be9-7720-b828-e185f9029793";
+        let process_target = "019e434b-9eff-7110-b2af-7c963aa8085e";
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session(process_target, Some("/work/repo")),
+                session(fd_target, Some("/work/repo")),
+                mux_with_active_process("editor", Some("/work/repo"), "codex", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let processes = FakeProcessSnapshot::new([process(
+            100,
+            None,
+            &format!("codex resume {process_target}"),
+            Some("/work/repo"),
+        )]);
+        let fd_path = format!("/home/me/.codex/sessions/rollout-{fd_target}.jsonl");
+
+        infer_with_readers(
+            &mut snapshot,
+            |pid| (pid == 100).then(|| session_key_evidence_from_fd_paths([fd_path.as_str()])),
+            Some(&processes),
+        );
+
+        let concrete_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.source, NodeId::AgentSession(_))
+            })
+            .collect();
+        assert_eq!(concrete_links.len(), 1);
+        assert_eq!(
+            concrete_links[0].source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", fd_target))
+        );
+        assert_eq!(
+            concrete_links[0].source_metadata.evidence.as_deref(),
+            Some("active_pane_fd_session_match")
+        );
+    }
+
+    #[test]
+    fn single_agent_process_collapses_activity_matches_to_one_session() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session_with_activity("older", Some("/work/repo"), 1_700_000_010),
+                session_with_activity("newer", Some("/work/repo"), 1_700_000_020),
+                mux_with_active_process("editor", Some("/work/repo"), "bash", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        if let GraphNode::MuxSession(mux) = &mut snapshot.nodes[2] {
+            mux.created_epoch = Some(1_700_000_000);
+        }
+        let processes = FakeProcessSnapshot::new([process(100, None, "codex", Some("/work/repo"))]);
+
+        infer_with_process_snapshot(&mut snapshot, &processes);
+
+        let activity_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref()
+                        == Some("session_file_activity_match")
+            })
+            .collect();
+        assert_eq!(activity_links.len(), 1);
+        assert_eq!(
+            activity_links[0].source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "newer"))
+        );
+    }
+
+    #[test]
+    fn multiple_agent_processes_allow_multiple_session_attribution() {
+        let codex_id = "019e7733-0be9-7720-b828-e185f9029793";
+        let claude_id = "c1901a9e-f3db-48e3-a46c-3f92c7c0f2d3";
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session(codex_id, Some("/work/repo")),
+                GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("claude-code", "/state", claude_id),
+                    harness_key: "claude-code".to_string(),
+                    cwd: Some("/work/repo".to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                    session_kind: None,
+                }),
+                mux_with_active_process("editor", Some("/work/repo"), "bash", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let processes = FakeProcessSnapshot::new([
+            process(100, None, "bash", Some("/work/repo")),
+            process(
+                101,
+                Some(100),
+                &format!("codex resume {codex_id}"),
+                Some("/work/repo"),
+            ),
+            process(
+                102,
+                Some(100),
+                &format!("claude --resume {claude_id}"),
+                Some("/work/repo"),
+            ),
+        ]);
+
+        infer_with_process_snapshot(&mut snapshot, &processes);
+
+        let process_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref() == Some("active_pane_process_match")
+            })
+            .collect();
+        assert_eq!(process_links.len(), 2);
     }
 
     #[test]

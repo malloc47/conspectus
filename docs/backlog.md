@@ -3004,7 +3004,9 @@ failure:
     same-cwd matches are ambiguous, and skip the linker with
     `CONSPECTUS_DISABLE_PROCTREE`. Tests cover direct and nested
     process matches, exact command-key matches, ambiguous same-cwd
-    suppression, unknown binaries, missing process data, unresolved
+    suppression, fd evidence suppressing conflicting stale process
+    resume ids, process-cardinality gating for multi-session mux
+    attribution, unknown binaries, missing process data, unresolved
     evidence, and resolver ranking above launch argv.
 
 - [x] `H-MUXPROC-003` Add read-only session-file activity correlation.
@@ -3036,10 +3038,12 @@ failure:
     transcript files, and opencode session state. Fresh same-harness /
     same-cwd sessions near mux creation or activity emit
     `session_file_activity_match`, ranking below fd/hooks/state but
-    above process, launch argv, and cwd-only evidence. Ambiguous
-    same-cwd fresh sessions remain multiple candidates. Inotify /
-    fanotify continuous-mode event ingestion remains deferred to the
-    continuous server workstream.
+    above process, launch argv, and cwd-only evidence. When process
+    cardinality shows zero or one non-subagent harness process, fresh
+    same-cwd activity candidates collapse to one human session; multiple
+    attributions remain possible only when multiple harness processes
+    are observed. Inotify / fanotify continuous-mode event ingestion
+    remains deferred to the continuous server workstream.
 
 - [ ] `H-MUXPROC-004` Read harness state databases for live-session
   hints without mutating logs.

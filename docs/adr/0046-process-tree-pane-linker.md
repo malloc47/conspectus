@@ -41,13 +41,22 @@ their parent PIDs, command names, command lines, and current working
 directories.
 
 When a matched harness process can be paired with discovered `AgentSession`
-nodes by harness key and cwd, Conspectus emits `LinkedToMux` candidates with
-`match_kind = "active_pane_process_match"`, `StrongDiscovered` provenance, and
-high confidence. If no matching session exists yet, Conspectus preserves the
-evidence as a `MuxSession -> unresolved AgentSession` candidate carrying the
-harness key, pane root PID, matched process PID, command, depth, and cwd. That
-unresolved edge is diagnostic evidence only until a concrete session node is
-discovered in a later run.
+nodes by an exact command session key, or by a single harness/cwd match,
+Conspectus emits `LinkedToMux` candidates with `match_kind =
+"active_pane_process_match"`, `StrongDiscovered` provenance, and high
+confidence. If no matching session exists yet, or if same-cwd matching is
+ambiguous, Conspectus preserves the evidence as a `MuxSession -> unresolved
+AgentSession` candidate carrying the harness key, pane root PID, matched
+process PID, command, depth, and cwd. That unresolved edge is diagnostic
+evidence only until a concrete session node is discovered in a later run.
+
+The process tree also gates mux cardinality. If Conspectus observes zero or
+one non-subagent harness process under the mux active pane, it treats the pane
+as controlling at most one human agent session and collapses competing
+identity candidates to the freshest non-subagent session. Multiple concrete
+session attributions are allowed only when the process tree observes multiple
+non-subagent harness processes. openCode subagent worker processes and
+sessions are not counted as independent mux occupants.
 
 Resolver ranking treats `active_pane_process_match` as stronger than generic
 cwd matching but weaker than explicit current-session evidence from hooks,
@@ -63,13 +72,15 @@ mirroring the tmux and forge provider toggles.
 - The implementation avoids a new dependency and keeps platform support honest:
   Linux works through `/proc`; other platforms simply do not contribute this
   evidence yet.
-- The linker cannot identify the current session id by itself. It only proves
-  that a harness process is live in a pane and relies on cwd/harness matching or
+- The linker cannot identify the current session id by itself unless the
+  process command carries an exact session key. Otherwise it only proves that a
+  harness process is live in a pane and relies on cwd/harness matching or
   stronger sources for exact session attribution.
 - Process cwd can be unreadable for permission or lifecycle reasons. Missing
   cwd prevents session pairing but does not fail graph discovery.
-- Multiple same-harness sessions in the same cwd remain multiple candidates;
-  the resolver may use activity recency to pick a projection default.
+- Multiple same-harness sessions in the same cwd remain unresolved or collapse
+  to one candidate unless process cardinality shows multiple harness processes
+  for the mux.
 
 ## Alternatives Considered
 
