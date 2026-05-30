@@ -769,6 +769,39 @@ mod tests {
     }
 
     #[test]
+    fn session_mux_resolver_prefers_file_activity_over_process_match() {
+        let process = linked_to_mux_link(
+            "process",
+            session("a"),
+            mux("tmux:process"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(5_000),
+            Some("active_pane_process_match"),
+        );
+        let activity = linked_to_mux_link(
+            "activity",
+            session("a"),
+            mux("tmux:activity"),
+            Provenance::StrongDiscovered,
+            Confidence::Medium,
+            Some(1_000),
+            Some("session_file_activity_match"),
+        );
+
+        let output = resolve_links(&[process, activity]);
+
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id,
+            "activity"
+        );
+        assert_eq!(
+            output.resolved_relationships[0].competing_link_ids,
+            vec!["process".to_string()]
+        );
+    }
+
+    #[test]
     fn session_mux_resolver_emits_ambiguity_diagnostic_for_multiple_candidates() {
         let one = linked_to_mux_link(
             "one",

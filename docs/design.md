@@ -249,8 +249,8 @@ Entity notes:
 - `MuxSession` is a terminal multiplexer session. It can be linked to an agent
   session and/or rooted in a workspace, repo, checkout, or fork path. When the
   mux provider can observe active-pane process hints, open session files,
-  descendant harness processes, and start-command session keys may refine weak
-  cwd-based session links.
+  recent session-file activity, descendant harness processes, and
+  start-command session keys may refine weak cwd-based session links.
 - `ForgePr` is a forge pull request record. GitHub is the only v1 provider, but
   the entity should not encode GitHub-specific assumptions into the graph shape.
 - `GraphLink` is the canonical candidate/evidence edge record used for

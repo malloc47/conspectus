@@ -31,6 +31,7 @@ use crate::model::{
 
 const ADAPTER_NAME: &str = "cross_link";
 const PROCESS_TREE_MAX_DEPTH: usize = 4;
+const SESSION_FILE_ACTIVITY_WINDOW_SECONDS: i64 = 15 * 60;
 
 pub fn infer(snapshot: &mut GraphSnapshot) {
     let process_snapshot = LinuxProcSnapshot;
@@ -406,6 +407,19 @@ fn insert_process_fields(fields: &mut crate::model::Metadata, evidence: &Process
         "process_command".to_string(),
         serde_json::Value::String(evidence.command.clone()),
     );
+    if !evidence.session_keys.is_empty() {
+        fields.insert(
+            "process_session_keys".to_string(),
+            serde_json::Value::Array(
+                evidence
+                    .session_keys
+                    .iter()
+                    .cloned()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
     if let Some(cwd) = &evidence.cwd {
         fields.insert(
             "process_cwd".to_string(),
@@ -542,16 +556,23 @@ fn active_mux_sessions(
                     .map(|session| session.id.clone())
                     .collect();
 
-                if process_matches.is_empty() {
-                    matches.unresolved_process = true;
-                    unresolved_links.push(process_unresolved_link(mux, evidence));
-                } else {
+                if process_matches.len() == 1 {
                     matches.process.push(ActiveMuxProcessMatch {
                         sessions: process_matches,
                         evidence: evidence.clone(),
                     });
+                } else {
+                    matches.unresolved_process = true;
+                    unresolved_links.push(process_unresolved_link(mux, evidence));
                 }
             }
+        }
+
+        if matches.identity.is_none()
+            && let Some(activity_match) =
+                session_file_activity_match(mux, sessions, process_evidence_by_mux.get(&mux.id))
+        {
+            matches.identity = Some(activity_match);
         }
 
         if matches.has_current_evidence() {
@@ -572,6 +593,64 @@ fn most_recent_epoch(
         .filter_map(|s| s.last_active_epoch)
         .max()
         .unwrap_or(0)
+}
+
+fn session_file_activity_match(
+    mux: &MuxSessionNode,
+    sessions: &[&AgentSessionNode],
+    process_evidence: Option<&Vec<ProcessPaneEvidence>>,
+) -> Option<ActiveMuxSessionMatch> {
+    let anchor_epoch = mux.created_epoch.or(mux.activity_epoch)?;
+    let mux_cwd = mux
+        .active_pane_current_path
+        .as_deref()
+        .or(mux.cwd.as_deref())
+        .map(normalize_path)?;
+    let harnesses = activity_harnesses(mux, process_evidence);
+    if harnesses.is_empty() {
+        return None;
+    }
+
+    let sessions: BTreeSet<_> = sessions
+        .iter()
+        .filter(|session| harnesses.contains(&session.harness_key))
+        .filter(|session| {
+            session
+                .cwd
+                .as_deref()
+                .is_some_and(|cwd| normalize_path(cwd) == mux_cwd)
+        })
+        .filter(|session| {
+            session
+                .last_active_epoch
+                .is_some_and(|epoch| epoch_close(epoch, anchor_epoch))
+        })
+        .map(|session| session.id.clone())
+        .collect();
+
+    (!sessions.is_empty()).then_some(ActiveMuxSessionMatch {
+        sessions,
+        evidence: "session_file_activity_match",
+    })
+}
+
+fn activity_harnesses(
+    mux: &MuxSessionNode,
+    process_evidence: Option<&Vec<ProcessPaneEvidence>>,
+) -> BTreeSet<String> {
+    let mut harnesses = active_pane_harnesses(mux);
+    if let Some(process_evidence) = process_evidence {
+        harnesses.extend(
+            process_evidence
+                .iter()
+                .map(|evidence| evidence.harness_key.clone()),
+        );
+    }
+    harnesses
+}
+
+fn epoch_close(left: i64, right: i64) -> bool {
+    left.abs_diff(right) <= SESSION_FILE_ACTIVITY_WINDOW_SECONDS as u64
 }
 
 #[derive(Default)]
@@ -618,6 +697,7 @@ struct ActiveMuxProcessMatch {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProcessPaneEvidence {
     harness_key: String,
+    session_keys: BTreeSet<String>,
     root_pid: i64,
     matched_pid: i64,
     depth: usize,
@@ -629,6 +709,9 @@ impl ProcessPaneEvidence {
     fn matches_session(&self, session: &AgentSessionNode) -> bool {
         if session.harness_key != self.harness_key {
             return false;
+        }
+        if !self.session_keys.is_empty() {
+            return self.session_keys.contains(&session.id.session_key);
         }
         let (Some(process_cwd), Some(session_cwd)) = (&self.cwd, &session.cwd) else {
             return false;
@@ -762,6 +845,7 @@ fn active_pane_process_evidence(
                 if seen_harness_pid.insert((harness_key.clone(), pid)) {
                     output.push(ProcessPaneEvidence {
                         harness_key,
+                        session_keys: uuid_like_values(command),
                         root_pid,
                         matched_pid: pid,
                         depth,
@@ -1212,6 +1296,18 @@ mod tests {
         })
     }
 
+    fn session_with_activity(id: &str, cwd: Option<&str>, last_active_epoch: i64) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", id),
+            harness_key: "codex".to_string(),
+            cwd: cwd.map(str::to_string),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(last_active_epoch),
+            session_kind: None,
+        })
+    }
+
     fn mux(native: &str, cwd: Option<&str>) -> GraphNode {
         GraphNode::MuxSession(MuxSessionNode {
             id: MuxSessionId::new(format!("tmux:{native}")),
@@ -1648,6 +1744,89 @@ mod tests {
     }
 
     #[test]
+    fn active_pane_process_match_does_not_fan_out_across_same_cwd_sessions() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("old-session", Some("/work/repo")),
+                session("new-session", Some("/work/repo")),
+                mux_with_active_process("editor", Some("/work/repo"), "bash", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let processes = FakeProcessSnapshot::new([process(100, None, "codex", Some("/work/repo"))]);
+
+        infer_with_process_snapshot(&mut snapshot, &processes);
+
+        let concrete_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.source, NodeId::AgentSession(_))
+            })
+            .collect();
+        assert!(
+            concrete_links.is_empty(),
+            "ambiguous cwd process evidence should not fan out: {concrete_links:#?}"
+        );
+
+        let unresolved = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.source, NodeId::MuxSession(_))
+            })
+            .expect("unresolved process evidence");
+        assert_eq!(
+            unresolved.source_metadata.evidence.as_deref(),
+            Some("active_pane_process_match")
+        );
+    }
+
+    #[test]
+    fn active_pane_process_match_uses_process_command_session_key() {
+        let target = "019e434b-9eff-7110-b2af-7c963aa8085e";
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("019e4354-26b9-7ad2-9521-4ad921cc312b", Some("/work/repo")),
+                session(target, Some("/work/repo")),
+                mux_with_active_process("editor", Some("/work/repo"), "bash", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let processes = FakeProcessSnapshot::new([process(
+            100,
+            None,
+            &format!("codex resume {target}"),
+            Some("/work/repo"),
+        )]);
+
+        infer_with_process_snapshot(&mut snapshot, &processes);
+
+        let link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.source, NodeId::AgentSession(_))
+            })
+            .expect("exact process command link");
+        assert_eq!(
+            link.source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", target))
+        );
+        assert_eq!(
+            link.source_metadata
+                .fields
+                .get("process_session_keys")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn active_pane_process_unknown_binary_degrades_without_link() {
         let mut snapshot = GraphSnapshot {
             nodes: vec![
@@ -1717,6 +1896,90 @@ mod tests {
         assert_eq!(evidence.node_type, "agent_session");
         assert_eq!(evidence.harness_key.as_deref(), Some("codex"));
         assert_eq!(evidence.path.as_deref(), Some("/work/repo"));
+    }
+
+    #[test]
+    fn session_file_activity_match_links_recent_same_harness_session() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session_with_activity("recent", Some("/work/repo"), 1_700_000_050),
+                session_with_activity("stale", Some("/work/repo"), 1_699_000_000),
+                mux_with_active_command("one", Some("/work/repo"), "codex"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        if let GraphNode::MuxSession(mux) = &mut snapshot.nodes[2] {
+            mux.created_epoch = Some(1_700_000_000);
+        }
+
+        infer_without_process_tree(&mut snapshot);
+
+        let mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert_eq!(mux_links.len(), 1);
+        assert_eq!(
+            mux_links[0].source,
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "recent"))
+        );
+        assert_eq!(
+            mux_links[0].source_metadata.evidence.as_deref(),
+            Some("session_file_activity_match")
+        );
+    }
+
+    #[test]
+    fn stale_session_file_activity_does_not_emit_activity_match() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session_with_activity("stale", Some("/work/repo"), 1_699_000_000),
+                mux_with_active_command("one", Some("/work/repo"), "codex"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        if let GraphNode::MuxSession(mux) = &mut snapshot.nodes[1] {
+            mux.created_epoch = Some(1_700_000_000);
+        }
+
+        infer_without_process_tree(&mut snapshot);
+
+        assert!(
+            snapshot.candidate_links.iter().all(|link| {
+                link.source_metadata.evidence.as_deref() != Some("session_file_activity_match")
+            }),
+            "stale session activity should not become activity evidence: {:#?}",
+            snapshot.candidate_links
+        );
+    }
+
+    #[test]
+    fn ambiguous_same_cwd_activity_matches_remain_candidates() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session_with_activity("one", Some("/work/repo"), 1_700_000_010),
+                session_with_activity("two", Some("/work/repo"), 1_700_000_020),
+                mux_with_active_command("one", Some("/work/repo"), "codex"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        if let GraphNode::MuxSession(mux) = &mut snapshot.nodes[2] {
+            mux.created_epoch = Some(1_700_000_000);
+        }
+
+        infer_without_process_tree(&mut snapshot);
+
+        let activity_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref()
+                        == Some("session_file_activity_match")
+            })
+            .collect();
+        assert_eq!(activity_links.len(), 2);
     }
 
     #[test]

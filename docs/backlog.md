@@ -2998,14 +2998,16 @@ failure:
     ADR 0046. Cross-link inference can walk a Linux `/proc` snapshot
     from each tmux active-pane PID, match supported harness binaries
     through nested shell children, emit `active_pane_process_match`
-    `LinkedToMux` candidates for discovered same-harness/same-cwd
-    sessions, preserve unresolved agent evidence when no session node
-    exists yet, and skip the linker with `CONSPECTUS_DISABLE_PROCTREE`.
-    Tests cover direct and nested process matches, unknown binaries,
-    missing process data, unresolved evidence, and resolver ranking
-    above launch argv.
+    `LinkedToMux` candidates for exact process command session keys or
+    a single discovered same-harness/same-cwd session, preserve
+    unresolved agent evidence when no session node exists yet or
+    same-cwd matches are ambiguous, and skip the linker with
+    `CONSPECTUS_DISABLE_PROCTREE`. Tests cover direct and nested
+    process matches, exact command-key matches, ambiguous same-cwd
+    suppression, unknown binaries, missing process data, unresolved
+    evidence, and resolver ranking above launch argv.
 
-- [ ] `H-MUXPROC-003` Add read-only session-file activity correlation.
+- [x] `H-MUXPROC-003` Add read-only session-file activity correlation.
   - Scope: improve fresh-session attribution without sending input to
     running agents. Add a read-only observation layer that correlates
     tmux pane PIDs with harness session files by recent creation /
@@ -3028,6 +3030,16 @@ failure:
     non-cwd `LinkedToMux` candidate after the session file appears.
   - Blockers: `H-MUXPROC-002`; friendlier after the continuous-mode
     snapshot workstream starts.
+  - Outcome: one-shot discovery now correlates active-pane harness
+    identity, mux cwd, and read-only harness session activity
+    timestamps already collected from Codex rollout files, Claude
+    transcript files, and opencode session state. Fresh same-harness /
+    same-cwd sessions near mux creation or activity emit
+    `session_file_activity_match`, ranking below fd/hooks/state but
+    above process, launch argv, and cwd-only evidence. Ambiguous
+    same-cwd fresh sessions remain multiple candidates. Inotify /
+    fanotify continuous-mode event ingestion remains deferred to the
+    continuous server workstream.
 
 - [ ] `H-MUXPROC-004` Read harness state databases for live-session
   hints without mutating logs.
