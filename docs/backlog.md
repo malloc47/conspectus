@@ -2907,10 +2907,11 @@ failure:
    activity correlation. This improves fresh-session and post-switch
    attribution without requiring opt-in hooks, and gives the resolver a
    middle-strength signal above cwd-only matching.
-7. Do `H-MUXPROC-004` only after a schema audit proves stable
-   read-only state fields. It is useful for Codex/opencode and future
-   Claude state, but it has more locking/schema risk than hooks or
-   file-activity correlation.
+7. Do `H-MUXPROC-004` per ADR 0048. The May 2026 audit closed the
+   opencode portion as a no-op and scoped the work to a Codex
+   state-reader slice plus a Codex log-derived live-attribution
+   linker. The log linker is also the Codex-side fix for the same
+   stale-`--resume` drift class as `H-MUXPROC-015`.
 8. Land `H-MUXPROC-008` as soon as the ADR path is open, or fold it
    into `H-MUXPROC-001` if that ADR is still being written. This keeps
    terminal injection and slash-command probing out of the attribution
@@ -3063,28 +3064,64 @@ failure:
   - Blockers: none; defer until the metadata-only process evidence
     approach shows more sustained pressure.
 
-- [ ] `H-MUXPROC-004` Read harness state databases for live-session
-  hints without mutating logs.
-  - Scope: for harnesses that maintain sqlite or other indexed state,
-    add read-only queries that can strengthen session ↔ mux
-    attribution. Codex currently opens `state_*.sqlite` and
-    `logs_*.sqlite`; opencode has a session database; future Claude
-    Code state may expose a durable index. The provider should open
-    databases in read-only mode, avoid long-lived locks, and extract
-    only stable fields such as session id, cwd, last activity, parent
-    session, and any pid / terminal / server binding if present.
-    The output should refine existing candidates; it must not become
-    the only source of session discovery.
-  - Tests: temp sqlite fixtures for each supported schema, missing
-    database degradation, unknown schema degradation, read-only lock
-    behavior, and resolver tests proving database evidence ranks
-    above cwd-only but below direct fd evidence.
-  - Manual checks: run against live Codex and opencode state stores
-    while sessions are active; confirm no write-ahead-log churn is
-    introduced by Conspectus.
-  - Blockers: schema audit per harness; ADR required before any new
-    persistent schema dependency or long-running read strategy is
-    introduced.
+- [ ] `H-MUXPROC-004` Read Codex state and log databases for live
+  session attribution.
+  - Scope: per ADR 0048, add two read-only Codex slices under the
+    existing harness state-root discovery. The state-reader slice
+    globs `state_*.sqlite`, selects the highest numeric suffix, and
+    emits one `AgentSession` per `threads` row (`id`, `rollout_path`,
+    `cwd`, title with `first_user_message` fallback, millisecond
+    timestamps, git metadata, model, cli_version, agent role/nickname,
+    archived flag) plus one intra-harness `parent_session` candidate
+    per `thread_spawn_edges` row on the ADR 0018 shape. The
+    log-linker slice reads `logs_*.sqlite` only to resolve the
+    freshest `thread_id` for each live Codex pid by parsing
+    `process_uuid` as `pid:<os_pid>:<uuid>` and querying within a
+    15-minute `ts` floor matching ADR 0028. The resulting
+    `LinkedToMux` candidate ranks above
+    `active_pane_command_session_match` and
+    `active_pane_fd_session_match` for Codex and demotes stale
+    command-session candidates for the same mux, mirroring the
+    hook-sidecar override rule. Fresh log evidence may synthesize a
+    sparse `AgentSession` when state has not yet observed the thread,
+    matching the ADR 0028 synthesis path. Both readers use
+    `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX` plus
+    `PRAGMA query_only = ON`, never select `feedback_log_body`, and
+    cap/normalize `first_user_message` like opencode previews.
+  - Tests: temp sqlite fixtures for the current `state_5` and
+    `logs_2` schemas; missing-database and unknown-schema
+    degradation; column-probe behavior when a known column is absent;
+    parent-lineage candidate emission and self/empty-parent skipping;
+    log-linker fixture proving the freshest `thread_id` wins per pid;
+    pid-reuse disambiguation via the trailing UUID; 15-minute ts
+    floor rejecting stale rows; resolver tests proving codex
+    log-derived candidates rank above command and fd evidence and
+    override stale `active_pane_command_session_match`; synthesized
+    sparse session round-tripping into the state-backed node when
+    state catches up.
+  - Manual checks: run against the live Codex state/log stores while
+    a session is active; reproduce the in-process resume drift case
+    (launch argv names session A, in-process switch to session B)
+    and confirm `conspectus graph --format json` and `conspectus tui`
+    link the mux to B without consulting argv. Confirm no write-ahead
+    log churn from Conspectus reads.
+  - Related: ADR 0048; ADR 0028 (sidecar TTL and demotion rule
+    reused); ADR 0046 (process-tree provides the live Codex pid set);
+    ADR 0018 (parent_session shape); `H-MUXPROC-015` (Claude analogue
+    of the drift case this closes for Codex); `H-MUXPROC-005` /
+    `H-MUXPROC-006` (Codex `remote_control_enrollments` belongs to
+    the control-plane audit, not here).
+  - Blockers: none. ADR 0048 supplies the persistent schema-dependency
+    decision the original blocker required.
+  - **audit slice landed**: ADR 0048 records the May 2026 audit of
+    opencode `opencode.db`, Codex `state_5.sqlite`, and Codex
+    `logs_2.sqlite`. opencode's slice of 004 closes as a no-op
+    because the schema carries no live process/server binding beyond
+    what the existing reader already extracts; live opencode↔mux
+    attribution remains the responsibility of `H-MUXPROC-007` /
+    `H-MUXPROC-014`. Codex `jobs`, `agent_jobs`, `thread_goals`, and
+    `stage1_outputs` were empty on the audit machine and are deferred
+    until in-the-wild usage justifies coverage.
 
 - [ ] `H-MUXPROC-005` Audit harness control planes for non-mutating
   current-session queries.

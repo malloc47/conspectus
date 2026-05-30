@@ -352,6 +352,12 @@ The sane default is:
 - read fresh harness hook sidecar records from the user's Conspectus state
   directory when present, using them as current-session evidence rather than
   durable user intent
+- read read-only harness state and log databases when the harness maintains
+  them, using stable indexed fields to discover sessions and to derive live
+  mux attribution; for Codex this is the `state_*.sqlite` threads/lineage
+  reader plus a `logs_*.sqlite` linker that resolves the active thread for
+  each live Codex pid by parsing `process_uuid = pid:<os_pid>:<uuid>`
+  within a 15-minute freshness window (ADR 0048)
 - inspect cwd and explicitly configured scan roots
 - read known workspace metadata from supported providers when a workspace is
   discovered
@@ -372,6 +378,15 @@ harness hooks outside project trees. They may refine mux/session attribution
 when fresh, but stale records should not override active process evidence.
 Conspectus must not inject terminal input or slash commands to ask an agent for
 its current session id.
+
+Read-only harness state and log databases are equivalent rebuildable
+observations owned by the harness itself rather than by Conspectus.
+Conspectus opens them with read-only flags and `query_only` enabled, never
+selects privacy-sensitive payload columns, and treats their evidence on the
+same freshness rules as hook sidecars: fresh log-derived current-session
+evidence outranks command/fd evidence and demotes stale launch-argv
+candidates for the same mux; stale rows are ignored for active attribution
+(ADR 0048).
 
 Additive discovery:
 
