@@ -4,6 +4,8 @@ pub mod aliases;
 pub mod api;
 pub mod config;
 pub mod declared;
+#[cfg(any(test, debug_assertions))]
+pub mod dev_scenarios;
 pub mod discovery;
 pub mod filter;
 pub mod hook;

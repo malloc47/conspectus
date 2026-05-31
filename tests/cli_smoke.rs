@@ -2456,3 +2456,47 @@ fn tui_rejects_unknown_sessions_grouping_value() {
         .failure()
         .stderr(predicate::str::contains("invalid value"));
 }
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_list_includes_named_replay_worlds() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["dev", "scenario", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ambiguous-mux"))
+        .stdout(predicate::str::contains("codex-fd-current"));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_graph_renders_generated_world() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["dev", "scenario", "graph", "exact-match"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"nodes\""))
+        .stdout(predicate::str::contains("session-x"))
+        .stdout(predicate::str::contains("tmux:editor"));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_table_renders_generated_world() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args([
+            "dev",
+            "scenario",
+            "table",
+            "ambiguous-mux",
+            "sessions",
+            "--wide",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ambiguous"))
+        .stdout(predicate::str::contains("MUX"));
+}

@@ -36,6 +36,8 @@ mod ui;
 pub mod widgets;
 
 pub use app::{App, Msg};
+#[cfg(any(test, debug_assertions))]
+pub use runtime::run_static;
 pub use theme::Theme;
 
 /// Knobs the CLI shell passes into the TUI. The TUI does not read

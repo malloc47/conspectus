@@ -3823,7 +3823,7 @@ launched through CLI/TUI surfaces for manual inspection.
   - Blockers: `TEST-001`; coordinates with `T8-006` so buffer
     snapshot coverage is not duplicated.
 
-- [ ] `TEST-006` Expose named replay scenarios to CLI and TUI runs.
+- [x] `TEST-006` Expose named replay scenarios to CLI and TUI runs.
   - Scope: promote the replay harness's useful worlds into a small
     named scenario registry shared by tests and developer commands.
     Each scenario should materialize an isolated temp world and return
@@ -3846,6 +3846,15 @@ launched through CLI/TUI surfaces for manual inspection.
   - Blockers: `TEST-001`; useful before `TEST-005` and `GV-002`/`GV-003`
     so interaction tests and visualization exports share scenario
     names instead of rebuilding fixtures independently.
+  - Outcome: added a debug/test-only `dev_scenarios` module with
+    named worlds for empty, orphan-session, exact-match,
+    ambiguous-mux, hook-supersession, Codex fd-current,
+    workspace-pr, and fork-lineage cases. Added hidden debug CLI
+    commands under `conspectus dev scenario` for list, graph,
+    table, node, and static TUI launch. Scenario tests prove every
+    world materializes, resolves, renders graph JSON and table output,
+    and builds a TUI sessions row tree without reading real home,
+    tmux, `/proc`, or network state.
 
 ### Session Naming
 

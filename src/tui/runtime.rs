@@ -57,6 +57,19 @@ pub fn run(config: RunConfig) -> Result<()> {
     result
 }
 
+/// Run a static, pre-materialized graph in the TUI. This is for
+/// debug-only replay scenarios: it lets developers inspect edge-case
+/// worlds through the real renderer and reducer without teaching
+/// production discovery about fixtures.
+#[cfg(any(test, debug_assertions))]
+pub fn run_static(config: RunConfig, snapshot: crate::model::GraphSnapshot) -> Result<()> {
+    let mut terminal = ratatui::init();
+    let _ = terminal.clear();
+    let result = static_event_loop(&mut terminal, config, snapshot);
+    ratatui::restore();
+    result
+}
+
 /// Block on terminal input, dispatching crossterm events to the
 /// pure reducer until the app signals quit.
 fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
@@ -239,6 +252,125 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(any(test, debug_assertions))]
+fn static_event_loop(
+    terminal: &mut DefaultTerminal,
+    config: RunConfig,
+    snapshot: crate::model::GraphSnapshot,
+) -> Result<()> {
+    let mut app = App::new(config.clone());
+    set_static_data(&mut app, &config, &snapshot)?;
+    let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
+    refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);
+    let poll_timeout = Duration::from_millis(100);
+
+    while !app.should_quit() {
+        terminal.draw(|frame| ui::draw(&app, frame))?;
+        if event::poll(poll_timeout)? {
+            let event = event::read()?;
+            let viewport = terminal.size()?.height.saturating_sub(2);
+            let prev_mux_target = current_mux_target(&app);
+            let action = static_action_for_event(&app, event, viewport);
+            match action {
+                Some(Action::Msg(msg)) => app.update(*msg),
+                Some(Action::OpenHelp) => app.open_help_overlay(),
+                Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(&mut app, key),
+                Some(Action::OpenSearch) => {
+                    app.open_search_overlay();
+                    app.update(Msg::SetStatus(Some(
+                        "search: type to filter · Enter pick · Esc close".to_string(),
+                    )));
+                }
+                Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(&mut app, key),
+                Some(Action::SwitchView(view)) => {
+                    app.apply_controls_action(
+                        crate::tui::widgets::controls::ControlsAction::SwitchView(view),
+                    );
+                    set_static_data(&mut app, &config, &snapshot)?;
+                }
+                Some(Action::CycleView(delta)) => {
+                    let next = cycle_view(app.config().default_view, delta);
+                    app.apply_controls_action(
+                        crate::tui::widgets::controls::ControlsAction::SwitchView(next),
+                    );
+                    set_static_data(&mut app, &config, &snapshot)?;
+                }
+                Some(Action::Refresh) => {
+                    set_static_data(&mut app, &config, &snapshot)?;
+                    app.update(Msg::SetStatus(Some(
+                        "scenario snapshot reloaded".to_string(),
+                    )));
+                }
+                Some(Action::Attach) => {
+                    app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; attach is disabled".to_string(),
+                    )));
+                }
+                Some(Action::Resume) => {
+                    app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; resume is disabled".to_string(),
+                    )));
+                }
+                Some(Action::OpenRename)
+                | Some(Action::RenameOverlayKey(_))
+                | Some(Action::OpenControls)
+                | Some(Action::OpenControlsAtFilters)
+                | Some(Action::ControlsOverlayKey(_))
+                | Some(Action::CycleGrouping(_))
+                | Some(Action::ClearFilters) => {
+                    app.update(Msg::SetStatus(Some(
+                        "scenario TUI supports navigation, search, help, and view switching"
+                            .to_string(),
+                    )));
+                }
+                None => {}
+            }
+            refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(any(test, debug_assertions))]
+fn set_static_data(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: &crate::model::GraphSnapshot,
+) -> Result<()> {
+    let conn = crate::query::materialize_snapshot(snapshot)?;
+    let tree = build_tree_for_view(&conn, app.config())?;
+    let database = GraphDb::new(conn);
+    let initial_selection_hint = launch_context_row_id(&tree);
+    app.update(Msg::SetData {
+        snapshot: database,
+        tree,
+        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+        initial_selection_hint,
+    });
+    populate_provider_status(app, config);
+    Ok(())
+}
+
+#[cfg(any(test, debug_assertions))]
+fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
+    if app.help_overlay().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::HelpOverlayKey(key)),
+            _ => None,
+        };
+    }
+    if app.search_overlay().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                Some(Action::SearchOverlayKey(key))
+            }
+            _ => None,
+        };
+    }
+    translate(event, viewport).map(|action| remap_for_focus(action, app.focus()))
 }
 
 /// Spawn a background thread that runs discovery and sends the resolved

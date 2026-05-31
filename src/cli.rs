@@ -44,6 +44,8 @@ impl Cli {
             Command::Rename(args) => args.run(),
             Command::Alias(args) => args.run(),
             Command::Query(args) => args.run(),
+            #[cfg(debug_assertions)]
+            Command::Dev(args) => args.run(),
         }
     }
 }
@@ -74,6 +76,169 @@ enum Command {
     Alias(AliasArgs),
     /// Run a read-only SQL query against the graph (ADR 0036).
     Query(QueryArgs),
+    /// Debug-only developer commands.
+    #[cfg(debug_assertions)]
+    #[command(hide = true)]
+    Dev(DevArgs),
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct DevArgs {
+    #[command(subcommand)]
+    command: DevCommand,
+}
+
+#[cfg(debug_assertions)]
+impl DevArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            DevCommand::Scenario(args) => args.run(),
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Subcommand)]
+enum DevCommand {
+    /// Materialize and inspect named replay scenarios.
+    Scenario(DevScenarioArgs),
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct DevScenarioArgs {
+    #[command(subcommand)]
+    command: DevScenarioCommand,
+}
+
+#[cfg(debug_assertions)]
+impl DevScenarioArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            DevScenarioCommand::List => {
+                for scenario in conspectus::dev_scenarios::SCENARIOS {
+                    println!("{}\t{}", scenario.name, scenario.description);
+                }
+                Ok(())
+            }
+            DevScenarioCommand::Graph(args) => args.run(),
+            DevScenarioCommand::Table(args) => args.run(),
+            DevScenarioCommand::Node(args) => args.run(),
+            DevScenarioCommand::Tui(args) => args.run(),
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Subcommand)]
+enum DevScenarioCommand {
+    /// List available scenario names.
+    List,
+    /// Render resolved graph JSON for a scenario.
+    Graph(DevScenarioGraphArgs),
+    /// Render a table row-type for a scenario.
+    Table(DevScenarioTableArgs),
+    /// Show one node from a scenario.
+    Node(DevScenarioNodeArgs),
+    /// Open the interactive TUI on a static scenario graph.
+    Tui(DevScenarioTuiArgs),
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct DevScenarioGraphArgs {
+    name: String,
+}
+
+#[cfg(debug_assertions)]
+impl DevScenarioGraphArgs {
+    fn run(self) -> Result<()> {
+        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        println!("{}", world.render_graph_json()?);
+        Ok(())
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct DevScenarioTableArgs {
+    name: String,
+    /// Row-type to render: sessions, mux, union, prs, or forks.
+    rows: String,
+    /// Force untruncated output.
+    #[arg(long)]
+    wide: bool,
+    /// Render at exactly this many columns.
+    #[arg(long, value_name = "N")]
+    width: Option<usize>,
+    /// Row layout.
+    #[arg(long, value_enum, default_value_t = LayoutFlag::Columnar)]
+    layout: LayoutFlag,
+}
+
+#[cfg(debug_assertions)]
+impl DevScenarioTableArgs {
+    fn run(self) -> Result<()> {
+        let projection = config::Projection::parse(&self.rows).map_err(|err| anyhow!(err))?;
+        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let options = match (self.layout, self.width, self.wide) {
+            (LayoutFlag::Columnar, Some(width), _) => {
+                conspectus::output::table::RenderOptions::columnar_width(width)
+            }
+            (LayoutFlag::Columnar, None, _) => conspectus::output::table::RenderOptions::wide(),
+            (LayoutFlag::Card, Some(width), _) => {
+                conspectus::output::table::RenderOptions::card_width(width)
+            }
+            (LayoutFlag::Card, None, _) => conspectus::output::table::RenderOptions::card(),
+        };
+        let table = world.render_table(projection, options)?;
+        print!("{table}");
+        Ok(())
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct DevScenarioNodeArgs {
+    name: String,
+    id: String,
+    /// When to colorize the output.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
+}
+
+#[cfg(debug_assertions)]
+impl DevScenarioNodeArgs {
+    fn run(self) -> Result<()> {
+        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
+        print!("{}", world.render_node_show(&self.id, color)?);
+        Ok(())
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Args)]
+struct DevScenarioTuiArgs {
+    name: String,
+    /// Initial left-panel organization.
+    #[arg(long, value_enum, default_value_t = ViewFlag::Sessions)]
+    view: ViewFlag,
+    /// When to colorize the output.
+    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
+    color: ColorFlag,
+}
+
+#[cfg(debug_assertions)]
+impl DevScenarioTuiArgs {
+    fn run(self) -> Result<()> {
+        let world = conspectus::dev_scenarios::materialize(&self.name)?;
+        let view = view_from_flag(self.view);
+        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
+        let snapshot = world.snapshot()?;
+        conspectus::tui::run_static(world.tui_config(view, color), snapshot)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1556,6 +1721,16 @@ fn view_flag_label(view: conspectus::tui::View) -> &'static str {
     }
 }
 
+fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
+    match flag {
+        ViewFlag::Sessions => conspectus::tui::View::Sessions,
+        ViewFlag::Mux => conspectus::tui::View::Mux,
+        ViewFlag::Union => conspectus::tui::View::Union,
+        ViewFlag::Prs => conspectus::tui::View::Prs,
+        ViewFlag::Forks => conspectus::tui::View::Forks,
+    }
+}
+
 impl TuiArgs {
     fn run(self) -> Result<()> {
         let refresh_interval = parse_tui_duration(&self.refresh_interval).map_err(|err| {
@@ -1594,13 +1769,7 @@ impl TuiArgs {
             vec![cwd.clone()]
         };
 
-        let view = match self.view {
-            ViewFlag::Sessions => conspectus::tui::View::Sessions,
-            ViewFlag::Mux => conspectus::tui::View::Mux,
-            ViewFlag::Union => conspectus::tui::View::Union,
-            ViewFlag::Prs => conspectus::tui::View::Prs,
-            ViewFlag::Forks => conspectus::tui::View::Forks,
-        };
+        let view = view_from_flag(self.view);
 
         // Resolve initial filter: CLI flags win over config.
         let cli_filter = self.filter_args.to_row_filter()?;
