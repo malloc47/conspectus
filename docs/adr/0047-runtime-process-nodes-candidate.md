@@ -1,8 +1,8 @@
-# ADR 0047: Candidate Runtime Process Nodes
+# ADR 0047: Runtime Process Nodes
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -25,11 +25,17 @@ Process modeling may also matter for openCode subagent filtering, harness
 server/proxy modes, control-plane discovery, multi-pane mux sessions, and
 diagnostics for stale launch arguments versus current session evidence.
 
-## Candidate Decision
+## Decision
 
-Conspectus may add an explicit runtime process layer to the graph if process
-evidence becomes central enough to justify a data-model expansion. A possible
-shape is:
+Conspectus will add an explicit runtime process layer to the graph before
+shipping graph visualization exports. Process evidence has accumulated enough
+resolver, mux-cardinality, hook/plugin, subagent, and diagnostic
+responsibilities that keeping it only in `GraphLink.source_metadata` would make
+the visualization surface misleading: the graph would show agent and mux nodes
+without the operational process facts that explain why the resolver accepted or
+rejected a mux/session attribution.
+
+The accepted model shape is:
 
 - `RuntimeProcess` node: ephemeral observation of a process under a mux pane.
 - `MuxSession -> RuntimeProcess`: the mux contains or owns the observed pane
@@ -45,6 +51,11 @@ the pane root, observed epoch, and a process role such as `human_agent`,
 `subagent`, `shell`, or `unknown`. Process nodes should be treated as
 observations, not durable identity. They should not imply that PIDs are stable
 across runs.
+
+Runtime process nodes should be hidden from default table/TUI views unless the
+operator asks for diagnostic detail. Machine-readable graph output and graph
+visualization exports should preserve them because they explain resolver
+behavior and process-cardinality gates.
 
 ## Consequences
 
@@ -64,6 +75,10 @@ across runs.
 - Cross-platform support would remain uneven. Linux `/proc` can populate the
   first implementation; macOS and other platforms may contribute no process
   nodes until a separate provider exists.
+- Graph visualization ADRs and implementations should treat runtime process
+  nodes as part of the resolved graph shape. DOT and HTML renderers can choose
+  subdued styling or default-hidden diagnostic layers, but they should not
+  design around a process-free graph.
 
 ## Alternatives Considered
 
@@ -82,10 +97,14 @@ across runs.
 
 ## Open Questions Answered
 
-- This ADR does not accept process nodes for immediate implementation. It
-  records a candidate direction for a future workstream.
-- The current MUXPROC work should continue enforcing process cardinality via
-  process evidence metadata until process nodes have a dedicated design and
-  migration plan.
-- If implemented, process nodes should be observational and ephemeral, while
-  `AgentSession -> MuxSession` remains the main user-facing relationship.
+- Process nodes are accepted for implementation as a MUXPROC follow-up before
+  graph visualization work begins.
+- `AgentSession -> MuxSession` remains the main user-facing relationship.
+  Runtime process nodes explain and support that derived relationship; they do
+  not replace it.
+- Runtime process observations are ephemeral and rebuildable. They may appear in
+  JSON, SQLite, node detail, and visualization surfaces, but they are not
+  durable identity and should not be persisted as user-authored intent.
+- The first implementation should model harness-relevant process observations
+  and enough ancestry to explain active-pane attribution. It does not need to
+  model every host process.

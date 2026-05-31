@@ -3046,7 +3046,7 @@ failure:
     are observed. Inotify / fanotify continuous-mode event ingestion
     remains deferred to the continuous server workstream.
 
-- [ ] `H-MUXPROC-FU-001` Evaluate first-class runtime process nodes.
+- [x] `H-MUXPROC-FU-001` Evaluate first-class runtime process nodes.
   - Scope: turn ADR 0047's proposed model into a concrete workstream
     proposal if process evidence continues to accumulate resolver,
     mux-cardinality, opencode subagent, server/proxy, or diagnostic
@@ -3061,8 +3061,71 @@ failure:
     fixtures for single-agent, multi-agent, subagent, stale argv, and
     unreadable process cases.
   - Related: ADR 0047, ADR 0046, `H-MUXPROC-005`, `H-SUBAGENT-004`.
-  - Blockers: none; defer until the metadata-only process evidence
-    approach shows more sustained pressure.
+  - Blockers: none.
+  - Outcome: ADR 0047 is accepted. Runtime process nodes should land
+    before graph visualization exports so DOT/HTML designs are not
+    built around a process-free graph. Process observations remain
+    ephemeral and rebuildable, while `AgentSession -> MuxSession`
+    stays the main user-facing resolved relationship. Implementation
+    is split into the follow-up slices below.
+
+- [ ] `H-MUXPROC-FU-002` Add runtime process graph model and relation
+  kinds.
+  - Scope: add a provider-neutral `RuntimeProcess` node with ephemeral
+    observation identity and sparse attributes for PID, parent PID,
+    root pane PID, command, cwd, harness key, process role, depth, and
+    observed epoch. Add relation kinds for mux contains/observes process
+    and process identifies/candidates/unresolved agent session evidence.
+    Preserve `AgentSession -> MuxSession` as the resolver-selected
+    user-facing relationship.
+  - Tests: serde round trips, deterministic identity/order tests, sparse
+    node serialization, and relation-kind serialization.
+  - Blockers: `H-MUXPROC-FU-001`.
+
+- [ ] `H-MUXPROC-FU-003` Persist runtime process nodes in SQLite and
+  graph JSON.
+  - Scope: extend the query schema/loader/reader for runtime process
+    nodes and their relation evidence. Keep process observations
+    rebuildable and outside user-authored declared-link intent.
+  - Tests: schema constant tests, load/read parity snapshots, and graph
+    JSON snapshots covering single-agent, multi-agent, subagent, stale
+    argv, and unreadable-process cases.
+  - Blockers: `H-MUXPROC-FU-002`.
+
+- [ ] `H-MUXPROC-FU-004` Emit runtime process nodes from MUXPROC
+  discovery.
+  - Scope: update process-tree, fd, hook/plugin, and Codex log-derived
+    attribution paths to emit process observations and explicit
+    process/session evidence instead of hiding all process facts inside
+    `LinkedToMux.source_metadata`. Preserve compatibility metadata only
+    where needed during migration.
+  - Tests: fixture-backed process-tree tests for direct/nested matches,
+    no matching session, ambiguous same-cwd sessions, subagent roles,
+    stale argv suppressed by stronger current-session evidence, and
+    unreadable `/proc` degradation.
+  - Blockers: `H-MUXPROC-FU-003`.
+
+- [ ] `H-MUXPROC-FU-005` Move mux-cardinality and attribution resolver
+  logic onto runtime process evidence.
+  - Scope: teach resolver/cross-link inference to derive
+    `AgentSession -> MuxSession` from explicit process observations and
+    process/session candidates. Cardinality rules should count
+    non-subagent runtime process roles instead of re-parsing opaque link
+    metadata.
+  - Tests: resolver tests for zero/one/multiple non-subagent processes,
+    subagent exclusion, current-session evidence beating stale launch
+    argv, and unresolved process diagnostics.
+  - Blockers: `H-MUXPROC-FU-004`.
+
+- [ ] `H-MUXPROC-FU-006` Surface runtime process diagnostics in node
+  detail and scenario fixtures.
+  - Scope: add node-detail sections for runtime process nodes and for
+    agent/mux nodes linked through process evidence. Extend named dev
+    scenarios so process-cardinality and stale-argv cases can be
+    inspected through `dev scenario graph/table/node/tui`.
+  - Tests: node-show/detail snapshots and dev-scenario coverage for
+    process-backed attribution cases.
+  - Blockers: `H-MUXPROC-FU-005`, `TEST-006`.
 
 - [x] `H-MUXPROC-004` Read Codex state and log databases for live
   session attribution.
@@ -6246,7 +6309,7 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: review the ADR against `docs/design.md` and update
     the design doc if the exported graph shape or CLI surface becomes
     part of the product contract.
-  - Blockers: none.
+  - Blockers: `H-MUXPROC-FU-006`.
 
 - [ ] `GV-002` Add `conspectus graph --format dot`.
   - Scope: add a Graphviz DOT renderer for the resolved internal graph.
@@ -6263,7 +6326,7 @@ this phase migrates whichever ones exist when each story lands.
     scenario registry is available.
   - Manual checks: run `dot -Tsvg` on at least one generated fixture and
     inspect that labels and edge kinds remain readable.
-  - Blockers: `GV-001`.
+  - Blockers: `H-MUXPROC-FU-006`, `GV-001`.
 
 - [ ] `GV-003` Add `conspectus graph --format html`.
   - Scope: generate an HTML graph explorer backed by the same graph data
@@ -6278,7 +6341,7 @@ this phase migrates whichever ones exist when each story lands.
     payload consumed by the page.
   - Manual checks: open a generated HTML file for a real local graph and
     verify navigation, search, filtering, and node detail inspection.
-  - Blockers: `GV-001`, `GV-002`.
+  - Blockers: `H-MUXPROC-FU-006`, `GV-001`, `GV-002`.
 
 - [ ] `GV-004` Document graph visualization workflows.
   - Scope: update `README.md`, `docs/operations.md`, or a focused

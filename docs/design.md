@@ -255,6 +255,12 @@ Entity notes:
   observed non-subagent harness process should have at most one human agent
   session attributed to it; multiple session attributions are allowed only when
   multiple harness processes are observed.
+- `RuntimeProcess` is an ephemeral, provider-neutral observation of a process
+  relevant to mux/session attribution. It may record PID, parent/root pane PID,
+  command, cwd, harness key, depth, observed time, and role. Runtime process
+  nodes explain resolver decisions and visualization diagnostics, but they are
+  rebuildable operational facts rather than durable identity or user-authored
+  intent.
 - `ForgePr` is a forge pull request record. GitHub is the only v1 provider, but
   the entity should not encode GitHub-specific assumptions into the graph shape.
 - `GraphLink` is the canonical candidate/evidence edge record used for
@@ -378,6 +384,12 @@ harness hooks outside project trees. They may refine mux/session attribution
 when fresh, but stale records should not override active process evidence.
 Conspectus must not inject terminal input or slash commands to ask an agent for
 its current session id.
+
+Runtime process observations are likewise rebuildable discovery output. Per ADR
+0047, Conspectus should model them as first-class graph nodes when process
+evidence explains mux attribution, subagent filtering, server/proxy behavior, or
+graph diagnostics. Default human projections can hide process nodes, but graph
+JSON, SQLite, node detail, and visualization exports should preserve them.
 
 Read-only harness state and log databases are equivalent rebuildable
 observations owned by the harness itself rather than by Conspectus.
