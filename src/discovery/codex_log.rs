@@ -6,15 +6,19 @@
 //! answer to fix mux↔session attribution when launch argv `--resume <A>` has
 //! gone stale because the operator switched sessions in-process.
 //!
-//! Inputs: the existing process-tree linker (ADR 0046) emits `LinkedToMux`
-//! candidates with `match_kind = "active_pane_process_match"` carrying
-//! `matched_pid` in source metadata. This linker scans those candidates for
-//! Codex processes, queries the `logs.process_uuid` column (encoded as
-//! `pid:<os_pid>:<uuid>`) for the freshest `thread_id` per pid within a
-//! 15-minute `ts` floor (matching the ADR 0028 hook-sidecar TTL), and emits
-//! a fresh `LinkedToMux` candidate that ranks above command/fd evidence.
-//! Stale `active_pane_command_session_match` candidates for the same mux are
-//! marked `Overridden` so the resolver no longer prefers them.
+//! Inputs: a precomputed `(mux → [(harness_key, pid)])` map produced by
+//! `cross_link::active_harness_pids_per_mux`, which exposes the same
+//! process-tree walk that powers `active_pane_process_match` candidates but
+//! without the identity-evidence gating that suppresses publication when
+//! fd/command evidence already resolved the mux. Consuming the raw pid set
+//! is necessary because this linker's whole purpose is to **correct** stale
+//! command/fd evidence — gating on "no identity evidence yet" would defeat
+//! that. For each codex pid, the linker queries the `logs.process_uuid`
+//! column (encoded as `pid:<os_pid>:<uuid>`) for the freshest `thread_id`
+//! within a 15-minute `ts` floor (matching the ADR 0028 hook-sidecar TTL),
+//! and emits a fresh `LinkedToMux` candidate that ranks above command/fd
+//! evidence. Stale `active_pane_command_session_match` candidates for the
+//! same mux are marked `Overridden` so the resolver no longer prefers them.
 //!
 //! When the log thread id names a Codex session the slice-A state reader has
 //! not yet observed, a sparse `AgentSession` node is synthesized in place so
@@ -38,7 +42,17 @@ use crate::model::{
 };
 
 const ADAPTER_NAME: &str = "codex_log";
-const FRESHNESS_WINDOW_SECONDS: i64 = 15 * 60;
+/// Upper bound on log-row age accepted as evidence. The pid set is already
+/// filtered to currently-live codex processes (see
+/// `cross_link::active_harness_pids_per_mux`), which is the real correctness
+/// guarantee — a stale process_uuid pointing at a dead session cannot be
+/// returned because the dead pid wouldn't appear in the candidate set.
+/// This window is therefore a query-performance guard against unbounded
+/// LIKE scans on the `logs` table when no compound `(process_uuid, ts)`
+/// index exists, not the freshness gate ADR 0028 hook-sidecar records use.
+/// 24 hours is generous enough to cover a long-lived codex session that
+/// has been idle between user turns without scanning the entire history.
+const FRESHNESS_WINDOW_SECONDS: i64 = 24 * 60 * 60;
 const PROCESS_UUID_PREFIX: &str = "pid:";
 
 /// Convenience wall-clock for the production discovery path.
@@ -52,11 +66,15 @@ pub fn current_epoch() -> i64 {
 /// Apply Codex log-derived current-session attribution to a snapshot.
 ///
 /// `state_root` is the harness state root for codex (where `logs_*.sqlite`
-/// lives alongside `state_*.sqlite`). `now_epoch` is the wall clock used to
-/// gate freshness; injectable so tests are deterministic.
+/// lives alongside `state_*.sqlite`). `codex_pids_per_mux` carries the live
+/// codex pid set per mux from `cross_link::active_harness_pids_per_mux`;
+/// supply an empty map to skip the linker (production discovery does this
+/// when process-tree walking is disabled). `now_epoch` is the wall clock
+/// used to gate freshness; injectable so tests are deterministic.
 pub fn apply_codex_log_attribution(
     snapshot: &mut GraphSnapshot,
     state_root: &Path,
+    codex_pids_per_mux: &BTreeMap<MuxSessionId, Vec<(String, i64)>>,
     now_epoch: i64,
 ) {
     let Some(db_path) = pick_active_log_db(state_root) else {
@@ -74,7 +92,7 @@ pub fn apply_codex_log_attribution(
     }
 
     let ts_floor = now_epoch.saturating_sub(FRESHNESS_WINDOW_SECONDS);
-    let candidates = collect_codex_pane_processes(snapshot);
+    let candidates = collect_codex_pane_processes(codex_pids_per_mux);
     if candidates.is_empty() {
         return;
     }
@@ -184,69 +202,30 @@ struct CodexPaneProcess {
     pid: i64,
 }
 
-/// Scan candidate links emitted by the process-tree linker for Codex
-/// processes. The process-tree linker writes `match_kind` and `matched_pid`
-/// on every `LinkedToMux` candidate whose evidence is a Codex command found
-/// in the active-pane process tree.
-fn collect_codex_pane_processes(snapshot: &GraphSnapshot) -> Vec<CodexPaneProcess> {
+/// Project the precomputed `(harness_key, pid)` pairs into the codex-only
+/// subset this linker needs.
+fn collect_codex_pane_processes(
+    codex_pids_per_mux: &BTreeMap<MuxSessionId, Vec<(String, i64)>>,
+) -> Vec<CodexPaneProcess> {
     let mut output: Vec<CodexPaneProcess> = Vec::new();
     let mut seen: BTreeMap<(MuxSessionId, i64), ()> = BTreeMap::new();
 
-    for link in &snapshot.candidate_links {
-        if link.relation != RelationKind::LinkedToMux {
-            continue;
+    for (mux_id, entries) in codex_pids_per_mux {
+        for (harness_key, pid) in entries {
+            if harness_key != CODEX_HARNESS_KEY {
+                continue;
+            }
+            if seen.insert((mux_id.clone(), *pid), ()).is_some() {
+                continue;
+            }
+            output.push(CodexPaneProcess {
+                mux_id: mux_id.clone(),
+                pid: *pid,
+            });
         }
-        if !matches!(link.state, LinkState::Active) {
-            continue;
-        }
-        let fields = &link.source_metadata.fields;
-        let match_kind = fields
-            .get("match_kind")
-            .and_then(serde_json::Value::as_str)
-            .or(link.source_metadata.evidence.as_deref());
-        if match_kind != Some("active_pane_process_match") {
-            continue;
-        }
-        let Some(matched_pid) = fields
-            .get("matched_pid")
-            .and_then(serde_json::Value::as_i64)
-        else {
-            continue;
-        };
-        let Some(command) = fields
-            .get("process_command")
-            .and_then(serde_json::Value::as_str)
-        else {
-            continue;
-        };
-        if !command_identifies_codex(command) {
-            continue;
-        }
-        let Some(mux_id) = mux_target(link).cloned() else {
-            continue;
-        };
-        if seen.insert((mux_id.clone(), matched_pid), ()).is_some() {
-            continue;
-        }
-        output.push(CodexPaneProcess {
-            mux_id,
-            pid: matched_pid,
-        });
     }
 
     output
-}
-
-fn command_identifies_codex(command: &str) -> bool {
-    let Some(first) = command.split_whitespace().next() else {
-        return false;
-    };
-    let name = Path::new(first)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(first)
-        .to_ascii_lowercase();
-    name == "codex"
 }
 
 fn mux_target(link: &GraphLink) -> Option<&MuxSessionId> {
@@ -479,49 +458,6 @@ mod tests {
         })
     }
 
-    fn process_tree_link(state_scope: &str, native_id: &str, pid: i64) -> GraphLink {
-        // Resolved process-tree match: cross_link emits this when the
-        // active-pane process tree contains a codex binary and the argv
-        // names a known session. The log linker also consumes the
-        // unresolved variant, but the metadata shape is identical.
-        let source = NodeId::AgentSession(AgentSessionId::new(
-            CODEX_HARNESS_KEY,
-            state_scope,
-            "argv-id",
-        ));
-        let target = NodeId::MuxSession(MuxSessionId::new(format!("tmux:{native_id}")));
-        let mut fields = Metadata::new();
-        fields.insert(
-            "match_kind".to_string(),
-            serde_json::Value::String("active_pane_process_match".to_string()),
-        );
-        fields.insert(
-            "matched_pid".to_string(),
-            serde_json::Value::Number(pid.into()),
-        );
-        fields.insert(
-            "process_command".to_string(),
-            serde_json::Value::String(
-                "/nix/store/abc/bin/codex --resume stale-session".to_string(),
-            ),
-        );
-        GraphLink {
-            id: format!("cross_link:proc:{pid}"),
-            source,
-            target: LinkEndpoint::Node { id: target },
-            relation: RelationKind::LinkedToMux,
-            provenance: Provenance::StrongDiscovered,
-            confidence: Confidence::High,
-            freshness: Freshness::Fresh,
-            source_metadata: SourceMetadata {
-                adapter: "cross_link".to_string(),
-                evidence: Some("active_pane_process_match".to_string()),
-                fields,
-            },
-            state: LinkState::Active,
-        }
-    }
-
     fn stale_command_match_link(
         state_scope: &str,
         native_id: &str,
@@ -555,13 +491,19 @@ mod tests {
         }
     }
 
-    fn build_snapshot(state_scope: &str, native_id: &str, pid: i64) -> GraphSnapshot {
+    fn build_snapshot(native_id: &str) -> GraphSnapshot {
         let mut snapshot = GraphSnapshot::default();
         snapshot.nodes.push(mux_node(native_id));
         snapshot
-            .candidate_links
-            .push(process_tree_link(state_scope, native_id, pid));
-        snapshot
+    }
+
+    fn codex_pid_map(native_id: &str, pid: i64) -> BTreeMap<MuxSessionId, Vec<(String, i64)>> {
+        let mut map = BTreeMap::new();
+        map.insert(
+            MuxSessionId::new(format!("tmux:{native_id}")),
+            vec![(CODEX_HARNESS_KEY.to_string(), pid)],
+        );
+        map
     }
 
     #[test]
@@ -577,14 +519,15 @@ mod tests {
             ],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
         // Slice-A would normally produce the AgentSession for thread-current;
         // include it here so we exercise the existing-session path.
         snapshot
             .nodes
             .push(agent_session_node(&state_scope, "thread-current"));
 
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let log_links: Vec<_> = snapshot
             .candidate_links
@@ -614,15 +557,16 @@ mod tests {
     fn synthesizes_sparse_session_when_state_has_not_seen_thread_yet() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
+        let _state_scope = state_root.to_string_lossy().to_string();
         write_logs_db(
             &state_root.join("logs_2.sqlite"),
             &[("pid:100:uuid-a", "fresh-thread", now() - 5)],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
         // No agent session for fresh-thread yet.
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let synth = snapshot.nodes.iter().find_map(|n| match n {
             GraphNode::AgentSession(s) if s.id.session_key == "fresh-thread" => Some(s),
@@ -650,7 +594,8 @@ mod tests {
             &[("pid:100:uuid-a", "current-thread", now() - 5)],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
         // Stale command match pointing at a different session for the same mux.
         snapshot.candidate_links.push(stale_command_match_link(
             &state_scope,
@@ -664,7 +609,7 @@ mod tests {
             .nodes
             .push(agent_session_node(&state_scope, "current-thread"));
 
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let stale = snapshot
             .candidate_links
@@ -691,7 +636,8 @@ mod tests {
             &[("pid:100:uuid-a", "thread-x", now() - 5)],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
         // Command match for the SAME session the log resolves to. Should
         // remain Active — it's corroborating, not stale.
         snapshot
@@ -701,7 +647,7 @@ mod tests {
             .nodes
             .push(agent_session_node(&state_scope, "thread-x"));
 
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let corroborating = snapshot
             .candidate_links
@@ -718,14 +664,19 @@ mod tests {
     fn log_rows_outside_freshness_window_are_ignored() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
+        let _state_scope = state_root.to_string_lossy().to_string();
+        // Older than the 24h query-performance bound. The pid set is
+        // already filtered to live codex processes, so this test only
+        // protects the query-cost guard; it is not a correctness
+        // freshness gate.
         write_logs_db(
             &state_root.join("logs_2.sqlite"),
-            &[("pid:100:uuid-a", "stale-thread", now() - 16 * 60)],
+            &[("pid:100:uuid-a", "stale-thread", now() - 25 * 60 * 60)],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let count = snapshot
             .candidate_links
@@ -739,14 +690,15 @@ mod tests {
     fn unrelated_pid_does_not_produce_a_link() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
+        let _state_scope = state_root.to_string_lossy().to_string();
         write_logs_db(
             &state_root.join("logs_2.sqlite"),
             &[("pid:999:uuid-z", "other-thread", now() - 5)],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let count = snapshot
             .candidate_links
@@ -760,7 +712,7 @@ mod tests {
     fn higher_log_db_suffix_wins_when_multiple_files_present() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
+        let _state_scope = state_root.to_string_lossy().to_string();
         write_logs_db(
             &state_root.join("logs_1.sqlite"),
             &[("pid:100:uuid-old", "stale-from-old-db", now() - 5)],
@@ -770,8 +722,9 @@ mod tests {
             &[("pid:100:uuid-new", "current-from-new-db", now() - 5)],
         );
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let link = snapshot
             .candidate_links
@@ -788,11 +741,12 @@ mod tests {
     fn missing_log_db_returns_silently() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
+        let _state_scope = state_root.to_string_lossy().to_string();
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
         let before = snapshot.candidate_links.len();
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
         assert_eq!(snapshot.candidate_links.len(), before);
     }
 
@@ -800,40 +754,33 @@ mod tests {
     fn empty_log_db_returns_silently() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
+        let _state_scope = state_root.to_string_lossy().to_string();
         let db = state_root.join("logs_2.sqlite");
         Connection::open(&db).expect("empty db");
 
-        let mut snapshot = build_snapshot(&state_scope, "main", 100);
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
         let before = snapshot.candidate_links.len();
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
         assert_eq!(snapshot.candidate_links.len(), before);
     }
 
     #[test]
-    fn non_codex_process_tree_links_are_ignored() {
+    fn non_codex_pids_in_map_are_ignored() {
         let temp = TempDir::new().expect("temp");
         let state_root = temp.path();
-        let state_scope = state_root.to_string_lossy().to_string();
         write_logs_db(
             &state_root.join("logs_2.sqlite"),
             &[("pid:100:uuid-a", "thread-x", now() - 5)],
         );
 
-        let mut snapshot = GraphSnapshot::default();
-        snapshot.nodes.push(mux_node("main"));
-        // Process-tree link that names claude-code instead of codex.
-        let mut claude_link = process_tree_link(&state_scope, "main", 100);
-        if let Some(value) = claude_link
-            .source_metadata
-            .fields
-            .get_mut("process_command")
-        {
-            *value = serde_json::Value::String("claude --resume id".to_string());
-        }
-        snapshot.candidate_links.push(claude_link);
-
-        apply_codex_log_attribution(&mut snapshot, state_root, now());
+        let mut snapshot = build_snapshot("main");
+        let mut pids: BTreeMap<MuxSessionId, Vec<(String, i64)>> = BTreeMap::new();
+        pids.insert(
+            MuxSessionId::new("tmux:main".to_string()),
+            vec![("claude-code".to_string(), 100)],
+        );
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
 
         let count = snapshot
             .candidate_links

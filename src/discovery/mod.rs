@@ -171,15 +171,18 @@ pub fn discover_local_with(
     let mut snapshot = providers.discover(&context)?;
     let cwd_git_fragment = observed_cwd_git_fragment(&snapshot);
     snapshot = merge_fragments([snapshot_fragment(snapshot), cwd_git_fragment]);
-    if config.process_tree_enabled {
+    let codex_pids_per_mux = if config.process_tree_enabled {
         cross_link::infer(&mut snapshot);
+        cross_link::active_harness_pids_per_mux(&snapshot, &cross_link::LinuxProcSnapshot)
     } else {
         cross_link::infer_without_process_tree(&mut snapshot);
-    }
+        std::collections::BTreeMap::new()
+    };
     if let Some(codex_state_root) = config.harness_state_roots.get(harness::codex::HARNESS_KEY) {
         codex_log::apply_codex_log_attribution(
             &mut snapshot,
             codex_state_root,
+            &codex_pids_per_mux,
             codex_log::current_epoch(),
         );
     }

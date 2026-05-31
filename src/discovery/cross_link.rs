@@ -851,6 +851,39 @@ fn parse_proc_stat_command(stat: &str) -> Option<String> {
     (end > start).then(|| stat[start..end].to_string())
 }
 
+/// Pid set per mux that exposes the same process-tree walk used internally
+/// for `active_pane_process_match` candidates, but without the identity-
+/// evidence gating that suppresses publication when fd/command evidence
+/// already resolved the mux. Downstream linkers that *need* the pid even
+/// when fd evidence won (e.g. ADR 0048 codex log attribution, which uses
+/// the pid to query logs.process_uuid) can consume this directly.
+pub fn active_harness_pids_per_mux(
+    snapshot: &GraphSnapshot,
+    process_snapshot: &dyn ProcessSnapshot,
+) -> BTreeMap<crate::model::MuxSessionId, Vec<(String, i64)>> {
+    let muxes: Vec<&MuxSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some(mux),
+            _ => None,
+        })
+        .collect();
+    let evidence = active_pane_process_evidence_by_mux(&muxes, process_snapshot);
+    evidence
+        .into_iter()
+        .map(|(mux_id, records)| {
+            let mut pids: Vec<(String, i64)> = records
+                .into_iter()
+                .map(|r| (r.harness_key, r.matched_pid))
+                .collect();
+            pids.sort();
+            pids.dedup();
+            (mux_id, pids)
+        })
+        .collect()
+}
+
 fn active_pane_process_evidence_by_mux(
     muxes: &[&MuxSessionNode],
     process_snapshot: &dyn ProcessSnapshot,

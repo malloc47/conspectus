@@ -109,11 +109,17 @@ ORDER BY ts DESC, ts_nanos DESC
 LIMIT 1
 ```
 
-`:ts_floor` is `now() - 15 minutes`, matching the active-record TTL chosen in
-ADR 0028. The 15-minute bound keeps the query cheap on heavy log volumes
-because the table lacks a `(process_uuid, ts)` compound index, and it
-matches the freshness budget Conspectus already uses for "live session"
-evidence.
+`:ts_floor` is `now() - 24 hours`. Unlike ADR 0028 hook-sidecar records,
+which arrive asynchronously and can become orphaned from process
+lifetimes, codex log evidence is anchored to a live OS pid: the candidate
+set is `cross_link::active_harness_pids_per_mux`, which only contains pids
+currently running codex in the active-pane process tree. Pid liveness is
+therefore the real correctness guarantee — a dead pid cannot return a
+stale link because it never enters the candidate set. The 24-hour bound
+is a query-performance guard against unbounded `LIKE` scans on heavy
+`logs` tables that lack a `(process_uuid, ts)` compound index. It is
+deliberately wider than the ADR 0028 TTL so a long-lived codex session
+idling between user turns is still resolvable.
 
 The full `process_uuid` value is parsed as `pid:<os_pid>:<uuid>`. The trailing
 UUID disambiguates pid reuse across Codex restarts; the linker keeps the
@@ -177,10 +183,10 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
   links with `lineage_kind = "spawn"`, distinct from existing rollout-fork
   lineage. Resolver and TUI handling stays on the ADR 0018 surface.
 - A `(process_uuid, ts)` compound index would make the log lookup faster but
-  is not required: the 15-minute floor and `idx_logs_thread_id` keep cost
-  bounded. If real-world log volumes ever make this expensive, the linker can
-  pre-filter by candidate Codex pids in process snapshot order so the
-  WHERE-clause comparisons stay narrow.
+  is not required: the 24-hour query-bound and `idx_logs_thread_id` keep
+  cost bounded. If real-world log volumes ever make this expensive, the
+  linker can pre-filter by candidate Codex pids in process snapshot order
+  so the WHERE-clause comparisons stay narrow.
 - Conspectus now reads Codex schema across two filename-versioned databases.
   Adding `state_6` or `logs_3` upstream will require a new column-probe pass
   and may require a new resolved-relationship shape, but the
@@ -227,8 +233,12 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 
 - `H-MUXPROC-004` for opencode resolves as a no-op: the schema offers no
   live-binding signal beyond what the existing reader already consumes.
-- The freshness budget for log-derived current-session evidence is 15
-  minutes, consistent with ADR 0028's hook-sidecar TTL.
+- The query bound on log-derived current-session evidence is 24 hours,
+  intentionally wider than the ADR 0028 hook-sidecar TTL. The pid being
+  alive in the active-pane process tree (filtered via
+  `cross_link::active_harness_pids_per_mux`) is the real correctness
+  guarantee; the time bound exists only to keep the `LIKE` scan cheap
+  on large `logs` tables.
 - Fresh Codex log evidence may synthesize a sparse `AgentSession` when the
   state reader has not yet observed the thread row, mirroring the
   hook-sidecar synthesis path.
