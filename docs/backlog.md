@@ -3222,7 +3222,7 @@ failure:
     attribution. Harness-documented non-mutating command channels
     remain possible only as explicit control-plane adapters.
 
-- [ ] `H-MUXPROC-009` Audit harness hooks/plugins as definitive
+- [x] `H-MUXPROC-009` Audit harness hooks/plugins as definitive
   session-state sidecar emitters.
   - Scope: determine whether supported harnesses can expose current
     session state through lifecycle hooks, tool hooks, plugins, or
@@ -3246,12 +3246,51 @@ failure:
     no Conspectus probe text was logged.
   - Blockers: none. Follow-up ADR required before adding a durable
     sidecar schema or installer.
-  - **audit slice landed**: Claude Code hooks are viable and provide
-    `session_id`, `transcript_path`, `cwd`, and event name on stdin;
-    `SessionStart` covers startup, resume, clear, and compact. ADR
-    0028 records the sidecar path. OpenCode plugin/session events
-    remain viable but non-critical. Codex hook viability remains
-    unproven.
+  - **audit slice landed (Claude)**: Claude Code hooks are viable
+    and provide `session_id`, `transcript_path`, `cwd`, and event
+    name on stdin; `SessionStart` covers startup, resume, clear,
+    and compact. ADR 0028 records the sidecar path.
+  - **audit slice landed (opencode, 2026-05-30)**: OpenCode hooks
+    are viable. The plugin API ships as `@opencode-ai/plugin`
+    (npm), installed via `opencode plugin <module>` into
+    `$XDG_CONFIG_HOME/opencode/node_modules` and listed in
+    `config.json#plugin`. A plugin is a TypeScript module with
+    default export `(input: PluginInput) => Promise<Hooks>`. The
+    `event` hook receives the full `Event` union from
+    `@opencode-ai/sdk`; relevant variants include
+    `EventSessionCreated` and `EventSessionUpdated` (both carry
+    the full `Session` object: `id`, `directory`, `parentID`,
+    `title`, `time.{created,updated}`, `share.url`),
+    `EventSessionStatus` and `EventSessionIdle` and
+    `EventSessionCompacted` (carry `sessionID`), and `chat.message`
+    / `chat.params` / `chat.headers` / `tool.execute.{before,after}`
+    / `command.execute.before` / `permission.ask` (all carry
+    `sessionID`). `PluginInput` exposes `project`, `directory`,
+    `worktree`, `serverUrl`, `client`, and a `BunShell`; the
+    plugin runs in-process so `process.pid`, `process.ppid`, and
+    `process.env.TMUX{,_PANE,_TMPDIR}` are directly readable for
+    pane/process context. The hook write path is non-mutating —
+    forwarding events to `conspectus hook write` does not append
+    to the opencode session DB, transcript, or HTTP API. Opt-out
+    exists at the CLI level via `opencode --pure`. Implementation
+    plan for `H-MUXPROC-014` is therefore well-scoped: ship a
+    `@conspectus/opencode-hook` npm plugin that calls a new
+    `conspectus hook write opencode` writer (sibling of the
+    existing `claude-code` and `codex` writers), and reuse the
+    existing `discovery::hook_sidecar` post-merge pass which is
+    already harness-agnostic.
+  - **audit slice landed (codex, 2026-05-30)**: Codex has a hook
+    surface (the top-level CLI flag `--dangerously-bypass-hook-trust`
+    proves it, with `codex plugin` for marketplace plugins). The
+    exact event names, payload shapes, and config schema were not
+    extractable from `codex --help` or from a strings dump of the
+    wrapped binary on this machine and would need upstream docs
+    or source reading. Lower priority than opencode because
+    `H-MUXPROC-004` / ADR 0048 already closes the codex side of
+    the H-MUXPROC-015 drift class via log-derived attribution; the
+    `conspectus hook write codex` writer subcommand exists as a
+    stub for future use if/when codex hook payload semantics are
+    documented or reverse-engineered.
 
 - [x] `H-MUXPROC-010` Define Conspectus hook sidecar schema and
   trust/ranking rules.
@@ -3585,21 +3624,45 @@ failure:
     no-opt-in current-session source for already-running Codex TUI
     processes.
 
-- [ ] `H-MUXPROC-014` Add opencode plugin/server sidecar emitter if
-  audit proves non-mutating session identity.
-  - Scope: if opencode's plugin, server, ACP, or attach surfaces can
-    expose the active session id without mutating session logs, build
-    an opt-in sidecar emitter. Prefer a documented plugin/server API
-    over shell wrappers. The emitter should record active session id,
-    project directory, pid/server id, and any attach URL or socket
-    metadata needed to correlate back to a mux pane.
-  - Tests: fake plugin/server payload tests, sidecar generation
-    tests, multiple-project/session ambiguity tests, and degradation
-    when the plugin is absent.
-  - Manual checks: run opencode with the plugin/server extension and
-    confirm no transcript records are added by the Conspectus
-    attribution path.
-  - Blockers: `H-MUXPROC-009`, `H-MUXPROC-010`.
+- [ ] `H-MUXPROC-014` Add opencode plugin sidecar emitter.
+  - Scope: ship an opt-in npm-distributed opencode plugin (working
+    name `@conspectus/opencode-hook`, distributed alongside the
+    Conspectus release; can also be tried locally via the
+    documented `opencode plugin <local-path>` install) that
+    subscribes to the `event` hook on the `@opencode-ai/plugin`
+    surface and forwards session lifecycle observations to a new
+    `conspectus hook write opencode` subcommand. The writer should
+    parse the opencode `Event` union, extracting `sessionID` (or
+    `info.id` for `EventSession{Created,Updated}`), `info.directory`
+    when present, and process/tmux context (`process.pid`,
+    `process.ppid`, `TMUX`, `TMUX_PANE`, `TMUX_TMPDIR`), then emit
+    a hook record on the same schema ADR 0028 defines for Claude.
+    Plugin opt-out at the CLI is `opencode --pure`. Existing
+    `discovery::hook_sidecar` post-merge pass is already harness-
+    agnostic and will pick up `harness_key: "opencode"` records
+    automatically; resolver ranking and demotion semantics for
+    opencode mirror the Claude path. Consider whether
+    `chat.message` / `tool.execute.after` events also write a
+    record (gives finer-grained activity heartbeat) or whether
+    `session.{created,updated,idle,status}` are sufficient — pick
+    the smaller event set if both work, to keep sidecar churn low.
+  - Tests: payload fixture tests for each handled `Event` variant;
+    sidecar record generation tests; missing-field degradation;
+    multi-project plugin process emits records keyed by sessionID
+    not project; `--pure` opt-out path produces no records.
+  - Manual checks: install the plugin via `opencode plugin` and
+    run a short opencode session with `--print-logs` enabled;
+    confirm `conspectus hook write opencode` is invoked, the
+    sidecar DB rows show the expected sessionID/cwd/pid/tmux
+    fields, and a follow-up `opencode session list` shows the
+    session transcript is byte-identical to a control run without
+    the plugin installed.
+  - Related: `H-MUXPROC-009` audit slice landed 2026-05-30
+    establishing the plugin shape; ADR 0028 hook sidecar schema;
+    `discovery::hook_sidecar` reader; ADR 0048 (parallel codex
+    drift fix uses log-derived attribution rather than hooks).
+  - Blockers: none. Audit complete via `H-MUXPROC-009`; sidecar
+    schema fixed via `H-MUXPROC-010`.
 
 ### Testing Improvements And Regression Replay (TEST-*)
 
