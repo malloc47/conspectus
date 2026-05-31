@@ -16,7 +16,8 @@
 //! - `AgentSession` ↔ worktree/checkout `AssociatedWith` candidates when a
 //!   session's cwd lives at or below a discovered checkout root.
 //!
-//! No nodes are created here, and any `Unresolved` lineage endpoints already
+//! Runtime process observation nodes are created here when active-pane process
+//! or fd evidence is available. Other provider-owned unresolved endpoints already
 //! present in `candidate_links` are left untouched.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -25,8 +26,8 @@ use std::path::Path;
 
 use crate::model::{
     AgentSessionNode, CheckoutId, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, SessionKind,
-    SourceMetadata,
+    LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, RuntimeProcessId,
+    RuntimeProcessNode, RuntimeProcessRole, SessionKind, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "cross_link";
@@ -104,16 +105,29 @@ fn infer_with_readers(
     let checkout_roots = checkout_roots(snapshot);
     let workspace_member_roots = workspace_member_roots(snapshot);
     let fork_roots = fork_roots(snapshot);
+    let process_evidence_by_mux = process_snapshot
+        .map(|snapshot| active_pane_process_evidence_by_mux(&mux_sessions, snapshot))
+        .unwrap_or_default();
     let (active_mux_sessions, mut process_unresolved_links) = active_mux_sessions(
         &agent_sessions,
         &mux_sessions,
         snapshot,
         &fd_reader,
-        process_snapshot,
+        process_snapshot.is_some(),
+        &process_evidence_by_mux,
     );
+    let (mut process_nodes, mut process_links) =
+        runtime_process_graph(&agent_sessions, &mux_sessions, &process_evidence_by_mux);
+    if process_snapshot.is_none() {
+        let (mut fd_process_nodes, mut fd_process_links) =
+            fd_runtime_process_graph(&agent_sessions, &mux_sessions, &fd_reader);
+        process_nodes.append(&mut fd_process_nodes);
+        process_links.append(&mut fd_process_links);
+    }
 
     let mut new_links = Vec::new();
     new_links.append(&mut process_unresolved_links);
+    new_links.append(&mut process_links);
 
     for session in &agent_sessions {
         let Some(session_cwd) = session.cwd.as_deref().map(normalize_path) else {
@@ -151,6 +165,7 @@ fn infer_with_readers(
         }
     }
 
+    snapshot.nodes.append(&mut process_nodes);
     snapshot.candidate_links.extend(new_links);
 
     suppress_subagent_mux_links(snapshot);
@@ -399,6 +414,12 @@ fn insert_process_fields(fields: &mut crate::model::Metadata, evidence: &Process
         "matched_pid".to_string(),
         serde_json::Value::Number(evidence.matched_pid.into()),
     );
+    if let Some(parent_pid) = evidence.parent_pid {
+        fields.insert(
+            "parent_pid".to_string(),
+            serde_json::Value::Number(parent_pid.into()),
+        );
+    }
     fields.insert(
         "process_depth".to_string(),
         serde_json::Value::Number((evidence.depth as u64).into()),
@@ -446,6 +467,12 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
         "matched_pid".to_string(),
         serde_json::Value::Number(evidence.matched_pid.into()),
     );
+    if let Some(parent_pid) = evidence.parent_pid {
+        endpoint_metadata.insert(
+            "parent_pid".to_string(),
+            serde_json::Value::Number(parent_pid.into()),
+        );
+    }
     endpoint_metadata.insert(
         "process_depth".to_string(),
         serde_json::Value::Number((evidence.depth as u64).into()),
@@ -484,6 +511,377 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
     }
 }
 
+fn runtime_process_graph(
+    sessions: &[&AgentSessionNode],
+    muxes: &[&MuxSessionNode],
+    process_evidence_by_mux: &HashMap<crate::model::MuxSessionId, Vec<ProcessPaneEvidence>>,
+) -> (Vec<GraphNode>, Vec<GraphLink>) {
+    let mut nodes_by_id = BTreeMap::new();
+    let mut links_by_id = BTreeMap::new();
+
+    for mux in muxes {
+        let Some(process_evidence) = process_evidence_by_mux.get(&mux.id) else {
+            continue;
+        };
+        for evidence in process_evidence {
+            let process_node = runtime_process_node(mux, evidence);
+            let process_id = NodeId::RuntimeProcess(process_node.id.clone());
+            nodes_by_id.insert(
+                process_node.id.clone(),
+                GraphNode::RuntimeProcess(process_node),
+            );
+
+            let containment = runtime_process_link(
+                format!(
+                    "cross_link:{}:mux_contains_process:{}",
+                    NodeId::MuxSession(mux.id.clone()),
+                    process_id
+                ),
+                NodeId::MuxSession(mux.id.clone()),
+                LinkEndpoint::Node {
+                    id: process_id.clone(),
+                },
+                RelationKind::MuxContainsProcess,
+                "active_pane_process_observation",
+                Confidence::High,
+                evidence,
+            );
+            links_by_id.insert(containment.id.clone(), containment);
+
+            let matching_sessions: Vec<_> = sessions
+                .iter()
+                .copied()
+                .filter(|session| evidence.matches_session(session))
+                .collect();
+
+            if matching_sessions.is_empty() {
+                let unresolved = runtime_process_link(
+                    format!(
+                        "cross_link:{process_id}:process_candidates_session:unresolved:{}",
+                        evidence.matched_pid
+                    ),
+                    process_id.clone(),
+                    LinkEndpoint::Unresolved {
+                        evidence: crate::model::UnresolvedEndpoint {
+                            node_type: "agent_session".to_string(),
+                            harness_key: Some(evidence.harness_key.clone()),
+                            native_id: None,
+                            state_scope: None,
+                            path: evidence.cwd.clone(),
+                            metadata: runtime_process_endpoint_metadata(evidence),
+                        },
+                    },
+                    RelationKind::ProcessCandidatesSession,
+                    "active_pane_process_match",
+                    Confidence::Low,
+                    evidence,
+                );
+                links_by_id.insert(unresolved.id.clone(), unresolved);
+                continue;
+            }
+
+            for session in matching_sessions {
+                let relation = if evidence.session_keys.contains(&session.id.session_key) {
+                    RelationKind::ProcessIdentifiesSession
+                } else {
+                    RelationKind::ProcessCandidatesSession
+                };
+                let confidence = if relation == RelationKind::ProcessIdentifiesSession {
+                    Confidence::High
+                } else {
+                    Confidence::Medium
+                };
+                let target = NodeId::AgentSession(session.id.clone());
+                let link = runtime_process_link(
+                    format!(
+                        "cross_link:{process_id}:{}:{target}",
+                        process_relation_label(&relation)
+                    ),
+                    process_id.clone(),
+                    LinkEndpoint::Node { id: target },
+                    relation,
+                    "active_pane_process_match",
+                    confidence,
+                    evidence,
+                );
+                links_by_id.insert(link.id.clone(), link);
+            }
+        }
+    }
+
+    (
+        nodes_by_id.into_values().collect(),
+        links_by_id.into_values().collect(),
+    )
+}
+
+fn runtime_process_node(
+    mux: &MuxSessionNode,
+    evidence: &ProcessPaneEvidence,
+) -> RuntimeProcessNode {
+    let observation_key = format!(
+        "{}:root:{}:pid:{}",
+        NodeId::MuxSession(mux.id.clone()),
+        evidence.root_pid,
+        evidence.matched_pid
+    );
+    RuntimeProcessNode {
+        id: RuntimeProcessId::new(&observation_key),
+        observation_key,
+        pid: Some(evidence.matched_pid),
+        parent_pid: evidence.parent_pid,
+        root_pane_pid: Some(evidence.root_pid),
+        command: Some(evidence.command.clone()),
+        cwd: evidence.cwd.clone(),
+        harness_key: Some(evidence.harness_key.clone()),
+        role: Some(evidence.role()),
+        depth: Some(evidence.depth as i64),
+        observed_epoch: None,
+    }
+}
+
+fn runtime_process_link(
+    id: String,
+    source: NodeId,
+    target: LinkEndpoint,
+    relation: RelationKind,
+    evidence_label: &'static str,
+    confidence: Confidence,
+    evidence: &ProcessPaneEvidence,
+) -> GraphLink {
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "match_kind".to_string(),
+        serde_json::Value::String(evidence_label.to_string()),
+    );
+    insert_process_fields(&mut fields, evidence);
+    GraphLink {
+        id,
+        source,
+        target,
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some(evidence_label.to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn runtime_process_endpoint_metadata(evidence: &ProcessPaneEvidence) -> crate::model::Metadata {
+    let mut metadata = crate::model::Metadata::new();
+    insert_process_fields(&mut metadata, evidence);
+    metadata
+}
+
+fn process_relation_label(relation: &RelationKind) -> &'static str {
+    match relation {
+        RelationKind::ProcessIdentifiesSession => "process_identifies_session",
+        RelationKind::ProcessCandidatesSession => "process_candidates_session",
+        RelationKind::MuxContainsProcess => "mux_contains_process",
+        _ => "process_evidence",
+    }
+}
+
+fn fd_runtime_process_graph(
+    sessions: &[&AgentSessionNode],
+    muxes: &[&MuxSessionNode],
+    fd_reader: &impl Fn(i64) -> Option<SessionKeyEvidence>,
+) -> (Vec<GraphNode>, Vec<GraphLink>) {
+    let mut nodes_by_id = BTreeMap::new();
+    let mut links_by_id = BTreeMap::new();
+
+    for mux in muxes {
+        let Some(pid) = mux.active_pane_pid else {
+            continue;
+        };
+        let Some(evidence) = active_pane_evidence(mux, fd_reader) else {
+            continue;
+        };
+        if evidence.link_evidence == "active_pane_command_session_match" {
+            continue;
+        }
+
+        let process_node = fd_runtime_process_node(mux, pid, &evidence);
+        let process_id = NodeId::RuntimeProcess(process_node.id.clone());
+        nodes_by_id.insert(
+            process_node.id.clone(),
+            GraphNode::RuntimeProcess(process_node),
+        );
+
+        let containment = fd_runtime_process_link(
+            format!(
+                "cross_link:{}:mux_contains_process:{}",
+                NodeId::MuxSession(mux.id.clone()),
+                process_id
+            ),
+            NodeId::MuxSession(mux.id.clone()),
+            LinkEndpoint::Node {
+                id: process_id.clone(),
+            },
+            RelationKind::MuxContainsProcess,
+            Confidence::High,
+            pid,
+            &evidence,
+        );
+        links_by_id.insert(containment.id.clone(), containment);
+
+        let matching_sessions: Vec<_> = sessions
+            .iter()
+            .copied()
+            .filter(|session| evidence.matches_session(session))
+            .collect();
+
+        if matching_sessions.is_empty() {
+            let unresolved = fd_runtime_process_link(
+                format!("cross_link:{process_id}:process_candidates_session:fd:{pid}"),
+                process_id.clone(),
+                LinkEndpoint::Unresolved {
+                    evidence: crate::model::UnresolvedEndpoint {
+                        node_type: "agent_session".to_string(),
+                        harness_key: single_value(&evidence.harnesses),
+                        native_id: None,
+                        state_scope: None,
+                        path: mux
+                            .active_pane_current_path
+                            .as_ref()
+                            .or(mux.cwd.as_ref())
+                            .cloned(),
+                        metadata: fd_runtime_process_endpoint_metadata(pid, &evidence),
+                    },
+                },
+                RelationKind::ProcessCandidatesSession,
+                Confidence::Low,
+                pid,
+                &evidence,
+            );
+            links_by_id.insert(unresolved.id.clone(), unresolved);
+            continue;
+        }
+
+        for session in matching_sessions {
+            let target = NodeId::AgentSession(session.id.clone());
+            let link = fd_runtime_process_link(
+                format!("cross_link:{process_id}:process_identifies_session:{target}"),
+                process_id.clone(),
+                LinkEndpoint::Node { id: target },
+                RelationKind::ProcessIdentifiesSession,
+                Confidence::High,
+                pid,
+                &evidence,
+            );
+            links_by_id.insert(link.id.clone(), link);
+        }
+    }
+
+    (
+        nodes_by_id.into_values().collect(),
+        links_by_id.into_values().collect(),
+    )
+}
+
+fn fd_runtime_process_node(
+    mux: &MuxSessionNode,
+    pid: i64,
+    evidence: &ActivePaneEvidence,
+) -> RuntimeProcessNode {
+    let observation_key = format!("{}:fd:pid:{}", NodeId::MuxSession(mux.id.clone()), pid);
+    RuntimeProcessNode {
+        id: RuntimeProcessId::new(&observation_key),
+        observation_key,
+        pid: Some(pid),
+        parent_pid: None,
+        root_pane_pid: Some(pid),
+        command: mux
+            .active_pane_start_command
+            .clone()
+            .or_else(|| mux.active_pane_command.clone()),
+        cwd: mux
+            .active_pane_current_path
+            .clone()
+            .or_else(|| mux.cwd.clone()),
+        harness_key: single_value(&evidence.harnesses),
+        role: Some(RuntimeProcessRole::HumanAgent),
+        depth: Some(0),
+        observed_epoch: mux.activity_epoch,
+    }
+}
+
+fn fd_runtime_process_link(
+    id: String,
+    source: NodeId,
+    target: LinkEndpoint,
+    relation: RelationKind,
+    confidence: Confidence,
+    pid: i64,
+    evidence: &ActivePaneEvidence,
+) -> GraphLink {
+    let fields = fd_runtime_process_endpoint_metadata(pid, evidence);
+    GraphLink {
+        id,
+        source,
+        target,
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some(evidence.link_evidence.to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn fd_runtime_process_endpoint_metadata(
+    pid: i64,
+    evidence: &ActivePaneEvidence,
+) -> crate::model::Metadata {
+    let mut metadata = crate::model::Metadata::new();
+    metadata.insert(
+        "match_kind".to_string(),
+        serde_json::Value::String(evidence.link_evidence.to_string()),
+    );
+    metadata.insert(
+        "matched_pid".to_string(),
+        serde_json::Value::Number(pid.into()),
+    );
+    metadata.insert(
+        "session_keys".to_string(),
+        serde_json::Value::Array(
+            evidence
+                .session_keys
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    );
+    metadata.insert(
+        "harnesses".to_string(),
+        serde_json::Value::Array(
+            evidence
+                .harnesses
+                .iter()
+                .cloned()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
+    );
+    metadata
+}
+
+fn single_value(values: &BTreeSet<String>) -> Option<String> {
+    (values.len() == 1)
+        .then(|| values.iter().next().cloned())
+        .flatten()
+}
+
 fn mux_has_non_harness_active_pane(mux: &MuxSessionNode) -> bool {
     let has_active_pane = mux.active_pane_command.is_some()
         || mux.active_pane_start_command.is_some()
@@ -496,23 +894,21 @@ fn active_mux_sessions(
     muxes: &[&MuxSessionNode],
     snapshot: &GraphSnapshot,
     fd_reader: &impl Fn(i64) -> Option<SessionKeyEvidence>,
-    process_snapshot: Option<&dyn ProcessSnapshot>,
+    has_process_snapshot: bool,
+    process_evidence_by_mux: &HashMap<crate::model::MuxSessionId, Vec<ProcessPaneEvidence>>,
 ) -> (
     HashMap<crate::model::MuxSessionId, ActiveMuxSessionMatches>,
     Vec<GraphLink>,
 ) {
     let parent_by_child = parent_session_keys_by_child(snapshot);
     let mut active = HashMap::new();
-    let process_evidence_by_mux = process_snapshot
-        .map(|snapshot| active_pane_process_evidence_by_mux(muxes, snapshot))
-        .unwrap_or_default();
     let mut unresolved_links = Vec::new();
 
     for mux in muxes {
         let mut matches = ActiveMuxSessionMatches::default();
         let process_evidence = process_evidence_by_mux.get(&mux.id);
         let enforce_single_agent_session =
-            process_snapshot.is_some() && controlling_agent_process_count(process_evidence) <= 1;
+            has_process_snapshot && controlling_agent_process_count(process_evidence) <= 1;
 
         if let Some(evidence) = active_pane_evidence(mux, fd_reader) {
             let direct_matches: BTreeSet<_> = sessions
@@ -756,6 +1152,7 @@ struct ProcessPaneEvidence {
     session_keys: BTreeSet<String>,
     root_pid: i64,
     matched_pid: i64,
+    parent_pid: Option<i64>,
     depth: usize,
     command: String,
     cwd: Option<String>,
@@ -777,6 +1174,14 @@ impl ProcessPaneEvidence {
 
     fn is_opencode_subagent_process(&self) -> bool {
         self.harness_key == "opencode" && self.command.to_ascii_lowercase().contains(" subagent")
+    }
+
+    fn role(&self) -> RuntimeProcessRole {
+        if self.is_opencode_subagent_process() {
+            RuntimeProcessRole::Subagent
+        } else {
+            RuntimeProcessRole::HumanAgent
+        }
     }
 }
 
@@ -941,6 +1346,7 @@ fn active_pane_process_evidence(
                         session_keys: uuid_like_values(command),
                         root_pid,
                         matched_pid: pid,
+                        parent_pid: record.parent_pid,
                         depth,
                         command: command.to_string(),
                         cwd: record.cwd.clone(),
@@ -1799,6 +2205,36 @@ mod tests {
                 .and_then(serde_json::Value::as_i64),
             Some(100)
         );
+
+        let process_node = snapshot
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::RuntimeProcess(process) => Some(process),
+                _ => None,
+            })
+            .expect("runtime process node");
+        assert_eq!(process_node.pid, Some(100));
+        assert_eq!(process_node.root_pane_pid, Some(100));
+        assert_eq!(process_node.harness_key.as_deref(), Some("codex"));
+        assert_eq!(process_node.role, Some(RuntimeProcessRole::HumanAgent));
+
+        let process_id = NodeId::RuntimeProcess(process_node.id.clone());
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::MuxContainsProcess
+                && link.source == NodeId::MuxSession(MuxSessionId::new("tmux:editor"))
+                && link.target_node_id() == Some(&process_id)
+        }));
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::ProcessCandidatesSession
+                && link.source == process_id
+                && link.target_node_id()
+                    == Some(&NodeId::AgentSession(AgentSessionId::new(
+                        "codex",
+                        "/state",
+                        "target-session",
+                    )))
+        }));
     }
 
     #[test]
@@ -1917,6 +2353,18 @@ mod tests {
                 .map(Vec::len),
             Some(1)
         );
+
+        let process_link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::ProcessIdentifiesSession)
+            .expect("process identifies session link");
+        assert_eq!(
+            process_link.target_node_id(),
+            Some(&NodeId::AgentSession(AgentSessionId::new(
+                "codex", "/state", target
+            )))
+        );
     }
 
     #[test]
@@ -1962,6 +2410,51 @@ mod tests {
             concrete_links[0].source_metadata.evidence.as_deref(),
             Some("active_pane_fd_session_match")
         );
+    }
+
+    #[test]
+    fn active_pane_fd_session_emits_runtime_process_without_process_tree() {
+        let target = "019e7733-0be9-7720-b828-e185f9029793";
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session(target, Some("/work/repo")),
+                mux_with_active_process("editor", Some("/work/repo"), "codex", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let fd_path = format!("/home/me/.codex/sessions/rollout-{target}.jsonl");
+        let fd_paths = BTreeMap::from([(100, vec![fd_path])]);
+
+        infer_with_fd_paths(&mut snapshot, &fd_paths);
+
+        let process_node = snapshot
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::RuntimeProcess(process) => Some(process),
+                _ => None,
+            })
+            .expect("runtime process node");
+        assert_eq!(process_node.pid, Some(100));
+        assert_eq!(process_node.root_pane_pid, Some(100));
+        assert_eq!(process_node.harness_key.as_deref(), Some("codex"));
+        assert_eq!(process_node.depth, Some(0));
+
+        let process_id = NodeId::RuntimeProcess(process_node.id.clone());
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::MuxContainsProcess
+                && link.source == NodeId::MuxSession(MuxSessionId::new("tmux:editor"))
+                && link.target_node_id() == Some(&process_id)
+        }));
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::ProcessIdentifiesSession
+                && link.source == process_id
+                && link.target_node_id()
+                    == Some(&NodeId::AgentSession(AgentSessionId::new(
+                        "codex", "/state", target,
+                    )))
+                && link.source_metadata.evidence.as_deref() == Some("active_pane_fd_session_match")
+        }));
     }
 
     #[test]

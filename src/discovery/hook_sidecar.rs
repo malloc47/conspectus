@@ -11,7 +11,7 @@ use crate::hook::{self, HookRecord, HookTmuxRecord};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, Provenance,
-    RelationKind, SourceMetadata,
+    RelationKind, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "hook_sidecar";
@@ -75,12 +75,17 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
             }
         }
 
+        let link_is_active = matches!(link.state, LinkState::Active);
         if !snapshot
             .candidate_links
             .iter()
             .any(|existing| existing.id == link.id)
         {
             snapshot.candidate_links.push(link);
+        }
+
+        if link_is_active {
+            emit_runtime_process_observation(snapshot, &session, &mux, &record);
         }
     }
 }
@@ -311,6 +316,120 @@ fn linked_to_mux(
     }
 }
 
+fn emit_runtime_process_observation(
+    snapshot: &mut GraphSnapshot,
+    session: &AgentSessionNode,
+    mux: &MuxSessionNode,
+    record: &HookRecord,
+) {
+    let Some(pid) = record.pid else {
+        return;
+    };
+    let observation_key = format!(
+        "hook_sidecar:{}:pid:{}:{}",
+        NodeId::MuxSession(mux.id.clone()),
+        pid,
+        record.observed_epoch
+    );
+    let process_id = RuntimeProcessId::new(&observation_key);
+    let process_node_id = NodeId::RuntimeProcess(process_id.clone());
+    if !snapshot
+        .nodes
+        .iter()
+        .any(|node| node.id() == process_node_id)
+    {
+        snapshot
+            .nodes
+            .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
+                id: process_id,
+                observation_key,
+                pid: Some(pid),
+                parent_pid: record.ppid,
+                root_pane_pid: mux.active_pane_pid,
+                command: None,
+                cwd: record.cwd.clone(),
+                harness_key: Some(record.harness_key.clone()),
+                role: Some(RuntimeProcessRole::HumanAgent),
+                depth: None,
+                observed_epoch: Some(record.observed_epoch),
+            }));
+    }
+
+    let mux_id = NodeId::MuxSession(mux.id.clone());
+    let session_id = NodeId::AgentSession(session.id.clone());
+    let containment = hook_process_link(
+        format!("hook_sidecar:{mux_id}:mux_contains_process:{process_node_id}"),
+        mux_id,
+        LinkEndpoint::Node {
+            id: process_node_id.clone(),
+        },
+        RelationKind::MuxContainsProcess,
+        record,
+    );
+    let identifies = hook_process_link(
+        format!("hook_sidecar:{process_node_id}:process_identifies_session:{session_id}"),
+        process_node_id,
+        LinkEndpoint::Node { id: session_id },
+        RelationKind::ProcessIdentifiesSession,
+        record,
+    );
+    for link in [containment, identifies] {
+        if !snapshot
+            .candidate_links
+            .iter()
+            .any(|existing| existing.id == link.id)
+        {
+            snapshot.candidate_links.push(link);
+        }
+    }
+}
+
+fn hook_process_link(
+    id: String,
+    source: NodeId,
+    target: LinkEndpoint,
+    relation: RelationKind,
+    record: &HookRecord,
+) -> GraphLink {
+    let mut fields = Metadata::new();
+    fields.insert(
+        "match_kind".to_string(),
+        serde_json::Value::String("hook_process_observation".to_string()),
+    );
+    fields.insert(
+        "observed_epoch".to_string(),
+        serde_json::Value::Number(record.observed_epoch.into()),
+    );
+    if let Some(pid) = record.pid {
+        fields.insert(
+            "process_pid".to_string(),
+            serde_json::Value::Number(pid.into()),
+        );
+    }
+    if let Some(ppid) = record.ppid {
+        fields.insert(
+            "process_parent_pid".to_string(),
+            serde_json::Value::Number(ppid.into()),
+        );
+    }
+
+    GraphLink {
+        id,
+        source,
+        target,
+        relation,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some("hook_process_observation".to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
 fn tmux_metadata(tmux: &HookTmuxRecord) -> BTreeMap<String, serde_json::Value> {
     let mut fields = BTreeMap::new();
     if let Some(value) = &tmux.session_name {
@@ -520,13 +639,30 @@ mod tests {
 
         apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
 
-        assert_eq!(snapshot.candidate_links.len(), 1);
+        let mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert_eq!(mux_links.len(), 1);
         assert_eq!(
-            snapshot.candidate_links[0]
-                .source_metadata
-                .evidence
-                .as_deref(),
+            mux_links[0].source_metadata.evidence.as_deref(),
             Some("hook_session_match")
+        );
+        assert!(snapshot.nodes.iter().any(|node| {
+            matches!(
+                node,
+                GraphNode::RuntimeProcess(process)
+                    if process.pid == Some(123)
+                        && process.parent_pid == Some(456)
+                        && process.harness_key.as_deref() == Some("claude-code")
+            )
+        }));
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .any(|link| link.relation == RelationKind::ProcessIdentifiesSession)
         );
     }
 

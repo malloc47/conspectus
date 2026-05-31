@@ -3105,7 +3105,7 @@ failure:
     them. Scenario-specific process fixtures remain in
     `H-MUXPROC-FU-006`.
 
-- [ ] `H-MUXPROC-FU-004` Emit runtime process nodes from MUXPROC
+- [x] `H-MUXPROC-FU-004` Emit runtime process nodes from MUXPROC
   discovery.
   - Scope: update process-tree, fd, hook/plugin, and Codex log-derived
     attribution paths to emit process observations and explicit
@@ -3117,6 +3117,17 @@ failure:
     stale argv suppressed by stronger current-session evidence, and
     unreadable `/proc` degradation.
   - Blockers: `H-MUXPROC-FU-003`.
+  - **slice landed**: process-tree evidence now emits
+    `RuntimeProcess` nodes, `mux_contains_process` links, and
+    `process_identifies_session` / `process_candidates_session`
+    links alongside the legacy `linked_to_mux` candidates. Hook
+    sidecar records with process ids and Codex log-derived pid/thread
+    attribution emit the same process graph shape. The ERD in
+    `docs/design.md` now includes mux/process/session relationships.
+    Active-pane fd evidence without a process-tree snapshot now
+    synthesizes a root process observation from the mux active pane PID,
+    preserving the runtime process graph shape for deterministic
+    scenarios and constrained platforms.
 
 - [ ] `H-MUXPROC-FU-005` Move mux-cardinality and attribution resolver
   logic onto runtime process evidence.

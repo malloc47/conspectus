@@ -165,7 +165,11 @@ fn is_cwd_evidence(link: &GraphLink) -> bool {
 fn multi_target_relation(relation: &RelationKind) -> bool {
     matches!(
         relation,
-        RelationKind::AssociatedWith | RelationKind::WorkspaceContainsRepo
+        RelationKind::AssociatedWith
+            | RelationKind::WorkspaceContainsRepo
+            | RelationKind::MuxContainsProcess
+            | RelationKind::ProcessIdentifiesSession
+            | RelationKind::ProcessCandidatesSession
     )
 }
 

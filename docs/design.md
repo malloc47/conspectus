@@ -197,6 +197,8 @@ erDiagram
     AGENT_SESSION }o--o| CHECKOUT : associated_with
     AGENT_SESSION }o--o| FORK : associated_with
     AGENT_SESSION }o--o| MUX_SESSION : linked_to
+    MUX_SESSION ||--o{ RUNTIME_PROCESS : observes
+    RUNTIME_PROCESS }o--o| AGENT_SESSION : identifies_or_candidates
     MUX_SESSION }o--o| WORKSPACE : rooted_in
     MUX_SESSION }o--o| REPO : rooted_in
     MUX_SESSION }o--o| CHECKOUT : rooted_in

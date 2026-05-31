@@ -41,7 +41,7 @@ use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, Provenance, RelationKind,
-    SourceMetadata,
+    RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = "codex_log";
@@ -124,6 +124,7 @@ pub fn apply_codex_log_attribution(
 
     let state_scope = state_root.to_string_lossy().to_string();
     let mut emitted: Vec<GraphLink> = Vec::new();
+    let mut process_links: Vec<GraphLink> = Vec::new();
     let mut synthesized: Vec<AgentSessionNode> = Vec::new();
 
     // Dedupe so the same (mux, thread) only produces one log-derived link
@@ -165,6 +166,18 @@ pub fn apply_codex_log_attribution(
             &observation,
             candidate.pid,
         ));
+        let process_id = ensure_codex_runtime_process(
+            snapshot,
+            &candidate.mux_id,
+            candidate.pid,
+            observation.ts,
+        );
+        process_links.push(codex_process_link(
+            process_id,
+            NodeId::AgentSession(session_id.clone()),
+            &observation,
+            candidate.pid,
+        ));
     }
 
     for synth in synthesized {
@@ -176,6 +189,15 @@ pub fn apply_codex_log_attribution(
     }
 
     for link in emitted {
+        if !snapshot
+            .candidate_links
+            .iter()
+            .any(|existing| existing.id == link.id)
+        {
+            snapshot.candidate_links.push(link);
+        }
+    }
+    for link in process_links {
         if !snapshot
             .candidate_links
             .iter()
@@ -357,6 +379,130 @@ fn build_link(
     }
 }
 
+fn ensure_codex_runtime_process(
+    snapshot: &mut GraphSnapshot,
+    mux_id: &MuxSessionId,
+    pid: i64,
+    observed_epoch: i64,
+) -> NodeId {
+    if let Some(existing) = runtime_process_for_mux_pid(snapshot, mux_id, pid) {
+        return existing;
+    }
+
+    let mux_node_id = NodeId::MuxSession(mux_id.clone());
+    let observation_key = format!("codex_log:{mux_node_id}:pid:{pid}");
+    let process_id = RuntimeProcessId::new(&observation_key);
+    let process_node_id = NodeId::RuntimeProcess(process_id.clone());
+    snapshot
+        .nodes
+        .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: process_id,
+            observation_key,
+            pid: Some(pid),
+            parent_pid: None,
+            root_pane_pid: None,
+            command: Some("codex".to_string()),
+            cwd: None,
+            harness_key: Some(CODEX_HARNESS_KEY.to_string()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: None,
+            observed_epoch: Some(observed_epoch),
+        }));
+    let containment = GraphLink {
+        id: format!("codex_log:{mux_node_id}:mux_contains_process:{process_node_id}"),
+        source: mux_node_id,
+        target: LinkEndpoint::Node {
+            id: process_node_id.clone(),
+        },
+        relation: RelationKind::MuxContainsProcess,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some("codex_log_process_observation".to_string()),
+            fields: Metadata::new(),
+        },
+        state: LinkState::Active,
+    };
+    if !snapshot
+        .candidate_links
+        .iter()
+        .any(|existing| existing.id == containment.id)
+    {
+        snapshot.candidate_links.push(containment);
+    }
+    process_node_id
+}
+
+fn runtime_process_for_mux_pid(
+    snapshot: &GraphSnapshot,
+    mux_id: &MuxSessionId,
+    pid: i64,
+) -> Option<NodeId> {
+    let process_ids: BTreeMap<_, _> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::RuntimeProcess(process) if process.pid == Some(pid) => {
+                Some((NodeId::RuntimeProcess(process.id.clone()), ()))
+            }
+            _ => None,
+        })
+        .collect();
+    let mux_node_id = NodeId::MuxSession(mux_id.clone());
+    snapshot.candidate_links.iter().find_map(|link| {
+        if link.relation == RelationKind::MuxContainsProcess
+            && link.source == mux_node_id
+            && let Some(target) = link.target_node_id()
+            && process_ids.contains_key(target)
+        {
+            return Some(target.clone());
+        }
+        None
+    })
+}
+
+fn codex_process_link(
+    process_id: NodeId,
+    session_id: NodeId,
+    observation: &ThreadObservation,
+    pid: i64,
+) -> GraphLink {
+    let mut fields = Metadata::new();
+    fields.insert(
+        "match_kind".to_string(),
+        serde_json::Value::String("codex_log_process_thread_match".to_string()),
+    );
+    fields.insert(
+        "observed_epoch".to_string(),
+        serde_json::Value::Number(observation.ts.into()),
+    );
+    fields.insert(
+        "process_pid".to_string(),
+        serde_json::Value::Number(pid.into()),
+    );
+    fields.insert(
+        "process_uuid".to_string(),
+        serde_json::Value::String(observation.process_uuid.clone()),
+    );
+    GraphLink {
+        id: format!("codex_log:{process_id}:process_identifies_session:{session_id}"),
+        source: process_id,
+        target: LinkEndpoint::Node { id: session_id },
+        relation: RelationKind::ProcessIdentifiesSession,
+        provenance: Provenance::StrongDiscovered,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: ADAPTER_NAME.to_string(),
+            evidence: Some("codex_log_process_thread_match".to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
+}
+
 /// Mark `active_pane_command_session_match` candidates for the same mux as
 /// `Overridden`, matching the demotion shape established for hook sidecars
 /// in ADR 0028. The override only triggers when the stale link points at a
@@ -531,6 +677,16 @@ mod tests {
         map
     }
 
+    fn codex_log_mux_links(snapshot: &GraphSnapshot) -> Vec<&GraphLink> {
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|l| {
+                l.source_metadata.adapter == ADAPTER_NAME && l.relation == RelationKind::LinkedToMux
+            })
+            .collect()
+    }
+
     #[test]
     fn emits_linked_to_mux_for_freshest_thread_per_pid() {
         let temp = TempDir::new().expect("temp");
@@ -560,11 +716,7 @@ mod tests {
             DEFAULT_WINDOW_SECONDS,
         );
 
-        let log_links: Vec<_> = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .collect();
+        let log_links = codex_log_mux_links(&snapshot);
         assert_eq!(log_links.len(), 1);
         let NodeId::AgentSession(session_id) = &log_links[0].source else {
             panic!("expected agent session source");
@@ -582,6 +734,20 @@ mod tests {
             .get("process_uuid_suffix")
             .and_then(serde_json::Value::as_str);
         assert_eq!(suffix, Some("uuid-a"));
+        assert!(snapshot.nodes.iter().any(|node| {
+            matches!(
+                node,
+                GraphNode::RuntimeProcess(process)
+                    if process.pid == Some(100)
+                        && process.harness_key.as_deref() == Some(CODEX_HARNESS_KEY)
+            )
+        }));
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .any(|link| link.relation == RelationKind::ProcessIdentifiesSession)
+        );
     }
 
     #[test]
@@ -613,11 +779,7 @@ mod tests {
         assert_eq!(synth.harness_key, CODEX_HARNESS_KEY);
         assert_eq!(synth.last_active_epoch, Some(now() - 5));
 
-        let log_link_count = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .count();
+        let log_link_count = codex_log_mux_links(&snapshot).len();
         assert_eq!(log_link_count, 1);
     }
 
@@ -733,11 +895,7 @@ mod tests {
             DEFAULT_WINDOW_SECONDS,
         );
 
-        let count = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .count();
+        let count = codex_log_mux_links(&snapshot).len();
         assert_eq!(count, 0);
     }
 
@@ -761,11 +919,7 @@ mod tests {
             DEFAULT_WINDOW_SECONDS,
         );
 
-        let count = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .count();
+        let count = codex_log_mux_links(&snapshot).len();
         assert_eq!(count, 0);
     }
 
@@ -793,10 +947,9 @@ mod tests {
             DEFAULT_WINDOW_SECONDS,
         );
 
-        let link = snapshot
-            .candidate_links
-            .iter()
-            .find(|l| l.source_metadata.adapter == ADAPTER_NAME)
+        let link = codex_log_mux_links(&snapshot)
+            .into_iter()
+            .next()
             .expect("log link");
         let NodeId::AgentSession(session_id) = &link.source else {
             panic!("expected agent session source");
@@ -867,11 +1020,7 @@ mod tests {
             DEFAULT_WINDOW_SECONDS,
         );
 
-        let count = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .count();
+        let count = codex_log_mux_links(&snapshot).len();
         assert_eq!(count, 0);
     }
 
@@ -891,11 +1040,7 @@ mod tests {
 
         // Tight 5-minute window: row should be rejected as too old.
         apply_codex_log_attribution(&mut snapshot, state_root, &pids, now(), 5 * 60);
-        let tight = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .count();
+        let tight = codex_log_mux_links(&snapshot).len();
         assert_eq!(tight, 0);
 
         // Default window: same row is accepted.
@@ -906,11 +1051,7 @@ mod tests {
             now(),
             DEFAULT_WINDOW_SECONDS,
         );
-        let wide = snapshot
-            .candidate_links
-            .iter()
-            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
-            .count();
+        let wide = codex_log_mux_links(&snapshot).len();
         assert_eq!(wide, 1);
     }
 }
