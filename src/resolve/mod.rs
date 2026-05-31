@@ -3,16 +3,241 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
-    Confidence, Diagnostic, GraphLink, GraphSnapshot, LinkState, NodeId, Provenance, RelationKind,
-    ResolvedRelationship,
+    Confidence, Diagnostic, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
+    LinkState, NodeId, Provenance, RelationKind, ResolvedRelationship, RuntimeProcessRole,
+    SourceMetadata,
 };
 
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
+    let process_links = derive_process_mux_links(&snapshot);
+    append_unique_links(&mut snapshot.candidate_links, process_links);
     let output = resolve_links(&snapshot.candidate_links);
     snapshot.resolved_relationships = output.resolved_relationships;
     snapshot.diagnostics = output.diagnostics;
     snapshot.canonicalize();
     snapshot
+}
+
+fn append_unique_links(links: &mut Vec<GraphLink>, additions: Vec<GraphLink>) {
+    for link in additions {
+        if !links.iter().any(|existing| existing.id == link.id) {
+            links.push(link);
+        }
+    }
+}
+
+fn derive_process_mux_links(snapshot: &GraphSnapshot) -> Vec<GraphLink> {
+    let mut role_by_process = BTreeMap::new();
+    for node in &snapshot.nodes {
+        if let GraphNode::RuntimeProcess(process) = node {
+            role_by_process.insert(
+                NodeId::RuntimeProcess(process.id.clone()),
+                process.role.unwrap_or(RuntimeProcessRole::Unknown),
+            );
+        }
+    }
+
+    let mut mux_links_by_process: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
+    let mut session_links_by_process: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
+    for link in &snapshot.candidate_links {
+        if link.state.is_ignored() || matches!(link.state, LinkState::Overridden { .. }) {
+            continue;
+        }
+        match link.relation {
+            RelationKind::MuxContainsProcess => {
+                if let Some(process) = link.target_node_id() {
+                    mux_links_by_process
+                        .entry(process.clone())
+                        .or_default()
+                        .push(link);
+                }
+            }
+            RelationKind::ProcessIdentifiesSession | RelationKind::ProcessCandidatesSession => {
+                session_links_by_process
+                    .entry(link.source.clone())
+                    .or_default()
+                    .push(link);
+            }
+            _ => {}
+        }
+    }
+
+    let candidate_counts_by_process: BTreeMap<NodeId, usize> = session_links_by_process
+        .iter()
+        .map(|(process, links)| {
+            let count = links
+                .iter()
+                .filter(|link| link.relation == RelationKind::ProcessCandidatesSession)
+                .filter(|link| matches!(link.target_node_id(), Some(NodeId::AgentSession(_))))
+                .count();
+            (process.clone(), count)
+        })
+        .collect();
+
+    let mut non_subagent_processes_by_mux: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+    for (process, mux_links) in &mux_links_by_process {
+        if role_by_process.get(process) == Some(&RuntimeProcessRole::Subagent) {
+            continue;
+        }
+        for mux_link in mux_links {
+            non_subagent_processes_by_mux
+                .entry(mux_link.source.clone())
+                .or_default()
+                .insert(process.clone());
+        }
+    }
+
+    let mut derived = BTreeMap::new();
+    for (process, session_links) in &session_links_by_process {
+        let Some(mux_links) = mux_links_by_process.get(process) else {
+            continue;
+        };
+        for session_link in session_links {
+            let Some(NodeId::AgentSession(_)) = session_link.target_node_id() else {
+                continue;
+            };
+            if session_link.relation == RelationKind::ProcessCandidatesSession
+                && candidate_counts_by_process
+                    .get(process)
+                    .copied()
+                    .unwrap_or(0)
+                    != 1
+            {
+                continue;
+            }
+
+            for mux_link in mux_links {
+                let source = session_link
+                    .target_node_id()
+                    .expect("checked above")
+                    .clone();
+                let target = mux_link.source.clone();
+                if !matches!(target, NodeId::MuxSession(_)) {
+                    continue;
+                }
+                if has_compatible_session_mux_link(
+                    &snapshot.candidate_links,
+                    &source,
+                    &target,
+                    process,
+                ) {
+                    continue;
+                }
+                let link = process_mux_link(
+                    source,
+                    target,
+                    process.clone(),
+                    mux_link,
+                    session_link,
+                    non_subagent_processes_by_mux
+                        .get(&mux_link.source)
+                        .map(BTreeSet::len)
+                        .unwrap_or(0),
+                );
+                derived.insert(link.id.clone(), link);
+            }
+        }
+    }
+
+    derived.into_values().collect()
+}
+
+fn has_compatible_session_mux_link(
+    links: &[GraphLink],
+    source: &NodeId,
+    target: &NodeId,
+    process: &NodeId,
+) -> bool {
+    links.iter().any(|link| {
+        if link.relation != RelationKind::LinkedToMux
+            || &link.source != source
+            || link.target_node_id() != Some(target)
+        {
+            return false;
+        }
+        let match_kind = link
+            .source_metadata
+            .fields
+            .get("match_kind")
+            .and_then(serde_json::Value::as_str)
+            .or(link.source_metadata.evidence.as_deref());
+        let process_id = link
+            .source_metadata
+            .fields
+            .get("runtime_process")
+            .and_then(serde_json::Value::as_str);
+        let process_id_matches = process_id.is_some_and(|value| value == process.to_string());
+        matches!(
+            match_kind,
+            Some(
+                "active_pane_process_match"
+                    | "active_pane_fd_session_match"
+                    | "active_pane_fd_command_session_match"
+                    | "hook_session_match"
+                    | "hook_session_path_match"
+                    | "codex_log_thread_match"
+                    | "runtime_process_identifies_session"
+                    | "runtime_process_candidates_session"
+            )
+        ) || process_id_matches
+    })
+}
+
+fn process_mux_link(
+    source: NodeId,
+    target: NodeId,
+    process: NodeId,
+    mux_link: &GraphLink,
+    session_link: &GraphLink,
+    non_subagent_process_count: usize,
+) -> GraphLink {
+    let identifies = session_link.relation == RelationKind::ProcessIdentifiesSession;
+    let match_kind = if identifies {
+        "runtime_process_identifies_session"
+    } else {
+        "runtime_process_candidates_session"
+    };
+    let mut fields = crate::model::Metadata::new();
+    fields.insert(
+        "match_kind".to_string(),
+        serde_json::Value::String(match_kind.to_string()),
+    );
+    fields.insert(
+        "runtime_process".to_string(),
+        serde_json::Value::String(process.to_string()),
+    );
+    fields.insert(
+        "mux_process_link_id".to_string(),
+        serde_json::Value::String(mux_link.id.clone()),
+    );
+    fields.insert(
+        "process_session_link_id".to_string(),
+        serde_json::Value::String(session_link.id.clone()),
+    );
+    fields.insert(
+        "non_subagent_process_count".to_string(),
+        serde_json::Value::Number((non_subagent_process_count as u64).into()),
+    );
+
+    GraphLink {
+        id: format!("resolve:{source}:linked_to_mux:{target}:via:{process}"),
+        source,
+        target: LinkEndpoint::Node { id: target },
+        relation: RelationKind::LinkedToMux,
+        provenance: Provenance::StrongDiscovered,
+        confidence: if identifies {
+            Confidence::High
+        } else {
+            Confidence::Medium
+        },
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "resolver".to_string(),
+            evidence: Some(match_kind.to_string()),
+            fields,
+        },
+        state: LinkState::Active,
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -253,7 +478,11 @@ fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
         ) => 50,
         Some("active_pane_fd_command_session_match") => 45,
         Some("session_file_activity_match" | "harness_state_current_session_match") => 40,
-        Some("active_pane_process_match") => 35,
+        Some(
+            "active_pane_process_match"
+            | "runtime_process_identifies_session"
+            | "runtime_process_candidates_session",
+        ) => 35,
         Some("active_pane_command_session_match") => 30,
         Some("exact_cwd_match") => 20,
         Some("cwd_prefix_match") => 10,
@@ -367,9 +596,9 @@ fn pr_state_rank(raw: Option<&str>) -> PrStateRank {
 #[cfg(test)]
 mod tests {
     use crate::model::{
-        AgentSessionId, BranchId, CheckoutId, Confidence, ForgePrId, ForkId, GraphLink,
+        AgentSessionId, BranchId, CheckoutId, Confidence, ForgePrId, ForkId, GraphLink, GraphNode,
         LinkEndpoint, LinkState, MuxSessionId, NodeId, Provenance, RelationKind, RepoId,
-        UnresolvedEndpoint, WorkspaceId,
+        RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, UnresolvedEndpoint, WorkspaceId,
     };
 
     use super::*;
@@ -380,6 +609,26 @@ mod tests {
 
     fn mux(id: &str) -> NodeId {
         NodeId::MuxSession(MuxSessionId::new(id))
+    }
+
+    fn process(id: &str) -> NodeId {
+        NodeId::RuntimeProcess(RuntimeProcessId::new(id))
+    }
+
+    fn process_node(id: &str, role: RuntimeProcessRole) -> GraphNode {
+        GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: RuntimeProcessId::new(id),
+            observation_key: id.to_string(),
+            pid: None,
+            parent_pid: None,
+            root_pane_pid: None,
+            command: None,
+            cwd: None,
+            harness_key: None,
+            role: Some(role),
+            depth: None,
+            observed_epoch: None,
+        })
     }
 
     fn workspace(id: &str) -> NodeId {
@@ -582,6 +831,35 @@ mod tests {
         link
     }
 
+    fn mux_contains_process_link(id: &str, mux: NodeId, process: NodeId) -> GraphLink {
+        let mut link = GraphLink::new(
+            id,
+            mux,
+            LinkEndpoint::Node { id: process },
+            RelationKind::MuxContainsProcess,
+            Provenance::StrongDiscovered,
+        );
+        link.confidence = Confidence::High;
+        link
+    }
+
+    fn process_session_link(
+        id: &str,
+        process: NodeId,
+        session: NodeId,
+        relation: RelationKind,
+    ) -> GraphLink {
+        let mut link = GraphLink::new(
+            id,
+            process,
+            LinkEndpoint::Node { id: session },
+            relation,
+            Provenance::StrongDiscovered,
+        );
+        link.confidence = Confidence::High;
+        link
+    }
+
     #[test]
     fn session_mux_resolver_picks_local_declared_over_lower_tiers() {
         let strong = linked_to_mux_link(
@@ -770,6 +1048,200 @@ mod tests {
             output.resolved_relationships[0].competing_link_ids,
             vec!["launch-argv".to_string()]
         );
+    }
+
+    #[test]
+    fn resolve_snapshot_derives_session_mux_from_process_identity() {
+        let session = session("a");
+        let mux = mux("tmux:process");
+        let process = process("proc:1");
+        let snapshot = GraphSnapshot {
+            nodes: vec![process_node("proc:1", RuntimeProcessRole::HumanAgent)],
+            candidate_links: vec![
+                mux_contains_process_link("mux-process", mux.clone(), process.clone()),
+                process_session_link(
+                    "process-session",
+                    process,
+                    session.clone(),
+                    RelationKind::ProcessIdentifiesSession,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        let relation = resolved
+            .resolved_relationships
+            .iter()
+            .find(|rel| rel.relation == RelationKind::LinkedToMux)
+            .expect("derived session mux relationship");
+        assert_eq!(relation.source, session);
+        assert_eq!(relation.target, mux);
+        assert!(
+            relation
+                .selected_link_id
+                .starts_with("resolve:agent_session:codex:global:a:linked_to_mux:")
+        );
+        assert!(resolved.candidate_links.iter().any(|link| {
+            link.id == relation.selected_link_id
+                && link.source_metadata.evidence.as_deref()
+                    == Some("runtime_process_identifies_session")
+                && link
+                    .source_metadata
+                    .fields
+                    .get("non_subagent_process_count")
+                    .and_then(serde_json::Value::as_u64)
+                    == Some(1)
+        }));
+    }
+
+    #[test]
+    fn resolve_snapshot_does_not_fan_out_ambiguous_process_candidates() {
+        let process = process("proc:ambiguous");
+        let snapshot = GraphSnapshot {
+            nodes: vec![process_node(
+                "proc:ambiguous",
+                RuntimeProcessRole::HumanAgent,
+            )],
+            candidate_links: vec![
+                mux_contains_process_link("mux-process", mux("tmux:process"), process.clone()),
+                process_session_link(
+                    "process-session-a",
+                    process.clone(),
+                    session("a"),
+                    RelationKind::ProcessCandidatesSession,
+                ),
+                process_session_link(
+                    "process-session-b",
+                    process,
+                    session("b"),
+                    RelationKind::ProcessCandidatesSession,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        assert!(
+            !resolved
+                .resolved_relationships
+                .iter()
+                .any(|rel| rel.relation == RelationKind::LinkedToMux)
+        );
+    }
+
+    #[test]
+    fn process_unresolved_candidate_remains_a_diagnostic() {
+        let link = GraphLink::new(
+            "process-unresolved",
+            process("proc:unresolved"),
+            LinkEndpoint::Unresolved {
+                evidence: UnresolvedEndpoint {
+                    node_type: "agent_session".to_string(),
+                    harness_key: Some("codex".to_string()),
+                    native_id: None,
+                    state_scope: None,
+                    path: Some("/work/repo".to_string()),
+                    metadata: Default::default(),
+                },
+            },
+            RelationKind::ProcessCandidatesSession,
+            Provenance::StrongDiscovered,
+        );
+
+        let output = resolve_links(&[link]);
+
+        assert!(output.resolved_relationships.is_empty());
+        assert!(matches!(
+            output.diagnostics.as_slice(),
+            [Diagnostic::UnresolvedEndpoint { link_id, relation }]
+                if link_id == "process-unresolved"
+                    && relation == &RelationKind::ProcessCandidatesSession
+        ));
+    }
+
+    #[test]
+    fn resolve_snapshot_counts_non_subagent_runtime_processes() {
+        let human = process("proc:human");
+        let subagent = process("proc:subagent");
+        let mux = mux("tmux:process");
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                process_node("proc:human", RuntimeProcessRole::HumanAgent),
+                process_node("proc:subagent", RuntimeProcessRole::Subagent),
+            ],
+            candidate_links: vec![
+                mux_contains_process_link("mux-human", mux.clone(), human.clone()),
+                mux_contains_process_link("mux-subagent", mux, subagent),
+                process_session_link(
+                    "human-session",
+                    human,
+                    session("a"),
+                    RelationKind::ProcessIdentifiesSession,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        let link = resolved
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref()
+                        == Some("runtime_process_identifies_session")
+            })
+            .expect("derived process link");
+        assert_eq!(
+            link.source_metadata
+                .fields
+                .get("non_subagent_process_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn resolve_snapshot_process_identity_beats_stale_launch_argv() {
+        let session = session("a");
+        let process = process("proc:current");
+        let stale = linked_to_mux_link(
+            "launch-argv",
+            session.clone(),
+            mux("tmux:stale"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(1_000),
+            Some("active_pane_command_session_match"),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![process_node("proc:current", RuntimeProcessRole::HumanAgent)],
+            candidate_links: vec![
+                stale,
+                mux_contains_process_link("mux-process", mux("tmux:current"), process.clone()),
+                process_session_link(
+                    "process-session",
+                    process,
+                    session,
+                    RelationKind::ProcessIdentifiesSession,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        let relation = resolved
+            .resolved_relationships
+            .iter()
+            .find(|rel| rel.relation == RelationKind::LinkedToMux)
+            .expect("session mux relationship");
+        assert_eq!(relation.target, mux("tmux:current"));
+        assert_eq!(relation.competing_link_ids, vec!["launch-argv".to_string()]);
     }
 
     #[test]

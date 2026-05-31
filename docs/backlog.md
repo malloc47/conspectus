@@ -3129,7 +3129,7 @@ failure:
     preserving the runtime process graph shape for deterministic
     scenarios and constrained platforms.
 
-- [ ] `H-MUXPROC-FU-005` Move mux-cardinality and attribution resolver
+- [x] `H-MUXPROC-FU-005` Move mux-cardinality and attribution resolver
   logic onto runtime process evidence.
   - Scope: teach resolver/cross-link inference to derive
     `AgentSession -> MuxSession` from explicit process observations and
@@ -3140,6 +3140,13 @@ failure:
     subagent exclusion, current-session evidence beating stale launch
     argv, and unresolved process diagnostics.
   - Blockers: `H-MUXPROC-FU-004`.
+  - Outcome: `resolve_snapshot` now derives compatibility
+    `AgentSession -> MuxSession` candidates from
+    `mux_contains_process` plus concrete process/session evidence,
+    without fanning out ambiguous `process_candidates_session` links.
+    Resolver metadata records the source process links and counts
+    non-subagent runtime process roles so subagent observations do not
+    inflate mux cardinality.
 
 - [ ] `H-MUXPROC-FU-006` Surface runtime process diagnostics in node
   detail and scenario fixtures.
