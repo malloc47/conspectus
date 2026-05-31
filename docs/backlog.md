@@ -3781,7 +3781,7 @@ launched through CLI/TUI surfaces for manual inspection.
     at most one Active hook-sidecar `LinkedToMux` per `(mux, pane_id)`,
     called from the hook supersession test.
 
-- [ ] `TEST-004` Add graph and row-projection invariant tests.
+- [x] `TEST-004` Add graph and row-projection invariant tests.
   - Scope: add table-driven and, where practical, property-style
     tests for invariants that cut across specific scenarios: ignored
     candidates never resolve as active relationships; stronger
@@ -3797,6 +3797,12 @@ launched through CLI/TUI surfaces for manual inspection.
   - Manual checks: none.
   - Blockers: none for table-driven invariants; `TEST-001` before
     running invariants against replay fixtures.
+  - Outcome: added four deterministic invariant tests to
+    `tests/testing_replay.rs`: ignored mux candidates remain visible
+    as evidence but never resolve, ambiguous TUI session rows dedupe
+    candidate rows by mux target, replay worlds enforce at most one
+    active hook-sidecar link per `(mux, pane_id)`, and stronger
+    current-session fd evidence wins over stale launch history.
 
 - [ ] `TEST-005` Add TUI interaction regression tests for row
   expansion, scrolling, and attach resolution.
