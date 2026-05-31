@@ -3441,7 +3441,7 @@ failure:
     dedupe semantics. Unit tests cover old-record retention,
     fresher-same-pane override, and different-pane independence.
 
-- [ ] `H-MUXPROC-015` Fix Claude Code mux attribution after
+- [x] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
   - Problem: live testing showed a Claude Code process running in
     tmux with argv
@@ -3505,8 +3505,23 @@ failure:
     pid by parsing `logs.process_uuid` (`pid:<os_pid>:<uuid>`) and
     demotes stale `active_pane_command_session_match` candidates for
     the same mux, closing the codex equivalent of this drift class
-    without requiring hooks. Claude-side remains gated on
-    `H-MUXPROC-012` / `H-MUXPROC-005`.
+    without requiring hooks.
+  - **Claude-side fix landed via `H-MUXPROC-012` + ADR 0028 hook
+    sidecar stack** and confirmed in-the-wild on 2026-05-30. Live
+    `conspectus graph --format json` against the development host
+    showed two concurrent Claude panes with `claude --resume A` argv
+    whose hook-sidecar records had reported the operator's
+    post-`/resume` current session B; in both cases the cross_link
+    `active_pane_command_session_match` for A was already
+    `Overridden` by a fresh `hook_session_path_match` link to B with
+    reason "fresh hook sidecar current-session evidence", and on one
+    of the panes 10 older orphaned hook records for other sessions
+    were correctly demoted by the freshest record via "superseded by
+    fresher hook sidecar record for same pane". Three other Claude
+    panes whose argv id matched the hook id produced corroborating
+    candidates that did not need the override path. No code change
+    was needed for closure; the resolver tests and ADR 0028 hook
+    sidecar machinery already shipped the fix.
 
 - [x] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
   non-mutating session identity.
