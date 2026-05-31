@@ -126,6 +126,9 @@ fn node_id(endpoint: &DeclaredEndpoint) -> NodeId {
         DeclaredEndpoint::MuxSession { native_id } => {
             NodeId::MuxSession(MuxSessionId::new(native_id.clone()))
         }
+        DeclaredEndpoint::RuntimeProcess { observation_key } => {
+            NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(observation_key.clone()))
+        }
         DeclaredEndpoint::Branch {
             repo_common_dir,
             refname,

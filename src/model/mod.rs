@@ -72,6 +72,7 @@ simple_id!(RepoId, "repo", common_dir);
 simple_id!(WorkspaceId, "workspace", root);
 simple_id!(MuxSessionId, "mux_session", native_id);
 simple_id!(ForkId, "fork", provider_source_key);
+simple_id!(RuntimeProcessId, "runtime_process", observation_key);
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct CheckoutId {
@@ -191,6 +192,7 @@ pub enum NodeId {
     Workspace(WorkspaceId),
     AgentSession(AgentSessionId),
     MuxSession(MuxSessionId),
+    RuntimeProcess(RuntimeProcessId),
     Branch(BranchId),
     Fork(ForkId),
     ForgePr(ForgePrId),
@@ -217,6 +219,7 @@ impl fmt::Display for NodeId {
             Self::Workspace(id) => id.fmt(f),
             Self::AgentSession(id) => id.fmt(f),
             Self::MuxSession(id) => id.fmt(f),
+            Self::RuntimeProcess(id) => id.fmt(f),
             Self::Branch(id) => id.fmt(f),
             Self::Fork(id) => id.fmt(f),
             Self::ForgePr(id) => id.fmt(f),
@@ -232,6 +235,7 @@ pub enum GraphNode {
     Workspace(WorkspaceNode),
     AgentSession(AgentSessionNode),
     MuxSession(MuxSessionNode),
+    RuntimeProcess(RuntimeProcessNode),
     Branch(BranchNode),
     Fork(ForkNode),
     ForgePr(ForgePrNode),
@@ -249,6 +253,7 @@ impl GraphNode {
             Self::Workspace(node) => NodeId::Workspace(node.id.clone()),
             Self::AgentSession(node) => NodeId::AgentSession(node.id.clone()),
             Self::MuxSession(node) => NodeId::MuxSession(node.id.clone()),
+            Self::RuntimeProcess(node) => NodeId::RuntimeProcess(node.id.clone()),
             Self::Branch(node) => NodeId::Branch(node.id.clone()),
             Self::Fork(node) => NodeId::Fork(node.id.clone()),
             Self::ForgePr(node) => NodeId::ForgePr(node.id.clone()),
@@ -360,6 +365,30 @@ pub struct MuxSessionNode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct RuntimeProcessNode {
+    pub id: RuntimeProcessId,
+    pub observation_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_pid: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_pane_pid: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<RuntimeProcessRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_epoch: Option<i64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct BranchNode {
     pub id: BranchId,
     pub refname: String,
@@ -412,6 +441,18 @@ pub enum SessionKind {
     Subagent,
 }
 
+/// Best-effort role classification for ephemeral runtime process
+/// observations. The role is diagnostic and resolver-supporting; it
+/// is not durable identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeProcessRole {
+    HumanAgent,
+    Subagent,
+    Shell,
+    Unknown,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
@@ -432,6 +473,9 @@ pub enum RelationKind {
     AssociatedBranch,
     ParentFork,
     RootedAtPath,
+    MuxContainsProcess,
+    ProcessIdentifiesSession,
+    ProcessCandidatesSession,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -689,6 +733,10 @@ mod tests {
             ForgePrId::new("github", "github.com", "openai", "conspectus", 42).to_string(),
             "forge_pr:github:github.com/openai/conspectus#42"
         );
+        assert_eq!(
+            RuntimeProcessId::new("tmux:0:12345").to_string(),
+            "runtime_process:tmux:0:12345"
+        );
     }
 
     #[test]
@@ -724,6 +772,10 @@ mod tests {
             serde_json::to_string(&RelationKind::CreatedCheckout).expect("serialize relation kind");
 
         assert_eq!(encoded, r#""created_checkout""#);
+
+        let encoded = serde_json::to_string(&RelationKind::MuxContainsProcess)
+            .expect("serialize relation kind");
+        assert_eq!(encoded, r#""mux_contains_process""#);
     }
 
     #[test]

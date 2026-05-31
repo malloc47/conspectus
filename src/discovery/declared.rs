@@ -161,6 +161,9 @@ fn node_id(endpoint: &DeclaredEndpoint) -> NodeId {
         DeclaredEndpoint::MuxSession { native_id } => {
             NodeId::MuxSession(MuxSessionId::new(native_id.clone()))
         }
+        DeclaredEndpoint::RuntimeProcess { observation_key } => {
+            NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(observation_key.clone()))
+        }
         DeclaredEndpoint::Branch {
             repo_common_dir,
             refname,
@@ -239,6 +242,14 @@ fn unresolved_endpoint(endpoint: &DeclaredEndpoint) -> UnresolvedEndpoint {
             node_type: "mux_session".to_string(),
             harness_key: None,
             native_id: Some(native_id.clone()),
+            state_scope: None,
+            path: None,
+            metadata,
+        },
+        DeclaredEndpoint::RuntimeProcess { observation_key } => UnresolvedEndpoint {
+            node_type: "runtime_process".to_string(),
+            harness_key: None,
+            native_id: Some(observation_key.clone()),
             state_scope: None,
             path: None,
             metadata,

@@ -323,6 +323,7 @@ fn node_kind_label(id: &NodeId) -> &'static str {
         NodeId::Workspace(_) => "workspace",
         NodeId::AgentSession(_) => "agent_session",
         NodeId::MuxSession(_) => "mux_session",
+        NodeId::RuntimeProcess(_) => "runtime_process",
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
         NodeId::ForgePr(_) => "forge_pr",
@@ -348,6 +349,7 @@ fn write_node_summary_from_conn(
         NodeId::Workspace(_) => write_workspace(out, conn, &id_display)?,
         NodeId::AgentSession(aid) => write_agent_session(out, conn, &id_display, aid)?,
         NodeId::MuxSession(_) => write_mux_session(out, conn, &id_display)?,
+        NodeId::RuntimeProcess(_) => write_runtime_process(out, conn, &id_display)?,
         NodeId::Branch(bid) => write_branch(out, bid)?,
         NodeId::Fork(_) => write_fork(out, conn, &id_display)?,
         NodeId::ForgePr(_) => write_forge_pr(out, conn, &id_display)?,
@@ -471,6 +473,79 @@ fn write_mux_session(out: &mut String, conn: &Connection, node_id: &str) -> rusq
     let _ = writeln!(out, "  native_id: {native_id}");
     if let Some(cwd) = cwd {
         let _ = writeln!(out, "  cwd:       {cwd}");
+    }
+    Ok(true)
+}
+
+fn write_runtime_process(
+    out: &mut String,
+    conn: &Connection,
+    node_id: &str,
+) -> rusqlite::Result<bool> {
+    struct ProcessRow {
+        observation_key: String,
+        pid: Option<i64>,
+        parent_pid: Option<i64>,
+        root_pane_pid: Option<i64>,
+        command: Option<String>,
+        cwd: Option<String>,
+        harness_key: Option<String>,
+        role: Option<String>,
+        depth: Option<i64>,
+        observed_epoch: Option<i64>,
+    }
+    let row: Option<ProcessRow> = conn
+        .query_row(
+            "SELECT observation_key, pid, parent_pid, root_pane_pid, command, cwd, \
+                    harness_key, role, depth, observed_epoch \
+             FROM node_runtime_processes WHERE node_id = ?1",
+            [node_id],
+            |r| {
+                Ok(ProcessRow {
+                    observation_key: r.get(0)?,
+                    pid: r.get(1)?,
+                    parent_pid: r.get(2)?,
+                    root_pane_pid: r.get(3)?,
+                    command: r.get(4)?,
+                    cwd: r.get(5)?,
+                    harness_key: r.get(6)?,
+                    role: r.get(7)?,
+                    depth: r.get(8)?,
+                    observed_epoch: r.get(9)?,
+                })
+            },
+        )
+        .optional()?;
+    let Some(row) = row else {
+        return Ok(false);
+    };
+    let _ = writeln!(out, "  observation_key: {}", row.observation_key);
+    if let Some(pid) = row.pid {
+        let _ = writeln!(out, "  pid:             {pid}");
+    }
+    if let Some(parent_pid) = row.parent_pid {
+        let _ = writeln!(out, "  parent_pid:      {parent_pid}");
+    }
+    if let Some(root_pane_pid) = row.root_pane_pid {
+        let _ = writeln!(out, "  root_pane_pid:   {root_pane_pid}");
+    }
+    if let Some(command) = row.command {
+        let _ = writeln!(out, "  command:         {command}");
+    }
+    if let Some(cwd) = row.cwd {
+        let _ = writeln!(out, "  cwd:             {cwd}");
+    }
+    if let Some(harness_key) = row.harness_key {
+        let _ = writeln!(out, "  harness:         {harness_key}");
+    }
+    if let Some(role) = row.role {
+        let _ = writeln!(out, "  role:            {role}");
+    }
+    if let Some(depth) = row.depth {
+        let _ = writeln!(out, "  depth:           {depth}");
+    }
+    if let Some(observed_epoch) = row.observed_epoch {
+        let _ = writeln!(out, "  observed_epoch:  {observed_epoch}");
     }
     Ok(true)
 }

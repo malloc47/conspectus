@@ -3069,7 +3069,7 @@ failure:
     stays the main user-facing resolved relationship. Implementation
     is split into the follow-up slices below.
 
-- [ ] `H-MUXPROC-FU-002` Add runtime process graph model and relation
+- [x] `H-MUXPROC-FU-002` Add runtime process graph model and relation
   kinds.
   - Scope: add a provider-neutral `RuntimeProcess` node with ephemeral
     observation identity and sparse attributes for PID, parent PID,
@@ -3081,8 +3081,14 @@ failure:
   - Tests: serde round trips, deterministic identity/order tests, sparse
     node serialization, and relation-kind serialization.
   - Blockers: `H-MUXPROC-FU-001`.
+  - Outcome: added `RuntimeProcessId`, `RuntimeProcessNode`,
+    `RuntimeProcessRole`, a `GraphNode::RuntimeProcess` variant, a
+    `NodeId::RuntimeProcess` variant, and process relation kinds for
+    mux/process containment plus process/session identification and
+    candidate evidence. Model tests cover stable display and relation
+    serialization.
 
-- [ ] `H-MUXPROC-FU-003` Persist runtime process nodes in SQLite and
+- [x] `H-MUXPROC-FU-003` Persist runtime process nodes in SQLite and
   graph JSON.
   - Scope: extend the query schema/loader/reader for runtime process
     nodes and their relation evidence. Keep process observations
@@ -3091,6 +3097,13 @@ failure:
     JSON snapshots covering single-agent, multi-agent, subagent, stale
     argv, and unreadable-process cases.
   - Blockers: `H-MUXPROC-FU-002`.
+  - Outcome: bumped the query schema version and added
+    `node_runtime_processes`, `v_nodes` coverage, loader insertion,
+    readback, `NodeId` JSON round-trip coverage, and full-snapshot
+    SQLite round-trip coverage. Minimal `node show` and TUI detail
+    summaries can render runtime process nodes once discovery emits
+    them. Scenario-specific process fixtures remain in
+    `H-MUXPROC-FU-006`.
 
 - [ ] `H-MUXPROC-FU-004` Emit runtime process nodes from MUXPROC
   discovery.

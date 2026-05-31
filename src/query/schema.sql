@@ -89,6 +89,22 @@ CREATE TABLE IF NOT EXISTS node_mux_sessions (
     discovery_freshness_epoch     INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS node_runtime_processes (
+    node_id                   TEXT PRIMARY KEY,
+    observation_key           TEXT NOT NULL,
+    pid                       INTEGER,
+    parent_pid                INTEGER,
+    root_pane_pid             INTEGER,
+    command                   TEXT,
+    cwd                       TEXT,
+    harness_key               TEXT,
+    role                      TEXT,
+    depth                     INTEGER,
+    observed_epoch            INTEGER,
+    discovery_provider        TEXT NOT NULL DEFAULT 'unknown',
+    discovery_freshness_epoch INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS node_branches (
     node_id                   TEXT PRIMARY KEY,
     repo_common_dir           TEXT NOT NULL,    -- denormalized from BranchId.repo
@@ -137,6 +153,8 @@ CREATE VIEW IF NOT EXISTS v_nodes AS
     SELECT node_id, 'agent_session', discovery_provider, discovery_freshness_epoch FROM node_agent_sessions
     UNION ALL
     SELECT node_id, 'mux_session',   discovery_provider, discovery_freshness_epoch FROM node_mux_sessions
+    UNION ALL
+    SELECT node_id, 'runtime_process', discovery_provider, discovery_freshness_epoch FROM node_runtime_processes
     UNION ALL
     SELECT node_id, 'branch',        discovery_provider, discovery_freshness_epoch FROM node_branches
     UNION ALL

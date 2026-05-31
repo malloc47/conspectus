@@ -50,7 +50,8 @@ use std::path::Path;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
     GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
-    Provenance, RelationKind, RepoNode, ResolvedRelationship, WorkspaceNode,
+    Provenance, RelationKind, RepoNode, ResolvedRelationship, RuntimeProcessNode,
+    RuntimeProcessRole, WorkspaceNode,
 };
 use crate::output::table::node_short_id;
 use crate::tui::rows::shorten_home;
@@ -345,6 +346,7 @@ fn kind_label(node: &GraphNode) -> &'static str {
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
+        GraphNode::RuntimeProcess(_) => "runtime_process",
         GraphNode::Branch(_) => "branch",
         GraphNode::Fork(_) => "fork",
         GraphNode::ForgePr(_) => "forge_pr",
@@ -355,6 +357,7 @@ fn title_line(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
         GraphNode::MuxSession(mux) => mux_display_label(mux),
+        GraphNode::RuntimeProcess(process) => format!("process:{}", process.observation_key),
         GraphNode::ForgePr(pr) => format!("forge_pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => match &fork.name {
             Some(name) => format!("fork:{name}"),
@@ -388,6 +391,7 @@ fn header_fields_inner(
         GraphNode::MuxSession(mux) => {
             mux_session_fields(snapshot, mux, home, include_linked_details)
         }
+        GraphNode::RuntimeProcess(process) => runtime_process_fields(process, home),
         GraphNode::ForgePr(pr) => forge_pr_fields(pr),
         GraphNode::Fork(fork) => fork_fields(fork),
         GraphNode::Repo(repo) => repo_fields(repo, home),
@@ -587,6 +591,47 @@ fn fork_fields(fork: &ForkNode) -> Vec<HeaderField> {
         fields.push(plain("scope", scope.clone()));
     }
     fields.push(plain("source_key", fork.provider_source_key.clone()));
+    fields
+}
+
+fn runtime_process_fields(process: &RuntimeProcessNode, home: Option<&Path>) -> Vec<HeaderField> {
+    let mut fields = vec![plain("observation", process.observation_key.clone())];
+    if let Some(pid) = process.pid {
+        fields.push(plain("pid", pid.to_string()));
+    }
+    if let Some(parent_pid) = process.parent_pid {
+        fields.push(plain("parent", parent_pid.to_string()));
+    }
+    if let Some(root_pane_pid) = process.root_pane_pid {
+        fields.push(plain("pane_pid", root_pane_pid.to_string()));
+    }
+    if let Some(command) = &process.command {
+        fields.push(plain("command", command.clone()));
+    }
+    if let Some(cwd) = &process.cwd {
+        fields.push(plain("cwd", shorten_home(cwd, home)));
+    }
+    if let Some(harness_key) = &process.harness_key {
+        fields.push(plain("harness", harness_key.clone()));
+    }
+    if let Some(role) = process.role {
+        fields.push(plain(
+            "role",
+            match role {
+                RuntimeProcessRole::HumanAgent => "human_agent",
+                RuntimeProcessRole::Subagent => "subagent",
+                RuntimeProcessRole::Shell => "shell",
+                RuntimeProcessRole::Unknown => "unknown",
+            }
+            .to_string(),
+        ));
+    }
+    if let Some(depth) = process.depth {
+        fields.push(plain("depth", depth.to_string()));
+    }
+    if let Some(observed_epoch) = process.observed_epoch {
+        fields.push(plain("observed", observed_epoch.to_string()));
+    }
     fields
 }
 

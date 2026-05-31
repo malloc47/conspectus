@@ -42,8 +42,9 @@ use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence,
     Diagnostic, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
     GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId,
-    Provenance, RelationKind, RepoId, RepoNode, ResolvedRelationship, SourceMetadata,
-    UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
+    Provenance, RelationKind, RepoId, RepoNode, ResolvedRelationship, RuntimeProcessId,
+    RuntimeProcessNode, RuntimeProcessRole, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
+    WorkspaceNode,
 };
 
 /// Read a complete [`GraphSnapshot`] from `conn`. The snapshot is
@@ -56,6 +57,7 @@ pub fn read_snapshot(conn: &Connection) -> rusqlite::Result<GraphSnapshot> {
     read_workspaces(conn, &mut snap.nodes)?;
     read_agent_sessions(conn, &mut snap.nodes)?;
     read_mux_sessions(conn, &mut snap.nodes)?;
+    read_runtime_processes(conn, &mut snap.nodes)?;
     read_branches(conn, &mut snap.nodes)?;
     read_forks(conn, &mut snap.nodes)?;
     read_forge_prs(conn, &mut snap.nodes)?;
@@ -200,6 +202,42 @@ fn read_mux_sessions(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::R
     })?;
     for mux in rows {
         out.push(GraphNode::MuxSession(mux?));
+    }
+    Ok(())
+}
+
+fn read_runtime_processes(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT observation_key, pid, parent_pid, root_pane_pid, command, cwd, \
+                harness_key, role, depth, observed_epoch \
+         FROM node_runtime_processes ORDER BY node_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let observation_key: String = row.get(0)?;
+        let raw_role: Option<String> = row.get(7)?;
+        let role = raw_role.and_then(|role| match role.as_str() {
+            "human_agent" => Some(RuntimeProcessRole::HumanAgent),
+            "subagent" => Some(RuntimeProcessRole::Subagent),
+            "shell" => Some(RuntimeProcessRole::Shell),
+            "unknown" => Some(RuntimeProcessRole::Unknown),
+            _ => None,
+        });
+        Ok(RuntimeProcessNode {
+            id: RuntimeProcessId::new(&observation_key),
+            observation_key,
+            pid: row.get(1)?,
+            parent_pid: row.get(2)?,
+            root_pane_pid: row.get(3)?,
+            command: row.get(4)?,
+            cwd: row.get(5)?,
+            harness_key: row.get(6)?,
+            role,
+            depth: row.get(8)?,
+            observed_epoch: row.get(9)?,
+        })
+    })?;
+    for process in rows {
+        out.push(GraphNode::RuntimeProcess(process?));
     }
     Ok(())
 }
@@ -568,12 +606,13 @@ mod tests {
     fn every_node_id_variant_round_trips_through_json() {
         use crate::model::{
             AgentSessionId, BranchId, CheckoutId, ForgePrId, ForkId, MuxSessionId, RepoId,
-            WorkspaceId,
+            RuntimeProcessId, WorkspaceId,
         };
         let cases = vec![
             NodeId::Repo(RepoId::new("/r/.git")),
             NodeId::Workspace(WorkspaceId::new("/w")),
             NodeId::MuxSession(MuxSessionId::new("tmux:0")),
+            NodeId::RuntimeProcess(RuntimeProcessId::new("tmux:0:12345")),
             NodeId::Fork(ForkId::new("provider:src")),
             NodeId::AgentSession(AgentSessionId::new("claude-code", "default", "abc")),
             NodeId::Checkout(CheckoutId::new(RepoId::new("/r/.git"), "/r")),
@@ -637,8 +676,9 @@ mod tests {
             AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode,
             Confidence, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
             LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, Provenance,
-            RelationKind, RepoId, RepoNode, ResolvedRelationship, SourceMetadata,
-            UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
+            RelationKind, RepoId, RepoNode, ResolvedRelationship, RuntimeProcessId,
+            RuntimeProcessNode, RuntimeProcessRole, SourceMetadata, UnresolvedEndpoint,
+            WorkspaceId, WorkspaceNode,
         };
 
         let mut snap = GraphSnapshot::empty();
@@ -688,6 +728,21 @@ mod tests {
             activity_epoch: Some(1_700_000_001),
             created_epoch: Some(1_699_000_000),
         }));
+
+        snap.nodes
+            .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
+                id: RuntimeProcessId::new("tmux:0:12345"),
+                observation_key: "tmux:0:12345".into(),
+                pid: Some(12345),
+                parent_pid: Some(123),
+                root_pane_pid: Some(123),
+                command: Some("codex".into()),
+                cwd: Some("/cwd".into()),
+                harness_key: Some("codex".into()),
+                role: Some(RuntimeProcessRole::HumanAgent),
+                depth: Some(1),
+                observed_epoch: Some(1_700_000_003),
+            }));
 
         snap.nodes.push(GraphNode::Branch(BranchNode {
             id: BranchId::new(RepoId::new("/r/.git"), "refs/heads/main"),

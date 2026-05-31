@@ -23,7 +23,7 @@ pub const SCHEMA_SQL: &str = include_str!("schema.sql");
 /// the bump. Aligned with the in-memory `GraphSnapshot` schema version;
 /// when the model gains breaking changes (e.g. P7-002's provider-
 /// provenance fields), both versions advance together.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// One curated saved view defined in `schema.sql`. The registry below
 /// is the single source of truth that `conspectus query --list-views`
@@ -96,6 +96,7 @@ pub fn node_table_name(node: &GraphNode) -> &'static str {
         GraphNode::Workspace(_) => "node_workspaces",
         GraphNode::AgentSession(_) => "node_agent_sessions",
         GraphNode::MuxSession(_) => "node_mux_sessions",
+        GraphNode::RuntimeProcess(_) => "node_runtime_processes",
         GraphNode::Branch(_) => "node_branches",
         GraphNode::Fork(_) => "node_forks",
         GraphNode::ForgePr(_) => "node_forge_prs",
@@ -111,6 +112,7 @@ pub fn node_table_name_for_id(id: &NodeId) -> &'static str {
         NodeId::Workspace(_) => "node_workspaces",
         NodeId::AgentSession(_) => "node_agent_sessions",
         NodeId::MuxSession(_) => "node_mux_sessions",
+        NodeId::RuntimeProcess(_) => "node_runtime_processes",
         NodeId::Branch(_) => "node_branches",
         NodeId::Fork(_) => "node_forks",
         NodeId::ForgePr(_) => "node_forge_prs",
@@ -125,6 +127,7 @@ pub fn node_kind_tag(id: &NodeId) -> &'static str {
         NodeId::Workspace(_) => "workspace",
         NodeId::AgentSession(_) => "agent_session",
         NodeId::MuxSession(_) => "mux_session",
+        NodeId::RuntimeProcess(_) => "runtime_process",
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
         NodeId::ForgePr(_) => "forge_pr",
@@ -207,6 +210,9 @@ pub fn relation_kind_tag(kind: &RelationKind) -> &'static str {
         RelationKind::AssociatedBranch => "associated_branch",
         RelationKind::ParentFork => "parent_fork",
         RelationKind::RootedAtPath => "rooted_at_path",
+        RelationKind::MuxContainsProcess => "mux_contains_process",
+        RelationKind::ProcessIdentifiesSession => "process_identifies_session",
+        RelationKind::ProcessCandidatesSession => "process_candidates_session",
     }
 }
 
@@ -281,6 +287,22 @@ pub const NODE_MUX_SESSIONS_COLUMNS: &[&str] = &[
     "client_attached",
     "activity_epoch",
     "created_epoch",
+    "discovery_provider",
+    "discovery_freshness_epoch",
+];
+
+pub const NODE_RUNTIME_PROCESSES_COLUMNS: &[&str] = &[
+    "node_id",
+    "observation_key",
+    "pid",
+    "parent_pid",
+    "root_pane_pid",
+    "command",
+    "cwd",
+    "harness_key",
+    "role",
+    "depth",
+    "observed_epoch",
     "discovery_provider",
     "discovery_freshness_epoch",
 ];
@@ -444,6 +466,7 @@ pub const TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ("node_workspaces", NODE_WORKSPACES_COLUMNS),
     ("node_agent_sessions", NODE_AGENT_SESSIONS_COLUMNS),
     ("node_mux_sessions", NODE_MUX_SESSIONS_COLUMNS),
+    ("node_runtime_processes", NODE_RUNTIME_PROCESSES_COLUMNS),
     ("node_branches", NODE_BRANCHES_COLUMNS),
     ("node_forks", NODE_FORKS_COLUMNS),
     ("node_forge_prs", NODE_FORGE_PRS_COLUMNS),
@@ -467,7 +490,8 @@ mod tests {
     use crate::model::{
         AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode,
         ForgePrId, ForgePrNode, ForkId, ForkNode, GraphNode, MuxSessionId, MuxSessionNode, RepoId,
-        RepoNode, WorkspaceId, WorkspaceNode,
+        RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, WorkspaceId,
+        WorkspaceNode,
     };
 
     /// Every `RelationKind` value the project understands today. The
@@ -491,6 +515,9 @@ mod tests {
         RelationKind::AssociatedBranch,
         RelationKind::ParentFork,
         RelationKind::RootedAtPath,
+        RelationKind::MuxContainsProcess,
+        RelationKind::ProcessIdentifiesSession,
+        RelationKind::ProcessCandidatesSession,
     ];
 
     fn fresh_conn() -> Connection {
@@ -533,6 +560,19 @@ mod tests {
                 client_attached: None,
                 activity_epoch: None,
                 created_epoch: None,
+            }),
+            GraphNode::RuntimeProcess(RuntimeProcessNode {
+                id: RuntimeProcessId::new("tmux:0:12345"),
+                observation_key: "tmux:0:12345".into(),
+                pid: Some(12345),
+                parent_pid: Some(123),
+                root_pane_pid: Some(123),
+                command: Some("codex".into()),
+                cwd: Some("/r".into()),
+                harness_key: Some("codex".into()),
+                role: Some(RuntimeProcessRole::HumanAgent),
+                depth: Some(1),
+                observed_epoch: Some(1_700_000_003),
             }),
             GraphNode::Branch(BranchNode {
                 id: BranchId::new(RepoId::new("/r/.git"), "refs/heads/main"),
@@ -587,6 +627,7 @@ mod tests {
             "node_workspaces",
             "node_agent_sessions",
             "node_mux_sessions",
+            "node_runtime_processes",
             "node_branches",
             "node_forks",
             "node_forge_prs",
@@ -701,12 +742,12 @@ mod tests {
             assert!(!tag.is_empty(), "empty tag for {kind:?}");
             assert!(seen.insert(tag), "duplicate tag {tag} for {kind:?}");
         }
-        // Verify the table covers all 17 currently-defined variants.
+        // Verify the table covers all 20 currently-defined variants.
         // If a new variant is added to `RelationKind`, this length
         // assertion fails until ALL_RELATION_KINDS is updated.
         assert_eq!(
             ALL_RELATION_KINDS.len(),
-            17,
+            20,
             "RelationKind variant count changed; update ALL_RELATION_KINDS and \
              relation_kind_tag together"
         );

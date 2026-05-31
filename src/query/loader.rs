@@ -19,7 +19,7 @@ use crate::aliases::AliasOverlay;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Diagnostic, ForgePrNode, ForkNode, GraphLink,
     GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, RepoNode,
-    ResolvedRelationship, WorkspaceNode,
+    ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
 };
 
 use super::schema::{
@@ -44,6 +44,7 @@ pub fn load(snapshot: &GraphSnapshot, conn: &mut Connection) -> rusqlite::Result
     insert_workspaces(&tx, &snapshot.nodes)?;
     insert_agent_sessions(&tx, &snapshot.nodes)?;
     insert_mux_sessions(&tx, &snapshot.nodes)?;
+    insert_runtime_processes(&tx, &snapshot.nodes)?;
     insert_branches(&tx, &snapshot.nodes)?;
     insert_forks(&tx, &snapshot.nodes)?;
     insert_forge_prs(&tx, &snapshot.nodes)?;
@@ -63,6 +64,7 @@ fn clear_all(tx: &Transaction) -> rusqlite::Result<()> {
         "node_forge_prs",
         "node_forks",
         "node_branches",
+        "node_runtime_processes",
         "node_mux_sessions",
         "node_agent_sessions",
         "node_workspaces",
@@ -234,6 +236,54 @@ fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Resul
             client_attached,
             activity_epoch,
             created_epoch,
+        ])?;
+    }
+    Ok(())
+}
+
+fn insert_runtime_processes(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+    let mut stmt = tx.prepare(
+        "INSERT INTO node_runtime_processes (\
+           node_id, observation_key, pid, parent_pid, root_pane_pid, command, cwd, \
+           harness_key, role, depth, observed_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+    )?;
+    for node in nodes {
+        let GraphNode::RuntimeProcess(process) = node else {
+            continue;
+        };
+        let node_id = node.id();
+        let RuntimeProcessNode {
+            id: _,
+            observation_key,
+            pid,
+            parent_pid,
+            root_pane_pid,
+            command,
+            cwd,
+            harness_key,
+            role,
+            depth,
+            observed_epoch,
+        } = process;
+        let role_str = role.map(|role| match role {
+            crate::model::RuntimeProcessRole::HumanAgent => "human_agent".to_string(),
+            crate::model::RuntimeProcessRole::Subagent => "subagent".to_string(),
+            crate::model::RuntimeProcessRole::Shell => "shell".to_string(),
+            crate::model::RuntimeProcessRole::Unknown => "unknown".to_string(),
+        });
+        stmt.execute(params![
+            node_id.to_string(),
+            observation_key,
+            pid,
+            parent_pid,
+            root_pane_pid,
+            command,
+            cwd,
+            harness_key,
+            role_str,
+            depth,
+            observed_epoch,
         ])?;
     }
     Ok(())
@@ -500,8 +550,9 @@ mod tests {
         AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode,
         Confidence, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
         GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId,
-        Provenance, RelationKind, RepoId, RepoNode, ResolvedRelationship, SourceMetadata,
-        UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
+        Provenance, RelationKind, RepoId, RepoNode, ResolvedRelationship, RuntimeProcessId,
+        RuntimeProcessNode, RuntimeProcessRole, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
+        WorkspaceNode,
     };
     use crate::query::schema::apply_schema;
 
@@ -571,6 +622,22 @@ mod tests {
         }
     }
 
+    fn make_runtime_process(observation_key: &str) -> RuntimeProcessNode {
+        RuntimeProcessNode {
+            id: RuntimeProcessId::new(observation_key),
+            observation_key: observation_key.into(),
+            pid: Some(12345),
+            parent_pid: Some(123),
+            root_pane_pid: Some(123),
+            command: Some("codex".into()),
+            cwd: Some("/cwd".into()),
+            harness_key: Some("codex".into()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: Some(1),
+            observed_epoch: Some(1_700_000_003),
+        }
+    }
+
     fn make_branch(repo_common: &str, refname: &str) -> BranchNode {
         BranchNode {
             id: BranchId::new(RepoId::new(repo_common), refname),
@@ -616,6 +683,10 @@ mod tests {
             .push(GraphNode::AgentSession(make_agent("s1", "claude-code")));
         snap.nodes.push(GraphNode::MuxSession(make_mux("tmux:0")));
         snap.nodes
+            .push(GraphNode::RuntimeProcess(make_runtime_process(
+                "tmux:0:12345",
+            )));
+        snap.nodes
             .push(GraphNode::Branch(make_branch("/r/.git", "refs/heads/main")));
         snap.nodes.push(GraphNode::Fork(make_fork("provider:src")));
         snap.nodes.push(GraphNode::ForgePr(make_forge_pr()));
@@ -646,6 +717,7 @@ mod tests {
             "node_workspaces",
             "node_agent_sessions",
             "node_mux_sessions",
+            "node_runtime_processes",
             "node_branches",
             "node_forks",
             "node_forge_prs",
@@ -653,7 +725,7 @@ mod tests {
             let n = count(&conn, &format!("SELECT COUNT(*) FROM {table}"));
             assert_eq!(n, 1, "expected one row in {table}, got {n}");
         }
-        assert_eq!(count(&conn, "SELECT COUNT(*) FROM v_nodes"), 8);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM v_nodes"), 9);
     }
 
     #[test]
@@ -1042,7 +1114,7 @@ mod tests {
         load(&snap, &mut conn).expect("re-load");
         let second_node_count = count(&conn, "SELECT COUNT(*) FROM v_nodes");
         assert_eq!(first_node_count, second_node_count);
-        assert_eq!(first_node_count, 8);
+        assert_eq!(first_node_count, 9);
     }
 
     #[test]
@@ -1050,7 +1122,7 @@ mod tests {
         let mut conn = fresh_conn();
         let snap_a = full_snapshot();
         load(&snap_a, &mut conn).unwrap();
-        assert_eq!(count(&conn, "SELECT COUNT(*) FROM v_nodes"), 8);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM v_nodes"), 9);
 
         let mut snap_b = GraphSnapshot::empty();
         snap_b

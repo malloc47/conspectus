@@ -2996,6 +2996,7 @@ fn node_kind_label(id: &NodeId) -> &'static str {
         NodeId::Workspace(_) => "workspace",
         NodeId::AgentSession(_) => "agent_session",
         NodeId::MuxSession(_) => "mux_session",
+        NodeId::RuntimeProcess(_) => "runtime_process",
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
         NodeId::ForgePr(_) => "forge_pr",
@@ -3193,6 +3194,9 @@ fn format_alias_endpoint(endpoint: &DeclaredEndpoint) -> String {
             session_key,
         } => format!("agent_session:{harness_key}:{state_scope}:{session_key}"),
         DeclaredEndpoint::MuxSession { native_id } => format!("mux_session:{native_id}"),
+        DeclaredEndpoint::RuntimeProcess { observation_key } => {
+            format!("runtime_process:{observation_key}")
+        }
         DeclaredEndpoint::Repo { common_dir } => format!("repo:{common_dir}"),
         DeclaredEndpoint::Checkout { root, .. } => format!("checkout:{root}"),
         DeclaredEndpoint::Workspace { root } => format!("workspace:{root}"),
@@ -3360,6 +3364,9 @@ fn parse_relation_kind(raw: &str) -> std::result::Result<RelationKind, String> {
         "associated_branch" => Ok(RelationKind::AssociatedBranch),
         "parent_fork" => Ok(RelationKind::ParentFork),
         "rooted_at_path" => Ok(RelationKind::RootedAtPath),
+        "mux_contains_process" => Ok(RelationKind::MuxContainsProcess),
+        "process_identifies_session" => Ok(RelationKind::ProcessIdentifiesSession),
+        "process_candidates_session" => Ok(RelationKind::ProcessCandidatesSession),
         _ => Err(format!(
             "invalid relation `{raw}`; expected a declared relation such as linked_to_mux"
         )),
@@ -3385,6 +3392,9 @@ fn relation_label(relation: &RelationKind) -> &'static str {
         RelationKind::AssociatedBranch => "associated_branch",
         RelationKind::ParentFork => "parent_fork",
         RelationKind::RootedAtPath => "rooted_at_path",
+        RelationKind::MuxContainsProcess => "mux_contains_process",
+        RelationKind::ProcessIdentifiesSession => "process_identifies_session",
+        RelationKind::ProcessCandidatesSession => "process_candidates_session",
     }
 }
 
@@ -3409,6 +3419,9 @@ fn parse_endpoint(raw: &str) -> std::result::Result<DeclaredEndpoint, String> {
         }),
         "mux_session" => Ok(DeclaredEndpoint::MuxSession {
             native_id: required_field(&fields, "native_id")?,
+        }),
+        "runtime_process" => Ok(DeclaredEndpoint::RuntimeProcess {
+            observation_key: required_field(&fields, "observation_key")?,
         }),
         "branch" => Ok(DeclaredEndpoint::Branch {
             repo_common_dir: required_field(&fields, "repo_common_dir")?,
@@ -3455,6 +3468,9 @@ fn endpoint_label(endpoint: &DeclaredEndpoint) -> String {
         }
         DeclaredEndpoint::MuxSession { native_id } => {
             format!("mux_session:native_id={native_id}")
+        }
+        DeclaredEndpoint::RuntimeProcess { observation_key } => {
+            format!("runtime_process:observation_key={observation_key}")
         }
         DeclaredEndpoint::Branch {
             repo_common_dir,

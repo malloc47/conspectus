@@ -94,6 +94,9 @@ pub enum DeclaredEndpoint {
     MuxSession {
         native_id: String,
     },
+    RuntimeProcess {
+        observation_key: String,
+    },
     Branch {
         repo_common_dir: String,
         refname: String,
@@ -190,6 +193,9 @@ pub fn declared_endpoint_from_node_id(id: &NodeId) -> DeclaredEndpoint {
         },
         NodeId::MuxSession(mux) => DeclaredEndpoint::MuxSession {
             native_id: mux.native_id.clone(),
+        },
+        NodeId::RuntimeProcess(process) => DeclaredEndpoint::RuntimeProcess {
+            observation_key: process.observation_key.clone(),
         },
         NodeId::Branch(branch) => DeclaredEndpoint::Branch {
             repo_common_dir: branch.repo.common_dir.clone(),
@@ -465,6 +471,12 @@ fn endpoint_project_root(endpoint: &DeclaredEndpoint, snapshot: &GraphSnapshot) 
             let id = NodeId::MuxSession(crate::model::MuxSessionId::new(native_id.clone()));
             node_cwd(&id, snapshot).and_then(|cwd| nearest_known_root(Path::new(&cwd), snapshot))
         }
+        DeclaredEndpoint::RuntimeProcess { observation_key } => {
+            let id = NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(
+                observation_key.clone(),
+            ));
+            node_cwd(&id, snapshot).and_then(|cwd| nearest_known_root(Path::new(&cwd), snapshot))
+        }
         DeclaredEndpoint::Fork {
             provider_source_key,
         } => {
@@ -517,6 +529,9 @@ fn node_cwd(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
             session.cwd.clone()
         }
         GraphNode::MuxSession(mux) if NodeId::MuxSession(mux.id.clone()) == *id => mux.cwd.clone(),
+        GraphNode::RuntimeProcess(process) if NodeId::RuntimeProcess(process.id.clone()) == *id => {
+            process.cwd.clone()
+        }
         _ => None,
     })
 }
