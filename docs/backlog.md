@@ -3687,7 +3687,9 @@ real-world fixture material so regressions can be captured quickly.
 `TEST-003` turns recent MUXPROC escapes into replayed scenarios.
 `TEST-004` adds broad invariants that should hold across any graph
 fixture. `TEST-005` covers TUI interaction regressions that only show
-up after row expansion, scrolling, or attach resolution.
+up after row expansion, scrolling, or attach resolution. `TEST-006`
+turns the same replay worlds into named operator scenarios that can be
+launched through CLI/TUI surfaces for manual inspection.
 
 - [x] `TEST-001` Add a MUXPROC scenario replay harness.
   - Scope: introduce a test support layer that can build a complete
@@ -3814,6 +3816,30 @@ up after row expansion, scrolling, or attach resolution.
     ambiguous-mux fixture only when adding a new interaction failure.
   - Blockers: `TEST-001`; coordinates with `T8-006` so buffer
     snapshot coverage is not duplicated.
+
+- [ ] `TEST-006` Expose named replay scenarios to CLI and TUI runs.
+  - Scope: promote the replay harness's useful worlds into a small
+    named scenario registry shared by tests and developer commands.
+    Each scenario should materialize an isolated temp world and return
+    enough launch context for `graph`, `table`, `node show`, and
+    `tui` to run against exactly the same generated state. Cover at
+    least: empty world, orphan session, session+tmux exact match,
+    ambiguous mux candidates, hook supersession, Codex fd-beats-stale
+    argv, workspace with PR, and fork lineage. Keep the scenario
+    materializer test-only or explicitly gated so production discovery
+    does not grow fixture behavior.
+  - Tests: scenario-registry tests proving every named scenario can
+    materialize, run discovery, resolve, render graph JSON, render the
+    relevant table row-type, and build the TUI row tree without reading
+    the user's home directory, real tmux, real `/proc`, or network.
+  - Manual checks: add a documented launch path such as
+    `conspectus dev scenario tui ambiguous-mux` (exact surface to be
+    decided during implementation) and verify it opens the real TUI on
+    the generated scenario. Also verify graph/table output from the
+    same scenario matches the automated snapshots.
+  - Blockers: `TEST-001`; useful before `TEST-005` and `GV-002`/`GV-003`
+    so interaction tests and visualization exports share scenario
+    names instead of rebuilding fixtures independently.
 
 ### Session Naming
 
@@ -6159,10 +6185,13 @@ this phase migrates whichever ones exist when each story lands.
     repos, checkouts, workspaces, agent sessions, mux sessions, branches,
     forks, and forge PRs. Render candidate links and resolved
     relationships distinctly so ambiguity and resolver decisions are easy
-    to inspect.
+    to inspect. Once `TEST-006` exists, support rendering the named
+    replay scenarios so graph visualization can be used for fixture and
+    regression review without recreating local state by hand.
   - Tests: deterministic DOT snapshot tests for sparse graph, mux
     candidate ambiguity, session lineage, fork ancestry, and branch→PR
-    fixtures.
+    fixtures; include at least one named replay scenario when the
+    scenario registry is available.
   - Manual checks: run `dot -Tsvg` on at least one generated fixture and
     inspect that labels and edge kinds remain readable.
   - Blockers: `GV-001`.
@@ -6173,7 +6202,8 @@ this phase migrates whichever ones exist when each story lands.
     neighbor highlighting, search/filter by node kind and text, and an
     inspection panel showing node attributes and link evidence. Keep the
     exported file usable offline if the ADR selects vendoring or
-    self-contained output.
+    self-contained output. Prefer the named `TEST-006` scenarios as
+    examples and manual-review inputs once they exist.
   - Tests: deterministic HTML fixture coverage with volatile generated
     timestamps avoided or normalized; unit tests for the serialized graph
     payload consumed by the page.
