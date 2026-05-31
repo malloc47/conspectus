@@ -155,6 +155,7 @@ impl HookWriteArgs {
         match self.harness {
             HookWriteHarness::ClaudeCode(args) => args.run(),
             HookWriteHarness::Codex(args) => args.run(),
+            HookWriteHarness::Opencode(args) => args.run(),
         }
     }
 }
@@ -165,6 +166,8 @@ enum HookWriteHarness {
     ClaudeCode(ClaudeHookWriteArgs),
     /// Read Codex hook JSON from stdin and write a hook observation.
     Codex(CodexHookWriteArgs),
+    /// Read opencode plugin hook JSON from stdin and write a hook observation.
+    Opencode(OpenCodeHookWriteArgs),
 }
 
 #[derive(Debug, Args)]
@@ -220,6 +223,36 @@ impl CodexHookWriteArgs {
             i64::from(parent_pid()),
             tmux_context(),
             None,
+            conspectus::hook::current_epoch(),
+        )?;
+        HookStore::new(root).write_record(&record)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct OpenCodeHookWriteArgs {
+    /// Override hook state root. Primarily useful for tests and experiments.
+    #[arg(long = "state-root", value_name = "PATH")]
+    state_root: Option<PathBuf>,
+}
+
+impl OpenCodeHookWriteArgs {
+    fn run(self) -> Result<()> {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        if input.trim().is_empty() {
+            bail!("opencode hook payload was empty");
+        }
+        let payload: serde_json::Value =
+            serde_json::from_str(&input).context("failed to parse opencode hook JSON")?;
+        let root = resolve_hook_state_root(self.state_root)?;
+        let record = conspectus::hook::opencode_record_from_payload(
+            &payload,
+            i64::from(std::process::id()),
+            i64::from(parent_pid()),
+            tmux_context(),
+            std::env::var("CONSPECTUS_OPENCODE_HOOK_VERSION").ok(),
             conspectus::hook::current_epoch(),
         )?;
         HookStore::new(root).write_record(&record)?;

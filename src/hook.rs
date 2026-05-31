@@ -213,6 +213,50 @@ pub fn codex_record_from_payload(
     })
 }
 
+/// Build a hook record from an opencode plugin payload.
+///
+/// The opencode plugin (see `plugins/opencode-hook`) normalizes the SDK
+/// `Event` union into a flat shape matching the Claude/Codex writers
+/// before piping to stdin. See `H-MUXPROC-014` audit notes in
+/// `docs/backlog.md` for the field mapping per `Event` variant.
+pub fn opencode_record_from_payload(
+    payload: &serde_json::Value,
+    pid: i64,
+    ppid: i64,
+    tmux: Option<HookTmuxRecord>,
+    harness_version: Option<String>,
+    observed_epoch: i64,
+) -> Result<HookRecord> {
+    let Some(session_id) = payload
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        bail!("OpenCode hook payload missing string `session_id`");
+    };
+    if session_id.is_empty() {
+        bail!("OpenCode hook payload has empty `session_id`");
+    }
+
+    Ok(HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "opencode".to_string(),
+        session_key: session_id.to_string(),
+        cwd: optional_string(payload, "cwd"),
+        pid: Some(pid),
+        ppid: Some(ppid),
+        tmux: tmux.filter(|tmux| !tmux.is_empty()),
+        // opencode sessions are tracked in the project sqlite store rather
+        // than a per-session JSONL transcript file. The plugin may still
+        // forward an explicit `transcript_path` if a project surface like
+        // `info.share.url` or a future field maps onto it; leave the slot
+        // open and accept it when present.
+        transcript_path: optional_string(payload, "transcript_path"),
+        hook_event_name: optional_string(payload, "hook_event_name"),
+        observed_epoch,
+        harness_version,
+    })
+}
+
 impl HookTmuxRecord {
     pub fn is_empty(&self) -> bool {
         self.session_name.is_none()
@@ -392,5 +436,66 @@ mod tests {
         assert_eq!(record.hook_event_name.as_deref(), Some("SessionStart"));
         assert_eq!(record.pid, Some(10));
         assert_eq!(record.ppid, Some(9));
+    }
+
+    #[test]
+    fn opencode_payload_builds_hook_record() {
+        let record = opencode_record_from_payload(
+            &serde_json::json!({
+                "session_id": "ses_01HZX2J5Y",
+                "cwd": "/home/me/src/proj",
+                "hook_event_name": "session.updated"
+            }),
+            42,
+            41,
+            Some(HookTmuxRecord {
+                session_name: Some("work".to_string()),
+                native_id: Some("$3".to_string()),
+                pane_id: Some("%5".to_string()),
+                socket_path: Some("/run/user/1000/tmux-1000/default".to_string()),
+            }),
+            Some("1.14.19".to_string()),
+            1_700_000_500,
+        )
+        .expect("record");
+
+        assert_eq!(record.harness_key, "opencode");
+        assert_eq!(record.session_key, "ses_01HZX2J5Y");
+        assert_eq!(record.cwd.as_deref(), Some("/home/me/src/proj"));
+        assert_eq!(record.hook_event_name.as_deref(), Some("session.updated"));
+        assert_eq!(record.pid, Some(42));
+        assert_eq!(record.ppid, Some(41));
+        assert_eq!(record.harness_version.as_deref(), Some("1.14.19"));
+        assert!(record.transcript_path.is_none());
+        let tmux = record.tmux.as_ref().expect("tmux carried through");
+        assert_eq!(tmux.pane_id.as_deref(), Some("%5"));
+    }
+
+    #[test]
+    fn opencode_payload_requires_session_id() {
+        let err = opencode_record_from_payload(
+            &serde_json::json!({"cwd": "/work"}),
+            1,
+            2,
+            None,
+            None,
+            100,
+        )
+        .expect_err("missing id");
+        assert!(err.to_string().contains("session_id"));
+    }
+
+    #[test]
+    fn opencode_payload_rejects_empty_session_id() {
+        let err = opencode_record_from_payload(
+            &serde_json::json!({"session_id": ""}),
+            1,
+            2,
+            None,
+            None,
+            100,
+        )
+        .expect_err("empty id");
+        assert!(err.to_string().contains("empty"));
     }
 }

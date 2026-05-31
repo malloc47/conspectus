@@ -452,6 +452,58 @@ fn hook_write_codex_writes_sqlite_observation() {
 }
 
 #[test]
+fn hook_write_opencode_writes_sqlite_observation() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let state = tempfile::TempDir::new().expect("state temp");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("write")
+        .arg("opencode")
+        .arg("--state-root")
+        .arg(state.path())
+        .write_stdin(
+            r#"{
+              "session_id": "ses_01HZX2J5Y",
+              "cwd": "/home/me/src/proj",
+              "hook_event_name": "session.updated"
+            }"#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    let database = state.path().join("hooks.sqlite3");
+    assert!(database.is_file());
+    let connection = rusqlite::Connection::open(database).expect("open sqlite");
+    let body: String = connection
+        .query_row("SELECT record_json FROM hook_records", [], |row| row.get(0))
+        .expect("record json");
+    let record: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(record["harness_key"], "opencode");
+    assert_eq!(record["session_key"], "ses_01HZX2J5Y");
+    assert_eq!(record["cwd"], "/home/me/src/proj");
+    assert_eq!(record["hook_event_name"], "session.updated");
+}
+
+#[test]
+fn hook_write_opencode_rejects_empty_payload() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let state = tempfile::TempDir::new().expect("state temp");
+
+    isolated_cmd(home.path())
+        .arg("hook")
+        .arg("write")
+        .arg("opencode")
+        .arg("--state-root")
+        .arg(state.path())
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("opencode hook payload was empty"));
+}
+
+#[test]
 fn hook_init_status_remove_claude_code_preserves_existing_settings() {
     let home = tempfile::TempDir::new().expect("home temp");
     let settings = home.path().join(".claude/settings.json");
