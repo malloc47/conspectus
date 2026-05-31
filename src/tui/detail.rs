@@ -225,6 +225,7 @@ pub struct HeaderField {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SectionKind {
     Session,
+    Process,
     Mux,
     Pr,
     Lineage,
@@ -236,6 +237,7 @@ impl SectionKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Session => "Session",
+            Self::Process => "Process",
             Self::Mux => "Mux",
             Self::Pr => "PR",
             Self::Lineage => "Lineage",
@@ -262,10 +264,15 @@ fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
     use SectionKind::*;
     match (kind_label, field_label) {
         ("agent_session", "mux") => Mux,
+        ("agent_session", "process") => Process,
         ("agent_session", "pr") => Pr,
         ("agent_session", "lineage") => Lineage,
         ("mux_session", "name" | "backend" | "cwd" | "attached") => Mux,
         ("mux_session", "session" | "id" | "harness" | "alias" | "title") => Session,
+        ("mux_session", "process") => Process,
+        ("runtime_process", "mux") => Mux,
+        ("runtime_process", "session") => Session,
+        ("runtime_process", _) => Process,
         ("forge_pr", _) => Pr,
         ("fork", _) => Lineage,
         _ => Session,
@@ -275,8 +282,9 @@ fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
 fn section_order(kind_label: &str) -> &'static [SectionKind] {
     use SectionKind::*;
     match kind_label {
-        "mux_session" => &[Mux, Session, Pr, Lineage],
-        _ => &[Session, Mux, Pr, Lineage],
+        "mux_session" => &[Mux, Process, Session, Pr, Lineage],
+        "runtime_process" => &[Process, Mux, Session, Pr, Lineage],
+        _ => &[Session, Process, Mux, Pr, Lineage],
     }
 }
 
@@ -391,7 +399,7 @@ fn header_fields_inner(
         GraphNode::MuxSession(mux) => {
             mux_session_fields(snapshot, mux, home, include_linked_details)
         }
-        GraphNode::RuntimeProcess(process) => runtime_process_fields(process, home),
+        GraphNode::RuntimeProcess(process) => runtime_process_fields(snapshot, process, home),
         GraphNode::ForgePr(pr) => forge_pr_fields(pr),
         GraphNode::Fork(fork) => fork_fields(fork),
         GraphNode::Repo(repo) => repo_fields(repo, home),
@@ -440,6 +448,7 @@ fn agent_session_fields(
     }
 
     fields.push(session_mux_field(snapshot, &session_id));
+    fields.extend(session_process_fields(snapshot, &session_id));
     fields.push(session_pr_field(snapshot, &session_id, home));
     fields.push(session_lineage_field(snapshot, &session_id));
     if include_linked_details {
@@ -549,6 +558,13 @@ fn mux_session_fields(
     let attached_sessions = attached_sessions_for_mux(snapshot, &mux_id);
     let attached_count = attached_sessions.len();
     fields.push(plain("attached", format!("{attached_count}")));
+    for process in processes_for_mux(snapshot, &mux_id) {
+        fields.push(linked(
+            "process",
+            process_link_label(snapshot, &process).unwrap_or_else(|| format!("{}", process)),
+            Some(process),
+        ));
+    }
     for session in attached_sessions {
         fields.push(linked(
             "session",
@@ -594,7 +610,11 @@ fn fork_fields(fork: &ForkNode) -> Vec<HeaderField> {
     fields
 }
 
-fn runtime_process_fields(process: &RuntimeProcessNode, home: Option<&Path>) -> Vec<HeaderField> {
+fn runtime_process_fields(
+    snapshot: &GraphSnapshot,
+    process: &RuntimeProcessNode,
+    home: Option<&Path>,
+) -> Vec<HeaderField> {
     let mut fields = vec![plain("observation", process.observation_key.clone())];
     if let Some(pid) = process.pid {
         fields.push(plain("pid", pid.to_string()));
@@ -631,6 +651,25 @@ fn runtime_process_fields(process: &RuntimeProcessNode, home: Option<&Path>) -> 
     }
     if let Some(observed_epoch) = process.observed_epoch {
         fields.push(plain("observed", observed_epoch.to_string()));
+    }
+    let process_id = NodeId::RuntimeProcess(process.id.clone());
+    for mux in muxes_for_process(snapshot, &process_id) {
+        fields.push(linked(
+            "mux",
+            link_target_label_by_id(snapshot, &mux).unwrap_or_else(|| format!("{}", mux)),
+            Some(mux),
+        ));
+    }
+    for (session, relation) in sessions_for_process(snapshot, &process_id) {
+        let mut field = linked(
+            "session",
+            agent_session_link_label(snapshot, &session).unwrap_or_else(|| format!("{}", session)),
+            Some(session),
+        );
+        if relation == RelationKind::ProcessCandidatesSession {
+            field.annotation = Some("⚠");
+        }
+        fields.push(field);
     }
     fields
 }
@@ -782,6 +821,10 @@ fn preferred_target(
 
 fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<String> {
     let target = link.target_node_id()?;
+    link_target_label_by_id(snapshot, target)
+}
+
+fn link_target_label_by_id(snapshot: &GraphSnapshot, target: &NodeId) -> Option<String> {
     let node = snapshot.nodes.iter().find(|n| n.id() == *target)?;
     match node {
         GraphNode::MuxSession(mux) => Some(mux_display_label(mux)),
@@ -789,6 +832,7 @@ fn link_target_label(snapshot: &GraphSnapshot, link: &GraphLink) -> Option<Strin
             "{}:{}",
             session.harness_key, session.id.session_key
         )),
+        GraphNode::RuntimeProcess(process) => Some(runtime_process_display_label(process)),
         GraphNode::Repo(repo) => Some(format!("repo:{}", repo.common_dir)),
         other => Some(format!("{}", other.id())),
     }
@@ -811,6 +855,98 @@ fn attached_sessions_for_mux<'a>(snapshot: &'a GraphSnapshot, mux_id: &NodeId) -
     sessions
 }
 
+fn session_process_fields(snapshot: &GraphSnapshot, session_id: &NodeId) -> Vec<HeaderField> {
+    let mut fields = Vec::new();
+    for (process, relation) in processes_for_session(snapshot, session_id) {
+        let mut field = linked(
+            "process",
+            process_link_label(snapshot, &process).unwrap_or_else(|| format!("{}", process)),
+            Some(process),
+        );
+        if relation == RelationKind::ProcessCandidatesSession {
+            field.annotation = Some("⚠");
+        }
+        fields.push(field);
+    }
+    fields
+}
+
+fn processes_for_mux(snapshot: &GraphSnapshot, mux_id: &NodeId) -> Vec<NodeId> {
+    let mut processes: Vec<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| link.relation == RelationKind::MuxContainsProcess)
+        .filter(|link| link.source == *mux_id)
+        .filter_map(|link| link.target_node_id().cloned())
+        .collect();
+    processes.sort();
+    processes.dedup();
+    processes
+}
+
+fn processes_for_session(
+    snapshot: &GraphSnapshot,
+    session_id: &NodeId,
+) -> Vec<(NodeId, RelationKind)> {
+    let mut processes: Vec<(NodeId, RelationKind)> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| {
+            matches!(
+                link.relation,
+                RelationKind::ProcessIdentifiesSession | RelationKind::ProcessCandidatesSession
+            )
+        })
+        .filter(|link| link.target_node_id() == Some(session_id))
+        .map(|link| (link.source.clone(), link.relation.clone()))
+        .collect();
+    processes.sort();
+    processes.dedup();
+    processes
+}
+
+fn muxes_for_process(snapshot: &GraphSnapshot, process_id: &NodeId) -> Vec<NodeId> {
+    let mut muxes: Vec<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| link.relation == RelationKind::MuxContainsProcess)
+        .filter(|link| link.target_node_id() == Some(process_id))
+        .map(|link| link.source.clone())
+        .collect();
+    muxes.sort();
+    muxes.dedup();
+    muxes
+}
+
+fn sessions_for_process(
+    snapshot: &GraphSnapshot,
+    process_id: &NodeId,
+) -> Vec<(NodeId, RelationKind)> {
+    let mut sessions: Vec<(NodeId, RelationKind)> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| {
+            matches!(
+                link.relation,
+                RelationKind::ProcessIdentifiesSession | RelationKind::ProcessCandidatesSession
+            )
+        })
+        .filter(|link| link.source == *process_id)
+        .filter_map(|link| {
+            link.target_node_id()
+                .cloned()
+                .map(|target| (target, link.relation.clone()))
+        })
+        .collect();
+    sessions.sort();
+    sessions.dedup();
+    sessions
+}
+
 fn agent_session_link_label(snapshot: &GraphSnapshot, session_id: &NodeId) -> Option<String> {
     let GraphNode::AgentSession(session) = snapshot.nodes.iter().find(|n| n.id() == *session_id)?
     else {
@@ -825,6 +961,24 @@ fn agent_session_display_id(session: &AgentSessionNode) -> String {
 
 fn mux_display_label(mux: &MuxSessionNode) -> String {
     format!("{}:{}", mux.backend, mux.native_id)
+}
+
+fn process_link_label(snapshot: &GraphSnapshot, process_id: &NodeId) -> Option<String> {
+    let GraphNode::RuntimeProcess(process) =
+        snapshot.nodes.iter().find(|n| n.id() == *process_id)?
+    else {
+        return None;
+    };
+    Some(runtime_process_display_label(process))
+}
+
+fn runtime_process_display_label(process: &RuntimeProcessNode) -> String {
+    match (process.pid, process.command.as_deref()) {
+        (Some(pid), Some(command)) => format!("pid {pid}: {command}"),
+        (Some(pid), None) => format!("pid {pid}"),
+        (None, Some(command)) => command.to_string(),
+        (None, None) => process.observation_key.clone(),
+    }
 }
 
 fn link_summaries(
@@ -937,7 +1091,8 @@ mod tests {
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId,
         ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
-        Provenance, RepoId, RepoNode, SourceMetadata,
+        Provenance, RepoId, RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
+        SourceMetadata,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -956,6 +1111,36 @@ mod tests {
             last_active_epoch: None,
             session_kind: None,
         })
+    }
+
+    fn runtime_process(observation_key: &str, pid: i64, command: &str) -> GraphNode {
+        GraphNode::RuntimeProcess(RuntimeProcessNode {
+            id: RuntimeProcessId::new(observation_key),
+            observation_key: observation_key.to_string(),
+            pid: Some(pid),
+            parent_pid: None,
+            root_pane_pid: Some(pid),
+            command: Some(command.to_string()),
+            cwd: Some("/home/op/src/x".to_string()),
+            harness_key: Some("codex".to_string()),
+            role: Some(RuntimeProcessRole::HumanAgent),
+            depth: Some(0),
+            observed_epoch: Some(1_700_000_500),
+        })
+    }
+
+    fn process_link(id: &str, source: NodeId, target: NodeId, relation: RelationKind) -> GraphLink {
+        GraphLink {
+            id: id.to_string(),
+            source,
+            target: LinkEndpoint::Node { id: target },
+            relation,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
     }
 
     fn build(snapshot: &GraphSnapshot, target: &NodeId, home: Option<&Path>) -> NodeDetail {
@@ -1457,6 +1642,128 @@ mod tests {
             .find(|f| f.label == "cwd")
             .unwrap();
         assert_eq!(cwd.value, "~/src/x");
+    }
+
+    #[test]
+    fn process_links_surface_on_agent_and_mux_details() {
+        let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let process_id = NodeId::RuntimeProcess(RuntimeProcessId::new("tmux:editor:pid:4242"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("editor"),
+            backend: "tmux".into(),
+            native_id: "editor".into(),
+            cwd: Some("/home/op/src/x".into()),
+            active_pane_command: None,
+            active_pane_pid: Some(4242),
+            active_pane_current_path: Some("/home/op/src/x".into()),
+            active_pane_start_command: Some("codex".into()),
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        snapshot
+            .nodes
+            .push(agent("codex", "abc", Some("/home/op/src/x"), None));
+        snapshot
+            .nodes
+            .push(runtime_process("tmux:editor:pid:4242", 4242, "codex"));
+        snapshot.candidate_links.push(process_link(
+            "mux-process",
+            mux_id.clone(),
+            process_id.clone(),
+            RelationKind::MuxContainsProcess,
+        ));
+        snapshot.candidate_links.push(process_link(
+            "process-session",
+            process_id.clone(),
+            session_id.clone(),
+            RelationKind::ProcessIdentifiesSession,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+
+        let session_detail = build(&snapshot, &session_id, Some(home().as_path()));
+        let session_process = session_detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "process")
+            .expect("session process field");
+        assert_eq!(session_process.value, "pid 4242: codex");
+        assert_eq!(session_process.target, Some(process_id.clone()));
+
+        let mux_detail = build(&snapshot, &mux_id, Some(home().as_path()));
+        let mux_process = mux_detail
+            .sections()
+            .into_iter()
+            .find(|section| section.kind == SectionKind::Process)
+            .and_then(|section| section.fields.into_iter().next())
+            .expect("mux process field");
+        assert_eq!(mux_process.value, "pid 4242: codex");
+        assert_eq!(mux_process.target, Some(process_id));
+    }
+
+    #[test]
+    fn runtime_process_detail_links_back_to_mux_and_session() {
+        let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let process_id = NodeId::RuntimeProcess(RuntimeProcessId::new("tmux:editor:pid:4242"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("editor"),
+            backend: "tmux".into(),
+            native_id: "editor".into(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        snapshot.nodes.push(agent("codex", "abc", None, None));
+        snapshot
+            .nodes
+            .push(runtime_process("tmux:editor:pid:4242", 4242, "codex"));
+        snapshot.candidate_links.push(process_link(
+            "mux-process",
+            mux_id.clone(),
+            process_id.clone(),
+            RelationKind::MuxContainsProcess,
+        ));
+        snapshot.candidate_links.push(process_link(
+            "process-session",
+            process_id.clone(),
+            session_id.clone(),
+            RelationKind::ProcessCandidatesSession,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+
+        let detail = build(&snapshot, &process_id, Some(home().as_path()));
+        let sections = detail.sections();
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.kind)
+                .collect::<Vec<_>>(),
+            vec![SectionKind::Process, SectionKind::Mux, SectionKind::Session]
+        );
+        let mux = detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "mux")
+            .expect("mux field");
+        assert_eq!(mux.value, "tmux:editor");
+        assert_eq!(mux.target, Some(mux_id));
+        let session = detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "session")
+            .expect("session field");
+        assert_eq!(session.value, "codex:abc");
+        assert_eq!(session.target, Some(session_id));
+        assert_eq!(session.annotation, Some("⚠"));
     }
 
     #[test]

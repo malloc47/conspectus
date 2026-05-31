@@ -70,6 +70,11 @@ pub const SCENARIOS: &[ScenarioDef] = &[
         build: build_codex_fd_current,
     },
     ScenarioDef {
+        name: "process-cardinality",
+        description: "one mux with two human agent runtime processes",
+        build: build_process_cardinality,
+    },
+    ScenarioDef {
         name: "workspace-pr",
         description: "git workspace with a fake GitHub pull request",
         build: build_workspace_pr,
@@ -475,6 +480,45 @@ fn build_codex_fd_current(world: &mut ScenarioWorld) -> Result<()> {
     Ok(())
 }
 
+fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
+    let work = world.mkdir("work")?;
+    let session_a = "c0000000-1111-2222-3333-444444444444";
+    let session_b = "d0000000-1111-2222-3333-444444444444";
+
+    world.write_claude_code_session(session_a, &work)?;
+    world.write_claude_code_session(session_b, &work)?;
+    world.add_tmux_row(
+        TmuxReplayRow::new("pair")
+            .with_cwd(&work)
+            .with_active_pane("claude", 6101, &work, "claude"),
+    );
+
+    for (session_key, pid, ppid, pane_id, observed_epoch) in [
+        (session_a, 6101, 6000, "%1", 1_700_000_500),
+        (session_b, 6201, 6000, "%2", 1_700_000_540),
+    ] {
+        world.write_hook_record(HookRecord {
+            schema_version: SCHEMA_VERSION,
+            harness_key: "claude-code".to_string(),
+            session_key: session_key.to_string(),
+            cwd: Some(path_string(&work)),
+            pid: Some(pid),
+            ppid: Some(ppid),
+            tmux: Some(HookTmuxRecord {
+                session_name: Some("pair".to_string()),
+                native_id: None,
+                pane_id: Some(pane_id.to_string()),
+                socket_path: None,
+            }),
+            transcript_path: None,
+            hook_event_name: Some("SessionStart".to_string()),
+            observed_epoch,
+            harness_version: Some("1.0.0".to_string()),
+        })?;
+    }
+    Ok(())
+}
+
 fn build_workspace_pr(world: &mut ScenarioWorld) -> Result<()> {
     let repo = world.init_repo("repo", Some("git@github.com:octo/repo.git"))?;
     world.scan_roots = vec![repo.clone()];
@@ -612,5 +656,23 @@ mod tests {
         };
         assert!(err.contains("unknown scenario `missing`"));
         assert!(err.contains("ambiguous-mux"));
+    }
+
+    #[test]
+    fn process_cardinality_scenario_exposes_runtime_processes() {
+        let world = materialize("process-cardinality").expect("materialize scenario");
+        let snapshot = world.snapshot().expect("snapshot");
+        let process_count = snapshot
+            .nodes
+            .iter()
+            .filter(|node| matches!(node, crate::model::GraphNode::RuntimeProcess(_)))
+            .count();
+        assert_eq!(process_count, 2);
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .any(|link| { link.relation == crate::model::RelationKind::MuxContainsProcess })
+        );
     }
 }

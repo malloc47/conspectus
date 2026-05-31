@@ -3148,7 +3148,7 @@ failure:
     non-subagent runtime process roles so subagent observations do not
     inflate mux cardinality.
 
-- [ ] `H-MUXPROC-FU-006` Surface runtime process diagnostics in node
+- [x] `H-MUXPROC-FU-006` Surface runtime process diagnostics in node
   detail and scenario fixtures.
   - Scope: add node-detail sections for runtime process nodes and for
     agent/mux nodes linked through process evidence. Extend named dev
@@ -3157,6 +3157,13 @@ failure:
   - Tests: node-show/detail snapshots and dev-scenario coverage for
     process-backed attribution cases.
   - Blockers: `H-MUXPROC-FU-005`, `TEST-006`.
+  - Outcome: TUI/node detail now has a `Process` section for runtime
+    process fields and linked process context from agent and mux
+    details. Runtime process details link back to containing muxes and
+    identified/candidate sessions, annotating candidate session links.
+    Added a named `process-cardinality` dev scenario with two runtime
+    process observations for one mux; `codex-fd-current` continues to
+    cover stale argv vs fd-backed process attribution.
 
 - [x] `H-MUXPROC-004` Read Codex state and log databases for live
   session attribution.
