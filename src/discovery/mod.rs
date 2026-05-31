@@ -178,12 +178,15 @@ pub fn discover_local_with(
         cross_link::infer_without_process_tree(&mut snapshot);
         std::collections::BTreeMap::new()
     };
-    if let Some(codex_state_root) = config.harness_state_roots.get(harness::codex::HARNESS_KEY) {
+    if !config.codex_log_disabled
+        && let Some(codex_state_root) = config.harness_state_roots.get(harness::codex::HARNESS_KEY)
+    {
         codex_log::apply_codex_log_attribution(
             &mut snapshot,
             codex_state_root,
             &codex_pids_per_mux,
             codex_log::current_epoch(),
+            config.codex_log_window_seconds,
         );
     }
     if let Some(root) = &config.hook_sidecar_root {
@@ -204,6 +207,15 @@ pub struct LocalDiscoveryConfig {
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
+    /// When `true`, skip the codex log-derived attribution linker entirely.
+    /// Even with the codex state root configured. Mirrors the
+    /// `CONSPECTUS_DISABLE_TMUX` / `_FORGE` / `_PROCTREE` opt-out pattern.
+    pub codex_log_disabled: bool,
+    /// Maximum log-row age (seconds) the codex log linker accepts. Defaults
+    /// to [`codex_log::DEFAULT_WINDOW_SECONDS`]. Overridable via the
+    /// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var. See the constant docs
+    /// for the dual query-cost / pid-reuse rationale.
+    pub codex_log_window_seconds: i64,
 }
 
 impl LocalDiscoveryConfig {
@@ -238,6 +250,12 @@ impl LocalDiscoveryConfig {
                 Some(Box::new(forge::SystemGh::new()))
             };
 
+        let codex_log_window_seconds = env::var("CONSPECTUS_CODEX_LOG_WINDOW_SECONDS")
+            .ok()
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .filter(|secs| *secs >= 0)
+            .unwrap_or(codex_log::DEFAULT_WINDOW_SECONDS);
+
         Self {
             harness_state_roots,
             tmux_runner,
@@ -245,6 +263,8 @@ impl LocalDiscoveryConfig {
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             declared_config_loader: Some(ConfigLoader::from_env()),
+            codex_log_disabled: env::var_os("CONSPECTUS_DISABLE_CODEX_LOG").is_some(),
+            codex_log_window_seconds,
         }
     }
 
@@ -256,6 +276,8 @@ impl LocalDiscoveryConfig {
             process_tree_enabled: false,
             hook_sidecar_root: None,
             declared_config_loader: None,
+            codex_log_disabled: false,
+            codex_log_window_seconds: codex_log::DEFAULT_WINDOW_SECONDS,
         }
     }
 
@@ -291,6 +313,16 @@ impl LocalDiscoveryConfig {
 
     pub fn with_process_tree(mut self) -> Self {
         self.process_tree_enabled = true;
+        self
+    }
+
+    pub fn without_codex_log(mut self) -> Self {
+        self.codex_log_disabled = true;
+        self
+    }
+
+    pub fn with_codex_log_window(mut self, seconds: i64) -> Self {
+        self.codex_log_window_seconds = seconds.max(0);
         self
     }
 

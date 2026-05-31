@@ -109,17 +109,41 @@ ORDER BY ts DESC, ts_nanos DESC
 LIMIT 1
 ```
 
-`:ts_floor` is `now() - 24 hours`. Unlike ADR 0028 hook-sidecar records,
-which arrive asynchronously and can become orphaned from process
-lifetimes, codex log evidence is anchored to a live OS pid: the candidate
-set is `cross_link::active_harness_pids_per_mux`, which only contains pids
-currently running codex in the active-pane process tree. Pid liveness is
-therefore the real correctness guarantee — a dead pid cannot return a
-stale link because it never enters the candidate set. The 24-hour bound
-is a query-performance guard against unbounded `LIKE` scans on heavy
-`logs` tables that lack a `(process_uuid, ts)` compound index. It is
-deliberately wider than the ADR 0028 TTL so a long-lived codex session
-idling between user turns is still resolvable.
+`:ts_floor` is `now() - 24 hours` by default, overridable via the
+`CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var and the
+`LocalDiscoveryConfig::with_codex_log_window` builder. Unlike ADR 0028
+hook-sidecar records, which arrive asynchronously and can become orphaned
+from process lifetimes, codex log evidence is anchored to a live OS pid:
+the candidate set comes from `cross_link::active_harness_pids_per_mux`,
+which only contains pids currently running codex in the active-pane
+process tree. The 24-hour bound therefore serves two purposes that
+together justify keeping it nonzero by default:
+
+1. **Query performance.** The `logs` table lacks a `(process_uuid, ts)`
+   compound index, so an unbounded `LIKE 'pid:<pid>:%'` scan is expensive
+   on heavy users. The `ts` floor lets the planner use `idx_logs_ts` to
+   narrow the scan.
+2. **Pid-reuse defense.** The candidate pid set guarantees the current
+   pid is alive and runs codex, but the log row format
+   `pid:<os_pid>:<uuid>` is matched only by prefix. If pid `P` previously
+   ran codex `A` (which wrote log rows), exited, and the kernel reused
+   `P` for a brand-new codex `B` that has not written any log rows yet,
+   `LIKE 'pid:P:%' ORDER BY ts DESC LIMIT 1` would return `A`'s latest
+   row and the linker would attribute the wrong thread. The time bound
+   confines that misattribution to the window's width.
+
+24 hours balances "long enough that a quiescent codex session resumes
+correctly across user idle periods" against "short enough that pid-reuse
+risk on typical Linux pid spaces stays low." Users with extreme uptime
+or unusually long-idle codex panes can widen via the env var; the
+linker can also be skipped entirely via `CONSPECTUS_DISABLE_CODEX_LOG`
+when the active-DB read is undesirable.
+
+A proper pid-reuse fix would compare each row's `ts` against
+`/proc/<pid>/stat.starttime` and accept only rows written after the
+current process started. That refinement is deferred — `ProcessSnapshot`
+does not expose start time today, and the 24-hour bound is adequate for
+the realistic failure shape.
 
 The full `process_uuid` value is parsed as `pid:<os_pid>:<uuid>`. The trailing
 UUID disambiguates pid reuse across Codex restarts; the linker keeps the
@@ -233,12 +257,15 @@ binding remains the responsibility of `H-MUXPROC-007` / `H-MUXPROC-014`.
 
 - `H-MUXPROC-004` for opencode resolves as a no-op: the schema offers no
   live-binding signal beyond what the existing reader already consumes.
-- The query bound on log-derived current-session evidence is 24 hours,
-  intentionally wider than the ADR 0028 hook-sidecar TTL. The pid being
-  alive in the active-pane process tree (filtered via
-  `cross_link::active_harness_pids_per_mux`) is the real correctness
-  guarantee; the time bound exists only to keep the `LIKE` scan cheap
-  on large `logs` tables.
+- The default query bound on log-derived current-session evidence is 24
+  hours, intentionally wider than the ADR 0028 hook-sidecar TTL because
+  the pid liveness filter (via `cross_link::active_harness_pids_per_mux`)
+  already provides the freshness guarantee hook records get from TTL.
+  The bound serves a dual purpose — query performance and pid-reuse
+  defense — and is overridable via `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS`.
+  The linker can be skipped entirely via `CONSPECTUS_DISABLE_CODEX_LOG`.
+  A proper pid-reuse fix using `/proc/<pid>/stat.starttime` is deferred
+  because `ProcessSnapshot` does not expose start time today.
 - Fresh Codex log evidence may synthesize a sparse `AgentSession` when the
   state reader has not yet observed the thread row, mirroring the
   hook-sidecar synthesis path.

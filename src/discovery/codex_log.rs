@@ -15,10 +15,13 @@
 //! command/fd evidence — gating on "no identity evidence yet" would defeat
 //! that. For each codex pid, the linker queries the `logs.process_uuid`
 //! column (encoded as `pid:<os_pid>:<uuid>`) for the freshest `thread_id`
-//! within a 15-minute `ts` floor (matching the ADR 0028 hook-sidecar TTL),
+//! within a caller-supplied `ts` floor (see [`DEFAULT_WINDOW_SECONDS`] for
+//! the default, dual-purpose query-cost / pid-reuse rationale, and the
+//! `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var for production override),
 //! and emits a fresh `LinkedToMux` candidate that ranks above command/fd
 //! evidence. Stale `active_pane_command_session_match` candidates for the
 //! same mux are marked `Overridden` so the resolver no longer prefers them.
+//! The linker can be skipped entirely via `CONSPECTUS_DISABLE_CODEX_LOG`.
 //!
 //! When the log thread id names a Codex session the slice-A state reader has
 //! not yet observed, a sparse `AgentSession` node is synthesized in place so
@@ -42,17 +45,34 @@ use crate::model::{
 };
 
 const ADAPTER_NAME: &str = "codex_log";
-/// Upper bound on log-row age accepted as evidence. The pid set is already
-/// filtered to currently-live codex processes (see
-/// `cross_link::active_harness_pids_per_mux`), which is the real correctness
-/// guarantee — a stale process_uuid pointing at a dead session cannot be
-/// returned because the dead pid wouldn't appear in the candidate set.
-/// This window is therefore a query-performance guard against unbounded
-/// LIKE scans on the `logs` table when no compound `(process_uuid, ts)`
-/// index exists, not the freshness gate ADR 0028 hook-sidecar records use.
-/// 24 hours is generous enough to cover a long-lived codex session that
-/// has been idle between user turns without scanning the entire history.
-const FRESHNESS_WINDOW_SECONDS: i64 = 24 * 60 * 60;
+/// Default upper bound on log-row age accepted as evidence. This bound
+/// serves two purposes; both justify keeping it nonzero by default and
+/// neither matches ADR 0028's hook-sidecar TTL semantics:
+///
+/// 1. **Query performance.** The `logs` table lacks a `(process_uuid, ts)`
+///    compound index, so an unbounded `LIKE 'pid:<pid>:%'` scan is expensive
+///    on heavy users. Bounding by `ts` lets the planner use `idx_logs_ts` to
+///    narrow the scan.
+/// 2. **Pid-reuse defense.** The candidate pid set comes from the
+///    process-tree walk and contains currently-live codex pids, but the
+///    log row format `pid:<os_pid>:<uuid>` does not match the *current*
+///    process uuid — only the prefix. If pid `P` previously ran codex `A`
+///    (which wrote log rows), exited, and the kernel reused `P` for a
+///    brand-new codex `B` that has not written any log rows yet, our
+///    `LIKE 'pid:P:%' ORDER BY ts DESC LIMIT 1` query would return `A`'s
+///    latest row and we would attribute the wrong thread. The time bound
+///    keeps that misattribution narrow to the bound's window.
+///
+/// 24 hours is the default: long enough for an idle codex session that has
+/// been quiescent between user turns, short enough that pid-reuse risk on
+/// typical Linux pid spaces stays low. Overridable via
+/// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS`.
+///
+/// A proper pid-reuse fix would compare row `ts` against
+/// `/proc/<pid>/stat.starttime` and accept only rows written after the
+/// current process started. That refinement is deferred (`ProcessSnapshot`
+/// does not expose start time today).
+pub const DEFAULT_WINDOW_SECONDS: i64 = 24 * 60 * 60;
 const PROCESS_UUID_PREFIX: &str = "pid:";
 
 /// Convenience wall-clock for the production discovery path.
@@ -70,12 +90,17 @@ pub fn current_epoch() -> i64 {
 /// codex pid set per mux from `cross_link::active_harness_pids_per_mux`;
 /// supply an empty map to skip the linker (production discovery does this
 /// when process-tree walking is disabled). `now_epoch` is the wall clock
-/// used to gate freshness; injectable so tests are deterministic.
+/// used to compute the `ts` floor. `window_seconds` is the query bound
+/// described on [`DEFAULT_WINDOW_SECONDS`]; pass that constant for the
+/// default, or a different value when callers want a tighter or wider
+/// bound (e.g. test fixtures, or production via the
+/// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var).
 pub fn apply_codex_log_attribution(
     snapshot: &mut GraphSnapshot,
     state_root: &Path,
     codex_pids_per_mux: &BTreeMap<MuxSessionId, Vec<(String, i64)>>,
     now_epoch: i64,
+    window_seconds: i64,
 ) {
     let Some(db_path) = pick_active_log_db(state_root) else {
         return;
@@ -91,7 +116,7 @@ pub fn apply_codex_log_attribution(
         return;
     }
 
-    let ts_floor = now_epoch.saturating_sub(FRESHNESS_WINDOW_SECONDS);
+    let ts_floor = now_epoch.saturating_sub(window_seconds.max(0));
     let candidates = collect_codex_pane_processes(codex_pids_per_mux);
     if candidates.is_empty() {
         return;
@@ -527,7 +552,13 @@ mod tests {
             .nodes
             .push(agent_session_node(&state_scope, "thread-current"));
 
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let log_links: Vec<_> = snapshot
             .candidate_links
@@ -566,7 +597,13 @@ mod tests {
         let mut snapshot = build_snapshot("main");
         let pids = codex_pid_map("main", 100);
         // No agent session for fresh-thread yet.
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let synth = snapshot.nodes.iter().find_map(|n| match n {
             GraphNode::AgentSession(s) if s.id.session_key == "fresh-thread" => Some(s),
@@ -609,7 +646,13 @@ mod tests {
             .nodes
             .push(agent_session_node(&state_scope, "current-thread"));
 
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let stale = snapshot
             .candidate_links
@@ -647,7 +690,13 @@ mod tests {
             .nodes
             .push(agent_session_node(&state_scope, "thread-x"));
 
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let corroborating = snapshot
             .candidate_links
@@ -676,7 +725,13 @@ mod tests {
 
         let mut snapshot = build_snapshot("main");
         let pids = codex_pid_map("main", 100);
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let count = snapshot
             .candidate_links
@@ -698,7 +753,13 @@ mod tests {
 
         let mut snapshot = build_snapshot("main");
         let pids = codex_pid_map("main", 100);
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let count = snapshot
             .candidate_links
@@ -724,7 +785,13 @@ mod tests {
 
         let mut snapshot = build_snapshot("main");
         let pids = codex_pid_map("main", 100);
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let link = snapshot
             .candidate_links
@@ -746,7 +813,13 @@ mod tests {
         let mut snapshot = build_snapshot("main");
         let pids = codex_pid_map("main", 100);
         let before = snapshot.candidate_links.len();
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
         assert_eq!(snapshot.candidate_links.len(), before);
     }
 
@@ -761,7 +834,13 @@ mod tests {
         let mut snapshot = build_snapshot("main");
         let pids = codex_pid_map("main", 100);
         let before = snapshot.candidate_links.len();
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
         assert_eq!(snapshot.candidate_links.len(), before);
     }
 
@@ -780,7 +859,13 @@ mod tests {
             MuxSessionId::new("tmux:main".to_string()),
             vec![("claude-code".to_string(), 100)],
         );
-        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now());
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
 
         let count = snapshot
             .candidate_links
@@ -788,5 +873,44 @@ mod tests {
             .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
             .count();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn caller_supplied_window_overrides_default_bound() {
+        let temp = TempDir::new().expect("temp");
+        let state_root = temp.path();
+        write_logs_db(
+            &state_root.join("logs_2.sqlite"),
+            // Row is 30 minutes old; inside the 24h default but outside a
+            // tight 5-minute custom bound.
+            &[("pid:100:uuid-a", "thread-x", now() - 30 * 60)],
+        );
+
+        let mut snapshot = build_snapshot("main");
+        let pids = codex_pid_map("main", 100);
+
+        // Tight 5-minute window: row should be rejected as too old.
+        apply_codex_log_attribution(&mut snapshot, state_root, &pids, now(), 5 * 60);
+        let tight = snapshot
+            .candidate_links
+            .iter()
+            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
+            .count();
+        assert_eq!(tight, 0);
+
+        // Default window: same row is accepted.
+        apply_codex_log_attribution(
+            &mut snapshot,
+            state_root,
+            &pids,
+            now(),
+            DEFAULT_WINDOW_SECONDS,
+        );
+        let wide = snapshot
+            .candidate_links
+            .iter()
+            .filter(|l| l.source_metadata.adapter == ADAPTER_NAME)
+            .count();
+        assert_eq!(wide, 1);
     }
 }
