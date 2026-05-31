@@ -3804,7 +3804,7 @@ launched through CLI/TUI surfaces for manual inspection.
     active hook-sidecar link per `(mux, pane_id)`, and stronger
     current-session fd evidence wins over stale launch history.
 
-- [ ] `TEST-005` Add TUI interaction regression tests for row
+- [x] `TEST-005` Add TUI interaction regression tests for row
   expansion, scrolling, and attach resolution.
   - Scope: build a thin test driver around `App` that applies fixed
     key/action sequences at deterministic terminal sizes. Cover the
@@ -3822,6 +3822,12 @@ launched through CLI/TUI surfaces for manual inspection.
     ambiguous-mux fixture only when adding a new interaction failure.
   - Blockers: `TEST-001`; coordinates with `T8-006` so buffer
     snapshot coverage is not duplicated.
+  - Outcome: added scenario-backed `App` reducer/action tests using
+    the named `TEST-006` worlds. Coverage now asserts ambiguous mux
+    candidate rows remain navigable after expansion, selection snaps
+    to a visible row when a refresh removes the selected row, and
+    attach target resolution refuses the tmux session hosting the
+    current TUI.
 
 - [x] `TEST-006` Expose named replay scenarios to CLI and TUI runs.
   - Scope: promote the replay harness's useful worlds into a small

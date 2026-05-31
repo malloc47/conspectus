@@ -951,6 +951,7 @@ fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dev_scenarios;
     use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
@@ -1008,6 +1009,35 @@ mod tests {
             initial_selection_hint: None,
         });
         app
+    }
+
+    fn scenario_app(name: &str) -> (App, GraphSnapshot) {
+        let world = dev_scenarios::materialize(name).expect("materialize scenario");
+        let snap = world.snapshot().expect("scenario snapshot");
+        let tree = world.sessions_tree().expect("scenario sessions tree");
+        let mut app = App::new(world.tui_config(View::Sessions, false));
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_600,
+            initial_selection_hint: None,
+        });
+        (app, snap)
+    }
+
+    fn select_session(app: &mut App, session_key: &str) -> RowId {
+        let id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(session) if session.session.session_key == session_key => {
+                    Some(row.id.clone())
+                }
+                _ => None,
+            })
+            .expect("visible session row");
+        app.set_selection(id.clone());
+        id
     }
 
     #[test]
@@ -1264,6 +1294,89 @@ mod tests {
         let returned = app.adjust_left_scroll(99, 0);
         assert_eq!(returned, before);
         assert_eq!(app.left_scroll(), before);
+    }
+
+    #[test]
+    fn scenario_ambiguous_mux_candidates_remain_navigable_after_expansion() {
+        let (mut app, _) = scenario_app("ambiguous-mux");
+        select_session(&mut app, "ambiguous");
+
+        app.update(Msg::ToggleExpand);
+        let candidate_rows: Vec<_> = app
+            .visible_rows()
+            .iter()
+            .filter(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_)))
+            .map(|row| row.id.clone())
+            .collect();
+        assert_eq!(
+            candidate_rows.len(),
+            2,
+            "expanded ambiguous session should expose both mux candidates"
+        );
+
+        app.update(Msg::NavDown);
+        assert_eq!(
+            app.selection().cloned(),
+            candidate_rows.first().cloned(),
+            "cursor should move into candidate rows after expansion"
+        );
+        app.update(Msg::NavDown);
+        assert_eq!(
+            app.selection().cloned(),
+            candidate_rows.get(1).cloned(),
+            "cursor should move past the first candidate row"
+        );
+    }
+
+    #[test]
+    fn scenario_refresh_when_selected_row_disappears_snaps_to_visible_row() {
+        let (mut app, _) = scenario_app("exact-match");
+        let old_selection = select_session(&mut app, "session-x");
+
+        let replacement =
+            dev_scenarios::materialize("orphan-session").expect("materialize replacement scenario");
+        let snap = replacement.snapshot().expect("replacement snapshot");
+        let tree = replacement.sessions_tree().expect("replacement tree");
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_601,
+            initial_selection_hint: None,
+        });
+
+        let new_selection = app.selection().cloned().expect("fallback selection");
+        assert_ne!(
+            new_selection, old_selection,
+            "selected exact-match row should have disappeared"
+        );
+        assert!(
+            app.visible_rows().iter().any(|row| row.id == new_selection),
+            "fallback selection should point at a visible row"
+        );
+    }
+
+    #[test]
+    fn scenario_attach_target_refuses_current_tmux_session() {
+        let world = dev_scenarios::materialize("exact-match").expect("materialize scenario");
+        let snap = world.snapshot().expect("scenario snapshot");
+        let tree = world.sessions_tree().expect("scenario sessions tree");
+        let mut config = world.tui_config(View::Sessions, false);
+        config.current_tmux_session = Some("editor".to_string());
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_600,
+            initial_selection_hint: None,
+        });
+        select_session(&mut app, "session-x");
+
+        assert_eq!(
+            crate::tui::actions::resolve_attach_target(&app),
+            Err(crate::tui::actions::AttachDisabled::CurrentTmuxSession(
+                "editor".to_string()
+            ))
+        );
     }
 
     #[test]
