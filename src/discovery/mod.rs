@@ -14,6 +14,7 @@ use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
 pub mod aliases;
 pub mod atelier;
+pub mod codex_log;
 pub mod cross_link;
 pub mod declared;
 pub mod forge;
@@ -174,6 +175,13 @@ pub fn discover_local_with(
         cross_link::infer(&mut snapshot);
     } else {
         cross_link::infer_without_process_tree(&mut snapshot);
+    }
+    if let Some(codex_state_root) = config.harness_state_roots.get(harness::codex::HARNESS_KEY) {
+        codex_log::apply_codex_log_attribution(
+            &mut snapshot,
+            codex_state_root,
+            codex_log::current_epoch(),
+        );
     }
     if let Some(root) = &config.hook_sidecar_root {
         hook_sidecar::apply_hook_sidecars(&mut snapshot, root, hook_sidecar::current_epoch());

@@ -3064,7 +3064,7 @@ failure:
   - Blockers: none; defer until the metadata-only process evidence
     approach shows more sustained pressure.
 
-- [ ] `H-MUXPROC-004` Read Codex state and log databases for live
+- [x] `H-MUXPROC-004` Read Codex state and log databases for live
   session attribution.
   - Scope: per ADR 0048, add two read-only Codex slices under the
     existing harness state-root discovery. The state-reader slice
@@ -3500,6 +3500,13 @@ failure:
     stale `active_pane_command_session_match` for the same mux, plus
     live-validation fallout where a fresh Claude session exists in
     hook state before its transcript file exists on disk.
+  - **codex-side fix landed via `H-MUXPROC-004` / ADR 0048**: the
+    codex log linker resolves the active thread for each live codex
+    pid by parsing `logs.process_uuid` (`pid:<os_pid>:<uuid>`) and
+    demotes stale `active_pane_command_session_match` candidates for
+    the same mux, closing the codex equivalent of this drift class
+    without requiring hooks. Claude-side remains gated on
+    `H-MUXPROC-012` / `H-MUXPROC-005`.
 
 - [x] `H-MUXPROC-013` Add Codex hook sidecar emitter if audit proves
   non-mutating session identity.
