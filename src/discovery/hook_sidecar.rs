@@ -1012,4 +1012,142 @@ mod tests {
                 && link.source_metadata.evidence.as_deref() == Some("hook_session_match")
         }));
     }
+
+    /// Proves the opencode end-to-end path for H-MUXPROC-014: a SQLite
+    /// hook record written by the `@conspectus/opencode-hook` plugin
+    /// produces a fresh `LinkedToMux` candidate sourced from an opencode
+    /// session, and demotes a stale `active_pane_command_session_match`
+    /// candidate pointing at the launch-argv session for the same mux.
+    /// The harness-key check in `pane_running_harness` and the demotion
+    /// rule in `demote_weaker_mux_links` are both already
+    /// harness-agnostic; this test pins that behavior under the opencode
+    /// harness key explicitly so future refactors cannot regress it.
+    #[test]
+    fn opencode_hook_record_demotes_stale_launch_argv_for_same_mux() {
+        let temp = tempdir().expect("tempdir");
+
+        let opencode_session = |key: &str| -> GraphNode {
+            GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("opencode", "/oc-state", key),
+                harness_key: "opencode".to_string(),
+                cwd: Some("/work/proj".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            })
+        };
+
+        let opencode_mux = GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("tmux:editor".to_string()),
+            backend: "tmux".to_string(),
+            native_id: "editor".to_string(),
+            cwd: Some("/work/proj".to_string()),
+            active_pane_command: Some("opencode".to_string()),
+            active_pane_pid: Some(4242),
+            active_pane_current_path: Some("/work/proj".to_string()),
+            active_pane_start_command: Some(
+                "opencode /work/proj --session launch-argv-session".to_string(),
+            ),
+            client_attached: None,
+            activity_epoch: Some(1_700_000_000),
+            created_epoch: None,
+        });
+
+        let stale_argv_link = {
+            let mut fields = Metadata::new();
+            fields.insert(
+                "match_kind".to_string(),
+                serde_json::Value::String("active_pane_command_session_match".to_string()),
+            );
+            GraphLink {
+                id: "cross_link:cmd:launch-argv-session:editor".to_string(),
+                source: NodeId::AgentSession(AgentSessionId::new(
+                    "opencode",
+                    "/oc-state",
+                    "launch-argv-session",
+                )),
+                target: LinkEndpoint::Node {
+                    id: NodeId::MuxSession(MuxSessionId::new("tmux:editor".to_string())),
+                },
+                relation: RelationKind::LinkedToMux,
+                provenance: Provenance::StrongDiscovered,
+                confidence: Confidence::High,
+                freshness: Freshness::Fresh,
+                source_metadata: SourceMetadata {
+                    adapter: "cross_link".to_string(),
+                    evidence: Some("active_pane_command_session_match".to_string()),
+                    fields,
+                },
+                state: LinkState::Active,
+            }
+        };
+
+        hook::HookStore::new(temp.path())
+            .write_record(&hook::HookRecord {
+                schema_version: hook::SCHEMA_VERSION,
+                harness_key: "opencode".to_string(),
+                session_key: "current-after-resume".to_string(),
+                cwd: Some("/work/proj".to_string()),
+                pid: Some(4242),
+                ppid: Some(4241),
+                tmux: Some(hook::HookTmuxRecord {
+                    session_name: Some("editor".to_string()),
+                    native_id: None,
+                    pane_id: Some("%1".to_string()),
+                    socket_path: None,
+                }),
+                transcript_path: None,
+                hook_event_name: Some("session.updated".to_string()),
+                observed_epoch: 1_700_000_050,
+                harness_version: Some("0.1.0".to_string()),
+            })
+            .expect("write hook record");
+
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                opencode_session("launch-argv-session"),
+                opencode_session("current-after-resume"),
+                opencode_mux,
+            ],
+            candidate_links: vec![stale_argv_link],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        let stale = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.id == "cross_link:cmd:launch-argv-session:editor")
+            .expect("stale argv link");
+        match &stale.state {
+            LinkState::Overridden { reason, .. } => {
+                assert!(
+                    reason.as_ref().is_some_and(|r| r.contains("hook sidecar")),
+                    "expected hook-sidecar override reason, got {reason:?}"
+                );
+            }
+            other => panic!("expected stale argv link to be Overridden, got {other:?}"),
+        }
+
+        let fresh = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.source
+                    == NodeId::AgentSession(AgentSessionId::new(
+                        "opencode",
+                        "/oc-state",
+                        "current-after-resume",
+                    ))
+            })
+            .expect("fresh hook link");
+        assert!(matches!(fresh.state, LinkState::Active));
+        assert_eq!(fresh.source_metadata.adapter, "hook_sidecar");
+        assert_eq!(
+            fresh.source_metadata.evidence.as_deref(),
+            Some("hook_session_match")
+        );
+    }
 }

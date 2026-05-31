@@ -3624,7 +3624,7 @@ failure:
     no-opt-in current-session source for already-running Codex TUI
     processes.
 
-- [ ] `H-MUXPROC-014` Add opencode plugin sidecar emitter.
+- [x] `H-MUXPROC-014` Add opencode plugin sidecar emitter.
   - Scope: ship an opt-in npm-distributed opencode plugin (working
     name `@conspectus/opencode-hook`, distributed alongside the
     Conspectus release; can also be tried locally via the
@@ -3659,8 +3659,27 @@ failure:
     the plugin installed.
   - Related: `H-MUXPROC-009` audit slice landed 2026-05-30
     establishing the plugin shape; ADR 0028 hook sidecar schema;
-    `discovery::hook_sidecar` reader; ADR 0048 (parallel codex
-    drift fix uses log-derived attribution rather than hooks).
+    ADR 0049 plugin distribution; `discovery::hook_sidecar`
+    reader; ADR 0048 (parallel codex drift fix uses log-derived
+    attribution rather than hooks).
+  - **landed 2026-05-31**: Rust writer subcommand
+    `conspectus hook write opencode` plus three unit tests
+    (`hook::opencode_payload_{builds_hook_record,requires_session_id,
+    rejects_empty_session_id}`); harness-agnostic
+    `discovery::hook_sidecar::apply_hook_sidecars` already picks up
+    `harness_key: "opencode"` records; a new end-to-end test
+    `opencode_hook_record_demotes_stale_launch_argv_for_same_mux`
+    pins the override behavior under the opencode harness key.
+    TypeScript plugin lives in-repo at `plugins/opencode-hook/`
+    per ADR 0049 (npm package `@conspectus/opencode-hook`, builds
+    cleanly via `npm install && npm run build`, types pass
+    `npm run typecheck`). v1 subscribes only to lifecycle
+    `session.{created,updated,status,idle,compacted}` events;
+    `chat.message` / `tool.execute.*` heartbeat was rejected by
+    ADR 0049 because freshest-record-wins doesn't require
+    heartbeat and the lower churn is preferable. Distribution is
+    local-install via `opencode plugin <local-path>`; npm publish
+    is deferred per ADR 0049 until at least one external user.
   - Blockers: none. Audit complete via `H-MUXPROC-009`; sidecar
     schema fixed via `H-MUXPROC-010`.
 
