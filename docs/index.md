@@ -29,6 +29,12 @@ Purpose: user-facing runtime reference covering the environment variables
 that gate discovery providers, the harness state-root overrides, the
 config-file precedence, and the current CLI surface.
 
+## `docs/dev-scenarios.md`
+
+Purpose: developer reference for named replay scenarios, including the
+hidden debug-only `conspectus dev scenario ...` commands and how to add new
+scenario builders.
+
 ## `docs/tui-review.md`
 
 Purpose: UX review of the in-development `conspectus tui` sessions view,

@@ -2500,3 +2500,58 @@ fn dev_scenario_table_renders_generated_world() {
         .stdout(predicate::str::contains("ambiguous"))
         .stdout(predicate::str::contains("MUX"));
 }
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_tui_help_lists_filter_group_and_sort_flags() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args(["dev", "scenario", "tui", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--grouping"))
+        .stdout(predicate::str::contains("--harness"))
+        .stdout(predicate::str::contains("--mux-state"))
+        .stdout(predicate::str::contains("--max-age"))
+        .stdout(predicate::str::contains("--sort"));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_tui_validates_grouping_for_selected_view() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args([
+            "dev",
+            "scenario",
+            "tui",
+            "ambiguous-mux",
+            "--view",
+            "sessions",
+            "--grouping",
+            "host",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "invalid --grouping `host` for --view sessions",
+        ));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn dev_scenario_tui_validates_filter_flags_before_launch() {
+    Command::cargo_bin("conspectus")
+        .expect("conspectus binary exists")
+        .args([
+            "dev",
+            "scenario",
+            "tui",
+            "ambiguous-mux",
+            "--max-age",
+            "abc",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid --max-age `abc`"));
+}

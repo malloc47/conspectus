@@ -3862,6 +3862,35 @@ launched through CLI/TUI surfaces for manual inspection.
     and builds a TUI sessions row tree without reading real home,
     tmux, `/proc`, or network state.
 
+- [x] `TEST-007` Add filter, grouping, and sort controls to dev
+  scenario exploration.
+  - Scope: make `conspectus dev scenario tui <name>` accept the same
+    pure exploration flags as normal `conspectus tui`: `--view`,
+    `--grouping`, `--harness`, `--mux-state`, `--max-age`, and
+    `--sort`. In the static scenario TUI, enable the controls overlay,
+    grouping cycle, clear-filters action, and sort/filter changes by
+    rebuilding row trees from the pre-materialized scenario snapshot
+    instead of running live discovery. Keep mutating or host-affecting
+    actions disabled (`attach`, `resume`, rename writes).
+  - Tests: CLI smoke tests for scenario TUI flag validation and
+    scenario table/filter output where practical; reducer/runtime tests
+    for static controls applying filter/grouping/sort without invoking
+    live discovery. Update `docs/dev-scenarios.md` with examples.
+  - Manual checks: run `cargo run -- dev scenario tui ambiguous-mux
+    --grouping none --mux-state ambiguous --sort recency` and verify
+    the TUI opens on the filtered static scenario graph; use the
+    controls overlay to change filters/grouping and confirm rows
+    rebuild in place.
+  - Blockers: none for filter/grouping; visible sort behavior may need
+    follow-up if a row-tree builder does not yet consume `Sort`.
+  - Outcome: `conspectus dev scenario tui` now accepts filter,
+    grouping, and sort flags before launch. The static scenario TUI
+    enables controls overlay, grouping cycle, clear-filters, and
+    view-switch rebuilds against the pre-materialized scenario
+    snapshot, while attach/resume/rename remain disabled. Added CLI
+    smoke tests for the hidden TUI flag surface and validation, and
+    updated `docs/dev-scenarios.md` with filter/group/sort examples.
+
 ### Session Naming
 
 Conspectus today is read-only outside Phase 5 declared-link CRUD. Session

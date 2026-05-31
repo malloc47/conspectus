@@ -284,6 +284,21 @@ fn static_event_loop(
                     )));
                 }
                 Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(&mut app, key),
+                Some(Action::OpenControls) => {
+                    app.open_controls_overlay();
+                    app.update(Msg::SetStatus(Some(
+                        "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
+                    )));
+                }
+                Some(Action::OpenControlsAtFilters) => {
+                    app.open_controls_overlay_at_filters();
+                    app.update(Msg::SetStatus(Some(
+                        "controls: editing filters · Esc closes".to_string(),
+                    )));
+                }
+                Some(Action::ControlsOverlayKey(key)) => {
+                    static_handle_controls_overlay_key(&mut app, &config, &snapshot, key)?;
+                }
                 Some(Action::SwitchView(view)) => {
                     app.apply_controls_action(
                         crate::tui::widgets::controls::ControlsAction::SwitchView(view),
@@ -313,16 +328,33 @@ fn static_event_loop(
                         "scenario TUI is static; resume is disabled".to_string(),
                     )));
                 }
-                Some(Action::OpenRename)
-                | Some(Action::RenameOverlayKey(_))
-                | Some(Action::OpenControls)
-                | Some(Action::OpenControlsAtFilters)
-                | Some(Action::ControlsOverlayKey(_))
-                | Some(Action::CycleGrouping(_))
-                | Some(Action::ClearFilters) => {
+                Some(Action::CycleGrouping(delta)) => {
+                    let next = if delta >= 0 {
+                        app.grouping().cycle_next()
+                    } else {
+                        app.grouping().cycle_prev()
+                    };
+                    static_apply_controls_action_and_refresh(
+                        &mut app,
+                        &config,
+                        &snapshot,
+                        crate::tui::widgets::controls::ControlsAction::SetGrouping(next),
+                    )?;
+                }
+                Some(Action::ClearFilters) => {
+                    static_apply_controls_action_and_refresh(
+                        &mut app,
+                        &config,
+                        &snapshot,
+                        crate::tui::widgets::controls::ControlsAction::SetFilter(
+                            crate::filter::RowFilter::default(),
+                        ),
+                    )?;
+                    app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+                }
+                Some(Action::OpenRename) | Some(Action::RenameOverlayKey(_)) => {
                     app.update(Msg::SetStatus(Some(
-                        "scenario TUI supports navigation, search, help, and view switching"
-                            .to_string(),
+                        "scenario TUI keeps mutating actions disabled".to_string(),
                     )));
                 }
                 None => {}
@@ -332,6 +364,55 @@ fn static_event_loop(
     }
 
     Ok(())
+}
+
+#[cfg(any(test, debug_assertions))]
+fn static_handle_controls_overlay_key(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: &crate::model::GraphSnapshot,
+    key: ratatui::crossterm::event::KeyEvent,
+) -> Result<()> {
+    use crate::tui::widgets::controls::{ControlsContext, ControlsOutcome};
+    let view = app.config().default_view;
+    let grouping = app.grouping();
+    let filter_snapshot = app.filter().clone();
+    let sort = app.sort();
+    let ctx = ControlsContext {
+        view,
+        grouping,
+        filter: &filter_snapshot,
+        sort,
+    };
+    let outcome = match app.controls_overlay_mut() {
+        Some(state) => state.handle_key(&ctx, key),
+        None => return Ok(()),
+    };
+    match outcome {
+        ControlsOutcome::Continue => {}
+        ControlsOutcome::Close => {
+            app.close_controls_overlay();
+        }
+        ControlsOutcome::ApplyAndStay(action) => {
+            static_apply_controls_action_and_refresh(app, config, snapshot, action)?;
+        }
+        ControlsOutcome::ApplyAndClose(action) => {
+            app.close_controls_overlay();
+            static_apply_controls_action_and_refresh(app, config, snapshot, action)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(test, debug_assertions))]
+fn static_apply_controls_action_and_refresh(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: &crate::model::GraphSnapshot,
+    action: crate::tui::widgets::controls::ControlsAction,
+) -> Result<()> {
+    app.apply_controls_action(action);
+    set_static_data(app, config, snapshot)
 }
 
 #[cfg(any(test, debug_assertions))]
@@ -366,6 +447,22 @@ fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Act
         return match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 Some(Action::SearchOverlayKey(key))
+            }
+            _ => None,
+        };
+    }
+    if app.controls_overlay().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                Some(Action::ControlsOverlayKey(key))
+            }
+            _ => None,
+        };
+    }
+    if app.rename_overlay().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                Some(Action::RenameOverlayKey(key))
             }
             _ => None,
         };
@@ -1246,6 +1343,27 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('f'), KeyModifiers::NONE), 24),
             Some(Action::OpenControlsAtFilters)
+        );
+    }
+
+    #[test]
+    fn static_action_routes_keys_to_controls_overlay() {
+        let mut app = App::new(RunConfig::defaults());
+        app.open_controls_overlay();
+
+        assert_eq!(
+            static_action_for_event(&app, press(KeyCode::Down, KeyModifiers::NONE), 24),
+            Some(Action::ControlsOverlayKey(KeyEvent::new(
+                KeyCode::Down,
+                KeyModifiers::NONE
+            )))
+        );
+        assert_eq!(
+            static_action_for_event(&app, press(KeyCode::Char('q'), KeyModifiers::NONE), 24),
+            Some(Action::ControlsOverlayKey(KeyEvent::new(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE
+            )))
         );
     }
 

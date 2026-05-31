@@ -210,6 +210,11 @@ conspectus columns {sessions|mux|union|prs|forks}
 conspectus declared ...
 ```
 
+Debug/test builds also include hidden developer scenario commands under
+`conspectus dev scenario ...`. They materialize isolated replay worlds for
+manual graph/table/TUI inspection and are documented in
+`docs/dev-scenarios.md`. Release builds do not expose this surface.
+
 The row-type (`sessions`, `mux`, `union`, `prs`, `forks`) is a required positional;
 there is no implicit default. Width detection: when stdout is a TTY
 the table truncates to the detected terminal width; pipes default to

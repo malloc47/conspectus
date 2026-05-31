@@ -225,6 +225,13 @@ struct DevScenarioTuiArgs {
     /// Initial left-panel organization.
     #[arg(long, value_enum, default_value_t = ViewFlag::Sessions)]
     view: ViewFlag,
+    /// Row sort within each group.
+    #[arg(long, value_enum, default_value_t = SortFlag::Hierarchy)]
+    sort: SortFlag,
+    /// Filter / grouping flags. Accepted grouping values depend on
+    /// `--view`, matching normal `conspectus tui`.
+    #[command(flatten)]
+    filter_args: FilterArgs,
     /// When to colorize the output.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
@@ -235,9 +242,21 @@ impl DevScenarioTuiArgs {
     fn run(self) -> Result<()> {
         let world = conspectus::dev_scenarios::materialize(&self.name)?;
         let view = view_from_flag(self.view);
+        let filter = self.filter_args.to_row_filter()?;
+        let grouping = self
+            .filter_args
+            .to_grouping(view)?
+            .unwrap_or_else(|| conspectus::tui::Grouping::default_for(view));
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
         let snapshot = world.snapshot()?;
-        conspectus::tui::run_static(world.tui_config(view, color), snapshot)
+        let mut config = world.tui_config(view, color);
+        config.default_sort = match self.sort {
+            SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
+            SortFlag::Recency => conspectus::tui::Sort::Recency,
+        };
+        config.initial_filter = filter;
+        apply_grouping_to_tui_config(&mut config, grouping);
+        conspectus::tui::run_static(config, snapshot)
     }
 }
 
@@ -1728,6 +1747,23 @@ fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
         ViewFlag::Union => conspectus::tui::View::Union,
         ViewFlag::Prs => conspectus::tui::View::Prs,
         ViewFlag::Forks => conspectus::tui::View::Forks,
+    }
+}
+
+fn apply_grouping_to_tui_config(
+    config: &mut conspectus::tui::RunConfig,
+    grouping: conspectus::tui::Grouping,
+) {
+    match grouping {
+        conspectus::tui::Grouping::Sessions(grouping) => {
+            config.sessions_grouping = grouping;
+        }
+        conspectus::tui::Grouping::Mux(grouping) => {
+            config.mux_grouping = grouping;
+        }
+        conspectus::tui::Grouping::Union(_)
+        | conspectus::tui::Grouping::Prs(_)
+        | conspectus::tui::Grouping::Forks(_) => {}
     }
 }
 
