@@ -656,8 +656,12 @@ inline. With the right pane focused:
   neighbor and pushes a breadcrumb hop.
 - `e` is the explicit expand/collapse accelerator for multi-link
   group headers.
-- `Backspace` pops the breadcrumb stack and restores the prior focused
-  node along with the cursor and expansion state saved with it.
+- `Backspace` reads as a general "go back" gesture: it pops the
+  breadcrumb stack and restores the prior focused node along with the
+  cursor and expansion state saved with it. Once the stack is empty,
+  the next `Backspace` shifts focus from the right pane back to the
+  left tree, so the operator can keep tapping Backspace to fully
+  unwind their position.
 - `o` opens the full untruncated value of the cursor row in a centered
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.

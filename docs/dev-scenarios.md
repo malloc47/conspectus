@@ -119,7 +119,9 @@ move focus into the right pane. From there:
   group headers (e.g. the two-mux group on `ambiguous-mux`, or the
   two-process group on `process-cardinality`).
 - `Backspace` pops the breadcrumb and restores the prior focused node
-  along with its cursor and expansion state.
+  along with its cursor and expansion state. Once the stack is empty,
+  the next `Backspace` shifts focus from the right pane back to the
+  left tree, so Backspace reads as a general "go back" key.
 - `o` opens the full untruncated value of the cursor row in a
   centered modal — useful on long `cwd`, `command`, transcript path,
   and observation-key rows.

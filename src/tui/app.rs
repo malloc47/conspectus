@@ -351,8 +351,10 @@ pub enum Msg {
     ExplorerToggleGroup,
     /// Right panel (graph explorer): back out of the most recent
     /// drilldown hop, restoring the previous focused node and the
-    /// cursor / expansion state saved with it. No-op when the
-    /// breadcrumb stack is empty.
+    /// cursor / expansion state saved with it. When the breadcrumb
+    /// stack is empty and the right pane has focus, shifts focus to
+    /// the left pane so Backspace reads as a general "go back"
+    /// gesture. No-op on left focus with an empty stack.
     ExplorerBack,
     /// Move keyboard focus to the next panel.
     CycleFocus,
@@ -1253,7 +1255,16 @@ impl App {
             return;
         };
         let Some(hop) = state.breadcrumb.pop() else {
-            self.status_message = Some("explorer: no drill history to back out of".to_string());
+            // Treat Backspace as a general "go back" gesture: once
+            // the drilldown stack is empty, the next press should
+            // back out of the right pane entirely so the operator
+            // can keep tapping Backspace to unwind their position.
+            if matches!(self.focus, Focus::Right) {
+                self.focus = Focus::Left;
+                self.status_message = None;
+            } else {
+                self.status_message = Some("explorer: no drill history to back out of".to_string());
+            }
             return;
         };
         let home = home_for_config(&self.config);
@@ -2106,14 +2117,63 @@ mod tests {
     }
 
     #[test]
-    fn explorer_back_with_no_breadcrumb_surfaces_status_hint() {
+    fn explorer_back_with_no_breadcrumb_and_left_focus_surfaces_status_hint() {
         let mut app = app_for_explorer();
+        assert_eq!(app.focus(), Focus::Left);
         app.update(Msg::ExplorerBack);
         assert!(
             app.status_message()
                 .map(|s| s.contains("no drill history"))
                 .unwrap_or(false)
         );
+        // Focus stays put when there's nothing to back out of.
+        assert_eq!(app.focus(), Focus::Left);
+    }
+
+    #[test]
+    fn explorer_back_with_no_breadcrumb_and_right_focus_shifts_focus_left() {
+        // Backspace is the universal "go back" key: after the
+        // drilldown stack is empty, the next press should back out
+        // of the right pane focus so the operator can keep tapping
+        // Backspace to fully unwind their position.
+        let mut app = app_for_explorer();
+        app.update(Msg::CycleFocus);
+        assert_eq!(app.focus(), Focus::Right);
+        app.update(Msg::ExplorerBack);
+        assert_eq!(app.focus(), Focus::Left);
+        // No stray "no drill history" hint either — the focus shift
+        // is itself the feedback.
+        assert!(app.status_message().is_none());
+    }
+
+    #[test]
+    fn explorer_back_unwinds_drill_then_shifts_focus_on_second_press() {
+        // T8-031 follow-up: with one drilldown hop on the stack, two
+        // taps of Backspace should (1) restore the original focused
+        // node and (2) shift focus to the left pane.
+        let mut app = app_for_explorer();
+        app.update(Msg::CycleFocus);
+        assert_eq!(app.focus(), Focus::Right);
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        let before = app.explorer().expect("state").view.focused.clone();
+        app.update(Msg::ExplorerActivate);
+        assert_ne!(app.explorer().expect("state").view.focused, before);
+        // First backspace pops the drilldown hop; focus stays right.
+        app.update(Msg::ExplorerBack);
+        assert_eq!(app.explorer().expect("state").view.focused, before);
+        assert_eq!(app.focus(), Focus::Right);
+        // Second backspace at the empty stack shifts focus left.
+        app.update(Msg::ExplorerBack);
+        assert_eq!(app.focus(), Focus::Left);
     }
 
     #[test]

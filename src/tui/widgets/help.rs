@@ -186,7 +186,7 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(
         &mut lines,
         "Backspace",
-        "Back out of the most recent drilldown hop",
+        "Back out of the most recent drilldown hop · shifts focus to the left pane once the stack is empty",
     );
     bind(
         &mut lines,
