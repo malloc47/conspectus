@@ -5389,7 +5389,7 @@ than recursive inline detail panes.
     render alone).
   - Blockers: T8-027 modeling.
 
-- [ ] `T8-038` Shorten breadcrumb hop labels and elide deep chains.
+- [x] `T8-038` Shorten breadcrumb hop labels and elide deep chains.
   - Scope: today each breadcrumb hop renders the focused node's
     full display label, which eats the breadcrumb line after two
     hops. Render hops as `kind:short_tag` (e.g. `mux:editor`,

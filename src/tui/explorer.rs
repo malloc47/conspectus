@@ -83,10 +83,12 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
     let upstream = build_explorer(inputs.snapshot, &id, Direction::Upstream, inputs.home);
     let downstream = build_explorer(inputs.snapshot, &id, Direction::Downstream, inputs.home);
 
+    let short_label = short_node_label(node);
     Some(NodeView {
         focused: id.clone(),
         kind_label,
         title_line,
+        short_label,
         short_id,
         full_id: id,
         core_fields,
@@ -108,6 +110,11 @@ pub struct NodeView {
     pub kind_label: &'static str,
     /// Compact identity line shown in the title.
     pub title_line: String,
+    /// Compact `kind:short_tag` label for this node (T8-038). Used
+    /// by [`BreadcrumbHop::short_label`] when this view is the
+    /// before-drill focused node, and by the right-pane title to
+    /// render the full drilldown chain.
+    pub short_label: String,
     /// FNV-1a 64-bit short id (H-TBL-002 length).
     pub short_id: String,
     pub full_id: NodeId,
@@ -560,9 +567,12 @@ pub struct BreadcrumbHop {
     /// The node the cursor was focused on *before* the drill that
     /// produced this hop.
     pub focused: NodeId,
-    /// Short identity label for the hop, used in the breadcrumb
-    /// header rendered above the Node zone.
-    pub display: String,
+    /// Compact `kind:short_tag` identity label for the hop (T8-038),
+    /// rendered as one segment of the breadcrumb chain. Callers can
+    /// disambiguate same-short-label collisions across the chain
+    /// using [`render_breadcrumb_chain`], which suffixes the last-4
+    /// of the focused node's display when two hops collide.
+    pub short_label: String,
     /// Cursor row identity at the time of the drill, so Backspace
     /// can re-find it.
     pub cursor_key: Option<ExplorerRowKey>,
@@ -665,6 +675,68 @@ impl NodeView {
     }
 }
 
+/// Format a breadcrumb chain for the right-pane title (T8-038).
+/// Joins hop `short_label`s with ` › `, falling back to elision
+/// (`first … last-N`) when the rendered chain exceeds `available`.
+/// Within the chain, hops that share a short label get a `·xxxx`
+/// suffix (last-4 of the focused node's display) so the operator
+/// can tell two same-named hops apart.
+///
+/// Returns `None` when `hops` is empty so callers can skip the
+/// breadcrumb glyph entirely.
+pub fn render_breadcrumb_chain(hops: &[BreadcrumbHop], available: usize) -> Option<String> {
+    if hops.is_empty() {
+        return None;
+    }
+    let labels = disambiguate_chain(hops);
+    Some(elide_chain(&labels, available))
+}
+
+fn disambiguate_chain(hops: &[BreadcrumbHop]) -> Vec<String> {
+    let mut counts: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::with_capacity(hops.len());
+    for hop in hops {
+        *counts.entry(hop.short_label.as_str()).or_insert(0) += 1;
+    }
+    hops.iter()
+        .map(|hop| {
+            if counts.get(hop.short_label.as_str()).copied().unwrap_or(0) > 1 {
+                let id_text = hop.focused.to_string();
+                let tail: String = id_text.chars().rev().take(4).collect();
+                let tail: String = tail.chars().rev().collect();
+                format!("{}·{tail}", hop.short_label)
+            } else {
+                hop.short_label.clone()
+            }
+        })
+        .collect()
+}
+
+fn elide_chain(labels: &[String], available: usize) -> String {
+    const SEP: &str = " › ";
+    let full = labels.join(SEP);
+    if full.chars().count() <= available || labels.len() <= 1 {
+        return full;
+    }
+    let last = labels
+        .last()
+        .expect("labels non-empty when len > 1")
+        .clone();
+    let first = labels
+        .first()
+        .expect("labels non-empty when len > 1")
+        .clone();
+    let with_first = format!("{first}{SEP}…{SEP}{last}");
+    if with_first.chars().count() <= available {
+        return with_first;
+    }
+    let only_last = format!("…{SEP}{last}");
+    if only_last.chars().count() <= available {
+        return only_last;
+    }
+    last
+}
+
 /// Borrowed view of the Preview-zone content for a single cursor row.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RowPreview<'a> {
@@ -726,6 +798,56 @@ fn kind_label(node: &GraphNode) -> &'static str {
         GraphNode::Branch(_) => "branch",
         GraphNode::Fork(_) => "fork",
         GraphNode::ForgePr(_) => "forge_pr",
+    }
+}
+
+/// Compact `kind:short_tag` label for a node, used in breadcrumb
+/// hops (T8-038) so a deep drill chain stays visible at a glance.
+/// Pure: no snapshot / alias context, no truncation against terminal
+/// width — callers handle elision over the rendered chain.
+pub fn short_node_label(node: &GraphNode) -> String {
+    fn basename(path: &str) -> &str {
+        path.rsplit(['/', '\\'])
+            .find(|seg| !seg.is_empty())
+            .unwrap_or(path)
+    }
+    match node {
+        GraphNode::AgentSession(s) => {
+            let tag =
+                s.id.session_key
+                    .rsplit(['-', '/'])
+                    .find(|seg| !seg.is_empty())
+                    .unwrap_or(s.id.session_key.as_str());
+            let tag = if tag.chars().count() > 8 {
+                &tag[tag.len().saturating_sub(8)..]
+            } else {
+                tag
+            };
+            format!("session:{tag}")
+        }
+        GraphNode::MuxSession(m) => format!("mux:{}", m.native_id),
+        GraphNode::RuntimeProcess(p) => {
+            let head = p
+                .command
+                .as_deref()
+                .map(|cmd| basename(cmd.split_whitespace().next().unwrap_or(cmd)).to_string())
+                .or_else(|| p.pid.map(|pid| format!("pid {pid}")))
+                .unwrap_or_else(|| basename(&p.observation_key).to_string());
+            let head = truncate(&head, 14);
+            format!("proc:{head}")
+        }
+        GraphNode::ForgePr(pr) => format!("pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
+        GraphNode::Fork(f) => {
+            let tag = f.name.as_deref().unwrap_or(f.provider_source_key.as_str());
+            format!("fork:{}", truncate(tag, 16))
+        }
+        GraphNode::Repo(r) => format!("repo:{}", basename(&r.common_dir)),
+        GraphNode::Checkout(c) => format!("co:{}", basename(&c.root)),
+        GraphNode::Workspace(w) => {
+            let tag = w.name.as_deref().unwrap_or_else(|| basename(&w.root));
+            format!("ws:{tag}")
+        }
+        GraphNode::Branch(b) => format!("branch:{}", b.refname),
     }
 }
 
@@ -1856,6 +1978,127 @@ mod tests {
         let extra_labels: Vec<&str> = view.all_fields.iter().map(|f| f.label).collect();
         assert!(extra_labels.contains(&"provider"));
         assert!(extra_labels.contains(&"state"));
+    }
+
+    #[test]
+    fn short_node_label_renders_kind_short_tag_per_node() {
+        // T8-038: every node kind should produce a `kind:short_tag`
+        // label suitable for breadcrumb hops.
+        assert_eq!(
+            short_node_label(&agent(
+                "claude-code",
+                "session-abcdef0123456789",
+                None,
+                None,
+            )),
+            "session:23456789",
+        );
+        assert_eq!(short_node_label(&mux("tmux", "editor", None)), "mux:editor");
+        assert_eq!(
+            short_node_label(&process("obs:1", 82310, "/usr/bin/claude --resume aaa")),
+            "proc:claude",
+        );
+        let pr = GraphNode::ForgePr(ForgePrNode {
+            id: ForgePrId::new("github", "github.com", "octo", "repo", 7),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "octo".to_string(),
+            repo: "repo".to_string(),
+            number: 7,
+            state: None,
+            url: None,
+            updated_epoch: None,
+            is_draft: false,
+        });
+        assert_eq!(short_node_label(&pr), "pr:octo/repo#7");
+        let repo = RepoNode {
+            id: RepoId::new("/srv/git/conspectus.git"),
+            common_dir: "/srv/git/conspectus.git".to_string(),
+            source_paths: vec![],
+            remotes: vec![],
+        };
+        assert_eq!(
+            short_node_label(&GraphNode::Repo(repo)),
+            "repo:conspectus.git"
+        );
+    }
+
+    #[test]
+    fn render_breadcrumb_chain_joins_hops_with_separator() {
+        let hops = vec![
+            breadcrumb_hop("session:abc", "agent:1"),
+            breadcrumb_hop("mux:editor", "mux:editor"),
+            breadcrumb_hop("proc:claude", "proc:1"),
+        ];
+        let rendered = render_breadcrumb_chain(&hops, 80).expect("non-empty");
+        assert_eq!(rendered, "session:abc › mux:editor › proc:claude");
+    }
+
+    #[test]
+    fn render_breadcrumb_chain_returns_none_when_empty() {
+        assert_eq!(render_breadcrumb_chain(&[], 80), None);
+    }
+
+    #[test]
+    fn render_breadcrumb_chain_elides_middle_when_too_long() {
+        // Four hops; budget only fits `first … last`.
+        let hops = vec![
+            breadcrumb_hop("session:abcdefgh", "agent:1"),
+            breadcrumb_hop("mux:editor-east", "mux:1"),
+            breadcrumb_hop("proc:claude-helper", "proc:1"),
+            breadcrumb_hop("session:xyzlast", "agent:2"),
+        ];
+        let rendered = render_breadcrumb_chain(&hops, 40).expect("non-empty");
+        // Should keep first and last with an elision marker.
+        assert!(rendered.starts_with("session:abcdefgh"));
+        assert!(rendered.ends_with("session:xyzlast"));
+        assert!(rendered.contains('…'));
+    }
+
+    #[test]
+    fn render_breadcrumb_chain_falls_back_to_last_hop_when_extremely_narrow() {
+        let hops = vec![
+            breadcrumb_hop("session:abc", "agent:1"),
+            breadcrumb_hop("mux:editor", "mux:1"),
+            breadcrumb_hop("proc:claude", "proc:1"),
+        ];
+        // Budget only fits the last hop.
+        let rendered = render_breadcrumb_chain(&hops, 5).expect("non-empty");
+        assert_eq!(rendered, "proc:claude");
+    }
+
+    #[test]
+    fn render_breadcrumb_chain_disambiguates_colliding_short_labels() {
+        // Two `session:abc` hops should pick up a `·last4` tail
+        // so the operator can tell which is which.
+        let hops = vec![
+            breadcrumb_hop("session:abc", "claude-code:/state:session-1234"),
+            breadcrumb_hop("mux:editor", "tmux:editor"),
+            breadcrumb_hop("session:abc", "claude-code:/state:session-5678"),
+        ];
+        let rendered = render_breadcrumb_chain(&hops, 80).expect("non-empty");
+        // Both colliding hops should carry a `·` disambiguator.
+        let session_segments: Vec<&str> = rendered
+            .split(" › ")
+            .filter(|s| s.starts_with("session:abc"))
+            .collect();
+        assert_eq!(session_segments.len(), 2);
+        assert!(
+            session_segments.iter().all(|s| s.contains('·')),
+            "colliding hops should be disambiguated: {rendered}",
+        );
+    }
+
+    fn breadcrumb_hop(short_label: &str, focused_display: &str) -> BreadcrumbHop {
+        // Use a MuxSession id as a stand-in NodeId — the breadcrumb
+        // chain renderer only cares about its `Display` form for the
+        // tiebreak suffix.
+        BreadcrumbHop {
+            focused: NodeId::MuxSession(MuxSessionId::new(focused_display)),
+            short_label: short_label.to_string(),
+            cursor_key: None,
+            expanded_groups: std::collections::BTreeSet::new(),
+        }
     }
 
     #[test]

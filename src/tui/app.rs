@@ -1221,12 +1221,12 @@ impl App {
             return;
         };
         let prev_focused = state.view.focused.clone();
-        let prev_display = state.view.title_line.clone();
+        let prev_short_label = state.view.short_label.clone();
         let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
         let prev_expanded = state.expanded_groups.clone();
         let hop = BreadcrumbHop {
             focused: prev_focused,
-            display: prev_display,
+            short_label: prev_short_label,
             cursor_key: prev_cursor_key,
             expanded_groups: prev_expanded,
         };

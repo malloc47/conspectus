@@ -654,33 +654,53 @@ fn left_panel_title(app: &App) -> Line<'static> {
 /// being inspected (`session`, `mux`, `pr`, …) so the operator can
 /// tell what they're looking at without re-reading the body.
 /// Falls back to `detail` while no selection is resolved.
-fn right_panel_title(app: &App) -> Line<'static> {
+fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     let label = right_panel_kind_label(app);
     let mut spans = vec![
         Span::raw(" "),
         focus_marker_span(app, Focus::Right),
         Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
     ];
-    // T8-029 partial: surface drilldown depth + the most recent hop
-    // identity inline in the title so the operator can tell which
-    // node the explorer is showing without re-reading the body. The
-    // full breadcrumb stack lives in the Node zone (follow-up
-    // T8-029b); here we just hint that the right pane no longer
-    // mirrors the left tree's selection.
+    // T8-038: render the full drilldown chain in short `kind:tag`
+    // form so the operator can see depth at a glance, with elision
+    // (`first … last`) when the chain exceeds the title's available
+    // width. The breadcrumb glyph `◀` plus the trailing depth marker
+    // anchor the chain so even an elided rendering still conveys
+    // where the explorer is.
     if let Some(state) = app.explorer()
-        && let Some(hop) = state.breadcrumb.last()
+        && !state.breadcrumb.is_empty()
     {
-        spans.push(Span::styled(
-            format!(" ◀ {} · ", hop.display),
-            Style::default().fg(app.theme().secondary_text),
-        ));
-        spans.push(Span::styled(
-            format!("depth {}", state.breadcrumb.len()),
-            Style::default().fg(app.theme().secondary_text),
-        ));
+        // Budget for the chain itself: total title width minus the
+        // fixed-cost spans we already pushed (focus marker + label +
+        // " ◀ " prefix + " · depth N" suffix + the leading/trailing
+        // padding spaces).
+        let depth_suffix = format!(" · depth {}", state.breadcrumb.len());
+        let fixed_width = 1
+            + focus_marker_width(app, Focus::Right)
+            + label.chars().count()
+            + " ◀ ".chars().count()
+            + depth_suffix.chars().count()
+            + 1;
+        let available = width.saturating_sub(fixed_width);
+        if let Some(chain) =
+            crate::tui::explorer::render_breadcrumb_chain(&state.breadcrumb, available.max(8))
+        {
+            spans.push(Span::styled(
+                format!(" ◀ {chain}"),
+                Style::default().fg(app.theme().secondary_text),
+            ));
+            spans.push(Span::styled(
+                depth_suffix,
+                Style::default().fg(app.theme().secondary_text),
+            ));
+        }
     }
     spans.push(Span::raw(" "));
     Line::from(spans)
+}
+
+fn focus_marker_width(app: &App, focus: Focus) -> usize {
+    focus_marker_span(app, focus).content.chars().count()
 }
 
 fn right_panel_kind_label(app: &App) -> &'static str {
@@ -1319,7 +1339,7 @@ fn compact_mux_native_id(native: &str) -> String {
 fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(right_panel_title(app));
+        .title(right_panel_title(app, area.width as usize));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -2850,6 +2870,18 @@ mod tests {
         assert!(
             drilled.contains("◀"),
             "breadcrumb back-hint should surface in the right-pane title: {drilled}"
+        );
+        // T8-038: the breadcrumb chain should surface in compact
+        // `kind:short_tag` form so the operator can see depth at a
+        // glance, with a `depth N` marker so even an elided chain
+        // tells the operator where they are.
+        assert!(
+            drilled.contains("session:"),
+            "breadcrumb chain should carry the previous session in short form: {drilled}"
+        );
+        assert!(
+            drilled.contains("depth 1"),
+            "breadcrumb title should carry the depth marker: {drilled}"
         );
     }
 
