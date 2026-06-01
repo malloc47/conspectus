@@ -142,6 +142,11 @@ pub struct CoreField {
     /// Full untruncated value when [`Self::value`] is a truncated
     /// preview. `o` opens it in the full-value modal (T8-030).
     pub long_value: Option<String>,
+    /// Optional graph-kind chip rendered next to the value (T8-039).
+    /// Used by the renderer to surface that e.g. a `cwd` path
+    /// resolves to a `repo` / `workspace` / `checkout` node, without
+    /// stuffing that metadata into the value string.
+    pub kind_chip: Option<&'static str>,
 }
 
 impl CoreField {
@@ -152,6 +157,7 @@ impl CoreField {
             placeholder: false,
             annotation: None,
             long_value: None,
+            kind_chip: None,
         }
     }
 
@@ -162,11 +168,17 @@ impl CoreField {
             placeholder: true,
             annotation: None,
             long_value: None,
+            kind_chip: None,
         }
     }
 
     fn with_long(mut self, full: String) -> Self {
         self.long_value = Some(full);
+        self
+    }
+
+    fn with_kind_chip(mut self, kind: &'static str) -> Self {
+        self.kind_chip = Some(kind);
         self
     }
 }
@@ -801,6 +813,49 @@ fn kind_label(node: &GraphNode) -> &'static str {
     }
 }
 
+/// Reverse-lookup helper for the cwd field (T8-039): returns the
+/// owning node's kind label when `cwd` matches a Repo, Workspace,
+/// or Checkout in the snapshot. Match precedence is Checkout (most
+/// specific) → Workspace → Repo (matches by `common_dir` or any
+/// `source_paths` entry). Returns `None` when nothing in the
+/// snapshot claims the path, in which case the renderer leaves the
+/// cwd value bare rather than guessing.
+fn cwd_owner_kind(snapshot: &GraphSnapshot, cwd: &str) -> Option<&'static str> {
+    let cwd = cwd.trim_end_matches('/');
+    if cwd.is_empty() {
+        return None;
+    }
+    let matches = |candidate: &str| -> bool { candidate.trim_end_matches('/') == cwd };
+    let mut found_checkout = false;
+    let mut found_workspace = false;
+    let mut found_repo = false;
+    for node in &snapshot.nodes {
+        match node {
+            GraphNode::Checkout(c) if matches(&c.root) => {
+                found_checkout = true;
+            }
+            GraphNode::Workspace(w) if matches(&w.root) => {
+                found_workspace = true;
+            }
+            GraphNode::Repo(r) => {
+                if matches(&r.common_dir) || r.source_paths.iter().any(|p| matches(p)) {
+                    found_repo = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    if found_checkout {
+        Some("checkout")
+    } else if found_workspace {
+        Some("workspace")
+    } else if found_repo {
+        Some("repo")
+    } else {
+        None
+    }
+}
+
 /// Compact `kind:short_tag` label for a node, used in breadcrumb
 /// hops (T8-038) so a deep drill chain stays visible at a glance.
 /// Pure: no snapshot / alias context, no truncation against terminal
@@ -889,7 +944,7 @@ fn core_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) 
         GraphNode::Checkout(c) => checkout_core(c, home),
         GraphNode::Workspace(w) => workspace_core(w, home),
         GraphNode::AgentSession(s) => agent_session_core(snapshot, s, home),
-        GraphNode::MuxSession(m) => mux_session_core(m, home),
+        GraphNode::MuxSession(m) => mux_session_core(snapshot, m, home),
         GraphNode::RuntimeProcess(p) => runtime_process_core(p, home),
         GraphNode::Branch(b) => branch_core(b),
         GraphNode::Fork(f) => fork_core(f),
@@ -913,7 +968,7 @@ fn extra_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>)
     match node {
         GraphNode::AgentSession(s) => agent_session_extras(snapshot, s, home),
         GraphNode::MuxSession(m) => mux_session_extras(m),
-        GraphNode::RuntimeProcess(p) => runtime_process_extras(p, home),
+        GraphNode::RuntimeProcess(p) => runtime_process_extras(snapshot, p, home),
         GraphNode::Fork(f) => fork_extras(f),
         GraphNode::ForgePr(pr) => forge_pr_extras(pr),
         _ => Vec::new(),
@@ -1024,7 +1079,13 @@ fn agent_session_core(
         fields.push(CoreField::placeholder("alias", "—"));
     }
     fields.push(match &s.cwd {
-        Some(cwd) => CoreField::plain("cwd", shorten_home(cwd, home)),
+        Some(cwd) => {
+            let field = CoreField::plain("cwd", shorten_home(cwd, home));
+            match cwd_owner_kind(snapshot, cwd) {
+                Some(kind) => field.with_kind_chip(kind),
+                None => field,
+            }
+        }
         None => CoreField::placeholder("cwd", "— (unknown)"),
     });
     fields.push(CoreField::plain("status", session_status(s)));
@@ -1070,7 +1131,11 @@ fn agent_session_extras(
     fields
 }
 
-fn mux_session_core(m: &MuxSessionNode, home: Option<&Path>) -> Vec<CoreField> {
+fn mux_session_core(
+    snapshot: &GraphSnapshot,
+    m: &MuxSessionNode,
+    home: Option<&Path>,
+) -> Vec<CoreField> {
     let mut fields = vec![
         CoreField::plain("id", node_short_id(&NodeId::MuxSession(m.id.clone()))),
         CoreField::plain(
@@ -1079,7 +1144,13 @@ fn mux_session_core(m: &MuxSessionNode, home: Option<&Path>) -> Vec<CoreField> {
         ),
     ];
     fields.push(match &m.cwd {
-        Some(cwd) => CoreField::plain("cwd", shorten_home(cwd, home)),
+        Some(cwd) => {
+            let field = CoreField::plain("cwd", shorten_home(cwd, home));
+            match cwd_owner_kind(snapshot, cwd) {
+                Some(kind) => field.with_kind_chip(kind),
+                None => field,
+            }
+        }
         None => CoreField::placeholder("cwd", "— (unknown)"),
     });
     let attached = match m.client_attached {
@@ -1155,6 +1226,7 @@ fn runtime_process_core(p: &RuntimeProcessNode, _home: Option<&Path>) -> Vec<Cor
         placeholder: p.pid.is_none(),
         annotation: None,
         long_value: None,
+        kind_chip: None,
     });
     let command_field = match &p.command {
         Some(cmd) => {
@@ -1186,10 +1258,19 @@ fn runtime_process_core(p: &RuntimeProcessNode, _home: Option<&Path>) -> Vec<Cor
     fields
 }
 
-fn runtime_process_extras(p: &RuntimeProcessNode, home: Option<&Path>) -> Vec<CoreField> {
+fn runtime_process_extras(
+    snapshot: &GraphSnapshot,
+    p: &RuntimeProcessNode,
+    home: Option<&Path>,
+) -> Vec<CoreField> {
     let mut fields = Vec::new();
     if let Some(cwd) = &p.cwd {
-        fields.push(CoreField::plain("cwd", shorten_home(cwd, home)));
+        let field = CoreField::plain("cwd", shorten_home(cwd, home));
+        let field = match cwd_owner_kind(snapshot, cwd) {
+            Some(kind) => field.with_kind_chip(kind),
+            None => field,
+        };
+        fields.push(field);
     }
     if let Some(harness) = &p.harness_key {
         fields.push(CoreField::plain("harness_key", harness.clone()));
@@ -1570,10 +1651,10 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, Confidence, ForgePrId, ForgePrNode, GraphSnapshot,
-        LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode,
-        RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
-        UnresolvedEndpoint,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId,
+        ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+        Provenance, RepoId, RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
+        SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -2099,6 +2180,107 @@ mod tests {
             cursor_key: None,
             expanded_groups: std::collections::BTreeSet::new(),
         }
+    }
+
+    #[test]
+    fn cwd_owner_kind_resolves_to_checkout_workspace_then_repo() {
+        // T8-039: when the cwd of a session matches a Checkout in
+        // the snapshot, surface `checkout`; otherwise Workspace,
+        // then Repo (`common_dir` or any `source_paths` entry).
+        let mut snapshot = GraphSnapshot::empty();
+        let repo_id = RepoId::new("/srv/git/conspectus.git");
+        snapshot.nodes.push(GraphNode::Repo(RepoNode {
+            id: repo_id.clone(),
+            common_dir: "/srv/git/conspectus.git".to_string(),
+            source_paths: vec!["/home/op/src/conspectus".to_string()],
+            remotes: vec![],
+        }));
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new("/home/op/atelier/demo"),
+            root: "/home/op/atelier/demo".to_string(),
+            provider: None,
+            name: Some("demo".to_string()),
+        }));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(repo_id, "/home/op/src/conspectus"),
+            root: "/home/op/src/conspectus".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        // Checkout wins over Repo for the same path.
+        assert_eq!(
+            cwd_owner_kind(&snapshot, "/home/op/src/conspectus"),
+            Some("checkout")
+        );
+        // Workspace beats Repo when no checkout matches.
+        assert_eq!(
+            cwd_owner_kind(&snapshot, "/home/op/atelier/demo"),
+            Some("workspace")
+        );
+        // Repo by common_dir.
+        assert_eq!(
+            cwd_owner_kind(&snapshot, "/srv/git/conspectus.git"),
+            Some("repo")
+        );
+        // No match anywhere → bare cwd.
+        assert_eq!(cwd_owner_kind(&snapshot, "/tmp/scratch"), None);
+        // Empty/whitespace inputs don't claim a match.
+        assert_eq!(cwd_owner_kind(&snapshot, ""), None);
+    }
+
+    #[test]
+    fn agent_session_cwd_field_carries_kind_chip_when_resolved() {
+        // T8-039: the session's `cwd` field should pick up the
+        // owning-node kind chip when the path resolves in the graph.
+        let mut snapshot = GraphSnapshot::empty();
+        let repo_id = RepoId::new("/srv/git/conspectus.git");
+        snapshot.nodes.push(GraphNode::Repo(RepoNode {
+            id: repo_id.clone(),
+            common_dir: "/srv/git/conspectus.git".to_string(),
+            source_paths: vec!["/home/op/src/conspectus".to_string()],
+            remotes: vec![],
+        }));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(repo_id, "/home/op/src/conspectus"),
+            root: "/home/op/src/conspectus".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot.nodes.push(agent(
+            "claude-code",
+            "abc",
+            Some("/home/op/src/conspectus"),
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let target = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
+        let view = build(&snapshot, &target, Some(home().as_path()));
+        let cwd = view
+            .core_fields
+            .iter()
+            .find(|f| f.label == "cwd")
+            .expect("cwd field present");
+        assert_eq!(cwd.kind_chip, Some("checkout"));
+    }
+
+    #[test]
+    fn agent_session_cwd_has_no_kind_chip_when_path_does_not_resolve() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(agent("claude-code", "abc", Some("/tmp/scratch"), None));
+        let snapshot = resolve_snapshot(snapshot);
+        let target = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
+        let view = build(&snapshot, &target, Some(home().as_path()));
+        let cwd = view
+            .core_fields
+            .iter()
+            .find(|f| f.label == "cwd")
+            .expect("cwd field present");
+        assert!(
+            cwd.kind_chip.is_none(),
+            "unresolved cwd should leave kind_chip empty: {cwd:?}",
+        );
     }
 
     #[test]

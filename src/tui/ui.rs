@@ -1580,6 +1580,10 @@ fn render_node_field_line(
         Style::default().add_modifier(Modifier::BOLD),
     );
     let mut spans = vec![label, Span::styled(field.value.clone(), style)];
+    if let Some(kind) = field.kind_chip {
+        spans.push(Span::raw(" "));
+        spans.push(kind_chip_span(kind, theme));
+    }
     if field.long_value.is_some() {
         spans.push(Span::styled(
             "  (truncated · o)".to_string(),
@@ -1594,6 +1598,16 @@ fn render_node_field_line(
         ));
     }
     Line::from(spans)
+}
+
+/// Dim leading `[kind]` chip used to surface the graph node kind
+/// next to a value (T8-039). Rendered with `theme.placeholder` so it
+/// reads as metadata rather than primary content.
+fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
+    Span::styled(
+        format!("[{kind}]"),
+        Style::default().add_modifier(theme.placeholder),
+    )
 }
 
 fn render_group_header_line(
@@ -1631,21 +1645,27 @@ fn render_group_child_line(
     theme: &Theme,
 ) -> Line<'static> {
     let star = if link.resolved_winner { "  ★" } else { "" };
-    let text = format!(
-        "      {}  ·  {} · {} · {}{star}",
-        link.neighbor_label,
+    let mut id_style = Style::default().fg(theme.link_id);
+    if highlight {
+        id_style = id_style.add_modifier(Modifier::REVERSED);
+    }
+    if link.resolved_winner {
+        id_style = id_style.add_modifier(Modifier::BOLD);
+    }
+    let trailing_text = format!(
+        "  ·  {} · {} · {}{star}",
         link.provenance.snake_case(),
         link.confidence.snake_case(),
         link.state.snake_case(),
     );
-    let mut style = Style::default();
-    if highlight {
-        style = style.add_modifier(Modifier::REVERSED);
-    }
-    if link.resolved_winner {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    Line::from(Span::styled(text, style.fg(theme.link_id)))
+    let spans = vec![
+        Span::styled("      ".to_string(), Style::default()),
+        kind_chip_span(link.neighbor_kind, theme),
+        Span::raw(" "),
+        Span::styled(link.neighbor_label.clone(), id_style),
+        Span::styled(trailing_text, id_style),
+    ];
+    Line::from(spans)
 }
 
 fn render_single_link_composite(
@@ -1655,11 +1675,6 @@ fn render_single_link_composite(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let star = if link.resolved_winner { "  ★" } else { "" };
-    let header_text = format!(
-        "    {:<24} {}{star}",
-        group.relation.snake_case(),
-        link.neighbor_label,
-    );
     let mut header_style = Style::default().fg(theme.link_id);
     if link.resolved_winner {
         header_style = header_style.add_modifier(Modifier::BOLD);
@@ -1667,6 +1682,14 @@ fn render_single_link_composite(
     if highlight {
         header_style = header_style.add_modifier(Modifier::REVERSED);
     }
+    let relation_text = format!("    {:<24} ", group.relation.snake_case());
+    let label_text = format!("{}{star}", link.neighbor_label);
+    let header_spans = vec![
+        Span::styled(relation_text, Style::default()),
+        kind_chip_span(link.neighbor_kind, theme),
+        Span::raw(" "),
+        Span::styled(label_text, header_style),
+    ];
     let trailing = format!(
         "        {} · {} · {}",
         link.provenance.snake_case(),
@@ -1678,7 +1701,7 @@ fn render_single_link_composite(
         trailing_style = trailing_style.add_modifier(Modifier::REVERSED);
     }
     vec![
-        Line::from(Span::styled(header_text, header_style)),
+        Line::from(header_spans),
         Line::from(Span::styled(trailing, trailing_style)),
     ]
 }
@@ -2806,6 +2829,32 @@ mod tests {
         assert!(
             text.contains(" Preview "),
             "expected Preview section divider label: {text}",
+        );
+    }
+
+    #[test]
+    fn link_rows_carry_leading_kind_chip_for_neighbor_kind() {
+        // T8-039: link rows in the explorer should surface the
+        // neighbor's graph kind as a leading `[kind]` chip so the
+        // operator can tell mux from session from process at a glance
+        // without parsing the harness prefix out of the id label.
+        let app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let mux_line = text
+            .lines()
+            .find(|line| line.contains("tmux:editor"))
+            .expect("mux link row");
+        let chip_idx = mux_line.find("[mux_session]").unwrap_or_else(|| {
+            panic!("mux link row should carry leading [mux_session] chip: {mux_line}")
+        });
+        let label_idx = mux_line
+            .find("tmux:editor")
+            .expect("mux label still on the line");
+        assert!(
+            chip_idx < label_idx,
+            "kind chip should render before the neighbor label: {mux_line}",
         );
     }
 

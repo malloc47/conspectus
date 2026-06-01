@@ -5405,7 +5405,7 @@ than recursive inline detail panes.
     snapshot coverage for a 4+ hop chain.
   - Blockers: `T8-028`.
 
-- [ ] `T8-039` Surface node kind as a first-class field in the
+- [x] `T8-039` Surface node kind as a first-class field in the
   detail pane.
   - Scope: today the node kind is buried in the harness-prefixed
     id (e.g. `opencode:ses_…`) and the operator has to parse it
