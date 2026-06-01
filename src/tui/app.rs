@@ -19,8 +19,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 
-use crate::model::MuxSessionId;
+use crate::model::{MuxSessionId, NodeId};
 use crate::tui::detail::{NodeDetail, build_node_detail_from_conn};
+use crate::tui::explorer::{
+    BreadcrumbHop, ExplorerRow, ExplorerRowKey, GroupKey, NodeView, build_node_view_from_conn,
+};
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::{RunConfig, View};
@@ -106,6 +109,11 @@ pub struct App {
     /// Whether linked-entity summary rows in the right-panel detail
     /// are expanded in place.
     detail_links_expanded: bool,
+    /// Right-panel graph explorer state (T8-027 / T8-028). Carries
+    /// the focused node view, the navigation cursor, group expansion,
+    /// and the breadcrumb stack for drilldown. `None` until the
+    /// reducer has resolved a selection into a node view.
+    explorer: Option<ExplorerState>,
     /// Which panel currently consumes navigation keys.
     focus: Focus,
     /// Vertical scroll offset for the right-panel preview, in
@@ -206,6 +214,80 @@ pub enum Focus {
     Right,
 }
 
+/// Right-pane graph explorer state. Owns the focused node's view
+/// model, the cursor position within the flat row list, the set of
+/// expanded multi-link groups, and the breadcrumb stack used by
+/// drilldown.
+#[derive(Debug, Clone)]
+pub struct ExplorerState {
+    /// View model for the currently-focused node.
+    pub view: NodeView,
+    /// Index into [`NodeView::flat_rows`] when materialized with the
+    /// current `expanded_groups`. Clamped on every update so the
+    /// renderer can read it unchecked.
+    pub cursor: usize,
+    /// Set of multi-link groups whose children are currently visible.
+    pub expanded_groups: BTreeSet<GroupKey>,
+    /// Drill history. Empty when the focused node is the same one
+    /// the left tree points at.
+    pub breadcrumb: Vec<BreadcrumbHop>,
+}
+
+impl ExplorerState {
+    /// Build a fresh state for `view`, starting with the cursor on
+    /// the first relationship row (or the first row of any kind if
+    /// no relationships exist).
+    pub fn new(view: NodeView) -> Self {
+        let expanded_groups = BTreeSet::new();
+        let rows = view.flat_rows(&expanded_groups);
+        let cursor = rows
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. } | ExplorerRow::GroupHeader { .. }))
+            .unwrap_or(0);
+        Self {
+            view,
+            cursor,
+            expanded_groups,
+            breadcrumb: Vec::new(),
+        }
+    }
+
+    /// The flat list of selectable rows for the current view +
+    /// expansion state. Computed each call rather than cached so the
+    /// view model stays the source of truth.
+    pub fn rows(&self) -> Vec<ExplorerRow> {
+        self.view.flat_rows(&self.expanded_groups)
+    }
+
+    /// Selected row, if any.
+    pub fn selected_row(&self) -> Option<ExplorerRow> {
+        self.rows().into_iter().nth(self.cursor)
+    }
+
+    /// Preserve cursor identity across a rebuild by row key. Used
+    /// when the underlying view model changes (refresh, group
+    /// expand) so the cursor sticks to the same logical row.
+    fn reseat_cursor(&mut self, previous_key: Option<ExplorerRowKey>) {
+        let rows = self.rows();
+        if rows.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+        let target = previous_key.and_then(|key| {
+            rows.iter().position(|row| row.key(&self.view) == key)
+        });
+        self.cursor = target.unwrap_or_else(|| {
+            // Fall back to the first link or group header so the
+            // cursor lands on something actionable.
+            rows.iter()
+                .position(|row| {
+                    matches!(row, ExplorerRow::Link { .. } | ExplorerRow::GroupHeader { .. })
+                })
+                .unwrap_or(0)
+        });
+    }
+}
+
 /// Every event the reducer can process. Keep variants narrow and
 /// add as stories land; do not make the enum a kitchen sink.
 #[derive(Debug, Clone, PartialEq)]
@@ -247,6 +329,25 @@ pub enum Msg {
     /// Right panel: expand/collapse linked entity details under the
     /// selected node's compact link rows.
     ToggleLinkedDetails,
+    /// Right panel (graph explorer): move the cursor down one row
+    /// in the flat row list (T8-028).
+    ExplorerNavDown,
+    /// Right panel (graph explorer): move the cursor up one row.
+    ExplorerNavUp,
+    /// Right panel (graph explorer): activate the highlighted row.
+    /// On a group header this toggles the group's expansion; on a
+    /// link row it drills into the neighbor and pushes a breadcrumb
+    /// hop. No-op on unresolved-evidence rows in v1.
+    ExplorerActivate,
+    /// Right panel (graph explorer): toggle expansion of the
+    /// highlighted multi-link group. No-op when the cursor isn't
+    /// on a header.
+    ExplorerToggleGroup,
+    /// Right panel (graph explorer): back out of the most recent
+    /// drilldown hop, restoring the previous focused node and the
+    /// cursor / expansion state saved with it. No-op when the
+    /// breadcrumb stack is empty.
+    ExplorerBack,
     /// Move keyboard focus to the next panel.
     CycleFocus,
     /// Right panel: scroll preview by `delta` rows. Positive
@@ -292,6 +393,7 @@ impl App {
             selection: None,
             detail: None,
             detail_links_expanded: false,
+            explorer: None,
             focus: Focus::Left,
             preview_scroll: 0,
             loaded_at_epoch: None,
@@ -593,6 +695,12 @@ impl App {
         self.detail_links_expanded
     }
 
+    /// Right-pane graph explorer state for the current focused
+    /// node. `None` until the reducer has resolved a selection.
+    pub fn explorer(&self) -> Option<&ExplorerState> {
+        self.explorer.as_ref()
+    }
+
     /// Which panel currently has focus.
     pub fn focus(&self) -> Focus {
         self.focus
@@ -721,6 +829,11 @@ impl App {
             Msg::End => self.move_selection_to(usize::MAX),
             Msg::ToggleExpand => self.toggle_expand_selected(),
             Msg::ToggleLinkedDetails => self.toggle_linked_details(),
+            Msg::ExplorerNavDown => self.explorer_move_cursor(1),
+            Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
+            Msg::ExplorerActivate => self.explorer_activate(),
+            Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
+            Msg::ExplorerBack => self.explorer_back(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
                     Focus::Left => Focus::Right,
@@ -866,6 +979,7 @@ impl App {
         self.detail = None;
         self.preview_scroll = 0;
         let Some(selection) = self.selection.as_ref() else {
+            self.explorer = None;
             return;
         };
         let target = match selection {
@@ -878,14 +992,237 @@ impl App {
             RowId::Synthetic(_) => None,
         };
         let Some(target) = target else {
+            self.explorer = None;
             return;
         };
         let Some(database) = self.database.as_ref() else {
+            self.explorer = None;
             return;
         };
         let home = home_for_config(&self.config);
         self.detail = build_node_detail_from_conn(database.conn(), &target, home.as_deref())
             .expect("detail builder should read current TUI database");
+        self.recompute_explorer_for(target, home.as_deref());
+    }
+
+    fn recompute_explorer_for(&mut self, target: NodeId, home: Option<&std::path::Path>) {
+        let database = self.database.as_ref();
+        let Some(database) = database else {
+            self.explorer = None;
+            return;
+        };
+        let view = build_node_view_from_conn(database.conn(), &target, home)
+            .expect("explorer view builder should read current TUI database");
+        match view {
+            None => self.explorer = None,
+            Some(view) => {
+                // When the focused node hasn't changed, preserve
+                // cursor / expansion / breadcrumb across refresh.
+                let preserved =
+                    self.explorer
+                        .as_ref()
+                        .and_then(|state| match state.view.focused == target {
+                            true => Some(state.clone()),
+                            false => None,
+                        });
+                match preserved {
+                    Some(mut state) => {
+                        let prev_key = state
+                            .selected_row()
+                            .map(|row| row.key(&state.view));
+                        // Replace the view while keeping cursor /
+                        // expansion / breadcrumb identity.
+                        state.view = view;
+                        // Drop any expanded-group entries whose
+                        // group no longer exists.
+                        let valid: BTreeSet<GroupKey> = state
+                            .view
+                            .upstream
+                            .groups
+                            .iter()
+                            .map(|g| GroupKey::for_group(
+                                crate::tui::explorer::Direction::Upstream,
+                                g,
+                            ))
+                            .chain(state.view.downstream.groups.iter().map(|g| {
+                                GroupKey::for_group(
+                                    crate::tui::explorer::Direction::Downstream,
+                                    g,
+                                )
+                            }))
+                            .collect();
+                        state.expanded_groups.retain(|key| valid.contains(key));
+                        state.reseat_cursor(prev_key);
+                        self.explorer = Some(state);
+                    }
+                    None => {
+                        self.explorer = Some(ExplorerState::new(view));
+                    }
+                }
+            }
+        }
+    }
+
+    fn explorer_move_cursor(&mut self, delta: i32) {
+        let Some(state) = self.explorer.as_mut() else {
+            return;
+        };
+        let rows = state.rows();
+        if rows.is_empty() {
+            state.cursor = 0;
+            return;
+        }
+        let len = rows.len() as i32;
+        let next = (state.cursor as i32 + delta).clamp(0, len - 1);
+        state.cursor = next as usize;
+        self.status_message = None;
+    }
+
+    fn explorer_toggle_group(&mut self) {
+        let Some(state) = self.explorer.as_mut() else {
+            return;
+        };
+        let rows = state.rows();
+        let Some(row) = rows.get(state.cursor).cloned() else {
+            return;
+        };
+        let ExplorerRow::GroupHeader {
+            direction,
+            group_index,
+            ..
+        } = row
+        else {
+            self.status_message = Some(
+                "explorer: nothing to expand here — only multi-link groups expand".to_string(),
+            );
+            return;
+        };
+        let explorer = match direction {
+            crate::tui::explorer::Direction::Upstream => &state.view.upstream,
+            crate::tui::explorer::Direction::Downstream => &state.view.downstream,
+        };
+        let Some(group) = explorer.groups.get(group_index) else {
+            return;
+        };
+        let key = GroupKey::for_group(direction, group);
+        let prev_key = state.selected_row().map(|row| row.key(&state.view));
+        if state.expanded_groups.contains(&key) {
+            state.expanded_groups.remove(&key);
+        } else {
+            state.expanded_groups.insert(key);
+        }
+        state.reseat_cursor(prev_key);
+        self.status_message = None;
+    }
+
+    fn explorer_activate(&mut self) {
+        let Some(state) = self.explorer.as_ref() else {
+            return;
+        };
+        let rows = state.rows();
+        let Some(row) = rows.get(state.cursor).cloned() else {
+            return;
+        };
+        match row {
+            ExplorerRow::GroupHeader { .. } => {
+                self.explorer_toggle_group();
+            }
+            ExplorerRow::Link { .. } => {
+                if let Some(target) = state.view.drill_target(&row) {
+                    self.explorer_drill_into(target);
+                }
+            }
+            ExplorerRow::Unresolved { .. } => {
+                self.status_message = Some(
+                    "explorer: unresolved evidence — `o` opens detail (T8-032)".to_string(),
+                );
+            }
+            ExplorerRow::NodeField { .. } => {
+                self.status_message = None;
+            }
+        }
+    }
+
+    fn explorer_drill_into(&mut self, target: NodeId) {
+        let Some(state) = self.explorer.as_mut() else {
+            return;
+        };
+        let prev_focused = state.view.focused.clone();
+        let prev_display = state.view.title_line.clone();
+        let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
+        let prev_expanded = state.expanded_groups.clone();
+        let hop = BreadcrumbHop {
+            focused: prev_focused,
+            display: prev_display,
+            cursor_key: prev_cursor_key,
+            expanded_groups: prev_expanded,
+        };
+        // Build the new view. If we can't load it, leave state alone
+        // and surface a status message.
+        let home = home_for_config(&self.config);
+        let database = self.database.as_ref();
+        let Some(database) = database else {
+            return;
+        };
+        let next = build_node_view_from_conn(database.conn(), &target, home.as_deref())
+            .expect("explorer view builder should read current TUI database");
+        match next {
+            None => {
+                self.status_message = Some(format!(
+                    "explorer: drill target {target:?} not in current snapshot"
+                ));
+            }
+            Some(view) => {
+                let mut new_state = ExplorerState::new(view);
+                // Carry the breadcrumb stack forward so deep
+                // drills accumulate.
+                new_state.breadcrumb = state.breadcrumb.clone();
+                new_state.breadcrumb.push(hop);
+                self.explorer = Some(new_state);
+                // Recompute the legacy detail too so the renderer
+                // surfaces consistent info during the renderer
+                // transition (T8-029).
+                self.detail =
+                    build_node_detail_from_conn(database.conn(), &target, home.as_deref())
+                        .expect("detail builder should read current TUI database");
+                self.preview_scroll = 0;
+                self.status_message = None;
+            }
+        }
+    }
+
+    fn explorer_back(&mut self) {
+        let Some(state) = self.explorer.as_mut() else {
+            return;
+        };
+        let Some(hop) = state.breadcrumb.pop() else {
+            self.status_message = Some("explorer: no drill history to back out of".to_string());
+            return;
+        };
+        let home = home_for_config(&self.config);
+        let database = self.database.as_ref();
+        let Some(database) = database else {
+            return;
+        };
+        let view = build_node_view_from_conn(database.conn(), &hop.focused, home.as_deref())
+            .expect("explorer view builder should read current TUI database");
+        let Some(view) = view else {
+            self.status_message = Some(
+                "explorer: cannot restore breadcrumb hop — node missing from snapshot"
+                    .to_string(),
+            );
+            return;
+        };
+        let breadcrumb_remaining = state.breadcrumb.clone();
+        let mut restored = ExplorerState::new(view);
+        restored.expanded_groups = hop.expanded_groups;
+        restored.breadcrumb = breadcrumb_remaining;
+        restored.reseat_cursor(hop.cursor_key);
+        self.detail = build_node_detail_from_conn(database.conn(), &hop.focused, home.as_deref())
+            .expect("detail builder should read current TUI database");
+        self.explorer = Some(restored);
+        self.preview_scroll = 0;
+        self.status_message = None;
     }
 }
 
@@ -1556,5 +1893,227 @@ mod tests {
         ));
         assert_eq!(app.filter(), &filter_before);
         assert_eq!(app.grouping(), grouping_before);
+    }
+
+    // ----- T8-028: explorer navigation / drilldown / breadcrumb -----
+
+    use crate::model::{LinkEndpoint, LinkState, MuxSessionNode, RelationKind, SourceMetadata};
+    use crate::tui::explorer::{Direction, ExplorerRow};
+
+    fn snapshot_session_with_mux() -> GraphSnapshot {
+        // Session → linked_to_mux → mux. Drives the simplest
+        // drillable explorer state: one downstream group with one
+        // link.
+        let mut snap = GraphSnapshot::empty();
+        let repo_id = RepoId::new("/p/proj");
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+        snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+            root: "/p/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("claude-code", "/state", "abc"),
+            harness_key: "claude-code".to_string(),
+            cwd: Some("/p/proj".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
+        }));
+        snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: crate::model::MuxSessionId::new("work"),
+            backend: "tmux".to_string(),
+            native_id: "work".to_string(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: Some(true),
+            activity_epoch: Some(1_700_000_000),
+            created_epoch: Some(1_700_000_000),
+        }));
+        let session_id = NodeId::AgentSession(AgentSessionId::new(
+            "claude-code",
+            "/state",
+            "abc",
+        ));
+        let mux_id = NodeId::MuxSession(crate::model::MuxSessionId::new("work"));
+        snap.candidate_links.push(crate::model::GraphLink {
+            id: "l1".to_string(),
+            source: session_id,
+            target: LinkEndpoint::Node { id: mux_id },
+            relation: RelationKind::LinkedToMux,
+            provenance: crate::model::Provenance::StrongDiscovered,
+            confidence: crate::model::Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        resolve_snapshot(snap)
+    }
+
+    fn app_for_explorer() -> App {
+        let snap = snapshot_session_with_mux();
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        // Land selection on the agent session row.
+        let row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("agent session row in tree");
+        app.set_selection(row_id);
+        app
+    }
+
+    #[test]
+    fn explorer_state_initializes_with_focus_on_a_relationship_row() {
+        let app = app_for_explorer();
+        let state = app.explorer().expect("explorer state present");
+        let row = state.selected_row().expect("selected row");
+        assert!(matches!(
+            row,
+            ExplorerRow::Link {
+                direction: Direction::Downstream,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn explorer_enter_on_link_drills_into_neighbor_and_pushes_breadcrumb() {
+        let mut app = app_for_explorer();
+        let before = app
+            .explorer()
+            .expect("explorer state present")
+            .view
+            .focused
+            .clone();
+        app.update(Msg::ExplorerActivate);
+        let after = app.explorer().expect("explorer state after drill");
+        // Focus now points at the mux.
+        assert_ne!(after.view.focused, before);
+        assert_eq!(after.view.kind_label, "mux_session");
+        assert_eq!(after.breadcrumb.len(), 1);
+        assert_eq!(after.breadcrumb[0].focused, before);
+    }
+
+    #[test]
+    fn explorer_backspace_restores_previous_focused_node_and_cursor() {
+        let mut app = app_for_explorer();
+        let before_state = app.explorer().expect("initial").clone();
+        let before_focus = before_state.view.focused.clone();
+        let before_cursor_key = before_state
+            .selected_row()
+            .map(|row| row.key(&before_state.view));
+        app.update(Msg::ExplorerActivate);
+        // Move cursor on the new focused node to prove it gets
+        // restored to the *original* one on Backspace.
+        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::ExplorerBack);
+        let restored = app.explorer().expect("restored explorer");
+        assert_eq!(restored.view.focused, before_focus);
+        assert!(restored.breadcrumb.is_empty());
+        let restored_cursor = restored.selected_row().map(|row| row.key(&restored.view));
+        assert_eq!(restored_cursor, before_cursor_key);
+    }
+
+    #[test]
+    fn explorer_back_with_no_breadcrumb_surfaces_status_hint() {
+        let mut app = app_for_explorer();
+        app.update(Msg::ExplorerBack);
+        assert!(app
+            .status_message()
+            .map(|s| s.contains("no drill history"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn explorer_toggle_group_only_acts_on_headers() {
+        let mut app = app_for_explorer();
+        // Sole row is a single-link composite — not a header.
+        app.update(Msg::ExplorerToggleGroup);
+        assert!(app
+            .status_message()
+            .map(|s| s.contains("nothing to expand"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn explorer_nav_clamps_inside_flat_row_range() {
+        let mut app = app_for_explorer();
+        let len = app.explorer().expect("state").rows().len();
+        for _ in 0..(len + 5) {
+            app.update(Msg::ExplorerNavDown);
+        }
+        let cursor = app.explorer().expect("state").cursor;
+        assert!(cursor < len.max(1));
+        for _ in 0..(len + 5) {
+            app.update(Msg::ExplorerNavUp);
+        }
+        assert_eq!(app.explorer().expect("state").cursor, 0);
+    }
+
+    #[test]
+    fn explorer_state_resets_when_left_tree_selection_changes() {
+        let mut app = app_for_explorer();
+        let initial_focused = app.explorer().expect("state").view.focused.clone();
+        app.update(Msg::ExplorerActivate); // drill into mux
+        let drilled_focused = app.explorer().expect("state").view.focused.clone();
+        assert_ne!(initial_focused, drilled_focused);
+        // Selecting a different row in the left tree should reset
+        // the explorer to that new node — the right pane is the
+        // detail surface for whatever the left pane points at.
+        let snap = snapshot_session_with_mux();
+        let other_session = AgentSessionNode {
+            id: AgentSessionId::new("claude-code", "/state", "second"),
+            harness_key: "claude-code".to_string(),
+            cwd: Some("/p/proj".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
+        };
+        let mut snap = snap;
+        snap.nodes.push(GraphNode::AgentSession(other_session));
+        let snap = resolve_snapshot(snap);
+        let tree = build_tree(&snap);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_100,
+            initial_selection_hint: None,
+        });
+        // Re-select the original session — explorer follows the
+        // selection.
+        let row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(session)
+                    if session.session.session_key == "abc" =>
+                {
+                    Some(row.id.clone())
+                }
+                _ => None,
+            })
+            .expect("first session row");
+        app.set_selection(row_id);
+        let after = app.explorer().expect("explorer after reselect");
+        assert_eq!(after.view.focused, initial_focused);
+        assert!(after.breadcrumb.is_empty());
     }
 }

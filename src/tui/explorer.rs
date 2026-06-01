@@ -166,7 +166,7 @@ impl CoreField {
 
 /// Upstream / Downstream direction encoded by section, per locked
 /// decision 1 in the mockup.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Direction {
     /// Incoming edges — the focused node is the link's *target*.
     Upstream,
@@ -310,6 +310,380 @@ impl LinkStateLabel {
             Self::Overridden => "overridden",
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// Navigation cursor + breadcrumb
+// -----------------------------------------------------------------------------
+
+/// Stable identity for a flat selectable row in the explorer. Used by
+/// the reducer to preserve cursor position across rebuilds (snapshot
+/// refresh, group toggle, drilldown).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExplorerRowKey {
+    /// Title bar acts as the "go back to the inherent identity"
+    /// landing target; not currently selectable but reserved.
+    Title,
+    /// One of the [`NodeView::core_fields`] rows (by label, so the
+    /// key stays stable across renames).
+    NodeField {
+        label: String,
+    },
+    /// A multi-link group's header row.
+    GroupHeader {
+        direction: Direction,
+        relation: RelationKind,
+        neighbor_kind: String,
+    },
+    /// A concrete link child row inside an expanded multi-link
+    /// group, or the composite row for a single-link group.
+    Link {
+        direction: Direction,
+        link_id: String,
+    },
+    /// An unresolved-evidence placeholder row inside a group.
+    Unresolved {
+        direction: Direction,
+        link_id: String,
+    },
+}
+
+/// Flat selectable row in the explorer. The reducer builds this
+/// list from the [`NodeView`] plus the per-frame
+/// `expanded_groups` set. The order matches what the renderer
+/// draws top-to-bottom so cursor index and rendered row index
+/// agree.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExplorerRow {
+    /// One of the focused node's core summary rows. Carries the
+    /// underlying [`CoreField`] index so `o` can find the long
+    /// value when the row was truncated.
+    NodeField {
+        index: usize,
+        label: &'static str,
+        long_value: Option<String>,
+    },
+    /// Multi-link group header (≥ 2 selectable rows). Selecting it
+    /// and hitting `Enter` or `e` toggles the group's expansion.
+    GroupHeader {
+        direction: Direction,
+        group_index: usize,
+        expanded: bool,
+    },
+    /// One link inside an expanded multi-link group, or the
+    /// composite row for a single-link group. `Enter` drills.
+    Link {
+        direction: Direction,
+        group_index: usize,
+        link_index: usize,
+    },
+    /// Unresolved-evidence placeholder. `Enter` is inert in v1; `o`
+    /// opens the evidence (see T8-032).
+    Unresolved {
+        direction: Direction,
+        group_index: usize,
+        unresolved_index: usize,
+    },
+}
+
+impl ExplorerRow {
+    /// Stable key for cursor persistence across rebuilds.
+    pub fn key(&self, view: &NodeView) -> ExplorerRowKey {
+        match self {
+            Self::NodeField { label, .. } => ExplorerRowKey::NodeField {
+                label: (*label).to_string(),
+            },
+            Self::GroupHeader {
+                direction,
+                group_index,
+                ..
+            } => {
+                let group = explorer_for(view, *direction).groups.get(*group_index);
+                ExplorerRowKey::GroupHeader {
+                    direction: *direction,
+                    relation: group
+                        .map(|g| g.relation.clone())
+                        .unwrap_or(RelationKind::AssociatedWith),
+                    neighbor_kind: group
+                        .map(|g| g.neighbor_kind.clone())
+                        .unwrap_or_default(),
+                }
+            }
+            Self::Link {
+                direction,
+                group_index,
+                link_index,
+            } => {
+                let link_id = explorer_for(view, *direction)
+                    .groups
+                    .get(*group_index)
+                    .and_then(|g| g.links.get(*link_index))
+                    .map(|l| l.link_id.clone())
+                    .unwrap_or_default();
+                ExplorerRowKey::Link {
+                    direction: *direction,
+                    link_id,
+                }
+            }
+            Self::Unresolved {
+                direction,
+                group_index,
+                unresolved_index,
+            } => {
+                let link_id = explorer_for(view, *direction)
+                    .groups
+                    .get(*group_index)
+                    .and_then(|g| g.unresolved.get(*unresolved_index))
+                    .map(|u| u.link_id.clone())
+                    .unwrap_or_default();
+                ExplorerRowKey::Unresolved {
+                    direction: *direction,
+                    link_id,
+                }
+            }
+        }
+    }
+
+    /// Long value attached to this row, when present. Drives the `o`
+    /// open-value modal.
+    pub fn long_value(&self) -> Option<&str> {
+        match self {
+            Self::NodeField { long_value, .. } => long_value.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+fn explorer_for(view: &NodeView, direction: Direction) -> &RelationshipExplorer {
+    match direction {
+        Direction::Upstream => &view.upstream,
+        Direction::Downstream => &view.downstream,
+    }
+}
+
+/// Per-group expansion identity. Multi-link groups stay collapsed by
+/// default; `e` or `Enter` on the header inserts the key.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GroupKey {
+    pub direction: Direction,
+    pub relation: RelationKind,
+    pub neighbor_kind: String,
+}
+
+impl GroupKey {
+    pub fn for_group(direction: Direction, group: &RelationshipGroup) -> Self {
+        Self {
+            direction,
+            relation: group.relation.clone(),
+            neighbor_kind: group.neighbor_kind.clone(),
+        }
+    }
+}
+
+impl NodeView {
+    /// Build the ordered list of selectable rows the cursor steps
+    /// through. `expanded` is the set of multi-link group headers
+    /// whose children are visible.
+    ///
+    /// Single-link groups always render as one composite row regardless
+    /// of `expanded`. Per locked decision 5 there is no header form for
+    /// a count-of-one group.
+    pub fn flat_rows(&self, expanded: &std::collections::BTreeSet<GroupKey>) -> Vec<ExplorerRow> {
+        let mut rows = Vec::new();
+        for (index, field) in self.core_fields.iter().enumerate() {
+            rows.push(ExplorerRow::NodeField {
+                index,
+                label: field.label,
+                long_value: field.long_value.clone(),
+            });
+        }
+        for explorer in [&self.upstream, &self.downstream] {
+            push_explorer_rows(&mut rows, explorer, expanded);
+        }
+        rows
+    }
+}
+
+fn push_explorer_rows(
+    rows: &mut Vec<ExplorerRow>,
+    explorer: &RelationshipExplorer,
+    expanded: &std::collections::BTreeSet<GroupKey>,
+) {
+    for (group_index, group) in explorer.groups.iter().enumerate() {
+        let key = GroupKey::for_group(explorer.direction, group);
+        let is_single = group.is_single();
+        if is_single {
+            if let Some(_) = group.links.first() {
+                rows.push(ExplorerRow::Link {
+                    direction: explorer.direction,
+                    group_index,
+                    link_index: 0,
+                });
+            } else if !group.unresolved.is_empty() {
+                rows.push(ExplorerRow::Unresolved {
+                    direction: explorer.direction,
+                    group_index,
+                    unresolved_index: 0,
+                });
+            }
+        } else {
+            let expanded = expanded.contains(&key);
+            rows.push(ExplorerRow::GroupHeader {
+                direction: explorer.direction,
+                group_index,
+                expanded,
+            });
+            if expanded {
+                for link_index in 0..group.links.len() {
+                    rows.push(ExplorerRow::Link {
+                        direction: explorer.direction,
+                        group_index,
+                        link_index,
+                    });
+                }
+                for unresolved_index in 0..group.unresolved.len() {
+                    rows.push(ExplorerRow::Unresolved {
+                        direction: explorer.direction,
+                        group_index,
+                        unresolved_index,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// One frame of drill history. The reducer pushes a hop when the
+/// operator presses `Enter` on a link row; Backspace pops the
+/// most-recent hop and restores the saved cursor + expansion state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BreadcrumbHop {
+    /// The node the cursor was focused on *before* the drill that
+    /// produced this hop.
+    pub focused: NodeId,
+    /// Short identity label for the hop, used in the breadcrumb
+    /// header rendered above the Node zone.
+    pub display: String,
+    /// Cursor row identity at the time of the drill, so Backspace
+    /// can re-find it.
+    pub cursor_key: Option<ExplorerRowKey>,
+    /// Expanded-group set at the time of the drill.
+    pub expanded_groups: std::collections::BTreeSet<GroupKey>,
+}
+
+/// Identity for one slot in the [`NodeView`]'s neighbor list — used
+/// by the reducer to pick which link to drill into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkRef {
+    pub direction: Direction,
+    pub group_index: usize,
+    pub link_index: usize,
+}
+
+impl NodeView {
+    /// Lookup helper for the reducer: resolve the currently-selected
+    /// flat row into the neighbor `NodeId` to drill into. Returns
+    /// `None` for non-drillable rows (node fields, group headers,
+    /// unresolved evidence).
+    pub fn drill_target(&self, row: &ExplorerRow) -> Option<NodeId> {
+        if let ExplorerRow::Link {
+            direction,
+            group_index,
+            link_index,
+        } = row
+        {
+            let explorer = explorer_for(self, *direction);
+            let group = explorer.groups.get(*group_index)?;
+            let link = group.links.get(*link_index)?;
+            return Some(link.neighbor_id.clone());
+        }
+        None
+    }
+
+    /// The preview content for a given cursor row — the neighbor's
+    /// core fields plus an edge summary. Returns `None` for rows
+    /// that don't carry a neighbor (node fields).
+    pub fn row_preview(&self, row: &ExplorerRow) -> Option<RowPreview<'_>> {
+        match row {
+            ExplorerRow::NodeField { .. } => None,
+            ExplorerRow::GroupHeader {
+                direction,
+                group_index,
+                ..
+            } => {
+                let explorer = explorer_for(self, *direction);
+                let group = explorer.groups.get(*group_index)?;
+                // Header preview targets the resolver winner if any,
+                // else the first link.
+                let link = group
+                    .links
+                    .iter()
+                    .find(|l| l.resolved_winner)
+                    .or_else(|| group.links.first())?;
+                Some(RowPreview::Link {
+                    neighbor_label: &link.neighbor_label,
+                    fields: &link.preview,
+                    provenance: link.provenance,
+                    confidence: link.confidence,
+                    state: link.state,
+                    edge_state: &link.edge_state,
+                })
+            }
+            ExplorerRow::Link {
+                direction,
+                group_index,
+                link_index,
+            } => {
+                let explorer = explorer_for(self, *direction);
+                let group = explorer.groups.get(*group_index)?;
+                let link = group.links.get(*link_index)?;
+                Some(RowPreview::Link {
+                    neighbor_label: &link.neighbor_label,
+                    fields: &link.preview,
+                    provenance: link.provenance,
+                    confidence: link.confidence,
+                    state: link.state,
+                    edge_state: &link.edge_state,
+                })
+            }
+            ExplorerRow::Unresolved {
+                direction,
+                group_index,
+                unresolved_index,
+            } => {
+                let explorer = explorer_for(self, *direction);
+                let group = explorer.groups.get(*group_index)?;
+                let row = group.unresolved.get(*unresolved_index)?;
+                Some(RowPreview::Unresolved {
+                    node_type: &row.node_type,
+                    evidence: &row.evidence,
+                    provenance: row.provenance,
+                    confidence: row.confidence,
+                    state: row.state,
+                })
+            }
+        }
+    }
+}
+
+/// Borrowed view of the Preview-zone content for a single cursor row.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowPreview<'a> {
+    Link {
+        neighbor_label: &'a str,
+        fields: &'a [CoreField],
+        provenance: Provenance,
+        confidence: Confidence,
+        state: LinkStateLabel,
+        edge_state: &'a EdgeStateLabel,
+    },
+    Unresolved {
+        node_type: &'a str,
+        evidence: &'a UnresolvedEvidence,
+        provenance: Provenance,
+        confidence: Confidence,
+        state: LinkStateLabel,
+    },
 }
 
 /// Resolver-outcome axis. Distinct from `LinkStateLabel` (lifecycle
@@ -1096,7 +1470,7 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId,
+        AgentSessionId, AgentSessionNode, Confidence, ForgePrId,
         ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
         Provenance, RepoId, RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
         SourceMetadata, UnresolvedEndpoint,

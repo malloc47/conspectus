@@ -1164,11 +1164,19 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
     }
     match action {
         Action::Msg(boxed) => Action::Msg(Box::new(match *boxed {
-            Msg::NavDown => Msg::ScrollPreviewBy(1),
-            Msg::NavUp => Msg::ScrollPreviewBy(-1),
-            Msg::PageDown(viewport) => Msg::ScrollPreviewBy(i32::from(viewport.max(1))),
-            Msg::PageUp(viewport) => Msg::ScrollPreviewBy(-i32::from(viewport.max(1))),
-            Msg::ToggleExpand => Msg::ToggleLinkedDetails,
+            // T8-028: j/k drive the explorer cursor when the right
+            // pane has focus, replacing the prior raw preview-scroll
+            // remap. Uppercase J/K still scroll the preview.
+            Msg::NavDown => Msg::ExplorerNavDown,
+            Msg::NavUp => Msg::ExplorerNavUp,
+            Msg::PageDown(_) => Msg::ExplorerNavDown,
+            Msg::PageUp(_) => Msg::ExplorerNavUp,
+            // Enter on the explorer cursor expands a group header or
+            // drills into a link row per locked decision 8.
+            Msg::ToggleExpand => Msg::ExplorerActivate,
+            // `e` toggles group expansion; on a non-header row the
+            // reducer surfaces a status hint.
+            Msg::ToggleLinkedDetails => Msg::ExplorerToggleGroup,
             other => other,
         })),
         other => other,
@@ -1243,6 +1251,10 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (_, KeyCode::Home) | (_, KeyCode::Char('g')) => Some(Action::Msg(Box::new(Msg::Home))),
             (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Box::new(Msg::End))),
             (_, KeyCode::Enter) => Some(Action::Msg(Box::new(Msg::ToggleExpand))),
+            // Backspace on the explorer pops a drilldown hop. The
+            // reducer no-ops on left focus / empty stack and surfaces
+            // a status hint when appropriate.
+            (_, KeyCode::Backspace) => Some(Action::Msg(Box::new(Msg::ExplorerBack))),
             (m, KeyCode::Char('e')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::Msg(Box::new(Msg::ToggleLinkedDetails)))
             }
@@ -1499,37 +1511,47 @@ mod tests {
     }
 
     #[test]
-    fn remap_for_focus_right_swaps_nav_for_preview_scroll() {
+    fn remap_for_focus_right_routes_nav_keys_into_the_explorer() {
         use crate::tui::app::Focus;
+        // T8-028: with the right pane focused, j/k and PageUp/Down
+        // move the explorer cursor instead of scrolling the preview.
+        // J/K (uppercase) keep their preview-scroll role via the
+        // standalone bindings in `translate`.
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::NavDown)), Focus::Right),
-            Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))
+            Action::Msg(Box::new(Msg::ExplorerNavDown))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::NavUp)), Focus::Right),
-            Action::Msg(Box::new(Msg::ScrollPreviewBy(-1)))
+            Action::Msg(Box::new(Msg::ExplorerNavUp))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::PageDown(20))), Focus::Right),
-            Action::Msg(Box::new(Msg::ScrollPreviewBy(20)))
+            Action::Msg(Box::new(Msg::ExplorerNavDown))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::PageUp(20))), Focus::Right),
-            Action::Msg(Box::new(Msg::ScrollPreviewBy(-20)))
+            Action::Msg(Box::new(Msg::ExplorerNavUp))
         );
     }
 
     #[test]
-    fn remap_for_focus_right_keeps_global_actions_and_expands_detail_links() {
+    fn remap_for_focus_right_routes_enter_and_e_to_the_explorer() {
         use crate::tui::app::Focus;
-        // Tab / quit stay global; Enter targets the focused right pane.
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
             Action::Msg(Box::new(Msg::CycleFocus))
         );
+        // Locked decision 8: Enter is the universal "do the obvious
+        // thing" key on the explorer cursor.
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::ToggleExpand)), Focus::Right),
-            Action::Msg(Box::new(Msg::ToggleLinkedDetails))
+            Action::Msg(Box::new(Msg::ExplorerActivate))
+        );
+        // `e` is the explicit expand/collapse accelerator.
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::ToggleLinkedDetails)), Focus::Right),
+            Action::Msg(Box::new(Msg::ExplorerToggleGroup))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),

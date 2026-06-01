@@ -3374,28 +3374,7 @@ fn parse_relation_kind(raw: &str) -> std::result::Result<RelationKind, String> {
 }
 
 fn relation_label(relation: &RelationKind) -> &'static str {
-    match relation {
-        RelationKind::AssociatedWith => "associated_with",
-        RelationKind::BelongsToRepo => "belongs_to_repo",
-        RelationKind::CheckedOutBranch => "checked_out_branch",
-        RelationKind::WorkspaceContainsRepo => "workspace_contains_repo",
-        RelationKind::BranchHasForgePr => "branch_has_forge_pr",
-        RelationKind::LinkedToMux => "linked_to_mux",
-        RelationKind::RootedIn => "rooted_in",
-        RelationKind::ForksWorkspace => "forks_workspace",
-        RelationKind::ForksRepo => "forks_repo",
-        RelationKind::CreatedCheckout => "created_checkout",
-        RelationKind::ReferencedCheckout => "referenced_checkout",
-        RelationKind::ParentSession => "parent_session",
-        RelationKind::ChildSession => "child_session",
-        RelationKind::CreatedBranch => "created_branch",
-        RelationKind::AssociatedBranch => "associated_branch",
-        RelationKind::ParentFork => "parent_fork",
-        RelationKind::RootedAtPath => "rooted_at_path",
-        RelationKind::MuxContainsProcess => "mux_contains_process",
-        RelationKind::ProcessIdentifiesSession => "process_identifies_session",
-        RelationKind::ProcessCandidatesSession => "process_candidates_session",
-    }
+    relation.snake_case()
 }
 
 fn parse_endpoint(raw: &str) -> std::result::Result<DeclaredEndpoint, String> {
