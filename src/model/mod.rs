@@ -478,6 +478,35 @@ pub enum RelationKind {
     ProcessCandidatesSession,
 }
 
+impl RelationKind {
+    /// Stable snake_case label used across CLI, TUI, and snapshot
+    /// outputs. Matches the `serde(rename_all = "snake_case")` form.
+    pub fn snake_case(&self) -> &'static str {
+        match self {
+            Self::AssociatedWith => "associated_with",
+            Self::BelongsToRepo => "belongs_to_repo",
+            Self::CheckedOutBranch => "checked_out_branch",
+            Self::WorkspaceContainsRepo => "workspace_contains_repo",
+            Self::BranchHasForgePr => "branch_has_forge_pr",
+            Self::LinkedToMux => "linked_to_mux",
+            Self::RootedIn => "rooted_in",
+            Self::ForksWorkspace => "forks_workspace",
+            Self::ForksRepo => "forks_repo",
+            Self::CreatedCheckout => "created_checkout",
+            Self::ReferencedCheckout => "referenced_checkout",
+            Self::ParentSession => "parent_session",
+            Self::ChildSession => "child_session",
+            Self::CreatedBranch => "created_branch",
+            Self::AssociatedBranch => "associated_branch",
+            Self::ParentFork => "parent_fork",
+            Self::RootedAtPath => "rooted_at_path",
+            Self::MuxContainsProcess => "mux_contains_process",
+            Self::ProcessIdentifiesSession => "process_identifies_session",
+            Self::ProcessCandidatesSession => "process_candidates_session",
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
@@ -499,6 +528,18 @@ impl Provenance {
             Self::Cached => 1,
         }
     }
+
+    /// Stable snake_case label used in operator-facing surfaces.
+    pub fn snake_case(self) -> &'static str {
+        match self {
+            Self::LocalDeclared => "local_declared",
+            Self::GlobalDeclared => "global_declared",
+            Self::StrongDiscovered => "strong_discovered",
+            Self::Discovered => "discovered",
+            Self::Convention => "convention",
+            Self::Cached => "cached",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -507,6 +548,17 @@ pub enum Confidence {
     High,
     Medium,
     Low,
+}
+
+impl Confidence {
+    /// Stable snake_case label used in operator-facing surfaces.
+    pub fn snake_case(self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
