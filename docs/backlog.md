@@ -5253,6 +5253,119 @@ than recursive inline detail panes.
     coverage for launching the TUI on the relevant named scenarios.
   - Blockers: `T8-030`, `TEST-006`.
 
+- [ ] `T8-032` First-class evidence inspector and link-promotion
+  flow.
+  - Scope: replace the v1 `o opens evidence` placeholder on
+    unresolved-evidence rows (per
+    `docs/tui-detail-mockup.md`) with a focused inspector that
+    renders all `UnresolvedEndpoint` metadata for the candidate
+    (`harness_key`, `native_id`, `state_scope`, `path`, free-form
+    `metadata` fields) and supports promoting that evidence to a
+    durable declared link from inside the TUI. The same inspector
+    should let operators convert a discovered/resolved candidate
+    into a declared link without leaving the detail explorer.
+    Writes route through the existing declared-link CRUD path
+    (server socket or direct SQLite writer per ADR 0038); the
+    inspector does not bypass the manual-link command surface in
+    `docs/design.md`.
+  - Tests: reducer/keymap tests for opening the inspector,
+    cancelling, and promoting evidence; declared-link store
+    integration tests that confirm the write lands in the
+    appropriate local-or-global store per `docs/design.md`'s
+    persistence rules; snapshot coverage for the inspector with
+    sparse vs richly-populated unresolved endpoints.
+  - Blockers: `T8-030`, declared-link CRUD landing in the TUI
+    surface (currently CLI-only).
+
+- [ ] `T8-033` TUI responsive-layout design and breakpoints.
+  - Scope: codify the layout breakpoints the TUI uses across all
+    views so the detail-pane explorer (and the rest of the TUI)
+    renders predictably across terminal sizes. Decide and
+    document: (a) the width / height where left + right panes
+    stack vertically instead of side-by-side, (b) the width where
+    the right pane auto-expands when it gains focus, (c) the
+    width where the right pane is hidden entirely and the
+    operator cycles to it via a tab affordance, (d) the
+    narrow-pane content-drop rules called out under
+    "Narrow-terminal Behavior" in `docs/tui-detail-mockup.md`.
+    Likely deliverables: a design note in `docs/` (promoted to an
+    ADR if the choices are cross-cutting) plus the implementation
+    that applies the rules uniformly across sessions / mux /
+    union / prs / forks views and the detail explorer.
+  - Tests: render tests at representative terminal sizes covering
+    each breakpoint transition; snapshot regression for the
+    stack-vs-split, expand-on-focus, and hide-and-tab behaviors;
+    keymap coverage for the tab affordance when the right pane is
+    hidden.
+  - Blockers: `T8-014` (contextual status bar — the breakpoint
+    rules need to play nicely with the contextual status zone),
+    `T8-027` v1 slice (so the detail-pane explorer's needs are
+    concrete before thresholds are picked).
+
+- [ ] `T8-034` Expanded Node Detail toggle.
+  - Scope: add a "full node" toggle that swaps the Node zone's
+    top-5 render for every field the focused node carries
+    (per `docs/tui-detail-mockup.md`'s Expanded Node Detail View
+    section and the per-kind fields-reference tables). Default
+    accelerator `F`; primary surface is the Controls overlay
+    (ADR 0031). Toggle state is per-focused-node and resets when
+    drilling into a neighbor; Backspace restores the prior node's
+    toggle state along with its focus. Long values reuse the
+    existing `(truncated · o)` open-value path. For node kinds
+    whose available field set already fits in the top-5
+    (`Repo`, `Workspace`, `Branch`, `Checkout`, `Fork`), the
+    toggle is a no-op and renders the same content.
+  - Tests: reducer/keymap tests for toggle on/off across drills
+    and backspace; renderer tests for each node kind's expanded
+    field set; snapshot coverage for at least one expanded
+    `agent_session`, `mux_session`, `runtime_process`, and
+    `forge_pr` case.
+  - Blockers: `T8-027` modeling.
+
+- [ ] `T8-035` Left-pane mirror sync (default).
+  - Scope: implement `[tui.detail].left_pane_sync = "mirror"` as
+    the default behavior per `docs/tui-detail-mockup.md`'s
+    Left / Right Pane Synchronization section. When the right pane
+    drills via `Enter` on a relationship row, the left tree
+    scrolls to and selects the row corresponding to the focused
+    node, expanding group rows along the ancestor path. The
+    left-pane *view* does not change. When the focused node has
+    no row in the current view (e.g. `runtime_process` while in
+    sessions view), the left pane keeps its previous selection.
+    The breadcrumb stack also stacks left-pane selection state so
+    `Backspace` restores both panes. Manual left-tree navigation
+    cancels the active drill: the right pane's focused node is
+    replaced by the node corresponding to the new tree selection
+    and the breadcrumb stack is collapsed.
+  - Tests: pure tree-expansion tests for finding/selecting a
+    node by id across each left-pane view; reducer tests for
+    drill + sync, Backspace restoring prior selection, manual
+    tree navigation collapsing the drill, and the "focused node
+    has no row" fallback. Buffer snapshots for at least the
+    sessions and mux views across one round of drilldown.
+  - Blockers: `T8-028`.
+
+- [ ] `T8-036` Left-pane follow sync (opt-in view switching).
+  - Scope: implement `[tui.detail].left_pane_sync = "follow"`
+    per `docs/tui-detail-mockup.md`. In `follow` mode, when
+    `mirror` would keep the left pane's previous selection
+    because the focused node has no row in the current view, the
+    left pane switches to a view that *does* have the row and
+    selects it. Backspace restores the previous view and the
+    previous selection together (breadcrumb stack carries view
+    state). Drill hops whose neighbor kind has no top-level view
+    (e.g. `runtime_process`, `fork` when no fork view exists)
+    fall back to `mirror` behavior. Add a `none` mode that
+    leaves the left pane completely untouched during drilldown,
+    and add the Controls overlay entry for flipping between
+    `mirror`, `follow`, and `none` mid-session.
+  - Tests: reducer tests for view-switching across each
+    `(focused-node-kind, current-view)` pair; tests for the
+    fallback-to-mirror behavior on view-less node kinds; tests
+    for Backspace restoring view + selection; Controls overlay
+    mode-flip tests.
+  - Blockers: `T8-035`.
+
 - [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
     ancestor when neither CLI nor config specifies one. Low
     priority.
