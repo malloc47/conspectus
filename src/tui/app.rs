@@ -241,6 +241,11 @@ pub struct ExplorerState {
     /// Drill history. Empty when the focused node is the same one
     /// the left tree points at.
     pub breadcrumb: Vec<BreadcrumbHop>,
+    /// Whether the Node zone is rendering its full per-kind field
+    /// set (T8-034) instead of the top-5 Core summary. Per-focused-
+    /// node: resets to `false` when drilling into a neighbor and is
+    /// restored along with the prior focus by Backspace.
+    pub full_detail_expanded: bool,
 }
 
 impl ExplorerState {
@@ -259,6 +264,7 @@ impl ExplorerState {
             cursor: 0,
             expanded_groups,
             breadcrumb: Vec::new(),
+            full_detail_expanded: false,
         }
     }
 
@@ -266,7 +272,8 @@ impl ExplorerState {
     /// expansion state. Computed each call rather than cached so the
     /// view model stays the source of truth.
     pub fn rows(&self) -> Vec<ExplorerRow> {
-        self.view.flat_rows(&self.expanded_groups)
+        self.view
+            .flat_rows(&self.expanded_groups, self.full_detail_expanded)
     }
 
     /// Selected row, if any.
@@ -355,6 +362,13 @@ pub enum Msg {
     /// highlighted multi-link group. No-op when the cursor isn't
     /// on a header.
     ExplorerToggleGroup,
+    /// Right panel (graph explorer): toggle the Expanded Node Detail
+    /// view (T8-034). Swaps the Node zone's top-5 render for the
+    /// full per-kind field set. Per-focused-node: resets when
+    /// drilling into a neighbor and is restored along with the
+    /// prior focus on Backspace. No-op for node kinds whose
+    /// `all_fields` matches `core_fields`.
+    ExplorerToggleFullDetail,
     /// Right panel (graph explorer): back out of the most recent
     /// drilldown hop, restoring the previous focused node and the
     /// cursor / expansion state saved with it. When the breadcrumb
@@ -913,6 +927,7 @@ impl App {
             Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
             Msg::ExplorerActivate => self.explorer_activate(),
             Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
+            Msg::ExplorerToggleFullDetail => self.explorer_toggle_full_detail(),
             Msg::ExplorerBack => self.explorer_back(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
@@ -1189,6 +1204,27 @@ impl App {
         self.status_message = None;
     }
 
+    fn explorer_toggle_full_detail(&mut self) {
+        let Some(state) = self.explorer.as_mut() else {
+            return;
+        };
+        let prev_key = state.selected_row().map(|row| row.key(&state.view));
+        let core_len = state.view.core_fields.len();
+        let all_len = state.view.all_fields.len();
+        state.full_detail_expanded = !state.full_detail_expanded;
+        state.reseat_cursor(prev_key);
+        // Render a soft status hint for the no-op case so the
+        // operator knows their toggle was received but the node
+        // kind doesn't carry extras to expand.
+        if core_len == all_len {
+            self.status_message = Some(format!(
+                "explorer: this node kind has no extra fields ({core_len} total)"
+            ));
+        } else {
+            self.status_message = None;
+        }
+    }
+
     fn explorer_activate(&mut self) {
         let Some(state) = self.explorer.as_ref() else {
             return;
@@ -1224,11 +1260,13 @@ impl App {
         let prev_short_label = state.view.short_label.clone();
         let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
         let prev_expanded = state.expanded_groups.clone();
+        let prev_full_detail_expanded = state.full_detail_expanded;
         let hop = BreadcrumbHop {
             focused: prev_focused,
             short_label: prev_short_label,
             cursor_key: prev_cursor_key,
             expanded_groups: prev_expanded,
+            full_detail_expanded: prev_full_detail_expanded,
         };
         // Build the new view. If we can't load it, leave state alone
         // and surface a status message.
@@ -1309,6 +1347,7 @@ impl App {
         let mut restored = ExplorerState::new(view);
         restored.expanded_groups = hop.expanded_groups;
         restored.breadcrumb = breadcrumb_remaining;
+        restored.full_detail_expanded = hop.full_detail_expanded;
         restored.reseat_cursor(hop.cursor_key);
         self.detail = build_node_detail_from_conn(database.conn(), &hop.focused, home.as_deref())
             .expect("detail builder should read current TUI database");
@@ -2245,6 +2284,77 @@ mod tests {
         // Third backspace shifts focus to the left pane.
         app.update(Msg::ExplorerBack);
         assert_eq!(app.focus(), Focus::Left);
+    }
+
+    #[test]
+    fn explorer_toggle_full_detail_swaps_core_for_all_fields() {
+        // T8-034: toggling Expanded Node Detail should swap the
+        // Node-zone field rows for the per-kind `all_fields` set.
+        // app_for_explorer focuses on an agent session, whose
+        // all_fields is a superset of core_fields.
+        let mut app = app_for_explorer();
+        let core_count = app.explorer().expect("state").view.core_fields.len();
+        let all_count = app.explorer().expect("state").view.all_fields.len();
+        assert!(
+            all_count > core_count,
+            "test premise: agent_session should carry extras",
+        );
+        let rows_before = app.explorer().expect("state").rows();
+        let node_field_count_before = rows_before
+            .iter()
+            .filter(|r| matches!(r, ExplorerRow::NodeField { .. }))
+            .count();
+        assert_eq!(node_field_count_before, core_count);
+
+        app.update(Msg::ExplorerToggleFullDetail);
+        assert!(app.explorer().expect("state").full_detail_expanded);
+        let rows_after = app.explorer().expect("state").rows();
+        let node_field_count_after = rows_after
+            .iter()
+            .filter(|r| matches!(r, ExplorerRow::NodeField { .. }))
+            .count();
+        assert_eq!(node_field_count_after, all_count);
+
+        // Toggle back.
+        app.update(Msg::ExplorerToggleFullDetail);
+        assert!(!app.explorer().expect("state").full_detail_expanded);
+        let rows_back = app.explorer().expect("state").rows();
+        let node_field_count_back = rows_back
+            .iter()
+            .filter(|r| matches!(r, ExplorerRow::NodeField { .. }))
+            .count();
+        assert_eq!(node_field_count_back, core_count);
+    }
+
+    #[test]
+    fn explorer_full_detail_resets_on_drill_and_restores_on_backspace() {
+        // T8-034: the toggle is per-focused-node — drilling into a
+        // neighbor resets it, and Backspace restores the prior
+        // node's toggle state.
+        let mut app = app_for_explorer();
+        // Turn on Expanded Detail on the original node.
+        app.update(Msg::ExplorerToggleFullDetail);
+        assert!(app.explorer().expect("state").full_detail_expanded);
+        // Walk to the first link row and drill.
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        app.update(Msg::ExplorerActivate);
+        // Drilled state should default back to compact.
+        assert!(!app.explorer().expect("state").full_detail_expanded);
+        // Backspace should restore the prior toggle state.
+        app.update(Msg::ExplorerBack);
+        assert!(
+            app.explorer().expect("state").full_detail_expanded,
+            "Backspace should restore the prior node's Expanded Detail toggle",
+        );
     }
 
     #[test]

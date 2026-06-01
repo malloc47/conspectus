@@ -506,9 +506,18 @@ impl NodeView {
     /// Single-link groups always render as one composite row regardless
     /// of `expanded`. Per locked decision 5 there is no header form for
     /// a count-of-one group.
-    pub fn flat_rows(&self, expanded: &std::collections::BTreeSet<GroupKey>) -> Vec<ExplorerRow> {
+    ///
+    /// `expanded_detail` (T8-034) swaps the Node zone's top-5 render
+    /// for the full per-kind field set when the operator has toggled
+    /// the Expanded Node Detail view on. The relationship rows are
+    /// unaffected.
+    pub fn flat_rows(
+        &self,
+        expanded: &std::collections::BTreeSet<GroupKey>,
+        expanded_detail: bool,
+    ) -> Vec<ExplorerRow> {
         let mut rows = Vec::new();
-        for (index, field) in self.core_fields.iter().enumerate() {
+        for (index, field) in self.fields(expanded_detail).iter().enumerate() {
             rows.push(ExplorerRow::NodeField {
                 index,
                 label: field.label,
@@ -519,6 +528,18 @@ impl NodeView {
             push_explorer_rows(&mut rows, explorer, expanded);
         }
         rows
+    }
+
+    /// Node-zone fields to render given the Expanded Node Detail
+    /// toggle (T8-034). For node kinds whose `all_fields` equals
+    /// `core_fields` the two returns are identical, so the toggle is
+    /// a visual no-op on those kinds.
+    pub fn fields(&self, expanded_detail: bool) -> &[CoreField] {
+        if expanded_detail {
+            &self.all_fields
+        } else {
+            &self.core_fields
+        }
     }
 }
 
@@ -590,6 +611,9 @@ pub struct BreadcrumbHop {
     pub cursor_key: Option<ExplorerRowKey>,
     /// Expanded-group set at the time of the drill.
     pub expanded_groups: std::collections::BTreeSet<GroupKey>,
+    /// Whether the Node zone had its Expanded Detail toggle on at
+    /// the time of the drill (T8-034), so Backspace can restore it.
+    pub full_detail_expanded: bool,
 }
 
 /// Identity for one slot in the [`NodeView`]'s neighbor list — used
@@ -2179,6 +2203,7 @@ mod tests {
             short_label: short_label.to_string(),
             cursor_key: None,
             expanded_groups: std::collections::BTreeSet::new(),
+            full_detail_expanded: false,
         }
     }
 

@@ -5302,7 +5302,7 @@ than recursive inline detail panes.
     `T8-027` v1 slice (so the detail-pane explorer's needs are
     concrete before thresholds are picked).
 
-- [ ] `T8-034` Expanded Node Detail toggle.
+- [x] `T8-034` Expanded Node Detail toggle.
   - Scope: add a "full node" toggle that swaps the Node zone's
     top-5 render for every field the focused node carries
     (per `docs/tui-detail-mockup.md`'s Expanded Node Detail View

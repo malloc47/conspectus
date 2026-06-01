@@ -190,6 +190,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     );
     bind(
         &mut lines,
+        "F",
+        "Toggle Expanded Node Detail (every per-kind field) on the focused node",
+    );
+    bind(
+        &mut lines,
         "o",
         "Open the full untruncated value for the cursor row in a modal",
     );

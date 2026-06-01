@@ -1218,6 +1218,10 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
             Msg::ToggleLinkedDetails => Msg::ExplorerToggleGroup,
             other => other,
         })),
+        // T8-034: `F` toggles the Expanded Node Detail view when the
+        // right pane is focused. The same key still clears filters
+        // when the left tree has focus (ADR 0031).
+        Action::ClearFilters => Action::Msg(Box::new(Msg::ExplorerToggleFullDetail)),
         other => other,
     }
 }
@@ -1608,6 +1612,16 @@ mod tests {
         assert_eq!(
             remap_for_focus(Action::Refresh, Focus::Right),
             Action::Refresh
+        );
+        // T8-034: F clears filters on the left tree but toggles the
+        // Expanded Node Detail view on the right pane.
+        assert_eq!(
+            remap_for_focus(Action::ClearFilters, Focus::Left),
+            Action::ClearFilters
+        );
+        assert_eq!(
+            remap_for_focus(Action::ClearFilters, Focus::Right),
+            Action::Msg(Box::new(Msg::ExplorerToggleFullDetail))
         );
     }
 

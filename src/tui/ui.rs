@@ -1458,7 +1458,7 @@ fn render_explorer_lines(
         theme,
         ChipAnchor::Left,
     ));
-    for (idx, field) in view.core_fields.iter().enumerate() {
+    for (idx, field) in view.fields(state.full_detail_expanded).iter().enumerate() {
         let flat_index = rows
             .iter()
             .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
