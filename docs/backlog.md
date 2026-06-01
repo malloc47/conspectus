@@ -5449,7 +5449,7 @@ than recursive inline detail panes.
     or absent values don't surface a misleading "copied" toast.
   - Blockers: `T8-027`; ADR for the clipboard backend.
 
-- [ ] `T8-041` Flip the Upstream / Downstream header layout so
+- [x] `T8-041` Flip the Upstream / Downstream header layout so
   zone labels anchor to the right.
   - Scope: today the explorer's zone headers render the bold
     `Upstream` / `Downstream` label on the left and the aggregate

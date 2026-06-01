@@ -1431,7 +1431,13 @@ fn render_explorer_lines(
     let view = &state.view;
 
     // Node section.
-    lines.push(chip_divider_line("Node", None, width, theme));
+    lines.push(chip_divider_line(
+        "Node",
+        None,
+        width,
+        theme,
+        ChipAnchor::Left,
+    ));
     for (idx, field) in view.core_fields.iter().enumerate() {
         let flat_index = rows
             .iter()
@@ -1469,6 +1475,7 @@ fn render_explorer_lines(
             Some(&summary),
             width,
             theme,
+            ChipAnchor::Right,
         ));
         for (group_index, group) in explorer.groups.iter().enumerate() {
             let is_single = group.is_single();
@@ -2081,7 +2088,7 @@ fn format_elapsed(seconds: u64) -> String {
 /// Right-anchored labeled rule used between detail sections. Wraps
 /// [`chip_divider_line`] with the section's static label.
 fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<'static> {
-    chip_divider_line(kind.label(), None, width, theme)
+    chip_divider_line(kind.label(), None, width, theme, ChipAnchor::Left)
 }
 
 /// Build a right-anchored divider with a filled-chip label and an
@@ -2091,11 +2098,24 @@ fn section_divider_line(kind: SectionKind, width: usize, theme: &Theme) -> Line<
 /// body. The suffix surface lets the preview divider keep its
 /// captured-time / pane-target context inline without breaking the
 /// uniform chip treatment.
+/// Anchor side for a zone-header chip. `Left` keeps the chip near the
+/// start of the line with any aggregate summary trailing it (used by
+/// Node and Preview, which have no summary). `Right` flips the order
+/// so the aggregate renders left of the chip and the chip anchors
+/// flush right (T8-041) — keeps the bold zone label easy to scan
+/// vertically when Upstream / Downstream summaries grow.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ChipAnchor {
+    Left,
+    Right,
+}
+
 fn chip_divider_line(
     label: &str,
     suffix: Option<&str>,
     width: usize,
     theme: &Theme,
+    anchor: ChipAnchor,
 ) -> Line<'static> {
     let chip_text = format!(" {label} ");
     let chip_width = chip_text.chars().count();
@@ -2103,6 +2123,14 @@ fn chip_divider_line(
     let suffix_width = suffix_text.chars().count();
     let trailing_rule = 2;
     let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
+    let chip_span = Span::styled(
+        chip_text,
+        Style::default()
+            .fg(theme.panel_focus_accent)
+            .add_modifier(theme.badge),
+    );
+    let suffix_span = (suffix_width > 0)
+        .then(|| Span::styled(suffix_text, Style::default().fg(theme.secondary_text)));
     let mut spans = Vec::with_capacity(4);
     if leading_rule > 0 {
         spans.push(Span::styled(
@@ -2110,17 +2138,19 @@ fn chip_divider_line(
             Style::default().add_modifier(theme.divider),
         ));
     }
-    spans.push(Span::styled(
-        chip_text,
-        Style::default()
-            .fg(theme.panel_focus_accent)
-            .add_modifier(theme.badge),
-    ));
-    if suffix_width > 0 {
-        spans.push(Span::styled(
-            suffix_text,
-            Style::default().fg(theme.secondary_text),
-        ));
+    match anchor {
+        ChipAnchor::Left => {
+            spans.push(chip_span);
+            if let Some(span) = suffix_span {
+                spans.push(span);
+            }
+        }
+        ChipAnchor::Right => {
+            if let Some(span) = suffix_span {
+                spans.push(span);
+            }
+            spans.push(chip_span);
+        }
     }
     spans.push(Span::styled(
         "─".repeat(trailing_rule),
@@ -2337,7 +2367,7 @@ fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
 /// captured-time freshness already render in the Mux section
 /// above, and a second copy here pushed the chip far to the left.
 fn preview_divider_line(_app: &App, width: usize, theme: &Theme) -> Line<'static> {
-    chip_divider_line("Preview", None, width, theme)
+    chip_divider_line("Preview", None, width, theme, ChipAnchor::Left)
 }
 
 fn crop_bottom_lines(text: &str, max_lines: usize) -> String {
@@ -2756,6 +2786,30 @@ mod tests {
         assert!(
             text.contains(" Preview "),
             "expected Preview section divider label: {text}",
+        );
+    }
+
+    #[test]
+    fn downstream_zone_header_renders_aggregate_left_of_label() {
+        // T8-041: the bold zone label should anchor flush right, so
+        // the aggregate summary ("N groups · M links · …") appears
+        // to the left of the chip on the same divider line. This
+        // keeps the highlighted label easy to scan vertically.
+        let app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let line = text
+            .lines()
+            .find(|line| line.contains(" Downstream "))
+            .expect("downstream divider line");
+        let groups_idx = line.find("groups").expect("aggregate summary on the line");
+        let label_idx = line
+            .find(" Downstream ")
+            .expect("downstream chip on the line");
+        assert!(
+            groups_idx < label_idx,
+            "aggregate `groups …` should render to the left of the Downstream chip; got: {line}",
         );
     }
 
