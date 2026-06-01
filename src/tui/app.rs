@@ -116,6 +116,12 @@ pub struct App {
     explorer: Option<ExplorerState>,
     /// Which panel currently consumes navigation keys.
     focus: Focus,
+    /// `true` after a Backspace press on the right pane with an
+    /// empty breadcrumb stack: the press surfaced a hint instead of
+    /// shifting focus, and a follow-up Backspace will perform the
+    /// focus shift. Cleared by any other message so the arming only
+    /// survives across consecutive Backspace presses.
+    explorer_back_armed: bool,
     /// Vertical scroll offset for the right-panel preview, in
     /// rendered rows.
     preview_scroll: u16,
@@ -403,6 +409,7 @@ impl App {
             detail_links_expanded: false,
             explorer: None,
             focus: Focus::Left,
+            explorer_back_armed: false,
             preview_scroll: 0,
             loaded_at_epoch: None,
             status_message: None,
@@ -879,6 +886,13 @@ impl App {
     /// Apply a single [`Msg`] to the state. Pure: no I/O, no panics,
     /// no clock reads.
     pub fn update(&mut self, msg: Msg) {
+        // The empty-stack Backspace arming only persists across
+        // consecutive Backspace presses; any other message clears it
+        // so the operator doesn't accidentally back out of the right
+        // pane after an intervening action.
+        if !matches!(msg, Msg::ExplorerBack) {
+            self.explorer_back_armed = false;
+        }
         match msg {
             Msg::Quit => self.should_quit = true,
             Msg::SetData {
@@ -1255,13 +1269,24 @@ impl App {
             return;
         };
         let Some(hop) = state.breadcrumb.pop() else {
-            // Treat Backspace as a general "go back" gesture: once
-            // the drilldown stack is empty, the next press should
-            // back out of the right pane entirely so the operator
-            // can keep tapping Backspace to unwind their position.
+            // Treat Backspace as a general "go back" gesture, but
+            // require a two-press confirmation before backing out of
+            // the right pane entirely: the first press surfaces a
+            // hint and arms the focus shift, the second performs it.
+            // Left-pane Backspace keeps the original status hint and
+            // doesn't shift focus.
             if matches!(self.focus, Focus::Right) {
-                self.focus = Focus::Left;
-                self.status_message = None;
+                if self.explorer_back_armed {
+                    self.focus = Focus::Left;
+                    self.explorer_back_armed = false;
+                    self.status_message = None;
+                } else {
+                    self.status_message = Some(
+                        "explorer: no drill history — press Backspace again to return to the left pane"
+                            .to_string(),
+                    );
+                    self.explorer_back_armed = true;
+                }
             } else {
                 self.status_message = Some("explorer: no drill history to back out of".to_string());
             }
@@ -2131,26 +2156,64 @@ mod tests {
     }
 
     #[test]
-    fn explorer_back_with_no_breadcrumb_and_right_focus_shifts_focus_left() {
-        // Backspace is the universal "go back" key: after the
-        // drilldown stack is empty, the next press should back out
-        // of the right pane focus so the operator can keep tapping
-        // Backspace to fully unwind their position.
+    fn explorer_back_with_no_breadcrumb_and_right_focus_arms_then_shifts_focus_on_second_press() {
+        // Backspace on the right pane with an empty drilldown stack
+        // requires a confirmation press before backing out of the
+        // pane entirely: the first press surfaces a hint, the second
+        // performs the focus shift. This matches "press Backspace
+        // twice to leave the right pane" UX.
         let mut app = app_for_explorer();
         app.update(Msg::CycleFocus);
         assert_eq!(app.focus(), Focus::Right);
+        // First press: arms the shift and surfaces the hint.
+        app.update(Msg::ExplorerBack);
+        assert_eq!(app.focus(), Focus::Right);
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("press Backspace again"))
+                .unwrap_or(false),
+            "first backspace should surface the confirmation hint; got: {:?}",
+            app.status_message()
+        );
+        // Second press: actually shifts focus, clears the hint.
         app.update(Msg::ExplorerBack);
         assert_eq!(app.focus(), Focus::Left);
-        // No stray "no drill history" hint either — the focus shift
-        // is itself the feedback.
         assert!(app.status_message().is_none());
     }
 
     #[test]
-    fn explorer_back_unwinds_drill_then_shifts_focus_on_second_press() {
-        // T8-031 follow-up: with one drilldown hop on the stack, two
-        // taps of Backspace should (1) restore the original focused
-        // node and (2) shift focus to the left pane.
+    fn explorer_back_armed_state_clears_on_intervening_message() {
+        // The "press Backspace again" arming only survives across
+        // consecutive Backspace presses. Any intervening message
+        // (e.g. navigation, focus cycle) should reset it so the next
+        // Backspace once again surfaces the hint instead of jumping
+        // straight to the focus shift.
+        let mut app = app_for_explorer();
+        app.update(Msg::CycleFocus);
+        assert_eq!(app.focus(), Focus::Right);
+        app.update(Msg::ExplorerBack);
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("press Backspace again"))
+                .unwrap_or(false)
+        );
+        // Intervening navigation cancels the arming.
+        app.update(Msg::ExplorerNavDown);
+        // Next Backspace should re-arm, not shift focus.
+        app.update(Msg::ExplorerBack);
+        assert_eq!(app.focus(), Focus::Right);
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("press Backspace again"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
+        // T8-031 follow-up: with one drilldown hop on the stack, three
+        // Backspace taps now (1) pop the hop, (2) arm the focus shift
+        // with a hint, and (3) shift focus to the left pane.
         let mut app = app_for_explorer();
         app.update(Msg::CycleFocus);
         assert_eq!(app.focus(), Focus::Right);
@@ -2171,7 +2234,15 @@ mod tests {
         app.update(Msg::ExplorerBack);
         assert_eq!(app.explorer().expect("state").view.focused, before);
         assert_eq!(app.focus(), Focus::Right);
-        // Second backspace at the empty stack shifts focus left.
+        // Second backspace at the empty stack arms the focus shift.
+        app.update(Msg::ExplorerBack);
+        assert_eq!(app.focus(), Focus::Right);
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("press Backspace again"))
+                .unwrap_or(false)
+        );
+        // Third backspace shifts focus to the left pane.
         app.update(Msg::ExplorerBack);
         assert_eq!(app.focus(), Focus::Left);
     }

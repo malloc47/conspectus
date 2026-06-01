@@ -659,9 +659,12 @@ inline. With the right pane focused:
 - `Backspace` reads as a general "go back" gesture: it pops the
   breadcrumb stack and restores the prior focused node along with the
   cursor and expansion state saved with it. Once the stack is empty,
-  the next `Backspace` shifts focus from the right pane back to the
-  left tree, so the operator can keep tapping Backspace to fully
-  unwind their position.
+  the first `Backspace` surfaces a status hint ("press Backspace again
+  to return to the left pane") and a second consecutive `Backspace`
+  shifts focus from the right pane back to the left tree. Any
+  intervening action (navigation, focus cycle, …) cancels the arming
+  so the next `Backspace` re-prompts instead of jumping straight to
+  the focus shift.
 - `o` opens the full untruncated value of the cursor row in a centered
   modal — used for `cwd`, `command`, `url`, `last_message_preview`,
   and other rows that carry `(truncated · o)` hints.
