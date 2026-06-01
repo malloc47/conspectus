@@ -70,6 +70,15 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
     draw_search_overlay(app, frame, area);
     draw_help_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
+    draw_value_modal(app, frame, area);
+}
+
+fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.value_modal() else {
+        return;
+    };
+    use crate::tui::widgets::value_modal::ValueModalWidget;
+    frame.render_widget(ValueModalWidget::new(state, app.theme()), area);
 }
 
 fn draw_help_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {

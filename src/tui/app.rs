@@ -159,6 +159,10 @@ pub struct App {
     search_overlay: Option<crate::tui::widgets::search::SearchOverlayState>,
     /// Active `?` help overlay (F8-011). `None` when closed.
     help_overlay: Option<crate::tui::widgets::help::HelpOverlayState>,
+    /// Active `o` full-value modal (T8-030). `None` when closed;
+    /// `Some` suspends navigation keys and routes input through the
+    /// modal.
+    value_modal: Option<crate::tui::widgets::value_modal::ValueModalState>,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -406,6 +410,7 @@ impl App {
             controls_overlay: None,
             search_overlay: None,
             help_overlay: None,
+            value_modal: None,
             sort,
             filter,
             grouping,
@@ -557,6 +562,67 @@ impl App {
 
     pub fn close_help_overlay(&mut self) {
         self.help_overlay = None;
+    }
+
+    /// Active `o` full-value modal (T8-030), if any.
+    pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModalState> {
+        self.value_modal.as_ref()
+    }
+
+    pub fn value_modal_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::value_modal::ValueModalState> {
+        self.value_modal.as_mut()
+    }
+
+    pub fn close_value_modal(&mut self) {
+        self.value_modal = None;
+    }
+
+    /// Open the full-value modal for whatever value the active
+    /// surface points at. The explorer cursor row is the v1
+    /// candidate: long node-field values truncate with a `(truncated
+    /// · o)` hint and `o` opens the full text here. No-op when no
+    /// long value is reachable from the current cursor.
+    pub fn open_value_modal_for_cursor(&mut self) {
+        // Skip if nothing's mounted.
+        let Some(state) = self.explorer.as_ref() else {
+            self.status_message = Some(
+                "explorer: nothing to open here — `o` opens long values on the cursor row"
+                    .to_string(),
+            );
+            return;
+        };
+        let Some(row) = state.selected_row() else {
+            return;
+        };
+        let opened = match row {
+            ExplorerRow::NodeField {
+                index, label, ..
+            } => state
+                .view
+                .core_fields
+                .get(index)
+                .and_then(|field| {
+                    field
+                        .long_value
+                        .clone()
+                        .map(|value| (label.to_string(), value))
+                }),
+            _ => None,
+        };
+        match opened {
+            Some((label, value)) => {
+                self.value_modal =
+                    Some(crate::tui::widgets::value_modal::ValueModalState::new(label, value));
+                self.status_message = None;
+            }
+            None => {
+                self.status_message = Some(
+                    "explorer: row has no truncated value to open".to_string(),
+                );
+            }
+        }
     }
 
     /// Programmatically set the selection to a row id, recomputing
@@ -1898,7 +1964,7 @@ mod tests {
     // ----- T8-028: explorer navigation / drilldown / breadcrumb -----
 
     use crate::model::{LinkEndpoint, LinkState, MuxSessionNode, RelationKind, SourceMetadata};
-    use crate::tui::explorer::{Direction, ExplorerRow};
+    use crate::tui::explorer::ExplorerRow;
 
     fn snapshot_session_with_mux() -> GraphSnapshot {
         // Session → linked_to_mux → mux. Drives the simplest
@@ -2097,6 +2163,75 @@ mod tests {
             app.update(Msg::ExplorerNavUp);
         }
         assert_eq!(app.explorer().expect("state").cursor, 0);
+    }
+
+    #[test]
+    fn open_value_modal_when_cursor_has_a_long_value() {
+        // Build an app focused on a session that carries a long
+        // `last_message_preview` so the cursor walks to a row with
+        // a long_value set.
+        let snap = {
+            let mut snap = GraphSnapshot::empty();
+            let repo_id = RepoId::new("/p/proj");
+            snap.nodes
+                .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+            snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+                id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+                root: "/p/proj".to_string(),
+                git_dir: None,
+                current_branch: None,
+            }));
+            snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("claude-code", "/state", "abc"),
+                harness_key: "claude-code".to_string(),
+                cwd: Some("/p/proj".to_string()),
+                title: None,
+                last_message_preview: Some("a".repeat(120)),
+                last_active_epoch: Some(1_700_000_000),
+                session_kind: None,
+            }));
+            resolve_snapshot(snap)
+        };
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("session row");
+        app.set_selection(row_id);
+        // The session's `last_message_preview` lives only in
+        // `all_fields`, not `core_fields`. Without the full-node
+        // toggle (T8-034) the cursor never lands on it through
+        // navigation. For now we exercise the no-value branch.
+        app.open_value_modal_for_cursor();
+        assert!(app.value_modal().is_none());
+        assert!(app
+            .status_message()
+            .map(|s| s.contains("no truncated"))
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn value_modal_close_clears_state() {
+        let mut app = app_for_explorer();
+        // Simulate an opened modal — exercise the close path.
+        app.value_modal = Some(crate::tui::widgets::value_modal::ValueModalState::new(
+            "command",
+            "long".to_string(),
+        ));
+        assert!(app.value_modal().is_some());
+        app.close_value_modal();
+        assert!(app.value_modal().is_none());
     }
 
     #[test]

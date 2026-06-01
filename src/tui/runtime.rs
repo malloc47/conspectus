@@ -142,7 +142,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            let action = if app.help_overlay().is_some() {
+            let action = if app.value_modal().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::ValueModalKey(key))
+                    }
+                    _ => None,
+                }
+            } else if app.help_overlay().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         Some(Action::HelpOverlayKey(key))
@@ -245,6 +252,12 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::HelpOverlayKey(key)) => {
                     handle_help_overlay_key(&mut app, key);
                 }
+                Some(Action::OpenValueModal) => {
+                    app.open_value_modal_for_cursor();
+                }
+                Some(Action::ValueModalKey(key)) => {
+                    handle_value_modal_key(&mut app, key);
+                }
                 None => {}
             }
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
@@ -277,6 +290,8 @@ fn static_event_loop(
                 Some(Action::Msg(msg)) => app.update(*msg),
                 Some(Action::OpenHelp) => app.open_help_overlay(),
                 Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(&mut app, key),
+                Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
+                Some(Action::ValueModalKey(key)) => handle_value_modal_key(&mut app, key),
                 Some(Action::OpenSearch) => {
                     app.open_search_overlay();
                     app.update(Msg::SetStatus(Some(
@@ -437,6 +452,14 @@ fn set_static_data(
 
 #[cfg(any(test, debug_assertions))]
 fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
+    if app.value_modal().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                Some(Action::ValueModalKey(key))
+            }
+            _ => None,
+        };
+    }
     if app.help_overlay().is_some() {
         return match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::HelpOverlayKey(key)),
@@ -922,6 +945,11 @@ enum Action {
     OpenHelp,
     /// Forward a key event into the open help overlay.
     HelpOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Open the `o` full-value modal (T8-030) on the active explorer
+    /// cursor row, when the row has a truncated value.
+    OpenValueModal,
+    /// Forward a key event into the open full-value modal.
+    ValueModalKey(ratatui::crossterm::event::KeyEvent),
     /// Resume the selected un-muxed agent session in a new terminal
     /// (launches the harness binary in the background).
     Resume,
@@ -937,6 +965,19 @@ fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEve
     };
     if let HelpOutcome::Close = outcome {
         app.close_help_overlay();
+    }
+}
+
+/// Dispatch a key into the open full-value modal and close it on
+/// ValueModalOutcome::Close.
+fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+    use crate::tui::widgets::value_modal::ValueModalOutcome;
+    let outcome = match app.value_modal_mut() {
+        Some(state) => state.handle_key(key),
+        None => return,
+    };
+    if let ValueModalOutcome::Close = outcome {
+        app.close_value_modal();
     }
 }
 
@@ -1257,6 +1298,12 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (_, KeyCode::Backspace) => Some(Action::Msg(Box::new(Msg::ExplorerBack))),
             (m, KeyCode::Char('e')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::Msg(Box::new(Msg::ToggleLinkedDetails)))
+            }
+            // T8-030: `o` opens the full-value modal on the cursor
+            // row. The reducer no-ops gracefully if the cursor isn't
+            // on a row with a truncated value.
+            (m, KeyCode::Char('o')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::OpenValueModal)
             }
             (_, KeyCode::Tab) => Some(Action::Msg(Box::new(Msg::CycleFocus))),
             (_, KeyCode::Char('J')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))),
