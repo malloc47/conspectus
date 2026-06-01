@@ -624,6 +624,44 @@ Configuration moves to `[tui.views.<name>]` sub-tables. The original
 `[tui].sessions_grouping` key remains supported as a deprecated alias
 until a follow-on ADR retires it.
 
+### TUI Detail Navigation
+
+The right-panel detail view is a focused node inspector and graph
+relationship explorer, not a recursive report renderer.
+
+Each selected node detail has three conceptual regions:
+
+- core node summary: stable, short fields for the selected node only
+  (`id`, label/name, cwd, status, important timestamps, and other
+  high-signal attributes)
+- relationship groups: upstream and downstream adjacent graph links,
+  grouped by destination kind and relation, rendered as compact rows
+  with direction, relation, neighbor label, evidence, confidence, and
+  state
+- selected relationship preview: a compact, non-recursive preview of
+  the currently highlighted neighbor or edge
+
+Traversal through N levels of the graph is explicit rather than
+inline. Pressing `Enter` on a relationship row focuses the linked node;
+`Backspace` returns to the previous focused node; breadcrumbs show the
+drill path. The same model applies to process observations, mux links,
+session lineage, repo/checkouts, forks, and PRs, so adding new graph
+entities should not require nested section rendering.
+
+The `e` key expands or collapses relationship groups, not full child
+node detail panes. Expanded groups reveal additional compact edge rows;
+the preview region shows details for the selected edge or neighbor.
+Long values such as mux names, process observation keys, commands, and
+transcript paths are truncated in the summary rows and can be opened in
+a focused full-value view or modal when needed.
+
+This supersedes recursive inline linked-detail expansion. Inline
+expansion made one-hop links visible, but it does not scale once muxes,
+runtime processes, sessions, repos, forks, and PRs repeat nested
+sections. The detail pane should instead preserve orientation, keep the
+selected node's own facts visually distinct, and use explicit
+navigation for graph depth.
+
 ### Graph-to-View Slicing
 
 Per ADR 0043, every view, renderer, and inspection surface consumes
@@ -878,11 +916,13 @@ backed by SQLite. The shape:
     `#RRGGBB` / modifier-suffix grammar, and treat parse errors as
     soft-failure warnings that fall back to defaults without aborting the
     TUI.
-  - ADR 0033: structure the right-panel detail view as a closed
-    `SectionKind` enum (Session, Mux, PR, Lineage, Preview, Output) with
+  - ADR 0033: structure the right-panel detail view as typed sections with
     omit-when-placeholder-only suppression, right-anchored labeled
     dividers, and per-`(section, label)` colorization dispatched against
-    the ADR 0032 `Theme`.
+    the ADR 0032 `Theme`. The current target refines this into a focused
+    node inspector plus relationship explorer: relationship groups expand
+    compact edge rows, while graph depth is navigated through explicit
+    drilldown and breadcrumbs instead of recursive inline child details.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

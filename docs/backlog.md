@@ -5138,6 +5138,80 @@ work. `P8-014` is post-v1 polish that does not block the release.
     existing Mux/Session section instead of changing the left-tree
     selection.
 
+### Detail Pane Graph Explorer Revamp
+
+Runtime process observations made the current one-hop inline expansion
+model too dense: repeated nested `Mux`, `Session`, and `Process`
+section headers are hard to scan, and indentation is not enough to
+preserve orientation. Per `docs/design.md`, the right panel should be a
+focused node inspector plus relationship explorer. Core facts for the
+selected node stay visually separate; upstream/downstream links render
+as compact relationship rows; the selected relationship gets a compact
+preview; graph depth is reached by drilldown with breadcrumbs rather
+than recursive inline detail panes.
+
+- [ ] `T8-027` Model detail-pane relationship groups and previews.
+  - Scope: replace the recursive `HeaderField.expanded_fields` detail
+    payload with a view model that separates core node facts,
+    relationship groups, selected relationship row, neighbor preview,
+    and breadcrumbs. Relationship rows should carry direction,
+    relation kind, neighbor node id/kind/label, evidence, confidence,
+    state, selected-link id, and resolved-vs-candidate context. Keep
+    the model SQLite-backed through `build_node_detail_from_conn`.
+  - Tests: pure view-model tests for mux, agent session, runtime
+    process, repo/checkout, fork, and PR nodes; coverage for empty
+    groups, unresolved endpoints, conflicts, and long labels.
+  - Blockers: `H-MUXPROC-FU-006`, `P10-010`.
+
+- [ ] `T8-028` Replace inline expansion with relationship-group
+  navigation.
+  - Scope: change `e` to expand/collapse relationship groups only.
+    Add right-pane cursor state for relationship rows. `Enter` drills
+    into the selected neighbor node, `Backspace` returns through a
+    breadcrumb stack, and selection survives refreshes by node id plus
+    selected relationship id where possible. Remove or retire the
+    existing "expanded linked details" state from `T8-026`.
+  - Tests: reducer/keymap tests for group expand/collapse, drilldown,
+    back navigation, breadcrumb reset on missing nodes, and refresh
+    stability.
+  - Blockers: `T8-027`.
+
+- [ ] `T8-029` Render the focused inspector, relationship explorer,
+  and preview layout.
+  - Scope: update the right-panel renderer so core node facts, grouped
+    relationships, and selected-edge/neighbor preview have distinct
+    visual treatment. Avoid nested section dividers in previews.
+    Truncate long mux names, process observation keys, commands, and
+    transcript paths in rows while preserving access to the full value
+    through the focused preview or a follow-up full-value overlay.
+  - Tests: Ratatui buffer snapshots for the cluttered mux/process
+    case, narrow terminals, long labels, expanded groups, and
+    breadcrumb drilldown.
+  - Blockers: `T8-028`.
+
+- [ ] `T8-030` Add full-value inspection for long detail fields.
+  - Scope: provide a focused way to inspect long values from the core
+    summary, relationship rows, and previews without forcing them into
+    the main detail layout. Candidate UX: `o` opens a centered
+    read-only value modal for the selected field/row, with wrapping,
+    scroll, and copy-oriented text. Reuse existing modal/input
+    primitives where possible and avoid new dependencies.
+  - Tests: widget/reducer tests for opening, scrolling, and closing the
+    full-value view; buffer snapshots for long command and observation
+    key values.
+  - Blockers: `T8-029`.
+
+- [ ] `T8-031` Update docs and scenario coverage for detail graph
+  navigation.
+  - Scope: update TUI help/keybinding docs and dev scenario docs to
+    describe relationship-group expansion, drilldown, breadcrumbs, and
+    full-value inspection. Ensure `process-cardinality`,
+    `codex-fd-current`, and `ambiguous-mux` can demonstrate the new
+    detail explorer manually.
+  - Tests: help-overlay snapshot/keybinding tests and scenario smoke
+    coverage for launching the TUI on the relevant named scenarios.
+  - Blockers: `T8-030`, `TEST-006`.
+
 - [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
     ancestor when neither CLI nor config specifies one. Low
     priority.
