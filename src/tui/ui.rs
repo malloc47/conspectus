@@ -1708,27 +1708,27 @@ fn render_single_link_composite(
     theme: &Theme,
     show_edge_meta: bool,
 ) -> Vec<Line<'static>> {
+    // Always render the neighbor label on a new indented row below
+    // the `relation [kind]` header. Paragraph wrapping would
+    // otherwise put short labels inline and long ones below, making
+    // the same composite visually inconsistent across rows.
     let star = if link.resolved_winner { "  ★" } else { "" };
-    let mut header_style = Style::default().fg(theme.link_id);
+    let mut label_style = Style::default().fg(theme.link_id);
     if link.resolved_winner {
-        header_style = header_style.add_modifier(Modifier::BOLD);
+        label_style = label_style.add_modifier(Modifier::BOLD);
     }
     if highlight {
-        header_style = header_style.add_modifier(Modifier::REVERSED);
+        label_style = label_style.add_modifier(Modifier::REVERSED);
     }
     let relation_text = format!("    {:<24} ", group.relation.snake_case());
-    let label_text = format!("{}{star}", link.neighbor_label);
-    let header_spans = vec![
+    let relation_spans = vec![
         Span::styled(relation_text, Style::default()),
         kind_chip_span(link.neighbor_kind, theme),
-        Span::raw(" "),
-        Span::styled(label_text, header_style),
     ];
-    // T8-042: when edge meta is hidden, the single-link composite
-    // collapses to its header row only — the `★` marker still
-    // anchors the resolver winner.
+    let label_text = format!("        {}{star}", link.neighbor_label);
+    let label_line = Line::from(Span::styled(label_text, label_style));
     if !show_edge_meta {
-        return vec![Line::from(header_spans)];
+        return vec![Line::from(relation_spans), label_line];
     }
     let trailing = format!(
         "        {} · {} · {}",
@@ -1741,7 +1741,8 @@ fn render_single_link_composite(
         trailing_style = trailing_style.add_modifier(Modifier::REVERSED);
     }
     vec![
-        Line::from(header_spans),
+        Line::from(relation_spans),
+        label_line,
         Line::from(Span::styled(trailing, trailing_style)),
     ]
 }
@@ -2873,6 +2874,40 @@ mod tests {
     }
 
     #[test]
+    fn single_link_composite_always_breaks_label_to_a_new_line() {
+        // T8-042b: the single-link composite should always render
+        // the neighbor label on its own indented row beneath the
+        // `relation [kind]` row, regardless of label length. Short
+        // labels used to flow inline and long labels wrapped — the
+        // visual result was inconsistent across rows in the same
+        // pane. Pin the always-newline behavior here.
+        let app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let relation_line_idx = text
+            .lines()
+            .position(|line| line.contains("linked_to_mux"))
+            .expect("relation row in buffer");
+        let relation_line = text
+            .lines()
+            .nth(relation_line_idx)
+            .expect("relation line by index");
+        assert!(
+            !relation_line.contains("tmux:editor"),
+            "relation row must not also carry the neighbor label inline: {relation_line}",
+        );
+        let label_line = text
+            .lines()
+            .nth(relation_line_idx + 1)
+            .expect("row immediately after relation row");
+        assert!(
+            label_line.contains("tmux:editor"),
+            "label should land on the row immediately after the relation row: {label_line}",
+        );
+    }
+
+    #[test]
     fn link_rows_hide_edge_meta_by_default_and_surface_it_after_toggle() {
         // T8-042: by default the explorer's single-link composite
         // collapses to just its header row (no `provenance ·
@@ -2900,23 +2935,41 @@ mod tests {
         // neighbor's graph kind as a leading `[kind]` chip so the
         // operator can tell mux from session from process at a glance
         // without parsing the harness prefix out of the id label.
+        // T8-042b: the chip lives on the relation-name row, with the
+        // neighbor label on the row beneath. Check both pieces and
+        // that the chip line precedes the label line.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
-        let mux_line = text
+        let chip_line_idx = text
             .lines()
-            .find(|line| line.contains("tmux:editor"))
-            .expect("mux link row");
-        let chip_idx = mux_line.find("[mux_session]").unwrap_or_else(|| {
-            panic!("mux link row should carry leading [mux_session] chip: {mux_line}")
-        });
-        let label_idx = mux_line
-            .find("tmux:editor")
-            .expect("mux label still on the line");
+            .position(|line| line.contains("[mux_session]"))
+            .expect("relation row carrying [mux_session] chip");
+        let label_line_idx = text
+            .lines()
+            .position(|line| line.contains("tmux:editor"))
+            .expect("neighbor label row carrying tmux:editor");
         assert!(
-            chip_idx < label_idx,
-            "kind chip should render before the neighbor label: {mux_line}",
+            chip_line_idx < label_line_idx,
+            "kind chip row should precede the neighbor label row; got chip at {chip_line_idx}, label at {label_line_idx}",
+        );
+        // And the chip row should carry the relation name to its
+        // left of the chip, confirming the layout is
+        // `relation [kind]` rather than just a bare chip.
+        let chip_line = text
+            .lines()
+            .nth(chip_line_idx)
+            .expect("chip line in buffer");
+        let chip_idx = chip_line
+            .find("[mux_session]")
+            .expect("chip on the chip line");
+        let relation_idx = chip_line
+            .find("linked_to_mux")
+            .expect("relation name on the chip line");
+        assert!(
+            relation_idx < chip_idx,
+            "relation name should render before the kind chip: {chip_line}",
         );
     }
 
