@@ -614,6 +614,11 @@ pub struct BreadcrumbHop {
     /// Whether the Node zone had its Expanded Detail toggle on at
     /// the time of the drill (T8-034), so Backspace can restore it.
     pub full_detail_expanded: bool,
+    /// Left-pane row selection at the time of the drill (T8-035 —
+    /// `[tui.detail].left_pane_sync = "mirror"`), so Backspace can
+    /// restore both panes together. `None` when no row was selected
+    /// (the empty-tree case at boot).
+    pub left_pane_selection: Option<crate::tui::rows::RowId>,
 }
 
 /// Identity for one slot in the [`NodeView`]'s neighbor list — used
@@ -2204,6 +2209,7 @@ mod tests {
             cursor_key: None,
             expanded_groups: std::collections::BTreeSet::new(),
             full_detail_expanded: false,
+            left_pane_selection: None,
         }
     }
 

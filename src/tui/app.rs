@@ -1261,12 +1261,14 @@ impl App {
         let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
         let prev_expanded = state.expanded_groups.clone();
         let prev_full_detail_expanded = state.full_detail_expanded;
+        let prev_left_pane_selection = self.selection.clone();
         let hop = BreadcrumbHop {
             focused: prev_focused,
             short_label: prev_short_label,
             cursor_key: prev_cursor_key,
             expanded_groups: prev_expanded,
             full_detail_expanded: prev_full_detail_expanded,
+            left_pane_selection: prev_left_pane_selection,
         };
         // Build the new view. If we can't load it, leave state alone
         // and surface a status message.
@@ -1298,8 +1300,49 @@ impl App {
                         .expect("detail builder should read current TUI database");
                 self.preview_scroll = 0;
                 self.status_message = None;
+                // T8-035: mirror sync — when the drilled neighbor
+                // has a row in the current view, scroll the left
+                // tree to it and expand any ancestor groups. When
+                // it doesn't, leave the left selection untouched so
+                // the operator's prior position is preserved.
+                self.mirror_left_pane_to(&target);
             }
         }
+    }
+
+    /// Move the left-pane selection to the row corresponding to
+    /// `target`, expanding any ancestor group rows along the path.
+    /// No-op when the focused node isn't represented in the current
+    /// view's row tree (T8-035 fallback per the design doc).
+    fn mirror_left_pane_to(&mut self, target: &NodeId) {
+        let Some(row_index) = self
+            .tree
+            .rows
+            .iter()
+            .position(|row| row_matches(row, target))
+        else {
+            return;
+        };
+        let target_id = self.tree.rows[row_index].id.clone();
+        let target_depth = self.tree.rows[row_index].depth;
+        // Walk back through the flat tree expanding any ancestor
+        // group rows at lower depths so the target row is
+        // materialized in the rendered visible-rows pass.
+        let mut current_depth = target_depth;
+        for ancestor_idx in (0..row_index).rev() {
+            if current_depth == 0 {
+                break;
+            }
+            let ancestor = &self.tree.rows[ancestor_idx];
+            if ancestor.depth < current_depth && ancestor.expandable {
+                self.expanded.insert(ancestor.id.clone());
+                current_depth = ancestor.depth;
+            }
+        }
+        // Bypass `set_selection` so we don't trigger the
+        // recompute_detail path — the explorer was just rebuilt for
+        // the drilled neighbor and that's what we want to keep.
+        self.selection = Some(target_id);
     }
 
     fn explorer_back(&mut self) {
@@ -1354,6 +1397,29 @@ impl App {
         self.explorer = Some(restored);
         self.preview_scroll = 0;
         self.status_message = None;
+        // T8-035: restore the left-pane selection that was active
+        // at the time of the drill, so Backspace unwinds both panes
+        // together. Bypasses `set_selection` to avoid rebuilding
+        // the explorer we just restored.
+        if let Some(prev_selection) = hop.left_pane_selection
+            && self.tree.rows.iter().any(|row| row.id == prev_selection)
+        {
+            self.selection = Some(prev_selection);
+        }
+    }
+}
+
+/// Does `row` represent `target` in the left-pane tree (T8-035)?
+/// Group rows match when their `primary_node` (when set) equals
+/// `target`; mux candidate rows match their parent mux's node id.
+fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
+    match &row.kind {
+        RowKind::Group(group) => group.primary_node.as_ref() == Some(target),
+        RowKind::AgentSession(s) => &s.primary_node == target,
+        RowKind::AgentSessionMuxCandidate(c) => &c.primary_node == target,
+        RowKind::MuxSession(m) => &m.primary_node == target,
+        RowKind::Pr(p) => &p.primary_node == target,
+        RowKind::Fork(f) => &f.primary_node == target,
     }
 }
 
@@ -2028,7 +2094,10 @@ mod tests {
 
     // ----- T8-028: explorer navigation / drilldown / breadcrumb -----
 
-    use crate::model::{LinkEndpoint, LinkState, MuxSessionNode, RelationKind, SourceMetadata};
+    use crate::model::{
+        Confidence, LinkEndpoint, LinkState, MuxSessionNode, Provenance, RelationKind,
+        SourceMetadata,
+    };
     use crate::tui::explorer::ExplorerRow;
 
     fn snapshot_session_with_mux() -> GraphSnapshot {
@@ -2147,6 +2216,190 @@ mod tests {
         assert_eq!(after.view.kind_label, "mux_session");
         assert_eq!(after.breadcrumb.len(), 1);
         assert_eq!(after.breadcrumb[0].focused, before);
+    }
+
+    #[test]
+    fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
+        // T8-035: drilling from a session into its mux while the
+        // left pane is in the sessions view should preserve the
+        // prior selection because the sessions view doesn't carry
+        // a MuxSession row. The hop still records the prior
+        // selection so Backspace can restore it.
+        let mut app = app_for_explorer();
+        let pre_drill_selection = app
+            .selection()
+            .expect("session selection in app_for_explorer")
+            .clone();
+        let target_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..target_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        app.update(Msg::ExplorerActivate);
+        // Sessions view doesn't render the mux as a row, so the
+        // left selection should stay put.
+        assert_eq!(
+            app.selection().expect("selection after drill"),
+            &pre_drill_selection,
+            "left selection should be preserved when the neighbor has no row",
+        );
+        // But the explorer should still be focused on the mux —
+        // mirror sync's missing-row fallback only affects the left
+        // pane.
+        assert_eq!(
+            app.explorer().expect("state").view.kind_label,
+            "mux_session"
+        );
+        let hop = app
+            .explorer()
+            .expect("state")
+            .breadcrumb
+            .last()
+            .expect("one hop after drill")
+            .clone();
+        assert_eq!(hop.left_pane_selection.as_ref(), Some(&pre_drill_selection));
+    }
+
+    #[test]
+    fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
+        // T8-035: when the drilled neighbor *does* have a row in
+        // the current view (here: drilling from one agent session
+        // to a sibling agent session via `ParentSession`), the
+        // left pane should move to it.
+        let mut snap = snapshot_session_with_mux();
+        // Add a second agent session and a parent_session link
+        // session_a → session_b so the explorer's downstream group
+        // exposes the sibling as a drillable neighbor.
+        let session_b = AgentSessionNode {
+            id: AgentSessionId::new("claude-code", "/state", "child"),
+            harness_key: "claude-code".to_string(),
+            cwd: Some("/p/proj".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
+        };
+        let parent_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
+        let child_id = NodeId::AgentSession(session_b.id.clone());
+        snap.nodes.push(GraphNode::AgentSession(session_b));
+        snap.candidate_links.push(crate::model::GraphLink {
+            id: "sibling".to_string(),
+            source: parent_id.clone(),
+            target: LinkEndpoint::Node {
+                id: child_id.clone(),
+            },
+            relation: RelationKind::ParentSession,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snap = resolve_snapshot(snap);
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        // Select the parent session row. Use the underlying tree
+        // rather than visible_rows because the parent may sit under
+        // a not-yet-expanded group; set_selection accepts any row
+        // that exists in the flat tree.
+        let parent_row = app
+            .tree()
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(s) if s.session.session_key == "abc" => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("parent agent session row in tree");
+        app.set_selection(parent_row.clone());
+        app.update(Msg::CycleFocus);
+        // Walk to a link row whose neighbor is the child session.
+        let rows = app.explorer().expect("state").rows();
+        let link_idx = rows
+            .iter()
+            .enumerate()
+            .find_map(|(idx, row)| match row {
+                ExplorerRow::Link { .. }
+                    if app.explorer().expect("state").view.drill_target(row)
+                        == Some(child_id.clone()) =>
+                {
+                    Some(idx)
+                }
+                _ => None,
+            })
+            .expect("link row drilling into the child session");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        app.update(Msg::ExplorerActivate);
+        let post = app.selection().expect("selection after drill").clone();
+        let child_row = app
+            .tree()
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(s) if s.session.session_key == "child" => {
+                    Some(row.id.clone())
+                }
+                _ => None,
+            })
+            .expect("child agent session row in tree");
+        assert_eq!(
+            post, child_row,
+            "left pane should mirror the drilled neighbor when it has a row",
+        );
+        // Right pane still on the child session.
+        assert_eq!(
+            app.explorer().expect("state").view.focused,
+            child_id,
+            "explorer should still focus the drilled neighbor",
+        );
+    }
+
+    #[test]
+    fn explorer_backspace_restores_left_pane_selection() {
+        // T8-035: Backspace should pop the hop, restore the prior
+        // left-pane selection, and refocus the explorer on the
+        // pre-drill node.
+        let mut app = app_for_explorer();
+        let pre_drill_selection = app
+            .selection()
+            .expect("session selection in app_for_explorer")
+            .clone();
+        let target_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..target_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        app.update(Msg::ExplorerActivate);
+        // Backspace.
+        app.update(Msg::ExplorerBack);
+        assert_eq!(
+            app.selection().expect("selection after backspace"),
+            &pre_drill_selection,
+            "left pane should be restored to the pre-drill row",
+        );
+        assert_eq!(
+            app.explorer().expect("state").view.kind_label,
+            "agent_session",
+            "right pane should be restored to the pre-drill node",
+        );
     }
 
     #[test]

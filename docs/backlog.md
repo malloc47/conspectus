@@ -5322,7 +5322,7 @@ than recursive inline detail panes.
     `forge_pr` case.
   - Blockers: `T8-027` modeling.
 
-- [ ] `T8-035` Left-pane mirror sync (default).
+- [x] `T8-035` Left-pane mirror sync (default).
   - Scope: implement `[tui.detail].left_pane_sync = "mirror"` as
     the default behavior per `docs/tui-detail-mockup.md`'s
     Left / Right Pane Synchronization section. When the right pane
