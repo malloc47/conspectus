@@ -157,12 +157,7 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(
         &mut lines,
         "Enter",
-        "Expand row; with right focus, expand linked details",
-    );
-    bind(
-        &mut lines,
-        "e",
-        "Expand / collapse linked entities in the detail pane",
+        "Expand left-tree row; with right focus, drill or expand a group",
     );
     bind(
         &mut lines,
@@ -170,6 +165,34 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         "Cycle focus between left tree and right panel",
     );
     bind(&mut lines, "J / K", "Scroll the right-panel preview");
+    blank(&mut lines);
+
+    section(&mut lines, "Detail-pane graph explorer (right focus)");
+    bind(
+        &mut lines,
+        "j / k",
+        "Move the explorer cursor between Node fields and relationship rows",
+    );
+    bind(
+        &mut lines,
+        "Enter",
+        "Drill into the neighbor on a link row · expand on a group header",
+    );
+    bind(
+        &mut lines,
+        "e",
+        "Toggle expand/collapse on a multi-link group header",
+    );
+    bind(
+        &mut lines,
+        "Backspace",
+        "Back out of the most recent drilldown hop",
+    );
+    bind(
+        &mut lines,
+        "o",
+        "Open the full untruncated value for the cursor row in a modal",
+    );
     blank(&mut lines);
 
     lines.push(Line::from(Span::styled(

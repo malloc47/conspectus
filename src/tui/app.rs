@@ -2224,6 +2224,98 @@ mod tests {
     }
 
     #[test]
+    fn scenario_process_cardinality_exposes_upstream_process_groups() {
+        // T8-031: the process-cardinality dev scenario is the
+        // canonical "messy" setup with one preferred process and one
+        // candidate runner-up. With the new explorer, those should
+        // both surface as Upstream groups on the agent session.
+        let (mut app, _snap) = scenario_app("process-cardinality");
+        let target = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("an agent session row in the scenario");
+        app.set_selection(target);
+        let state = app.explorer().expect("explorer for session");
+        let labels: Vec<&str> = state
+            .view
+            .upstream
+            .groups
+            .iter()
+            .map(|g| g.relation.snake_case())
+            .collect();
+        assert!(
+            labels.contains(&"process_identifies_session")
+                || labels.contains(&"process_candidates_session"),
+            "process-cardinality should expose process groups upstream: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_codex_fd_current_exposes_session_linked_groups() {
+        // T8-031: codex-fd-current is the canonical "fd evidence
+        // outranks stale launch command" setup. The detail explorer
+        // should show the linked mux as a downstream group on the
+        // agent session so an operator can drill into it manually.
+        let (mut app, _snap) = scenario_app("codex-fd-current");
+        let target = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("an agent session row in the scenario");
+        app.set_selection(target);
+        let state = app.explorer().expect("explorer for session");
+        let downstream_kinds: Vec<&str> = state
+            .view
+            .downstream
+            .groups
+            .iter()
+            .map(|g| g.neighbor_kind.as_str())
+            .collect();
+        assert!(
+            downstream_kinds.contains(&"mux_session"),
+            "codex-fd-current should link the session to a mux downstream: {downstream_kinds:?}"
+        );
+    }
+
+    #[test]
+    fn scenario_ambiguous_mux_exposes_two_candidate_muxes() {
+        // T8-031: ambiguous-mux carries two plausible tmux sessions
+        // for one agent. The explorer should surface both as
+        // selectable rows in a single downstream group so operators
+        // can drill into either candidate from the detail pane.
+        let (mut app, _snap) = scenario_app("ambiguous-mux");
+        let target = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("an agent session row in the scenario");
+        app.set_selection(target);
+        let state = app.explorer().expect("explorer for session");
+        let total_mux_links: usize = state
+            .view
+            .downstream
+            .groups
+            .iter()
+            .filter(|g| g.neighbor_kind == "mux_session")
+            .map(|g| g.link_count())
+            .sum();
+        assert!(
+            total_mux_links >= 2,
+            "ambiguous-mux should surface two mux candidates in downstream groups; got {total_mux_links}"
+        );
+    }
+
+    #[test]
     fn explorer_state_resets_when_left_tree_selection_changes() {
         let mut app = app_for_explorer();
         let initial_focused = app.explorer().expect("state").view.focused.clone();

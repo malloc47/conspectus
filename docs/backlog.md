@@ -5191,7 +5191,7 @@ as compact relationship rows; the selected relationship gets a compact
 preview; graph depth is reached by drilldown with breadcrumbs rather
 than recursive inline detail panes.
 
-- [ ] `T8-027` Model detail-pane relationship groups and previews.
+- [x] `T8-027` Model detail-pane relationship groups and previews.
   - Scope: replace the recursive `HeaderField.expanded_fields` detail
     payload with a view model that separates core node facts,
     relationship groups, selected relationship row, neighbor preview,
@@ -5204,7 +5204,7 @@ than recursive inline detail panes.
     groups, unresolved endpoints, conflicts, and long labels.
   - Blockers: `H-MUXPROC-FU-006`, `P10-010`.
 
-- [ ] `T8-028` Replace inline expansion with relationship-group
+- [x] `T8-028` Replace inline expansion with relationship-group
   navigation.
   - Scope: change `e` to expand/collapse relationship groups only.
     Add right-pane cursor state for relationship rows. `Enter` drills
@@ -5217,7 +5217,7 @@ than recursive inline detail panes.
     stability.
   - Blockers: `T8-027`.
 
-- [ ] `T8-029` Render the focused inspector, relationship explorer,
+- [x] `T8-029` Render the focused inspector, relationship explorer,
   and preview layout.
   - Scope: update the right-panel renderer so core node facts, grouped
     relationships, and selected-edge/neighbor preview have distinct
@@ -5230,7 +5230,7 @@ than recursive inline detail panes.
     breadcrumb drilldown.
   - Blockers: `T8-028`.
 
-- [ ] `T8-030` Add full-value inspection for long detail fields.
+- [x] `T8-030` Add full-value inspection for long detail fields.
   - Scope: provide a focused way to inspect long values from the core
     summary, relationship rows, and previews without forcing them into
     the main detail layout. Candidate UX: `o` opens a centered
@@ -5242,7 +5242,7 @@ than recursive inline detail panes.
     key values.
   - Blockers: `T8-029`.
 
-- [ ] `T8-031` Update docs and scenario coverage for detail graph
+- [x] `T8-031` Update docs and scenario coverage for detail graph
   navigation.
   - Scope: update TUI help/keybinding docs and dev scenario docs to
     describe relationship-group expansion, drilldown, breadcrumbs, and

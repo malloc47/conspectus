@@ -36,6 +36,7 @@ Current scenarios:
 | `ambiguous-mux` | One agent session with two plausible tmux candidates. |
 | `hook-supersession` | Same-pane hook records where the freshest session wins. |
 | `codex-fd-current` | Codex fd evidence beats a stale launch command. |
+| `process-cardinality` | One mux pane with two human-agent runtime processes. |
 | `workspace-pr` | Git workspace with a fake GitHub pull request. |
 | `fork-lineage` | Atelier fork lineage with unresolved harness lineage. |
 
@@ -92,6 +93,48 @@ tui`:
 Sort state is available to the TUI controls. Some row-tree builders
 still have fixed local ordering, so visible sort differences depend on
 the active view.
+
+## Detail Explorer Demo
+
+The right-panel detail view is a focused node inspector and graph
+relationship explorer (see "TUI Detail Navigation" in
+[`design.md`](design.md) and the layout reference in
+[`tui-detail-mockup.md`](tui-detail-mockup.md)). Three named scenarios
+are the canonical manual-demo surfaces for it:
+
+```sh
+cargo run -- dev scenario tui ambiguous-mux --view sessions
+cargo run -- dev scenario tui codex-fd-current --view sessions
+cargo run -- dev scenario tui process-cardinality --view sessions
+```
+
+In each, select the agent session in the left tree and press `Tab` to
+move focus into the right pane. From there:
+
+- `j` / `k` walk the explorer cursor through Node fields, Upstream
+  groups, then Downstream groups in render order.
+- `Enter` drills into the neighbor on a link row and pushes a
+  breadcrumb hop, or expands a multi-link group header.
+- `e` is the explicit expand/collapse accelerator for multi-link
+  group headers (e.g. the two-mux group on `ambiguous-mux`, or the
+  two-process group on `process-cardinality`).
+- `Backspace` pops the breadcrumb and restores the prior focused node
+  along with its cursor and expansion state.
+- `o` opens the full untruncated value of the cursor row in a
+  centered modal — useful on long `cwd`, `command`, transcript path,
+  and observation-key rows.
+
+Each scenario highlights a different aspect of the explorer:
+
+- `ambiguous-mux` — one downstream group with two candidate mux
+  links; the resolver's preferred candidate sorts first and carries a
+  trailing `★`.
+- `codex-fd-current` — a single linked-mux downstream group whose
+  preview row exposes the fd evidence that won over the stale launch
+  command.
+- `process-cardinality` — two upstream runtime-process groups so the
+  explorer surfaces `process_identifies_session` vs
+  `process_candidates_session` separately.
 
 ## Adding A Scenario
 

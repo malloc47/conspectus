@@ -627,40 +627,54 @@ until a follow-on ADR retires it.
 ### TUI Detail Navigation
 
 The right-panel detail view is a focused node inspector and graph
-relationship explorer, not a recursive report renderer.
+relationship explorer (`T8-027` – `T8-031`), not a recursive report
+renderer. The full layout, locked decisions, and per-kind field set
+live in [`docs/tui-detail-mockup.md`](tui-detail-mockup.md); this
+section captures the implemented contract.
 
-Each selected node detail has three conceptual regions:
+Each selected node detail has four conceptual regions:
 
-- core node summary: stable, short fields for the selected node only
-  (`id`, label/name, cwd, status, important timestamps, and other
-  high-signal attributes)
-- relationship groups: upstream and downstream adjacent graph links,
-  grouped by destination kind and relation, rendered as compact rows
-  with direction, relation, neighbor label, evidence, confidence, and
-  state
-- selected relationship preview: a compact, non-recursive preview of
-  the currently highlighted neighbor or edge
+- **Node** zone: stable, short fields for the focused node only (`id`,
+  label/name, cwd, status, important timestamps, and the high-signal
+  attributes per the mockup's Core-Summary fields reference).
+- **Upstream** zone: incoming edges, grouped by `(relation,
+  neighbor_kind)` and rendered as compact rows. Direction is encoded
+  by section rather than per-row arrows.
+- **Downstream** zone: outgoing edges, same grouping. Empty Upstream
+  / Downstream sections are suppressed entirely.
+- **Preview** zone: the neighbor's core fields plus an `edge` row
+  summarizing provenance, confidence, state, and the resolver verdict
+  (`resolves` / `alt of <relation>` / `conflict`).
 
 Traversal through N levels of the graph is explicit rather than
-inline. Pressing `Enter` on a relationship row focuses the linked node;
-`Backspace` returns to the previous focused node; breadcrumbs show the
-drill path. The same model applies to process observations, mux links,
-session lineage, repo/checkouts, forks, and PRs, so adding new graph
-entities should not require nested section rendering.
+inline. With the right pane focused:
 
-The `e` key expands or collapses relationship groups, not full child
-node detail panes. Expanded groups reveal additional compact edge rows;
-the preview region shows details for the selected edge or neighbor.
-Long values such as mux names, process observation keys, commands, and
-transcript paths are truncated in the summary rows and can be opened in
-a focused full-value view or modal when needed.
+- `j` / `k` walk the cursor through Node fields, Upstream groups, then
+  Downstream groups in render order.
+- `Enter` is the universal "do the obvious thing" key: on a group
+  header it toggles expansion; on a link row it drills into the
+  neighbor and pushes a breadcrumb hop.
+- `e` is the explicit expand/collapse accelerator for multi-link
+  group headers.
+- `Backspace` pops the breadcrumb stack and restores the prior focused
+  node along with the cursor and expansion state saved with it.
+- `o` opens the full untruncated value of the cursor row in a centered
+  modal — used for `cwd`, `command`, `url`, `last_message_preview`,
+  and other rows that carry `(truncated · o)` hints.
 
-This supersedes recursive inline linked-detail expansion. Inline
-expansion made one-hop links visible, but it does not scale once muxes,
-runtime processes, sessions, repos, forks, and PRs repeat nested
-sections. The detail pane should instead preserve orientation, keep the
-selected node's own facts visually distinct, and use explicit
-navigation for graph depth.
+Single-link groups collapse to a two-line composite row (locked
+decision 5); multi-link groups use a `▶` / `▼` header with a child
+count. Resolver-preferred candidates sort first and carry a trailing
+`★`. Unresolved-evidence stubs render as placeholder rows whose
+`Enter` is inert in v1 (see follow-up `T8-032`).
+
+This supersedes the recursive inline linked-detail expansion (`e` =
+expand-in-place) the pane used to carry. Inline expansion made
+one-hop links visible, but it did not scale once muxes, runtime
+processes, sessions, repos, forks, and PRs repeated nested sections.
+The new layout preserves orientation, keeps the focused node's own
+facts visually distinct, and uses explicit navigation for graph
+depth.
 
 ### Graph-to-View Slicing
 
