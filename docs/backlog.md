@@ -5366,6 +5366,108 @@ than recursive inline detail panes.
     mode-flip tests.
   - Blockers: `T8-035`.
 
+- [ ] `T8-037` Distinguish symmetric relations in the detail
+  explorer.
+  - Scope: today the explorer buckets edges into Upstream /
+    Downstream from the underlying `GraphLink`'s `source → target`
+    direction, which reads correctly for directional relations
+    (`process_identifies_session`, `runs_in_mux`, …) but is
+    misleading for symmetric relations such as `associated_with`
+    where the side a link lands on is an artifact of link-builder
+    order. Tag each `RelationKind` with a
+    `Directionality::{Directed, Symmetric}` and render symmetric
+    relations in a third **Related** zone between Upstream and
+    Downstream so the layout no longer implies a direction the
+    model doesn't carry. Update Node-zone cursor walk order and
+    breadcrumb hop carry-state accordingly.
+  - Tests: reducer tests asserting that symmetric relations land
+    in the Related zone (not Upstream or Downstream); cursor walk
+    tests covering Node → Upstream → Related → Downstream order;
+    renderer snapshot for a node carrying at least one symmetric
+    relation; coverage for a node with *only* symmetric edges
+    (Upstream and Downstream should suppress, Related should
+    render alone).
+  - Blockers: T8-027 modeling.
+
+- [ ] `T8-038` Shorten breadcrumb hop labels and elide deep chains.
+  - Scope: today each breadcrumb hop renders the focused node's
+    full display label, which eats the breadcrumb line after two
+    hops. Render hops as `kind:short_tag` (e.g. `mux:editor`,
+    `proc:claude·82310`) and add an elision rule
+    (`first … last-N`) when the rendered chain exceeds the
+    breadcrumb zone width. Tiebreak ambiguous short forms within a
+    chain by suffixing the last-4 of the id when two hops would
+    otherwise collide.
+  - Tests: unit tests for the short-form formatter across each
+    node kind; collision-tiebreak tests for two hops with the same
+    short label; rendering tests at narrow widths confirming
+    elision (`first … last-N`) without dropping the current hop;
+    snapshot coverage for a 4+ hop chain.
+  - Blockers: `T8-028`.
+
+- [ ] `T8-039` Surface node kind as a first-class field in the
+  detail pane.
+  - Scope: today the node kind is buried in the harness-prefixed
+    id (e.g. `opencode:ses_…`) and the operator has to parse it
+    out. Render the kind as a dim leading chip (e.g.
+    `[agent_session]`) in the Node zone title and in link / group
+    rows, separately from the id/label. For the `cwd` core-field
+    row specifically, perform a reverse lookup against the
+    `GraphDb` and append the resolved-owning-node kind chip
+    (`Repo`, `Workspace`, `Checkout`) when the lookup succeeds; on
+    no match leave the path bare rather than guessing. Apply the
+    same convention to the breadcrumb hop short-form from
+    `T8-038`.
+  - Tests: renderer tests for kind chips on each node kind across
+    the Node zone, link rows, and group headers; reverse-lookup
+    tests for `cwd` resolving to Repo / Workspace / Checkout / no
+    match; snapshot coverage for a sparse-graph case where the
+    `cwd` doesn't resolve.
+  - Blockers: `T8-027`, `T8-038` (so the breadcrumb short-form can
+    pick up the chip too).
+
+- [ ] `T8-040` Enter-to-copy on Node-zone fields with a toast
+  widget.
+  - Scope: `Enter` on a Node-zone field row is a no-op today.
+    Wire it to copy the field's full value to the system
+    clipboard and surface a transient toast ("copied: cwd") via a
+    new reusable toast widget under `src/tui/widgets/` that
+    auto-dismisses after ~1.5s and does not block input. This
+    cleanly splits the contract: `o` for *reading* a long value
+    (modal, scrollable), `Enter` for *copying*. Reuse the toast
+    for `i` (copy short id) and any future copy actions so
+    feedback is consistent. Requires an ADR covering the
+    clipboard backend choice — OSC 52 (terminal escape, works
+    over SSH, not universally honored) vs `arboard` (native, no
+    SSH support, new dep). Recommend OSC 52 as the no-new-dep
+    default with `arboard` behind a feature flag if needed.
+  - Tests: reducer/keymap tests for Enter-on-Node-field copying
+    the value and surfacing a toast; toast widget unit tests for
+    auto-dismiss timing and replacement (newer toast supersedes
+    older); regression test that Enter on link rows still drills
+    and Enter on group headers still toggles; coverage that empty
+    or absent values don't surface a misleading "copied" toast.
+  - Blockers: `T8-027`; ADR for the clipboard backend.
+
+- [ ] `T8-041` Flip the Upstream / Downstream header layout so
+  zone labels anchor to the right.
+  - Scope: today the explorer's zone headers render the bold
+    `Upstream` / `Downstream` label on the left and the aggregate
+    summary on the right (`Downstream  2 groups · 3 links · 1 ⚠`),
+    so the highlighted label gets pushed toward the center of the
+    pane and is hard to scan vertically when the right pane is
+    narrow. Flip the order so the aggregate counts render on the
+    left and the bold label anchors flush right
+    (`2 groups · 3 links · 1 ⚠  Downstream`). Apply the same flip
+    to the third **Related** zone introduced by `T8-037` if it
+    lands first.
+  - Tests: renderer snapshot for a wide pane (aggregate left,
+    label flush right); snapshot for a narrow pane (label still
+    visible, aggregate elided rather than the label); coverage
+    for Upstream, Downstream, and Related zones; regression that
+    empty zones still suppress entirely.
+  - Blockers: `T8-029` renderer.
+
 - [ ] `T8-020` Auto-broaden TUI scan roots to the cwd's "code dir"
     ancestor when neither CLI nor config specifies one. Low
     priority.
