@@ -154,7 +154,10 @@ mod tests {
     #[test]
     fn esc_closes_the_modal() {
         let mut state = ValueModalState::new("cwd", "/long/path");
-        assert_eq!(state.handle_key(press(KeyCode::Esc)), ValueModalOutcome::Close);
+        assert_eq!(
+            state.handle_key(press(KeyCode::Esc)),
+            ValueModalOutcome::Close
+        );
     }
 
     #[test]

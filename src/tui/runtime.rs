@@ -454,9 +454,7 @@ fn set_static_data(
 fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
     if app.value_modal().is_some() {
         return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                Some(Action::ValueModalKey(key))
-            }
+            Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::ValueModalKey(key)),
             _ => None,
         };
     }
@@ -1597,7 +1595,10 @@ mod tests {
         );
         // `e` is the explicit expand/collapse accelerator.
         assert_eq!(
-            remap_for_focus(Action::Msg(Box::new(Msg::ToggleLinkedDetails)), Focus::Right),
+            remap_for_focus(
+                Action::Msg(Box::new(Msg::ToggleLinkedDetails)),
+                Focus::Right
+            ),
             Action::Msg(Box::new(Msg::ExplorerToggleGroup))
         );
         assert_eq!(

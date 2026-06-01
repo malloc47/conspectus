@@ -277,15 +277,17 @@ impl ExplorerState {
             self.cursor = 0;
             return;
         }
-        let target = previous_key.and_then(|key| {
-            rows.iter().position(|row| row.key(&self.view) == key)
-        });
+        let target =
+            previous_key.and_then(|key| rows.iter().position(|row| row.key(&self.view) == key));
         self.cursor = target.unwrap_or_else(|| {
             // Fall back to the first link or group header so the
             // cursor lands on something actionable.
             rows.iter()
                 .position(|row| {
-                    matches!(row, ExplorerRow::Link { .. } | ExplorerRow::GroupHeader { .. })
+                    matches!(
+                        row,
+                        ExplorerRow::Link { .. } | ExplorerRow::GroupHeader { .. }
+                    )
                 })
                 .unwrap_or(0)
         });
@@ -597,30 +599,26 @@ impl App {
             return;
         };
         let opened = match row {
-            ExplorerRow::NodeField {
-                index, label, ..
-            } => state
-                .view
-                .core_fields
-                .get(index)
-                .and_then(|field| {
+            ExplorerRow::NodeField { index, label, .. } => {
+                state.view.core_fields.get(index).and_then(|field| {
                     field
                         .long_value
                         .clone()
                         .map(|value| (label.to_string(), value))
-                }),
+                })
+            }
             _ => None,
         };
         match opened {
             Some((label, value)) => {
-                self.value_modal =
-                    Some(crate::tui::widgets::value_modal::ValueModalState::new(label, value));
+                self.value_modal = Some(crate::tui::widgets::value_modal::ValueModalState::new(
+                    label, value,
+                ));
                 self.status_message = None;
             }
             None => {
-                self.status_message = Some(
-                    "explorer: row has no truncated value to open".to_string(),
-                );
+                self.status_message =
+                    Some("explorer: row has no truncated value to open".to_string());
             }
         }
     }
@@ -1093,9 +1091,7 @@ impl App {
                         });
                 match preserved {
                     Some(mut state) => {
-                        let prev_key = state
-                            .selected_row()
-                            .map(|row| row.key(&state.view));
+                        let prev_key = state.selected_row().map(|row| row.key(&state.view));
                         // Replace the view while keeping cursor /
                         // expansion / breadcrumb identity.
                         state.view = view;
@@ -1106,15 +1102,11 @@ impl App {
                             .upstream
                             .groups
                             .iter()
-                            .map(|g| GroupKey::for_group(
-                                crate::tui::explorer::Direction::Upstream,
-                                g,
-                            ))
+                            .map(|g| {
+                                GroupKey::for_group(crate::tui::explorer::Direction::Upstream, g)
+                            })
                             .chain(state.view.downstream.groups.iter().map(|g| {
-                                GroupKey::for_group(
-                                    crate::tui::explorer::Direction::Downstream,
-                                    g,
-                                )
+                                GroupKey::for_group(crate::tui::explorer::Direction::Downstream, g)
                             }))
                             .collect();
                         state.expanded_groups.retain(|key| valid.contains(key));
@@ -1199,9 +1191,8 @@ impl App {
                 }
             }
             ExplorerRow::Unresolved { .. } => {
-                self.status_message = Some(
-                    "explorer: unresolved evidence — `o` opens detail (T8-032)".to_string(),
-                );
+                self.status_message =
+                    Some("explorer: unresolved evidence — `o` opens detail (T8-032)".to_string());
             }
             ExplorerRow::NodeField { .. } => {
                 self.status_message = None;
@@ -1274,8 +1265,7 @@ impl App {
             .expect("explorer view builder should read current TUI database");
         let Some(view) = view else {
             self.status_message = Some(
-                "explorer: cannot restore breadcrumb hop — node missing from snapshot"
-                    .to_string(),
+                "explorer: cannot restore breadcrumb hop — node missing from snapshot".to_string(),
             );
             return;
         };
@@ -2002,11 +1992,7 @@ mod tests {
             activity_epoch: Some(1_700_000_000),
             created_epoch: Some(1_700_000_000),
         }));
-        let session_id = NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
-            "abc",
-        ));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
         let mux_id = NodeId::MuxSession(crate::model::MuxSessionId::new("work"));
         snap.candidate_links.push(crate::model::GraphLink {
             id: "l1".to_string(),
@@ -2123,10 +2109,11 @@ mod tests {
     fn explorer_back_with_no_breadcrumb_surfaces_status_hint() {
         let mut app = app_for_explorer();
         app.update(Msg::ExplorerBack);
-        assert!(app
-            .status_message()
-            .map(|s| s.contains("no drill history"))
-            .unwrap_or(false));
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("no drill history"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -2144,10 +2131,11 @@ mod tests {
             app.update(Msg::ExplorerNavDown);
         }
         app.update(Msg::ExplorerToggleGroup);
-        assert!(app
-            .status_message()
-            .map(|s| s.contains("nothing to expand"))
-            .unwrap_or(false));
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("nothing to expand"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -2215,10 +2203,11 @@ mod tests {
         // navigation. For now we exercise the no-value branch.
         app.open_value_modal_for_cursor();
         assert!(app.value_modal().is_none());
-        assert!(app
-            .status_message()
-            .map(|s| s.contains("no truncated"))
-            .unwrap_or(false));
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("no truncated"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -2280,9 +2269,7 @@ mod tests {
             .visible_rows()
             .iter()
             .find_map(|row| match &row.kind {
-                RowKind::AgentSession(session)
-                    if session.session.session_key == "abc" =>
-                {
+                RowKind::AgentSession(session) if session.session.session_key == "abc" => {
                     Some(row.id.clone())
                 }
                 _ => None,

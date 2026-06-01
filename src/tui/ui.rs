@@ -1365,10 +1365,7 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
                 Constraint::Min(0),
             ])
             .split(inner);
-        frame.render_widget(
-            Paragraph::new(lines).wrap(Wrap { trim: false }),
-            split[0],
-        );
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), split[0]);
         frame.render_widget(
             Paragraph::new(preview_divider_line(
                 app,
@@ -1444,95 +1441,94 @@ fn render_explorer_lines(
     }
 
     // Helper to render one explorer's groups.
-    let render_explorer_section =
-        |lines: &mut Vec<Line<'static>>, direction: ExpDir| {
-            let explorer = match direction {
-                ExpDir::Upstream => &view.upstream,
-                ExpDir::Downstream => &view.downstream,
-            };
-            if explorer.groups.is_empty() {
-                return;
-            }
-            let summary = format!(
-                "{} groups · {} links{}{}",
-                explorer.groups.len(),
-                explorer.link_count(),
-                if explorer.ambiguous_groups() > 0 {
-                    format!(" · {} ⚠", explorer.ambiguous_groups())
-                } else {
-                    String::new()
-                },
-                if explorer.unresolved_groups() > 0 {
-                    format!(" · {} —", explorer.unresolved_groups())
-                } else {
-                    String::new()
-                },
-            );
-            lines.push(chip_divider_line(
-                direction.label(),
-                Some(&summary),
-                width,
-                theme,
-            ));
-            for (group_index, group) in explorer.groups.iter().enumerate() {
-                let is_single = group.is_single();
-                if is_single {
-                    if let Some(link) = group.links.first() {
-                        let flat = rows.iter().position(|row| matches!(
+    let render_explorer_section = |lines: &mut Vec<Line<'static>>, direction: ExpDir| {
+        let explorer = match direction {
+            ExpDir::Upstream => &view.upstream,
+            ExpDir::Downstream => &view.downstream,
+        };
+        if explorer.groups.is_empty() {
+            return;
+        }
+        let summary = format!(
+            "{} groups · {} links{}{}",
+            explorer.groups.len(),
+            explorer.link_count(),
+            if explorer.ambiguous_groups() > 0 {
+                format!(" · {} ⚠", explorer.ambiguous_groups())
+            } else {
+                String::new()
+            },
+            if explorer.unresolved_groups() > 0 {
+                format!(" · {} —", explorer.unresolved_groups())
+            } else {
+                String::new()
+            },
+        );
+        lines.push(chip_divider_line(
+            direction.label(),
+            Some(&summary),
+            width,
+            theme,
+        ));
+        for (group_index, group) in explorer.groups.iter().enumerate() {
+            let is_single = group.is_single();
+            if is_single {
+                if let Some(link) = group.links.first() {
+                    let flat = rows.iter().position(|row| {
+                        matches!(
                             row,
                             ExplorerRow::Link { direction: d, group_index: g, link_index: 0 }
                                 if *d == direction && *g == group_index,
-                        ));
-                        let highlight = flat == Some(cursor);
-                        lines.extend(render_single_link_composite(
-                            group, link, highlight, theme,
-                        ));
-                    } else if let Some(row) = group.unresolved.first() {
-                        let flat = rows.iter().position(|r| matches!(
+                        )
+                    });
+                    let highlight = flat == Some(cursor);
+                    lines.extend(render_single_link_composite(group, link, highlight, theme));
+                } else if let Some(row) = group.unresolved.first() {
+                    let flat = rows.iter().position(|r| matches!(
                             r,
                             ExplorerRow::Unresolved { direction: d, group_index: g, unresolved_index: 0 }
                                 if *d == direction && *g == group_index,
                         ));
-                        let highlight = flat == Some(cursor);
-                        lines.extend(render_unresolved_composite(
-                            group, row, highlight, theme,
-                        ));
-                    }
-                } else {
-                    let header_flat = rows.iter().position(|row| matches!(
+                    let highlight = flat == Some(cursor);
+                    lines.extend(render_unresolved_composite(group, row, highlight, theme));
+                }
+            } else {
+                let header_flat = rows.iter().position(|row| {
+                    matches!(
                         row,
                         ExplorerRow::GroupHeader { direction: d, group_index: g, .. }
                             if *d == direction && *g == group_index,
-                    ));
-                    let highlight = header_flat == Some(cursor);
-                    let key = crate::tui::explorer::GroupKey::for_group(direction, group);
-                    let expanded = state.expanded_groups.contains(&key);
-                    lines.push(render_group_header_line(
-                        group, expanded, highlight, theme,
-                    ));
-                    if expanded {
-                        for (link_index, link) in group.links.iter().enumerate() {
-                            let flat = rows.iter().position(|r| matches!(
+                    )
+                });
+                let highlight = header_flat == Some(cursor);
+                let key = crate::tui::explorer::GroupKey::for_group(direction, group);
+                let expanded = state.expanded_groups.contains(&key);
+                lines.push(render_group_header_line(group, expanded, highlight, theme));
+                if expanded {
+                    for (link_index, link) in group.links.iter().enumerate() {
+                        let flat = rows.iter().position(|r| {
+                            matches!(
                                 r,
                                 ExplorerRow::Link { direction: d, group_index: g, link_index: l }
                                     if *d == direction && *g == group_index && *l == link_index,
-                            ));
-                            let highlight = flat == Some(cursor);
-                            lines.push(render_group_child_line(link, highlight, theme));
-                        }
-                        for (unresolved_index, row) in group.unresolved.iter().enumerate() {
-                            let flat = rows.iter().position(|r| matches!(
+                            )
+                        });
+                        let highlight = flat == Some(cursor);
+                        lines.push(render_group_child_line(link, highlight, theme));
+                    }
+                    for (unresolved_index, row) in group.unresolved.iter().enumerate() {
+                        let flat = rows.iter().position(|r| matches!(
                                 r,
                                 ExplorerRow::Unresolved { direction: d, group_index: g, unresolved_index: u }
                                     if *d == direction && *g == group_index && *u == unresolved_index,
                             ));
-                            let highlight = flat == Some(cursor);
-                            lines.push(render_unresolved_child_line(row, highlight, theme));
-                        }
+                        let highlight = flat == Some(cursor);
+                        lines.push(render_unresolved_child_line(row, highlight, theme));
                     }
                 }
             }
-        };
+        }
+    };
 
     render_explorer_section(&mut lines, ExpDir::Upstream);
     render_explorer_section(&mut lines, ExpDir::Downstream);

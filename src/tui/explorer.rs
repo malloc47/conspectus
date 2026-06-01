@@ -206,7 +206,10 @@ impl RelationshipExplorer {
 
     /// Number of groups carrying unresolved-evidence stubs.
     pub fn unresolved_groups(&self) -> usize {
-        self.groups.iter().filter(|g| g.unresolved_count > 0).count()
+        self.groups
+            .iter()
+            .filter(|g| g.unresolved_count > 0)
+            .count()
     }
 }
 
@@ -326,9 +329,7 @@ pub enum ExplorerRowKey {
     Title,
     /// One of the [`NodeView::core_fields`] rows (by label, so the
     /// key stays stable across renames).
-    NodeField {
-        label: String,
-    },
+    NodeField { label: String },
     /// A multi-link group's header row.
     GroupHeader {
         direction: Direction,
@@ -404,9 +405,7 @@ impl ExplorerRow {
                     relation: group
                         .map(|g| g.relation.clone())
                         .unwrap_or(RelationKind::AssociatedWith),
-                    neighbor_kind: group
-                        .map(|g| g.neighbor_kind.clone())
-                        .unwrap_or_default(),
+                    neighbor_kind: group.map(|g| g.neighbor_kind.clone()).unwrap_or_default(),
                 }
             }
             Self::Link {
@@ -513,7 +512,7 @@ fn push_explorer_rows(
         let key = GroupKey::for_group(explorer.direction, group);
         let is_single = group.is_single();
         if is_single {
-            if let Some(_) = group.links.first() {
+            if !group.links.is_empty() {
                 rows.push(ExplorerRow::Link {
                     direction: explorer.direction,
                     group_index,
@@ -757,10 +756,7 @@ fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
             .unwrap_or_else(|| f.provider_source_key.clone()),
         GraphNode::Repo(r) => r.common_dir.clone(),
         GraphNode::Checkout(c) => c.root.clone(),
-        GraphNode::Workspace(w) => w
-            .name
-            .clone()
-            .unwrap_or_else(|| w.root.clone()),
+        GraphNode::Workspace(w) => w.name.clone().unwrap_or_else(|| w.root.clone()),
         GraphNode::Branch(b) => b.refname.clone(),
     }
 }
@@ -791,11 +787,7 @@ fn all_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) -
     fields
 }
 
-fn extra_fields(
-    snapshot: &GraphSnapshot,
-    node: &GraphNode,
-    home: Option<&Path>,
-) -> Vec<CoreField> {
+fn extra_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) -> Vec<CoreField> {
     match node {
         GraphNode::AgentSession(s) => agent_session_extras(snapshot, s, home),
         GraphNode::MuxSession(m) => mux_session_extras(m),
@@ -904,12 +896,7 @@ fn agent_session_core(
         .map(str::to_string);
     if let Some(alias) = &alias {
         fields.push(CoreField::plain("alias", alias.clone()));
-    } else if let Some(title) = s
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    {
+    } else if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         fields.push(CoreField::plain("alias", title.to_string()));
     } else {
         fields.push(CoreField::placeholder("alias", "—"));
@@ -934,12 +921,7 @@ fn agent_session_extras(
     ));
     fields.push(CoreField::plain("state_scope", s.id.state_scope.clone()));
     fields.push(CoreField::plain("session_key", s.id.session_key.clone()));
-    if let Some(title) = s
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-    {
+    if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         fields.push(CoreField::plain("title", title.to_string()));
     }
     if let Some(epoch) = s.last_active_epoch {
@@ -1164,10 +1146,7 @@ fn fork_extras(f: &ForkNode) -> Vec<CoreField> {
 fn forge_pr_core(pr: &ForgePrNode) -> Vec<CoreField> {
     let id_node = NodeId::ForgePr(pr.id.clone());
     let state = pr.state.as_deref().unwrap_or("?");
-    let composite = format!(
-        "{}/{}#{} ({state})",
-        pr.owner, pr.repo, pr.number
-    );
+    let composite = format!("{}/{}#{} ({state})", pr.owner, pr.repo, pr.number);
     let mut fields = vec![
         CoreField::plain("id", node_short_id(&id_node)),
         CoreField::plain("pr", composite),
@@ -1358,8 +1337,6 @@ fn finalize_group(
                 EdgeStateLabel::Resolves
             } else if ambiguous && competing.contains(&link.id) {
                 EdgeStateLabel::Conflict
-            } else if winner_link_id.is_some() {
-                EdgeStateLabel::AltOf(relation.clone())
             } else {
                 EdgeStateLabel::AltOf(relation.clone())
             };
@@ -1455,9 +1432,10 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
             .unwrap_or_else(|| f.provider_source_key.clone()),
         GraphNode::Repo(r) => shorten_home(&r.common_dir, home),
         GraphNode::Checkout(c) => shorten_home(&c.root, home),
-        GraphNode::Workspace(w) => {
-            w.name.clone().unwrap_or_else(|| shorten_home(&w.root, home))
-        }
+        GraphNode::Workspace(w) => w
+            .name
+            .clone()
+            .unwrap_or_else(|| shorten_home(&w.root, home)),
         GraphNode::Branch(b) => b.refname.clone(),
     }
 }
@@ -1470,10 +1448,10 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, Confidence, ForgePrId,
-        ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
-        Provenance, RepoId, RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
-        SourceMetadata, UnresolvedEndpoint,
+        AgentSessionId, AgentSessionNode, Confidence, ForgePrId, ForgePrNode, GraphSnapshot,
+        LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RepoId, RepoNode,
+        RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
+        UnresolvedEndpoint,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -1630,7 +1608,13 @@ mod tests {
         let labels: Vec<&str> = group.links[0].preview.iter().map(|f| f.label).collect();
         assert_eq!(
             labels,
-            vec!["id", "backend · native_id", "cwd", "attached", "last_active"]
+            vec![
+                "id",
+                "backend · native_id",
+                "cwd",
+                "attached",
+                "last_active"
+            ]
         );
     }
 
@@ -1640,7 +1624,9 @@ mod tests {
         snapshot
             .nodes
             .push(agent("claude-code", "abc", Some("/home/op/src/x"), None));
-        snapshot.nodes.push(process("obs:1", 100, "/usr/bin/claude"));
+        snapshot
+            .nodes
+            .push(process("obs:1", 100, "/usr/bin/claude"));
         snapshot
             .nodes
             .push(process("obs:2", 200, "/usr/bin/claude-sub"));
@@ -1694,33 +1680,24 @@ mod tests {
     #[test]
     fn child_session_group_multi_link_keeps_winner_first() {
         let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(agent("claude-code", "parent", Some("/home/op/src/x"), None));
         snapshot.nodes.push(agent(
             "claude-code",
-            "parent",
-            Some("/home/op/src/x"),
+            "child-a",
+            Some("/home/op/src/y"),
             None,
         ));
-        snapshot
-            .nodes
-            .push(agent("claude-code", "child-a", Some("/home/op/src/y"), None));
-        snapshot
-            .nodes
-            .push(agent("claude-code", "child-b", Some("/home/op/src/z"), None));
-        let parent = NodeId::AgentSession(AgentSessionId::new(
+        snapshot.nodes.push(agent(
             "claude-code",
-            "/state",
-            "parent",
-        ));
-        let child_a = NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
-            "child-a",
-        ));
-        let child_b = NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
             "child-b",
+            Some("/home/op/src/z"),
+            None,
         ));
+        let parent = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "parent"));
+        let child_a = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "child-a"));
+        let child_b = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "child-b"));
         snapshot.candidate_links.push(link(
             "ca",
             child_a,
@@ -1749,17 +1726,10 @@ mod tests {
     #[test]
     fn unresolved_endpoint_renders_as_unresolved_row() {
         let mut snapshot = GraphSnapshot::empty();
-        snapshot.nodes.push(agent(
-            "claude-code",
-            "child",
-            Some("/home/op/src/x"),
-            None,
-        ));
-        let child = NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
-            "child",
-        ));
+        snapshot
+            .nodes
+            .push(agent("claude-code", "child", Some("/home/op/src/x"), None));
+        let child = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "child"));
         let evidence = UnresolvedEndpoint {
             node_type: "agent_session".to_string(),
             harness_key: Some("claude-code".to_string()),
@@ -1796,10 +1766,9 @@ mod tests {
     #[test]
     fn long_command_truncates_with_full_value_available() {
         let mut snapshot = GraphSnapshot::empty();
-        let long_command = "/usr/bin/claude --resume 7f3c2a917b8c4d556e6f7a8b9c0d1e2f3a4b5c6d --extra";
-        snapshot
-            .nodes
-            .push(process("obs:1", 82310, long_command));
+        let long_command =
+            "/usr/bin/claude --resume 7f3c2a917b8c4d556e6f7a8b9c0d1e2f3a4b5c6d --extra";
+        snapshot.nodes.push(process("obs:1", 82310, long_command));
         let proc_id = NodeId::RuntimeProcess(RuntimeProcessId::new("obs:1"));
         let snapshot = resolve_snapshot(snapshot);
         let view = build(&snapshot, &proc_id, Some(home().as_path()));
@@ -1821,8 +1790,7 @@ mod tests {
             Some("/home/op/src/x"),
             Some("title"),
         ));
-        let target =
-            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
+        let target = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
         let snapshot = resolve_snapshot(snapshot);
         let view = build(&snapshot, &target, Some(home().as_path()));
         let core_labels: Vec<&str> = view.core_fields.iter().map(|f| f.label).collect();
@@ -1897,11 +1865,7 @@ mod tests {
             .nodes
             .push(agent("claude-code", "abc", Some("/home/op/src/x"), None));
         snapshot.nodes.push(mux("tmux", "work-claude", None));
-        let session_id = NodeId::AgentSession(AgentSessionId::new(
-            "claude-code",
-            "/state",
-            "abc",
-        ));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
         let mux_id = NodeId::MuxSession(MuxSessionId::new("work-claude"));
         snapshot.candidate_links.push(link(
             "l1",
