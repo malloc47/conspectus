@@ -81,6 +81,12 @@ pub struct RunConfig {
     /// this from `[tui.theme]` config and passes it through; the
     /// renderer reads it via [`App::theme`].
     pub theme: Theme,
+    /// Initial visibility of the explorer's `provenance · confidence
+    /// · state` link-row meta (T8-042). Sourced from
+    /// `[tui.detail].show_edge_meta` in the on-disk config. The
+    /// runtime per-session `E` accelerator flips this in memory; the
+    /// config knob just sets the default.
+    pub show_edge_meta: bool,
 }
 
 impl RunConfig {
@@ -100,6 +106,7 @@ impl RunConfig {
             color: true,
             current_tmux_session: None,
             theme: Theme::default(),
+            show_edge_meta: false,
         }
     }
 }

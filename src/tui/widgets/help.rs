@@ -195,6 +195,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     );
     bind(
         &mut lines,
+        "E",
+        "Toggle edge meta (provenance · confidence · state) on link rows",
+    );
+    bind(
+        &mut lines,
         "o",
         "Open the full untruncated value for the cursor row in a modal",
     );

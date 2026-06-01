@@ -5468,7 +5468,7 @@ than recursive inline detail panes.
     empty zones still suppress entirely.
   - Blockers: `T8-029` renderer.
 
-- [ ] `T8-042` Hide edge meta (`provenance · confidence · state`)
+- [x] `T8-042` Hide edge meta (`provenance · confidence · state`)
   from link rows by default with an opt-in toggle.
   - Scope: today every link row in the explorer carries a trailing
     `discovered · high · active` line that exposes the resolver's

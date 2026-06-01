@@ -1883,6 +1883,7 @@ impl TuiArgs {
             color,
             current_tmux_session: current_tmux_session_name(),
             theme: outcome.config.tui.theme.clone(),
+            show_edge_meta: outcome.config.tui.detail.show_edge_meta,
         };
 
         conspectus::tui::run(config)

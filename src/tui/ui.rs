@@ -1356,7 +1356,12 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // section-grouped detail when the explorer state isn't ready
     // yet (race during the first SetData).
     if let Some(state) = app.explorer() {
-        let lines = render_explorer_lines(state, inner.width as usize, app.theme());
+        let lines = render_explorer_lines(
+            state,
+            inner.width as usize,
+            app.theme(),
+            app.edge_meta_visible(),
+        );
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
         // terminal rows. Without the wrap-aware estimate the
@@ -1374,7 +1379,16 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
                 width.div_ceil(inner.width.max(1) as usize).max(1)
             })
             .sum();
+        // +1 safety margin: the per-line `div_ceil` count assumes
+        // the renderer packs each line tight to the right edge, but
+        // Paragraph wraps on word boundaries and a long unbroken
+        // token can push the actual row count one above the
+        // estimate. Without the slack the last explorer line
+        // (typically a single-link composite or the trailing Down-
+        // stream row) gets clipped when the Node zone carries a
+        // very long value.
         let header_height = (wrapped_rows as u16)
+            .saturating_add(1)
             .min(inner.height.saturating_sub(3))
             .max(3);
         let split = Layout::default()
@@ -1443,6 +1457,7 @@ fn render_explorer_lines(
     state: &crate::tui::app::ExplorerState,
     width: usize,
     theme: &Theme,
+    show_edge_meta: bool,
 ) -> Vec<Line<'static>> {
     use crate::tui::explorer::{Direction as ExpDir, ExplorerRow};
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -1509,7 +1524,13 @@ fn render_explorer_lines(
                         )
                     });
                     let highlight = flat == Some(cursor);
-                    lines.extend(render_single_link_composite(group, link, highlight, theme));
+                    lines.extend(render_single_link_composite(
+                        group,
+                        link,
+                        highlight,
+                        theme,
+                        show_edge_meta,
+                    ));
                 } else if let Some(row) = group.unresolved.first() {
                     let flat = rows.iter().position(|r| matches!(
                             r,
@@ -1541,7 +1562,12 @@ fn render_explorer_lines(
                             )
                         });
                         let highlight = flat == Some(cursor);
-                        lines.push(render_group_child_line(link, highlight, theme));
+                        lines.push(render_group_child_line(
+                            link,
+                            highlight,
+                            theme,
+                            show_edge_meta,
+                        ));
                     }
                     for (unresolved_index, row) in group.unresolved.iter().enumerate() {
                         let flat = rows.iter().position(|r| matches!(
@@ -1643,6 +1669,7 @@ fn render_group_child_line(
     link: &crate::tui::explorer::RelationshipLink,
     highlight: bool,
     theme: &Theme,
+    show_edge_meta: bool,
 ) -> Line<'static> {
     let star = if link.resolved_winner { "  ★" } else { "" };
     let mut id_style = Style::default().fg(theme.link_id);
@@ -1652,12 +1679,18 @@ fn render_group_child_line(
     if link.resolved_winner {
         id_style = id_style.add_modifier(Modifier::BOLD);
     }
-    let trailing_text = format!(
-        "  ·  {} · {} · {}{star}",
-        link.provenance.snake_case(),
-        link.confidence.snake_case(),
-        link.state.snake_case(),
-    );
+    // T8-042: when edge meta is hidden, keep the resolver-winner
+    // `★` marker but drop the `· prov · conf · state` segment.
+    let trailing_text = if show_edge_meta {
+        format!(
+            "  ·  {} · {} · {}{star}",
+            link.provenance.snake_case(),
+            link.confidence.snake_case(),
+            link.state.snake_case(),
+        )
+    } else {
+        star.to_string()
+    };
     let spans = vec![
         Span::styled("      ".to_string(), Style::default()),
         kind_chip_span(link.neighbor_kind, theme),
@@ -1673,6 +1706,7 @@ fn render_single_link_composite(
     link: &crate::tui::explorer::RelationshipLink,
     highlight: bool,
     theme: &Theme,
+    show_edge_meta: bool,
 ) -> Vec<Line<'static>> {
     let star = if link.resolved_winner { "  ★" } else { "" };
     let mut header_style = Style::default().fg(theme.link_id);
@@ -1690,6 +1724,12 @@ fn render_single_link_composite(
         Span::raw(" "),
         Span::styled(label_text, header_style),
     ];
+    // T8-042: when edge meta is hidden, the single-link composite
+    // collapses to its header row only — the `★` marker still
+    // anchors the resolver winner.
+    if !show_edge_meta {
+        return vec![Line::from(header_spans)];
+    }
     let trailing = format!(
         "        {} · {} · {}",
         link.provenance.snake_case(),
@@ -2829,6 +2869,28 @@ mod tests {
         assert!(
             text.contains(" Preview "),
             "expected Preview section divider label: {text}",
+        );
+    }
+
+    #[test]
+    fn link_rows_hide_edge_meta_by_default_and_surface_it_after_toggle() {
+        // T8-042: by default the explorer's single-link composite
+        // collapses to just its header row (no `provenance ·
+        // confidence · state` trailing line). After Msg::ToggleEdgeMeta
+        // the trailing meta surfaces.
+        let mut app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let default_text = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            !default_text.contains("discovered · "),
+            "edge meta should be hidden by default: {default_text}",
+        );
+        // Toggle to opt-in.
+        app.update(Msg::ToggleEdgeMeta);
+        let toggled_text = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            toggled_text.contains("discovered · ") || toggled_text.contains("strong_discovered · "),
+            "edge meta should surface after the toggle: {toggled_text}",
         );
     }
 

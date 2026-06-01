@@ -116,6 +116,11 @@ pub struct App {
     explorer: Option<ExplorerState>,
     /// Which panel currently consumes navigation keys.
     focus: Focus,
+    /// Whether the explorer's link rows render the trailing
+    /// `provenance · confidence · state` meta line (T8-042).
+    /// Initialized from `RunConfig::show_edge_meta`; flipped at
+    /// runtime by `Msg::ToggleEdgeMeta`.
+    edge_meta_visible: bool,
     /// `true` after a Backspace press on the right pane with an
     /// empty breadcrumb stack: the press surfaced a hint instead of
     /// shifting focus, and a follow-up Backspace will perform the
@@ -362,6 +367,12 @@ pub enum Msg {
     /// highlighted multi-link group. No-op when the cursor isn't
     /// on a header.
     ExplorerToggleGroup,
+    /// Right panel (graph explorer): toggle the visibility of the
+    /// link rows' trailing `provenance · confidence · state` meta
+    /// line (T8-042). The default is hidden; the `★` resolver-winner
+    /// marker and `⚠` group-level conflict aggregate stay visible
+    /// regardless.
+    ToggleEdgeMeta,
     /// Right panel (graph explorer): toggle the Expanded Node Detail
     /// view (T8-034). Swaps the Node zone's top-5 render for the
     /// full per-kind field set. Per-focused-node: resets when
@@ -412,6 +423,7 @@ impl App {
         let sort = config.default_sort;
         let filter = config.initial_filter.clone();
         let grouping = super::Grouping::Sessions(config.sessions_grouping);
+        let edge_meta_visible = config.show_edge_meta;
         Self {
             config,
             should_quit: false,
@@ -423,6 +435,7 @@ impl App {
             detail_links_expanded: false,
             explorer: None,
             focus: Focus::Left,
+            edge_meta_visible,
             explorer_back_armed: false,
             preview_scroll: 0,
             loaded_at_epoch: None,
@@ -793,6 +806,12 @@ impl App {
         self.focus
     }
 
+    /// Whether the explorer's link rows render the trailing
+    /// `provenance · confidence · state` meta line (T8-042).
+    pub fn edge_meta_visible(&self) -> bool {
+        self.edge_meta_visible
+    }
+
     /// True when the row is currently expanded.
     pub fn is_expanded(&self, id: &RowId) -> bool {
         self.expanded.contains(id)
@@ -928,6 +947,7 @@ impl App {
             Msg::ExplorerActivate => self.explorer_activate(),
             Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
             Msg::ExplorerToggleFullDetail => self.explorer_toggle_full_detail(),
+            Msg::ToggleEdgeMeta => self.toggle_edge_meta(),
             Msg::ExplorerBack => self.explorer_back(),
             Msg::CycleFocus => {
                 self.focus = match self.focus {
@@ -1202,6 +1222,18 @@ impl App {
         }
         state.reseat_cursor(prev_key);
         self.status_message = None;
+    }
+
+    fn toggle_edge_meta(&mut self) {
+        self.edge_meta_visible = !self.edge_meta_visible;
+        self.status_message = Some(
+            if self.edge_meta_visible {
+                "explorer: edge meta visible (provenance · confidence · state)"
+            } else {
+                "explorer: edge meta hidden"
+            }
+            .to_string(),
+        );
     }
 
     fn explorer_toggle_full_detail(&mut self) {
@@ -2537,6 +2569,40 @@ mod tests {
         // Third backspace shifts focus to the left pane.
         app.update(Msg::ExplorerBack);
         assert_eq!(app.focus(), Focus::Left);
+    }
+
+    #[test]
+    fn edge_meta_visibility_defaults_to_run_config_value_and_toggles() {
+        // T8-042: edge_meta_visible starts from `RunConfig.show_edge_meta`
+        // and Msg::ToggleEdgeMeta flips it with a status hint.
+        let app = App::new(RunConfig::defaults());
+        assert!(
+            !app.edge_meta_visible(),
+            "RunConfig::defaults() should hide edge meta by default",
+        );
+        let mut config = RunConfig::defaults();
+        config.show_edge_meta = true;
+        let app_with_meta = App::new(config);
+        assert!(
+            app_with_meta.edge_meta_visible(),
+            "config knob should set the initial state",
+        );
+        let mut app = app_for_explorer();
+        assert!(!app.edge_meta_visible());
+        app.update(Msg::ToggleEdgeMeta);
+        assert!(app.edge_meta_visible());
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("edge meta visible"))
+                .unwrap_or(false)
+        );
+        app.update(Msg::ToggleEdgeMeta);
+        assert!(!app.edge_meta_visible());
+        assert!(
+            app.status_message()
+                .map(|s| s.contains("edge meta hidden"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]

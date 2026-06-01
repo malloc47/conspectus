@@ -1259,6 +1259,15 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             }
             (KeyModifiers::SHIFT, KeyCode::Char('F'))
             | (KeyModifiers::NONE, KeyCode::Char('F')) => Some(Action::ClearFilters),
+            // T8-042: `E` toggles the explorer's edge-meta visibility
+            // (provenance · confidence · state on link rows).
+            // Focus-agnostic: the meta visibility is a global UI
+            // preference that applies to the right pane regardless
+            // of which pane currently has focus.
+            (KeyModifiers::SHIFT, KeyCode::Char('E'))
+            | (KeyModifiers::NONE, KeyCode::Char('E')) => {
+                Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
+            }
             (KeyModifiers::CONTROL, KeyCode::Char('g')) => Some(Action::CycleGrouping(1)),
             (m, KeyCode::Char(']')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::CycleView(1))
@@ -1437,6 +1446,21 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('F'), KeyModifiers::NONE), 24),
             Some(Action::ClearFilters)
+        );
+    }
+
+    #[test]
+    fn translate_shift_e_toggles_edge_meta() {
+        // T8-042: `E` toggles the explorer's edge-meta visibility.
+        // Focus-agnostic — the binding is global so the operator
+        // can flip it without first tabbing into the right pane.
+        assert_eq!(
+            translate(press(KeyCode::Char('E'), KeyModifiers::SHIFT), 24),
+            Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('E'), KeyModifiers::NONE), 24),
+            Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
         );
     }
 

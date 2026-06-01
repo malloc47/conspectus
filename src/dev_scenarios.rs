@@ -215,6 +215,7 @@ impl ScenarioWorld {
             color,
             current_tmux_session: None,
             theme: crate::tui::Theme::default(),
+            show_edge_meta: false,
         }
     }
 

@@ -49,9 +49,27 @@ pub struct TuiConfig {
     /// under `[tui.views.<name>]` sub-tables. CLI flags override
     /// these when present.
     pub views: TuiViewsConfig,
+    /// Detail-pane (right pane) configuration (T8-042). Configured
+    /// under `[tui.detail]` in the on-disk config.
+    pub detail: TuiDetailConfig,
     /// Resolved color theme (ADR 0032). Built from `[tui.theme]` with
     /// unspecified entries falling back to [`Theme::default`].
     pub theme: Theme,
+}
+
+/// Settings under `[tui.detail]` in `.conspectus.toml` / user config
+/// (T8-042). The detail pane is the right-panel graph explorer; this
+/// block controls its visual defaults.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TuiDetailConfig {
+    /// When `true`, the link rows in the explorer render the
+    /// `provenance · confidence · state` trailing meta line by
+    /// default. When `false` (the default), the meta line is
+    /// suppressed and the operator can flip it on per-session with
+    /// the `E` accelerator. Per T8-042 the right pane is primarily a
+    /// graph-navigation surface; the edge-meta detail is opt-in for
+    /// operators actively diagnosing resolver decisions.
+    pub show_edge_meta: bool,
 }
 
 /// Per-view configuration block — one entry per registered view.
@@ -176,12 +194,22 @@ struct TuiFile {
     sessions_grouping: Option<String>,
     #[serde(default)]
     views: Option<TuiViewsFile>,
+    /// `[tui.detail]` table (T8-042). Right-panel detail-explorer
+    /// visual defaults.
+    #[serde(default)]
+    detail: Option<TuiDetailFile>,
     /// `[tui.theme]` table (ADR 0032). Flat map of palette overrides
     /// — unspecified keys keep the runtime defaults, unknown keys
     /// produce a diagnostic, malformed values produce a diagnostic
     /// and the field falls back to its default.
     #[serde(default)]
     theme: Option<BTreeMap<String, toml::Value>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TuiDetailFile {
+    #[serde(default)]
+    show_edge_meta: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -511,6 +539,12 @@ fn merge_tui(
         config.views.sessions.grouping = Some(legacy);
     }
 
+    if let Some(detail_file) = file.detail
+        && let Some(show_edge_meta) = detail_file.show_edge_meta
+    {
+        config.detail.show_edge_meta = show_edge_meta;
+    }
+
     if let Some(theme_file) = file.theme {
         merge_tui_theme(&mut config.theme, theme_file, path, diagnostics);
     }
@@ -781,6 +815,39 @@ mod tests {
         assert!(outcome.diagnostics.is_empty());
         assert!(outcome.project_path.is_none());
         assert!(outcome.user_path.is_none());
+    }
+
+    #[test]
+    fn tui_detail_show_edge_meta_loads_from_config() {
+        // T8-042: `[tui.detail].show_edge_meta` flips the runtime
+        // default for the explorer's link-row meta visibility.
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.detail]\nshow_edge_meta = true\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty());
+        assert!(outcome.config.tui.detail.show_edge_meta);
+    }
+
+    #[test]
+    fn tui_detail_show_edge_meta_defaults_to_false_when_absent() {
+        let temp = TempDir::new().expect("temp dir");
+        let loader = ConfigLoader::new()
+            .with_home(temp.path())
+            .with_xdg_config_home(temp.path().join("xdg"));
+        let outcome = loader.load_from(temp.path());
+
+        assert!(
+            !outcome.config.tui.detail.show_edge_meta,
+            "T8-042: edge meta should default to hidden",
+        );
     }
 
     #[test]
