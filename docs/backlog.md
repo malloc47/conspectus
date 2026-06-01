@@ -3231,7 +3231,7 @@ failure:
     `stage1_outputs` were empty on the audit machine and are deferred
     until in-the-wild usage justifies coverage.
 
-- [ ] `H-MUXPROC-005` Audit harness control planes for non-mutating
+- [x] `H-MUXPROC-005` Audit harness control planes for non-mutating
   current-session queries.
   - Scope: determine whether any supported harness exposes a
     documented side-channel that can ask an already-running
@@ -3261,9 +3261,16 @@ failure:
     and plugin surfaces; keep `H-MUXPROC-007` gated. Claude Code's
     strongest non-mutating path is hooks, tracked under
     `H-MUXPROC-009` / `H-MUXPROC-012`.
+  - **closed 2026-05-31**: audit work is the scope; the recorded
+    findings have routed each harness to its chosen non-mutating
+    path (Codex → ADR 0048 log linker; opencode → plugin sidecar
+    via `H-MUXPROC-014`; Claude Code → hook sidecar via
+    `H-MUXPROC-012`). `H-MUXPROC-006` and `H-MUXPROC-007` are
+    closed as won't-do; see their entries for rationale.
 
-- [ ] `H-MUXPROC-006` Add Codex app-server attribution adapter if
-  the audit proves a stable non-mutating query.
+- [x] `H-MUXPROC-006` Add Codex app-server attribution adapter if
+  the audit proves a stable non-mutating query. **Closed as
+  won't-do 2026-05-31.**
   - Scope: if `H-MUXPROC-005` confirms Codex's app-server or control
     socket can report the active session/rollout for an interactive
     TUI, implement an optional adapter that discovers the control
@@ -3279,9 +3286,20 @@ failure:
     confirm Conspectus links the live rollout without relying on
     command-line resume args or open JSONL fd paths.
   - Blockers: `H-MUXPROC-005`.
+  - **closure rationale**: `H-MUXPROC-005` audit found Codex's
+    app-server surface is gated behind experimental flags with no
+    stable contract and no local hook surface (`codex --help`). The
+    Codex drift class that motivated this work is already covered by
+    the log linker landed under `H-MUXPROC-004` / ADR 0048, which
+    derives current session attribution from the on-disk rollout log
+    without depending on the experimental control socket. Reopen
+    only if Codex ships a stable, documented current-session query
+    that the log linker cannot match (e.g. cross-pid session
+    handoff without log rotation).
 
-- [ ] `H-MUXPROC-007` Add opencode server/ACP attribution adapter if
-  the audit proves a stable non-mutating query.
+- [x] `H-MUXPROC-007` Add opencode server/ACP attribution adapter if
+  the audit proves a stable non-mutating query. **Closed as
+  won't-do 2026-05-31.**
   - Scope: if `H-MUXPROC-005` confirms opencode `serve`, `attach`,
     or ACP can report active session identity for a running TUI or
     headless server, implement an optional adapter that maps the
@@ -3296,6 +3314,17 @@ failure:
     confirm the query does not create transcript records or alter
     session recency.
   - Blockers: `H-MUXPROC-005`.
+  - **closure rationale**: supplanted by the plugin sidecar path in
+    `H-MUXPROC-014` (live-verified 2026-05-31). The opencode plugin
+    runs in-process inside every TUI/server/ACP launch mode, writes
+    `session.created`/`updated`/`idle`/`status`/`compacted`
+    observations to the hook sidecar without HTTP/socket discovery
+    or auth, and the existing `discovery::hook_sidecar` reader
+    already attributes the records by tmux pane. An HTTP/ACP
+    adapter would duplicate this evidence at higher cost (port
+    discovery, auth-token plumbing, multi-server polling). Reopen
+    only if the plugin distribution becomes untenable (e.g.
+    opencode removes the plugin surface).
 
 - [x] `H-MUXPROC-008` Document terminal-injection attribution as a
   rejected strategy unless a harness guarantees non-mutating status
@@ -3781,6 +3810,18 @@ failure:
     heartbeat and the lower churn is preferable. Distribution is
     local-install via `opencode plugin <local-path>`; npm publish
     is deferred per ADR 0049 until at least one external user.
+  - **live-verified 2026-05-31**: ran `npm install && npm run build`
+    in `plugins/opencode-hook/`, installed via `opencode plugin
+    "$(pwd)"` (local scope writes `<project>/.opencode/opencode.json`
+    when the cwd is a project root; user-scope path documented as
+    fallback in the plugin README), then ran `opencode run "say hi
+    in one word"` with `CONSPECTUS_HOOK_BIN` pointed at the debug
+    binary. One `hook_sidecar` candidate link landed under
+    `harness_key=opencode`, `harness_version=0.1.0`, carrying
+    `session.created` and the live tmux pane (`%10`); resolver
+    correctly marked it `ignored` because the pane is currently
+    running `claude-code`, not opencode (the `opencode run`
+    process exited after the prompt).
   - Blockers: none. Audit complete via `H-MUXPROC-009`; sidecar
     schema fixed via `H-MUXPROC-010`.
 

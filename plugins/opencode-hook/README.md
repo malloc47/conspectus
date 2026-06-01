@@ -35,15 +35,22 @@ opencode plugin "$(pwd)"
 ```
 
 The last command tells opencode to load this plugin from your local
-filesystem and updates `~/.config/opencode/config.json` accordingly.
+filesystem and updates an opencode config file accordingly. Scope
+depends on where you run it: invoking it from inside a directory that
+already contains `.opencode/` (or any opencode project root) writes a
+local-scope entry to `<project>/.opencode/opencode.json`; otherwise it
+writes a user-scope entry to `~/.config/opencode/config.json`. The
+install command prints the resolved scope and path.
 
 Make sure `conspectus` is on `PATH`, or set `CONSPECTUS_HOOK_BIN` to its
 absolute path before starting opencode. If the binary is missing the
 plugin silently no-ops (with a one-shot warning on stderr) and does not
 destabilize the opencode session.
 
-To uninstall, remove the plugin entry from
-`~/.config/opencode/config.json` and run `npm uninstall`.
+To uninstall, remove the plugin entry from whichever config file
+`opencode plugin` updated (local `<project>/.opencode/opencode.json`
+or user-scope `~/.config/opencode/config.json`) and run `npm
+uninstall`.
 
 ## Opt out
 
