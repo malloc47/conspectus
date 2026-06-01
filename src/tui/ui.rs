@@ -1321,6 +1321,57 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
 
+    // T8-029: when the graph explorer state is available, render
+    // the new mockup layout (Node + Upstream + Downstream sections
+    // with cursor highlight) on top. Falls back to the legacy
+    // section-grouped detail when the explorer state isn't ready
+    // yet (race during the first SetData).
+    if let Some(state) = app.explorer() {
+        let lines = render_explorer_lines(state, inner.width as usize, app.theme());
+        // Account for Paragraph wrap: any logical line whose
+        // displayed width exceeds the pane width consumes extra
+        // terminal rows. Without the wrap-aware estimate the
+        // Upstream / Downstream sections get clipped when the Node
+        // zone carries a long path or native id.
+        let wrapped_rows: usize = lines
+            .iter()
+            .map(|line| {
+                let width = line
+                    .spans
+                    .iter()
+                    .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                    .sum::<usize>()
+                    .max(1);
+                width.div_ceil(inner.width.max(1) as usize).max(1)
+            })
+            .sum();
+        let header_height = (wrapped_rows as u16)
+            .min(inner.height.saturating_sub(3))
+            .max(3);
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(header_height),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .split(inner);
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            split[0],
+        );
+        frame.render_widget(
+            Paragraph::new(preview_divider_line(
+                app,
+                split[1].width as usize,
+                app.theme(),
+            )),
+            split[1],
+        );
+        draw_explorer_preview(app, state, frame, split[2]);
+        return;
+    }
+
     let mux_runtime = mux_runtime_rows(app);
     let split = Layout::default()
         .direction(Direction::Vertical)
@@ -1357,6 +1408,418 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         split[1],
     );
     draw_detail_preview(app, detail, frame, split[2]);
+}
+
+/// Render the new graph-explorer Node + Upstream + Downstream
+/// layout for `state`. Cursor highlight uses REVERSED on the
+/// currently-selected flat row.
+fn render_explorer_lines(
+    state: &crate::tui::app::ExplorerState,
+    width: usize,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    use crate::tui::explorer::{Direction as ExpDir, ExplorerRow};
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let rows = state.rows();
+    let cursor = state.cursor;
+    let view = &state.view;
+
+    // Node section.
+    lines.push(chip_divider_line("Node", None, width, theme));
+    for (idx, field) in view.core_fields.iter().enumerate() {
+        let flat_index = rows
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
+        let highlight = flat_index == Some(cursor);
+        lines.push(render_node_field_line(field, highlight, theme));
+    }
+
+    // Helper to render one explorer's groups.
+    let render_explorer_section =
+        |lines: &mut Vec<Line<'static>>, direction: ExpDir| {
+            let explorer = match direction {
+                ExpDir::Upstream => &view.upstream,
+                ExpDir::Downstream => &view.downstream,
+            };
+            if explorer.groups.is_empty() {
+                return;
+            }
+            let summary = format!(
+                "{} groups · {} links{}{}",
+                explorer.groups.len(),
+                explorer.link_count(),
+                if explorer.ambiguous_groups() > 0 {
+                    format!(" · {} ⚠", explorer.ambiguous_groups())
+                } else {
+                    String::new()
+                },
+                if explorer.unresolved_groups() > 0 {
+                    format!(" · {} —", explorer.unresolved_groups())
+                } else {
+                    String::new()
+                },
+            );
+            lines.push(chip_divider_line(
+                direction.label(),
+                Some(&summary),
+                width,
+                theme,
+            ));
+            for (group_index, group) in explorer.groups.iter().enumerate() {
+                let is_single = group.is_single();
+                if is_single {
+                    if let Some(link) = group.links.first() {
+                        let flat = rows.iter().position(|row| matches!(
+                            row,
+                            ExplorerRow::Link { direction: d, group_index: g, link_index: 0 }
+                                if *d == direction && *g == group_index,
+                        ));
+                        let highlight = flat == Some(cursor);
+                        lines.extend(render_single_link_composite(
+                            group, link, highlight, theme,
+                        ));
+                    } else if let Some(row) = group.unresolved.first() {
+                        let flat = rows.iter().position(|r| matches!(
+                            r,
+                            ExplorerRow::Unresolved { direction: d, group_index: g, unresolved_index: 0 }
+                                if *d == direction && *g == group_index,
+                        ));
+                        let highlight = flat == Some(cursor);
+                        lines.extend(render_unresolved_composite(
+                            group, row, highlight, theme,
+                        ));
+                    }
+                } else {
+                    let header_flat = rows.iter().position(|row| matches!(
+                        row,
+                        ExplorerRow::GroupHeader { direction: d, group_index: g, .. }
+                            if *d == direction && *g == group_index,
+                    ));
+                    let highlight = header_flat == Some(cursor);
+                    let key = crate::tui::explorer::GroupKey::for_group(direction, group);
+                    let expanded = state.expanded_groups.contains(&key);
+                    lines.push(render_group_header_line(
+                        group, expanded, highlight, theme,
+                    ));
+                    if expanded {
+                        for (link_index, link) in group.links.iter().enumerate() {
+                            let flat = rows.iter().position(|r| matches!(
+                                r,
+                                ExplorerRow::Link { direction: d, group_index: g, link_index: l }
+                                    if *d == direction && *g == group_index && *l == link_index,
+                            ));
+                            let highlight = flat == Some(cursor);
+                            lines.push(render_group_child_line(link, highlight, theme));
+                        }
+                        for (unresolved_index, row) in group.unresolved.iter().enumerate() {
+                            let flat = rows.iter().position(|r| matches!(
+                                r,
+                                ExplorerRow::Unresolved { direction: d, group_index: g, unresolved_index: u }
+                                    if *d == direction && *g == group_index && *u == unresolved_index,
+                            ));
+                            let highlight = flat == Some(cursor);
+                            lines.push(render_unresolved_child_line(row, highlight, theme));
+                        }
+                    }
+                }
+            }
+        };
+
+    render_explorer_section(&mut lines, ExpDir::Upstream);
+    render_explorer_section(&mut lines, ExpDir::Downstream);
+    lines
+}
+
+fn render_node_field_line(
+    field: &crate::tui::explorer::CoreField,
+    highlight: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    let mut style = if field.placeholder {
+        Style::default().add_modifier(theme.placeholder)
+    } else {
+        Style::default()
+    };
+    if highlight {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    let label = Span::styled(
+        format!("  {:<14}", field.label),
+        Style::default().add_modifier(Modifier::BOLD),
+    );
+    let mut spans = vec![label, Span::styled(field.value.clone(), style)];
+    if field.long_value.is_some() {
+        spans.push(Span::styled(
+            "  (truncated · o)".to_string(),
+            Style::default().add_modifier(theme.placeholder),
+        ));
+    }
+    if let Some(annotation) = field.annotation {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            annotation.to_string(),
+            Style::default().fg(theme.warning),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn render_group_header_line(
+    group: &crate::tui::explorer::RelationshipGroup,
+    expanded: bool,
+    highlight: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    let glyph = if expanded { "▼" } else { "▶" };
+    let count = group.link_count();
+    let warn_suffix = if group.ambiguous { " ⚠" } else { "" };
+    let text = format!(
+        "  {glyph} {:<24} {:<18} {count}{warn_suffix}",
+        group.relation.snake_case(),
+        group.neighbor_kind,
+    );
+    let mut style = Style::default();
+    if highlight {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    let mut spans = vec![Span::styled(text, style)];
+    if group.ambiguous {
+        // Spacer; warn glyph already inline in the text.
+        spans.push(Span::styled(
+            String::new(),
+            Style::default().fg(theme.warning),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn render_group_child_line(
+    link: &crate::tui::explorer::RelationshipLink,
+    highlight: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    let star = if link.resolved_winner { "  ★" } else { "" };
+    let text = format!(
+        "      {}  ·  {} · {} · {}{star}",
+        link.neighbor_label,
+        link.provenance.snake_case(),
+        link.confidence.snake_case(),
+        link.state.snake_case(),
+    );
+    let mut style = Style::default();
+    if highlight {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    if link.resolved_winner {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    Line::from(Span::styled(text, style.fg(theme.link_id)))
+}
+
+fn render_single_link_composite(
+    group: &crate::tui::explorer::RelationshipGroup,
+    link: &crate::tui::explorer::RelationshipLink,
+    highlight: bool,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let star = if link.resolved_winner { "  ★" } else { "" };
+    let header_text = format!(
+        "    {:<24} {}{star}",
+        group.relation.snake_case(),
+        link.neighbor_label,
+    );
+    let mut header_style = Style::default().fg(theme.link_id);
+    if link.resolved_winner {
+        header_style = header_style.add_modifier(Modifier::BOLD);
+    }
+    if highlight {
+        header_style = header_style.add_modifier(Modifier::REVERSED);
+    }
+    let trailing = format!(
+        "        {} · {} · {}",
+        link.provenance.snake_case(),
+        link.confidence.snake_case(),
+        link.state.snake_case(),
+    );
+    let mut trailing_style = Style::default().add_modifier(theme.placeholder);
+    if highlight {
+        trailing_style = trailing_style.add_modifier(Modifier::REVERSED);
+    }
+    vec![
+        Line::from(Span::styled(header_text, header_style)),
+        Line::from(Span::styled(trailing, trailing_style)),
+    ]
+}
+
+fn render_unresolved_composite(
+    group: &crate::tui::explorer::RelationshipGroup,
+    row: &crate::tui::explorer::UnresolvedRow,
+    highlight: bool,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let header_text = format!(
+        "    {:<24} — unresolved (1 evidence)",
+        group.relation.snake_case(),
+    );
+    let mut header_style = Style::default().add_modifier(theme.placeholder);
+    if highlight {
+        header_style = header_style.add_modifier(Modifier::REVERSED);
+    }
+    let detail = unresolved_evidence_summary(row);
+    let trailing = format!("        {detail}");
+    let mut trailing_style = Style::default().add_modifier(theme.placeholder);
+    if highlight {
+        trailing_style = trailing_style.add_modifier(Modifier::REVERSED);
+    }
+    vec![
+        Line::from(Span::styled(header_text, header_style)),
+        Line::from(Span::styled(trailing, trailing_style)),
+    ]
+}
+
+fn render_unresolved_child_line(
+    row: &crate::tui::explorer::UnresolvedRow,
+    highlight: bool,
+    theme: &Theme,
+) -> Line<'static> {
+    let detail = unresolved_evidence_summary(row);
+    let text = format!("      — unresolved · {detail}");
+    let mut style = Style::default().add_modifier(theme.placeholder);
+    if highlight {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    Line::from(Span::styled(text, style))
+}
+
+fn unresolved_evidence_summary(row: &crate::tui::explorer::UnresolvedRow) -> String {
+    let mut parts = Vec::new();
+    if let Some(native) = &row.evidence.native_id {
+        parts.push(native.clone());
+    }
+    if let Some(harness) = &row.evidence.harness_key {
+        parts.push(harness.clone());
+    }
+    if let Some(path) = &row.evidence.path {
+        parts.push(path.clone());
+    }
+    if parts.is_empty() {
+        parts.push(row.node_type.clone());
+    }
+    format!(
+        "{}  ·  {} · {}",
+        parts.join(" · "),
+        row.provenance.snake_case(),
+        row.confidence.snake_case(),
+    )
+}
+
+/// Render the Preview zone body for the currently-selected explorer
+/// row. Mirrors `draw_detail_preview` but draws the neighbor's core
+/// summary plus an `edge` row instead of the live mux capture.
+fn draw_explorer_preview(
+    app: &App,
+    state: &crate::tui::app::ExplorerState,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    use crate::tui::explorer::RowPreview;
+    let Some(row) = state.selected_row() else {
+        // Fall back to the legacy preview body for rows that don't
+        // carry a neighbor (node fields land here).
+        if let Some(detail) = app.detail() {
+            draw_detail_preview(app, detail, frame, area);
+        }
+        return;
+    };
+    let Some(preview) = state.view.row_preview(&row) else {
+        // No neighbor for this row — defer to the legacy preview
+        // body (live mux capture, message preview, etc.).
+        if let Some(detail) = app.detail() {
+            draw_detail_preview(app, detail, frame, area);
+        }
+        return;
+    };
+    let theme = app.theme();
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    match preview {
+        RowPreview::Link {
+            neighbor_label,
+            fields,
+            provenance,
+            confidence,
+            state: link_state,
+            edge_state,
+        } => {
+            lines.push(Line::from(Span::styled(
+                format!("  neighbor    {neighbor_label}"),
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            for field in fields {
+                lines.push(render_node_field_line(field, false, theme));
+            }
+            let edge_value = format!(
+                "{} · {} · {}   ·   {}",
+                provenance.snake_case(),
+                confidence.snake_case(),
+                link_state.snake_case(),
+                edge_state.snake_case(),
+            );
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<14}", "edge"),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(edge_value, Style::default().fg(theme.warning)),
+            ]));
+        }
+        RowPreview::Unresolved {
+            node_type,
+            evidence,
+            provenance,
+            confidence,
+            state: link_state,
+        } => {
+            lines.push(Line::from(Span::styled(
+                format!("  unresolved  {node_type}"),
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            for (label, value) in [
+                ("harness_key", evidence.harness_key.as_deref()),
+                ("native_id", evidence.native_id.as_deref()),
+                ("state_scope", evidence.state_scope.as_deref()),
+                ("path", evidence.path.as_deref()),
+            ] {
+                if let Some(value) = value {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {:<14}", label),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(value.to_string()),
+                    ]));
+                }
+            }
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<14}", "edge"),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "{} · {} · {}",
+                        provenance.snake_case(),
+                        confidence.snake_case(),
+                        link_state.snake_case(),
+                    ),
+                    Style::default().add_modifier(theme.placeholder),
+                ),
+            ]));
+        }
+    }
+    let widget = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((app.preview_scroll(), 0));
+    frame.render_widget(widget, area);
 }
 
 fn empty_right_panel_text(app: &App) -> &'static str {
@@ -2267,59 +2730,67 @@ mod tests {
 
     #[test]
     fn detail_pane_renders_section_dividers_when_multiple_sections_present() {
-        // Phase 6 / ADR 0033: when the selected session carries
-        // mux/PR/lineage data, the detail pane separates them with
-        // right-anchored labeled dividers. seeded_app's session has
-        // no mux/pr/lineage, so the muxed_app fixture (which gives
-        // the session one mux candidate) is the right shape.
+        // T8-029: the section dividers in the new layout are
+        // Node / Upstream / Downstream / Preview. A session with at
+        // least one linked mux exercises the Node + Downstream +
+        // Preview path; the Upstream divider is omitted when there
+        // are no incoming edges per the mockup's "empty sections
+        // are suppressed entirely" rule.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
-            text.contains(" Mux "),
-            "expected Mux section divider label: {text}",
+            text.contains(" Node "),
+            "expected Node section divider label: {text}",
+        );
+        assert!(
+            text.contains(" Downstream "),
+            "expected Downstream section divider label: {text}",
+        );
+        assert!(
+            text.contains(" Preview "),
+            "expected Preview section divider label: {text}",
         );
     }
 
     #[test]
-    fn detail_pane_expands_linked_mux_details() {
+    fn detail_pane_shows_linked_to_mux_row_and_drills_into_mux() {
+        // T8-029 (locked decision 8): instead of expanding linked
+        // entity details in place, the explorer drills. Pressing
+        // Enter on the cursor while it sits on the `linked_to_mux`
+        // row should refocus the right pane on the mux node and
+        // push a breadcrumb hop. The Node-zone fields then mirror
+        // the mux summary (`backend · native_id`, etc.).
         let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let collapsed = buffer_to_string(&render_to_buffer(&app, area));
+        let initial = buffer_to_string(&render_to_buffer(&app, area));
         assert!(
-            collapsed.contains("mux       tmux:editor"),
-            "collapsed linked mux row missing: {collapsed}"
+            initial.contains("linked_to_mux"),
+            "session detail should expose the linked_to_mux relationship row: {initial}"
+        );
+        app.update(Msg::CycleFocus);
+        // Walk the cursor onto the link row, then activate.
+        use crate::tui::explorer::ExplorerRow;
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        app.update(Msg::ExplorerActivate);
+        let drilled = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            drilled.contains("backend · native_id"),
+            "after drilldown the Node zone should expose the mux fields: {drilled}"
         );
         assert!(
-            !collapsed.contains("backend   tmux"),
-            "linked mux details should start collapsed: {collapsed}"
-        );
-
-        app.update(Msg::ToggleLinkedDetails);
-        let expanded = buffer_to_string(&render_to_buffer(&app, area));
-        // Expanded rows mirror the top-level format (10-char bold
-        // label, natural-section colorization, dividers between
-        // sections) — only shifted right by a 2-cell indent.
-        assert!(
-            expanded.contains("  name      editor"),
-            "expanded mux name should mirror the standalone detail's \
-             10-char label, indented: {expanded}"
-        );
-        assert!(
-            expanded.contains("  backend   tmux"),
-            "expanded mux backend should mirror the standalone detail's \
-             10-char label, indented: {expanded}"
-        );
-        assert!(
-            expanded.contains("Session"),
-            "expanded mux should carry an indented Session divider \
-             above its attached-session rows: {expanded}"
-        );
-        assert!(
-            expanded.contains("  session   codex:abc"),
-            "expanded mux Session row should match the standalone \
-             detail's `session  <id>` line: {expanded}"
+            drilled.contains("◀"),
+            "breadcrumb back-hint should surface in the right-pane title: {drilled}"
         );
     }
 
@@ -2517,14 +2988,18 @@ mod tests {
         // section-content path, not from vertical clamping.
         let area = Rect::new(0, 0, 120, 40);
         let collapsed = buffer_to_string(&render_to_buffer(&app, area));
+        // T8-029: the linked session now surfaces upstream of the
+        // selected mux as an `linked_to_mux` relationship row (the
+        // session is the link's source, the mux its target). The
+        // header carries an `Upstream` chip divider; the row itself
+        // mentions the session by harness:key.
         assert!(
-            collapsed.contains("Session"),
-            "Session section divider should render: {collapsed}"
+            collapsed.contains(" Upstream "),
+            "Upstream section divider should render for the mux: {collapsed}"
         );
         assert!(
-            collapsed.contains("session   codex:abc"),
-            "collapsed Session section should show the session id row: \
-             {collapsed}"
+            collapsed.contains("codex:abc"),
+            "Upstream relationship row should expose the session id: {collapsed}"
         );
     }
 
@@ -2609,34 +3084,40 @@ mod tests {
             initial_selection_hint: None,
         });
         app.update(Msg::NavDown);
-        app.update(Msg::ToggleLinkedDetails);
+        app.update(Msg::CycleFocus);
+        // Walk the cursor onto the upstream `linked_to_mux` row,
+        // then activate to drill into the linked session.
+        use crate::tui::explorer::ExplorerRow;
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        app.update(Msg::ExplorerActivate);
 
         let area = Rect::new(0, 0, 120, 40);
-        let expanded = buffer_to_string(&render_to_buffer(&app, area));
-        // Same row format the standalone session detail would emit:
-        // 10-char bold label, value, with the linked session block
-        // indented by two cells under the mux's `session` row.
+        let drilled = buffer_to_string(&render_to_buffer(&app, area));
+        // T8-029: post-drill the right pane is now focused on the
+        // session itself. Its Node zone exposes the standalone
+        // session core fields (id, harness, alias, cwd, status).
         assert!(
-            expanded.contains("  id        abc"),
-            "expanded session id row should match the standalone \
-             session detail's row format (`id  <session_key>`): {expanded}"
+            drilled.contains("id"),
+            "drilled session Node zone should carry the id row: {drilled}"
         );
         assert!(
-            expanded.contains("  harness   codex"),
-            "expanded session harness row missing: {expanded}"
+            drilled.contains("codex"),
+            "drilled session Node zone should expose the harness: {drilled}"
         );
-        // Section dividers should appear inside the expansion just
-        // like they do in the standalone session detail. Indented +
-        // right-anchored Mux divider before the `mux` row.
-        let mux_divider_index = expanded
-            .find("Mux")
-            .expect("expanded session expansion should carry a Mux divider");
-        let mux_row_index = expanded
-            .find("  mux       tmux:editor")
-            .expect("expanded session should expose its linked mux as the same row a standalone session detail would");
+        // Breadcrumb back-hint surfaces in the right-pane title
+        // after a drilldown.
         assert!(
-            mux_divider_index < mux_row_index,
-            "Mux divider should precede the indented mux row: {expanded}"
+            drilled.contains("◀"),
+            "drilldown should add a breadcrumb back-hint to the title: {drilled}"
         );
     }
 

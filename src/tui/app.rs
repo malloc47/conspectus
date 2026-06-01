@@ -235,18 +235,18 @@ pub struct ExplorerState {
 
 impl ExplorerState {
     /// Build a fresh state for `view`, starting with the cursor on
-    /// the first relationship row (or the first row of any kind if
-    /// no relationships exist).
+    /// the first row. We default to the first row (a Node field)
+    /// rather than the first relationship so the Preview zone falls
+    /// back to the legacy live preview body — operators expect to
+    /// see the tmux pane capture, transcript tail, etc. without
+    /// having to scroll down into relationships first. Pressing
+    /// `j` walks into relationship rows, at which point the Preview
+    /// switches to neighbor + edge content.
     pub fn new(view: NodeView) -> Self {
         let expanded_groups = BTreeSet::new();
-        let rows = view.flat_rows(&expanded_groups);
-        let cursor = rows
-            .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. } | ExplorerRow::GroupHeader { .. }))
-            .unwrap_or(0);
         Self {
             view,
-            cursor,
+            cursor: 0,
             expanded_groups,
             breadcrumb: Vec::new(),
         }
@@ -1980,17 +1980,16 @@ mod tests {
     }
 
     #[test]
-    fn explorer_state_initializes_with_focus_on_a_relationship_row() {
+    fn explorer_state_initializes_with_cursor_on_the_first_node_field() {
+        // Defaulting to the first Node field keeps the Preview zone
+        // showing the live mux capture / message preview the
+        // operator expects to see by default. Pressing `j` walks
+        // down into the relationship rows, at which point the
+        // Preview switches to neighbor + edge content.
         let app = app_for_explorer();
         let state = app.explorer().expect("explorer state present");
         let row = state.selected_row().expect("selected row");
-        assert!(matches!(
-            row,
-            ExplorerRow::Link {
-                direction: Direction::Downstream,
-                ..
-            }
-        ));
+        assert!(matches!(row, ExplorerRow::NodeField { index: 0, .. }));
     }
 
     #[test]
@@ -2002,6 +2001,18 @@ mod tests {
             .view
             .focused
             .clone();
+        // Walk past the Node fields and onto the first link row,
+        // then activate to drill.
+        let target_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..target_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
         app.update(Msg::ExplorerActivate);
         let after = app.explorer().expect("explorer state after drill");
         // Focus now points at the mux.
@@ -2014,6 +2025,17 @@ mod tests {
     #[test]
     fn explorer_backspace_restores_previous_focused_node_and_cursor() {
         let mut app = app_for_explorer();
+        // Walk past the Node fields and onto the first link row.
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
         let before_state = app.explorer().expect("initial").clone();
         let before_focus = before_state.view.focused.clone();
         let before_cursor_key = before_state
@@ -2044,7 +2066,17 @@ mod tests {
     #[test]
     fn explorer_toggle_group_only_acts_on_headers() {
         let mut app = app_for_explorer();
-        // Sole row is a single-link composite — not a header.
+        // Walk past Node fields to the (single-link) composite row.
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
         app.update(Msg::ExplorerToggleGroup);
         assert!(app
             .status_message()
@@ -2071,6 +2103,16 @@ mod tests {
     fn explorer_state_resets_when_left_tree_selection_changes() {
         let mut app = app_for_explorer();
         let initial_focused = app.explorer().expect("state").view.focused.clone();
+        let link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
         app.update(Msg::ExplorerActivate); // drill into mux
         let drilled_focused = app.explorer().expect("state").view.focused.clone();
         assert_ne!(initial_focused, drilled_focused);
