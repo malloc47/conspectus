@@ -647,12 +647,31 @@ fn left_panel_title(app: &App) -> Line<'static> {
 /// Falls back to `detail` while no selection is resolved.
 fn right_panel_title(app: &App) -> Line<'static> {
     let label = right_panel_kind_label(app);
-    Line::from(vec![
+    let mut spans = vec![
         Span::raw(" "),
         focus_marker_span(app, Focus::Right),
         Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-    ])
+    ];
+    // T8-029 partial: surface drilldown depth + the most recent hop
+    // identity inline in the title so the operator can tell which
+    // node the explorer is showing without re-reading the body. The
+    // full breadcrumb stack lives in the Node zone (follow-up
+    // T8-029b); here we just hint that the right pane no longer
+    // mirrors the left tree's selection.
+    if let Some(state) = app.explorer()
+        && let Some(hop) = state.breadcrumb.last()
+    {
+        spans.push(Span::styled(
+            format!(" ◀ {} · ", hop.display),
+            Style::default().fg(app.theme().secondary_text),
+        ));
+        spans.push(Span::styled(
+            format!("depth {}", state.breadcrumb.len()),
+            Style::default().fg(app.theme().secondary_text),
+        ));
+    }
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 fn right_panel_kind_label(app: &App) -> &'static str {
@@ -1813,10 +1832,11 @@ fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
 fn contextual_status_text(app: &App) -> String {
     let focus_hint = match app.focus() {
         Focus::Left => "j/k move · Enter expand",
-        // When the right pane has focus, j/k are remapped to
-        // preview scroll (T8-011 behavioral) — surface that so
-        // operators know `Tab` changed what those keys do.
-        Focus::Right => "j/k scroll preview · Enter expand links",
+        // T8-029: with the right pane focused, j/k drive the graph
+        // explorer cursor (T8-028), Enter drills or expands a group
+        // depending on the cursor position, `e` toggles a group,
+        // and Backspace pops the breadcrumb stack.
+        Focus::Right => "j/k cursor · Enter drill/expand · e group · ⌫ back",
     };
     let action_hint = match resolve_attach_target(app) {
         Ok(target) => {
@@ -1830,7 +1850,7 @@ fn contextual_status_text(app: &App) -> String {
         }
         Err(reason) => attach_disabled_reason(&reason),
     };
-    format!("{action_hint} · e links · {focus_hint} · Tab focus · r refresh · q quit")
+    format!("{action_hint} · {focus_hint} · Tab focus · r refresh · q quit")
 }
 
 fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
@@ -3014,7 +3034,9 @@ mod tests {
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
-            text.contains("j/k scroll"),
+            // T8-029: right-focus hint now describes the explorer
+            // cursor instead of preview scroll.
+            text.contains("j/k cursor"),
             "right focus status hint missing: {text}"
         );
         assert!(
