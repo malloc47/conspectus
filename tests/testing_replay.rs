@@ -204,13 +204,14 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
         .iter()
         .filter(|link| {
             link.source_metadata.adapter == "hook_sidecar"
+                && link.relation == RelationKind::LinkedToMux
                 && matches!(link.state, LinkState::Active)
         })
         .collect();
     assert_eq!(
         active_hook_links.len(),
         1,
-        "exactly one active hook-sidecar link expected, got {:?}",
+        "exactly one active hook-sidecar LinkedToMux link expected, got {:?}",
         active_hook_links
     );
 
@@ -220,13 +221,14 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
         .iter()
         .filter(|link| {
             link.source_metadata.adapter == "hook_sidecar"
+                && link.relation == RelationKind::LinkedToMux
                 && matches!(link.state, LinkState::Overridden { .. })
         })
         .collect();
     assert_eq!(
         overridden_hook_links.len(),
         1,
-        "exactly one overridden hook-sidecar link expected, got {:?}",
+        "exactly one overridden hook-sidecar LinkedToMux link expected, got {:?}",
         overridden_hook_links
     );
 
