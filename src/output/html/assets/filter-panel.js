@@ -204,22 +204,33 @@
     });
     section.appendChild(select);
 
-    // Density chips — adjust spacing/repulsion across layouts.
+    // Density controls — chips (snap-to presets) + continuous
+    // slider for going past Spacious. Slider is the source of
+    // truth; chips just snap it to known values.
     if (
       typeof window !== "undefined" &&
       window.ConspectusGraphDriver &&
       window.ConspectusGraphDriver.AVAILABLE_DENSITIES &&
-      this.driver.setDensity
+      this.driver.setDensityScale
     ) {
       var densities = window.ConspectusGraphDriver.AVAILABLE_DENSITIES;
       var currentDensity = this.driver.density
         ? this.driver.density()
-        : "normal";
+        : "custom";
+      var currentScale =
+        this.driver.densityScale != null
+          ? this.driver.densityScale()
+          : 1.6;
+      var range =
+        window.ConspectusGraphDriver.DENSITY_RANGE ||
+        { min: 0.5, max: 8.0, step: 0.1 };
+
       var densityRow = el("div", "fp-chip-row fp-density-row");
       densities.forEach(function (opt) {
         var chip = el("button", "fp-chip", opt.label);
         if (opt.name === currentDensity) chip.classList.add("fp-chip-active");
-        chip.title = "Density: " + opt.label.toLowerCase();
+        chip.title =
+          "Density preset: " + opt.label.toLowerCase() + " (" + opt.scale + "x)";
         chip.addEventListener("click", function () {
           self.driver.setDensity(opt.name);
           self._render();
@@ -227,6 +238,31 @@
         densityRow.appendChild(chip);
       });
       section.appendChild(densityRow);
+
+      var sliderRow = el("div", "fp-density-slider-row");
+      var slider = document.createElement("input");
+      slider.type = "range";
+      slider.className = "fp-density-slider";
+      slider.min = String(range.min);
+      slider.max = String(range.max);
+      slider.step = String(range.step);
+      slider.value = String(currentScale);
+      slider.title = "Drag for fine control beyond the chip presets";
+      var readout = el("span", "fp-density-value", formatScale(currentScale));
+      // `input` fires continuously while dragging — re-running
+      // fcose on every input would be choppy, so debounce to
+      // `change` (which fires on mouseup) for the actual layout
+      // re-run; update the readout live for feedback.
+      slider.addEventListener("input", function () {
+        readout.textContent = formatScale(parseFloat(slider.value));
+      });
+      slider.addEventListener("change", function () {
+        self.driver.setDensityScale(parseFloat(slider.value));
+        self._render();
+      });
+      sliderRow.appendChild(slider);
+      sliderRow.appendChild(readout);
+      section.appendChild(sliderRow);
     }
 
     var rerun = el("button", "fp-rerun", "Re-run layout");
@@ -457,6 +493,12 @@
   }
 
   // ----- DOM helpers --------------------------------------------
+
+  /// Format a density scale for the slider readout. "1.6x".
+  function formatScale(n) {
+    if (!isFinite(n)) return "—";
+    return n.toFixed(1) + "x";
+  }
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);

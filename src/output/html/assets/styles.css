@@ -373,6 +373,26 @@ body {
   margin-bottom: 4px;
 }
 
+.fp-density-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 6px;
+}
+.fp-density-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+.fp-density-value {
+  font-size: 11px;
+  color: #455a64;
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+
 .fp-chip-row {
   display: flex;
   gap: 4px;

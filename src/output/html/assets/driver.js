@@ -102,7 +102,10 @@
     });
     this._payload = null;
     this._currentLayout = "fcose";
-    this._currentDensity = "normal"; // see DENSITY_PROFILES
+    // Continuous density scale. 1.0 = compact baseline; presets
+    // map to known values (see DENSITY_PRESETS). Anything off a
+    // preset is "custom".
+    this._densityScale = 1.6;
   }
 
   GraphDriver.prototype.load = function (payload) {
@@ -351,78 +354,105 @@
     this._runLayout();
   };
 
-  /// Density profiles for the layout solver. "compact" matches the
-  /// GV-003a tuning (tight clusters, lots of overlap on dense
-  /// graphs); "normal" is the default — ~50% more spacing, makes
-  /// edge labels legible without zooming; "spacious" is ~2.5x
-  /// spacing for big-graph readability or screenshots.
+  /// Density presets. The chip group in the chrome maps these to
+  /// numeric scale values, but the underlying control is the
+  /// continuous scale on the slider — chips are just snap-to
+  /// shortcuts. `Compact` = baseline (1.0); larger values spread
+  /// nodes apart by scaling the positional layout parameters
+  /// (idealEdgeLength, nodeRepulsion, nodeSeparation, …) and
+  /// reducing center-pull (gravity).
   GraphDriver.AVAILABLE_DENSITIES = [
-    { name: "compact", label: "Compact" },
-    { name: "normal", label: "Normal" },
-    { name: "spacious", label: "Spacious" },
+    { name: "compact", label: "Compact", scale: 1.0 },
+    { name: "normal", label: "Normal", scale: 1.6 },
+    { name: "spacious", label: "Spacious", scale: 2.5 },
   ];
 
-  GraphDriver.prototype.density = function () {
-    return this._currentDensity;
+  /// Allowed range for the slider. Going much past 8x produces
+  /// graphs so spread out that pan-to-find becomes harder than
+  /// the legibility win.
+  GraphDriver.DENSITY_RANGE = { min: 0.5, max: 8.0, step: 0.1 };
+
+  GraphDriver.prototype.densityScale = function () {
+    return this._densityScale;
   };
 
-  GraphDriver.prototype.setDensity = function (name) {
-    if (!DENSITY_PROFILES[name]) return;
-    this._currentDensity = name;
+  GraphDriver.prototype.setDensityScale = function (scale) {
+    var n = parseFloat(scale);
+    if (!isFinite(n)) return;
+    var r = GraphDriver.DENSITY_RANGE;
+    if (n < r.min) n = r.min;
+    if (n > r.max) n = r.max;
+    this._densityScale = n;
     this._runLayout();
+  };
+
+  /// Return the preset name whose scale matches the current
+  /// scale (within tolerance), or "custom" when the slider has
+  /// been dragged off any preset.
+  GraphDriver.prototype.density = function () {
+    var s = this._densityScale;
+    for (var i = 0; i < GraphDriver.AVAILABLE_DENSITIES.length; i++) {
+      var p = GraphDriver.AVAILABLE_DENSITIES[i];
+      if (Math.abs(p.scale - s) < 0.05) return p.name;
+    }
+    return "custom";
+  };
+
+  /// Snap to a named preset (chip click).
+  GraphDriver.prototype.setDensity = function (name) {
+    for (var i = 0; i < GraphDriver.AVAILABLE_DENSITIES.length; i++) {
+      var p = GraphDriver.AVAILABLE_DENSITIES[i];
+      if (p.name === name) {
+        this.setDensityScale(p.scale);
+        return;
+      }
+    }
   };
 
   // -- Internals ----------------------------------------------------
 
-  // Per-layout × per-density parameter tables. Keys here are read
-  // by _layoutOptions; adding a new layout means adding its row in
-  // each density profile.
-  var DENSITY_PROFILES = {
-    compact: {
-      fcose: {
-        idealEdgeLength: 90,
-        nodeRepulsion: 12000,
-        nodeSeparation: 90,
-        gravity: 0.4,
-        edgeElasticity: 0.35,
-      },
-      dagre: { nodeSep: 40, rankSep: 80, edgeSep: 12 },
-      cose: { idealEdgeLength: 90, nodeRepulsion: 10000 },
-      concentric: { minNodeSpacing: 30 },
+  // Per-layout baseline parameters (= scale 1.0 = "compact"
+  // density). Higher scale values multiply positional params and
+  // dampen gravity. Adding a new layout means adding its row
+  // here plus a case in _layoutOptions.
+  var BASE_PROFILES = {
+    fcose: {
+      idealEdgeLength: 90,
+      nodeRepulsion: 12000,
+      nodeSeparation: 90,
+      gravity: 0.4,
+      edgeElasticity: 0.35,
     },
-    normal: {
-      fcose: {
-        idealEdgeLength: 150,
-        nodeRepulsion: 20000,
-        nodeSeparation: 140,
-        gravity: 0.25,
-        edgeElasticity: 0.3,
-      },
-      dagre: { nodeSep: 70, rankSep: 130, edgeSep: 18 },
-      cose: { idealEdgeLength: 150, nodeRepulsion: 16000 },
-      concentric: { minNodeSpacing: 60 },
-    },
-    spacious: {
-      fcose: {
-        idealEdgeLength: 230,
-        nodeRepulsion: 30000,
-        nodeSeparation: 200,
-        gravity: 0.15,
-        edgeElasticity: 0.25,
-      },
-      dagre: { nodeSep: 110, rankSep: 200, edgeSep: 26 },
-      cose: { idealEdgeLength: 230, nodeRepulsion: 24000 },
-      concentric: { minNodeSpacing: 100 },
-    },
+    dagre: { nodeSep: 40, rankSep: 80, edgeSep: 12 },
+    cose: { idealEdgeLength: 90, nodeRepulsion: 10000 },
+    concentric: { minNodeSpacing: 30 },
   };
 
-  // Resolve a density profile for the given layout key. Falls
-  // back to "normal" then "compact" if the requested density or
-  // layout is missing — keeps things working when a new layout is
-  // added before its density rows.
-  function densityFor(layoutKey, densityName) {
-    var profile = DENSITY_PROFILES[densityName] || DENSITY_PROFILES.normal;
-    return profile[layoutKey] || DENSITY_PROFILES.normal[layoutKey] || {};
+  /// Apply the current density scale to a layout's baseline
+  /// parameters. Most positional params scale linearly with the
+  /// slider value; gravity decreases as 1/scale (more spread =
+  /// less center pull) with a floor; edgeElasticity decreases
+  /// more gently as 1/sqrt(scale).
+  function densityFor(layoutKey, scale) {
+    var base = BASE_PROFILES[layoutKey];
+    if (!base) return {};
+    var out = {};
+    Object.keys(base).forEach(function (k) {
+      var v = base[k];
+      if (k === "gravity") {
+        var g = v / scale;
+        if (g < 0.03) g = 0.03;
+        if (g > 0.6) g = 0.6;
+        out[k] = g;
+      } else if (k === "edgeElasticity") {
+        var e = v / Math.sqrt(scale);
+        if (e < 0.05) e = 0.05;
+        out[k] = e;
+      } else {
+        out[k] = v * scale;
+      }
+    });
+    return out;
   }
 
   GraphDriver.prototype._runLayout = function () {
@@ -443,7 +473,7 @@
   };
 
   GraphDriver.prototype._layoutOptions = function (name) {
-    var d = this._currentDensity || "normal";
+    var d = this._densityScale || 1.6;
     switch (name) {
       case "fcose": {
         if (!global.cytoscape("layout", "fcose")) return null;
