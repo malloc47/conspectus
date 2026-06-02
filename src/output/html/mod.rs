@@ -17,9 +17,7 @@ use std::fmt::Write;
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::model::{
-    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId, ResolvedRelationship,
-};
+use crate::model::{GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId};
 use crate::output::dot::Inclusion;
 
 #[derive(Copy, Clone, Debug)]
@@ -175,9 +173,35 @@ struct PayloadEdge {
     provenance: &'static str,
     confidence: &'static str,
     state: &'static str,
+    /// Discovery freshness: "fresh", "stale", or "unknown". Helps
+    /// the inspector contextualize cached / convention candidates.
+    freshness: &'static str,
     is_resolved: bool,
     is_unresolved_target: bool,
+    /// Adapter + evidence + adapter-specific fields. The `fields`
+    /// sub-object carries provider-specific keys (e.g. `match_kind`
+    /// for mux scoring, file paths, pid numbers) that the resolver
+    /// uses to break ties.
     metadata: serde_json::Value,
+    /// Detail when state is "ignored" or "overridden". `None` for
+    /// active edges.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_detail: Option<EdgeStateDetail>,
+    /// For resolver-preferred candidates only: the ids of every
+    /// other candidate the resolver evaluated for this resolution.
+    /// Sorted in candidate (deterministic) order. Empty when the
+    /// edge is unresolved or had no competitors.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    competing_link_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EdgeStateDetail {
+    kind: &'static str, // "ignored" or "overridden"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    overridden_by: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -205,19 +229,21 @@ fn build_payload(snapshot: &GraphSnapshot, opts: HtmlOptions) -> Payload {
         visible.insert(node.id(), node);
     }
 
-    // 2. Selected (resolver-preferred) link ids.
-    let selected: std::collections::BTreeSet<&str> = snapshot
-        .resolved_relationships
-        .iter()
-        .map(|r: &ResolvedRelationship| r.selected_link_id.as_str())
-        .collect();
+    // 2. Selected (resolver-preferred) link ids, with their
+    //    competing-candidate context so the inspector can show
+    //    winner vs. losers side by side.
+    let mut selected: std::collections::BTreeMap<&str, &[String]> =
+        std::collections::BTreeMap::new();
+    for r in &snapshot.resolved_relationships {
+        selected.insert(r.selected_link_id.as_str(), r.competing_link_ids.as_slice());
+    }
 
     // 3. Edges + unresolved stubs.
     let mut edges: Vec<PayloadEdge> = Vec::new();
     let mut stubs: Vec<PayloadStub> = Vec::new();
 
     for link in &snapshot.candidate_links {
-        let is_resolved = selected.contains(link.id.as_str());
+        let is_resolved = selected.contains_key(link.id.as_str());
 
         if !is_resolved && opts.candidates == Inclusion::Exclude {
             continue;
@@ -272,7 +298,17 @@ fn build_payload(snapshot: &GraphSnapshot, opts: HtmlOptions) -> Payload {
             .then(a.id.cmp(&b.id))
     });
 
-    // 5. Edges — sorted by (source, relation, target, -provenance_precedence, id).
+    // 5. Annotate resolver-preferred edges with their competing
+    //    candidate ids so the inspector can show winner vs. losers.
+    for edge in edges.iter_mut() {
+        if edge.is_resolved
+            && let Some(competing) = selected.get(edge.id.as_str())
+        {
+            edge.competing_link_ids = competing.to_vec();
+        }
+    }
+
+    // 6. Edges — sorted by (source, relation, target, -provenance_precedence, id).
     edges.sort_by(|a, b| {
         a.source
             .cmp(&b.source)
@@ -307,9 +343,12 @@ fn payload_edge(
         provenance: link.provenance.snake_case(),
         confidence: link.confidence.snake_case(),
         state: link_state_tag(&link.state),
+        freshness: link_freshness_tag(&link.freshness),
         is_resolved,
         is_unresolved_target,
         metadata: link_metadata(link),
+        state_detail: link_state_detail(&link.state),
+        competing_link_ids: Vec::new(), // filled later for resolver winners
     }
 }
 
@@ -321,10 +360,40 @@ fn link_state_tag(state: &LinkState) -> &'static str {
     }
 }
 
+fn link_state_detail(state: &LinkState) -> Option<EdgeStateDetail> {
+    match state {
+        LinkState::Active => None,
+        LinkState::Ignored { reason } => Some(EdgeStateDetail {
+            kind: "ignored",
+            reason: reason.clone(),
+            overridden_by: None,
+        }),
+        LinkState::Overridden { by, reason } => Some(EdgeStateDetail {
+            kind: "overridden",
+            reason: reason.clone(),
+            overridden_by: Some(by.clone()),
+        }),
+    }
+}
+
+fn link_freshness_tag(freshness: &crate::model::Freshness) -> &'static str {
+    use crate::model::Freshness;
+    match freshness {
+        Freshness::Fresh => "fresh",
+        Freshness::Stale => "stale",
+        Freshness::Unknown => "unknown",
+    }
+}
+
 fn link_metadata(link: &GraphLink) -> serde_json::Value {
+    // Carry adapter, brief evidence, and the adapter-specific
+    // fields. The fields submap is the "context that fed the
+    // resolver rules" — keys vary by adapter (mux match_kind,
+    // process pid, fd paths, …).
     serde_json::json!({
         "adapter": link.source_metadata.adapter,
         "evidence": link.source_metadata.evidence,
+        "fields": link.source_metadata.fields,
     })
 }
 

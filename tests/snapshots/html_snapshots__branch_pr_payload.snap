@@ -1,18 +1,20 @@
 ---
 source: tests/html_snapshots.rs
-assertion_line: 140
+assertion_line: 174
 expression: pretty
 ---
 {
   "edges": [
     {
       "confidence": "medium",
+      "freshness": "fresh",
       "id": "L_bpr_0",
       "is_resolved": true,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "discovered",
       "relation": "branch_has_forge_pr",
@@ -22,12 +24,14 @@ expression: pretty
     },
     {
       "confidence": "medium",
+      "freshness": "fresh",
       "id": "L_bpr_1",
       "is_resolved": true,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "discovered",
       "relation": "branch_has_forge_pr",
@@ -37,12 +41,14 @@ expression: pretty
     },
     {
       "confidence": "medium",
+      "freshness": "fresh",
       "id": "L_wcr_0",
       "is_resolved": true,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "discovered",
       "relation": "workspace_contains_repo",
@@ -52,12 +58,14 @@ expression: pretty
     },
     {
       "confidence": "medium",
+      "freshness": "fresh",
       "id": "L_wcr_1",
       "is_resolved": true,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "discovered",
       "relation": "workspace_contains_repo",

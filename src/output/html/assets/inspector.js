@@ -54,25 +54,42 @@
         attributes: s,
       };
     }, this);
-    // Per-node edge groupings.
+    // Per-node edge groupings, plus an id-keyed edge index for
+    // edge selection.
     this.outgoingBySource = {};
     this.incomingByTarget = {};
+    this.edgesById = {};
     p.edges.forEach(function (e) {
       (this.outgoingBySource[e.source] =
         this.outgoingBySource[e.source] || []).push(e);
       (this.incomingByTarget[e.target] =
         this.incomingByTarget[e.target] || []).push(e);
+      this.edgesById[e.id] = e;
     }, this);
   };
 
-  /// Show the inspector for a node id. Falls back to clear() if id
-  /// is null/undefined or unknown.
+  /// Show the inspector for a node OR edge id. Routes to the
+  /// appropriate renderer; falls back to clear() if the id is
+  /// unknown.
   Inspector.prototype.show = function (id) {
-    var node = id && this.nodesById[id];
-    if (!node) {
+    if (!id) {
       this.clear();
       return;
     }
+    var node = this.nodesById[id];
+    if (node) {
+      this._showNode(id, node);
+      return;
+    }
+    var edge = this.edgesById[id];
+    if (edge) {
+      this._showEdge(edge);
+      return;
+    }
+    this.clear();
+  };
+
+  Inspector.prototype._showNode = function (id, node) {
     this.host.innerHTML = "";
 
     this.host.appendChild(this._header(node));
@@ -93,10 +110,203 @@
     }
   };
 
+  /// Render the inspector for an edge. Shows the edge's full
+  /// metadata (provenance / confidence / state / freshness /
+  /// adapter / evidence / fields), its endpoints with click-to-
+  /// navigate, and — for resolver-preferred candidates — a side-
+  /// by-side row of every losing candidate the resolver evaluated
+  /// for the same (source, relation, target) so the operator can
+  /// see exactly why this edge won.
+  Inspector.prototype._showEdge = function (edge) {
+    this.host.innerHTML = "";
+    this.host.classList.add("ins-edge-mode");
+
+    // Header
+    var hdr = el("div", "ins-header ins-edge-header");
+    var col = el("div", "ins-header-col");
+    col.appendChild(elText("div", "ins-kind", "Edge"));
+    var title = edge.relation + (edge.is_resolved ? " ★" : "");
+    col.appendChild(elText("div", "ins-label", title));
+    col.appendChild(
+      elText(
+        "div",
+        "ins-sublabel",
+        edge.provenance + " · " + edge.confidence + " · " + edge.state
+      )
+    );
+    col.appendChild(elText("div", "ins-id", edge.id));
+    hdr.appendChild(col);
+    this.host.appendChild(hdr);
+
+    // Endpoints (clickable to navigate)
+    this.host.appendChild(this._edgeEndpointsSection(edge));
+
+    // State detail (ignored / overridden)
+    if (edge.state_detail) {
+      this.host.appendChild(this._edgeStateSection(edge));
+    }
+
+    // Mechanism (provenance / confidence / freshness / adapter /
+    // evidence / fields)
+    this.host.appendChild(this._edgeMechanismSection(edge));
+
+    // Competing candidates (only for resolver winners)
+    if (edge.is_resolved && edge.competing_link_ids && edge.competing_link_ids.length > 0) {
+      this.host.appendChild(this._edgeCompetingSection(edge));
+    }
+  };
+
   /// Restore the legend (default empty-selection state).
   Inspector.prototype.clear = function () {
     this.host.innerHTML = "";
+    this.host.classList.remove("ins-edge-mode");
     if (this.legendRenderer) this.legendRenderer(this.host);
+  };
+
+  // ---- edge subviews -------------------------------------------
+
+  Inspector.prototype._edgeEndpointsSection = function (edge) {
+    var section = el("div", "ins-edges");
+    section.appendChild(elText("div", "ins-section-title", "Endpoints"));
+    var self = this;
+    function row(label, otherId) {
+      var other = self.nodesById[otherId];
+      var otherLabel = other ? other.label_primary || otherId : otherId;
+      var otherKind = other ? other.kind : "unknown";
+      var r = el("div", "ins-edge-row ins-edge-clickable");
+      r.appendChild(el("span", "ins-swatch ins-swatch-small ins-swatch-" + otherKind));
+      var c = el("div", "ins-edge-col");
+      c.appendChild(elText("div", "ins-edge-relation", label));
+      c.appendChild(elText("div", "ins-edge-other", otherLabel));
+      r.appendChild(c);
+      r.addEventListener("click", function () {
+        self.driver.selectNode(otherId);
+        self.driver.focusNode(otherId);
+        self.show(otherId);
+      });
+      return r;
+    }
+    section.appendChild(row("Source", edge.source));
+    section.appendChild(row("Target", edge.target));
+    return section;
+  };
+
+  Inspector.prototype._edgeStateSection = function (edge) {
+    var sd = edge.state_detail;
+    var section = el("div", "ins-edges ins-state-" + sd.kind);
+    section.appendChild(
+      elText("div", "ins-section-title", sd.kind === "ignored" ? "Ignored" : "Overridden")
+    );
+    var rows = [];
+    if (sd.kind === "overridden" && sd.overridden_by) {
+      rows.push({ key: "by", value: sd.overridden_by });
+    }
+    if (sd.reason) {
+      rows.push({ key: "reason", value: sd.reason });
+    }
+    if (rows.length === 0) {
+      section.appendChild(elText("div", "ins-empty", "(no detail provided)"));
+      return section;
+    }
+    var tbl = el("div", "ins-kv");
+    rows.forEach(function (kv) {
+      tbl.appendChild(elText("div", "ins-k", kv.key));
+      tbl.appendChild(elText("div", "ins-v", kv.value));
+    });
+    section.appendChild(tbl);
+    return section;
+  };
+
+  Inspector.prototype._edgeMechanismSection = function (edge) {
+    var section = el("div", "ins-edges");
+    section.appendChild(elText("div", "ins-section-title", "Mechanism"));
+    var rows = [
+      { key: "provenance", value: edge.provenance },
+      { key: "confidence", value: edge.confidence },
+      { key: "freshness", value: edge.freshness },
+    ];
+    var md = edge.metadata || {};
+    if (md.adapter) rows.push({ key: "adapter", value: md.adapter });
+    if (md.evidence) rows.push({ key: "evidence", value: md.evidence });
+    var tbl = el("div", "ins-kv");
+    rows.forEach(function (kv) {
+      tbl.appendChild(elText("div", "ins-k", kv.key));
+      tbl.appendChild(elText("div", "ins-v", String(kv.value)));
+    });
+    section.appendChild(tbl);
+
+    // Adapter fields (arbitrary key/value)
+    var fields = (md && md.fields) || {};
+    var fieldKeys = Object.keys(fields).sort();
+    if (fieldKeys.length > 0) {
+      section.appendChild(elText("div", "ins-subsection-title", "Adapter fields"));
+      var ftbl = el("div", "ins-kv");
+      fieldKeys.forEach(function (k) {
+        ftbl.appendChild(elText("div", "ins-k", k));
+        ftbl.appendChild(
+          elText("div", "ins-v", typeof fields[k] === "object"
+            ? JSON.stringify(fields[k])
+            : String(fields[k]))
+        );
+      });
+      section.appendChild(ftbl);
+    }
+    return section;
+  };
+
+  Inspector.prototype._edgeCompetingSection = function (edge) {
+    var section = el("div", "ins-edges");
+    section.appendChild(
+      elText(
+        "div",
+        "ins-section-title",
+        "Lost candidates (" + edge.competing_link_ids.length + ")"
+      )
+    );
+    var note = el(
+      "div",
+      "ins-section-note",
+      "The resolver chose this edge over the candidates below. Compare provenance and adapter fields side by side."
+    );
+    section.appendChild(note);
+    var self = this;
+    edge.competing_link_ids.forEach(function (lostId) {
+      var lost = self.edgesById[lostId];
+      var row = el("div", "ins-edge-row ins-edge-clickable");
+      var col = el("div", "ins-edge-col");
+      if (lost) {
+        col.appendChild(
+          elText(
+            "div",
+            "ins-edge-other",
+            lost.provenance + " · " + lost.confidence + " · " + lost.state
+          )
+        );
+        var subText = "→ " + (self._labelFor(lost.target) || lost.target);
+        col.appendChild(elText("div", "ins-edge-meta", subText));
+      } else {
+        col.appendChild(elText("div", "ins-edge-other", lostId));
+        col.appendChild(
+          elText("div", "ins-edge-meta", "(not in current view — filtered out)")
+        );
+      }
+      row.appendChild(col);
+      if (lost) {
+        row.addEventListener("click", function () {
+          self.driver.selectNode(lostId);
+          self.show(lostId);
+        });
+      } else {
+        row.classList.remove("ins-edge-clickable");
+      }
+      section.appendChild(row);
+    });
+    return section;
+  };
+
+  Inspector.prototype._labelFor = function (id) {
+    var n = this.nodesById[id];
+    return n ? n.label_primary || id : id;
   };
 
   // ---- subviews ------------------------------------------------

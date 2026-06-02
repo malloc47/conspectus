@@ -1,18 +1,20 @@
 ---
 source: tests/html_snapshots.rs
-assertion_line: 140
+assertion_line: 174
 expression: pretty
 ---
 {
   "edges": [
     {
       "confidence": "high",
+      "freshness": "fresh",
       "id": "lineage-child-unresolved",
       "is_resolved": false,
       "is_unresolved_target": true,
       "metadata": {
         "adapter": "atelier",
-        "evidence": "fork harness entry"
+        "evidence": "fork harness entry",
+        "fields": {}
       },
       "provenance": "strong_discovered",
       "relation": "child_session",

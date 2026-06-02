@@ -1,48 +1,63 @@
 ---
 source: tests/html_snapshots.rs
-assertion_line: 167
+assertion_line: 174
 expression: pretty
 ---
 {
   "edges": [
     {
       "confidence": "medium",
+      "freshness": "unknown",
       "id": "mux-ignored",
       "is_resolved": false,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "convention",
       "relation": "linked_to_mux",
       "source": "agent_session:codex:/home/me/.codex:session-mixed",
       "state": "ignored",
+      "state_detail": {
+        "kind": "ignored",
+        "reason": "operator ignored convention match"
+      },
       "target": "mux_session:tmux:ignored"
     },
     {
       "confidence": "medium",
+      "freshness": "unknown",
       "id": "mux-overridden",
       "is_resolved": false,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "discovered",
       "relation": "linked_to_mux",
       "source": "agent_session:codex:/home/me/.codex:session-mixed",
       "state": "overridden",
+      "state_detail": {
+        "kind": "overridden",
+        "overridden_by": "mux-active",
+        "reason": "local declared link wins"
+      },
       "target": "mux_session:tmux:overridden"
     },
     {
       "confidence": "high",
+      "freshness": "unknown",
       "id": "mux-active",
       "is_resolved": true,
       "is_unresolved_target": false,
       "metadata": {
         "adapter": "",
-        "evidence": null
+        "evidence": null,
+        "fields": {}
       },
       "provenance": "strong_discovered",
       "relation": "linked_to_mux",
