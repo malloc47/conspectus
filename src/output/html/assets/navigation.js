@@ -126,9 +126,13 @@
     );
     this.viewState.updateNav(hidden);
 
-    // Center the canvas on the focused node if the driver supports
-    // it (no-op if the node was filtered out by some other layer).
-    if (this.driver.focusNode) this.driver.focusNode(this.state.focusId);
+    // Fit to the currently-visible neighborhood (focused node +
+    // everything within the current depth/direction restriction).
+    // Calling focusNode(id) here would zoom to just the single
+    // focused node, hiding the effect of depth/direction changes.
+    if (this.driver.fitVisible) {
+      this.driver.fitVisible(60);
+    }
   };
 
   ConspectusNavigation.prototype._render = function () {

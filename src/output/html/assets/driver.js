@@ -130,6 +130,19 @@
     this._cy.fit(undefined, 40);
   };
 
+  /// Fit the viewport to elements that are currently visible (not
+  /// hidden by `.filtered-out`'s display:none). Used by navigation
+  /// after a focus / depth / direction change so the user sees the
+  /// resulting neighborhood rather than the single focused node.
+  GraphDriver.prototype.fitVisible = function (padding) {
+    var visible = this._cy.elements(":visible");
+    if (visible.empty()) {
+      this._cy.fit(undefined, padding || 40);
+      return;
+    }
+    this._cy.fit(visible, padding || 40);
+  };
+
   GraphDriver.prototype.onNodeClick = function (handler) {
     var driver = this;
     this._cy.on("tap", "node", function (event) {
