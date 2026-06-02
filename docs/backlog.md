@@ -6881,7 +6881,7 @@ this phase migrates whichever ones exist when each story lands.
     node selection (inspector populated), Collapsed view preset,
     and free-text search all behave correctly.
 
-- [ ] `GV-003c` HTML navigation primitives.
+- [x] `GV-003c` HTML navigation primitives.
   - Scope: implement the navigation operations from ADR 0050
     decision 10 against the neutral payload (not Cytoscape's
     collection API): focus on a selected node, restrict the visible
@@ -6897,6 +6897,30 @@ this phase migrates whichever ones exist when each story lands.
     flip upstream-only and downstream-only, and verify the
     breadcrumb returns to the prior view on pop.
   - Blockers: `GV-003b`.
+  - Outcome: navigation chrome shipped as a top-of-canvas toolbar
+    that appears only when a node is focused. Toolbar carries a
+    breadcrumb trail (historic crumbs grey, current crumb blue,
+    click any to jump back), a Back button bound to Backspace, a
+    Clear focus button bound to Esc, a Depth chip group (1 / 2 /
+    3 / All) with [ and ] shortcuts, and a Direction chip group
+    (Both / Upstream / Downstream). Inspector header gains a
+    Focus button that pushes the selected node into the
+    navigation stack. Traversal runs over a new pure
+    `ConspectusNavHelpers` module (BFS over the neutral payload
+    with directional adjacency), never over Cytoscape's
+    collection API, per the ADR 0050 Coupling Boundary. Filter
+    panel and navigation compose through a new
+    `ConspectusViewState` coordinator that owns layered
+    hidden-id sets (filter + nav) and pushes their union to
+    `driver.setHidden`. Structural assertion confirms the new
+    `#conspectus-navbar` container and the three new module
+    globals (`ConspectusViewState`, `ConspectusNavHelpers`,
+    `ConspectusNavigation`) are present in the rendered
+    scaffold. 1133 tests pass; fmt and clippy clean. Manually
+    verified in headless chromium: focus a workspace at
+    depth 2 (subset shown correctly), drop to depth 1 (4-node
+    neighborhood), focus a second node through to push a
+    breadcrumb (atelier-demo › alpha, Back enabled).
 
 - [ ] `GV-003d` HTML layout improvements and selection.
   - Scope: the GV-003a default is fcose with hand-tuned options
