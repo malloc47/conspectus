@@ -2937,14 +2937,44 @@ transcript with a cursor at the last turn".
     first-cwd-wins, tool_use without input. 1165 nextest
     green.
 
-- [ ] `H-VIEWER-NATIVE-004` Codex parser.
-  - Scope: `src/viewer/parser/codex.rs` reads
-    `<state_root>/sessions/<YYYY>/<MM>/<DD>/rollout-*-<session_key>.jsonl`
-    into a `TranscriptDocument`. Honors the channel-marker filter
-    (`<turn_aborted>`, `<proposed_plan>`) from `H-PREVIEW-006`.
-  - Tests: fixture tests for the codex schema variants the
-    H-PREVIEW track already covers, plus an empty-session case.
-  - Blockers: `H-VIEWER-NATIVE-002`.
+- [x] `H-VIEWER-NATIVE-004` Codex parser.
+  - Outcome: `src/viewer/parser/codex.rs` walks
+    `<state_root>/sessions/<year>/<month>/<day>/` with std
+    `read_dir` (no `walkdir` dep) and locates the rollout file
+    by `-<session_key>.jsonl` suffix match. Translation rules
+    capture the dual-family record schema:
+    - Outer `type` = `session_meta` → fill `TranscriptMeta.cwd`
+      (first wins), no turn.
+    - Outer `type` = `turn_context` → cwd fallback only, no turn.
+    - Outer `type` = `response_item` → dispatch on
+      `payload.type`:
+      - `message` with role `user`/`assistant` → one `Message`
+        turn per `input_text`/`output_text` content block;
+        `developer` and `system` roles skipped as injected
+        instructions.
+      - `reasoning` → `Thinking` (joined `summary` + `content`
+        text blocks); skipped if only `encrypted_content`.
+      - `function_call`, `custom_tool_call`, `web_search_call`
+        → `ToolUse` with body `"<name>: <arguments>"`.
+      - `function_call_output`, `custom_tool_call_output` →
+        `ToolResult` with body = output.
+    - Outer `type` = `compacted` → `CompactionSummary` turn from
+      `payload.message`.
+    - Outer `type` = `event_msg` → skipped (engine telemetry:
+      token_count, task_started, exec_command_end echoes, etc.).
+    - Channel-marker filter per H-PREVIEW-006: message bodies
+      whose trimmed content is exactly `<turn_aborted>` or
+      `<proposed_plan>` are dropped as not-real-user-text.
+    - RFC3339 timestamps → `DateTime<Utc>`; malformed and blank
+      lines skip silently.
+  - 16 fixture tests cover supports() gating, file-not-found,
+    session_meta cwd capture, user/assistant message turns,
+    developer/system skip, function_call → ToolUse,
+    function_call_output → ToolResult, reasoning with summary
+    → Thinking, encrypted-only reasoning skip, event_msg skip,
+    `<turn_aborted>` and `<proposed_plan>` drops, compacted →
+    CompactionSummary, web_search_call → ToolUse, malformed
+    skip, nested-path file lookup. 1181 nextest green.
 
 - [ ] `H-VIEWER-NATIVE-005` OpenCode parser (SQLite-of-record).
   - Scope: `src/viewer/parser/opencode.rs` reads from `opencode.db`
