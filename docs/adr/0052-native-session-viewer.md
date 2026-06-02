@@ -84,9 +84,30 @@ similar). That intent shapes three rules:
    subtree. Allowed crate-internal exception: `crate::tui::theme`
    when it's clearly factored as a sub-crate-ready palette type
    (revisit if it grows project-specific assumptions).
-2. **Own its data model.** The viewer defines `TranscriptTurn`,
-   `TranscriptDocument`, and per-harness `SessionLocator` types
-   inside `src/viewer/model.rs`. The viewer does *not* take
+2. **Own its data model — as a normalized superset.** The viewer
+   defines `TranscriptTurn`, `TranscriptDocument`, and per-harness
+   `SessionLocator` types inside `src/viewer/model.rs`. These
+   types are deliberately the **normalized superset of every
+   supported harness's transcript format**, not a thin wrapper
+   over any one of them. Each per-harness parser is responsible
+   for translating its native records into this shape; the
+   renderer and any future cross-harness operations (export,
+   search, comparison, side-by-side diff) consume only the
+   normalized form. Consequences:
+   - Adding a harness extends the model only when no existing
+     variant fits — usually a new `TurnKind` variant or a new
+     optional metadata field, never a harness-specific branch in
+     the renderer.
+   - Harness-specific records that don't map cleanly are dropped
+     or flattened, with the rationale recorded in the per-harness
+     parser story (e.g. `H-VIEWER-NATIVE-003 .. 005`).
+   - Future viewers can be written against the model without
+     touching the parsers; future parsers can be written against
+     the model without touching the renderer.
+
+   This mirrors the conspectus-graph posture (ADR 0001 / ADR 0007
+   and `CLAUDE.md`): provider-neutral core, provider-specific
+   reality only at the edges. The viewer does *not* take
    `AgentSessionNode`, `NodeId`, or any conspectus-graph type as
    input. The conspectus TUI's adapter (`src/tui/viewer_bridge.rs`,
    say) translates from conspectus's graph types into the viewer's

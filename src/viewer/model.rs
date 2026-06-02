@@ -1,10 +1,18 @@
 //! Viewer data model — pure types, no I/O.
 //!
+//! Per ADR 0052 §"Own its data model — as a normalized superset",
+//! the types here are the **normalized superset of every supported
+//! harness's transcript format**. Parsers translate native records
+//! into this shape; the renderer and future cross-harness
+//! operations (export, search, diff) consume only the normalized
+//! form. Provider-specific reality lives in the per-harness
+//! parsers and dies before reaching the widget.
+//!
 //! The viewer takes [`SessionLocator`] as its input and produces
 //! [`TranscriptDocument`] for rendering. Conspectus-graph types
 //! (`AgentSessionId`, `AgentSessionNode`, etc.) do NOT appear here;
 //! the conversion happens in `crate::tui::viewer_bridge` so the
-//! extracted crate stays graph-agnostic (ADR 0052).
+//! extracted crate stays graph-agnostic.
 //!
 //! Every public type derives `Serialize` + `Deserialize`. The
 //! extracted-crate `bin` will accept a `SessionLocator` from clap;
