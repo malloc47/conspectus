@@ -356,7 +356,17 @@
     var name = this._currentLayout || "fcose";
     var opts = this._layoutOptions(name);
     if (!opts) opts = this._layoutOptions("cose");
-    this._cy.layout(opts).run();
+    // Scope the layout to currently-visible elements so re-running
+    // after a filter change actually re-flows around the remaining
+    // graph. Hidden (display:none) elements keep their old positions
+    // — they're invisible to both the user and the layout solver.
+    // On initial load nothing is filtered yet, so this is a no-op.
+    var visible = this._cy.elements(":visible");
+    if (visible.empty()) {
+      this._cy.layout(opts).run();
+      return;
+    }
+    visible.layout(opts).run();
   };
 
   GraphDriver.prototype._layoutOptions = function (name) {
