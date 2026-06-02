@@ -1,7 +1,8 @@
 use conspectus::model::{
-    AgentSessionId, AgentSessionNode, Confidence, ForkId, ForkNode, Freshness, GraphLink,
-    GraphNode, GraphSnapshot, LinkEndpoint, MuxSessionId, MuxSessionNode, NodeId, Provenance,
-    RelationKind, RepoId, RepoNode, SourceMetadata, UnresolvedEndpoint,
+    AgentSessionId, AgentSessionNode, BranchId, BranchNode, Confidence, ForgePrId, ForgePrNode,
+    ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
+    MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode,
+    SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
 };
 use conspectus::resolve;
 
@@ -180,6 +181,180 @@ pub fn mux_candidates_graph() -> GraphSnapshot {
             cached,
         ],
         candidate_links: vec![cached_link, convention_link, strong_link],
+        ..GraphSnapshot::empty()
+    })
+}
+
+pub fn fork_ancestry_graph() -> GraphSnapshot {
+    // Four-fork ParentFork chain a -> b -> c -> d (child cites
+    // parent, per the v_fork_ancestry convention used in
+    // tests/query_regression.rs).
+    let mut snap = GraphSnapshot::empty();
+    for key in ["a", "b", "c", "d"] {
+        snap.nodes.push(GraphNode::Fork(ForkNode {
+            id: ForkId::new(format!("atelier/{key}")),
+            provider: "atelier".to_string(),
+            provider_source_key: key.to_string(),
+            name: Some(key.to_string()),
+            scope: None,
+            capabilities: vec![],
+        }));
+    }
+    for (child, parent, id) in [("b", "a", "L_ba"), ("c", "b", "L_cb"), ("d", "c", "L_dc")] {
+        snap.candidate_links.push(GraphLink {
+            id: id.to_string(),
+            source: NodeId::Fork(ForkId::new(format!("atelier/{child}"))),
+            target: LinkEndpoint::Node {
+                id: NodeId::Fork(ForkId::new(format!("atelier/{parent}"))),
+            },
+            relation: RelationKind::ParentFork,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+    }
+    resolved(snap)
+}
+
+pub fn branch_pr_graph() -> GraphSnapshot {
+    // One workspace, two member repos, one branch per repo, one PR
+    // per branch. Exercises workspace_contains_repo, belongs_to_repo,
+    // and branch_has_forge_pr together.
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes.push(GraphNode::Workspace(WorkspaceNode {
+        id: WorkspaceId::new("/w"),
+        root: "/w".to_string(),
+        provider: Some("atelier".to_string()),
+        name: Some("ws".to_string()),
+    }));
+    let workspace_id = NodeId::Workspace(WorkspaceId::new("/w"));
+
+    for (idx, (repo_common, refname, pr_number)) in [
+        ("/repo1/.git", "refs/heads/main", 1u64),
+        ("/repo2/.git", "refs/heads/feature", 2u64),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let repo_id = RepoId::new(repo_common);
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+        let branch_id = BranchId::new(repo_id.clone(), refname);
+        snap.nodes.push(GraphNode::Branch(BranchNode {
+            id: branch_id.clone(),
+            refname: refname.to_string(),
+            current_commit: None,
+            upstream: None,
+        }));
+        let pr = ForgePrNode {
+            id: ForgePrId::new("github", "github.com", "owner", "repo", pr_number),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            number: pr_number,
+            state: Some("open".to_string()),
+            url: Some(format!("https://github.com/owner/repo/pull/{pr_number}")),
+            updated_epoch: Some(1_700_000_000 + (pr_number as i64) * 60),
+            is_draft: false,
+        };
+        snap.nodes.push(GraphNode::ForgePr(pr.clone()));
+
+        snap.candidate_links.push(GraphLink {
+            id: format!("L_wcr_{idx}"),
+            source: workspace_id.clone(),
+            target: LinkEndpoint::Node {
+                id: NodeId::Repo(repo_id),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        snap.candidate_links.push(GraphLink {
+            id: format!("L_bpr_{idx}"),
+            source: NodeId::ForgePr(pr.id.clone()),
+            target: LinkEndpoint::Node {
+                id: NodeId::Branch(branch_id),
+            },
+            relation: RelationKind::BranchHasForgePr,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+    }
+    resolved(snap)
+}
+
+pub fn ignored_and_overridden_graph() -> GraphSnapshot {
+    // One agent session with three mux candidates: one active and
+    // resolver-preferred, one explicitly ignored, one overridden by
+    // a declared link. Exercises every LinkState variant in the
+    // payload so the inspector/filter chrome has real data to
+    // render.
+    let source = NodeId::AgentSession(agent_id("session-mixed"));
+    let preferred = mux_node("tmux:preferred", "preferred");
+    let ignored_target = mux_node("tmux:ignored", "ignored");
+    let overridden_target = mux_node("tmux:overridden", "overridden");
+
+    let mut active = GraphLink::new(
+        "mux-active",
+        source.clone(),
+        LinkEndpoint::Node { id: preferred.id() },
+        RelationKind::LinkedToMux,
+        Provenance::StrongDiscovered,
+    );
+    active.confidence = Confidence::High;
+
+    let mut ignored = GraphLink::new(
+        "mux-ignored",
+        source.clone(),
+        LinkEndpoint::Node {
+            id: ignored_target.id(),
+        },
+        RelationKind::LinkedToMux,
+        Provenance::Convention,
+    );
+    ignored.state = LinkState::Ignored {
+        reason: Some("operator ignored convention match".to_string()),
+    };
+
+    let mut overridden = GraphLink::new(
+        "mux-overridden",
+        source.clone(),
+        LinkEndpoint::Node {
+            id: overridden_target.id(),
+        },
+        RelationKind::LinkedToMux,
+        Provenance::Discovered,
+    );
+    overridden.state = LinkState::Overridden {
+        by: "mux-active".to_string(),
+        reason: Some("local declared link wins".to_string()),
+    };
+
+    resolved(GraphSnapshot {
+        nodes: vec![
+            GraphNode::AgentSession(AgentSessionNode {
+                id: agent_id("session-mixed"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/workspace".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }),
+            preferred,
+            ignored_target,
+            overridden_target,
+        ],
+        candidate_links: vec![active, ignored, overridden],
         ..GraphSnapshot::empty()
     })
 }

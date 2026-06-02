@@ -1,0 +1,33 @@
+---
+source: tests/dot_snapshots.rs
+assertion_line: 127
+expression: rendered
+---
+digraph conspectus {
+  graph [rankdir=LR, fontname="Helvetica"];
+  node [fontname="Helvetica", style="filled,rounded"];
+  edge [fontname="Helvetica", fontsize=10];
+  subgraph cluster_0_workspace {
+    label="Workspaces"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_workspace__w" [label="ws\n/w", shape=tab, fillcolor="#b3e5fc"];
+  }
+  subgraph cluster_1_repo {
+    label="Repos"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_repo__repo1__git" [label=".git\n/repo1/.git", shape=folder, fillcolor="#c8e6c9"];
+    "n_repo__repo2__git" [label=".git\n/repo2/.git", shape=folder, fillcolor="#c8e6c9"];
+  }
+  subgraph cluster_3_branch {
+    label="Branches"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_branch_repo__repo1__git_refs_heads_main" [label="main\n/repo1/.git@refs/heads/main", shape=cds, fillcolor="#fff9c4"];
+    "n_branch_repo__repo2__git_refs_heads_feature" [label="feature\n/repo2/.git@refs/heads/feature", shape=cds, fillcolor="#fff9c4"];
+  }
+  subgraph cluster_8_forge_pr {
+    label="Forge PRs"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_forge_pr_github_github_com_owner_repo_1" [label="#1 owner/repo\nopen", shape=component, fillcolor="#ffccbc"];
+    "n_forge_pr_github_github_com_owner_repo_2" [label="#2 owner/repo\nopen", shape=component, fillcolor="#ffccbc"];
+  }
+  "n_forge_pr_github_github_com_owner_repo_1" -> "n_branch_repo__repo1__git_refs_heads_main" [label="branch_has_forge_pr ★\n[discovered · medium]", color="#424242", penwidth=1.0, style="solid", arrowhead=vee];
+  "n_forge_pr_github_github_com_owner_repo_2" -> "n_branch_repo__repo2__git_refs_heads_feature" [label="branch_has_forge_pr ★\n[discovered · medium]", color="#424242", penwidth=1.0, style="solid", arrowhead=vee];
+  "n_workspace__w" -> "n_repo__repo1__git" [label="workspace_contains_repo ★\n[discovered · medium]", color="#424242", penwidth=1.0, style="solid", arrowhead=diamond];
+  "n_workspace__w" -> "n_repo__repo2__git" [label="workspace_contains_repo ★\n[discovered · medium]", color="#424242", penwidth=1.0, style="solid", arrowhead=diamond];
+}

@@ -1,0 +1,10 @@
+---
+source: tests/dot_snapshots.rs
+assertion_line: 127
+expression: rendered
+---
+digraph conspectus {
+  graph [rankdir=LR, fontname="Helvetica"];
+  node [fontname="Helvetica", style="filled,rounded"];
+  edge [fontname="Helvetica", fontsize=10];
+}

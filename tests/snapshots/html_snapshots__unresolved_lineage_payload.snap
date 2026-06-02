@@ -1,0 +1,57 @@
+---
+source: tests/html_snapshots.rs
+assertion_line: 140
+expression: pretty
+---
+{
+  "edges": [
+    {
+      "confidence": "high",
+      "id": "lineage-child-unresolved",
+      "is_resolved": false,
+      "is_unresolved_target": true,
+      "metadata": {
+        "adapter": "atelier",
+        "evidence": "fork harness entry"
+      },
+      "provenance": "strong_discovered",
+      "relation": "child_session",
+      "source": "fork:atelier/fork-alpha",
+      "state": "active",
+      "target": "u_lineage-child-unresolved"
+    }
+  ],
+  "nodes": [
+    {
+      "attributes": {
+        "capabilities": [
+          "session"
+        ],
+        "id": {
+          "provider_source_key": "atelier/fork-alpha"
+        },
+        "name": "alpha",
+        "provider": "atelier",
+        "provider_source_key": "fork-alpha",
+        "scope": "workspace",
+        "type": "fork"
+      },
+      "id": "fork:atelier/fork-alpha",
+      "kind": "fork",
+      "label_primary": "alpha",
+      "label_secondary": "fork · atelier"
+    }
+  ],
+  "unresolved_stubs": [
+    {
+      "edge_id": "lineage-child-unresolved",
+      "harness_key": "codex",
+      "id": "u_lineage-child-unresolved",
+      "native_id": "pending-child",
+      "node_type": "agent_session",
+      "path": "/workspace/fork-alpha",
+      "state_scope": "/home/me/.codex"
+    }
+  ],
+  "version": 1
+}

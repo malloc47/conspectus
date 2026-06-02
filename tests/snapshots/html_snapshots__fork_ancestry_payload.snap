@@ -1,0 +1,118 @@
+---
+source: tests/html_snapshots.rs
+assertion_line: 140
+expression: pretty
+---
+{
+  "edges": [
+    {
+      "confidence": "high",
+      "id": "L_ba",
+      "is_resolved": true,
+      "is_unresolved_target": false,
+      "metadata": {
+        "adapter": "",
+        "evidence": null
+      },
+      "provenance": "strong_discovered",
+      "relation": "parent_fork",
+      "source": "fork:atelier/b",
+      "state": "active",
+      "target": "fork:atelier/a"
+    },
+    {
+      "confidence": "high",
+      "id": "L_cb",
+      "is_resolved": true,
+      "is_unresolved_target": false,
+      "metadata": {
+        "adapter": "",
+        "evidence": null
+      },
+      "provenance": "strong_discovered",
+      "relation": "parent_fork",
+      "source": "fork:atelier/c",
+      "state": "active",
+      "target": "fork:atelier/b"
+    },
+    {
+      "confidence": "high",
+      "id": "L_dc",
+      "is_resolved": true,
+      "is_unresolved_target": false,
+      "metadata": {
+        "adapter": "",
+        "evidence": null
+      },
+      "provenance": "strong_discovered",
+      "relation": "parent_fork",
+      "source": "fork:atelier/d",
+      "state": "active",
+      "target": "fork:atelier/c"
+    }
+  ],
+  "nodes": [
+    {
+      "attributes": {
+        "id": {
+          "provider_source_key": "atelier/a"
+        },
+        "name": "a",
+        "provider": "atelier",
+        "provider_source_key": "a",
+        "type": "fork"
+      },
+      "id": "fork:atelier/a",
+      "kind": "fork",
+      "label_primary": "a",
+      "label_secondary": "fork · atelier"
+    },
+    {
+      "attributes": {
+        "id": {
+          "provider_source_key": "atelier/b"
+        },
+        "name": "b",
+        "provider": "atelier",
+        "provider_source_key": "b",
+        "type": "fork"
+      },
+      "id": "fork:atelier/b",
+      "kind": "fork",
+      "label_primary": "b",
+      "label_secondary": "fork · atelier"
+    },
+    {
+      "attributes": {
+        "id": {
+          "provider_source_key": "atelier/c"
+        },
+        "name": "c",
+        "provider": "atelier",
+        "provider_source_key": "c",
+        "type": "fork"
+      },
+      "id": "fork:atelier/c",
+      "kind": "fork",
+      "label_primary": "c",
+      "label_secondary": "fork · atelier"
+    },
+    {
+      "attributes": {
+        "id": {
+          "provider_source_key": "atelier/d"
+        },
+        "name": "d",
+        "provider": "atelier",
+        "provider_source_key": "d",
+        "type": "fork"
+      },
+      "id": "fork:atelier/d",
+      "kind": "fork",
+      "label_primary": "d",
+      "label_secondary": "fork · atelier"
+    }
+  ],
+  "unresolved_stubs": [],
+  "version": 1
+}

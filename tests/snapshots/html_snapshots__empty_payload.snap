@@ -1,0 +1,11 @@
+---
+source: tests/html_snapshots.rs
+assertion_line: 141
+expression: pretty
+---
+{
+  "edges": [],
+  "nodes": [],
+  "unresolved_stubs": [],
+  "version": 1
+}

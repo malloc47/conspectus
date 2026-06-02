@@ -1,0 +1,8 @@
+# Vendored third-party assets are stored verbatim (see
+# src/output/html/assets/VERSIONS and NOTICE). Their internal
+# whitespace and line-ending choices are not ours to enforce; we
+# treat them as opaque blobs for diff-check and linguist purposes.
+src/output/html/assets/cytoscape.min.js  -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol
+src/output/html/assets/cose-base.js       -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol
+src/output/html/assets/cytoscape-fcose.js -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol
+src/output/html/assets/layout-base.js     -text linguist-vendored whitespace=-trailing-space,-space-before-tab,-tab-in-indent,-blank-at-eof,-blank-at-eol

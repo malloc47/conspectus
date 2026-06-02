@@ -149,13 +149,41 @@ enum DevScenarioCommand {
 #[derive(Debug, Args)]
 struct DevScenarioGraphArgs {
     name: String,
+    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+    format: OutputFormat,
+    #[arg(long, value_enum, default_value_t = InclusionFlag::Include)]
+    candidates: InclusionFlag,
+    #[arg(long = "diagnostic-nodes", value_enum, default_value_t = InclusionFlag::Include)]
+    diagnostic_nodes: InclusionFlag,
 }
 
 #[cfg(debug_assertions)]
 impl DevScenarioGraphArgs {
     fn run(self) -> Result<()> {
         let world = conspectus::dev_scenarios::materialize(&self.name)?;
-        println!("{}", world.render_graph_json()?);
+        match self.format {
+            OutputFormat::Json => println!("{}", world.render_graph_json()?),
+            OutputFormat::Dot => {
+                let opts = conspectus::output::DotOptions {
+                    candidates: self.candidates.into(),
+                    diagnostic_nodes: self.diagnostic_nodes.into(),
+                };
+                println!(
+                    "{}",
+                    conspectus::output::render_graph_dot(&world.snapshot()?, opts)?
+                );
+            }
+            OutputFormat::Html => {
+                let opts = conspectus::output::HtmlOptions {
+                    candidates: self.candidates.into(),
+                    diagnostic_nodes: self.diagnostic_nodes.into(),
+                };
+                print!(
+                    "{}",
+                    conspectus::output::render_graph_html(&world.snapshot()?, opts)?
+                );
+            }
+        }
         Ok(())
     }
 }
@@ -1107,6 +1135,15 @@ struct GraphArgs {
     format: OutputFormat,
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
+    /// DOT/HTML only: include or exclude non-resolved candidate
+    /// links (and their unresolved-endpoint stubs). Defaults to
+    /// include (ADR 0050).
+    #[arg(long, value_enum, default_value_t = InclusionFlag::Include)]
+    candidates: InclusionFlag,
+    /// DOT/HTML only: include or exclude RuntimeProcess diagnostic
+    /// nodes. Defaults to include (ADR 0050).
+    #[arg(long = "diagnostic-nodes", value_enum, default_value_t = InclusionFlag::Include)]
+    diagnostic_nodes: InclusionFlag,
 }
 
 impl Default for GraphArgs {
@@ -1114,21 +1151,41 @@ impl Default for GraphArgs {
         Self {
             format: OutputFormat::Json,
             scan_roots: Vec::new(),
+            candidates: InclusionFlag::Include,
+            diagnostic_nodes: InclusionFlag::Include,
         }
     }
 }
 
 impl GraphArgs {
     fn run(self) -> Result<()> {
+        let snapshot = if self.scan_roots.is_empty() {
+            conspectus::discovery::discover_local_at_roots([std::env::current_dir()?])?
+        } else {
+            conspectus::discovery::discover_local_at_roots(self.scan_roots)?
+        };
+        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+
         match self.format {
             OutputFormat::Json => {
-                let snapshot = if self.scan_roots.is_empty() {
-                    conspectus::discovery::discover_local_at_roots([std::env::current_dir()?])?
-                } else {
-                    conspectus::discovery::discover_local_at_roots(self.scan_roots)?
-                };
-                let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
                 println!("{}", conspectus::output::render_graph_json(&snapshot)?);
+            }
+            OutputFormat::Dot => {
+                let opts = conspectus::output::DotOptions {
+                    candidates: self.candidates.into(),
+                    diagnostic_nodes: self.diagnostic_nodes.into(),
+                };
+                println!("{}", conspectus::output::render_graph_dot(&snapshot, opts)?);
+            }
+            OutputFormat::Html => {
+                let opts = conspectus::output::HtmlOptions {
+                    candidates: self.candidates.into(),
+                    diagnostic_nodes: self.diagnostic_nodes.into(),
+                };
+                print!(
+                    "{}",
+                    conspectus::output::render_graph_html(&snapshot, opts)?
+                );
             }
         }
 
@@ -3218,6 +3275,23 @@ fn format_alias_endpoint(endpoint: &DeclaredEndpoint) -> String {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 enum OutputFormat {
     Json,
+    Dot,
+    Html,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum InclusionFlag {
+    Include,
+    Exclude,
+}
+
+impl From<InclusionFlag> for conspectus::output::Inclusion {
+    fn from(flag: InclusionFlag) -> Self {
+        match flag {
+            InclusionFlag::Include => Self::Include,
+            InclusionFlag::Exclude => Self::Exclude,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]

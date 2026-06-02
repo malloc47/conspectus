@@ -1,0 +1,20 @@
+---
+source: tests/dot_snapshots.rs
+assertion_line: 127
+expression: rendered
+---
+digraph conspectus {
+  graph [rankdir=LR, fontname="Helvetica"];
+  node [fontname="Helvetica", style="filled,rounded"];
+  edge [fontname="Helvetica", fontsize=10];
+  subgraph cluster_4_fork {
+    label="Forks"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_fork_atelier_a" [label="atelier: a\natelier/a", shape=octagon, fillcolor="#ffe0b2"];
+    "n_fork_atelier_b" [label="atelier: b\natelier/b", shape=octagon, fillcolor="#ffe0b2"];
+    "n_fork_atelier_c" [label="atelier: c\natelier/c", shape=octagon, fillcolor="#ffe0b2"];
+    "n_fork_atelier_d" [label="atelier: d\natelier/d", shape=octagon, fillcolor="#ffe0b2"];
+  }
+  "n_fork_atelier_b" -> "n_fork_atelier_a" [label="parent_fork ★\n[strong_discovered · high]", color="#212121", penwidth=1.6, style="solid", arrowhead=normal];
+  "n_fork_atelier_c" -> "n_fork_atelier_b" [label="parent_fork ★\n[strong_discovered · high]", color="#212121", penwidth=1.6, style="solid", arrowhead=normal];
+  "n_fork_atelier_d" -> "n_fork_atelier_c" [label="parent_fork ★\n[strong_discovered · high]", color="#212121", penwidth=1.6, style="solid", arrowhead=normal];
+}

@@ -1,0 +1,35 @@
+Vendored JavaScript assets for `conspectus graph --format html` (ADR 0050).
+
+These files are inlined into the generated HTML at build time via
+`include_str!`. Updating any of them is a deliberate operator
+action: refresh the file, update this VERSIONS file, and call out
+the bump in the project changelog or commit message.
+
+  cytoscape@3.33.4
+    https://unpkg.com/cytoscape@3.33.4/dist/cytoscape.min.js
+    sha256: bcd83f0e31eb175026a811db6dc1f24b4326000edffa402a10d0748c5be557b4
+    license: MIT (Cytoscape Consortium)
+
+  cytoscape-fcose@2.2.0
+    https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js
+    sha256: 4b1cab218d74996aa59cd8473f9239cc6398b8c1774d84d7e59ad9a68959cb57
+    license: MIT (iVis-at-Bilkent)
+
+  cose-base@2.2.0
+    https://unpkg.com/cose-base@2.2.0/cose-base.js
+    sha256: 7cae9509bd36235a63a85e71c8d9fa2cd0bc1d0c1ecc5b5a737976f39d040ddf
+    license: MIT (iVis-at-Bilkent)
+    note: peer dependency of cytoscape-fcose; expects `layoutBase`
+          on the global window.
+
+  layout-base@2.0.1
+    https://unpkg.com/layout-base@2.0.1/layout-base.js
+    sha256: ec15ab5df9af3f20708f4faab994accf91cda71848cd5bb10a23432cc50b6745
+    license: MIT (iVis-at-Bilkent)
+    note: peer dependency of cose-base.
+
+Load order matters: layout-base → cose-base → cytoscape →
+cytoscape-fcose. The Rust template (`src/output/html/template.rs`)
+inlines them in that order so the UMD globals attach cleanly.
+
+License texts for all four packages are reproduced in NOTICE.

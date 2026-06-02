@@ -1,0 +1,21 @@
+---
+source: tests/dot_snapshots.rs
+assertion_line: 127
+expression: rendered
+---
+digraph conspectus {
+  graph [rankdir=LR, fontname="Helvetica"];
+  node [fontname="Helvetica", style="filled,rounded"];
+  edge [fontname="Helvetica", fontsize=10];
+  subgraph cluster_5_agent_session {
+    label="Agent Sessions"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_agent_session_codex__home_me__codex_session_a" [label="codex: session\nsession-a", shape=box, fillcolor="#f8bbd0"];
+  }
+  subgraph cluster_6_mux_session {
+    label="Mux Sessions"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_mux_session_tmux_cached" [label="tmux:cached\ncached", shape=box3d, fillcolor="#d1c4e9"];
+    "n_mux_session_tmux_convention" [label="tmux:convention\nconvention", shape=box3d, fillcolor="#d1c4e9"];
+    "n_mux_session_tmux_process" [label="tmux:process\nprocess", shape=box3d, fillcolor="#d1c4e9"];
+  }
+  "n_agent_session_codex__home_me__codex_session_a" -> "n_mux_session_tmux_process" [label="linked_to_mux ★\n[strong_discovered · high]", color="#212121", penwidth=1.6, style="solid", arrowhead=vee];
+}

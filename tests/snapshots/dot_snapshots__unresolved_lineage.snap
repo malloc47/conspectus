@@ -1,0 +1,17 @@
+---
+source: tests/dot_snapshots.rs
+assertion_line: 127
+expression: rendered
+---
+digraph conspectus {
+  graph [rankdir=LR, fontname="Helvetica"];
+  node [fontname="Helvetica", style="filled,rounded"];
+  edge [fontname="Helvetica", fontsize=10];
+  subgraph cluster_4_fork {
+    label="Forks"; style=dashed; color="#90a4ae"; fontcolor="#455a64";
+    "n_fork_atelier_fork_alpha" [label="atelier: alpha\natelier/fork-alpha", shape=octagon, fillcolor="#ffe0b2"];
+  }
+  // Unresolved endpoints (dashed stubs)
+  "u_lineage_child_unresolved" [label="?\nagent_session:codex:pending-child", shape=circle, style="dashed", fillcolor="#ffffff", color="#90a4ae", fontsize=9, width=0.3, height=0.3];
+  "n_fork_atelier_fork_alpha" -> "u_lineage_child_unresolved" [label="child_session\n[strong_discovered · high]", color="#212121", penwidth=1.6, style="dashed", arrowhead=normal];
+}

@@ -1,0 +1,59 @@
+---
+source: tests/html_snapshots.rs
+assertion_line: 90
+expression: redacted
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>conspectus graph</title>
+<meta name="generator" content="conspectus graph --format html (ADR 0050)">
+<style>
+[redacted 6366 bytes]
+</style>
+</head>
+<body>
+<div id="conspectus-app">
+<div id="conspectus-header">
+<h1>conspectus graph</h1>
+<span id="conspectus-meta">nodes: 0 · edges: 0 · unresolved: 0</span>
+<div id="conspectus-search-wrap">
+<input id="conspectus-search" type="search" placeholder="Search nodes (label or id)" />
+<span id="conspectus-search-count"></span>
+</div>
+</div>
+<div id="conspectus-body">
+<aside id="conspectus-left"></aside>
+<div id="conspectus-cy"></div>
+<aside id="conspectus-right"></aside>
+</div>
+<div id="conspectus-statusbar"><span id="conspectus-status">loading…</span></div>
+</div>
+<script type="application/json" id="conspectus-graph-payload">{"version":1,"nodes":[],"edges":[],"unresolved_stubs":[]}</script>
+<script>
+[redacted 147959 bytes]
+</script>
+<script>
+[redacted 118907 bytes]
+</script>
+<script>
+[redacted 434246 bytes]
+</script>
+<script>
+[redacted 57240 bytes]
+</script>
+<script>
+[redacted 16278 bytes]
+</script>
+<script>
+[redacted 8684 bytes]
+</script>
+<script>
+[redacted 7530 bytes]
+</script>
+<script>
+[redacted 5609 bytes]
+</script>
+</body>
+</html>

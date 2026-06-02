@@ -1,0 +1,119 @@
+---
+source: tests/html_snapshots.rs
+assertion_line: 167
+expression: pretty
+---
+{
+  "edges": [
+    {
+      "confidence": "medium",
+      "id": "mux-ignored",
+      "is_resolved": false,
+      "is_unresolved_target": false,
+      "metadata": {
+        "adapter": "",
+        "evidence": null
+      },
+      "provenance": "convention",
+      "relation": "linked_to_mux",
+      "source": "agent_session:codex:/home/me/.codex:session-mixed",
+      "state": "ignored",
+      "target": "mux_session:tmux:ignored"
+    },
+    {
+      "confidence": "medium",
+      "id": "mux-overridden",
+      "is_resolved": false,
+      "is_unresolved_target": false,
+      "metadata": {
+        "adapter": "",
+        "evidence": null
+      },
+      "provenance": "discovered",
+      "relation": "linked_to_mux",
+      "source": "agent_session:codex:/home/me/.codex:session-mixed",
+      "state": "overridden",
+      "target": "mux_session:tmux:overridden"
+    },
+    {
+      "confidence": "high",
+      "id": "mux-active",
+      "is_resolved": true,
+      "is_unresolved_target": false,
+      "metadata": {
+        "adapter": "",
+        "evidence": null
+      },
+      "provenance": "strong_discovered",
+      "relation": "linked_to_mux",
+      "source": "agent_session:codex:/home/me/.codex:session-mixed",
+      "state": "active",
+      "target": "mux_session:tmux:preferred"
+    }
+  ],
+  "nodes": [
+    {
+      "attributes": {
+        "cwd": "/workspace",
+        "harness_key": "codex",
+        "id": {
+          "harness_key": "codex",
+          "session_key": "session-mixed",
+          "state_scope": "/home/me/.codex"
+        },
+        "type": "agent_session"
+      },
+      "id": "agent_session:codex:/home/me/.codex:session-mixed",
+      "kind": "agent_session",
+      "label_primary": "codex: session-mix…",
+      "label_secondary": "agent session"
+    },
+    {
+      "attributes": {
+        "backend": "tmux",
+        "cwd": "/workspace",
+        "id": {
+          "native_id": "tmux:ignored"
+        },
+        "native_id": "ignored",
+        "type": "mux_session"
+      },
+      "id": "mux_session:tmux:ignored",
+      "kind": "mux_session",
+      "label_primary": "tmux:ignored",
+      "label_secondary": "mux session"
+    },
+    {
+      "attributes": {
+        "backend": "tmux",
+        "cwd": "/workspace",
+        "id": {
+          "native_id": "tmux:overridden"
+        },
+        "native_id": "overridden",
+        "type": "mux_session"
+      },
+      "id": "mux_session:tmux:overridden",
+      "kind": "mux_session",
+      "label_primary": "tmux:overridden",
+      "label_secondary": "mux session"
+    },
+    {
+      "attributes": {
+        "backend": "tmux",
+        "cwd": "/workspace",
+        "id": {
+          "native_id": "tmux:preferred"
+        },
+        "native_id": "preferred",
+        "type": "mux_session"
+      },
+      "id": "mux_session:tmux:preferred",
+      "kind": "mux_session",
+      "label_primary": "tmux:preferred",
+      "label_secondary": "mux session"
+    }
+  ],
+  "unresolved_stubs": [],
+  "version": 1
+}
