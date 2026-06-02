@@ -2721,9 +2721,13 @@ satisfied when this workstream's TUI integration stories land.
     (`H-VIEWER-NATIVE-*`) takes over the default. The code
     shipped under this story stays as the *escape-hatch* path
     operators reach via `[viewers.<harness>]` config
-    (`H-TRANSCRIPT-013`). The patched recall (`pkgs/recall/`)
-    stays in the Nix overlay until the native viewer ships and
-    can be retired after.
+    (`H-TRANSCRIPT-013`). The recall-specific surface
+    (`RecallViewer`, `supports_flag` capability probe,
+    `required_flags` trait method) was ripped out alongside
+    `H-VIEWER-NATIVE-009`; only `ClaudeHistoryViewer` remains
+    as the hardcoded escape-hatch backend. Operators who want
+    recall back configure it via `H-TRANSCRIPT-013` once that
+    lands.
 
 - [~] `H-TRANSCRIPT-014` Surface recall's harness coverage gap (or
   broaden it). **Won't fix on the conspectus side** as of ADR 0052

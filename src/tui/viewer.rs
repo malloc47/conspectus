@@ -5,32 +5,24 @@
 //! pattern: leave the alt screen, exec the viewer, wait for it to
 //! exit, then re-enter the alt screen.
 //!
+//! Per ADR 0052 this is now the **escape-hatch** path, not the
+//! default. The default `T` target is the native in-tree viewer
+//! (`H-VIEWER-NATIVE-*`). The external launch survives for
+//! operators who prefer `claude-history`'s ledger formatting or
+//! who configure another viewer via `[viewers.<harness>]`
+//! (`H-TRANSCRIPT-013`).
+//!
 //! Resolution takes a [`BinaryProbe`] seam so tests can simulate
-//! PATH state and per-binary capability without touching the host.
-//! `plan()` may consult the filesystem (e.g. globbing for a Claude
-//! Code JSONL file) and returns `Err` with a one-line hint when no
-//! viable invocation can be assembled. v1 ships two backends per
-//! the May 2026 ADR 0019 survey:
+//! PATH state without touching the host. `plan()` may consult the
+//! filesystem (e.g. globbing for a Claude Code JSONL file) and
+//! returns `Err` with a one-line hint when no viable invocation
+//! can be assembled. v1 of the escape-hatch ships one backend:
 //!   - [`ClaudeHistoryViewer`] — resolves the session's on-disk
 //!     JSONL by globbing
 //!     `<state_scope>/projects/*/<session_key>.jsonl` and passes
 //!     the file path as a positional argument
-//!     (`claude-history --show-id` *prints* the id; the interactive
-//!     viewer takes a file path).
-//!   - [`RecallViewer`] — `recall --session <id>` for Claude Code,
-//!     Codex, OpenCode, and Factory/Droid sessions.
-//!
-//! `recall` 0.5.0 upstream has no `--session` flag, so launching it
-//! against an arbitrary session would drop the operator into the
-//! search picker. The conspectus Nix overlay patches `--session`
-//! into `recall` (version `0.5.0-conspectus-session`). The resolver
-//! treats any `recall` whose `--help` does not advertise `--session`
-//! as missing, so an unpatched upstream install fails closed rather
-//! than launching a useless picker.
-//!
-//! Selection prefers the harness-specific backend over the
-//! multi-harness backend when both binaries are on `PATH` and both
-//! advertise their required flags.
+//!     (`claude-history --show-id` *prints* the id; the
+//!     interactive viewer takes a file path).
 
 use std::path::PathBuf;
 
@@ -77,27 +69,14 @@ pub enum ViewerDisabled {
     TranscriptNotFound { binary: String, hint: String },
 }
 
-/// PATH-discovery + capability seam. Production uses
-/// [`PathBinaryProbe`]; tests inject [`FakeBinaryProbe`].
-///
-/// `supports_flag` exists because `recall` 0.5.0 upstream does not
-/// expose a session-deep-link flag — invoking it without `--session`
-/// drops the operator into the search picker, which defeats the
-/// reason conspectus is launching it at all. The conspectus Nix
-/// build patches `--session <ID>` in (and bumps the version to
-/// `0.5.0-conspectus-session`); this probe lets us treat
-/// unpatched / pre-flag installations as "not viable" rather than
-/// crashing through a useless launch.
+/// PATH-discovery seam. Production uses [`PathBinaryProbe`]; tests
+/// inject [`FakeBinaryProbe`].
 pub trait BinaryProbe {
     fn on_path(&self, binary: &str) -> bool;
-    /// Spawn `<binary> --help` and check whether `flag` appears in
-    /// the help text. Returns false on any spawn error.
-    fn supports_flag(&self, binary: &str, flag: &str) -> bool;
 }
 
-/// Walk `$PATH` looking for an executable, and feature-detect by
-/// scraping `<binary> --help`. No new dependency — the std-only
-/// lookup is short enough to live here, matching ADR 0024's
+/// Walk `$PATH` looking for an executable. No new dependency — the
+/// std-only lookup is short enough to live here, matching ADR 0024's
 /// "prefer hand-rolled first" stance for non-core surfaces.
 pub struct PathBinaryProbe;
 
@@ -115,16 +94,6 @@ impl BinaryProbe for PathBinaryProbe {
         }
         false
     }
-
-    fn supports_flag(&self, binary: &str, flag: &str) -> bool {
-        let Ok(output) = std::process::Command::new(binary).arg("--help").output() else {
-            return false;
-        };
-        let haystack = [output.stdout.as_slice(), output.stderr.as_slice()].concat();
-        haystack
-            .windows(flag.len())
-            .any(|window| window == flag.as_bytes())
-    }
 }
 
 /// Action-resolver trait per ADR 0019. Each backend knows the
@@ -137,13 +106,6 @@ pub trait SessionViewerAction {
     fn supports(&self, harness_key: &str) -> bool;
     /// Binary name probed against `$PATH`.
     fn binary(&self) -> &str;
-    /// Flags the binary must advertise in `--help` for this backend
-    /// to be considered viable. Default empty (any installation
-    /// works). Backends like `recall` override to require a
-    /// patched / future flag.
-    fn required_flags(&self) -> &'static [&'static str] {
-        &[]
-    }
     /// Construct the exec invocation for a session. May consult the
     /// filesystem to resolve harness-specific paths (e.g.
     /// `claude-history` needs the on-disk JSONL file). Returns
@@ -185,7 +147,7 @@ impl SessionViewerAction for ClaudeHistoryViewer {
         let file_str = file.to_string_lossy().into_owned();
         Ok(LaunchPlan {
             program: self.binary().to_string(),
-            args: vec![file_str.clone()],
+            args: vec![file_str],
             label: format!("{} {}", self.key(), session.session_key),
         })
     }
@@ -212,55 +174,14 @@ fn find_claude_session_file(state_scope: &str, session_key: &str) -> Option<Path
     None
 }
 
-/// `recall` (zippoxer/recall): multi-harness search and resume TUI.
-/// Conspectus depends on the `--session <ID>` deep-link flag —
-/// without it `recall` opens a search picker, defeating the purpose
-/// of launching from a conspectus selection. The flag ships in the
-/// conspectus Nix overlay's patched `recall` build. Installations
-/// that don't advertise `--session` in `--help` are treated as
-/// missing.
-pub struct RecallViewer;
-
-const RECALL_REQUIRED_FLAGS: &[&str] = &["--session"];
-
-impl SessionViewerAction for RecallViewer {
-    fn key(&self) -> &str {
-        "recall"
-    }
-
-    fn supports(&self, harness_key: &str) -> bool {
-        matches!(
-            harness_key,
-            "claude-code" | "codex" | "opencode" | "factory" | "droid"
-        )
-    }
-
-    fn binary(&self) -> &str {
-        "recall"
-    }
-
-    fn required_flags(&self) -> &'static [&'static str] {
-        RECALL_REQUIRED_FLAGS
-    }
-
-    fn plan(&self, session: &AgentSessionId) -> Result<LaunchPlan, String> {
-        Ok(LaunchPlan {
-            program: self.binary().to_string(),
-            args: vec!["--session".to_string(), session.session_key.clone()],
-            label: format!("{} {}", self.key(), session.session_key),
-        })
-    }
-}
-
-/// Backend preference order: harness-specific first, multi-harness
-/// fallback. Centralized so the resolver and the test layout agree.
-fn default_backends() -> [&'static dyn SessionViewerAction; 2] {
-    [&ClaudeHistoryViewer, &RecallViewer]
+/// Backend preference order. Centralized so the resolver and the
+/// test layout agree. Today this is a single-entry slice;
+/// `H-TRANSCRIPT-013` will extend it with config-defined viewers.
+fn default_backends() -> [&'static dyn SessionViewerAction; 1] {
+    [&ClaudeHistoryViewer]
 }
 
 /// Resolve a viewer launch for a session, given a PATH probe.
-/// Preference: harness-specific backend over multi-harness when both
-/// are present on PATH (ADR 0019).
 pub fn resolve_viewer_target(session: &AgentSessionId, probe: &dyn BinaryProbe) -> ViewerTarget {
     let backends = default_backends();
     let supported: Vec<&dyn SessionViewerAction> = backends
@@ -272,21 +193,12 @@ pub fn resolve_viewer_target(session: &AgentSessionId, probe: &dyn BinaryProbe) 
             harness_key: session.harness_key.clone(),
         });
     }
-    // Walk backends in preference order. A backend is "viable" if
-    // its binary is on PATH and advertises every required flag.
-    // We remember the *first* viable backend so we can fall through
-    // to it for the disabled reason if plan() refuses every viable
-    // backend (e.g. transcript file missing on disk).
+    // Walk backends in preference order. We remember the *first*
+    // viable backend's plan error so we can surface
+    // `TranscriptNotFound` when no backend's plan() succeeds.
     let mut last_plan_error: Option<(String, String)> = None;
     for backend in &supported {
         if !probe.on_path(backend.binary()) {
-            continue;
-        }
-        let missing_flag = backend
-            .required_flags()
-            .iter()
-            .find(|flag| !probe.supports_flag(backend.binary(), flag));
-        if missing_flag.is_some() {
             continue;
         }
         match backend.plan(session) {
@@ -334,42 +246,19 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    /// Test seam. `installed` declares which binaries the fake PATH
-    /// holds. `flags_by_binary` declares which `--help` flags each
-    /// installed binary advertises; entries default to "all required
-    /// flags supported" when a binary is `installed` but missing from
-    /// the map, so tests that don't care about capability gating
-    /// stay compact.
+    /// Test seam: records probed binary names and returns membership
+    /// in a fixed set of "installed" binaries.
     struct FakeBinaryProbe {
         installed: Vec<&'static str>,
-        flags_by_binary: std::collections::HashMap<&'static str, Vec<&'static str>>,
         probed: RefCell<Vec<String>>,
     }
 
     impl FakeBinaryProbe {
         fn new(installed: &[&'static str]) -> Self {
-            // Default: every installed binary advertises every flag
-            // any backend asks about. Tests that want to model an
-            // unpatched binary call `without_flag`.
             Self {
                 installed: installed.to_vec(),
-                flags_by_binary: std::collections::HashMap::new(),
                 probed: RefCell::new(Vec::new()),
             }
-        }
-
-        /// Declare that `binary` is installed but its `--help` does
-        /// *not* advertise `flag`. Mirrors an unpatched upstream
-        /// `recall` whose `--help` lacks `--session`.
-        fn without_flag(mut self, binary: &'static str, missing: &'static str) -> Self {
-            let entry = self.flags_by_binary.entry(binary).or_default();
-            entry.retain(|f| *f != missing);
-            // Sentinel: presence of the entry (even empty) flips the
-            // default-allow behavior off for that binary; the probe
-            // returns true only for flags explicitly listed below.
-            // For the unpatched-recall case the listed set is empty,
-            // so any flag query returns false.
-            self
         }
     }
 
@@ -377,13 +266,6 @@ mod tests {
         fn on_path(&self, binary: &str) -> bool {
             self.probed.borrow_mut().push(binary.to_string());
             self.installed.contains(&binary)
-        }
-
-        fn supports_flag(&self, binary: &str, flag: &str) -> bool {
-            match self.flags_by_binary.get(binary) {
-                Some(flags) => flags.contains(&flag),
-                None => true,
-            }
         }
     }
 
@@ -422,42 +304,8 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_prefers_claude_history_over_recall_when_both_installed() {
-        let probe = FakeBinaryProbe::new(&["claude-history", "recall"]);
-        let (_tmp, id) = claude_fixture("sess-uuid-abc");
-        match resolve_viewer_target(&id, &probe) {
-            ViewerTarget::Launch(plan) => {
-                assert_eq!(
-                    plan.program, "claude-history",
-                    "harness-specific backend wins per ADR 0019"
-                );
-            }
-            other => panic!("expected Launch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn claude_code_falls_back_to_recall_when_only_recall_installed() {
-        let probe = FakeBinaryProbe::new(&["recall"]);
-        // No fixture: ClaudeHistoryViewer can't resolve a file, but
-        // it isn't on PATH anyway so it's skipped before plan() runs.
-        match resolve_viewer_target(&session("claude-code"), &probe) {
-            ViewerTarget::Launch(plan) => {
-                assert_eq!(plan.program, "recall");
-                assert_eq!(plan.args, vec!["--session", "sess-uuid-abc"]);
-            }
-            other => panic!("expected Launch, got {other:?}"),
-        }
-    }
-
-    /// When claude-history is on PATH but no transcript file exists,
-    /// the resolver falls through to recall if available. If recall
-    /// is also unavailable, surface TranscriptNotFound rather than
-    /// silently failing.
-    #[test]
     fn claude_history_missing_transcript_reports_transcript_not_found() {
         let probe = FakeBinaryProbe::new(&["claude-history"]);
-        // Note: no fixture; state_scope=/state has no projects dir.
         match resolve_viewer_target(&session("claude-code"), &probe) {
             ViewerTarget::Disabled(ViewerDisabled::TranscriptNotFound { binary, hint }) => {
                 assert_eq!(binary, "claude-history");
@@ -467,84 +315,9 @@ mod tests {
         }
     }
 
-    /// When claude-history can't find the transcript but recall is
-    /// installed, recall takes the launch — this is the
-    /// missing-on-disk-but-recall-indexed safety net.
-    #[test]
-    fn claude_history_missing_transcript_falls_through_to_recall() {
-        let probe = FakeBinaryProbe::new(&["claude-history", "recall"]);
-        // No fixture for claude-history; recall on PATH so it wins.
-        match resolve_viewer_target(&session("claude-code"), &probe) {
-            ViewerTarget::Launch(plan) => {
-                assert_eq!(plan.program, "recall");
-                assert_eq!(plan.args, vec!["--session", "sess-uuid-abc"]);
-            }
-            other => panic!("expected recall fallback, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn codex_uses_recall_only() {
-        let probe = FakeBinaryProbe::new(&["recall"]);
-        match resolve_viewer_target(&session("codex"), &probe) {
-            ViewerTarget::Launch(plan) => {
-                assert_eq!(plan.program, "recall");
-                assert_eq!(plan.args, vec!["--session", "sess-uuid-abc"]);
-            }
-            other => panic!("expected Launch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn opencode_uses_recall_only() {
-        let probe = FakeBinaryProbe::new(&["recall"]);
-        match resolve_viewer_target(&session("opencode"), &probe) {
-            ViewerTarget::Launch(plan) => assert_eq!(plan.program, "recall"),
-            other => panic!("expected Launch, got {other:?}"),
-        }
-    }
-
-    /// Unpatched upstream `recall` (0.5.0) advertises no `--session`
-    /// flag in `--help`. The resolver must treat it as missing
-    /// rather than launching it into the search picker.
-    #[test]
-    fn recall_without_session_flag_is_treated_as_missing() {
-        let probe = FakeBinaryProbe::new(&["recall"]).without_flag("recall", "--session");
-        match resolve_viewer_target(&session("codex"), &probe) {
-            ViewerTarget::Disabled(ViewerDisabled::BinaryNotInstalled {
-                binaries,
-                harness_key,
-            }) => {
-                assert_eq!(harness_key, "codex");
-                assert_eq!(binaries, vec!["recall"]);
-            }
-            other => panic!("unpatched recall should be reported as not-installed, got {other:?}"),
-        }
-    }
-
-    /// Even when claude-history is installed alongside an unpatched
-    /// recall, a Claude Code row still prefers claude-history — but
-    /// the unpatched recall must not silently win for sessions that
-    /// claude-history doesn't cover.
-    #[test]
-    fn claude_history_still_wins_when_recall_lacks_session_flag() {
-        let probe =
-            FakeBinaryProbe::new(&["claude-history", "recall"]).without_flag("recall", "--session");
-        let (_tmp, id) = claude_fixture("sess-uuid-abc");
-        match resolve_viewer_target(&id, &probe) {
-            ViewerTarget::Launch(plan) => assert_eq!(plan.program, "claude-history"),
-            other => panic!("expected claude-history, got {other:?}"),
-        }
-        // ...and for codex the unpatched recall stays disabled.
-        match resolve_viewer_target(&session("codex"), &probe) {
-            ViewerTarget::Disabled(ViewerDisabled::BinaryNotInstalled { .. }) => {}
-            other => panic!("codex should report not-installed, got {other:?}"),
-        }
-    }
-
     #[test]
     fn aider_is_unsupported() {
-        let probe = FakeBinaryProbe::new(&["claude-history", "recall"]);
+        let probe = FakeBinaryProbe::new(&["claude-history"]);
         match resolve_viewer_target(&session("aider"), &probe) {
             ViewerTarget::Disabled(ViewerDisabled::UnsupportedHarness { harness_key }) => {
                 assert_eq!(harness_key, "aider");
@@ -555,7 +328,7 @@ mod tests {
 
     #[test]
     fn unknown_harness_is_unsupported() {
-        let probe = FakeBinaryProbe::new(&["claude-history", "recall"]);
+        let probe = FakeBinaryProbe::new(&["claude-history"]);
         match resolve_viewer_target(&session("mystery"), &probe) {
             ViewerTarget::Disabled(ViewerDisabled::UnsupportedHarness { harness_key }) => {
                 assert_eq!(harness_key, "mystery");
@@ -564,8 +337,22 @@ mod tests {
         }
     }
 
+    /// Non-claude harnesses have no escape-hatch backend registered.
+    /// Operators wanting Codex / OpenCode external viewers will
+    /// configure them via `H-TRANSCRIPT-013`.
     #[test]
-    fn claude_code_with_no_binaries_lists_both_in_reason() {
+    fn codex_has_no_escape_hatch_backend() {
+        let probe = FakeBinaryProbe::new(&["claude-history"]);
+        match resolve_viewer_target(&session("codex"), &probe) {
+            ViewerTarget::Disabled(ViewerDisabled::UnsupportedHarness { harness_key }) => {
+                assert_eq!(harness_key, "codex");
+            }
+            other => panic!("expected UnsupportedHarness, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn claude_code_with_no_binary_reports_install_hint() {
         let probe = FakeBinaryProbe::new(&[]);
         match resolve_viewer_target(&session("claude-code"), &probe) {
             ViewerTarget::Disabled(ViewerDisabled::BinaryNotInstalled {
@@ -573,22 +360,7 @@ mod tests {
                 harness_key,
             }) => {
                 assert_eq!(harness_key, "claude-code");
-                assert_eq!(binaries, vec!["claude-history", "recall"]);
-            }
-            other => panic!("expected BinaryNotInstalled, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn codex_with_no_binaries_lists_only_recall() {
-        let probe = FakeBinaryProbe::new(&[]);
-        match resolve_viewer_target(&session("codex"), &probe) {
-            ViewerTarget::Disabled(ViewerDisabled::BinaryNotInstalled {
-                binaries,
-                harness_key,
-            }) => {
-                assert_eq!(harness_key, "codex");
-                assert_eq!(binaries, vec!["recall"]);
+                assert_eq!(binaries, vec!["claude-history"]);
             }
             other => panic!("expected BinaryNotInstalled, got {other:?}"),
         }
@@ -612,17 +384,10 @@ mod tests {
         );
         assert_eq!(
             viewer_disabled_reason(&ViewerDisabled::BinaryNotInstalled {
-                binaries: vec!["claude-history".to_string(), "recall".to_string()],
+                binaries: vec!["claude-history".to_string()],
                 harness_key: "claude-code".to_string(),
             }),
-            "view: install claude-history or recall to view claude-code sessions"
-        );
-        assert_eq!(
-            viewer_disabled_reason(&ViewerDisabled::BinaryNotInstalled {
-                binaries: vec!["recall".to_string()],
-                harness_key: "codex".to_string(),
-            }),
-            "view: install recall to view codex sessions"
+            "view: install claude-history to view claude-code sessions"
         );
         assert_eq!(
             viewer_disabled_reason(&ViewerDisabled::TranscriptNotFound {
