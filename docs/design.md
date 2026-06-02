@@ -698,6 +698,44 @@ saved-view library, not a replacement resolver. Future ADR 0031 views
 (Mux / Union / Prs / Forks) should be built directly against the
 connection surface instead of introducing a new in-memory selector layer.
 
+### Graph Visualization Exports
+
+Per ADR 0050, `conspectus graph` exports two visualization formats in
+addition to JSON: `--format dot` (Graphviz for static inspection) and
+`--format html` (single-file self-contained interactive explorer built
+on inlined Cytoscape.js). Both render the same resolved
+`GraphSnapshot` and named replay scenarios.
+
+The v1 visual encoding is provider-neutral: node color/shape is keyed
+on `NodeKind`, edge style on `RelationKind`, edge weight/opacity on
+`Provenance`. Provider identity (atelier, tmux, github, harness key,
+mux backend) is carried in attributes and the HTML inspector panel
+rather than in bespoke node shapes. Provider-keyed overrides on top
+of the base palette are deferred, not prohibited; they ride on the
+shared `[theme]` table once a concrete use case appears. Candidate `GraphLink` evidence and
+resolved relationships are both available — the HTML view toggles
+between them; DOT renders both with distinct styling by default and
+collapses on `--candidates exclude`. `RuntimeProcess` nodes (ADR 0047)
+and unresolved-endpoint stubs (ADR 0005 / ADR 0018) render by default
+and are filterable. Emission is deterministic so the GV-002 / GV-003
+snapshot tests are stable. A live HTML view hosted by the continuous
+server (ADR 0038) is an explicit follow-on left to a later ADR.
+
+Theming grows a shared `[theme]` table for the per-`NodeKind` colors
+and per-`Provenance` modifiers the visualizer needs and that the TUI
+does not yet expose. The existing `[tui.theme]` keys are unaffected;
+`[html.theme]` is the new surface-specific override.
+
+Cytoscape is the chosen v1 library but is treated as a swappable
+implementation detail. The Rust renderer emits a library-neutral JSON
+payload; a single JS driver module fronts every Cytoscape call;
+graph-traversal primitives (BFS, depth-N, upstream/downstream) run
+over the neutral payload; and the stylesheet is expressed in terms of
+`NodeKind` / `RelationKind` / `Provenance` and translated to
+Cytoscape's idiom at load time. A future swap to a different library
+(e.g. AntV G6 with Graphin if a React-based explorer chrome is later
+warranted) is a contained driver rewrite, not a full rewrite.
+
 ## Continuous Operation Mode
 
 Conspectus supports two operation modes:
@@ -944,6 +982,16 @@ backed by SQLite. The shape:
     node inspector plus relationship explorer: relationship groups expand
     compact edge rows, while graph depth is navigated through explicit
     drilldown and breadcrumbs instead of recursive inline child details.
+  - ADR 0050: ship `conspectus graph --format {dot,html}` alongside the
+    existing JSON, with the HTML export inlining a vendored Cytoscape.js
+    bundle into a single self-contained file. Visual encoding is
+    provider-neutral and keyed on `NodeKind` / `RelationKind` /
+    `Provenance`. Candidate and resolved graphs are both visible (toggle
+    in HTML, distinct styling in DOT). `RuntimeProcess` and
+    unresolved-endpoint stubs render by default and are filterable.
+    Theming grows a shared `[theme]` table with `[tui.theme]` /
+    `[html.theme]` overrides. A live server-hosted HTML view is left to
+    a follow-up ADR.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
