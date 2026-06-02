@@ -77,6 +77,10 @@
       showRuntimeProcess: true,
       showUnresolvedStubs: true,
       showIgnoredOverridden: true,
+      // GV-003e additions: recency / activity / orphan filters.
+      maxAgeSeconds: null, // null = no max age
+      hideStaleSessions: false,
+      hideOrphans: false,
       kindOn: kindOn,
       relationOn: relOn,
       kinds: kinds,
@@ -103,8 +107,74 @@
 
     panel.appendChild(this._renderTopToggles());
     panel.appendChild(this._renderLayoutGroup());
+    panel.appendChild(this._renderRecencyGroup());
+    panel.appendChild(this._renderActivityGroup());
     panel.appendChild(this._renderKindGroup());
     panel.appendChild(this._renderRelationGroup());
+  };
+
+  FilterPanel.prototype._renderRecencyGroup = function () {
+    var section = el("div", "fp-section");
+    section.appendChild(el("div", "fp-section-title", "Recency"));
+    var options = [
+      { label: "All", value: null },
+      { label: "30d", value: 30 * 86400 },
+      { label: "7d", value: 7 * 86400 },
+      { label: "1d", value: 86400 },
+      { label: "1h", value: 3600 },
+    ];
+    var row = el("div", "fp-chip-row");
+    var self = this;
+    options.forEach(function (opt) {
+      var chip = el("button", "fp-chip", opt.label);
+      if (opt.value === self.state.maxAgeSeconds)
+        chip.classList.add("fp-chip-active");
+      chip.title =
+        opt.value == null
+          ? "No recency filter"
+          : "Hide nodes whose recency timestamp is older than " + opt.label;
+      chip.addEventListener("click", function () {
+        self.state.maxAgeSeconds = opt.value;
+        self._render();
+        self.apply();
+      });
+      row.appendChild(chip);
+    });
+    section.appendChild(row);
+    var note = el(
+      "div",
+      "fp-section-note",
+      "Applies per-kind: sessions, muxes, runtime processes, PRs. Structural nodes (repo, branch, …) ignore recency.",
+    );
+    section.appendChild(note);
+    return section;
+  };
+
+  FilterPanel.prototype._renderActivityGroup = function () {
+    var section = el("div", "fp-section");
+    section.appendChild(el("div", "fp-section-title", "Activity"));
+    var self = this;
+    section.appendChild(
+      checkbox(
+        "Hide stale sessions (no process or mux)",
+        this.state.hideStaleSessions,
+        function (v) {
+          self.state.hideStaleSessions = v;
+          self.apply();
+        },
+      ),
+    );
+    section.appendChild(
+      checkbox(
+        "Hide orphan nodes (no visible edges)",
+        this.state.hideOrphans,
+        function (v) {
+          self.state.hideOrphans = v;
+          self.apply();
+        },
+      ),
+    );
+    return section;
   };
 
   FilterPanel.prototype._renderLayoutGroup = function () {
@@ -271,12 +341,95 @@
       if (hide) hidden.add(e.id);
     });
 
+    // Recency filter: hide nodes whose per-kind recency epoch is
+    // older than the threshold. Structural nodes (repo, branch,
+    // workspace, fork, checkout) carry no recency signal and are
+    // never hidden by this pass.
+    if (s.maxAgeSeconds != null) {
+      var nowS = Date.now() / 1000;
+      payload.nodes.forEach(function (n) {
+        var epoch = nodeRecencyEpoch(n);
+        if (epoch == null) return;
+        if (nowS - epoch > s.maxAgeSeconds) hidden.add(n.id);
+      });
+    }
+
+    // Stale-session filter: hide AgentSession nodes that have no
+    // visible edge of relation linked_to_mux /
+    // process_identifies_session / process_candidates_session to a
+    // visible neighbor. Sessions live in harness state files long
+    // after their backing process exits; this prunes those.
+    if (s.hideStaleSessions) {
+      var activeRels = {
+        linked_to_mux: true,
+        process_identifies_session: true,
+        process_candidates_session: true,
+      };
+      payload.nodes.forEach(function (n) {
+        if (n.kind !== "agent_session") return;
+        if (hidden.has(n.id)) return;
+        var hasActive = payload.edges.some(function (e) {
+          if (hidden.has(e.id)) return false;
+          if (e.source !== n.id && e.target !== n.id) return false;
+          var other = e.source === n.id ? e.target : e.source;
+          if (hidden.has(other)) return false;
+          return activeRels[e.relation] === true;
+        });
+        if (!hasActive) hidden.add(n.id);
+      });
+    }
+
+    // Orphan filter: hide nodes with zero visible incident edges.
+    // Runs LAST so it composes with every other filter.
+    if (s.hideOrphans) {
+      var degree = {};
+      payload.nodes.forEach(function (n) {
+        if (!hidden.has(n.id)) degree[n.id] = 0;
+      });
+      (payload.unresolved_stubs || []).forEach(function (stub) {
+        if (!hidden.has(stub.id)) degree[stub.id] = 0;
+      });
+      payload.edges.forEach(function (e) {
+        if (hidden.has(e.id)) return;
+        if (degree[e.source] != null && degree[e.target] != null) {
+          degree[e.source]++;
+          degree[e.target]++;
+        }
+      });
+      Object.keys(degree).forEach(function (id) {
+        if (degree[id] === 0) hidden.add(id);
+      });
+    }
+
     if (this.viewState) {
       this.viewState.updateFilter(hidden);
     } else {
       this.driver.setHidden(hidden);
     }
   };
+
+  /// Per-kind recency epoch. Returns the seconds-since-epoch value
+  /// most appropriate to "is this node fresh", or `null` for kinds
+  /// that have no meaningful recency signal (purely structural).
+  function nodeRecencyEpoch(node) {
+    var attrs = node.attributes || {};
+    switch (node.kind) {
+      case "agent_session":
+        return attrs.last_active_epoch != null ? attrs.last_active_epoch : null;
+      case "mux_session":
+        return attrs.activity_epoch != null
+          ? attrs.activity_epoch
+          : attrs.created_epoch != null
+            ? attrs.created_epoch
+            : null;
+      case "runtime_process":
+        return attrs.observed_epoch != null ? attrs.observed_epoch : null;
+      case "forge_pr":
+        return attrs.updated_epoch != null ? attrs.updated_epoch : null;
+      default:
+        return null;
+    }
+  }
 
   // ----- DOM helpers --------------------------------------------
 
