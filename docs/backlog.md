@@ -6761,15 +6761,15 @@ this phase migrates whichever ones exist when each story lands.
     filter. Manually verified with `dot -Tsvg` on the `exact-match`,
     `ambiguous-mux`, and `fork-lineage` scenarios.
 
-- [ ] `GV-003` Add `conspectus graph --format html`. Split into
+- [x] `GV-003` Add `conspectus graph --format html`. Split into
   `GV-003a` / `GV-003b` / `GV-003c` so the foundational payload and
   vendoring story are settled before the chrome is built on top.
   Aggregate scope is unchanged from the original ticket: a single-file
   self-contained HTML explorer backed by the same resolved graph as
   DOT, supporting pan/zoom, selection, neighbor highlighting,
   search/filter, an inspector, and the navigation primitives from ADR
-  0050 decision 10. Closes when GV-003a, GV-003b, and GV-003c are all
-  complete.
+  0050 decision 10. Closed when GV-003a/b/c all landed; GV-003d
+  (layout selector + dagre) shipped in parallel as a follow-up.
 
 - [x] `GV-003a` HTML renderer scaffolding + minimal viewer.
   - Scope: add `conspectus graph --format html` and the matching
@@ -6922,7 +6922,7 @@ this phase migrates whichever ones exist when each story lands.
     neighborhood), focus a second node through to push a
     breadcrumb (atelier-demo › alpha, Back enabled).
 
-- [ ] `GV-003d` HTML layout improvements and selection.
+- [x] `GV-003d` HTML layout improvements and selection.
   - Scope: the GV-003a default is fcose with hand-tuned options
     that look reasonable on the named scenarios but degrade on
     denser graphs (edge-label collisions, suboptimal compound
@@ -6944,8 +6944,22 @@ this phase migrates whichever ones exist when each story lands.
     legibility hold.
   - Blockers: `GV-003a`. Not on the GV-003 umbrella critical path;
     can land in parallel with GV-003b / GV-003c.
+  - Outcome: vendored `cytoscape-dagre@3.0.0` (MIT, ~57 KB,
+    dagre bundled internally). Driver exposes `availableLayouts()`,
+    `currentLayout()`, `setLayout(name)`, `rerunLayout()`. Filter
+    panel gains a "Layout" section with a dropdown
+    (fcose / dagre-LR / dagre-TB / cose / concentric / circle /
+    grid — pruned to whatever Cytoscape actually has registered)
+    and a "Re-run layout" button. Concentric uses a per-`NodeKind`
+    ring (workspaces innermost, runtime processes outermost) so it
+    reads as a hub-and-spoke when the graph has clear roots. The
+    fcose tuning from the GV-003c follow-up stays the default.
+    VERSIONS / NOTICE / .gitattributes updated. 1133 tests pass;
+    fmt and clippy clean. Manually verified the dagre layout in
+    headless chromium on the `fork-lineage` scenario (clean
+    left-to-right hierarchy).
 
-- [ ] `GV-004` Document graph visualization workflows.
+- [x] `GV-004` Document graph visualization workflows.
   - Scope: update `README.md`, `docs/operations.md`, or a focused
     visualization guide with examples for generating DOT and HTML
     outputs, rendering DOT through Graphviz, and using the HTML explorer
@@ -6954,6 +6968,17 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: run each documented command against a fixture or local
     repo before marking complete.
   - Blockers: `GV-002`, `GV-003`.
+  - Outcome: new `docs/graph-visualization.md` covers `--format dot`
+    (pipe through Graphviz, recipes for SVG/PDF/PNG, fallback layout
+    flags for dense graphs), `--format html` (single self-contained
+    file, how to open) and walks every chrome surface (filter panel,
+    inspector, search, focus navigation). Includes four debugging
+    recipes ("why did the resolver pick mux X over Y", "show me
+    everything reachable from this fork", "approximate the CLI
+    table view", "what's this RuntimeProcess evidence for").
+    `docs/operations.md` CLI Surface and Paging notes updated.
+    `README.md` CLI block updated and `docs/index.md` registers the
+    new guide. Cross-references all point at ADR 0050 for rationale.
 
 ## Later
 
