@@ -2976,17 +2976,44 @@ transcript with a cursor at the last turn".
     CompactionSummary, web_search_call → ToolUse, malformed
     skip, nested-path file lookup. 1181 nextest green.
 
-- [ ] `H-VIEWER-NATIVE-005` OpenCode parser (SQLite-of-record).
-  - Scope: `src/viewer/parser/opencode.rs` reads from `opencode.db`
-    (ADR 0013). Single SQL query returns the session's messages
-    ordered by sequence; rows map to `TranscriptTurn`s.
-    `session_diff/` is *not* read — the SQLite store is
-    authoritative. Falls back to "transcript unavailable" when
-    the DB is absent / locked / corrupted.
-  - Tests: SQLite-backed fixture tests covering most-recent
-    ordering, per-session attribution, missing-table fallback.
-  - Blockers: `H-VIEWER-NATIVE-002`. **Closes the OpenCode
-    coverage gap** that `H-TRANSCRIPT-014` could not.
+- [x] `H-VIEWER-NATIVE-005` OpenCode parser (SQLite-of-record).
+  - Outcome: `src/viewer/parser/opencode.rs` reads `opencode.db`
+    via `rusqlite` (`OpenFlags::SQLITE_OPEN_READ_ONLY |
+    SQLITE_OPEN_NO_MUTEX`). One LEFT JOIN between `message` and
+    `part` keyed on `session_id` returns the conversation in
+    `(m.time_created, p.time_created)` order. `session_diff/`
+    is never touched — the SQLite store is authoritative, which
+    is the gap that recall could not close. Translation rules:
+    - `session.directory` → `TranscriptMeta.cwd`.
+    - `part.data.type = "text"` → `Message` turn with role
+      taken from the parent `message.data.role` (`user` or
+      `assistant`).
+    - `part.data.type = "reasoning"` → `Thinking` turn.
+    - `part.data.type = "tool"` → emits **two** turns from the
+      same row: a `ToolUse` with body `"<tool>: <state.input>"`
+      and a companion `ToolResult` with body `state.output`.
+      OpenCode bundles call+result in one row; the split keeps
+      the renderer's fold-tool-blocks UX consistent with
+      Claude / Codex.
+    - `step-start`, `step-finish`, `patch` parts skipped (model
+      lifecycle markers; v1 doesn't render patches).
+    - `part.time_created` (epoch ms) → `DateTime<Utc>` via
+      `chrono::DateTime::from_timestamp_millis`. Empty bodies
+      dropped. Missing DB → `ParseError::NotFound`.
+  - 12 SQLite-backed fixture tests cover supports() gating,
+    missing-db, empty-session-with-cwd, user/assistant
+    role-from-message, reasoning → Thinking, tool → ToolUse +
+    ToolResult split, tool-without-output → ToolUse only,
+    step/patch skip, intra-message time_created ordering,
+    other-session exclusion, empty-body drop, epoch-ms round
+    trip.
+  - Real-data smoke (one-off, not committed): parsed a 381-msg /
+    1658-part session from the author's `opencode.db` into 1193
+    turns with kind histogram Message: 65, Thinking: 349,
+    ToolResult: 388, ToolUse: 391 — confirms the parser
+    matches the live schema.
+  - 1193 nextest green. **Closes the OpenCode coverage gap**
+    that `H-TRANSCRIPT-014` could not.
 
 - [ ] `H-VIEWER-NATIVE-006` Viewer widget: full-screen modal,
   scroll, jump-to-end-on-open.
