@@ -174,6 +174,11 @@ pub struct App {
     /// `Some` suspends navigation keys and routes input through the
     /// modal.
     value_modal: Option<crate::tui::widgets::value_modal::ValueModalState>,
+    /// Active full-screen transcript viewer modal
+    /// (H-VIEWER-NATIVE-008). `None` when closed; `Some` replaces
+    /// the entire two-panel layout with the native viewer widget
+    /// and routes input through its reducer.
+    viewer_modal: Option<crate::viewer::state::ViewerState>,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -449,6 +454,7 @@ impl App {
             search_overlay: None,
             help_overlay: None,
             value_modal: None,
+            viewer_modal: None,
             sort,
             filter,
             grouping,
@@ -615,6 +621,34 @@ impl App {
 
     pub fn close_value_modal(&mut self) {
         self.value_modal = None;
+    }
+
+    /// Read-only access to the active transcript viewer modal
+    /// (H-VIEWER-NATIVE-008). `None` when closed.
+    pub fn viewer_modal(&self) -> Option<&crate::viewer::state::ViewerState> {
+        self.viewer_modal.as_ref()
+    }
+
+    /// Take the viewer modal state out of the App so the pure
+    /// reducer can consume it; callers put a new state back via
+    /// [`Self::open_viewer_modal`] when the reducer returns
+    /// `ViewerEffect::None`.
+    pub fn take_viewer_modal(&mut self) -> Option<crate::viewer::state::ViewerState> {
+        self.viewer_modal.take()
+    }
+
+    /// Mutable access for the draw path (the widget writes back
+    /// viewport_height + total_lines metrics during render).
+    pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::viewer::state::ViewerState> {
+        self.viewer_modal.as_mut()
+    }
+
+    pub fn open_viewer_modal(&mut self, state: crate::viewer::state::ViewerState) {
+        self.viewer_modal = Some(state);
+    }
+
+    pub fn close_viewer_modal(&mut self) {
+        self.viewer_modal = None;
     }
 
     /// Open the full-value modal for whatever value the active

@@ -114,7 +114,7 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(
         &mut lines,
         "T",
-        "Open the selected session's transcript in an external viewer",
+        "Open the selected session's transcript (q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t tools, y thinking)",
     );
     bind(&mut lines, "r", "Refresh discovery now");
     bind(&mut lines, "q / Ctrl-C", "Quit");

@@ -35,6 +35,7 @@ pub mod search;
 pub mod theme;
 mod ui;
 pub mod viewer;
+pub mod viewer_bridge;
 pub mod widgets;
 
 pub use app::{App, Msg};

@@ -91,7 +91,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let poll_timeout = Duration::from_millis(100);
 
     while !app.should_quit() {
-        terminal.draw(|frame| ui::draw(&app, frame))?;
+        terminal.draw(|frame| {
+            let area = frame.area();
+            if let Some(state) = app.viewer_modal_mut() {
+                crate::viewer::widget::draw(state, frame, area);
+            } else {
+                ui::draw(&app, frame);
+            }
+        })?;
 
         // Drain completed background discovery results without
         // blocking. Only the most recent result wins.
@@ -146,7 +153,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            let action = if app.value_modal().is_some() {
+            let action = if app.viewer_modal().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::ViewerOverlayKey(key))
+                    }
+                    _ => None,
+                }
+            } else if app.value_modal().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         Some(Action::ValueModalKey(key))
@@ -263,6 +277,9 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::ValueModalKey(key)) => {
                     handle_value_modal_key(&mut app, key);
                 }
+                Some(Action::ViewerOverlayKey(key)) => {
+                    handle_viewer_overlay_key(&mut app, key);
+                }
                 None => {}
             }
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
@@ -285,7 +302,14 @@ fn static_event_loop(
     let poll_timeout = Duration::from_millis(100);
 
     while !app.should_quit() {
-        terminal.draw(|frame| ui::draw(&app, frame))?;
+        terminal.draw(|frame| {
+            let area = frame.area();
+            if let Some(state) = app.viewer_modal_mut() {
+                crate::viewer::widget::draw(state, frame, area);
+            } else {
+                ui::draw(&app, frame);
+            }
+        })?;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
@@ -297,6 +321,7 @@ fn static_event_loop(
                 Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(&mut app, key),
                 Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
                 Some(Action::ValueModalKey(key)) => handle_value_modal_key(&mut app, key),
+                Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(&mut app, key),
                 Some(Action::OpenSearch) => {
                     app.open_search_overlay();
                     app.update(Msg::SetStatus(Some(
@@ -462,6 +487,14 @@ fn set_static_data(
 
 #[cfg(any(test, debug_assertions))]
 fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
+    if app.viewer_modal().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                Some(Action::ViewerOverlayKey(key))
+            }
+            _ => None,
+        };
+    }
     if app.value_modal().is_some() {
         return match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::ValueModalKey(key)),
@@ -961,11 +994,15 @@ enum Action {
     /// Resume the selected un-muxed agent session in a new terminal
     /// (launches the harness binary in the background).
     Resume,
-    /// Launch an external full-transcript viewer for the selected
-    /// agent session (H-TRANSCRIPT-012, ADR 0019). Mirrors the
-    /// `Attach` hand-off: suspend the TUI, exec the viewer, wait,
-    /// then re-enter the alt screen.
+    /// Open the native full-screen transcript viewer modal for
+    /// the selected agent session (H-VIEWER-NATIVE-008, ADR 0052).
+    /// The widget renders inside the existing terminal — no alt-
+    /// screen swap, no child process. Falls through to the
+    /// escape-hatch external launch when the harness has no
+    /// native parser (kept for `aider` etc.).
     View,
+    /// Forward a key event into the open viewer modal.
+    ViewerOverlayKey(ratatui::crossterm::event::KeyEvent),
 }
 
 /// Dispatch a key into the open help overlay and close it on
@@ -1205,13 +1242,42 @@ fn target_short(target: &AttachTarget) -> String {
     format!("{}:{}", target.backend, target.native_id)
 }
 
-/// Handle the `T` key (H-TRANSCRIPT-012). Resolve the selection
-/// against the registered viewer backends; on a [`ViewerTarget::Launch`]
-/// suspend the TUI, exec the viewer, wait for it to exit, then
-/// re-enter the alt screen. On disabled, set a status-bar message
-/// and stay in the TUI without touching the terminal.
+/// Handle the `T` key (H-VIEWER-NATIVE-008, ADR 0052). Resolve the
+/// selected agent session through `viewer_bridge::build_viewer_state`
+/// and open the native full-screen modal. Falls through to the
+/// escape-hatch external launch (`H-TRANSCRIPT-012`) when the
+/// harness has no native parser registered (currently: `aider`).
+/// On disabled, set a status-bar message and stay in the TUI.
 fn view_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
-    let target = resolve_view_target_for_selection(app);
+    let Some(selection) = app.selection() else {
+        app.update(Msg::SetStatus(Some(viewer_disabled_reason(
+            &ViewerDisabled::NoSelection,
+        ))));
+        return;
+    };
+    let session_id = match selection {
+        RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
+        _ => {
+            app.update(Msg::SetStatus(Some(viewer_disabled_reason(
+                &ViewerDisabled::UnsupportedRow,
+            ))));
+            return;
+        }
+    };
+
+    // Native viewer is the default per ADR 0052.
+    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state(&session_id) {
+        let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
+        app.open_viewer_modal(state);
+        app.update(Msg::SetStatus(Some(format!("viewing {label}"))));
+        return;
+    }
+
+    // Fallback: harness has no native parser. Honor the escape-hatch
+    // external launcher (`claude-history` only, for now). Used by
+    // `aider` and any other harness we add to the graph before its
+    // viewer parser lands.
+    let target = resolve_viewer_target(&session_id, &PathBinaryProbe);
     match target {
         ViewerTarget::Launch(plan) => {
             let outcome = run_viewer_launch(terminal, &plan);
@@ -1228,18 +1294,47 @@ fn view_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig
     }
 }
 
-/// Pull the agent-session id out of the current selection and run
-/// it through the viewer resolver. Selections that aren't an agent
-/// session row degrade to a disabled reason.
-fn resolve_view_target_for_selection(app: &App) -> ViewerTarget {
-    let Some(selection) = app.selection() else {
-        return ViewerTarget::Disabled(ViewerDisabled::NoSelection);
+/// Translate a key event into a [`crate::viewer::input::ViewerMsg`],
+/// run it through the pure reducer, and put the new state back on
+/// `app` — unless the reducer's effect was `Close`, in which case
+/// dismiss the modal. Keys that don't map are dropped silently
+/// (the modal owns every keystroke while open).
+fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+    use crate::viewer::input::{ViewerEffect, ViewerMsg, reduce};
+    let Some(state) = app.take_viewer_modal() else {
+        return;
     };
-    let session_id = match selection {
-        RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
-        _ => return ViewerTarget::Disabled(ViewerDisabled::UnsupportedRow),
+    let msg = match (key.modifiers, key.code) {
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
+        (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(ViewerMsg::Close),
+        (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(ViewerMsg::ScrollDown),
+        (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(ViewerMsg::ScrollUp),
+        (_, KeyCode::PageDown) | (_, KeyCode::Char(' ')) => Some(ViewerMsg::PageDown),
+        (_, KeyCode::PageUp) => Some(ViewerMsg::PageUp),
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(ViewerMsg::HalfPageDown),
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => Some(ViewerMsg::HalfPageUp),
+        (_, KeyCode::Char('g')) | (_, KeyCode::Home) => Some(ViewerMsg::JumpToStart),
+        (KeyModifiers::SHIFT, KeyCode::Char('G'))
+        | (KeyModifiers::NONE, KeyCode::Char('G'))
+        | (_, KeyCode::End) => Some(ViewerMsg::JumpToEnd),
+        (_, KeyCode::Char('t')) => Some(ViewerMsg::ToggleTools),
+        (_, KeyCode::Char('y')) => Some(ViewerMsg::ToggleThinking),
+        _ => None,
     };
-    resolve_viewer_target(&session_id, &PathBinaryProbe)
+    let Some(msg) = msg else {
+        app.open_viewer_modal(state);
+        return;
+    };
+    let (next, effect) = reduce(state, msg);
+    match effect {
+        ViewerEffect::Close => {
+            app.close_viewer_modal();
+            app.update(Msg::SetStatus(Some("viewer closed".to_string())));
+        }
+        ViewerEffect::None => {
+            app.open_viewer_modal(next);
+        }
+    }
 }
 
 /// Outcome of a single viewer launch attempt. Errors carry a
