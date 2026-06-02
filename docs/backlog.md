@@ -6699,7 +6699,7 @@ this phase migrates whichever ones exist when each story lands.
 
 ## Graph Visualization Workstream
 
-- [ ] `GV-001` Record graph visualization export decisions.
+- [x] `GV-001` Record graph visualization export decisions.
   - Scope: write an ADR covering graph visualization outputs: Graphviz
     DOT for static inspection and an HTML output for interactive,
     navigable graph inspection. Decide how the HTML renderer loads its
@@ -6711,8 +6711,20 @@ this phase migrates whichever ones exist when each story lands.
     the design doc if the exported graph shape or CLI surface becomes
     part of the product contract.
   - Blockers: `H-MUXPROC-FU-006`.
+  - Outcome: ADR 0050 settles both formats, picks inlined Cytoscape.js
+    as the HTML library, locks provider-neutral `NodeKind` /
+    `RelationKind` / `Provenance` visual encoding, treats candidate
+    vs. resolved as toggleable views in HTML (distinctly styled
+    together in DOT), defaults `RuntimeProcess` and unresolved-
+    endpoint stubs to visible-but-filterable, commits to
+    deterministic emission, and introduces a shared `[theme]` table
+    with `[tui.theme]` / `[html.theme]` overrides. Bespoke
+    navigation chrome (focus, N-depth, upstream/downstream) wraps
+    the Cytoscape API directly. Live server-hosted HTML view is
+    flagged as a follow-up. `docs/design.md` gains a Graph
+    Visualization Exports subsection and a Decisions entry.
 
-- [ ] `GV-002` Add `conspectus graph --format dot`.
+- [x] `GV-002` Add `conspectus graph --format dot`.
   - Scope: add a Graphviz DOT renderer for the resolved internal graph.
     Include node kind, stable id/label, and enough styling to distinguish
     repos, checkouts, workspaces, agent sessions, mux sessions, branches,
@@ -6728,21 +6740,186 @@ this phase migrates whichever ones exist when each story lands.
   - Manual checks: run `dot -Tsvg` on at least one generated fixture and
     inspect that labels and edge kinds remain readable.
   - Blockers: `H-MUXPROC-FU-006`, `GV-001`.
+  - Outcome: `conspectus graph --format dot` ships alongside the
+    existing `--format json`, with `--candidates {include,exclude}`
+    and `--diagnostic-nodes {include,exclude}` flags per ADR 0050.
+    `conspectus dev scenario graph --format dot <name>` extends the
+    same surface to named replay scenarios. The renderer
+    (`src/output/dot.rs`) is provider-neutral: shape/fill keyed on
+    `NodeKind`, arrowhead on `RelationKind` category, penwidth and
+    color tint on `Provenance`, resolver-preferred candidates marked
+    `★` and solid, losing candidates dashed, ignored/overridden
+    candidates dashed-red with a tooltip, unresolved endpoints
+    rendered as dashed-circle stubs. Nodes are grouped into
+    per-`NodeKind` `subgraph cluster_*` blocks in fixed order;
+    emission is deterministic (BTreeMap node walk, sorted edges).
+    Snapshot coverage in `tests/dot_snapshots.rs` covers empty,
+    orphan-session, mux candidates (with and without
+    `--candidates exclude`), unresolved lineage, fork ancestry, and
+    branch→PR fixtures. The `process-cardinality` named scenario is
+    exercised structurally to assert the `--diagnostic-nodes`
+    filter. Manually verified with `dot -Tsvg` on the `exact-match`,
+    `ambiguous-mux`, and `fork-lineage` scenarios.
 
-- [ ] `GV-003` Add `conspectus graph --format html`.
-  - Scope: generate an HTML graph explorer backed by the same graph data
-    as the DOT export. The page should support pan/zoom, node selection,
-    neighbor highlighting, search/filter by node kind and text, and an
-    inspection panel showing node attributes and link evidence. Keep the
-    exported file usable offline if the ADR selects vendoring or
-    self-contained output. Prefer the named `TEST-006` scenarios as
-    examples and manual-review inputs once they exist.
-  - Tests: deterministic HTML fixture coverage with volatile generated
-    timestamps avoided or normalized; unit tests for the serialized graph
-    payload consumed by the page.
-  - Manual checks: open a generated HTML file for a real local graph and
-    verify navigation, search, filtering, and node detail inspection.
+- [ ] `GV-003` Add `conspectus graph --format html`. Split into
+  `GV-003a` / `GV-003b` / `GV-003c` so the foundational payload and
+  vendoring story are settled before the chrome is built on top.
+  Aggregate scope is unchanged from the original ticket: a single-file
+  self-contained HTML explorer backed by the same resolved graph as
+  DOT, supporting pan/zoom, selection, neighbor highlighting,
+  search/filter, an inspector, and the navigation primitives from ADR
+  0050 decision 10. Closes when GV-003a, GV-003b, and GV-003c are all
+  complete.
+
+- [x] `GV-003a` HTML renderer scaffolding + minimal viewer.
+  - Scope: add `conspectus graph --format html` and the matching
+    `conspectus dev scenario graph --format html`. Vendor Cytoscape.js
+    (UMD build) plus the `fcose` layout extension under
+    `src/output/html/assets/` with license headers; inline via
+    `include_str!`. Produce a single-file HTML output: scaffolding
+    HTML + minimal CSS + a thin `GraphDriver` JS module wrapping
+    Cytoscape per the ADR 0050 Coupling Boundary + a library-neutral
+    JSON payload embedded in the page (not Cytoscape's element format).
+    Implement the visual encoding from ADR 0050 decision 3
+    (`NodeKind` shape/color, `RelationKind` arrowhead category,
+    `Provenance` width/opacity, candidate/resolved styling,
+    unresolved-stub dashed terminator). Honor `--candidates` and
+    `--diagnostic-nodes` flags. No chrome beyond default Cytoscape
+    pan/zoom and click-to-select in this sub-ticket.
+  - Tests: unit tests on the Rust payload serialization (deterministic
+    ordering, correct shape, `NodeKind` / `RelationKind` /
+    `Provenance` coverage); a snapshot test on the rendered HTML with
+    the inlined Cytoscape bundle redacted to a hash so the snapshot is
+    stable across library updates.
+  - Manual checks: open a generated HTML for the `exact-match`,
+    `ambiguous-mux`, and `fork-lineage` scenarios in a browser;
+    confirm pan/zoom, node selection, and the visual encoding match
+    the DOT output.
   - Blockers: `H-MUXPROC-FU-006`, `GV-001`, `GV-002`.
+  - Outcome: `conspectus graph --format html` and
+    `conspectus dev scenario graph --format html` ship single-file
+    self-contained pages (~775 KB) that inline cytoscape@3.33.4,
+    cytoscape-fcose@2.2.0, cose-base@2.2.0, and layout-base@2.0.1
+    (all MIT, vendored under `src/output/html/assets/` with VERSIONS
+    and NOTICE files). The Rust renderer (`src/output/html/mod.rs`)
+    emits a library-neutral JSON payload — not Cytoscape element
+    format — and the JS `GraphDriver` translates it at load time per
+    the ADR 0050 Coupling Boundary. `app.js` is a minimal bootstrap
+    (click to surface node info in the status bar); the rich chrome
+    (filter panel, inspector, search) lives in GV-003b. Visual
+    encoding mirrors the DOT output: `NodeKind` shape/fill,
+    `RelationKind` arrowhead, `Provenance` width/color, resolved
+    candidates marked solid + `★`, losing candidates dashed,
+    ignored/overridden red dashed, unresolved endpoints rendered as
+    dashed-bordered stub nodes. `--candidates` and
+    `--diagnostic-nodes` flags reuse the GV-002 plumbing. Payload
+    emission is deterministic (sorted by kind/id; edges by source/
+    relation/target/provenance/id). Test coverage in
+    `tests/html_snapshots.rs` is six payload snapshots (empty,
+    mux-candidates with and without `--candidates exclude`,
+    unresolved-lineage, branch-pr, fork-ancestry), one scaffold
+    snapshot with all inlined `<script>` and `<style>` blocks
+    redacted to `[redacted N bytes]` markers (stable across library
+    bumps; byte-count drift still surfaces in the diff), and a
+    structural check on the `process-cardinality` named scenario
+    asserting the `--diagnostic-nodes` filter drops RuntimeProcess
+    nodes and edges from the payload.
+    Post-review fixes: replaced `width: "label", height: "label"`
+    with fixed node sizes because the auto-sizing path interacts
+    badly with several shape geometries in Cytoscape 3.33 and made
+    workspace/fork/agent-session/some-checkout nodes report
+    `.visible() === false`, which in turn hid every edge incident
+    to them (Cytoscape hides edges with hidden endpoints). Enriched
+    labels with a kind-aware secondary line so `main` branch and
+    `repo-a` checkout disambiguate against `main` branch in a
+    different repo / `repo-a` repo. Added a top-right legend
+    overlay sourced from the driver's palette so the encoding is
+    self-documenting.
+
+- [x] `GV-003b` HTML inspector, filter panel, and search.
+  - Scope: add the bespoke chrome that wraps the GV-003a `GraphDriver`.
+    Filter panel with NodeKind checklist, RelationKind checklist,
+    candidate/resolved toggle (default resolved per ADR 0050
+    decision 4), RuntimeProcess toggle, unresolved-endpoint stub
+    toggle, ignored/overridden toggle, and a one-click "collapsed
+    view" preset that approximates what the CLI/TUI would show.
+    Inspector panel showing the selected node's attributes plus
+    grouped incoming/outgoing edges with provenance and confidence.
+    Free-text search box that filters nodes by label/id and dims the
+    rest. All chrome modules call into the `GraphDriver` interface;
+    none reach into the underlying Cytoscape instance directly.
+  - Tests: extend the GV-003a payload tests with cases that exercise
+    each filter dimension's data (ignored links, RuntimeProcess
+    nodes, unresolved endpoints). HTML scaffold snapshot continues
+    to redact the Cytoscape bundle hash.
+  - Manual checks: against a real local graph, toggle every filter,
+    confirm the "collapsed view" preset matches what `conspectus
+    table sessions` would show, and verify the inspector renders the
+    same fields as `conspectus node show`.
+  - Blockers: `GV-003a`.
+  - Outcome: shipped a three-column page layout (filters left,
+    Cytoscape canvas center, inspector/legend right) with a
+    header search input. New `GraphDriver` methods (setHidden,
+    setDimmed, selectNode, onSelectionChange, getDetail) keep the
+    chrome modules off the underlying Cytoscape instance per the
+    ADR 0050 Coupling Boundary. `filter-panel.js` exposes per-
+    kind and per-relation checklists plus four view toggles (show
+    candidates / RuntimeProcess / unresolved-stubs /
+    ignored-overridden) and a one-click "Collapsed view" preset
+    that approximates the CLI/TUI view. `inspector.js` shows the
+    selected node's flattened attributes (dotted paths, nulls
+    suppressed) and grouped incoming/outgoing edges with
+    provenance, confidence, ★ for resolved, state badges for
+    ignored/overridden; clicking a neighbor row navigates the
+    inspector and focuses on the graph. Search dims non-matching
+    nodes and their incident edges via setDimmed, with a counter
+    in the header. New `ignored_and_overridden_graph` fixture and
+    a payload snapshot cover state="ignored" / "overridden"; a
+    structural check confirms every chrome slot is present in the
+    rendered scaffold. 1133 tests pass; fmt and clippy clean.
+    Manually verified in headless chromium: default view, single-
+    node selection (inspector populated), Collapsed view preset,
+    and free-text search all behave correctly.
+
+- [ ] `GV-003c` HTML navigation primitives.
+  - Scope: implement the navigation operations from ADR 0050
+    decision 10 against the neutral payload (not Cytoscape's
+    collection API): focus on a selected node, restrict the visible
+    graph to nodes within `--depth N` of it, restrict to
+    upstream-only / downstream-only traversal, and a breadcrumb stack
+    so the user can pop back to prior focus states. Keyboard
+    shortcuts where they're cheap; menu chrome where they're
+    discoverable.
+  - Tests: unit tests on the JS traversal helpers if they're moved to
+    a small testable module; otherwise structural assertions on the
+    HTML scaffold that the navigation chrome is present.
+  - Manual checks: focus from any node, walk through depths 1/2/3,
+    flip upstream-only and downstream-only, and verify the
+    breadcrumb returns to the prior view on pop.
+  - Blockers: `GV-003b`.
+
+- [ ] `GV-003d` HTML layout improvements and selection.
+  - Scope: the GV-003a default is fcose with hand-tuned options
+    that look reasonable on the named scenarios but degrade on
+    denser graphs (edge-label collisions, suboptimal compound
+    grouping, no manual override). Improve the default tuning and
+    expose layout selection: at minimum a UI control to pick
+    among `fcose`, `cose`, `dagre` (hierarchical), and `concentric`
+    (radial-by-NodeKind). Consider per-`NodeKind` constraints so
+    workspaces/repos cluster naturally and lineage edges flow in a
+    consistent direction. A "re-run layout" button to escape local
+    minima. Vendor any additional layout extensions (`cytoscape-
+    dagre` etc.) under the same `assets/` pattern with VERSIONS /
+    NOTICE updates.
+  - Tests: GV-003a snapshot tests stay valid (layout is JS-side and
+    not part of the payload contract). Add a manual-check checklist
+    in the docs.
+  - Manual checks: render the named replay scenarios under each
+    available layout and confirm the result is readable; render a
+    real local graph (50-100 nodes) and confirm performance and
+    legibility hold.
+  - Blockers: `GV-003a`. Not on the GV-003 umbrella critical path;
+    can land in parallel with GV-003b / GV-003c.
 
 - [ ] `GV-004` Document graph visualization workflows.
   - Scope: update `README.md`, `docs/operations.md`, or a focused
