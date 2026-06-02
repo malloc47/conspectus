@@ -28,8 +28,17 @@ the bump in the project changelog or commit message.
     license: MIT (iVis-at-Bilkent)
     note: peer dependency of cose-base.
 
-Load order matters: layout-base → cose-base → cytoscape →
-cytoscape-fcose. The Rust template (`src/output/html/template.rs`)
-inlines them in that order so the UMD globals attach cleanly.
+  cytoscape-dagre@3.0.0
+    https://unpkg.com/cytoscape-dagre@3.0.0/cytoscape-dagre.js
+    sha256: 1b060e1ffec6355e208d5ec4d49aa573000e8069eafbe01b1719a3bd630da290
+    license: MIT (Cytoscape Consortium)
+    note: dagre is bundled in this UMD build (cytoscape-dagre@3.x
+          embeds dagre.cjs.js); no separate dagre.js needed.
+          Does NOT self-register; driver.js calls
+          `window.cytoscapeDagre(window.cytoscape)` explicitly.
 
-License texts for all four packages are reproduced in NOTICE.
+Load order matters: layout-base → cose-base → cytoscape →
+cytoscape-fcose → cytoscape-dagre. The Rust template inlines them
+in that order so the UMD globals attach cleanly.
+
+License texts for all five packages are reproduced in NOTICE.

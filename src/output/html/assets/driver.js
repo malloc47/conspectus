@@ -81,6 +81,16 @@
     if (!global.cytoscape) {
       throw new Error("Cytoscape is not loaded");
     }
+    // cytoscape-dagre does not self-register (unlike fcose, which
+    // does when the global `cytoscape` is in scope at load time).
+    // Register it here so the layout is available by name.
+    if (
+      global.cytoscapeDagre &&
+      typeof global.cytoscapeDagre === "function" &&
+      !global.cytoscape("layout", "dagre")
+    ) {
+      try { global.cytoscapeDagre(global.cytoscape); } catch (_) {}
+    }
     this._cy = global.cytoscape({
       container: container,
       elements: [],
@@ -91,6 +101,7 @@
       wheelSensitivity: 0.2,
     });
     this._payload = null;
+    this._currentLayout = "fcose";
   }
 
   GraphDriver.prototype.load = function (payload) {
@@ -283,13 +294,63 @@
     };
   };
 
+  // -- Public layout controls (GV-003d) --------------------------
+
+  /// Available layout names in preference order. The driver picks
+  /// the first one Cytoscape has registered when none is requested.
+  GraphDriver.AVAILABLE_LAYOUTS = [
+    { name: "fcose", label: "Force (fcose)" },
+    { name: "dagre-lr", label: "Hierarchical →" },
+    { name: "dagre-tb", label: "Hierarchical ↓" },
+    { name: "cose", label: "Force (cose)" },
+    { name: "concentric", label: "Concentric" },
+    { name: "circle", label: "Circle" },
+    { name: "grid", label: "Grid" },
+  ];
+
+  /// Return the names of layouts that Cytoscape can run right now
+  /// (i.e. extensions actually loaded). Built-ins always present:
+  /// cose, concentric, circle, grid, preset, null, random.
+  GraphDriver.prototype.availableLayouts = function () {
+    var self = this;
+    return GraphDriver.AVAILABLE_LAYOUTS.filter(function (l) {
+      var cyName = l.name.indexOf("dagre") === 0 ? "dagre" : l.name;
+      return !!global.cytoscape("layout", cyName);
+    });
+  };
+
+  GraphDriver.prototype.currentLayout = function () {
+    return this._currentLayout;
+  };
+
+  /// Set the active layout and re-run it. Pass one of the names in
+  /// availableLayouts() — `dagre-lr` and `dagre-tb` map to the
+  /// `dagre` layout with rankdir LR / TB respectively.
+  GraphDriver.prototype.setLayout = function (name) {
+    this._currentLayout = name;
+    this._runLayout();
+  };
+
+  /// Re-run the current layout (escapes local minima after a
+  /// filter change or for a "Re-run" button).
+  GraphDriver.prototype.rerunLayout = function () {
+    this._runLayout();
+  };
+
   // -- Internals ----------------------------------------------------
 
   GraphDriver.prototype._runLayout = function () {
-    var hasFcose =
-      global.cytoscape && global.cytoscape("layout", "fcose");
-    var opts = hasFcose
-      ? {
+    var name = this._currentLayout || "fcose";
+    var opts = this._layoutOptions(name);
+    if (!opts) opts = this._layoutOptions("cose");
+    this._cy.layout(opts).run();
+  };
+
+  GraphDriver.prototype._layoutOptions = function (name) {
+    switch (name) {
+      case "fcose":
+        if (!global.cytoscape("layout", "fcose")) return null;
+        return {
           name: "fcose",
           quality: "proof",
           animate: false,
@@ -308,8 +369,46 @@
           tilingPaddingHorizontal: 12,
           padding: 40,
           nodeSeparation: 90,
-        }
-      : {
+        };
+      case "dagre-lr":
+      case "dagre-tb":
+        if (!global.cytoscape("layout", "dagre")) return null;
+        return {
+          name: "dagre",
+          rankDir: name === "dagre-lr" ? "LR" : "TB",
+          nodeSep: 40,
+          rankSep: 80,
+          edgeSep: 12,
+          padding: 30,
+          animate: false,
+        };
+      case "concentric":
+        return {
+          name: "concentric",
+          animate: false,
+          padding: 30,
+          minNodeSpacing: 30,
+          concentric: function (node) {
+            // Inner ring: workspaces/forks (hubs). Outer rings:
+            // checkouts/branches/sessions/processes. Stubs furthest.
+            var k = node.data("kind");
+            switch (k) {
+              case "workspace": return 6;
+              case "fork": return 5;
+              case "repo": return 4;
+              case "checkout":
+              case "branch": return 3;
+              case "agent_session":
+              case "mux_session":
+              case "forge_pr": return 2;
+              case "runtime_process": return 1;
+              default: return 0;
+            }
+          },
+          levelWidth: function () { return 1; },
+        };
+      case "cose":
+        return {
           name: "cose",
           animate: false,
           randomize: true,
@@ -317,7 +416,13 @@
           idealEdgeLength: 90,
           padding: 40,
         };
-    this._cy.layout(opts).run();
+      case "circle":
+        return { name: "circle", animate: false, padding: 30 };
+      case "grid":
+        return { name: "grid", animate: false, padding: 30 };
+      default:
+        return null;
+    }
   };
 
   GraphDriver.prototype._payloadToElements = function (payload) {

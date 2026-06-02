@@ -102,8 +102,43 @@
     panel.appendChild(titleBar);
 
     panel.appendChild(this._renderTopToggles());
+    panel.appendChild(this._renderLayoutGroup());
     panel.appendChild(this._renderKindGroup());
     panel.appendChild(this._renderRelationGroup());
+  };
+
+  FilterPanel.prototype._renderLayoutGroup = function () {
+    var section = el("div", "fp-section");
+    section.appendChild(el("div", "fp-section-title", "Layout"));
+    if (!this.driver.availableLayouts || !this.driver.setLayout) {
+      return section; // older driver — no layout switching available
+    }
+    var available = this.driver.availableLayouts();
+    if (available.length <= 1) return section;
+    var current = this.driver.currentLayout
+      ? this.driver.currentLayout()
+      : null;
+
+    var select = document.createElement("select");
+    select.className = "fp-layout-select";
+    var self = this;
+    available.forEach(function (opt) {
+      var o = document.createElement("option");
+      o.value = opt.name;
+      o.textContent = opt.label;
+      if (opt.name === current) o.selected = true;
+      select.appendChild(o);
+    });
+    select.addEventListener("change", function () {
+      self.driver.setLayout(select.value);
+    });
+    section.appendChild(select);
+
+    var rerun = el("button", "fp-rerun", "Re-run layout");
+    rerun.title = "Re-run the current layout (escapes local minima)";
+    rerun.addEventListener("click", function () { self.driver.rerunLayout(); });
+    section.appendChild(rerun);
+    return section;
   };
 
   FilterPanel.prototype._renderTopToggles = function () {

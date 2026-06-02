@@ -101,6 +101,7 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
          <script>\n{cose_base}\n</script>\n\
          <script>\n{cytoscape}\n</script>\n\
          <script>\n{fcose}\n</script>\n\
+         <script>\n{dagre}\n</script>\n\
          <script>\n{driver}\n</script>\n\
          <script>\n{view_state}\n</script>\n\
          <script>\n{nav_helpers}\n</script>\n\
@@ -114,6 +115,7 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
         cose_base = COSE_BASE_JS,
         cytoscape = CYTOSCAPE_JS,
         fcose = FCOSE_JS,
+        dagre = DAGRE_JS,
         driver = DRIVER_JS,
         view_state = VIEW_STATE_JS,
         nav_helpers = NAV_HELPERS_JS,
@@ -132,6 +134,7 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
 const CYTOSCAPE_JS: &str = include_str!("assets/cytoscape.min.js");
 const COSE_BASE_JS: &str = include_str!("assets/cose-base.js");
 const FCOSE_JS: &str = include_str!("assets/cytoscape-fcose.js");
+const DAGRE_JS: &str = include_str!("assets/cytoscape-dagre.js");
 const LAYOUT_BASE_JS: &str = include_str!("assets/layout-base.js");
 const DRIVER_JS: &str = include_str!("assets/driver.js");
 const VIEW_STATE_JS: &str = include_str!("assets/view-state.js");
