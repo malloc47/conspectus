@@ -2524,34 +2524,36 @@ This workstream supersedes the single-bullet `P8-012c` story; that
 entry stays in Phase 8 as the v1 release-boundary marker that is
 satisfied when this workstream's TUI integration stories land.
 
-- [ ] `H-TRANSCRIPT-001` ADR: terminal markdown rendering for the
+- [x] `H-TRANSCRIPT-001` ADR: terminal markdown rendering for the
   inline transcript preview.
-  - Scope: record a follow-on ADR (per ADR 0024) selecting the
-    markdown rendering path for the TUI. Compare `tui-markdown`
-    (Ratatui-native, returns `ratatui::text::Text`), `termimad`
-    (crossterm-targeted, requires bridging), and a roll-your-own
-    minimal styler over `pulldown-cmark`. Decide on adoption
-    criteria including: crate maintenance posture, syntect/
-    `highlight-code` feature use, license, supply-chain cost,
-    and integration shape inside the existing `src/tui/` module.
-  - Tests: ADR text only; no code in this story.
-  - Blockers: none. Should land before `H-TRANSCRIPT-008` adds
-    the dep.
+  - Outcome: ADR 0051 selects `tui-markdown 0.3.7` with
+    `default-features = false` (no `syntect`, no second
+    `ansi-to-tui` path) for the inline transcript preview.
+    Alternatives evaluated: `termimad` (crossterm-only, requires
+    bridging) and a roll-your-own renderer over
+    `pulldown-cmark` (same long-tail surface ADR 0025 rejected
+    for SGR). Integration target is a new
+    `src/tui/transcript_preview.rs` per `H-TRANSCRIPT-009`.
 
-- [ ] `H-TRANSCRIPT-002` Resolve ADR 0019 with the May 2026 survey.
-  - Scope: move ADR 0019 from Proposed to Accepted (or amend it
-    in place) with the updated candidate status: `ccview`
-    disappeared; `claude-history`, `recall`, `ai-dash`,
-    `lazyagent`, and `ccboard` are all active; `lazyagent`
-    gained an HTTP API; `ccboard-core` is a candidate Rust
-    library; `coding_agent_session_search` is new and covers
-    20+ providers via `--json`. Narrow the `SessionViewer`
-    trait sketch to the integration shapes that current
-    candidates actually expose, and call out that the inline
-    preview is a separate concern handled by the rest of this
-    workstream rather than by `SessionViewer`.
-  - Tests: ADR text only.
-  - Blockers: none.
+- [x] `H-TRANSCRIPT-002` Resolve ADR 0019 with the May 2026 survey.
+  - Outcome: ADR 0019 amended in place to Accepted. Survey
+    refreshed: `ccview` is alive (v1.0.1, April 2026) — the
+    earlier "disappeared" note was incorrect; `claude-history`
+    (v0.1.64, May 2026) gained a structured agent protocol and
+    is the preferred Claude Code launch backend; `recall`
+    (v0.5.0, Jan 2026) is the preferred multi-harness backend
+    for Claude/Codex/OpenCode/Factory; `lazyagent` v0.12.0 has
+    an HTTP API (deferred — long-running service, not a
+    one-shot viewer); `ccboard-core` is published on crates.io
+    at 0.22.0; `cass`
+    (`coding_agent_session_search`) covers 20+ providers with
+    `--json`/`--robot` but is deferred pending license-rider
+    review. The trait was narrowed from
+    `SessionViewer::{view, export_text}` to a
+    `SessionViewerAction::plan -> LaunchPlan` action-resolver
+    seam mirroring `P8-010`'s `tmux attach` hand-off. The ADR
+    explicitly calls out that the inline preview is handled by
+    ADR 0051 and the rest of the `H-TRANSCRIPT-*` workstream.
 
 - [ ] `H-TRANSCRIPT-003` Recent-history adapter API.
   - Scope: define an on-demand adapter entry point on each
@@ -2672,19 +2674,315 @@ satisfied when this workstream's TUI integration stories land.
   - Tests: `git diff --check`.
   - Blockers: `H-TRANSCRIPT-010`.
 
-- [ ] `H-TRANSCRIPT-012` External full-transcript viewer launch
-  (optional follow-on).
-  - Scope: per the refreshed ADR 0019, add a keybind that
-    launches an external viewer (`claude-history` for Claude
-    Code, `recall` for multi-harness) as a child process and
-    hands control to it, the same way `P8-010` hands control
-    to `tmux attach-session`. Discover the binary on `PATH`;
-    surface a disabled-action reason when no viewer is
-    available for the selected harness. This is a separate
-    action from the inline preview, not a replacement.
-  - Tests: action-resolver tests covering supported /
-    unsupported harnesses and the no-binary-on-PATH path.
-  - Blockers: `H-TRANSCRIPT-002`, `H-TRANSCRIPT-010`.
+- [x] `H-TRANSCRIPT-012` External full-transcript viewer launch
+  (moved ahead of the inline-widget track per the amended ADR 0019,
+  which treats inline preview and external launch as parallel
+  surfaces).
+  - Outcome: `src/tui/viewer.rs` defines `SessionViewerAction`,
+    `LaunchPlan`, and `ViewerDisabled` per the amended ADR 0019.
+    Two backends ship: `ClaudeHistoryViewer` (resolves the on-disk
+    `<state_scope>/projects/*/<session_key>.jsonl` via std
+    `read_dir` and passes it as the positional arg —
+    `claude-history --show-id` *prints* the id, the interactive
+    viewer takes a file path) and `RecallViewer`
+    (`recall --session <session_key>`, multi-harness: claude-code,
+    codex, opencode, factory, droid). `resolve_viewer_target`
+    prefers harness-specific over multi-harness. PATH discovery
+    uses a std-only `BinaryProbe` walker (no new dep). The probe
+    also feature-detects `recall --help` for `--session` because
+    upstream `recall 0.5.0` lacks the flag; the conspectus Nix
+    overlay carries a patched `recall 0.5.0-conspectus-session`
+    until upstream lands a PR. `plan()` is fallible
+    (`Result<LaunchPlan, String>`) so claude-history can return
+    a `ViewerDisabled::TranscriptNotFound` hint when the JSONL
+    file isn't on disk; the resolver falls through to recall
+    when one is configured. The `T` keybind routes through
+    `Action::View` → `view_action`. `run_viewer_launch` does an
+    explicit `Clear(All) + MoveTo(0,0)` after `ratatui::restore`
+    so mosh / nested muxers stop intertangling the child's
+    first writes with the dropped TUI buffer, and holds for
+    Enter on non-zero exit so the operator can read the
+    viewer's stderr before the alt screen reclaims the
+    terminal. Help overlay registers the new binding. Fourteen
+    unit tests cover supported / unsupported harnesses, the
+    "no binary on PATH" path, the preference order, the
+    capability-probe gating for unpatched recall, and the
+    transcript-not-found + recall-fallback paths.
+  - Known limitations (filed as `H-TRANSCRIPT-014` and
+    `H-TRANSCRIPT-015`): recall doesn't scan opencode at the
+    storage layout the user's machine actually uses (it hard-codes
+    `~/.local/share/opencode/storage/session` while the real path
+    is `session_diff/` + SQLite); and recall has no modal focus,
+    so `j`/`k` after deep-link entry type into the search box
+    rather than navigating the preview. The stderr-hold makes
+    both failure modes legible from the TUI.
+  - **Repurposed by ADR 0052**: external viewer launch is no
+    longer the default `T` target. The native in-tree viewer
+    (`H-VIEWER-NATIVE-*`) takes over the default. The code
+    shipped under this story stays as the *escape-hatch* path
+    operators reach via `[viewers.<harness>]` config
+    (`H-TRANSCRIPT-013`). The patched recall (`pkgs/recall/`)
+    stays in the Nix overlay until the native viewer ships and
+    can be retired after.
+
+- [~] `H-TRANSCRIPT-014` Surface recall's harness coverage gap (or
+  broaden it). **Won't fix on the conspectus side** as of ADR 0052
+  — the native viewer (H-VIEWER-NATIVE-*) reads opencode directly
+  via SQLite (ADR 0013), so the gap is closed by replacing the
+  backend rather than patching recall. Operators who still want
+  recall as the opencode viewer maintain the patches themselves.
+  - Scope: on at least one observed machine, recall hard-codes
+    `~/.local/share/opencode/storage/session` but the real
+    OpenCode storage on the same machine lives at
+    `~/.local/share/opencode/storage/session_diff/` (and the
+    SQLite-of-record is `~/.local/share/opencode/opencode.db`).
+    The result: `recall list --source opencode` returns empty
+    even though conspectus discovers many opencode sessions
+    locally, and `recall --session <opencode-id>` exits 1 with
+    "Session not found". H-TRANSCRIPT-012's stderr-hold makes
+    the failure visible, but the underlying gap stays.
+  - Resolution options (pick one in the story):
+    (a) **Document** and leave: opencode-via-recall is an
+        unsupported combination on machines whose opencode store
+        lives outside recall's hardcoded path. The TUI status
+        bar already explains why on failure.
+    (b) **Extend the recall patch** to add a search-roots flag
+        (`--scan-root <path>` repeatable) and pass conspectus's
+        resolved `state_scope` per-harness.
+    (c) **Upstream PR** to point recall's opencode parser at the
+        real layout (session_diff/ + opencode.db), then drop the
+        local-only workaround.
+  - Tests: viewer-resolver tests already cover the disabled
+    paths; this story would add an integration probe that runs
+    `recall list --source <harness>` against the actual machine
+    layout when one is available, so coverage gaps regress
+    visibly.
+  - Blockers: none. Independent of `H-TRANSCRIPT-013`'s config
+    override (which would also let users sidestep the gap by
+    swapping recall for an opencode-native viewer per-harness).
+
+- [~] `H-TRANSCRIPT-015` Recall focus on deep-link entry. **Won't
+  fix on the conspectus side** as of ADR 0052 — the native viewer
+  owns its own focus model. Kept in the backlog for operators who
+  configure recall as their viewer via `H-TRANSCRIPT-013`.
+  - Scope: when patched-recall is launched with `--session <id>`,
+    the operator has already chosen the session in conspectus
+    and lands inside recall expecting to scroll. But recall has
+    no modal focus model — every keystroke other than the
+    explicit navigation keys (Up/Down/Ctrl-E) inserts into the
+    search query box. The most ingrained muscle memory
+    (`j`/`k` to move down/up) ends up filtering the session
+    list instead, often hiding the very session conspectus
+    just opened.
+  - Resolution options:
+    (a) **Extend the conspectus recall patch** with a deep-link
+        mode: when `--session` is set, intercept `j`/`k` (and
+        possibly `g`/`G`) as preview-navigation keys before
+        they reach `on_char`. Keep `/` as the escape hatch to
+        re-enter search.
+    (b) **Upstream PR** for a `--preview-focus-on-entry` flag
+        (or a deeper modal-focus rework) — recall would benefit
+        from this regardless of conspectus's use case.
+    (c) **Status-bar hint after launch** explaining the
+        Up/Down convention — cheapest, no patch revision.
+  - Tests: hard to unit-test the patched binary directly; rely
+    on the existing recall installCheck plus a one-line manual
+    smoke step in the H-TRANSCRIPT-012 outcome notes.
+  - Blockers: none. Pairs naturally with `H-TRANSCRIPT-014` —
+    both are recall-patch revisions.
+
+- [ ] `H-TRANSCRIPT-013` Config-driven viewer override.
+  - Scope: extend the hard-coded `ClaudeHistoryViewer` /
+    `RecallViewer` resolver with a `[viewers.<harness>]` (and
+    `[viewers.default]`) config section so users can bring their
+    own opinions without touching Conspectus internals. The
+    `recall --session` patching in `pkgs/recall/` was the
+    immediate driver — a future user shouldn't have to fork
+    Conspectus to swap in `cass view`, `claude-code-log`, a
+    homegrown wrapper, etc.
+  - Config shape: each entry is `command = ["prog", "arg", ...]`
+    with `{placeholder}` interpolation. Conspectus expands at
+    launch time. Precedence: project config > user config >
+    built-in resolver. Per-harness entry wins over
+    `[viewers.default]`. User-configured entries **bypass
+    `required_flags` probing** — the operator has opted in and
+    accepts whatever the child process does.
+  - Placeholder set (frozen by the ADR below):
+    `{session-id}` (raw `AgentSessionId.session_key`),
+    `{session-file}` (on-disk transcript path; empty / launch
+    refused for harnesses that have no single file — opencode
+    SQLite, codex split state/log per ADR 0048),
+    `{cwd}` (session cwd or empty),
+    `{harness}` (`AgentSessionId.harness_key`),
+    `{state-scope}` (`AgentSessionId.state_scope`).
+  - ADR: small ADR freezes the placeholder names, the precedence
+    rules, the unknown-placeholder behavior (diagnostic +
+    leave-as-text vs refuse-to-launch), and the
+    `{session-file}` semantics for SQLite-backed harnesses.
+    Variable names become a public contract once shipped.
+  - Implementation outline: new `ViewersConfig` in `src/config.rs`
+    mirroring the `TuiViewsConfig` parse/merge shape (~120 LOC),
+    a `ConfiguredViewer` backend in `src/tui/viewer.rs` with a
+    template expander (~80 LOC), resolver order change (~20 LOC),
+    a per-harness `state_file_for(session_id)` mapper (deciding
+    Option A: derive on demand vs. Option B: add an optional
+    `state_file` field to `AgentSessionNode`; deferred to the
+    ADR). Tests cover precedence, placeholder expansion,
+    `{session-file}` for the SQLite-backed harnesses, and the
+    interaction with the existing `required_flags` gating
+    (configured viewer bypasses it).
+  - Tests: config parse/merge for the new sections; template
+    expander with known/unknown placeholders; resolver tests
+    that a configured entry wins over the built-in backends; a
+    refused-launch test for `{session-file}` against opencode.
+  - Blockers: none (independent of the inline-widget track).
+    Should land before `H-TRANSCRIPT-012` ships outside the
+    author's machines so the patched-recall workaround is
+    optional rather than the only path.
+
+### Native In-Tree Transcript Viewer (H-VIEWER-NATIVE-*)
+
+Per ADR 0052. Builds a Ratatui full-screen modal that renders a
+single session's transcript inside the conspectus process.
+Replaces the external-launch path (`H-TRANSCRIPT-012`) as the
+default `T` action. Designed for later extraction to a standalone
+crate per `docs/transcript-viewer-deps.md`.
+
+Stories below depend on `H-TRANSCRIPT-003` (recent-history adapter
+API) but extend its return shape from "last N turns" to "full
+transcript with a cursor at the last turn".
+
+- [ ] `H-VIEWER-NATIVE-001` Module scaffold + dep-surface
+  enforcement.
+  - Scope: create `src/viewer/` with `mod.rs`, `model.rs`,
+    `parser/mod.rs`, `widget.rs`, `state.rs`, `input.rs`,
+    `render.rs`, `theme.rs`. `mod.rs` carries a docstring listing
+    every direct external crate the module imports (mirrors
+    `docs/transcript-viewer-deps.md`). Add no behavior beyond
+    type stubs and a compile gate. The conspectus TUI does *not*
+    yet route the `T` keybind into the new module.
+  - Tests: doc-test asserting the dep-surface docstring matches
+    `docs/transcript-viewer-deps.md` (string-diff). `cargo build`
+    succeeds with `src/viewer/` present but unused.
+  - Blockers: none. ADR 0052 covers the design.
+
+- [ ] `H-VIEWER-NATIVE-002` `TranscriptDocument` + `TranscriptTurn`
+  model + `SessionLocator` types.
+  - Scope: define `TranscriptTurn { role, kind, body, timestamp? }`
+    and `TranscriptDocument { turns: Vec<TranscriptTurn>, meta }`
+    in `src/viewer/model.rs`. Define `SessionLocator` enum with
+    per-harness variants (e.g. `ClaudeCode { state_root,
+    session_key }`, `Codex { state_root, session_key }`,
+    `OpenCode { db_path, session_id }`). No conspectus-graph
+    types appear in the public surface.
+  - Tests: serde round-trips for the model types; `SessionLocator`
+    Display impl coverage.
+  - Blockers: `H-VIEWER-NATIVE-001`.
+
+- [ ] `H-VIEWER-NATIVE-003` Claude Code parser.
+  - Scope: `src/viewer/parser/claude_code.rs` reads the full JSONL
+    transcript at `<state_root>/projects/*/<session_key>.jsonl`
+    into a `TranscriptDocument`. Skips tool-use, tool-result,
+    thinking, system records the same way the H-PREVIEW
+    extractor does, *but* tags them so the viewer can optionally
+    show them on operator request. Compaction summaries are
+    a distinct turn kind. Errors degrade to a "transcript
+    unavailable" `TranscriptDocument` rather than panicking.
+  - Tests: fixture tests for plain exchanges, compaction
+    summaries, tool-only tails, malformed lines.
+  - Blockers: `H-VIEWER-NATIVE-002`.
+
+- [ ] `H-VIEWER-NATIVE-004` Codex parser.
+  - Scope: `src/viewer/parser/codex.rs` reads
+    `<state_root>/sessions/<YYYY>/<MM>/<DD>/rollout-*-<session_key>.jsonl`
+    into a `TranscriptDocument`. Honors the channel-marker filter
+    (`<turn_aborted>`, `<proposed_plan>`) from `H-PREVIEW-006`.
+  - Tests: fixture tests for the codex schema variants the
+    H-PREVIEW track already covers, plus an empty-session case.
+  - Blockers: `H-VIEWER-NATIVE-002`.
+
+- [ ] `H-VIEWER-NATIVE-005` OpenCode parser (SQLite-of-record).
+  - Scope: `src/viewer/parser/opencode.rs` reads from `opencode.db`
+    (ADR 0013). Single SQL query returns the session's messages
+    ordered by sequence; rows map to `TranscriptTurn`s.
+    `session_diff/` is *not* read — the SQLite store is
+    authoritative. Falls back to "transcript unavailable" when
+    the DB is absent / locked / corrupted.
+  - Tests: SQLite-backed fixture tests covering most-recent
+    ordering, per-session attribution, missing-table fallback.
+  - Blockers: `H-VIEWER-NATIVE-002`. **Closes the OpenCode
+    coverage gap** that `H-TRANSCRIPT-014` could not.
+
+- [ ] `H-VIEWER-NATIVE-006` Viewer widget: full-screen modal,
+  scroll, jump-to-end-on-open.
+  - Scope: `src/viewer/widget.rs` + `src/viewer/state.rs`.
+    Full-screen Ratatui rendering: header (harness, session id,
+    cwd), scrollable transcript body, footer with key hints.
+    Initial scroll lands on the last turn (ADR 0052). `g`/`Home`
+    jumps to start, `G`/`End` to end, `j`/`k`/arrows scroll by
+    one line, `Ctrl-D`/`Ctrl-U` half-page, `PgDn`/`PgUp` page.
+    `q` / Esc closes the modal and returns to the row tree with
+    selection preserved. Per-turn rendering uses
+    `tui-markdown` for the body, plus role-tagged headers.
+  - Tests: buffer snapshot tests for (a) normal open at last
+    turn, (b) scrolled to top, (c) "transcript unavailable",
+    (d) compaction-summary turn rendering.
+  - Blockers: `H-VIEWER-NATIVE-002`, `H-TRANSCRIPT-008`
+    (`tui-markdown` dep).
+
+- [ ] `H-VIEWER-NATIVE-007` Substring search inside the viewer.
+  - Scope: `/` opens a search prompt at the footer. `n` / `N`
+    cycle matches. Matches highlight in the body. Search is
+    case-insensitive substring over rendered turn bodies (no
+    fuzzy index in v1, matching ADR 0024).
+  - Tests: snapshot tests for search-open, match-highlight,
+    no-match cases.
+  - Blockers: `H-VIEWER-NATIVE-006`.
+
+- [ ] `H-VIEWER-NATIVE-008` Viewer-bridge integration: wire the
+  `T` keybind into the native viewer.
+  - Scope: `src/tui/viewer_bridge.rs` translates the selected
+    `AgentSessionId` into a `SessionLocator` and opens the
+    native viewer. The existing `src/tui/viewer.rs`
+    (`SessionViewerAction` / external launch) becomes the
+    *fallback* path, triggered only when
+    `[viewers.<harness>]` config selects an external command
+    (`H-TRANSCRIPT-013`). Help overlay updates to reflect the
+    new default. Loading state shown while parsing.
+  - Tests: integration tests for the un-muxed selection path
+    opening the viewer; muxed-row path unchanged (mux capture
+    preview still wins for the inline pane);
+    `[viewers.claude-code] command = ["claude-history", ...]`
+    config path routes through the escape hatch.
+  - Blockers: `H-VIEWER-NATIVE-006`,
+    `H-VIEWER-NATIVE-003..005`, `H-TRANSCRIPT-013` (or a
+    minimal "external is opt-in" flag for the v1 cut).
+
+- [ ] `H-VIEWER-NATIVE-009` Retire patched recall from
+  `pkgs/recall/`.
+  - Scope: once `H-VIEWER-NATIVE-008` ships and the native
+    viewer is the default for all four harnesses, decide
+    whether to (a) revert `pkgs/recall/` to a thin prebuilt
+    wrapper for operators who configure recall via
+    `H-TRANSCRIPT-013`, or (b) remove the package entirely.
+    Update `H-TRANSCRIPT-012` outcome and the `dev-toolchain.nix`
+    inclusion accordingly.
+  - Tests: NixOS host evals.
+  - Blockers: `H-VIEWER-NATIVE-008`.
+
+- [ ] `H-VIEWER-NATIVE-010` (later) Extraction prep: lift
+  `src/viewer/` into a workspace member crate.
+  - Scope: when the viewer module's import surface has been
+    stable for ≥ N stories, create a `crates/` workspace,
+    move `src/viewer/` to `crates/conspectus-transcript-viewer/`,
+    add a thin `bin` target with clap that takes a
+    `SessionLocator` from argv. Conspectus depends on it as a
+    workspace member.
+  - Tests: existing viewer tests run from the new crate
+    location; conspectus TUI still routes through it
+    unchanged.
+  - Blockers: stability of the dep surface (see
+    `docs/transcript-viewer-deps.md` history).
 
 ### Agent-Mux Orchestrator Integrations
 

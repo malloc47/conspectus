@@ -34,6 +34,7 @@ mod runtime;
 pub mod search;
 pub mod theme;
 mod ui;
+pub mod viewer;
 pub mod widgets;
 
 pub use app::{App, Msg};

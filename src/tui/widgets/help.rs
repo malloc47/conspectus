@@ -111,6 +111,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     section(&mut lines, "Actions");
     bind(&mut lines, "a", "Attach to the selected mux");
     bind(&mut lines, "R", "Rename the selected agent session");
+    bind(
+        &mut lines,
+        "T",
+        "Open the selected session's transcript in an external viewer",
+    );
     bind(&mut lines, "r", "Refresh discovery now");
     bind(&mut lines, "q / Ctrl-C", "Quit");
     blank(&mut lines);

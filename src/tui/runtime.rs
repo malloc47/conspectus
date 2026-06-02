@@ -31,6 +31,10 @@ use crate::tui::resume::{
 use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputsFromConn, build_sessions_tree_from_conn};
+use crate::tui::viewer::{
+    LaunchPlan, PathBinaryProbe, ViewerDisabled, ViewerTarget, resolve_viewer_target,
+    viewer_disabled_reason,
+};
 use crate::tui::{RunConfig, View, ui};
 
 /// Result of a completed background discovery run. The worker returns
@@ -191,6 +195,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 }
                 Some(Action::Attach) => attach_action(terminal, &mut app, &config),
                 Some(Action::Resume) => resume_action(&mut app),
+                Some(Action::View) => view_action(terminal, &mut app, &config),
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
                     handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
@@ -341,6 +346,11 @@ fn static_event_loop(
                 Some(Action::Resume) => {
                     app.update(Msg::SetStatus(Some(
                         "scenario TUI is static; resume is disabled".to_string(),
+                    )));
+                }
+                Some(Action::View) => {
+                    app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; view is disabled".to_string(),
                     )));
                 }
                 Some(Action::CycleGrouping(delta)) => {
@@ -951,6 +961,11 @@ enum Action {
     /// Resume the selected un-muxed agent session in a new terminal
     /// (launches the harness binary in the background).
     Resume,
+    /// Launch an external full-transcript viewer for the selected
+    /// agent session (H-TRANSCRIPT-012, ADR 0019). Mirrors the
+    /// `Attach` hand-off: suspend the TUI, exec the viewer, wait,
+    /// then re-enter the alt screen.
+    View,
 }
 
 /// Dispatch a key into the open help overlay and close it on
@@ -1190,6 +1205,101 @@ fn target_short(target: &AttachTarget) -> String {
     format!("{}:{}", target.backend, target.native_id)
 }
 
+/// Handle the `T` key (H-TRANSCRIPT-012). Resolve the selection
+/// against the registered viewer backends; on a [`ViewerTarget::Launch`]
+/// suspend the TUI, exec the viewer, wait for it to exit, then
+/// re-enter the alt screen. On disabled, set a status-bar message
+/// and stay in the TUI without touching the terminal.
+fn view_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
+    let target = resolve_view_target_for_selection(app);
+    match target {
+        ViewerTarget::Launch(plan) => {
+            let outcome = run_viewer_launch(terminal, &plan);
+            refresh(app, config);
+            let message = match outcome {
+                ViewerOutcome::Exited => format!("viewed: {}", plan.label),
+                ViewerOutcome::Failed(reason) => format!("view failed: {reason}"),
+            };
+            app.update(Msg::SetStatus(Some(message)));
+        }
+        ViewerTarget::Disabled(reason) => {
+            app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
+        }
+    }
+}
+
+/// Pull the agent-session id out of the current selection and run
+/// it through the viewer resolver. Selections that aren't an agent
+/// session row degrade to a disabled reason.
+fn resolve_view_target_for_selection(app: &App) -> ViewerTarget {
+    let Some(selection) = app.selection() else {
+        return ViewerTarget::Disabled(ViewerDisabled::NoSelection);
+    };
+    let session_id = match selection {
+        RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
+        _ => return ViewerTarget::Disabled(ViewerDisabled::UnsupportedRow),
+    };
+    resolve_viewer_target(&session_id, &PathBinaryProbe)
+}
+
+/// Outcome of a single viewer launch attempt. Errors carry a
+/// human-readable reason for the status bar, parallel to
+/// [`AttachOutcome`].
+#[derive(Debug)]
+enum ViewerOutcome {
+    /// The viewer ran and exited (operator closed it, viewer
+    /// returned successfully, etc.).
+    Exited,
+    /// We never got to the viewer cleanly, or it exited non-zero
+    /// with a message worth surfacing.
+    Failed(String),
+}
+
+/// Leave the alt screen + raw mode, spawn the viewer inheriting the
+/// parent terminal, wait for it to exit, then re-enter the alt
+/// screen. Mirrors `run_tmux_attach` with two viewer-specific
+/// tweaks:
+///   1. Explicit `Clear(All)` + cursor-to-origin after restoring the
+///      terminal. Plain `ratatui::restore()` is enough for local
+///      terminals but on mosh / nested muxers the LeaveAlternateScreen
+///      sequence can be coalesced with the child's first writes,
+///      leaving the viewer's output overlaid on the dropped TUI
+///      buffer. The clear forces a clean canvas.
+///   2. On non-zero exit, hold for Enter before re-entering the alt
+///      screen so the operator can read whatever the viewer
+///      printed to stderr (e.g. `recall`'s "Session not found")
+///      instead of having it wiped by the re-render.
+fn run_viewer_launch(terminal: &mut DefaultTerminal, plan: &LaunchPlan) -> ViewerOutcome {
+    use ratatui::crossterm::{
+        cursor::MoveTo,
+        execute,
+        terminal::{Clear, ClearType},
+    };
+
+    ratatui::restore();
+    let _ = execute!(std::io::stdout(), Clear(ClearType::All), MoveTo(0, 0));
+
+    let status = std::process::Command::new(&plan.program)
+        .args(&plan.args)
+        .status();
+
+    let outcome = match status {
+        Ok(s) if s.success() => ViewerOutcome::Exited,
+        Ok(s) => ViewerOutcome::Failed(format!("{} exited with {s}", plan.program)),
+        Err(err) => ViewerOutcome::Failed(format!("could not launch {}: {err}", plan.program)),
+    };
+
+    if matches!(outcome, ViewerOutcome::Failed(_)) {
+        eprintln!("\n[viewer exited non-zero — press Enter to return to conspectus]");
+        let mut buf = String::new();
+        let _ = std::io::stdin().read_line(&mut buf);
+    }
+
+    *terminal = ratatui::init();
+    let _ = terminal.clear();
+    outcome
+}
+
 /// Remap navigation keys to preview scroll when focus is on the
 /// right panel. Keeps the j/k muscle memory consistent — they
 /// always drive the focused pane. Uppercase J/K continue to scroll
@@ -1245,6 +1355,8 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             | (KeyModifiers::NONE, KeyCode::Char('S')) => Some(Action::Resume),
             (KeyModifiers::SHIFT, KeyCode::Char('R'))
             | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
+            (KeyModifiers::SHIFT, KeyCode::Char('T'))
+            | (KeyModifiers::NONE, KeyCode::Char('T')) => Some(Action::View),
             // ADR 0031 / F8-005 accelerator surface. `v` opens the
             // controls overlay; `1`–`5` switch view directly;
             // `]`/`[` cycle views; `f` jumps into the controls
