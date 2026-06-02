@@ -1,0 +1,38 @@
+//! Per-harness transcript readers.
+//!
+//! Each implementor reads one harness's state-of-record into a
+//! [`TranscriptDocument`]. The trait is provider-neutral so the
+//! viewer (and the future extracted CLI) dispatches on
+//! [`SessionLocator`] without harness-specific knowledge in the
+//! widget layer.
+//!
+//! Stubs only at the scaffold stage. `H-VIEWER-NATIVE-003 .. 005`
+//! fill in claude_code / codex / opencode implementations.
+
+pub mod claude_code;
+pub mod codex;
+pub mod opencode;
+
+use crate::viewer::model::{SessionLocator, TranscriptDocument};
+
+/// Read a session's full transcript from its on-disk shape.
+pub trait HarnessParser {
+    /// Returns true when this parser handles `locator`'s variant.
+    fn supports(&self, locator: &SessionLocator) -> bool;
+    /// Read the transcript. Errors degrade to a stub document
+    /// with a "transcript unavailable" marker rather than failing
+    /// hard, so the widget always has something to render.
+    fn read(&self, locator: &SessionLocator) -> ParseResult;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("transcript file not found")]
+    NotFound,
+    #[error("transcript I/O failed: {0}")]
+    Io(String),
+    #[error("transcript parse failed: {0}")]
+    Malformed(String),
+}
+
+pub type ParseResult = Result<TranscriptDocument, ParseError>;

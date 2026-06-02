@@ -16,5 +16,6 @@ pub mod query;
 pub mod rename;
 pub mod resolve;
 pub mod tui;
+pub mod viewer;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

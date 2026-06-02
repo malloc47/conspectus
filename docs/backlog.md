@@ -2856,19 +2856,25 @@ Stories below depend on `H-TRANSCRIPT-003` (recent-history adapter
 API) but extend its return shape from "last N turns" to "full
 transcript with a cursor at the last turn".
 
-- [ ] `H-VIEWER-NATIVE-001` Module scaffold + dep-surface
+- [x] `H-VIEWER-NATIVE-001` Module scaffold + dep-surface
   enforcement.
-  - Scope: create `src/viewer/` with `mod.rs`, `model.rs`,
-    `parser/mod.rs`, `widget.rs`, `state.rs`, `input.rs`,
-    `render.rs`, `theme.rs`. `mod.rs` carries a docstring listing
-    every direct external crate the module imports (mirrors
-    `docs/transcript-viewer-deps.md`). Add no behavior beyond
-    type stubs and a compile gate. The conspectus TUI does *not*
-    yet route the `T` keybind into the new module.
-  - Tests: doc-test asserting the dep-surface docstring matches
-    `docs/transcript-viewer-deps.md` (string-diff). `cargo build`
-    succeeds with `src/viewer/` present but unused.
-  - Blockers: none. ADR 0052 covers the design.
+  - Outcome: `src/viewer/` laid down with `mod.rs`, `model.rs`,
+    `parser/{mod, claude_code, codex, opencode}.rs`, `widget.rs`,
+    `state.rs`, `input.rs`, `render.rs`, `theme.rs`. All bodies
+    are stubs returning `ParseError::Malformed` (parsers) or empty
+    placeholders pending `H-VIEWER-NATIVE-002 .. 006`. `mod.rs`
+    carries `ALLOWED_EXTERNAL_DEPS` and `ALLOWED_BINARY_DEPS`
+    consts that mirror `docs/transcript-viewer-deps.md`. The
+    `dep_surface_matches_doc_manifest` test parses the doc's
+    Markdown tables and asserts the two agree on both the
+    library surface (11 crates) and the binary-only surface
+    (`clap`); manually drifting either side fails the test.
+    `crate::tui::theme::Theme` is re-exported through
+    `src/viewer/theme.rs` per ADR 0052's tracked carve-out.
+    The conspectus TUI does not yet route `T` into the new
+    module — the existing escape-hatch `ClaudeHistoryViewer`
+    still owns the keybind until `H-VIEWER-NATIVE-008`. Eight
+    viewer-module tests pass; full nextest suite (1141) green.
 
 - [ ] `H-VIEWER-NATIVE-002` `TranscriptDocument` + `TranscriptTurn`
   model + `SessionLocator` types.
