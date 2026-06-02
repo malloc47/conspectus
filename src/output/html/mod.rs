@@ -73,7 +73,10 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
          </div>\n\
          <div id=\"conspectus-body\">\n\
          <aside id=\"conspectus-left\"></aside>\n\
+         <div id=\"conspectus-center\">\n\
+         <div id=\"conspectus-navbar\"></div>\n\
          <div id=\"conspectus-cy\"></div>\n\
+         </div>\n\
          <aside id=\"conspectus-right\"></aside>\n\
          </div>\n\
          <div id=\"conspectus-statusbar\"><span id=\"conspectus-status\">loading…</span></div>\n\
@@ -99,6 +102,9 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
          <script>\n{cytoscape}\n</script>\n\
          <script>\n{fcose}\n</script>\n\
          <script>\n{driver}\n</script>\n\
+         <script>\n{view_state}\n</script>\n\
+         <script>\n{nav_helpers}\n</script>\n\
+         <script>\n{navigation}\n</script>\n\
          <script>\n{filter_panel}\n</script>\n\
          <script>\n{inspector}\n</script>\n\
          <script>\n{app}\n</script>\n\
@@ -109,6 +115,9 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
         cytoscape = CYTOSCAPE_JS,
         fcose = FCOSE_JS,
         driver = DRIVER_JS,
+        view_state = VIEW_STATE_JS,
+        nav_helpers = NAV_HELPERS_JS,
+        navigation = NAVIGATION_JS,
         filter_panel = FILTER_PANEL_JS,
         inspector = INSPECTOR_JS,
         app = APP_JS,
@@ -125,6 +134,9 @@ const COSE_BASE_JS: &str = include_str!("assets/cose-base.js");
 const FCOSE_JS: &str = include_str!("assets/cytoscape-fcose.js");
 const LAYOUT_BASE_JS: &str = include_str!("assets/layout-base.js");
 const DRIVER_JS: &str = include_str!("assets/driver.js");
+const VIEW_STATE_JS: &str = include_str!("assets/view-state.js");
+const NAV_HELPERS_JS: &str = include_str!("assets/navigation-helpers.js");
+const NAVIGATION_JS: &str = include_str!("assets/navigation.js");
 const FILTER_PANEL_JS: &str = include_str!("assets/filter-panel.js");
 const INSPECTOR_JS: &str = include_str!("assets/inspector.js");
 const APP_JS: &str = include_str!("assets/app.js");

@@ -10,7 +10,7 @@ expression: redacted
 <title>conspectus graph</title>
 <meta name="generator" content="conspectus graph --format html (ADR 0050)">
 <style>
-[redacted 6366 bytes]
+[redacted 8664 bytes]
 </style>
 </head>
 <body>
@@ -25,7 +25,10 @@ expression: redacted
 </div>
 <div id="conspectus-body">
 <aside id="conspectus-left"></aside>
+<div id="conspectus-center">
+<div id="conspectus-navbar"></div>
 <div id="conspectus-cy"></div>
+</div>
 <aside id="conspectus-right"></aside>
 </div>
 <div id="conspectus-statusbar"><span id="conspectus-status">loading…</span></div>
@@ -47,13 +50,22 @@ expression: redacted
 [redacted 16278 bytes]
 </script>
 <script>
-[redacted 8684 bytes]
+[redacted 1760 bytes]
 </script>
 <script>
-[redacted 7530 bytes]
+[redacted 3736 bytes]
 </script>
 <script>
-[redacted 5609 bytes]
+[redacted 7267 bytes]
+</script>
+<script>
+[redacted 9090 bytes]
+</script>
+<script>
+[redacted 8265 bytes]
+</script>
+<script>
+[redacted 8119 bytes]
 </script>
 </body>
 </html>

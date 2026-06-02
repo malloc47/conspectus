@@ -44,9 +44,14 @@
     process_candidates_session: "process candidates session",
   };
 
-  function FilterPanel(host, driver) {
+  /// `viewState` is optional. When supplied, the panel pushes its
+  /// hidden-id set through the coordinator so it composes with the
+  /// navigation layer (GV-003c). When omitted, the panel drives the
+  /// `setHidden` call directly for backwards compatibility.
+  function FilterPanel(host, driver, viewState) {
     this.host = host;
     this.driver = driver;
+    this.viewState = viewState || null;
     this.payload = driver.payload();
     this.state = this._defaultState();
     this._render();
@@ -231,7 +236,11 @@
       if (hide) hidden.add(e.id);
     });
 
-    this.driver.setHidden(hidden);
+    if (this.viewState) {
+      this.viewState.updateFilter(hidden);
+    } else {
+      this.driver.setHidden(hidden);
+    }
   };
 
   // ----- DOM helpers --------------------------------------------

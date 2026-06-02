@@ -135,16 +135,45 @@
 
     var leftPane = document.getElementById("conspectus-left");
     var rightPane = document.getElementById("conspectus-right");
+    var navbar = document.getElementById("conspectus-navbar");
+
+    // Layered hidden-id coordinator (GV-003c): filter panel pushes
+    // its set into `filter`; navigation pushes its set into `nav`.
+    // The driver sees the union.
+    var viewState = global.ConspectusViewState
+      ? new global.ConspectusViewState(driver)
+      : null;
+
+    // Navigation chrome (toolbar + breadcrumb + depth/direction
+    // chips). Constructed before the inspector so the inspector
+    // can wire a "Focus" button into it.
+    var navigation = null;
+    if (navbar && viewState && global.ConspectusNavigation) {
+      navigation = new global.ConspectusNavigation({
+        host: navbar,
+        driver: driver,
+        viewState: viewState,
+        onFocusChange: function () {
+          /* future hook for status-bar updates */
+        },
+      });
+      wireNavigationShortcuts(navigation);
+    }
 
     if (leftPane && global.ConspectusFilterPanel) {
-      new global.ConspectusFilterPanel(leftPane, driver);
+      new global.ConspectusFilterPanel(leftPane, driver, viewState);
     }
+
     var inspector = null;
     if (rightPane && global.ConspectusInspector) {
+      var onFocusRequest = navigation
+        ? function (id) { navigation.focusOn(id); }
+        : null;
       inspector = new global.ConspectusInspector(
         rightPane,
         driver,
-        legendRenderer
+        legendRenderer,
+        onFocusRequest
       );
     }
 
@@ -168,7 +197,53 @@
       driver: driver,
       payload: payload,
       inspector: inspector,
+      navigation: navigation,
+      viewState: viewState,
     };
+  }
+
+  /// Keyboard shortcuts for the navigation chrome. Layered on top
+  /// of the visible chip buttons per the discoverability rule
+  /// (controls are clickable; shortcuts are an accelerator).
+  function wireNavigationShortcuts(navigation) {
+    document.addEventListener("keydown", function (e) {
+      // Don't intercept when the user is typing in the search box.
+      var t = e.target;
+      var tag = t && t.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (!navigation.isFocused() && e.key !== "Escape") return;
+      switch (e.key) {
+        case "Backspace":
+          e.preventDefault();
+          navigation.popBreadcrumb();
+          break;
+        case "Escape":
+          if (navigation.isFocused()) {
+            e.preventDefault();
+            navigation.clear();
+          }
+          break;
+        case "[":
+          e.preventDefault();
+          stepDepth(navigation, -1);
+          break;
+        case "]":
+          e.preventDefault();
+          stepDepth(navigation, +1);
+          break;
+        default:
+          break;
+      }
+    });
+  }
+
+  function stepDepth(navigation, delta) {
+    var ladder = [1, 2, 3, Infinity];
+    var current = navigation.state ? navigation.state.depth : 2;
+    var idx = ladder.indexOf(current);
+    if (idx === -1) idx = 1;
+    var next = ladder[Math.max(0, Math.min(ladder.length - 1, idx + delta))];
+    navigation.setDepth(next);
   }
 
   if (document.readyState === "loading") {

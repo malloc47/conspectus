@@ -22,11 +22,16 @@
     unresolved_stub: "Unresolved endpoint",
   };
 
-  function Inspector(host, driver, legendRenderer) {
+  /// `onFocusRequest` is an optional callback fired when the user
+  /// clicks the inspector "Focus" button (GV-003c). When supplied,
+  /// the header gains the button; otherwise it's omitted so the
+  /// inspector can still run without navigation chrome.
+  function Inspector(host, driver, legendRenderer, onFocusRequest) {
     this.host = host;
     this.driver = driver;
     this.payload = driver.payload();
     this.legendRenderer = legendRenderer;
+    this.onFocusRequest = onFocusRequest || null;
     this._index();
     this.clear();
   }
@@ -122,6 +127,19 @@
     if (node.label_secondary) col.appendChild(subLine);
     col.appendChild(idLine);
     hdr.appendChild(col);
+
+    if (this.onFocusRequest) {
+      var btn = document.createElement("button");
+      btn.className = "ins-focus-btn";
+      btn.textContent = "Focus";
+      btn.title =
+        "Restrict the view to this node and its neighbors within the current depth";
+      var self = this;
+      btn.addEventListener("click", function () {
+        self.onFocusRequest(node.id);
+      });
+      hdr.appendChild(btn);
+    }
     return hdr;
   };
 

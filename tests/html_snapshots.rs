@@ -115,17 +115,25 @@ fn ignored_and_overridden_payload_snapshot() {
 
 #[test]
 fn rendered_html_contains_chrome_containers() {
-    // Structural check that the GV-003b chrome slots are present
-    // in the rendered scaffold (filter sidebar, inspector sidebar,
-    // search input). Catches accidental template breakage without
-    // tying the snapshot to chrome HTML layout details.
+    // Structural check that every chrome slot is present in the
+    // rendered scaffold. Catches accidental template breakage
+    // without tying the snapshot to chrome HTML layout details.
     let html = render_graph_html(&fixtures::empty_graph(), HtmlOptions::default()).expect("render");
+    // GV-003a: payload + driver.
+    assert!(html.contains("id=\"conspectus-cy\""));
+    assert!(html.contains("id=\"conspectus-graph-payload\""));
+    assert!(html.contains("ConspectusGraphDriver"));
+    // GV-003b: chrome + search.
     assert!(html.contains("id=\"conspectus-left\""));
     assert!(html.contains("id=\"conspectus-right\""));
     assert!(html.contains("id=\"conspectus-search\""));
     assert!(html.contains("ConspectusFilterPanel"));
     assert!(html.contains("ConspectusInspector"));
-    assert!(html.contains("ConspectusGraphDriver"));
+    // GV-003c: navigation chrome.
+    assert!(html.contains("id=\"conspectus-navbar\""));
+    assert!(html.contains("ConspectusViewState"));
+    assert!(html.contains("ConspectusNavHelpers"));
+    assert!(html.contains("ConspectusNavigation"));
 }
 
 #[test]
