@@ -194,7 +194,9 @@ errors. The `[table]` palette (ADR 0022) is **not** affected by
 ## CLI Surface
 
 ```sh
-conspectus graph --format json [--scan-root PATH]...
+conspectus graph --format {json|dot|html} [--scan-root PATH]...
+                                          [--candidates {include|exclude}]
+                                          [--diagnostic-nodes {include|exclude}]
 conspectus table {sessions|mux|union|prs|forks} [--layout {columnar|card}]
                                                  [--wide | --width N]
                                                  [--columns LIST]
@@ -293,7 +295,11 @@ stdout is not a TTY (useful for `PAGER=cat` captures). `--pager` and
 `conspectus graph --format json` and `conspectus declared list` do
 not page; JSON output is machine-consumable and the declared listing
 is short-lived tab-separated text. Pipe either through a pager
-manually if needed.
+manually if needed. `conspectus graph --format dot` is also
+machine-consumable (pipe through `dot -Tsvg` etc.) and `--format
+html` writes a single self-contained `.html` file you redirect to
+disk; see [`graph-visualization.md`](graph-visualization.md) for
+the full guide.
 
 ## Color
 

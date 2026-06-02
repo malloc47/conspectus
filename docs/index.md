@@ -29,6 +29,12 @@ Purpose: user-facing runtime reference covering the environment variables
 that gate discovery providers, the harness state-root overrides, the
 config-file precedence, and the current CLI surface.
 
+## `docs/graph-visualization.md`
+
+Purpose: operator guide for `conspectus graph --format {dot,html}`,
+covering the DOT export and the self-contained HTML explorer (filter
+panel, inspector, search, focus navigation) with debugging recipes.
+
 ## `docs/dev-scenarios.md`
 
 Purpose: developer reference for named replay scenarios, including the

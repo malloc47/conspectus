@@ -14,14 +14,20 @@ config.
 ```sh
 conspectus
 conspectus tui [--view {sessions|mux|union|prs|forks}] [--scan-root PATH]...
-conspectus graph --format json [--scan-root PATH]...
+conspectus graph --format {json|dot|html} [--scan-root PATH]...
+                                          [--candidates {include|exclude}]
+                                          [--diagnostic-nodes {include|exclude}]
 conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
 
 conspectus declared list [--store {all|project|user}] [--scan-root PATH]...
 ```
 
 Running `conspectus` without a subcommand opens the interactive TUI.
-`graph` emits the full evidence-preserving graph document. `session` renders
+`graph` emits the full evidence-preserving graph document: `--format json`
+is machine-readable, `--format dot` pipes through Graphviz for static
+inspection, and `--format html` produces a self-contained interactive
+explorer (see [graph visualization guide](docs/graph-visualization.md)).
+`session` renders
 agent-, mux-, or union-oriented table projections after resolution. The
 `declared` subcommands can pin, ignore, remove, confirm, or override
 relationships.
@@ -32,6 +38,9 @@ relationships.
   discovery providers, declared-link behavior, and known limits.
 - [Operations](docs/operations.md) documents runtime environment variables,
   provider toggles, state-root overrides, and config-file precedence.
+- [Graph visualization](docs/graph-visualization.md) covers `--format dot`
+  and `--format html`, the HTML explorer chrome, and common debugging
+  recipes.
 - [Library API](docs/library-api.md) describes stable entry points and
   pure/impure boundaries for consumers.
 - [Atelier migration guide](docs/atelier-migration.md) maps overlapping Atelier
