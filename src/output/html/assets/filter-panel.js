@@ -204,6 +204,31 @@
     });
     section.appendChild(select);
 
+    // Density chips — adjust spacing/repulsion across layouts.
+    if (
+      typeof window !== "undefined" &&
+      window.ConspectusGraphDriver &&
+      window.ConspectusGraphDriver.AVAILABLE_DENSITIES &&
+      this.driver.setDensity
+    ) {
+      var densities = window.ConspectusGraphDriver.AVAILABLE_DENSITIES;
+      var currentDensity = this.driver.density
+        ? this.driver.density()
+        : "normal";
+      var densityRow = el("div", "fp-chip-row fp-density-row");
+      densities.forEach(function (opt) {
+        var chip = el("button", "fp-chip", opt.label);
+        if (opt.name === currentDensity) chip.classList.add("fp-chip-active");
+        chip.title = "Density: " + opt.label.toLowerCase();
+        chip.addEventListener("click", function () {
+          self.driver.setDensity(opt.name);
+          self._render();
+        });
+        densityRow.appendChild(chip);
+      });
+      section.appendChild(densityRow);
+    }
+
     var rerun = el("button", "fp-rerun", "Re-run layout");
     rerun.title = "Re-run the current layout (escapes local minima)";
     rerun.addEventListener("click", function () { self.driver.rerunLayout(); });

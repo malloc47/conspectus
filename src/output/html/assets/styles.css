@@ -368,6 +368,11 @@ body {
 }
 .fp-rerun:hover { background: #cfd8dc; }
 
+.fp-density-row {
+  margin-top: 6px;
+  margin-bottom: 4px;
+}
+
 .fp-chip-row {
   display: flex;
   gap: 4px;

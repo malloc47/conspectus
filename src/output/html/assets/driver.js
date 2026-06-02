@@ -102,6 +102,7 @@
     });
     this._payload = null;
     this._currentLayout = "fcose";
+    this._currentDensity = "normal"; // see DENSITY_PROFILES
   }
 
   GraphDriver.prototype.load = function (payload) {
@@ -350,7 +351,79 @@
     this._runLayout();
   };
 
+  /// Density profiles for the layout solver. "compact" matches the
+  /// GV-003a tuning (tight clusters, lots of overlap on dense
+  /// graphs); "normal" is the default — ~50% more spacing, makes
+  /// edge labels legible without zooming; "spacious" is ~2.5x
+  /// spacing for big-graph readability or screenshots.
+  GraphDriver.AVAILABLE_DENSITIES = [
+    { name: "compact", label: "Compact" },
+    { name: "normal", label: "Normal" },
+    { name: "spacious", label: "Spacious" },
+  ];
+
+  GraphDriver.prototype.density = function () {
+    return this._currentDensity;
+  };
+
+  GraphDriver.prototype.setDensity = function (name) {
+    if (!DENSITY_PROFILES[name]) return;
+    this._currentDensity = name;
+    this._runLayout();
+  };
+
   // -- Internals ----------------------------------------------------
+
+  // Per-layout × per-density parameter tables. Keys here are read
+  // by _layoutOptions; adding a new layout means adding its row in
+  // each density profile.
+  var DENSITY_PROFILES = {
+    compact: {
+      fcose: {
+        idealEdgeLength: 90,
+        nodeRepulsion: 12000,
+        nodeSeparation: 90,
+        gravity: 0.4,
+        edgeElasticity: 0.35,
+      },
+      dagre: { nodeSep: 40, rankSep: 80, edgeSep: 12 },
+      cose: { idealEdgeLength: 90, nodeRepulsion: 10000 },
+      concentric: { minNodeSpacing: 30 },
+    },
+    normal: {
+      fcose: {
+        idealEdgeLength: 150,
+        nodeRepulsion: 20000,
+        nodeSeparation: 140,
+        gravity: 0.25,
+        edgeElasticity: 0.3,
+      },
+      dagre: { nodeSep: 70, rankSep: 130, edgeSep: 18 },
+      cose: { idealEdgeLength: 150, nodeRepulsion: 16000 },
+      concentric: { minNodeSpacing: 60 },
+    },
+    spacious: {
+      fcose: {
+        idealEdgeLength: 230,
+        nodeRepulsion: 30000,
+        nodeSeparation: 200,
+        gravity: 0.15,
+        edgeElasticity: 0.25,
+      },
+      dagre: { nodeSep: 110, rankSep: 200, edgeSep: 26 },
+      cose: { idealEdgeLength: 230, nodeRepulsion: 24000 },
+      concentric: { minNodeSpacing: 100 },
+    },
+  };
+
+  // Resolve a density profile for the given layout key. Falls
+  // back to "normal" then "compact" if the requested density or
+  // layout is missing — keeps things working when a new layout is
+  // added before its density rows.
+  function densityFor(layoutKey, densityName) {
+    var profile = DENSITY_PROFILES[densityName] || DENSITY_PROFILES.normal;
+    return profile[layoutKey] || DENSITY_PROFILES.normal[layoutKey] || {};
+  }
 
   GraphDriver.prototype._runLayout = function () {
     var name = this._currentLayout || "fcose";
@@ -370,47 +443,50 @@
   };
 
   GraphDriver.prototype._layoutOptions = function (name) {
+    var d = this._currentDensity || "normal";
     switch (name) {
-      case "fcose":
+      case "fcose": {
         if (!global.cytoscape("layout", "fcose")) return null;
+        var f = densityFor("fcose", d);
         return {
           name: "fcose",
           quality: "proof",
           animate: false,
           randomize: true,
-          // Higher repulsion + shorter ideal edge length pulls
-          // connected clusters together while keeping disconnected
-          // components apart.
-          nodeRepulsion: 12000,
-          idealEdgeLength: 90,
-          edgeElasticity: 0.35,
-          gravity: 0.4,
+          nodeRepulsion: f.nodeRepulsion,
+          idealEdgeLength: f.idealEdgeLength,
+          edgeElasticity: f.edgeElasticity,
+          gravity: f.gravity,
           gravityRange: 4.0,
           numIter: 2500,
           tile: true,
           tilingPaddingVertical: 12,
           tilingPaddingHorizontal: 12,
           padding: 40,
-          nodeSeparation: 90,
+          nodeSeparation: f.nodeSeparation,
         };
+      }
       case "dagre-lr":
-      case "dagre-tb":
+      case "dagre-tb": {
         if (!global.cytoscape("layout", "dagre")) return null;
+        var dg = densityFor("dagre", d);
         return {
           name: "dagre",
           rankDir: name === "dagre-lr" ? "LR" : "TB",
-          nodeSep: 40,
-          rankSep: 80,
-          edgeSep: 12,
+          nodeSep: dg.nodeSep,
+          rankSep: dg.rankSep,
+          edgeSep: dg.edgeSep,
           padding: 30,
           animate: false,
         };
-      case "concentric":
+      }
+      case "concentric": {
+        var co = densityFor("concentric", d);
         return {
           name: "concentric",
           animate: false,
           padding: 30,
-          minNodeSpacing: 30,
+          minNodeSpacing: co.minNodeSpacing,
           concentric: function (node) {
             // Inner ring: workspaces/forks (hubs). Outer rings:
             // checkouts/branches/sessions/processes. Stubs furthest.
@@ -430,15 +506,18 @@
           },
           levelWidth: function () { return 1; },
         };
-      case "cose":
+      }
+      case "cose": {
+        var c = densityFor("cose", d);
         return {
           name: "cose",
           animate: false,
           randomize: true,
-          nodeRepulsion: 10000,
-          idealEdgeLength: 90,
+          nodeRepulsion: c.nodeRepulsion,
+          idealEdgeLength: c.idealEdgeLength,
           padding: 40,
         };
+      }
       case "circle":
         return { name: "circle", animate: false, padding: 30 };
       case "grid":
