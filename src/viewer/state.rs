@@ -1,25 +1,99 @@
-//! Pure viewer state — no `ratatui::*` types, no I/O.
+//! Pure viewer state.
 //!
-//! Per ADR 0024 the reducer is pure and synchronous; `widget` and
-//! `input` consume this state. Snapshot tests assert on `ViewerState`
-//! directly.
-//!
-//! Filled by `H-VIEWER-NATIVE-006`.
+//! Per ADR 0024 the reducer is pure and synchronous; `widget.rs`
+//! consumes this state and writes back per-draw layout metrics
+//! (`viewport_height`, `total_lines`) so navigation messages
+//! (page-down etc.) know how far to move and the scroll offset
+//! can be clamped.
 
 use crate::viewer::model::TranscriptDocument;
 
-/// The viewer's full state: a document, a scroll offset, a search
-/// query, and the navigation cursor. Designed to be cheap to clone
-/// for snapshot testing.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Everything the viewer needs to render itself. Cheap to clone for
+/// snapshot tests.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewerState {
     pub document: TranscriptDocument,
-    /// Line offset from document top. ADR 0052 sets the open
-    /// position to the last turn — initialized at construction time
-    /// by `H-VIEWER-NATIVE-006`.
+    /// Current scroll offset (line offset from the rendered body
+    /// top). Clamped on every draw against `total_lines` and
+    /// `viewport_height`.
     pub scroll_offset: usize,
-    /// Active search query, if any.
-    pub search_query: Option<String>,
-    /// Search-match cursor index into the document's match list.
-    pub current_match: usize,
+    /// When `true`, the next draw pins the scroll offset to the
+    /// bottom of the document. `JumpToEnd` sets it; initial state
+    /// starts with it on so the modal opens on the last turn
+    /// (ADR 0052).
+    pub stick_to_end: bool,
+    /// When `true`, `ToolUse` and `ToolResult` turns are rendered.
+    /// Off by default (matches `claude-history --show-tools`).
+    pub show_tools: bool,
+    /// When `true`, `Thinking` turns are rendered. Off by default
+    /// (matches `claude-history --show-thinking`).
+    pub show_thinking: bool,
+    /// Viewport height (in cells / lines) last seen during draw.
+    /// Used by the reducer to compute page/half-page deltas.
+    pub viewport_height: u16,
+    /// Total rendered line count produced by the last draw. Used
+    /// by the reducer to clamp scroll offsets.
+    pub total_lines: usize,
+}
+
+impl ViewerState {
+    /// Construct a fresh state for the given document. Opens on the
+    /// last turn (`stick_to_end = true`).
+    pub fn new(document: TranscriptDocument) -> Self {
+        Self {
+            document,
+            scroll_offset: 0,
+            stick_to_end: true,
+            show_tools: false,
+            show_thinking: false,
+            viewport_height: 0,
+            total_lines: 0,
+        }
+    }
+
+    /// Maximum scroll offset given the latest layout. Saturating
+    /// arithmetic, so `total_lines < viewport_height` clamps to 0.
+    pub fn max_scroll(&self) -> usize {
+        self.total_lines
+            .saturating_sub(self.viewport_height as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::viewer::model::{SessionLocator, TranscriptDocument};
+    use std::path::PathBuf;
+
+    fn empty_doc() -> TranscriptDocument {
+        TranscriptDocument::unavailable(&SessionLocator::ClaudeCode {
+            state_root: PathBuf::from("/x"),
+            session_key: "k".to_string(),
+        })
+    }
+
+    #[test]
+    fn fresh_state_opens_on_last_turn_with_clean_flags() {
+        let state = ViewerState::new(empty_doc());
+        assert_eq!(state.scroll_offset, 0);
+        assert!(state.stick_to_end);
+        assert!(!state.show_tools);
+        assert!(!state.show_thinking);
+    }
+
+    #[test]
+    fn max_scroll_clamps_to_zero_when_doc_fits() {
+        let mut state = ViewerState::new(empty_doc());
+        state.total_lines = 10;
+        state.viewport_height = 24;
+        assert_eq!(state.max_scroll(), 0);
+    }
+
+    #[test]
+    fn max_scroll_subtracts_viewport_when_doc_exceeds() {
+        let mut state = ViewerState::new(empty_doc());
+        state.total_lines = 100;
+        state.viewport_height = 24;
+        assert_eq!(state.max_scroll(), 76);
+    }
 }

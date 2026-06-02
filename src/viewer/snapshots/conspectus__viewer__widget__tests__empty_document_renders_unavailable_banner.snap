@@ -1,0 +1,13 @@
+---
+source: src/viewer/widget.rs
+assertion_line: 350
+expression: snapshot_string(&buf)
+---
+claude-code:missing                            cwd: (no cwd)
+────────────────────────────────────────────────────────────
+transcript unavailable
+
+
+
+────────────────────────────────────────────────────────────
+…

@@ -2616,16 +2616,15 @@ satisfied when this workstream's TUI integration stories land.
     a stable fixture corpus is available.
   - Blockers: same as `H-PREVIEW-005`.
 
-- [ ] `H-TRANSCRIPT-008` Add `tui-markdown` dependency.
-  - Scope: add the crate selected in `H-TRANSCRIPT-001` to
-    `Cargo.toml`. Decide on the `highlight-code` feature (and
-    whether the syntect cost is worth it for the preview
-    pane). Add the crate to the workspace lints/audit
-    allow-list if applicable. No usage yet — this story
-    isolates the dep change for review.
-  - Tests: `cargo build` and `cargo clippy --all-targets
-    --all-features -- -D warnings`.
-  - Blockers: `H-TRANSCRIPT-001`.
+- [x] `H-TRANSCRIPT-008` Add `tui-markdown` dependency.
+  - Outcome: `tui-markdown = { version = "0.3",
+    default-features = false }` added to `Cargo.toml` per ADR
+    0051. The `highlight-code` feature stays off so `syntect`
+    and the secondary `ansi-to-tui` path don't land in the dep
+    graph. Pre-listed in `ALLOWED_EXTERNAL_DEPS` from the
+    H-VIEWER-NATIVE-001 scaffold, so the
+    `dep_surface_matches_doc_manifest` test passes unchanged.
+    First use lands with H-VIEWER-NATIVE-006's `render_turn`.
 
 - [ ] `H-TRANSCRIPT-009` Inline transcript-preview widget.
   - Scope: new `src/tui/transcript_preview.rs` (or similar)
@@ -3015,22 +3014,45 @@ transcript with a cursor at the last turn".
   - 1193 nextest green. **Closes the OpenCode coverage gap**
     that `H-TRANSCRIPT-014` could not.
 
-- [ ] `H-VIEWER-NATIVE-006` Viewer widget: full-screen modal,
+- [x] `H-VIEWER-NATIVE-006` Viewer widget: full-screen modal,
   scroll, jump-to-end-on-open.
-  - Scope: `src/viewer/widget.rs` + `src/viewer/state.rs`.
-    Full-screen Ratatui rendering: header (harness, session id,
-    cwd), scrollable transcript body, footer with key hints.
-    Initial scroll lands on the last turn (ADR 0052). `g`/`Home`
-    jumps to start, `G`/`End` to end, `j`/`k`/arrows scroll by
-    one line, `Ctrl-D`/`Ctrl-U` half-page, `PgDn`/`PgUp` page.
-    `q` / Esc closes the modal and returns to the row tree with
-    selection preserved. Per-turn rendering uses
-    `tui-markdown` for the body, plus role-tagged headers.
-  - Tests: buffer snapshot tests for (a) normal open at last
-    turn, (b) scrolled to top, (c) "transcript unavailable",
-    (d) compaction-summary turn rendering.
-  - Blockers: `H-VIEWER-NATIVE-002`, `H-TRANSCRIPT-008`
-    (`tui-markdown` dep).
+  - Outcome: `src/viewer/{widget,state,input,render}.rs` ship the
+    full Ratatui modal. Layout: 1-line header
+    (`<harness>:<session-key>` left, `cwd: <cwd>` right-justified),
+    1-line `─` separator, flex body, 1-line bottom separator,
+    1-line footer with key hints. `state.rs::ViewerState`
+    carries the document, scroll offset, sticky-end flag, show
+    tools/thinking toggles, plus viewport-height +
+    total-line-count metrics written back by the draw fn so
+    the reducer has fresh layout numbers for page-down deltas.
+    `input.rs::reduce(state, msg) -> (state, ViewerEffect)` is
+    pure. Messages: ScrollUp/Down, PageUp/Down, HalfPageUp/Down,
+    JumpToStart, JumpToEnd, ToggleTools, ToggleThinking, Close.
+    All clear the sticky-end flag except JumpToEnd which sets
+    it; layout toggles re-clamp the scroll offset against
+    `max_scroll`. `render.rs::render_turn` emits a dimmed role
+    header (`you` / `assistant · thinking` / `— compaction
+    summary —` etc.), the body (Markdown via `tui-markdown` for
+    Message + CompactionSummary; dim plain text for Thinking /
+    ToolUse / ToolResult), and a spacer line. `widget.rs::draw`
+    short-circuits the empty-doc case with a "transcript
+    unavailable" banner; otherwise builds the flat body line
+    Vec (filtering tools/thinking by state flags) and scrolls
+    via `Paragraph::scroll`. Stick-to-end pins scroll to
+    `max_offset` on every draw until the operator manually
+    scrolls. Footer text adapts to current tool/thinking
+    state and truncates with `…` on narrow terminals.
+  - Tests: 3 state, 9 reducer, 6 render, 7 widget — 25 total.
+    Widget snapshot tests via insta cover (a) normal open at
+    last turn, (b) JumpToStart on a 30-turn doc, (c) empty
+    "transcript unavailable" doc, (d) compaction-summary turn
+    rendered with banner header. Additional widget tests
+    confirm `draw` writes viewport/total back to state, footer
+    advertises current toggle state, and `ToggleTools` makes
+    tool turns visible.
+  - Bridge wiring (`H-VIEWER-NATIVE-008`) still pending — `T`
+    keybind continues to route through the escape-hatch
+    `ClaudeHistoryViewer`. 1219 nextest green.
 
 - [ ] `H-VIEWER-NATIVE-007` Substring search inside the viewer.
   - Scope: `/` opens a search prompt at the footer. `n` / `N`

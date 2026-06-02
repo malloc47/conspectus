@@ -1,0 +1,17 @@
+---
+source: src/viewer/widget.rs
+assertion_line: 331
+expression: snapshot_string(&buf)
+---
+claude-code:0b34e59c                            cwd: /p/proj
+────────────────────────────────────────────────────────────
+you
+what's up?
+
+assistant
+not much
+
+
+
+────────────────────────────────────────────────────────────
+…

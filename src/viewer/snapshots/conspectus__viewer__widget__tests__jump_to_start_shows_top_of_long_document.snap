@@ -1,0 +1,15 @@
+---
+source: src/viewer/widget.rs
+assertion_line: 343
+expression: snapshot_string(&buf)
+---
+claude-code:long                                     cwd: /p
+────────────────────────────────────────────────────────────
+you
+turn 0
+
+you
+turn 1
+
+────────────────────────────────────────────────────────────
+…
