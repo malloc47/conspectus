@@ -16,6 +16,7 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
+use crate::viewer::state::ToolDetail;
 use crate::viewer::theme::Theme;
 
 /// Inner label width inside the chip pill. Wide enough for
@@ -53,13 +54,22 @@ pub fn into_owned_line(line: Line<'_>) -> Line<'static> {
 /// given `content_width` (cells available *after* the gutter +
 /// separator). Caller is responsible for picking the content_width
 /// against the viewport width.
+///
+/// `tool_detail` only affects `ToolUse` / `ToolResult` kinds:
+/// * [`ToolDetail::Hidden`] — caller filtered upstream; this fn
+///   never sees Hidden tool turns.
+/// * [`ToolDetail::Summary`] — chip + name line; argument bodies
+///   collapse to `(n lines)`.
+/// * [`ToolDetail::Truncated`] — chip + name + up to 8 body lines.
+/// * [`ToolDetail::Full`] — chip + full body.
 pub fn render_turn<'a>(
     turn: &'a TranscriptTurn,
     theme: &Theme,
     content_width: u16,
+    tool_detail: ToolDetail,
 ) -> Vec<Line<'a>> {
     let chip_color = chip_color(turn, theme);
-    let body_lines = build_body_lines(turn, content_width);
+    let body_lines = build_body_lines(turn, content_width, tool_detail);
     if body_lines.is_empty() {
         // Even an empty turn deserves its chip — render the chip
         // alone so the operator sees the role marker.
@@ -75,6 +85,8 @@ pub fn render_turn<'a>(
     out.push(Line::raw(""));
     out
 }
+
+const TRUNCATED_TOOL_LINES: usize = 8;
 
 /// Build a `gutter + separator + body` line. The chip is drawn
 /// only on the first line of a turn; the separator picks up the
@@ -138,7 +150,11 @@ fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
 
 /// Build the per-turn body as a list of pre-wrapped, styled
 /// [`Line`]s ready for gutter composition.
-fn build_body_lines<'a>(turn: &'a TranscriptTurn, content_width: u16) -> Vec<Line<'a>> {
+fn build_body_lines<'a>(
+    turn: &'a TranscriptTurn,
+    content_width: u16,
+    tool_detail: ToolDetail,
+) -> Vec<Line<'a>> {
     match turn.kind {
         TurnKind::Message | TurnKind::CompactionSummary => {
             // Markdown body. `tui_markdown::from_str` returns a
@@ -161,16 +177,157 @@ fn build_body_lines<'a>(turn: &'a TranscriptTurn, content_width: u16) -> Vec<Lin
             wrap_plain(&turn.body, content_width, style)
         }
         TurnKind::ToolUse | TurnKind::ToolResult => {
-            // Plain text, dim — tool content reads as supporting
-            // material rather than primary prose. Replace tabs
-            // with two spaces so `cat -n`-style line-numbered
-            // output (e.g. Claude's `Read` tool result) gets a
-            // visible gap between the line number and content
-            // instead of collapsing in the terminal.
-            let style = Style::new().add_modifier(Modifier::DIM);
-            let detabbed = turn.body.replace('\t', "  ");
-            wrap_plain_owned(detabbed, content_width, style)
+            render_tool_body(turn, content_width, tool_detail)
         }
+    }
+}
+
+/// Render a tool turn's body according to the detail level.
+///
+/// Tool result lines often start with a line-number prefix (the
+/// Claude `Read` tool's `cat -n` shape, grep/ripgrep's
+/// `path:line:content`, etc.). The prefix is detected and styled
+/// distinctly so it visually recedes.
+fn render_tool_body(
+    turn: &TranscriptTurn,
+    content_width: u16,
+    detail: ToolDetail,
+) -> Vec<Line<'static>> {
+    let body_style = Style::new().add_modifier(Modifier::DIM);
+    if matches!(detail, ToolDetail::Hidden) {
+        return Vec::new();
+    }
+    let detabbed = turn.body.replace('\t', "  ");
+    if matches!(detail, ToolDetail::Summary) {
+        // Just one line: the call's name (everything up to the
+        // first `:` or `(`) plus a one-line preview / line count.
+        let line_count = detabbed.lines().count();
+        let summary = match turn.kind {
+            TurnKind::ToolUse => first_line_of(&detabbed),
+            TurnKind::ToolResult => {
+                if line_count <= 1 {
+                    first_line_of(&detabbed)
+                } else {
+                    format!("({line_count} lines)")
+                }
+            }
+            _ => first_line_of(&detabbed),
+        };
+        return wrap_plain(&summary, content_width, body_style);
+    }
+    if matches!(detail, ToolDetail::Truncated) {
+        // First N lines, with a `(M more lines)` marker if any
+        // were dropped.
+        let total = detabbed.lines().count();
+        let mut wrapped: Vec<Line<'static>> = Vec::new();
+        for raw in detabbed.lines().take(TRUNCATED_TOOL_LINES) {
+            for line in line_with_styled_prefix(raw, content_width, body_style) {
+                wrapped.push(line);
+            }
+        }
+        if total > TRUNCATED_TOOL_LINES {
+            let more = format!("… ({} more lines)", total - TRUNCATED_TOOL_LINES);
+            wrapped.extend(wrap_plain(
+                &more,
+                content_width,
+                body_style.add_modifier(Modifier::ITALIC),
+            ));
+        }
+        return wrapped;
+    }
+    // Full detail: every line, line-number-prefix-aware.
+    let mut wrapped: Vec<Line<'static>> = Vec::new();
+    for raw in detabbed.lines() {
+        for line in line_with_styled_prefix(raw, content_width, body_style) {
+            wrapped.push(line);
+        }
+    }
+    wrapped
+}
+
+fn first_line_of(s: &str) -> String {
+    s.lines().next().unwrap_or("").to_string()
+}
+
+/// If `raw` begins with a line-number-style prefix (digits +
+/// separator, e.g. `9 ` or `9:` or `9→`), emit a `Line` whose
+/// first span is the prefix in a fainter style than the body. If
+/// no prefix matches, fall back to a single-style wrap.
+fn line_with_styled_prefix(raw: &str, content_width: u16, body_style: Style) -> Vec<Line<'static>> {
+    let prefix_style = Style::new()
+        .fg(ratatui::style::Color::DarkGray)
+        .add_modifier(Modifier::DIM);
+    if let Some((prefix_end, _)) = detect_line_number_prefix(raw) {
+        let prefix = &raw[..prefix_end];
+        let rest = &raw[prefix_end..];
+        let prefix_w = UnicodeWidthStr::width(prefix) as u16;
+        // We word-wrap the body only, using the remaining width
+        // after the prefix on the first line. Wrapped continuation
+        // lines don't repeat the prefix (matches how grep / cat
+        // outputs read in a pager).
+        let first_budget = content_width.saturating_sub(prefix_w).max(1);
+        let pieces = word_wrap_with_budgets(rest, first_budget, content_width);
+        let mut out: Vec<Line<'static>> = Vec::with_capacity(pieces.len());
+        for (i, piece) in pieces.into_iter().enumerate() {
+            if i == 0 {
+                out.push(Line::from(vec![
+                    Span::styled(prefix.to_string(), prefix_style),
+                    Span::styled(piece, body_style),
+                ]));
+            } else {
+                let pad = Span::raw(" ".repeat(prefix_w as usize));
+                out.push(Line::from(vec![pad, Span::styled(piece, body_style)]));
+            }
+        }
+        if out.is_empty() {
+            out.push(Line::from(Span::styled(prefix.to_string(), prefix_style)));
+        }
+        out
+    } else {
+        wrap_plain(raw, content_width, body_style)
+    }
+}
+
+/// Detect a leading `<digits><separator>` line-number prefix.
+/// Recognises whitespace, `:`, `→` and Claude's `→` (arrow) as
+/// separators, with optional surrounding whitespace.
+///
+/// Returns `(prefix_end_byte_index, digit_count)` or `None`.
+fn detect_line_number_prefix(raw: &str) -> Option<(usize, usize)> {
+    // Skip leading whitespace.
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] == b' ' {
+        i += 1;
+    }
+    let digit_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    let digit_count = i - digit_start;
+    if digit_count == 0 {
+        return None;
+    }
+    // Require a recognised separator immediately after the digits.
+    // Bytes are easy: `:`, ` `, `\t` (already detabbed to spaces),
+    // and `→` is 3 bytes (0xE2 0x86 0x92) — handle via a string slice.
+    let rest = &raw[i..];
+    if rest.starts_with(':') || rest.starts_with(' ') || rest.starts_with('→') {
+        // Consume the separator + any trailing whitespace as part
+        // of the prefix.
+        let mut j = i;
+        let sep_bytes = if rest.starts_with('→') {
+            "→".len()
+        } else {
+            1
+        };
+        j += sep_bytes;
+        while j < bytes.len() && bytes[j] == b' ' {
+            j += 1;
+        }
+        Some((j, digit_count))
+    } else {
+        None
     }
 }
 
@@ -187,12 +344,6 @@ fn wrap_plain(body: &str, width: u16, style: Style) -> Vec<Line<'static>> {
         }
     }
     out
-}
-
-/// Sibling for the owned-input case; kept distinct so the
-/// detabbed-string path reads obviously at the call site.
-fn wrap_plain_owned(body: String, width: u16, style: Style) -> Vec<Line<'static>> {
-    wrap_plain(&body, width, style)
 }
 
 /// Wrap a single line of plain text at `width` cells, breaking at
@@ -344,6 +495,7 @@ fn wrap_styled_line<'a>(line: Line<'a>, width: u16, out: &mut Vec<Line<'a>>) {
 mod tests {
     use super::*;
     use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
+    use crate::viewer::state::ToolDetail;
 
     fn turn(role: TurnRole, kind: TurnKind, body: &str) -> TranscriptTurn {
         TranscriptTurn {
@@ -377,7 +529,7 @@ mod tests {
         // CommonMark soft break and collapses to a space.
         let t = turn(TurnRole::User, TurnKind::Message, "hello\n\nworld");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40);
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
         let texts = flat_text(&out);
         // First content line: ` <you right-aligned in 9> ` + ` │ ` + body.
         let expected_first = format!("{} │ hello", chip_pill("you"));
@@ -397,7 +549,7 @@ mod tests {
     fn assistant_role_uses_assistant_chip() {
         let t = turn(TurnRole::Assistant, TurnKind::Message, "hi");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40);
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
         let texts = flat_text(&out);
         assert!(
             texts[0].contains(&format!("{} │ hi", chip_pill("assistant"))),
@@ -410,7 +562,7 @@ mod tests {
     fn thinking_chip_label() {
         let t = turn(TurnRole::Assistant, TurnKind::Thinking, "musing");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40);
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
         assert!(
             flat_text(&out)[0].contains(&format!("{} │", chip_pill("Thinking"))),
             "got {:?}",
@@ -422,14 +574,14 @@ mod tests {
     fn tool_use_and_tool_result_chips() {
         let theme = Theme::default();
         let call_turn = turn(TurnRole::Assistant, TurnKind::ToolUse, "ls");
-        let call = render_turn(&call_turn, &theme, 40);
+        let call = render_turn(&call_turn, &theme, 40, ToolDetail::Full);
         assert!(
             flat_text(&call)[0].contains(&format!("{} │ ls", chip_pill("Tool"))),
             "got {:?}",
             flat_text(&call)[0]
         );
         let res_turn = turn(TurnRole::Assistant, TurnKind::ToolResult, "ok");
-        let res = render_turn(&res_turn, &theme, 40);
+        let res = render_turn(&res_turn, &theme, 40, ToolDetail::Full);
         // Tool result uses the corner-arrow glyph.
         assert!(
             flat_text(&res)[0].contains(&format!("{} │ ok", chip_pill("↳ Result"))),
@@ -442,7 +594,7 @@ mod tests {
     fn compaction_summary_uses_compact_chip() {
         let t = turn(TurnRole::User, TurnKind::CompactionSummary, "summary");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40);
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
         assert!(
             flat_text(&out)[0].contains(&format!("{} │ summary", chip_pill("compact"))),
             "got {:?}",
@@ -456,7 +608,7 @@ mod tests {
         let body = "one two three four five six seven eight nine ten";
         let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 20);
+        let out = render_turn(&t, &theme, 20, ToolDetail::Full);
         let texts = flat_text(&out);
         // Drop the spacer line.
         let body_lines: Vec<&String> = texts.iter().take(texts.len() - 1).collect();
@@ -480,7 +632,7 @@ mod tests {
         let body = "abcdefghijklmnopqrstuvwxyz1234";
         let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 10);
+        let out = render_turn(&t, &theme, 10, ToolDetail::Full);
         let texts = flat_text(&out);
         // Should produce ≥ 3 body lines (30/10 = 3). +1 spacer = 4.
         assert!(texts.len() >= 4, "got {texts:?}");
@@ -497,7 +649,7 @@ mod tests {
         let body = "leading prefix that takes most of the line ccview tail";
         let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 50);
+        let out = render_turn(&t, &theme, 50, ToolDetail::Full);
         let texts = flat_text(&out);
         // The word "ccview" should appear intact on a single line
         // somewhere in the wrapped output (without inter-character
@@ -532,7 +684,7 @@ mod tests {
         let body = "1. some text that is just long enough to need wrapping";
         let t = turn(TurnRole::Assistant, TurnKind::Message, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 30);
+        let out = render_turn(&t, &theme, 30, ToolDetail::Full);
         let texts = flat_text(&out);
         // The list marker must share a line with at least the
         // first body word — no `"        you │ 1."` then
@@ -555,7 +707,7 @@ mod tests {
     fn empty_body_still_renders_the_chip() {
         let t = turn(TurnRole::User, TurnKind::Message, "");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40);
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
         // Empty body yields just the chip line; no spacer (the
         // alternative would waste vertical space for what is
         // already a degenerate turn).

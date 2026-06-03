@@ -33,7 +33,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::viewer::model::{TranscriptDocument, TurnKind};
 use crate::viewer::render::{LEADER_WIDTH, into_owned_line, render_turn};
-use crate::viewer::state::{RenderCache, ViewerState};
+use crate::viewer::state::{RenderCache, ToolDetail, ViewerState};
 use crate::viewer::theme::Theme;
 
 /// Draw the transcript viewer onto `area`. Mutates `state` to
@@ -156,7 +156,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
     let need_rebuild = match &state.rendered {
         Some(cache) => {
             cache.content_width != content_width
-                || cache.show_tools != state.show_tools
+                || cache.tool_detail != state.tool_detail
                 || cache.show_thinking != state.show_thinking
         }
         None => true,
@@ -169,7 +169,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
                 .collect();
         state.rendered = Some(RenderCache {
             content_width,
-            show_tools: state.show_tools,
+            tool_detail: state.tool_detail,
             show_thinking: state.show_thinking,
             lines: owned,
         });
@@ -219,11 +219,11 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     );
 
     // Toggle chips inline the binding letter so the key + label
-    // travel together (`tools·on (t)`). Keeps the operator's eyes
+    // travel together (`tools·sum (t)`). Keeps the operator's eyes
     // on one column instead of cross-referencing a separate
     // shortcut hint.
-    let tools_text = toggle_chip("tools", state.show_tools);
-    let thinking_text = toggle_chip("think", state.show_thinking);
+    let tools_text = tool_chip_label(state.tool_detail);
+    let thinking_text = toggle_chip("think", state.show_thinking, 'T');
 
     // Long hint trails. `?` for help is its own chip so it stands
     // out; `q close` is the last item per the operator-preferred
@@ -233,17 +233,11 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let close_chip = "(q) close";
     let scroll_hint = "j/k scroll · g/G top/end · PgUp/PgDn";
 
+    let tools_on = state.tool_detail.is_visible();
     let spans: Vec<Span<'_>> = vec![
         Span::styled(position, chip_style),
         pipe.clone(),
-        Span::styled(
-            tools_text,
-            if state.show_tools {
-                on_style
-            } else {
-                off_style
-            },
-        ),
+        Span::styled(tools_text, if tools_on { on_style } else { off_style }),
         pipe.clone(),
         Span::styled(
             thinking_text,
@@ -287,15 +281,11 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
                 chip_style,
             ),
             Span::styled(
-                format!(" · {}", toggle_chip("tools", state.show_tools)),
-                if state.show_tools {
-                    on_style
-                } else {
-                    off_style
-                },
+                format!(" · {}", tool_chip_label(state.tool_detail)),
+                if tools_on { on_style } else { off_style },
             ),
             Span::styled(
-                format!(" · {}", toggle_chip("think", state.show_thinking)),
+                format!(" · {}", toggle_chip("think", state.show_thinking, 'T')),
                 if state.show_thinking {
                     on_style
                 } else {
@@ -309,16 +299,21 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     frame.render_widget(Paragraph::new(line), area);
 }
 
-/// `tools·on (t)` / `tools·off (t)` style toggle chip. The key
+/// `tools·sum (t)` / `tools·off (t)` style chip. Carries the
+/// current ToolDetail value so the operator sees both the level
+/// and the cycle key together.
+fn tool_chip_label(detail: ToolDetail) -> String {
+    let label = detail.footer_label();
+    // Pad to 5 cells so the chip width is stable as the state
+    // cycles (Hidden=3 char, Summary=3, Truncated=5, Full=3).
+    format!("tools·{label:<5} (t)")
+}
+
+/// `think·on  (T)` / `think·off (T)` style toggle chip. The key
 /// binding is inlined so the operator doesn't need a separate
 /// hint to know how to flip it.
-fn toggle_chip(name: &str, on: bool) -> String {
+fn toggle_chip(name: &str, on: bool, key: char) -> String {
     let state_label = if on { "on " } else { "off" };
-    let key = match name {
-        "tools" => 't',
-        "think" => 'y',
-        _ => '?',
-    };
     format!("{name}·{state_label} ({key})")
 }
 
@@ -335,8 +330,8 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
         ("Ctrl-D / Ctrl-U", "Half-page down / up"),
         ("g / Home", "Jump to start of transcript"),
         ("G / End", "Jump to end (open default)"),
-        ("t", "Toggle tool-use / tool-result turns"),
-        ("y", "Toggle thinking turns"),
+        ("t", "Cycle tool detail (off → sum → trunc → all)"),
+        ("T", "Toggle thinking turns"),
         ("?", "Toggle this help panel"),
     ];
 
@@ -396,8 +391,10 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(paragraph, panel_area);
 }
 
-/// Build the flat body line list. Filters out tool/thinking turns
-/// when the corresponding state flags are off.
+/// Build the flat body line list. Filters out tool turns at
+/// `ToolDetail::Hidden` and thinking turns when `show_thinking`
+/// is off. Other tool-detail levels affect how each turn renders
+/// (summary / truncated / full) — that's `render_turn`'s job.
 fn build_body_lines<'a>(
     state: &'a ViewerState,
     theme: &Theme,
@@ -408,7 +405,7 @@ fn build_body_lines<'a>(
         if !is_visible(turn.kind, state) {
             continue;
         }
-        lines.extend(render_turn(turn, theme, content_width));
+        lines.extend(render_turn(turn, theme, content_width, state.tool_detail));
     }
     lines
 }
@@ -416,7 +413,7 @@ fn build_body_lines<'a>(
 fn is_visible(kind: TurnKind, state: &ViewerState) -> bool {
     match kind {
         TurnKind::Message | TurnKind::CompactionSummary => true,
-        TurnKind::ToolUse | TurnKind::ToolResult => state.show_tools,
+        TurnKind::ToolUse | TurnKind::ToolResult => state.tool_detail.is_visible(),
         TurnKind::Thinking => state.show_thinking,
     }
 }
@@ -636,12 +633,18 @@ mod tests {
     }
 
     #[test]
-    fn tools_visible_when_toggled_show_call_and_result_chips() {
+    fn tools_visible_at_full_detail_show_call_and_result_chips() {
         let theme = Theme::default();
         let state = ViewerState::new(document_with_tools());
-        // Toggle tools on so the ToolUse + ToolResult turns render.
+        // Cycle to Full detail (3 t's: Hidden → Sum → Trunc → Full)
+        // so the ToolUse + ToolResult turns render with full bodies.
         let (state, _) =
-            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleTools);
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        let (state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        let (state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        assert_eq!(state.tool_detail, ToolDetail::Full);
         let (mut state, _) =
             crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::JumpToStart);
         let buf = render_to_buffer(&mut state, &theme, 60, 16);
@@ -673,14 +676,20 @@ mod tests {
     fn footer_shows_position_and_toggle_state() {
         let theme = Theme::default();
         let state = ViewerState::new(sample_document());
+        // Cycle tool to Summary; toggle thinking on.
         let (state, _) =
-            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleTools);
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
         let (mut state, _) =
             crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleThinking);
-        let buf = render_to_buffer(&mut state, &theme, 80, 8);
+        let buf = render_to_buffer(&mut state, &theme, 100, 8);
         let s = buffer_to_string(&buf);
-        assert!(s.contains("tools·on"), "footer reports tools state: {s}");
+        assert!(
+            s.contains("tools·sum"),
+            "footer reports tools detail (sum): {s}"
+        );
         assert!(s.contains("think·on"), "footer reports thinking state: {s}");
+        assert!(s.contains("(t)"), "tools chip carries the t key hint");
+        assert!(s.contains("(T)"), "thinking chip carries the T key hint");
         assert!(s.contains("[ "), "footer carries position counter");
     }
 
@@ -722,20 +731,24 @@ mod tests {
         assert_eq!(cache_after.lines.len(), cached_lines);
         assert_eq!(cache_after.content_width, cached_width);
 
-        // Toggling tools must invalidate via the reducer. The next
-        // draw rebuilds.
+        // Cycling tool detail must invalidate via the reducer.
+        // The next draw rebuilds.
         let (mut state, _) =
-            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleTools);
-        assert!(state.rendered.is_none(), "ToggleTools invalidates cache");
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        assert!(
+            state.rendered.is_none(),
+            "CycleToolDetail invalidates cache"
+        );
         let _ = render_to_buffer(&mut state, &theme, 60, 14);
         let cache_post = state.rendered.as_ref().expect("cache repopulated");
-        assert!(
-            cache_post.show_tools,
-            "rebuilt cache reflects new toggle state"
+        assert_ne!(
+            cache_post.tool_detail,
+            ToolDetail::Hidden,
+            "rebuilt cache reflects new tool detail"
         );
         assert!(
             cache_post.lines.len() > cached_lines,
-            "show_tools=true adds tool turns; lines should grow ({} → {})",
+            "non-Hidden tool detail adds tool turns; lines should grow ({} → {})",
             cached_lines,
             cache_post.lines.len()
         );
@@ -773,16 +786,62 @@ mod tests {
     }
 
     #[test]
-    fn toggle_tools_makes_tool_turns_visible() {
+    fn cycle_tool_detail_makes_tool_turns_visible() {
         let theme = Theme::default();
         let mut state = ViewerState::new(document_with_tools());
         let before = buffer_to_string(&render_to_buffer(&mut state, &theme, 60, 14));
         assert!(!before.contains("Glob:"), "tools hidden by default");
 
+        // Cycle three times so we land on Full detail.
+        let (state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        let (state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
         let (mut state, _) =
-            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleTools);
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
         let after = buffer_to_string(&render_to_buffer(&mut state, &theme, 60, 14));
-        assert!(after.contains("Glob:"), "tool turns visible after toggle");
+        assert!(after.contains("Glob:"), "tool turns visible at Full detail");
         assert!(after.contains("Tool"), "tool chip label visible");
+    }
+
+    #[test]
+    fn summary_tool_detail_shows_chip_with_call_name_only() {
+        let theme = Theme::default();
+        let mut doc = TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "sum".to_string(),
+                cwd: None,
+            },
+            turns: Vec::new(),
+        };
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::ToolUse,
+            body: "bash: ls -la".to_string(),
+            timestamp: None,
+        });
+        let mut body = String::new();
+        for i in 0..30 {
+            body.push_str(&format!("line {i}\n"));
+        }
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::ToolResult,
+            body,
+            timestamp: None,
+        });
+        let state = ViewerState::new(doc);
+        // Cycle once: Hidden → Summary.
+        let (mut state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        assert_eq!(state.tool_detail, ToolDetail::Summary);
+        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 16));
+        assert!(s.contains("Tool"), "tool chip present at Summary");
+        assert!(s.contains("bash: ls -la"), "call name visible: {s}");
+        assert!(
+            s.contains("(30 lines)"),
+            "long result collapses to line-count summary: {s}"
+        );
     }
 }

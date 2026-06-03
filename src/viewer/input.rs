@@ -21,7 +21,9 @@ pub enum ViewerMsg {
     HalfPageDown,
     JumpToStart,
     JumpToEnd,
-    ToggleTools,
+    /// Cycle tool detail through Hidden → Summary → Truncated →
+    /// Full → Hidden. Bound to `t` in the runtime.
+    CycleToolDetail,
     ToggleThinking,
     ToggleHelp,
     Close,
@@ -85,8 +87,8 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             state.stick_to_end = true;
             state.scroll_offset = state.max_scroll();
         }
-        ViewerMsg::ToggleTools => {
-            state.show_tools = !state.show_tools;
+        ViewerMsg::CycleToolDetail => {
+            state.tool_detail = state.tool_detail.cycle();
             // Layout changed — re-clamp on next draw and drop the
             // cached body lines so the widget recomposes.
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
@@ -116,6 +118,7 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::viewer::state::ToolDetail;
     use crate::viewer::model::{SessionLocator, TranscriptDocument};
     use std::path::PathBuf;
 
@@ -199,13 +202,17 @@ mod tests {
     }
 
     #[test]
-    fn toggle_tools_flips_flag_and_reclamps() {
+    fn cycle_tool_detail_walks_four_states_and_reclamps() {
         let s = state_with(100, 24, 80);
-        let (s, _) = reduce(s, ViewerMsg::ToggleTools);
-        assert!(s.show_tools);
+        let (s, _) = reduce(s, ViewerMsg::CycleToolDetail);
+        assert_eq!(s.tool_detail, ToolDetail::Summary);
         assert!(s.scroll_offset <= s.max_scroll());
-        let (s, _) = reduce(s, ViewerMsg::ToggleTools);
-        assert!(!s.show_tools);
+        let (s, _) = reduce(s, ViewerMsg::CycleToolDetail);
+        assert_eq!(s.tool_detail, ToolDetail::Truncated);
+        let (s, _) = reduce(s, ViewerMsg::CycleToolDetail);
+        assert_eq!(s.tool_detail, ToolDetail::Full);
+        let (s, _) = reduce(s, ViewerMsg::CycleToolDetail);
+        assert_eq!(s.tool_detail, ToolDetail::Hidden);
     }
 
     #[test]

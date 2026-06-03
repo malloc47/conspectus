@@ -1308,8 +1308,10 @@ fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyE
         (KeyModifiers::SHIFT, KeyCode::Char('G'))
         | (KeyModifiers::NONE, KeyCode::Char('G'))
         | (_, KeyCode::End) => Some(ViewerMsg::JumpToEnd),
-        (_, KeyCode::Char('t')) => Some(ViewerMsg::ToggleTools),
-        (_, KeyCode::Char('y')) => Some(ViewerMsg::ToggleThinking),
+        (_, KeyCode::Char('t')) => Some(ViewerMsg::CycleToolDetail),
+        (KeyModifiers::SHIFT, KeyCode::Char('T')) | (KeyModifiers::NONE, KeyCode::Char('T')) => {
+            Some(ViewerMsg::ToggleThinking)
+        }
         (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
         _ => None,
     };

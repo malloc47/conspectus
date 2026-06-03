@@ -1,6 +1,6 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 604
+assertion_line: 632
 expression: snapshot_string(&buf)
 ---
  claude-code:compact · /p · 3 turns
@@ -16,4 +16,4 @@ expression: snapshot_string(&buf)
 
 
 ────────────────────────────────────────────────────────────
-[ 1/6 ] · tools·off (t) · think·off (y) · (q) close
+[ 1/6 ] · tools·off   (t) · think·off (T) · (q) close

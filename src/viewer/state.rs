@@ -15,12 +15,58 @@ use ratatui::text::Line;
 
 use crate::viewer::model::TranscriptDocument;
 
+/// How tool-use / tool-result turns are rendered.
+///
+/// Four levels matching `claude-history`'s `--show-tools`:
+/// * `Hidden`: tool turns drop out entirely (chip-less, no body).
+/// * `Summary`: tool chip + the call's name line; outputs and
+///   long argument bodies collapse to a one-line `(N lines)` marker.
+/// * `Truncated`: full call + up to 8 lines of output, with a
+///   trailing `… (N more lines)` marker if more remain.
+/// * `Full`: everything verbatim.
+///
+/// Cycle order: `Hidden → Summary → Truncated → Full → Hidden`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolDetail {
+    Hidden,
+    Summary,
+    Truncated,
+    Full,
+}
+
+impl ToolDetail {
+    /// Next state in the cycle. Bound to `t` in the viewer.
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Hidden => Self::Summary,
+            Self::Summary => Self::Truncated,
+            Self::Truncated => Self::Full,
+            Self::Full => Self::Hidden,
+        }
+    }
+
+    /// Short label for footer chips: `off` / `sum` / `trunc` / `all`.
+    pub fn footer_label(self) -> &'static str {
+        match self {
+            Self::Hidden => "off",
+            Self::Summary => "sum",
+            Self::Truncated => "trunc",
+            Self::Full => "all",
+        }
+    }
+
+    /// True iff a tool turn renders any body content at all.
+    pub fn is_visible(self) -> bool {
+        !matches!(self, Self::Hidden)
+    }
+}
+
 /// Cached body-line composition. Lifetime-erased so it can live on
 /// the state across draws.
 #[derive(Clone, Debug)]
 pub struct RenderCache {
     pub content_width: u16,
-    pub show_tools: bool,
+    pub tool_detail: ToolDetail,
     pub show_thinking: bool,
     pub lines: Vec<Line<'static>>,
 }
@@ -38,9 +84,8 @@ pub struct ViewerState {
     /// starts with it on so the modal opens on the last turn
     /// (ADR 0052).
     pub stick_to_end: bool,
-    /// When `true`, `ToolUse` and `ToolResult` turns are rendered.
-    /// Off by default (matches `claude-history --show-tools`).
-    pub show_tools: bool,
+    /// Tool detail level. Cycled by `t`; default `Hidden`.
+    pub tool_detail: ToolDetail,
     /// When `true`, `Thinking` turns are rendered. Off by default
     /// (matches `claude-history --show-thinking`).
     pub show_thinking: bool,
@@ -56,7 +101,7 @@ pub struct ViewerState {
     pub total_lines: usize,
     /// Cache of composed body lines. `None` means "rebuild on next
     /// draw". The widget populates this; the reducer invalidates
-    /// it whenever a flag that affects layout changes (`show_tools`,
+    /// it whenever a flag that affects layout changes (`tool_detail`,
     /// `show_thinking`).
     pub rendered: Option<RenderCache>,
 }
@@ -69,7 +114,7 @@ impl ViewerState {
             document,
             scroll_offset: 0,
             stick_to_end: true,
-            show_tools: false,
+            tool_detail: ToolDetail::Hidden,
             show_thinking: false,
             show_help: false,
             viewport_height: 0,
@@ -110,8 +155,21 @@ mod tests {
         let state = ViewerState::new(empty_doc());
         assert_eq!(state.scroll_offset, 0);
         assert!(state.stick_to_end);
-        assert!(!state.show_tools);
+        assert_eq!(state.tool_detail, ToolDetail::Hidden);
         assert!(!state.show_thinking);
+    }
+
+    #[test]
+    fn tool_detail_cycles_through_four_levels() {
+        let mut d = ToolDetail::Hidden;
+        d = d.cycle();
+        assert_eq!(d, ToolDetail::Summary);
+        d = d.cycle();
+        assert_eq!(d, ToolDetail::Truncated);
+        d = d.cycle();
+        assert_eq!(d, ToolDetail::Full);
+        d = d.cycle();
+        assert_eq!(d, ToolDetail::Hidden);
     }
 
     #[test]

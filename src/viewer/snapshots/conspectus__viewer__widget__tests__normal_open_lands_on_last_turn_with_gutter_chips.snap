@@ -1,6 +1,6 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 577
+assertion_line: 605
 expression: snapshot_string(&buf)
 ---
  claude-code:0b34e59c · /p/proj · 2 turns
@@ -14,4 +14,4 @@ expression: snapshot_string(&buf)
 
 
 ────────────────────────────────────────────────────────────
-[ 1/4 ] · tools·off (t) · think·off (y) · (q) close
+[ 1/4 ] · tools·off   (t) · think·off (T) · (q) close
