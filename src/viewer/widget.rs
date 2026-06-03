@@ -32,7 +32,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::viewer::model::{TranscriptDocument, TurnKind};
-use crate::viewer::render::{LEADER_WIDTH, into_owned_line, render_turn};
+use crate::viewer::render::{
+    LEADER_WIDTH, ToolCategory, aggregate_tool_phrase, categorize_tool_name, into_owned_line,
+    render_aggregated_tool_summary, render_turn, tool_name_from_body,
+};
 use crate::viewer::state::{RenderCache, ToolDetail, ViewerState};
 use crate::viewer::theme::Theme;
 
@@ -393,21 +396,70 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
 
 /// Build the flat body line list. Filters out tool turns at
 /// `ToolDetail::Hidden` and thinking turns when `show_thinking`
-/// is off. Other tool-detail levels affect how each turn renders
-/// (summary / truncated / full) — that's `render_turn`'s job.
+/// is off. At `ToolDetail::Summary` consecutive runs of tool
+/// turns are aggregated into a single claude-history-style line
+/// ("Read 2 files, ran 4 shell commands, edited 2 files") rather
+/// than emitting one chip per call. Other tool-detail levels
+/// affect how each turn renders — that's `render_turn`'s job.
 fn build_body_lines<'a>(
     state: &'a ViewerState,
     theme: &Theme,
     content_width: u16,
 ) -> Vec<Line<'a>> {
     let mut lines: Vec<Line<'a>> = Vec::new();
-    for turn in &state.document.turns {
+    let turns = &state.document.turns;
+    let mut i = 0;
+    while i < turns.len() {
+        let turn = &turns[i];
         if !is_visible(turn.kind, state) {
+            i += 1;
+            continue;
+        }
+        // Summary mode: walk the contiguous tool-turn run and
+        // emit one aggregated line for the whole run.
+        if state.tool_detail == ToolDetail::Summary && is_tool_kind(turn.kind) {
+            let (counts, run_len) = collect_tool_run(&turns[i..]);
+            if !counts.is_empty() {
+                let phrase = aggregate_tool_phrase(&counts);
+                let owned: Vec<Line<'static>> =
+                    render_aggregated_tool_summary(&phrase, theme, content_width);
+                lines.extend(owned);
+            }
+            i += run_len.max(1);
             continue;
         }
         lines.extend(render_turn(turn, theme, content_width, state.tool_detail));
+        i += 1;
     }
     lines
+}
+
+fn is_tool_kind(k: TurnKind) -> bool {
+    matches!(k, TurnKind::ToolUse | TurnKind::ToolResult)
+}
+
+/// Count consecutive tool turns by category. Only [`TurnKind::ToolUse`]
+/// turns contribute to the count (one call = one ToolUse in our
+/// model); the paired ToolResult lives in the same run but isn't
+/// double-counted.
+fn collect_tool_run(
+    turns: &[crate::viewer::model::TranscriptTurn],
+) -> (std::collections::BTreeMap<ToolCategory, usize>, usize) {
+    use crate::viewer::model::TurnKind as TK;
+    let mut counts: std::collections::BTreeMap<ToolCategory, usize> =
+        std::collections::BTreeMap::new();
+    let mut end = 0usize;
+    for turn in turns {
+        if !is_tool_kind(turn.kind) {
+            break;
+        }
+        if matches!(turn.kind, TK::ToolUse) {
+            let name = tool_name_from_body(&turn.body);
+            *counts.entry(categorize_tool_name(name)).or_insert(0) += 1;
+        }
+        end += 1;
+    }
+    (counts, end)
 }
 
 fn is_visible(kind: TurnKind, state: &ViewerState) -> bool {
@@ -805,30 +857,43 @@ mod tests {
     }
 
     #[test]
-    fn summary_tool_detail_shows_chip_with_call_name_only() {
+    fn summary_tool_detail_aggregates_consecutive_tool_runs() {
         let theme = Theme::default();
         let mut doc = TranscriptDocument {
             meta: TranscriptMeta {
                 harness: "claude-code".to_string(),
-                session_key: "sum".to_string(),
+                session_key: "agg".to_string(),
                 cwd: None,
             },
-            turns: Vec::new(),
+            turns: vec![TranscriptTurn {
+                role: TurnRole::User,
+                kind: TurnKind::Message,
+                body: "do the thing".to_string(),
+                timestamp: None,
+            }],
         };
-        doc.turns.push(TranscriptTurn {
-            role: TurnRole::Assistant,
-            kind: TurnKind::ToolUse,
-            body: "bash: ls -la".to_string(),
-            timestamp: None,
-        });
-        let mut body = String::new();
-        for i in 0..30 {
-            body.push_str(&format!("line {i}\n"));
+        // Run: Read x2, Bash x4, Edit x2 (each ToolUse + ToolResult).
+        let categories = [("Read", 2), ("Bash", 4), ("Edit", 2)];
+        for (name, count) in categories {
+            for i in 0..count {
+                doc.turns.push(TranscriptTurn {
+                    role: TurnRole::Assistant,
+                    kind: TurnKind::ToolUse,
+                    body: format!("{name}: arg{i}"),
+                    timestamp: None,
+                });
+                doc.turns.push(TranscriptTurn {
+                    role: TurnRole::Assistant,
+                    kind: TurnKind::ToolResult,
+                    body: format!("result {i}"),
+                    timestamp: None,
+                });
+            }
         }
         doc.turns.push(TranscriptTurn {
             role: TurnRole::Assistant,
-            kind: TurnKind::ToolResult,
-            body,
+            kind: TurnKind::Message,
+            body: "done".to_string(),
             timestamp: None,
         });
         let state = ViewerState::new(doc);
@@ -836,12 +901,77 @@ mod tests {
         let (mut state, _) =
             crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
         assert_eq!(state.tool_detail, ToolDetail::Summary);
-        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 16));
+        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
         assert!(s.contains("Tool"), "tool chip present at Summary");
-        assert!(s.contains("bash: ls -la"), "call name visible: {s}");
+        // The aggregated phrase replaces 16 per-turn lines.
         assert!(
-            s.contains("(30 lines)"),
-            "long result collapses to line-count summary: {s}"
+            s.contains("Read 2 files, ran 4 shell commands, edited 2 files"),
+            "aggregate phrase visible: {s}"
+        );
+        // Surrounding non-tool turns still render normally.
+        assert!(s.contains("do the thing"), "user message stays");
+        assert!(s.contains("done"), "assistant closing message stays");
+        // No per-call chip body should leak through Summary —
+        // operator wouldn't see individual "Bash: arg0" lines.
+        assert!(
+            !s.contains("Bash: arg"),
+            "individual call args hidden in Summary: {s}"
+        );
+    }
+
+    #[test]
+    fn summary_aggregation_separates_runs_around_messages() {
+        let theme = Theme::default();
+        let mut doc = TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "split".to_string(),
+                cwd: None,
+            },
+            turns: Vec::new(),
+        };
+        // Run 1: Read x1.
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::ToolUse,
+            body: "Read: file.rs".to_string(),
+            timestamp: None,
+        });
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::ToolResult,
+            body: "contents".to_string(),
+            timestamp: None,
+        });
+        // Message between the runs.
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::Message,
+            body: "inspecting".to_string(),
+            timestamp: None,
+        });
+        // Run 2: Bash x1.
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::ToolUse,
+            body: "Bash: ls".to_string(),
+            timestamp: None,
+        });
+        doc.turns.push(TranscriptTurn {
+            role: TurnRole::Assistant,
+            kind: TurnKind::ToolResult,
+            body: "out".to_string(),
+            timestamp: None,
+        });
+        let state = ViewerState::new(doc);
+        let (mut state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
+        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
+        // Both aggregates appear (singular forms).
+        assert!(s.contains("Read 1 file"), "first run aggregate: {s}");
+        assert!(
+            s.contains("Ran 1 shell command"),
+            "second run aggregate: {s}"
         );
     }
 }

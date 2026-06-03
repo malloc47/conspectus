@@ -88,6 +88,114 @@ pub fn render_turn<'a>(
 
 const TRUNCATED_TOOL_LINES: usize = 8;
 
+/// Coarse category for tool calls. Used by Summary-mode
+/// aggregation to roll up consecutive tool turns into a single
+/// claude-history-style phrase ("Read 2 files, ran 2 shell commands").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ToolCategory {
+    Read,
+    Search,
+    Web,
+    Shell,
+    Edit,
+    Other,
+}
+
+/// All categories in canonical display order: read-only first,
+/// then side-effecting operations, with the "Other" catch-all at
+/// the end. This is the order they appear in the aggregated phrase.
+pub const TOOL_CATEGORY_ORDER: [ToolCategory; 6] = [
+    ToolCategory::Read,
+    ToolCategory::Search,
+    ToolCategory::Web,
+    ToolCategory::Shell,
+    ToolCategory::Edit,
+    ToolCategory::Other,
+];
+
+/// Map a tool name (extracted from a [`TranscriptTurn::body`]
+/// of `TurnKind::ToolUse`) into a category. Lowercases the
+/// comparison so claude-style CamelCase (`Read`, `Bash`) and
+/// codex/opencode-style snake_case (`exec_command`, `read`) both
+/// land in the right bucket.
+pub fn categorize_tool_name(name: &str) -> ToolCategory {
+    match name.trim().to_lowercase().as_str() {
+        "read" => ToolCategory::Read,
+        "edit" | "write" | "multiedit" | "write_file" | "patch" | "apply_patch" => {
+            ToolCategory::Edit
+        }
+        "bash" | "shell" | "exec_command" | "run" => ToolCategory::Shell,
+        "grep" | "glob" | "search" | "find" | "ripgrep" => ToolCategory::Search,
+        "webfetch" | "web_fetch" | "web_search" | "fetch" => ToolCategory::Web,
+        _ => ToolCategory::Other,
+    }
+}
+
+/// Extract the tool name from a [`TurnKind::ToolUse`] body. Parsers
+/// build these as `"<name>: <args>"` (or just `"<name>"` when args
+/// are empty); both shapes are handled.
+pub fn tool_name_from_body(body: &str) -> &str {
+    body.split_once(": ").map_or(body, |(name, _)| name)
+}
+
+/// Format the aggregated-summary phrase for a run of tool turns,
+/// counted by category.
+///
+/// Examples:
+/// * `{Read: 1}` → `"Read 1 file"`
+/// * `{Read: 2, Shell: 4}` → `"Read 2 files, ran 4 shell commands"`
+/// * `{Edit: 1}` → `"Edited 1 file"`
+///
+/// First segment is title-case; subsequent segments lowercase.
+pub fn aggregate_tool_phrase(counts: &std::collections::BTreeMap<ToolCategory, usize>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut is_first = true;
+    for cat in TOOL_CATEGORY_ORDER {
+        let Some(&n) = counts.get(&cat) else { continue };
+        if n == 0 {
+            continue;
+        }
+        parts.push(category_segment(cat, n, is_first));
+        is_first = false;
+    }
+    parts.join(", ")
+}
+
+fn category_segment(cat: ToolCategory, n: usize, is_first: bool) -> String {
+    let (verb_cap, verb_low, noun_singular, noun_plural) = match cat {
+        ToolCategory::Read => ("Read", "read", "file", "files"),
+        ToolCategory::Search => ("Searched", "searched", "time", "times"),
+        ToolCategory::Web => ("Made", "made", "web call", "web calls"),
+        ToolCategory::Shell => ("Ran", "ran", "shell command", "shell commands"),
+        ToolCategory::Edit => ("Edited", "edited", "file", "files"),
+        ToolCategory::Other => ("Used", "used", "tool call", "tool calls"),
+    };
+    let verb = if is_first { verb_cap } else { verb_low };
+    let noun = if n == 1 { noun_singular } else { noun_plural };
+    format!("{verb} {n} {noun}")
+}
+
+/// Render an aggregated tool-call summary as a chip line for
+/// Summary mode. Constructs a synthetic [`TranscriptTurn`] of
+/// kind [`TurnKind::ToolUse`] so the existing chip pill +
+/// separator-thread machinery handles styling.
+pub fn render_aggregated_tool_summary(
+    phrase: &str,
+    theme: &Theme,
+    content_width: u16,
+) -> Vec<Line<'static>> {
+    let synthetic = TranscriptTurn {
+        role: TurnRole::Assistant,
+        kind: TurnKind::ToolUse,
+        body: phrase.to_string(),
+        timestamp: None,
+    };
+    render_turn(&synthetic, theme, content_width, ToolDetail::Summary)
+        .into_iter()
+        .map(into_owned_line)
+        .collect()
+}
+
 /// Build a `gutter + separator + body` line. The chip is drawn
 /// only on the first line of a turn; the separator picks up the
 /// chip's color on every line so each turn reads as a colored
@@ -700,6 +808,61 @@ mod tests {
                     .skip("1.".len())
                     .any(|c| !c.is_whitespace()),
             "marker should not be alone on the first line: {first:?}"
+        );
+    }
+
+    #[test]
+    fn categorize_known_claude_and_codex_tool_names() {
+        assert_eq!(categorize_tool_name("Read"), ToolCategory::Read);
+        assert_eq!(categorize_tool_name("read"), ToolCategory::Read);
+        assert_eq!(categorize_tool_name("Bash"), ToolCategory::Shell);
+        assert_eq!(categorize_tool_name("exec_command"), ToolCategory::Shell);
+        assert_eq!(categorize_tool_name("Edit"), ToolCategory::Edit);
+        assert_eq!(categorize_tool_name("MultiEdit"), ToolCategory::Edit);
+        assert_eq!(categorize_tool_name("Write"), ToolCategory::Edit);
+        assert_eq!(categorize_tool_name("Glob"), ToolCategory::Search);
+        assert_eq!(categorize_tool_name("Grep"), ToolCategory::Search);
+        assert_eq!(categorize_tool_name("WebFetch"), ToolCategory::Web);
+        assert_eq!(categorize_tool_name("web_search"), ToolCategory::Web);
+        assert_eq!(categorize_tool_name("TodoWrite"), ToolCategory::Other);
+    }
+
+    #[test]
+    fn tool_name_extracted_from_name_colon_args_body() {
+        assert_eq!(tool_name_from_body("Read: /path/to/file"), "Read");
+        assert_eq!(tool_name_from_body("Bash"), "Bash");
+        assert_eq!(
+            tool_name_from_body("exec_command: {\"cmd\":\"ls\"}"),
+            "exec_command"
+        );
+    }
+
+    #[test]
+    fn aggregate_phrase_matches_claude_history_examples() {
+        use std::collections::BTreeMap;
+        let mut counts: BTreeMap<ToolCategory, usize> = BTreeMap::new();
+        counts.insert(ToolCategory::Read, 2);
+        counts.insert(ToolCategory::Shell, 2);
+        assert_eq!(
+            aggregate_tool_phrase(&counts),
+            "Read 2 files, ran 2 shell commands"
+        );
+
+        let mut counts: BTreeMap<ToolCategory, usize> = BTreeMap::new();
+        counts.insert(ToolCategory::Shell, 1);
+        assert_eq!(aggregate_tool_phrase(&counts), "Ran 1 shell command");
+
+        let mut counts: BTreeMap<ToolCategory, usize> = BTreeMap::new();
+        counts.insert(ToolCategory::Edit, 1);
+        assert_eq!(aggregate_tool_phrase(&counts), "Edited 1 file");
+
+        let mut counts: BTreeMap<ToolCategory, usize> = BTreeMap::new();
+        counts.insert(ToolCategory::Read, 2);
+        counts.insert(ToolCategory::Shell, 4);
+        counts.insert(ToolCategory::Edit, 2);
+        assert_eq!(
+            aggregate_tool_phrase(&counts),
+            "Read 2 files, ran 4 shell commands, edited 2 files"
         );
     }
 
