@@ -212,13 +212,20 @@ fn turn_from_block(
             })
         }
         "thinking" => {
-            // `thinking` carries the visible chain-of-thought in the
-            // `thinking` field; signature is metadata only.
+            // `thinking` usually carries the visible chain-of-thought
+            // in the `thinking` field; some assistant turns emit
+            // *only* `encrypted_content` (opaque, omitted from our
+            // deserializer) and the visible field is an empty
+            // string. Render a placeholder in that case so toggling
+            // the thinking view actually surfaces something — the
+            // *presence* of a reasoning block is the operator
+            // signal even when the body is sealed.
             let body = block
                 .thinking
                 .as_deref()
                 .or(block.text.as_deref())
-                .and_then(nonempty)?;
+                .and_then(nonempty)
+                .unwrap_or_else(|| "(reasoning hidden by the model)".to_string());
             Some(TranscriptTurn {
                 role,
                 kind: TurnKind::Thinking,
@@ -478,6 +485,25 @@ mod tests {
         assert_eq!(doc.turns.len(), 1);
         assert_eq!(doc.turns[0].kind, TurnKind::Thinking);
         assert_eq!(doc.turns[0].body, "hmm, options...");
+    }
+
+    /// Real-data shape: assistant turns where the visible
+    /// `thinking` field is empty and the reasoning lives only in
+    /// the opaque `encrypted_content` blob. Renderer needs *some*
+    /// turn to render so the operator's `y` toggle has visible
+    /// effect.
+    #[test]
+    fn thinking_block_with_only_encrypted_content_emits_placeholder_turn() {
+        let line = r#"{"type":"assistant","timestamp":"2026-06-01T17:04:00Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"sig","encrypted_content":"gAAA..."}]}}"#;
+        let (_tmp, locator) = fixture("sess", &[line]);
+        let doc = ClaudeCodeParser.read(&locator).expect("parse");
+        assert_eq!(doc.turns.len(), 1);
+        assert_eq!(doc.turns[0].kind, TurnKind::Thinking);
+        assert!(
+            doc.turns[0].body.contains("hidden"),
+            "placeholder text should hint at encrypted reasoning, got {:?}",
+            doc.turns[0].body
+        );
     }
 
     #[test]

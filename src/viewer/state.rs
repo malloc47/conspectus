@@ -28,6 +28,10 @@ pub struct ViewerState {
     /// When `true`, `Thinking` turns are rendered. Off by default
     /// (matches `claude-history --show-thinking`).
     pub show_thinking: bool,
+    /// When `true`, the modal renders a centered help-overlay panel
+    /// over the body listing every viewer keybinding. Toggled by
+    /// `?`; closed by `?` or `Esc`.
+    pub show_help: bool,
     /// Viewport height (in cells / lines) last seen during draw.
     /// Used by the reducer to compute page/half-page deltas.
     pub viewport_height: u16,
@@ -46,6 +50,7 @@ impl ViewerState {
             stick_to_end: true,
             show_tools: false,
             show_thinking: false,
+            show_help: false,
             viewport_height: 0,
             total_lines: 0,
         }

@@ -1,19 +1,19 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 483
+assertion_line: 604
 expression: snapshot_string(&buf)
 ---
  claude-code:compact · /p · 3 turns
 ────────────────────────────────────────────────────────────
-       you │ before
+       you  │ before
 
-   compact │ summary of prior turns
+   compact  │ summary of prior turns
 
- assistant │ after
+ assistant  │ after
 
 
 
 
 
 ────────────────────────────────────────────────────────────
-[ 1/6 ] · tools·off · think·off · q close · j/k scroll · g/…
+[ 1/6 ] · tools·off (t) · think·off (y) · (q) close

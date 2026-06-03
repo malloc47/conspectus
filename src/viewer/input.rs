@@ -23,6 +23,7 @@ pub enum ViewerMsg {
     JumpToEnd,
     ToggleTools,
     ToggleThinking,
+    ToggleHelp,
     Close,
 }
 
@@ -93,7 +94,16 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             state.show_thinking = !state.show_thinking;
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
         }
+        ViewerMsg::ToggleHelp => {
+            state.show_help = !state.show_help;
+        }
         ViewerMsg::Close => {
+            // Close the help overlay first when it's up; only
+            // dismiss the modal when the body is showing.
+            if state.show_help {
+                state.show_help = false;
+                return (state, ViewerEffect::None);
+            }
             return (state, ViewerEffect::Close);
         }
     }
@@ -205,6 +215,29 @@ mod tests {
     #[test]
     fn close_emits_close_effect() {
         let s = state_with(100, 24, 0);
+        let (_s, eff) = reduce(s, ViewerMsg::Close);
+        assert_eq!(eff, ViewerEffect::Close);
+    }
+
+    #[test]
+    fn toggle_help_flips_show_help_flag() {
+        let s = state_with(100, 24, 0);
+        let (s, eff) = reduce(s, ViewerMsg::ToggleHelp);
+        assert!(s.show_help);
+        assert_eq!(eff, ViewerEffect::None);
+        let (s, _) = reduce(s, ViewerMsg::ToggleHelp);
+        assert!(!s.show_help);
+    }
+
+    #[test]
+    fn close_dismisses_help_overlay_first_then_modal() {
+        let mut s = state_with(100, 24, 0);
+        s.show_help = true;
+        let (s, eff) = reduce(s, ViewerMsg::Close);
+        // First close dismisses the help panel and stays in the modal.
+        assert!(!s.show_help);
+        assert_eq!(eff, ViewerEffect::None);
+        // Second close exits the modal.
         let (_s, eff) = reduce(s, ViewerMsg::Close);
         assert_eq!(eff, ViewerEffect::Close);
     }

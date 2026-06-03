@@ -1,17 +1,17 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 456
+assertion_line: 577
 expression: snapshot_string(&buf)
 ---
  claude-code:0b34e59c · /p/proj · 2 turns
 ────────────────────────────────────────────────────────────
-       you │ what's up?
+       you  │ what's up?
 
- assistant │ not much
+ assistant  │ not much
 
 
 
 
 
 ────────────────────────────────────────────────────────────
-[ 1/4 ] · tools·off · think·off · q close · j/k scroll · g/…
+[ 1/4 ] · tools·off (t) · think·off (y) · (q) close

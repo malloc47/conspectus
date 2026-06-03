@@ -55,6 +55,9 @@ pub fn draw(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area:
     draw_body(state, theme, frame, chunks[2]);
     draw_separator(theme, frame, chunks[3]);
     draw_footer(state, theme, frame, chunks[4]);
+    if state.show_help {
+        draw_help_overlay(theme, frame, area);
+    }
 }
 
 fn draw_header(document: &TranscriptDocument, theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
@@ -171,9 +174,6 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
             .min(state.total_lines.max(1)),
         state.total_lines.max(1),
     );
-    let tools_label = toggle_chip("tools", state.show_tools);
-    let thinking_label = toggle_chip("think", state.show_thinking);
-    let hint = "q close · j/k scroll · g/G top/end · PgUp/PgDn · t/y toggles";
 
     let chip_style = Style::new().add_modifier(Modifier::BOLD);
     let off_style = Style::new()
@@ -187,11 +187,26 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
             .add_modifier(Modifier::DIM),
     );
 
+    // Toggle chips inline the binding letter so the key + label
+    // travel together (`tools·on (t)`). Keeps the operator's eyes
+    // on one column instead of cross-referencing a separate
+    // shortcut hint.
+    let tools_text = toggle_chip("tools", state.show_tools);
+    let thinking_text = toggle_chip("think", state.show_thinking);
+
+    // Long hint trails. `?` for help is its own chip so it stands
+    // out; `q close` is the last item per the operator-preferred
+    // ordering (close should sit where the muscle memory lands
+    // when ready to exit).
+    let help_chip = "(?) help";
+    let close_chip = "(q) close";
+    let scroll_hint = "j/k scroll · g/G top/end · PgUp/PgDn";
+
     let spans: Vec<Span<'_>> = vec![
         Span::styled(position, chip_style),
         pipe.clone(),
         Span::styled(
-            tools_label,
+            tools_text,
             if state.show_tools {
                 on_style
             } else {
@@ -200,19 +215,25 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
         ),
         pipe.clone(),
         Span::styled(
-            thinking_label,
+            thinking_text,
             if state.show_thinking {
                 on_style
             } else {
                 off_style
             },
         ),
+        pipe.clone(),
+        Span::styled(help_chip, off_style),
+        pipe.clone(),
+        Span::styled(scroll_hint, off_style),
         pipe,
-        Span::styled(hint, off_style),
+        Span::styled(close_chip, off_style),
     ];
 
     // Width-aware truncate: if the assembled footer exceeds the
-    // area, drop the long hint first (keep position + chips).
+    // area, drop the scroll hint first (it's the longest), then
+    // the help chip. Position + toggle chips + close stay
+    // visible at every width that fits them.
     let total: usize = spans
         .iter()
         .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
@@ -221,27 +242,127 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let line = if total <= cap {
         Line::from(spans)
     } else {
-        // Truncate the trailing hint with ellipsis.
-        let prefix_width: usize = spans
-            .iter()
-            .take(spans.len() - 1)
-            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-            .sum();
-        let mut keep: Vec<Span<'_>> = spans.into_iter().take(6).collect();
-        let hint_cap = cap.saturating_sub(prefix_width).saturating_sub(1);
-        let truncated: String = hint.chars().take(hint_cap).collect();
-        keep.push(Span::styled(format!("{truncated}…"), off_style));
-        Line::from(keep)
+        // Build a minimal version: position · tools · think · close.
+        let minimal: Vec<Span<'_>> = vec![
+            Span::styled(
+                format!(
+                    "[ {}/{} ]",
+                    state
+                        .scroll_offset
+                        .saturating_add(1)
+                        .min(state.total_lines.max(1)),
+                    state.total_lines.max(1)
+                ),
+                chip_style,
+            ),
+            Span::styled(
+                format!(" · {}", toggle_chip("tools", state.show_tools)),
+                if state.show_tools {
+                    on_style
+                } else {
+                    off_style
+                },
+            ),
+            Span::styled(
+                format!(" · {}", toggle_chip("think", state.show_thinking)),
+                if state.show_thinking {
+                    on_style
+                } else {
+                    off_style
+                },
+            ),
+            Span::styled(format!(" · {close_chip}"), off_style),
+        ];
+        Line::from(minimal)
     };
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// `tools·on (t)` / `tools·off (t)` style toggle chip. The key
+/// binding is inlined so the operator doesn't need a separate
+/// hint to know how to flip it.
 fn toggle_chip(name: &str, on: bool) -> String {
-    if on {
-        format!("{name}·on ")
-    } else {
-        format!("{name}·off")
-    }
+    let state_label = if on { "on " } else { "off" };
+    let key = match name {
+        "tools" => 't',
+        "think" => 'y',
+        _ => '?',
+    };
+    format!("{name}·{state_label} ({key})")
+}
+
+fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+    use ratatui::widgets::{Block, Borders, Clear};
+    // Build the body content first so we can size the panel
+    // exactly to fit it.
+    let entries: &[(&str, &str)] = &[
+        ("q / Esc / Ctrl-C", "Close viewer"),
+        ("j / Down", "Scroll one line down"),
+        ("k / Up", "Scroll one line up"),
+        ("Space / PgDn", "Page down"),
+        ("PgUp", "Page up"),
+        ("Ctrl-D / Ctrl-U", "Half-page down / up"),
+        ("g / Home", "Jump to start of transcript"),
+        ("G / End", "Jump to end (open default)"),
+        ("t", "Toggle tool-use / tool-result turns"),
+        ("y", "Toggle thinking turns"),
+        ("?", "Toggle this help panel"),
+    ];
+
+    // Pick the longest key cell so columns align.
+    let key_col_width = entries
+        .iter()
+        .map(|(k, _)| unicode_width::UnicodeWidthStr::width(*k))
+        .max()
+        .unwrap_or(0);
+    let desc_col_width = entries
+        .iter()
+        .map(|(_, d)| unicode_width::UnicodeWidthStr::width(*d))
+        .max()
+        .unwrap_or(0);
+    let inner_width = (key_col_width + 3 + desc_col_width) as u16;
+    // +4 for the two borders + two cells of inner padding.
+    let panel_width = (inner_width + 4).min(area.width.saturating_sub(2));
+    // +2 for the top + bottom borders, +1 for a title line.
+    let panel_height = (entries.len() as u16 + 3).min(area.height.saturating_sub(2));
+
+    let panel_x = area.x + area.width.saturating_sub(panel_width) / 2;
+    let panel_y = area.y + area.height.saturating_sub(panel_height) / 2;
+    let panel_area = Rect::new(panel_x, panel_y, panel_width, panel_height);
+
+    let lines: Vec<Line<'_>> = entries
+        .iter()
+        .map(|(key, desc)| {
+            let key_pad = key_col_width.saturating_sub(unicode_width::UnicodeWidthStr::width(*key));
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(
+                    format!("{}{} ", " ".repeat(key_pad), key),
+                    Style::new()
+                        .fg(theme.harness_codex)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled((*desc).to_string(), Style::new()),
+            ])
+        })
+        .collect();
+
+    let title_line = Line::from(Span::styled(
+        " viewer keybindings ",
+        Style::new()
+            .fg(theme.success)
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(theme.badge),
+    ));
+
+    frame.render_widget(Clear, panel_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(theme.success))
+        .title(title_line);
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, panel_area);
 }
 
 /// Build the flat body line list. Filters out tool/thinking turns
@@ -530,6 +651,23 @@ mod tests {
         assert!(s.contains("tools·on"), "footer reports tools state: {s}");
         assert!(s.contains("think·on"), "footer reports thinking state: {s}");
         assert!(s.contains("[ "), "footer carries position counter");
+    }
+
+    #[test]
+    fn help_overlay_renders_keybindings_panel_when_show_help_is_set() {
+        let theme = Theme::default();
+        let mut state = ViewerState::new(sample_document());
+        state.show_help = true;
+        let buf = render_to_buffer(&mut state, &theme, 70, 18);
+        let s = buffer_to_string(&buf);
+        assert!(
+            s.contains("viewer keybindings"),
+            "panel title visible:\n{s}"
+        );
+        assert!(s.contains("q / Esc / Ctrl-C"), "close binding visible");
+        assert!(s.contains("Toggle this help panel"), "? binding listed");
+        assert!(s.contains("Jump to end"), "G/End binding listed");
+        insta::assert_snapshot!(snapshot_string(&buf));
     }
 
     #[test]

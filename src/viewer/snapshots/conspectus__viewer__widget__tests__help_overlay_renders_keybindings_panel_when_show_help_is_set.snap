@@ -1,0 +1,23 @@
+---
+source: src/viewer/widget.rs
+assertion_line: 670
+expression: snapshot_string(&buf)
+---
+ claude-code:0b34e59c · /p/proj · 2 turns
+──────────────────────────────────────────────────────────────────────
+      ┌ viewer keybindings ────────────────────────────────────┐
+      │ q / Esc / Ctrl-C   Close viewer                        │
+ assis│         j / Down   Scroll one line down                │
+      │           k / Up   Scroll one line up                  │
+      │     Space / PgDn   Page down                           │
+      │             PgUp   Page up                             │
+      │  Ctrl-D / Ctrl-U   Half-page down / up                 │
+      │         g / Home   Jump to start of transcript         │
+      │          G / End   Jump to end (open default)          │
+      │                t   Toggle tool-use / tool-result turns │
+      │                y   Toggle thinking turns               │
+      │                ?   Toggle this help panel              │
+      │                                                        │
+      └────────────────────────────────────────────────────────┘
+──────────────────────────────────────────────────────────────────────
+[ 1/4 ] · tools·off (t) · think·off (y) · (q) close

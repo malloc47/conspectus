@@ -1,17 +1,17 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 517
+assertion_line: 638
 expression: snapshot_string(&buf)
 ---
  claude-code:wrap · /p · 1 turn
 ────────────────────────────────────────
-       you │ one two three four five
-           │ six seven eight nine ten
-           │ eleven twelve thirteen
+       you  │ one two three four five
+            │ six seven eight nine ten
+            │ eleven twelve thirteen
 
 
 
 
 
 ────────────────────────────────────────
-[ 1/4 ] · tools·off · think·off · q clo…
+[ 1/4 ] · tools·off (t) · think·off (y)

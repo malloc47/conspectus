@@ -1,21 +1,21 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 496
+assertion_line: 617
 expression: snapshot_string(&buf)
 ---
  claude-code:tools · /p · 4 turns
 ────────────────────────────────────────────────────────────
-       you │ what files are here?
+       you  │ what files are here?
 
-      Tool │ Glob: **/*.rs
+      Tool  │ Glob: **/*.rs
 
-  ↳ Result │ src/lib.rs
-           │ src/main.rs
+  ↳ Result  │ src/lib.rs
+            │ src/main.rs
 
- assistant │ two Rust files in src/.
+ assistant  │ two Rust files in src/.
 
 
 
 
 ────────────────────────────────────────────────────────────
-[ 1/9 ] · tools·on  · think·off · q close · j/k scroll · g/…
+[ 1/9 ] · tools·on  (t) · think·off (y) · (q) close

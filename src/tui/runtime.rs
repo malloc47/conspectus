@@ -1310,6 +1310,7 @@ fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyE
         | (_, KeyCode::End) => Some(ViewerMsg::JumpToEnd),
         (_, KeyCode::Char('t')) => Some(ViewerMsg::ToggleTools),
         (_, KeyCode::Char('y')) => Some(ViewerMsg::ToggleThinking),
+        (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
         _ => None,
     };
     let Some(msg) = msg else {
