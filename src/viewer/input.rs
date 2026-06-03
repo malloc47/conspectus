@@ -25,6 +25,11 @@ pub enum ViewerMsg {
     /// Full → Hidden. Bound to `t` in the runtime.
     CycleToolDetail,
     ToggleThinking,
+    /// Show / hide turns the parser tagged as aborted. Bound to
+    /// capital-`I` (Shift-i, for "interrupted"). Off by default so
+    /// the viewer matches what the user saw in the agent's UI at
+    /// chat time.
+    ToggleAborted,
     ToggleHelp,
     Close,
 }
@@ -99,6 +104,11 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
             state.invalidate_render_cache();
         }
+        ViewerMsg::ToggleAborted => {
+            state.show_aborted = !state.show_aborted;
+            state.scroll_offset = state.scroll_offset.min(state.max_scroll());
+            state.invalidate_render_cache();
+        }
         ViewerMsg::ToggleHelp => {
             state.show_help = !state.show_help;
         }
@@ -118,8 +128,8 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::viewer::state::ToolDetail;
     use crate::viewer::model::{SessionLocator, TranscriptDocument};
+    use crate::viewer::state::ToolDetail;
     use std::path::PathBuf;
 
     fn doc() -> TranscriptDocument {
@@ -220,6 +230,20 @@ mod tests {
         let s = state_with(100, 24, 0);
         let (s, _) = reduce(s, ViewerMsg::ToggleThinking);
         assert!(s.show_thinking);
+    }
+
+    #[test]
+    fn toggle_aborted_flips_flag_and_invalidates_cache() {
+        let s = state_with(100, 24, 50);
+        assert!(!s.show_aborted, "off by default — matches harness UX");
+        let (s, _) = reduce(s, ViewerMsg::ToggleAborted);
+        assert!(s.show_aborted);
+        assert!(
+            s.rendered.is_none(),
+            "render cache invalidated so the aborted filter takes effect on next draw"
+        );
+        let (s, _) = reduce(s, ViewerMsg::ToggleAborted);
+        assert!(!s.show_aborted);
     }
 
     #[test]

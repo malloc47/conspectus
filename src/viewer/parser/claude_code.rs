@@ -95,9 +95,14 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
     let file = File::open(path).map_err(|err| ParseError::Io(err.to_string()))?;
     let reader = BufReader::new(file);
 
-    let mut turns: Vec<TranscriptTurn> = Vec::new();
+    // Two-pass: collect records, then build the parent→child uuid
+    // index, then emit turns with the abort flag set for orphan
+    // plain-text user records. Storing the whole record list is a
+    // larger working-set than the single-pass version but is bounded
+    // by file size (~MBs in practice) and we already pay this
+    // memory cost for the emitted turn list.
+    let mut records: Vec<Record> = Vec::new();
     let mut cwd: Option<String> = None;
-
     for line in reader.lines() {
         let Ok(line) = line else { continue };
         if line.trim().is_empty() {
@@ -109,7 +114,33 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
         if cwd.is_none() {
             cwd = record.cwd.clone();
         }
-        emit_turns_for_record(&record, &mut turns);
+        records.push(record);
+    }
+
+    // Parent set: every uuid that is anyone's `parentUuid`. A
+    // plain-text user record whose uuid is *not* in this set was
+    // never followed by an agent response — i.e. the user hit Esc
+    // before Claude generated any reply.
+    let parent_uuids: std::collections::HashSet<&str> = records
+        .iter()
+        .filter_map(|r| r.parent_uuid.as_deref())
+        .collect();
+
+    let mut turns: Vec<TranscriptTurn> = Vec::new();
+    let last_index = records.len().saturating_sub(1);
+    for (i, record) in records.iter().enumerate() {
+        // Orphan rule: plain-text user records (role=user, content
+        // is a String) whose uuid has no children. We also require
+        // that the record is not the last one in the file — the
+        // chronological tail is the in-flight turn the agent is
+        // still answering, not an abort.
+        let is_orphan_user_text = is_plain_text_user_record(record)
+            && record
+                .uuid
+                .as_deref()
+                .is_some_and(|u| !parent_uuids.contains(u))
+            && i < last_index;
+        emit_turns_for_record(record, is_orphan_user_text, &mut turns);
     }
 
     Ok(TranscriptDocument {
@@ -122,8 +153,28 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
     })
 }
 
+/// `true` when the record is a normal user-typed prose message —
+/// `type=user` with a plain-string `message.content`. Used to scope
+/// the orphan-leaf abort heuristic so tool_result-only user records
+/// (which never have children either, by design) aren't tagged.
+fn is_plain_text_user_record(record: &Record) -> bool {
+    if record.is_compact_summary {
+        return false;
+    }
+    if record.record_type.as_deref() != Some("user") {
+        return false;
+    }
+    matches!(
+        record.message.as_ref().and_then(|m| m.content.as_ref()),
+        Some(MessageContent::String(_))
+    )
+}
+
 /// Translate one Claude record into zero or more normalized turns.
-fn emit_turns_for_record(record: &Record, out: &mut Vec<TranscriptTurn>) {
+/// `aborted` is the abort flag for every turn emitted from this
+/// record — see [`is_plain_text_user_record`] for the orphan-leaf
+/// detection at the call site.
+fn emit_turns_for_record(record: &Record, aborted: bool, out: &mut Vec<TranscriptTurn>) {
     if record.is_compact_summary {
         let body = compaction_summary_body(record);
         if !body.is_empty() {
@@ -132,6 +183,7 @@ fn emit_turns_for_record(record: &Record, out: &mut Vec<TranscriptTurn>) {
                 kind: TurnKind::CompactionSummary,
                 body,
                 timestamp: parse_timestamp(record.timestamp.as_deref()),
+                aborted: false,
             });
         }
         return;
@@ -140,8 +192,6 @@ fn emit_turns_for_record(record: &Record, out: &mut Vec<TranscriptTurn>) {
     let role = match record.record_type.as_deref() {
         Some("user") => TurnRole::User,
         Some("assistant") => TurnRole::Assistant,
-        // System / custom-title / agent-name / attachment / etc.
-        // are metadata records — no turn for the operator.
         _ => return,
     };
     let timestamp = parse_timestamp(record.timestamp.as_deref());
@@ -157,12 +207,14 @@ fn emit_turns_for_record(record: &Record, out: &mut Vec<TranscriptTurn>) {
                     kind: TurnKind::Message,
                     body,
                     timestamp,
+                    aborted,
                 });
             }
         }
         Some(MessageContent::Blocks(blocks)) => {
             for block in blocks {
-                if let Some(turn) = turn_from_block(role, timestamp, block) {
+                if let Some(mut turn) = turn_from_block(role, timestamp, block) {
+                    turn.aborted = aborted;
                     out.push(turn);
                 }
             }
@@ -209,6 +261,7 @@ fn turn_from_block(
                 kind: TurnKind::Message,
                 body,
                 timestamp,
+                aborted: false,
             })
         }
         "thinking" => {
@@ -231,6 +284,7 @@ fn turn_from_block(
                 kind: TurnKind::Thinking,
                 body,
                 timestamp,
+                aborted: false,
             })
         }
         "tool_use" => {
@@ -250,6 +304,7 @@ fn turn_from_block(
                 kind: TurnKind::ToolUse,
                 body,
                 timestamp,
+                aborted: false,
             })
         }
         "tool_result" => {
@@ -259,6 +314,7 @@ fn turn_from_block(
                 kind: TurnKind::ToolResult,
                 body,
                 timestamp,
+                aborted: false,
             })
         }
         // Unknown block types (future schema additions, OAuth
@@ -321,6 +377,10 @@ struct Record {
     cwd: Option<String>,
     #[serde(rename = "isCompactSummary", default)]
     is_compact_summary: bool,
+    #[serde(default)]
+    uuid: Option<String>,
+    #[serde(rename = "parentUuid", default)]
+    parent_uuid: Option<String>,
     #[serde(default)]
     message: Option<MessageBody>,
 }
@@ -584,6 +644,92 @@ mod tests {
             doc.meta.cwd.as_deref(),
             Some("/p/proj"),
             "first-wins, ignoring later changes"
+        );
+    }
+
+    #[test]
+    fn orphan_plain_text_user_record_is_marked_aborted() {
+        // Real Claude Code shape: a plain-text user record with no
+        // descendants in the parent/child uuid graph corresponds to
+        // a message the operator typed and then Esc'd before the
+        // agent began responding. The replacement message follows
+        // with its own parent chain.
+        let (_tmp, locator) = fixture(
+            "sess",
+            &[
+                r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first prompt"}}"#,
+                r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"first reply"}]}}"#,
+                r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"interrupted thought"}}"#,
+                r#"{"type":"user","uuid":"u3","parentUuid":"a1","message":{"role":"user","content":"replacement prompt"}}"#,
+                r#"{"type":"assistant","uuid":"a3","parentUuid":"u3","message":{"role":"assistant","content":[{"type":"text","text":"reply to replacement"}]}}"#,
+            ],
+        );
+        let doc = ClaudeCodeParser.read(&locator).expect("parse");
+        let bodies: Vec<(&str, bool)> = doc
+            .turns
+            .iter()
+            .map(|t| (t.body.as_str(), t.aborted))
+            .collect();
+        assert_eq!(
+            bodies,
+            vec![
+                ("first prompt", false),
+                ("first reply", false),
+                ("interrupted thought", true),
+                ("replacement prompt", false),
+                ("reply to replacement", false),
+            ],
+            "orphan u2 tagged aborted; the other plain-text user records have children so they stay",
+        );
+    }
+
+    #[test]
+    fn last_record_is_never_tagged_aborted() {
+        // The chronological tail of an active session has no
+        // children but represents the *in-flight* turn the agent
+        // is still answering, not an interrupt. Don't tag it.
+        let (_tmp, locator) = fixture(
+            "sess",
+            &[
+                r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first prompt"}}"#,
+                r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"first reply"}]}}"#,
+                r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"tail prompt — still in flight"}}"#,
+            ],
+        );
+        let doc = ClaudeCodeParser.read(&locator).expect("parse");
+        assert_eq!(
+            doc.turns.last().unwrap().body,
+            "tail prompt — still in flight"
+        );
+        assert!(
+            !doc.turns.last().unwrap().aborted,
+            "chronological tail is in-flight, not aborted",
+        );
+    }
+
+    #[test]
+    fn tool_result_user_records_are_not_tagged_aborted() {
+        // user-role records that carry tool_result blocks have no
+        // children by design (Claude doesn't re-reply to them as
+        // user turns). They must NOT be tagged aborted just because
+        // they're orphans in the uuid graph.
+        let (_tmp, locator) = fixture(
+            "sess",
+            &[
+                r#"{"type":"assistant","uuid":"a1","parentUuid":null,"message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/x"}}]}}"#,
+                r#"{"type":"user","uuid":"u_tr","parentUuid":"a1","message":{"role":"user","content":[{"tool_use_id":"toolu_1","type":"tool_result","content":"ok"}]}}"#,
+                r#"{"type":"assistant","uuid":"a2","parentUuid":"u_tr","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}"#,
+            ],
+        );
+        let doc = ClaudeCodeParser.read(&locator).expect("parse");
+        let tool_result = doc
+            .turns
+            .iter()
+            .find(|t| t.kind == TurnKind::ToolResult)
+            .expect("tool result emitted");
+        assert!(
+            !tool_result.aborted,
+            "tool_result-only user records are not subject to the orphan heuristic"
         );
     }
 

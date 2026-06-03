@@ -106,6 +106,24 @@ pub struct TranscriptTurn {
     /// or it failed to parse — viewers degrade gracefully.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<DateTime<Utc>>,
+    /// `true` when this turn was part of an exchange the user
+    /// interrupted before the agent finished responding. Hidden by
+    /// default; revealed via the viewer's `I` toggle. Detection is
+    /// per-harness: Claude marks user records with no descendants in
+    /// the parent/child uuid graph; Codex consumes its
+    /// `event_msg.turn_aborted` signal; OpenCode reads
+    /// `error.name == "MessageAbortedError"` on assistant rows. Both
+    /// the user-sent text *and* any partial assistant/tool output
+    /// that landed before the abort are tagged, so the whole aborted
+    /// exchange disappears together when `show_aborted` is off — the
+    /// goal is to match what the harness's own UI showed the user.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub aborted: bool,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Who produced the turn.
@@ -308,6 +326,7 @@ mod tests {
                     .single()
                     .expect("valid timestamp"),
             ),
+            aborted: false,
         };
         let json = serde_json::to_string(&original).expect("serialize");
         let decoded: TranscriptTurn = serde_json::from_str(&json).expect("deserialize");
@@ -321,6 +340,7 @@ mod tests {
             kind: TurnKind::Message,
             body: "hi".to_string(),
             timestamp: None,
+            aborted: false,
         };
         let json = serde_json::to_string(&turn).expect("serialize");
         assert!(!json.contains("timestamp"), "got {json}");
@@ -351,6 +371,7 @@ mod tests {
                     kind: TurnKind::Message,
                     body: "what's up?".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::Assistant,
@@ -361,6 +382,7 @@ mod tests {
                             .single()
                             .expect("valid timestamp"),
                     ),
+                    aborted: false,
                 },
             ],
         };

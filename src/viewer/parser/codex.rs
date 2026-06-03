@@ -127,6 +127,15 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
 
     let mut turns: Vec<TranscriptTurn> = Vec::new();
     let mut cwd: Option<String> = None;
+    // Codex abort detection: track the index of the most-recent
+    // user `Message` turn that hasn't yet been resolved by a clean
+    // `task_complete` event. When `event_msg.turn_aborted` fires,
+    // mark that user turn *and* every later turn in `turns` (any
+    // partial assistant/reasoning/tool-call output before the
+    // operator hit Esc) as `aborted: true`. The whole exchange
+    // then disappears together when `show_aborted` is off — matches
+    // what Codex's own UI hid from the operator.
+    let mut pending_user_turn_idx: Option<usize> = None;
 
     for line in reader.lines() {
         let Ok(line) = line else { continue };
@@ -153,8 +162,42 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
                 }
             }
             Some("response_item") => {
+                let before = turns.len();
                 if let Some(payload) = &record.payload {
                     emit_response_item_turns(payload, timestamp, &mut turns);
+                }
+                // If this response_item produced a fresh user
+                // `Message`, remember it as the candidate for the
+                // next `turn_aborted` event. We use the first new
+                // index — Codex doesn't split user prose across
+                // multiple content blocks in practice.
+                for (offset, turn) in turns.iter().enumerate().skip(before) {
+                    if turn.role == TurnRole::User && turn.kind == TurnKind::Message {
+                        pending_user_turn_idx = Some(offset);
+                        break;
+                    }
+                }
+            }
+            Some("event_msg") => {
+                match record
+                    .payload
+                    .as_ref()
+                    .and_then(|p| p.payload_type.as_deref())
+                {
+                    Some("turn_aborted") => {
+                        if let Some(start) = pending_user_turn_idx.take() {
+                            for turn in &mut turns[start..] {
+                                turn.aborted = true;
+                            }
+                        }
+                    }
+                    Some("task_complete") => {
+                        // Turn finished cleanly — the candidate is no
+                        // longer at risk of being aborted by a later
+                        // event.
+                        pending_user_turn_idx = None;
+                    }
+                    _ => {}
                 }
             }
             Some("compacted") => {
@@ -170,12 +213,10 @@ fn parse_file(path: &Path, locator: &SessionLocator) -> ParseResult {
                         kind: TurnKind::CompactionSummary,
                         body: body.to_string(),
                         timestamp,
+                        aborted: false,
                     });
                 }
             }
-            // event_msg: engine telemetry (token counts, task
-            // started/complete, exec_command_end echoes, etc.).
-            // No transcript content.
             _ => {}
         }
     }
@@ -247,6 +288,7 @@ fn emit_message_turns(
             kind: TurnKind::Message,
             body: text.to_string(),
             timestamp,
+            aborted: false,
         });
     }
 }
@@ -296,6 +338,7 @@ fn emit_reasoning_turn(
         kind: TurnKind::Thinking,
         body,
         timestamp,
+        aborted: false,
     });
 }
 
@@ -316,6 +359,7 @@ fn emit_tool_call_turn(
         kind: TurnKind::ToolUse,
         body,
         timestamp,
+        aborted: false,
     });
 }
 
@@ -336,6 +380,7 @@ fn emit_tool_output_turn(
         kind: TurnKind::ToolResult,
         body: trimmed.to_string(),
         timestamp,
+        aborted: false,
     });
 }
 
@@ -641,6 +686,66 @@ mod tests {
         assert_eq!(doc.turns.len(), 2);
         assert_eq!(doc.turns[0].body, "a");
         assert_eq!(doc.turns[1].body, "b");
+    }
+
+    #[test]
+    fn turn_aborted_event_marks_preceding_user_message_and_partial_response() {
+        // Real Codex shape: user message, then a partial reasoning
+        // turn, then `event_msg.turn_aborted` because the operator
+        // hit Esc. Detection should mark the user message AND the
+        // partial reasoning turn so the whole exchange disappears
+        // together when `show_aborted` is off.
+        let (_tmp, locator) = fixture(
+            "sess",
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first prompt"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first reply"}]}}"#,
+                r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"interrupted thought"}]}}"#,
+                r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"partial reasoning before abort"}]}}"#,
+                r#"{"type":"event_msg","payload":{"type":"turn_aborted"}}"#,
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"replacement prompt"}]}}"#,
+            ],
+        );
+        let doc = CodexParser.read(&locator).expect("parse");
+        let bodies: Vec<(&str, bool)> = doc
+            .turns
+            .iter()
+            .map(|t| (t.body.as_str(), t.aborted))
+            .collect();
+        assert_eq!(
+            bodies,
+            vec![
+                ("first prompt", false),
+                ("first reply", false),
+                ("interrupted thought", true),
+                ("partial reasoning before abort", true),
+                ("replacement prompt", false),
+            ],
+            "abort flag tags the aborted user prompt and the partial reasoning that landed before Esc",
+        );
+    }
+
+    #[test]
+    fn task_complete_event_clears_abort_candidate() {
+        // If `task_complete` fires between a user message and a
+        // later `turn_aborted`, the user message must not be
+        // retroactively tagged. The abort only applies to the most
+        // recent unresolved turn.
+        let (_tmp, locator) = fixture(
+            "sess",
+            &[
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"settled prompt"}]}}"#,
+                r#"{"type":"event_msg","payload":{"type":"task_complete"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"turn_aborted"}}"#,
+            ],
+        );
+        let doc = CodexParser.read(&locator).expect("parse");
+        assert_eq!(doc.turns.len(), 1);
+        assert!(
+            !doc.turns[0].aborted,
+            "task_complete cleared the candidate before turn_aborted fired",
+        );
     }
 
     #[test]

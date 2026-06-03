@@ -1295,26 +1295,28 @@ fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyE
     let Some(state) = app.take_viewer_modal() else {
         return;
     };
-    let msg = match (key.modifiers, key.code) {
-        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
-        (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(ViewerMsg::Close),
-        (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(ViewerMsg::ScrollDown),
-        (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(ViewerMsg::ScrollUp),
-        (_, KeyCode::PageDown) | (_, KeyCode::Char(' ')) => Some(ViewerMsg::PageDown),
-        (_, KeyCode::PageUp) => Some(ViewerMsg::PageUp),
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(ViewerMsg::HalfPageDown),
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) => Some(ViewerMsg::HalfPageUp),
-        (_, KeyCode::Char('g')) | (_, KeyCode::Home) => Some(ViewerMsg::JumpToStart),
-        (KeyModifiers::SHIFT, KeyCode::Char('G'))
-        | (KeyModifiers::NONE, KeyCode::Char('G'))
-        | (_, KeyCode::End) => Some(ViewerMsg::JumpToEnd),
-        (_, KeyCode::Char('t')) => Some(ViewerMsg::CycleToolDetail),
-        (KeyModifiers::SHIFT, KeyCode::Char('T')) | (KeyModifiers::NONE, KeyCode::Char('T')) => {
-            Some(ViewerMsg::ToggleThinking)
-        }
-        (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
-        _ => None,
-    };
+    let msg =
+        match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
+            (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(ViewerMsg::Close),
+            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(ViewerMsg::ScrollDown),
+            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(ViewerMsg::ScrollUp),
+            (_, KeyCode::PageDown) | (_, KeyCode::Char(' ')) => Some(ViewerMsg::PageDown),
+            (_, KeyCode::PageUp) => Some(ViewerMsg::PageUp),
+            (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(ViewerMsg::HalfPageDown),
+            (KeyModifiers::CONTROL, KeyCode::Char('u')) => Some(ViewerMsg::HalfPageUp),
+            (_, KeyCode::Char('g')) | (_, KeyCode::Home) => Some(ViewerMsg::JumpToStart),
+            (KeyModifiers::SHIFT, KeyCode::Char('G'))
+            | (KeyModifiers::NONE, KeyCode::Char('G'))
+            | (_, KeyCode::End) => Some(ViewerMsg::JumpToEnd),
+            (_, KeyCode::Char('t')) => Some(ViewerMsg::CycleToolDetail),
+            (KeyModifiers::SHIFT, KeyCode::Char('T'))
+            | (KeyModifiers::NONE, KeyCode::Char('T')) => Some(ViewerMsg::ToggleThinking),
+            (KeyModifiers::SHIFT, KeyCode::Char('I'))
+            | (KeyModifiers::NONE, KeyCode::Char('I')) => Some(ViewerMsg::ToggleAborted),
+            (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
+            _ => None,
+        };
     let Some(msg) = msg else {
         app.open_viewer_modal(state);
         return;

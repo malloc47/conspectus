@@ -161,6 +161,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
             cache.content_width != content_width
                 || cache.tool_detail != state.tool_detail
                 || cache.show_thinking != state.show_thinking
+                || cache.show_aborted != state.show_aborted
         }
         None => true,
     };
@@ -174,6 +175,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
             content_width,
             tool_detail: state.tool_detail,
             show_thinking: state.show_thinking,
+            show_aborted: state.show_aborted,
             lines: owned,
         });
     }
@@ -227,6 +229,7 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     // shortcut hint.
     let tools_text = tool_chip_label(state.tool_detail);
     let thinking_text = toggle_chip("think", state.show_thinking, 'T');
+    let aborted_text = abort_chip_label(state.show_aborted);
 
     // Long hint trails. `?` for help is its own chip so it stands
     // out; `q close` is the last item per the operator-preferred
@@ -251,6 +254,15 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
             },
         ),
         pipe.clone(),
+        Span::styled(
+            aborted_text,
+            if state.show_aborted {
+                on_style
+            } else {
+                off_style
+            },
+        ),
+        pipe.clone(),
         Span::styled(help_chip, off_style),
         pipe.clone(),
         Span::styled(scroll_hint, off_style),
@@ -258,10 +270,13 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
         Span::styled(close_chip, off_style),
     ];
 
-    // Width-aware truncate: if the assembled footer exceeds the
-    // area, drop the scroll hint first (it's the longest), then
-    // the help chip. Position + toggle chips + close stay
-    // visible at every width that fits them.
+    // Width-aware truncate. Three tiers, picked by what fits:
+    //   1. Full assembly above.
+    //   2. Drop scroll hint + help chip, keep position · tools · think
+    //      · aborted · close.
+    //   3. Drop the aborted chip too. Aborted-turn filtering is rare,
+    //      and the tools / think chips reflect ongoing state — those
+    //      stay until close itself is at risk.
     let total: usize = spans
         .iter()
         .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
@@ -270,33 +285,54 @@ fn draw_footer(state: &ViewerState, theme: &Theme, frame: &mut Frame<'_>, area: 
     let line = if total <= cap {
         Line::from(spans)
     } else {
-        // Build a minimal version: position · tools · think · close.
-        let minimal: Vec<Span<'_>> = vec![
-            Span::styled(
-                format!(
-                    "[ {}/{} ]",
-                    state
-                        .scroll_offset
-                        .saturating_add(1)
-                        .min(state.total_lines.max(1)),
-                    state.total_lines.max(1)
-                ),
-                chip_style,
+        let position_span = Span::styled(
+            format!(
+                "[ {}/{} ]",
+                state
+                    .scroll_offset
+                    .saturating_add(1)
+                    .min(state.total_lines.max(1)),
+                state.total_lines.max(1)
             ),
-            Span::styled(
-                format!(" · {}", tool_chip_label(state.tool_detail)),
-                if tools_on { on_style } else { off_style },
-            ),
-            Span::styled(
-                format!(" · {}", toggle_chip("think", state.show_thinking, 'T')),
-                if state.show_thinking {
-                    on_style
-                } else {
-                    off_style
-                },
-            ),
-            Span::styled(format!(" · {close_chip}"), off_style),
+            chip_style,
+        );
+        let tools_span = Span::styled(
+            format!(" · {}", tool_chip_label(state.tool_detail)),
+            if tools_on { on_style } else { off_style },
+        );
+        let think_span = Span::styled(
+            format!(" · {}", toggle_chip("think", state.show_thinking, 'T')),
+            if state.show_thinking {
+                on_style
+            } else {
+                off_style
+            },
+        );
+        let aborted_span = Span::styled(
+            format!(" · {}", abort_chip_label(state.show_aborted)),
+            if state.show_aborted {
+                on_style
+            } else {
+                off_style
+            },
+        );
+        let close_span = Span::styled(format!(" · {close_chip}"), off_style);
+        let with_aborted = vec![
+            position_span.clone(),
+            tools_span.clone(),
+            think_span.clone(),
+            aborted_span,
+            close_span.clone(),
         ];
+        let width_with_aborted: usize = with_aborted
+            .iter()
+            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+            .sum();
+        let minimal = if width_with_aborted <= cap {
+            with_aborted
+        } else {
+            vec![position_span, tools_span, think_span, close_span]
+        };
         Line::from(minimal)
     };
     frame.render_widget(Paragraph::new(line), area);
@@ -320,6 +356,15 @@ fn toggle_chip(name: &str, on: bool, key: char) -> String {
     format!("{name}·{state_label} ({key})")
 }
 
+/// `aborted·hide (I)` / `aborted·show (I)` chip. Uses `hide`/`show`
+/// instead of `on`/`off` because the operator question isn't "is the
+/// flag on" but "am I looking at the on-disk reality or the
+/// harness-faithful view". Pad so the chip width stays stable.
+fn abort_chip_label(showing: bool) -> String {
+    let state_label = if showing { "show" } else { "hide" };
+    format!("aborted·{state_label} (I)")
+}
+
 fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     use ratatui::widgets::{Block, Borders, Clear};
     // Build the body content first so we can size the panel
@@ -335,6 +380,7 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
         ("G / End", "Jump to end (open default)"),
         ("t", "Cycle tool detail (off → sum → trunc → all)"),
         ("T", "Toggle thinking turns"),
+        ("I", "Toggle aborted/interrupted turns"),
         ("?", "Toggle this help panel"),
     ];
 
@@ -411,14 +457,14 @@ fn build_body_lines<'a>(
     let mut i = 0;
     while i < turns.len() {
         let turn = &turns[i];
-        if !is_visible(turn.kind, state) {
+        if !passes_abort_filter(turn, state) || !is_visible(turn.kind, state) {
             i += 1;
             continue;
         }
         // Summary mode: walk the contiguous tool-turn run and
         // emit one aggregated line for the whole run.
         if state.tool_detail == ToolDetail::Summary && is_tool_kind(turn.kind) {
-            let (counts, run_len) = collect_tool_run(&turns[i..]);
+            let (counts, run_len) = collect_tool_run(&turns[i..], state);
             if !counts.is_empty() {
                 let phrase = aggregate_tool_phrase(&counts);
                 let owned: Vec<Line<'static>> =
@@ -444,6 +490,7 @@ fn is_tool_kind(k: TurnKind) -> bool {
 /// double-counted.
 fn collect_tool_run(
     turns: &[crate::viewer::model::TranscriptTurn],
+    state: &ViewerState,
 ) -> (std::collections::BTreeMap<ToolCategory, usize>, usize) {
     use crate::viewer::model::TurnKind as TK;
     let mut counts: std::collections::BTreeMap<ToolCategory, usize> =
@@ -452,6 +499,13 @@ fn collect_tool_run(
     for turn in turns {
         if !is_tool_kind(turn.kind) {
             break;
+        }
+        // Skip aborted tool turns when the filter is on so the
+        // aggregate phrase reflects what the user saw, not the
+        // on-disk count.
+        if !passes_abort_filter(turn, state) {
+            end += 1;
+            continue;
         }
         if matches!(turn.kind, TK::ToolUse) {
             let name = tool_name_from_body(&turn.body);
@@ -468,6 +522,15 @@ fn is_visible(kind: TurnKind, state: &ViewerState) -> bool {
         TurnKind::ToolUse | TurnKind::ToolResult => state.tool_detail.is_visible(),
         TurnKind::Thinking => state.show_thinking,
     }
+}
+
+/// Per-turn filter applied before any kind-based visibility check.
+/// When `show_aborted` is off (the default), any turn tagged
+/// `aborted: true` by the parser drops out — matching what the
+/// agent's UI showed the user. The toggle restores the full
+/// on-disk transcript.
+fn passes_abort_filter(turn: &crate::viewer::model::TranscriptTurn, state: &ViewerState) -> bool {
+    state.show_aborted || !turn.aborted
 }
 
 /// Pick a harness-identity color for the title chip. Falls back to
@@ -534,12 +597,14 @@ mod tests {
                     kind: TurnKind::Message,
                     body: "what's up?".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::Message,
                     body: "not much".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
             ],
         }
@@ -567,6 +632,7 @@ mod tests {
                 kind: TurnKind::Message,
                 body: format!("turn {i}"),
                 timestamp: None,
+                aborted: false,
             });
         }
         doc
@@ -585,18 +651,21 @@ mod tests {
                     kind: TurnKind::Message,
                     body: "before".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::User,
                     kind: TurnKind::CompactionSummary,
                     body: "summary of prior turns".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::Message,
                     body: "after".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
             ],
         }
@@ -615,24 +684,28 @@ mod tests {
                     kind: TurnKind::Message,
                     body: "what files are here?".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::ToolUse,
                     body: "Glob: **/*.rs".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::ToolResult,
                     body: "src/lib.rs\nsrc/main.rs".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
                 TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::Message,
                     body: "two Rust files in src/.".to_string(),
                     timestamp: None,
+                    aborted: false,
                 },
             ],
         }
@@ -718,6 +791,7 @@ mod tests {
                 body: "one two three four five six seven eight nine ten eleven twelve thirteen"
                     .to_string(),
                 timestamp: None,
+                aborted: false,
             }],
         });
         let buf = render_to_buffer(&mut state, &theme, 40, 12);
@@ -857,6 +931,67 @@ mod tests {
     }
 
     #[test]
+    fn aborted_turns_hidden_by_default_visible_after_toggle() {
+        let theme = Theme::default();
+        let doc = TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "abrt".to_string(),
+                cwd: None,
+            },
+            turns: vec![
+                TranscriptTurn {
+                    role: TurnRole::User,
+                    kind: TurnKind::Message,
+                    body: "first prompt".to_string(),
+                    timestamp: None,
+                    aborted: false,
+                },
+                TranscriptTurn {
+                    role: TurnRole::Assistant,
+                    kind: TurnKind::Message,
+                    body: "first reply".to_string(),
+                    timestamp: None,
+                    aborted: false,
+                },
+                TranscriptTurn {
+                    role: TurnRole::User,
+                    kind: TurnKind::Message,
+                    body: "interrupted thought".to_string(),
+                    timestamp: None,
+                    aborted: true,
+                },
+                TranscriptTurn {
+                    role: TurnRole::User,
+                    kind: TurnKind::Message,
+                    body: "replacement prompt".to_string(),
+                    timestamp: None,
+                    aborted: false,
+                },
+            ],
+        };
+        let mut state = ViewerState::new(doc);
+        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 14));
+        assert!(
+            s.contains("first prompt"),
+            "non-aborted user msg shows: {s}"
+        );
+        assert!(s.contains("replacement prompt"), "next prompt shows");
+        assert!(
+            !s.contains("interrupted thought"),
+            "aborted user msg hidden by default: {s}"
+        );
+
+        let (mut state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleAborted);
+        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 14));
+        assert!(
+            s.contains("interrupted thought"),
+            "aborted msg revealed after toggle: {s}"
+        );
+    }
+
+    #[test]
     fn summary_tool_detail_aggregates_consecutive_tool_runs() {
         let theme = Theme::default();
         let mut doc = TranscriptDocument {
@@ -870,6 +1005,7 @@ mod tests {
                 kind: TurnKind::Message,
                 body: "do the thing".to_string(),
                 timestamp: None,
+                aborted: false,
             }],
         };
         // Run: Read x2, Bash x4, Edit x2 (each ToolUse + ToolResult).
@@ -881,12 +1017,14 @@ mod tests {
                     kind: TurnKind::ToolUse,
                     body: format!("{name}: arg{i}"),
                     timestamp: None,
+                    aborted: false,
                 });
                 doc.turns.push(TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::ToolResult,
                     body: format!("result {i}"),
                     timestamp: None,
+                    aborted: false,
                 });
             }
         }
@@ -895,6 +1033,7 @@ mod tests {
             kind: TurnKind::Message,
             body: "done".to_string(),
             timestamp: None,
+            aborted: false,
         });
         let state = ViewerState::new(doc);
         // Cycle once: Hidden → Summary.
@@ -936,12 +1075,14 @@ mod tests {
             kind: TurnKind::ToolUse,
             body: "Read: file.rs".to_string(),
             timestamp: None,
+            aborted: false,
         });
         doc.turns.push(TranscriptTurn {
             role: TurnRole::Assistant,
             kind: TurnKind::ToolResult,
             body: "contents".to_string(),
             timestamp: None,
+            aborted: false,
         });
         // Message between the runs.
         doc.turns.push(TranscriptTurn {
@@ -949,6 +1090,7 @@ mod tests {
             kind: TurnKind::Message,
             body: "inspecting".to_string(),
             timestamp: None,
+            aborted: false,
         });
         // Run 2: Bash x1.
         doc.turns.push(TranscriptTurn {
@@ -956,12 +1098,14 @@ mod tests {
             kind: TurnKind::ToolUse,
             body: "Bash: ls".to_string(),
             timestamp: None,
+            aborted: false,
         });
         doc.turns.push(TranscriptTurn {
             role: TurnRole::Assistant,
             kind: TurnKind::ToolResult,
             body: "out".to_string(),
             timestamp: None,
+            aborted: false,
         });
         let state = ViewerState::new(doc);
         let (mut state, _) =

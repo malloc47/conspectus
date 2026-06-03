@@ -68,6 +68,7 @@ pub struct RenderCache {
     pub content_width: u16,
     pub tool_detail: ToolDetail,
     pub show_thinking: bool,
+    pub show_aborted: bool,
     pub lines: Vec<Line<'static>>,
 }
 
@@ -89,6 +90,12 @@ pub struct ViewerState {
     /// When `true`, `Thinking` turns are rendered. Off by default
     /// (matches `claude-history --show-thinking`).
     pub show_thinking: bool,
+    /// When `true`, turns tagged `aborted: true` by the parser are
+    /// rendered. Off by default so the viewer matches what the
+    /// harness UI showed at chat time — see
+    /// [`crate::viewer::model::TranscriptTurn::aborted`] for how
+    /// detection works per harness. Toggled by capital-`I`.
+    pub show_aborted: bool,
     /// When `true`, the modal renders a centered help-overlay panel
     /// over the body listing every viewer keybinding. Toggled by
     /// `?`; closed by `?` or `Esc`.
@@ -116,6 +123,7 @@ impl ViewerState {
             stick_to_end: true,
             tool_detail: ToolDetail::Hidden,
             show_thinking: false,
+            show_aborted: false,
             show_help: false,
             viewport_height: 0,
             total_lines: 0,

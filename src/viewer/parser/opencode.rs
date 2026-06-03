@@ -106,8 +106,16 @@ fn read_session_cwd(conn: &Connection, session_id: &str) -> rusqlite::Result<Opt
 }
 
 fn read_turns(conn: &Connection, session_id: &str) -> rusqlite::Result<Vec<TranscriptTurn>> {
+    // Pre-pass: scan messages in chronological order to build the
+    // per-message aborted flag. An assistant message carrying
+    // `error.name = "MessageAbortedError"` was interrupted by the
+    // operator; its preceding user message (the prompt that
+    // triggered the aborted turn) is tagged too so the whole
+    // exchange disappears together when `show_aborted` is off.
+    let aborted_message_ids = read_aborted_message_ids(conn, session_id)?;
+
     let mut stmt = conn.prepare(
-        "SELECT m.data AS message_data, p.data AS part_data, p.time_created \
+        "SELECT m.id, m.data AS message_data, p.data AS part_data, p.time_created \
          FROM message m \
          LEFT JOIN part p ON p.message_id = m.id \
          WHERE m.session_id = ?1 \
@@ -116,17 +124,16 @@ fn read_turns(conn: &Connection, session_id: &str) -> rusqlite::Result<Vec<Trans
     let rows = stmt.query_map(params![session_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
         ))
     })?;
 
     let mut turns: Vec<TranscriptTurn> = Vec::new();
     for row in rows {
-        let (message_json, part_json, part_time_ms) = row?;
+        let (message_id, message_json, part_json, part_time_ms) = row?;
         let Some(part_json) = part_json else {
-            // Message with no parts — skip rather than emitting
-            // a phantom empty turn.
             continue;
         };
         let Ok(message) = serde_json::from_str::<MessageData>(&message_json) else {
@@ -141,15 +148,66 @@ fn read_turns(conn: &Connection, session_id: &str) -> rusqlite::Result<Vec<Trans
             Some("assistant") => TurnRole::Assistant,
             _ => TurnRole::Assistant,
         };
-        emit_turns_for_part(role, timestamp, &part, &mut turns);
+        let aborted = aborted_message_ids.contains(message_id.as_str());
+        emit_turns_for_part(role, timestamp, &part, aborted, &mut turns);
     }
     Ok(turns)
+}
+
+/// Collect the set of message ids that should render as `aborted`:
+/// every assistant message with `error.name = "MessageAbortedError"`
+/// (the operator pressed Esc) plus the user message that immediately
+/// preceded it in chronological order (the prompt that was
+/// interrupted). Pairing the user prompt with the aborted assistant
+/// row mirrors what OpenCode's own UI hid from the operator.
+fn read_aborted_message_ids(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT m.id, m.data \
+         FROM message m \
+         WHERE m.session_id = ?1 \
+         ORDER BY m.time_created ASC",
+    )?;
+    let mut aborted = std::collections::HashSet::<String>::new();
+    let mut last_user_id: Option<String> = None;
+    let rows = stmt.query_map(params![session_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, data) = row?;
+        let Ok(message) = serde_json::from_str::<MessageData>(&data) else {
+            continue;
+        };
+        match message.role.as_deref() {
+            Some("user") => {
+                last_user_id = Some(id);
+            }
+            Some("assistant") => {
+                let is_aborted_error = message
+                    .error
+                    .as_ref()
+                    .and_then(|e| e.name.as_deref())
+                    .is_some_and(|name| name == "MessageAbortedError");
+                if is_aborted_error {
+                    aborted.insert(id);
+                    if let Some(user_id) = last_user_id.take() {
+                        aborted.insert(user_id);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(aborted)
 }
 
 fn emit_turns_for_part(
     role: TurnRole,
     timestamp: Option<DateTime<Utc>>,
     part: &PartData,
+    aborted: bool,
     out: &mut Vec<TranscriptTurn>,
 ) {
     let Some(part_type) = part.part_type.as_deref() else {
@@ -165,6 +223,7 @@ fn emit_turns_for_part(
                 kind: TurnKind::Message,
                 body,
                 timestamp,
+                aborted,
             });
         }
         "reasoning" => {
@@ -176,6 +235,7 @@ fn emit_turns_for_part(
                 kind: TurnKind::Thinking,
                 body,
                 timestamp,
+                aborted,
             });
         }
         "tool" => {
@@ -195,23 +255,18 @@ fn emit_turns_for_part(
                 kind: TurnKind::ToolUse,
                 body: call_body,
                 timestamp,
+                aborted,
             });
-            // OpenCode bundles call + result in one row. Emit a
-            // companion ToolResult turn when the state carries an
-            // output, so the renderer can fold call/result as a
-            // pair the same way it does for Claude / Codex.
             if let Some(output) = state.and_then(|s| s.output.as_deref()).and_then(nonempty) {
                 out.push(TranscriptTurn {
                     role: TurnRole::Assistant,
                     kind: TurnKind::ToolResult,
                     body: output,
                     timestamp,
+                    aborted,
                 });
             }
         }
-        // step-start / step-finish: model step markers.
-        // patch: applied diff — skip for v1; revisit when widget
-        // gains patch rendering.
         _ => {}
     }
 }
@@ -230,6 +285,14 @@ fn nonempty(text: &str) -> Option<String> {
 struct MessageData {
     #[serde(default)]
     role: Option<String>,
+    #[serde(default)]
+    error: Option<MessageError>,
+}
+
+#[derive(Deserialize)]
+struct MessageError {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -614,6 +677,92 @@ mod tests {
         let doc = OpenCodeParser.read(&locator).expect("parse");
         assert_eq!(doc.turns.len(), 1);
         assert_eq!(doc.turns[0].body, "keeper");
+    }
+
+    #[test]
+    fn message_aborted_error_tags_assistant_and_preceding_user() {
+        // Real OpenCode shape: assistant message carries
+        // `error.name = "MessageAbortedError"` when the operator
+        // hit Esc mid-generation. The preceding user prompt pairs
+        // with the aborted assistant so the whole exchange hides
+        // together, matching OpenCode's own UI.
+        let (_tmp, locator) = fixture("ses_a", |conn| {
+            insert_session(conn, "ses_a", "/p", 1000);
+            insert_message(conn, "msg_u1", "ses_a", 1100, r#"{"role":"user"}"#);
+            insert_part(
+                conn,
+                "prt_u1",
+                "msg_u1",
+                "ses_a",
+                1101,
+                r#"{"type":"text","text":"first prompt"}"#,
+            );
+            insert_message(
+                conn,
+                "msg_a1",
+                "ses_a",
+                1200,
+                r#"{"role":"assistant","finish":"stop"}"#,
+            );
+            insert_part(
+                conn,
+                "prt_a1",
+                "msg_a1",
+                "ses_a",
+                1201,
+                r#"{"type":"text","text":"first reply"}"#,
+            );
+            insert_message(conn, "msg_u2", "ses_a", 1300, r#"{"role":"user"}"#);
+            insert_part(
+                conn,
+                "prt_u2",
+                "msg_u2",
+                "ses_a",
+                1301,
+                r#"{"type":"text","text":"interrupted thought"}"#,
+            );
+            insert_message(
+                conn,
+                "msg_a2",
+                "ses_a",
+                1400,
+                r#"{"role":"assistant","error":{"name":"MessageAbortedError","data":{"message":"Aborted"}}}"#,
+            );
+            insert_part(
+                conn,
+                "prt_a2",
+                "msg_a2",
+                "ses_a",
+                1401,
+                r#"{"type":"text","text":"partial reply"}"#,
+            );
+            insert_message(conn, "msg_u3", "ses_a", 1500, r#"{"role":"user"}"#);
+            insert_part(
+                conn,
+                "prt_u3",
+                "msg_u3",
+                "ses_a",
+                1501,
+                r#"{"type":"text","text":"replacement prompt"}"#,
+            );
+        });
+        let doc = OpenCodeParser.read(&locator).expect("parse");
+        let bodies: Vec<(&str, bool)> = doc
+            .turns
+            .iter()
+            .map(|t| (t.body.as_str(), t.aborted))
+            .collect();
+        assert_eq!(
+            bodies,
+            vec![
+                ("first prompt", false),
+                ("first reply", false),
+                ("interrupted thought", true),
+                ("partial reply", true),
+                ("replacement prompt", false),
+            ],
+            "MessageAbortedError tags the assistant + preceding user prompt",
+        );
     }
 
     #[test]

@@ -189,6 +189,7 @@ pub fn render_aggregated_tool_summary(
         kind: TurnKind::ToolUse,
         body: phrase.to_string(),
         timestamp: None,
+        aborted: false,
     };
     render_turn(&synthetic, theme, content_width, ToolDetail::Summary)
         .into_iter()
@@ -622,6 +623,7 @@ mod tests {
             kind,
             body: body.to_string(),
             timestamp: None,
+            aborted: false,
         }
     }
 

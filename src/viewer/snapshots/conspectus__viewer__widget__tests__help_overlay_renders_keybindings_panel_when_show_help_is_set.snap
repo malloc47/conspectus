@@ -1,14 +1,13 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 710
+assertion_line: 836
 expression: snapshot_string(&buf)
 ---
  claude-code:0b34e59c · /p/proj · 2 turns
-──────────────────────────────────────────────────────────────────────
-  ┌ viewer keybindings ────────────────────────────────────────────┐
+──┌ viewer keybindings ────────────────────────────────────────────┐──
   │ q / Esc / Ctrl-C   Close viewer                                │
- a│         j / Down   Scroll one line down                        │
-  │           k / Up   Scroll one line up                          │
+  │         j / Down   Scroll one line down                        │
+ a│           k / Up   Scroll one line up                          │
   │     Space / PgDn   Page down                                   │
   │             PgUp   Page up                                     │
   │  Ctrl-D / Ctrl-U   Half-page down / up                         │
@@ -16,6 +15,7 @@ expression: snapshot_string(&buf)
   │          G / End   Jump to end (open default)                  │
   │                t   Cycle tool detail (off → sum → trunc → all) │
   │                T   Toggle thinking turns                       │
+  │                I   Toggle aborted/interrupted turns            │
   │                ?   Toggle this help panel                      │
   │                                                                │
   └────────────────────────────────────────────────────────────────┘
