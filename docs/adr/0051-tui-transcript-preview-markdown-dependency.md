@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted
+Accepted. Amended under `H-VIEWER-NATIVE-011` (styling pass) to
+turn the `highlight-code` feature **on** after operator feedback
+that monochrome fenced code blocks hurt scannability. The
+original v1 decision to keep `highlight-code` off is preserved
+in the §"Why turn off `highlight-code`" section as the
+counterfactual; see §"Amendment: re-enable `highlight-code`
+for the native viewer" at the bottom for the revised cost /
+benefit.
 
 ## Context
 
@@ -218,3 +225,41 @@ remain the gating checks.
 - Integration lives in `src/tui/transcript_preview.rs`
   (`H-TRANSCRIPT-009`). `H-TRANSCRIPT-008` adds the dep to
   `Cargo.toml` in isolation.
+
+## Amendment: re-enable `highlight-code` for the native viewer
+
+Operator feedback after `H-VIEWER-NATIVE-008` shipped the
+native full-screen viewer: monochrome code blocks bury syntax
+cues that operators read past prose to find — function names,
+type annotations, keyword vs string vs comment colouring. The
+v1 "skip syntax highlighting" trade matched the inline preview's
+single-pane budget (short snippets, small surface area) but
+underestimated the full-screen viewer's "scan a tool-result
+diff" workflow.
+
+Re-decision: enable `tui-markdown`'s `highlight-code` feature.
+Concrete change is a one-line `Cargo.toml` edit:
+
+```toml
+tui-markdown = { version = "0.3", default-features = false, features = ["highlight-code"] }
+```
+
+`syntect` lands in the dependency graph (as `tui-markdown`'s
+transitive). `ansi-to-tui` is already a direct dep per
+ADR 0025, so no new direct surface. Compiled size grows by
+the bundled syntect grammars and themes — single-digit MB.
+`docs/transcript-viewer-deps.md` updated to add `syntect` to
+the maintained allow-list.
+
+The original v1 trade — that the inline preview is conversational
+prose, not a code-reading tool — still holds for the inline-
+preview surface, but the same code is now rendered inside the
+full-screen viewer where reading code is exactly the workflow.
+Sharing one renderer between the two surfaces is the right call
+even if it pulls the inline preview along for the ride; the
+alternative (two configurations of `tui-markdown`) doubles the
+build surface for no gain.
+
+`--color=never` continues to bypass the renderer per
+ADR 0022 / ADR 0025; with colour off, syntax highlighting is
+moot anyway.

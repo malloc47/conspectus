@@ -46,6 +46,7 @@ pub const ALLOWED_EXTERNAL_DEPS: &[&str] = &[
     "rusqlite",
     "serde",
     "serde_json",
+    "syntect",
     "thiserror",
     "tui-markdown",
     "unicode-width",
