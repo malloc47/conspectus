@@ -3245,6 +3245,80 @@ transcript with a cursor at the last turn".
   - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
     `H-VIEWER-NATIVE-011` for chip-as-click-target affordance.
 
+- [ ] `H-VIEWER-NATIVE-015` Per-message selection + clipboard copy.
+  - Scope: introduce per-message selection inside the viewer
+    modal. `J`/`K` (capital) move the selection forward/back
+    one turn. The selected turn shows a highlighted bar in
+    the gutter's far-left column (over the chip pill or
+    alongside it). A keybind (`yy` like vim's yank, or `Ctrl-Y`)
+    copies the selected turn's body to the system clipboard.
+  - State: `ViewerState` gains `selected_turn: Option<usize>`
+    (index into the visible turns produced by build_body_lines).
+    Reducer messages: `SelectPrevTurn`, `SelectNextTurn`,
+    `ClearSelection`, `CopySelectedBody`.
+  - Renderer: when `selected_turn == Some(i)`, the chip line
+    (and continuation lines) of turn `i` paint the leftmost
+    cell of the gutter as a highlight bar (e.g. `▌` in the
+    chip color, BOLD).
+  - Clipboard: route through a small abstraction (already
+    available in the wider conspectus surface via `arboard` /
+    the existing `clipaste` integration), or via OSC 52 for
+    SSH-friendly copy. ADR check on the dep before adding to
+    the viewer's allow-list.
+  - Tests: reducer unit tests for selection cycling; widget
+    snapshot test for the highlight bar; clipboard call
+    behind a `BinaryProbe`-style seam so unit tests don't
+    actually touch the host clipboard.
+  - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
+    `H-VIEWER-NATIVE-012` (mouse selection) and the
+    chunk-loading story so chunked transcripts have stable
+    turn indices.
+
+- [ ] `H-VIEWER-NATIVE-016` Per-tool expand on click.
+  - Scope: in tool-detail Summary or Truncated mode, clicking
+    the chip pill of an individual tool turn temporarily
+    expands *that* turn to full detail while leaving the
+    global tool detail level unchanged. Pressing the same key
+    or clicking again collapses. Inspired by claude-history's
+    per-message expand UX.
+  - State: `expanded_tool_turns: BTreeSet<usize>` on
+    `ViewerState` (turn indices currently expanded). Cycling
+    `t` clears the per-turn overrides.
+  - Renderer: per-turn render consults the override set; an
+    expanded turn renders at `ToolDetail::Full` regardless of
+    the global level.
+  - Folds into `H-VIEWER-NATIVE-012` (mouse) for the click
+    target. Without mouse, a `Tab`/`o`-style "expand cursor"
+    keybind can drive it from the keyboard (overlap with the
+    selection story).
+  - Tests: reducer for set toggling; widget assertions that
+    an expanded turn renders more lines than its peers at
+    the same global level.
+  - Blockers: `H-VIEWER-NATIVE-012` (mouse) and
+    `H-VIEWER-NATIVE-015` (selection cursor for keyboard
+    expand).
+
+- [ ] `H-VIEWER-NATIVE-017` Markdown table rendering.
+  - Scope: `tui-markdown` 0.3 currently emits Markdown tables
+    as raw text — the pipe-separated rows show up with literal
+    `|` characters and no column alignment, which reads as
+    noise in the viewer. Fix at one of three layers:
+    (a) **Upstream PR** to tui-markdown adding ratatui-native
+        table rendering (likely lifts pulldown-cmark's
+        Event::Start(Tag::Table(...)) into a styled grid).
+    (b) **Local post-processor**: after `tui_markdown::from_str`
+        but before our wrap pass, scan the line stream for
+        pipe-delimited rows + a separator row, and replace
+        them with an ASCII / Unicode box-drawing rendering.
+    (c) **Pre-processor**: rewrite tables in the source
+        Markdown to fenced code blocks before passing to
+        tui-markdown (loses table-ness but at least the
+        pipes don't look broken).
+  - Tests: fixture with a Markdown table; snapshot of the
+    rendered output; confirmation the wrap pass preserves
+    column alignment on narrow terminals.
+  - Blockers: none. Mostly a renderer-side decision.
+
 - [ ] `H-VIEWER-NATIVE-014` Lazy / chunk-by-chunk transcript
   loading around compaction boundaries.
   - Scope: NATIVE-011's render cache makes scroll-only frames
