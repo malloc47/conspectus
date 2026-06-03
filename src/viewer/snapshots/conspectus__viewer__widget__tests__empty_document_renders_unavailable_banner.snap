@@ -1,13 +1,13 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 350
+assertion_line: 475
 expression: snapshot_string(&buf)
 ---
-claude-code:missing                            cwd: (no cwd)
+ claude-code:missing · (no cwd) · 0 turns
 ────────────────────────────────────────────────────────────
 transcript unavailable
 
 
 
 ────────────────────────────────────────────────────────────
-…
+[ 1/1 ] · tools·off · think·off · q close · j/k scroll · g/…

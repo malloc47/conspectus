@@ -1,15 +1,21 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 467
+assertion_line: 496
 expression: snapshot_string(&buf)
 ---
- claude-code:long · /p · 30 turns
+ claude-code:tools · /p · 4 turns
 ────────────────────────────────────────────────────────────
-       you │ turn 0
+       you │ what files are here?
 
-       you │ turn 1
+      Tool │ Glob: **/*.rs
 
-       you │ turn 2
+  ↳ Result │ src/lib.rs
+           │ src/main.rs
+
+ assistant │ two Rust files in src/.
+
+
+
 
 ────────────────────────────────────────────────────────────
-[ 1/60 ] · tools·off · think·off · q close · j/k scroll · g…
+[ 1/9 ] · tools·on  · think·off · q close · j/k scroll · g/…

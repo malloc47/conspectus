@@ -3115,7 +3115,7 @@ transcript with a cursor at the last turn".
     None, `build_viewer_state` None for unsupported / fallback
     to unavailable doc when file missing). 1226 nextest green.
 
-- [ ] `H-VIEWER-NATIVE-011` Styling + spacing pass.
+- [x] `H-VIEWER-NATIVE-011` Styling + spacing pass.
   - Scope: H-VIEWER-NATIVE-006/008 ship a functional but
     visually-minimal modal. Operator feedback from kicking the
     tires: spacing is off (tool-output line numbers bump
@@ -3167,9 +3167,36 @@ transcript with a cursor at the last turn".
     baseline coverage; this story replaces them.
   - Out of scope: search highlighting (covered by
     `H-VIEWER-NATIVE-007`), per-message expand/collapse
-    (likely a separate story once tool-block framing is in).
+    (likely a separate story once tool-block framing is in),
+    mouse bindings (`H-VIEWER-NATIVE-012`), in-viewer fork /
+    child navigation (`H-VIEWER-NATIVE-013`).
   - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
     `H-VIEWER-NATIVE-007` since both touch the renderer.
+  - Outcome: rewrote `src/viewer/render.rs` around a
+    `claude-history`-inspired gutter-and-chip layout:
+    right-aligned colored chips (`you`, `assistant`, `Thinking`,
+    `Tool`, `↳ Result`, `compact`) in a fixed `GUTTER_WIDTH=10`
+    column, separated from body by ` │ ` dim rule, with body
+    flowing to the right. Continuation lines (multi-line bodies
+    + wrapped long lines) carry a blank gutter + repeated rule
+    so the body's left edge stays constant. Hand-rolled
+    word-wrap helper handles whitespace splits + hard-break for
+    oversized tokens; styled-line wrap preserves span styles
+    across line breaks for Markdown content. Chip styling
+    routed through the `crate::tui::theme::Theme` re-export
+    (ADR 0052's carve-out) so `[tui.theme]` config applies.
+    `src/viewer/widget.rs` updated: header refreshed to
+    `harness-chip · cwd · N turns` with width-aware degrade;
+    footer refreshed to `[ pos/total ] · tools·on/off ·
+    think·on/off · q close · …` with the long hint truncating
+    last. ADR 0051 amended to turn the `highlight-code`
+    feature **on** (re-decision rationale + counterfactual
+    both preserved); `syntect` added to
+    `ALLOWED_EXTERNAL_DEPS` and
+    `docs/transcript-viewer-deps.md`. Refreshed 4 prior
+    widget snapshots + added 2 new ones (tools-visible chip
+    pair, narrow-terminal 40-col wrap). 13 render-side tests
+    + 9 widget-side tests; 1231 nextest green.
 
 - [x] `H-VIEWER-NATIVE-009` Retire patched recall from
   `pkgs/recall/`.

@@ -93,8 +93,11 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     while !app.should_quit() {
         terminal.draw(|frame| {
             let area = frame.area();
-            if let Some(state) = app.viewer_modal_mut() {
-                crate::viewer::widget::draw(state, frame, area);
+            if app.viewer_modal().is_some() {
+                let theme = app.theme().clone();
+                if let Some(state) = app.viewer_modal_mut() {
+                    crate::viewer::widget::draw(state, &theme, frame, area);
+                }
             } else {
                 ui::draw(&app, frame);
             }
@@ -298,8 +301,11 @@ fn static_event_loop(
     while !app.should_quit() {
         terminal.draw(|frame| {
             let area = frame.area();
-            if let Some(state) = app.viewer_modal_mut() {
-                crate::viewer::widget::draw(state, frame, area);
+            if app.viewer_modal().is_some() {
+                let theme = app.theme().clone();
+                if let Some(state) = app.viewer_modal_mut() {
+                    crate::viewer::widget::draw(state, &theme, frame, area);
+                }
             } else {
                 ui::draw(&app, frame);
             }
