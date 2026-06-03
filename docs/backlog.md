@@ -3245,6 +3245,36 @@ transcript with a cursor at the last turn".
   - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
     `H-VIEWER-NATIVE-011` for chip-as-click-target affordance.
 
+- [ ] `H-VIEWER-NATIVE-014` Lazy / chunk-by-chunk transcript
+  loading around compaction boundaries.
+  - Scope: NATIVE-011's render cache makes scroll-only frames
+    O(1), but the *first* draw still composes every visible
+    turn through `tui_markdown::from_str`. Very large Claude
+    sessions (thousands of turns, many tool blocks) take a
+    visible beat to open the viewer. Operator suggestion:
+    load chunks lazily, anchored at `compact_boundary` /
+    `compacted` records — initial open renders just the
+    most-recent compaction window, and earlier chunks load
+    on demand as the operator scrolls past the chunk's top.
+  - Implementation outline: introduce a `ChunkedTranscript`
+    in `src/viewer/model.rs` (or a `ChunkBoundary` on
+    `TranscriptDocument`) carrying the compaction-aware
+    spans of the source. Parsers split at boundaries.
+    Widget keeps the active chunk in `ViewerState`; reducer
+    handles "scroll past chunk top" by loading the previous
+    chunk. Cache key gains the chunk identity.
+  - Open questions: how to render the chunk seam (single
+    rule with a "load previous" affordance vs. eager fetch
+    on approach); whether to also chunk on time-of-day
+    boundaries for sessions without explicit compaction;
+    interaction with search (`H-VIEWER-NATIVE-007`), which
+    needs to span chunks.
+  - Tests: parser-side fixture covering multi-chunk
+    boundaries; widget chunk-load reducer test; performance
+    smoke against a real session.
+  - Blockers: `H-VIEWER-NATIVE-011` (the render cache and
+    the gutter layout are prerequisites).
+
 - [ ] `H-VIEWER-NATIVE-010` (later) Extraction prep: lift
   `src/viewer/` into a workspace member crate.
   - Scope: when the viewer module's import surface has been
@@ -3258,6 +3288,98 @@ transcript with a cursor at the last turn".
     unchanged.
   - Blockers: stability of the dep surface (see
     `docs/transcript-viewer-deps.md` history).
+
+### Agent Session Continue Scheduling
+
+Some harnesses end a transcript with a usage-limit or rate-limit
+message that includes the time when work can resume. Conspectus
+already reads the last message for previews and can open native
+transcripts on demand; this workstream adds a higher-level
+"blocked until" signal and an explicit way for the operator to
+schedule a `Continue` prompt for that session at the time identified
+by the transcript.
+
+Detection stays read-only: a session whose final meaningful turn is a
+usage-limit message should surface as paused/blocked metadata and table
+or TUI affordances. Scheduling is separate, explicit user intent. It
+must not silently send prompts or create scheduler state from ordinary
+`graph`, `table`, or `tui` discovery.
+
+- [ ] `H-CONTINUE-001` ADR: usage-limit detection and scheduled
+  continuation policy.
+  - Scope: record the provider-neutral model for a "blocked until"
+    session signal, the allowed scheduler backend(s), where scheduled
+    jobs live, how missed/cancelled jobs behave, and why sending a
+    literal `Continue` prompt is safe enough only as an explicit action.
+    Compare alternatives such as shelling out to `at`, a Conspectus
+    background server, tmux `send-keys`, harness-native resume
+    commands, and manual reminders.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: review against ADR 0023, ADR 0052, and the
+    read-only discovery requirements in `docs/design.md`.
+  - Blockers: none.
+
+- [ ] `H-CONTINUE-002` Model blocked-session metadata.
+  - Scope: add optional metadata to `AgentSessionNode` or a typed
+    sidecar record that captures `blocked_reason`, parsed
+    `resume_after_epoch`, the source message snippet, parser
+    confidence, and harness/source provenance. Keep ordinary sessions
+    byte-stable by skipping absent fields in JSON.
+  - Tests: serde round trips, sparse-session JSON snapshots, and
+    no-field output for sessions without a recognized usage-limit
+    tail.
+  - Blockers: `H-CONTINUE-001`.
+
+- [ ] `H-CONTINUE-003` Detect usage-limit tails in supported
+  transcript parsers.
+  - Scope: for Claude Code, Codex, and OpenCode, inspect the final
+    meaningful assistant/system message after applying the same
+    tool/thinking/channel-marker filters used by preview and viewer
+    parsing. Recognize usage-limit messages only when they are the
+    last meaningful transcript message and contain a parseable resume
+    time. Preserve the source snippet and parsed time without
+    fabricating a blocked state for older messages in the middle of a
+    transcript.
+  - Tests: fixtures for absolute timestamps, relative "try again in"
+    durations, timezone-bearing text, malformed/no-time messages,
+    usage-limit messages followed by later user/assistant text, and
+    ordinary transcript tails.
+  - Blockers: `H-CONTINUE-002`.
+
+- [ ] `H-CONTINUE-004` Surface blocked-until state in CLI and TUI.
+  - Scope: add opt-in table columns such as `blocked` /
+    `resume-after`, a TUI row badge or detail-pane field, and
+    `node show` output that displays the parsed resume time and source
+    snippet. The default table columns should not grow unless the ADR
+    explicitly changes the privacy/width posture established by ADR
+    0023.
+  - Tests: table renderer snapshots, TUI buffer snapshots for blocked
+    and non-blocked sessions, and `node show` output coverage.
+  - Blockers: `H-CONTINUE-003`.
+
+- [ ] `H-CONTINUE-005` Implement explicit continue scheduling.
+  - Scope: add a command and matching TUI action that schedule a
+    `Continue` message for the selected blocked session at its parsed
+    resume time, with flags to override the time and message text.
+    The implementation must verify that the target session is still
+    the same session before sending, record enough state to list/cancel
+    pending jobs, and avoid project-tree cache/state writes.
+  - Tests: fake scheduler and fake harness sender coverage for create,
+    list, cancel, missed time, target-session mismatch, custom message,
+    and dry-run behavior.
+  - Manual checks: schedule against a disposable session using a
+    near-future time, confirm the prompt is sent once, and confirm
+    cancelling prevents delivery.
+  - Blockers: `H-CONTINUE-001`, `H-CONTINUE-003`, `H-CONTINUE-004`.
+
+- [ ] `H-CONTINUE-006` Document blocked-session and continue workflows.
+  - Scope: update `docs/operations.md` and any TUI help/docs with how
+    usage-limit detection works, how to inspect the parsed resume
+    time, how to schedule/list/cancel a pending continuation, and the
+    safety limits around stale sessions or unrecognized message
+    formats.
+  - Tests: docs-only `git diff --check`.
+  - Blockers: `H-CONTINUE-005`.
 
 ### Agent-Mux Orchestrator Integrations
 
@@ -6187,6 +6309,36 @@ than recursive inline detail panes.
     unsupported rows, ambiguity affordance text, focus scope, and
     the active pane keymap. Provider health/freshness chips remain
     with `T8-003`.
+
+- [ ] `T8-043` Make Enter trigger the selected row's default action.
+  - Scope: when the left pane has focus, route `Enter` through a
+    default-action dispatcher instead of treating every row as
+    expand/collapse. Default actions:
+    - mux rows attach to that mux, reusing the existing `P8-010` /
+      `T8-018` attach path and disabled-reason handling;
+    - un-muxed agent-session rows open the native transcript viewer,
+      reusing the existing `H-VIEWER-NATIVE-008` view path;
+    - mux-candidate / mux-attached agent rows keep the attach
+      behavior already available through `a`;
+    - group rows keep expand/collapse on `Enter`.
+    Preserve right-pane `Enter` semantics from the detail explorer:
+    relationship rows still drill, group headers still toggle, and
+    Node-zone copy behavior from `T8-040` remains scoped to the
+    right pane.
+  - Tests: reducer/keymap coverage for mux row attach, un-muxed
+    session view, attached-session attach, group expand/collapse,
+    disabled attach reason, unsupported viewer fallback, and
+    focus-specific behavior proving right-pane `Enter` is unchanged.
+    Add a status-bar snapshot or view-model test showing the
+    contextual hint advertises `Enter` as the primary default action
+    for attachable muxes and viewable un-muxed sessions.
+  - Manual checks: in `conspectus tui`, select a mux row and press
+    `Enter` to attach/detach back to Conspectus; select an un-muxed
+    Claude/Codex/OpenCode session and press `Enter` to open the
+    transcript viewer; select a group row and confirm it still
+    expands/collapses.
+  - Blockers: `P8-010`, `T8-018`, `H-VIEWER-NATIVE-008`,
+    `T8-014`.
 
 - [ ] `T8-015` Add sessions-tree density modes.
   - Scope: add a user-facing density setting for the sessions view
