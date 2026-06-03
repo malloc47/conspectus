@@ -3115,6 +3115,62 @@ transcript with a cursor at the last turn".
     None, `build_viewer_state` None for unsupported / fallback
     to unavailable doc when file missing). 1226 nextest green.
 
+- [ ] `H-VIEWER-NATIVE-011` Styling + spacing pass.
+  - Scope: H-VIEWER-NATIVE-006/008 ship a functional but
+    visually-minimal modal. Operator feedback from kicking the
+    tires: spacing is off (tool-output line numbers bump
+    directly into content), turn separation is too subtle,
+    role headers don't carry enough visual weight, and tool /
+    thinking blocks need more chrome to read as folded-by-
+    default content. Pass over:
+    - **Turn-level chrome**: visible separator between turns
+      (rule or extra spacing), accent color per role
+      (`you` vs `assistant`), optional timestamp suffix on the
+      header line (already in the model, not rendered yet).
+    - **Compaction summary**: full-width rule + a distinct
+      banner color so it reads as a structural marker rather
+      than another role header.
+    - **Body styling for `Message`/`CompactionSummary`**:
+      consistent left indent so role headers visually own the
+      body that follows; line wrapping (`Wrap { trim: false }`)
+      to avoid mid-word breaks; soft padding on either side so
+      Markdown bold/italic ranges don't crowd terminal edges.
+    - **Tool blocks**: bracketed framing (e.g. `┌─ tool call:
+      <name> ─` / `└─ tool result ─`) so call+result reads as
+      a paired unit when both are visible. Argument JSON
+      should be pretty-printed (or at least line-broken on
+      commas) rather than one-line. Tool output rendering
+      needs gutter handling — line numbers, lead-in prefixes
+      etc. should sit in a fixed-width gutter that doesn't
+      collide with content.
+    - **Thinking blocks**: prefix with a distinguishable
+      marker (e.g. dim italic `~ thinking ~`) so they're
+      obviously not assistant-output prose.
+    - **Code block styling inside `tui-markdown`**: re-evaluate
+      the `highlight-code` feature decision from ADR 0051.
+      The widget renders Markdown via `tui-markdown` with
+      `default-features = false`; turning `highlight-code` on
+      adds `syntect` (~MB), which ADR 0051 explicitly
+      rejected for v1. Revisit if operators report that
+      monochrome code blocks hurt scannability; otherwise add
+      a soft fence indent + dim background as cheap
+      substitutes.
+    - **Theme integration**: per ADR 0052's `theme.rs` carve-
+      out, route every color decision through the
+      `crate::tui::theme::Theme` re-export so users can
+      override via `[tui.theme]` config (ADR 0032).
+  - Tests: refresh insta snapshots for each turn kind (single
+    Message, paired ToolUse+ToolResult, Thinking block,
+    CompactionSummary banner). Add a snapshot for a narrow
+    (40×24) terminal so the gutter / wrap behavior regresses
+    visibly. The existing 4 widget snapshots stay as the
+    baseline coverage; this story replaces them.
+  - Out of scope: search highlighting (covered by
+    `H-VIEWER-NATIVE-007`), per-message expand/collapse
+    (likely a separate story once tool-block framing is in).
+  - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
+    `H-VIEWER-NATIVE-007` since both touch the renderer.
+
 - [ ] `H-VIEWER-NATIVE-009` Retire patched recall from
   `pkgs/recall/`.
   - Scope: once `H-VIEWER-NATIVE-008` ships and the native
