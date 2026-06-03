@@ -267,14 +267,27 @@ fn build_body_lines<'a>(
 ) -> Vec<Line<'a>> {
     match turn.kind {
         TurnKind::Message | TurnKind::CompactionSummary => {
-            // Markdown body. `tui_markdown::from_str` returns a
-            // pre-styled `Text`; we wrap each rendered line to the
-            // available width so the body never spills past the
-            // gutter+separator on continuation lines.
-            let text = tui_markdown::from_str(&turn.body);
-            let mut out = Vec::with_capacity(text.lines.len());
-            for line in text.lines {
-                wrap_styled_line(line, content_width, &mut out);
+            // Markdown body, possibly with GFM tables interleaved.
+            // We pre-segment with `table::segment_body` so each
+            // table block routes through comfy-table (ADR 0054)
+            // while the surrounding prose still flows through
+            // tui-markdown. Continuation lines stay within
+            // `content_width` so the gutter+separator never breaks.
+            let mut out: Vec<Line<'a>> = Vec::new();
+            for segment in crate::viewer::table::segment_body(&turn.body) {
+                match segment {
+                    crate::viewer::table::BodySegment::Markdown(src) => {
+                        let text = tui_markdown::from_str(src);
+                        for line in text.lines {
+                            wrap_styled_line(line, content_width, &mut out);
+                        }
+                    }
+                    crate::viewer::table::BodySegment::Table(parsed) => {
+                        let rendered =
+                            crate::viewer::table::render_table(&parsed, content_width, theme);
+                        out.extend(rendered);
+                    }
+                }
             }
             out
         }

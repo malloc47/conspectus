@@ -26,6 +26,7 @@ pub mod model;
 pub mod parser;
 pub mod render;
 pub mod state;
+pub mod table;
 pub mod theme;
 pub mod widget;
 
@@ -41,6 +42,7 @@ pub const ALLOWED_EXTERNAL_DEPS: &[&str] = &[
     "ansi-to-tui",
     "anyhow",
     "chrono",
+    "comfy-table",
     "crossterm",
     "ratatui",
     "rusqlite",

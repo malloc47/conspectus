@@ -757,6 +757,70 @@ mod tests {
         insta::assert_snapshot!(snapshot_string(&buf));
     }
 
+    fn document_with_table() -> TranscriptDocument {
+        let body = "Three-way comparison:\n\n\
+            | Option | Effort | Risk |\n\
+            |---|---|---|\n\
+            | A | Small | Low |\n\
+            | B | Medium | Medium |\n\
+            | C | Large | High |\n\n\
+            Recommend B.";
+        TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "tbl".to_string(),
+                cwd: Some("/proj".to_string()),
+            },
+            turns: vec![TranscriptTurn {
+                role: TurnRole::Assistant,
+                kind: TurnKind::Message,
+                body: body.to_string(),
+                timestamp: None,
+                aborted: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn table_snapshot_at_80_cols_wide_enough_to_fit_naturally() {
+        let theme = Theme::default();
+        let mut state = ViewerState::new(document_with_table());
+        let buf = render_to_buffer(&mut state, &theme, 80, 18);
+        insta::assert_snapshot!(snapshot_string(&buf));
+    }
+
+    #[test]
+    fn table_snapshot_at_40_cols_forces_dynamic_wrap() {
+        // Use a fixture with cell content that exceeds the
+        // available content width (terminal 40 minus 10-cell gutter
+        // minus the 3-cell ` │ ` separator = 27 cells). comfy-table's
+        // ContentArrangement::Dynamic should shrink the widest
+        // column and wrap its cells.
+        let body = "Comparison of long-form options:\n\n\
+            | Option | Description |\n\
+            |---|---|\n\
+            | Alpha | a sufficiently detailed description that demands wrapping |\n\
+            | Beta | shorter |";
+        let doc = TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "wrap".to_string(),
+                cwd: Some("/proj".to_string()),
+            },
+            turns: vec![TranscriptTurn {
+                role: TurnRole::Assistant,
+                kind: TurnKind::Message,
+                body: body.to_string(),
+                timestamp: None,
+                aborted: false,
+            }],
+        };
+        let theme = Theme::default();
+        let mut state = ViewerState::new(doc);
+        let buf = render_to_buffer(&mut state, &theme, 40, 20);
+        insta::assert_snapshot!(snapshot_string(&buf));
+    }
+
     #[test]
     fn tools_visible_at_full_detail_show_call_and_result_chips() {
         let theme = Theme::default();
@@ -928,6 +992,61 @@ mod tests {
         let after = buffer_to_string(&render_to_buffer(&mut state, &theme, 60, 14));
         assert!(after.contains("Glob:"), "tool turns visible at Full detail");
         assert!(after.contains("Tool"), "tool chip label visible");
+    }
+
+    #[test]
+    fn markdown_table_in_message_body_renders_as_aligned_table() {
+        // Real-shape body modeled on a Claude assistant turn: a
+        // brief prose intro, a GFM pipe-table, then a prose
+        // outro. The table must render as an aligned block with
+        // column separators (UTF8_BORDERS_ONLY preset) and the
+        // surrounding prose must stay intact.
+        let body = "Comparison of options:\n\n\
+            | Option | Effort | Risk |\n\
+            |---|---|---|\n\
+            | A | Small | Low |\n\
+            | B | Medium | Medium |\n\
+            | C | Large | High |\n\n\
+            Recommend B.";
+        let doc = TranscriptDocument {
+            meta: TranscriptMeta {
+                harness: "claude-code".to_string(),
+                session_key: "tbl".to_string(),
+                cwd: None,
+            },
+            turns: vec![TranscriptTurn {
+                role: TurnRole::Assistant,
+                kind: TurnKind::Message,
+                body: body.to_string(),
+                timestamp: None,
+                aborted: false,
+            }],
+        };
+        let theme = Theme::default();
+        let mut state = ViewerState::new(doc);
+        let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 80, 20));
+        assert!(s.contains("Comparison of options"), "prose intro: {s}");
+        assert!(s.contains("Recommend B"), "prose outro: {s}");
+        assert!(
+            s.contains("Option") && s.contains("Effort") && s.contains("Risk"),
+            "header cells present: {s}"
+        );
+        assert!(s.contains("Medium"), "body cell present: {s}");
+        // UTF8_NO_BORDERS preset uses `┆` as the column separator
+        // glyph; presence confirms aligned rendering rather than
+        // raw pipe fallthrough. The gutter rule (`│`) appears
+        // separately for every line, so we look specifically for the
+        // table's dotted column separator.
+        assert!(
+            s.contains('┆'),
+            "column separators rendered (not raw pipes): {s}"
+        );
+        // And the raw GFM separator row must not survive into the
+        // output — that would mean tui-markdown got the table.
+        assert!(
+            !s.contains("|---|"),
+            "raw pipe-separator row should not leak: {s}"
+        );
     }
 
     #[test]

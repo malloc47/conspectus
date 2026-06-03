@@ -1,0 +1,25 @@
+---
+source: src/viewer/widget.rs
+assertion_line: 821
+expression: snapshot_string(&buf)
+---
+ claude-code:wrap · /proj · 1 turn
+────────────────────────────────────────
+ assistant  │ Comparison of long-form
+            │ options:
+            │  Option ┆ Description
+            │ ════════╪═════════════════
+            │  Alpha  ┆ a sufficiently
+            │         ┆ detailed
+            │         ┆ description
+            │         ┆ that demands
+            │         ┆ wrapping
+            │ ╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+            │  Beta   ┆ shorter
+
+
+
+
+
+────────────────────────────────────────
+[ 1/12 ] · tools·off   (t) · think·off (
