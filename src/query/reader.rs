@@ -218,6 +218,7 @@ fn read_runtime_processes(conn: &Connection, out: &mut Vec<GraphNode>) -> rusqli
         let role = raw_role.and_then(|role| match role.as_str() {
             "human_agent" => Some(RuntimeProcessRole::HumanAgent),
             "subagent" => Some(RuntimeProcessRole::Subagent),
+            "background" => Some(RuntimeProcessRole::Background),
             "shell" => Some(RuntimeProcessRole::Shell),
             "unknown" => Some(RuntimeProcessRole::Unknown),
             _ => None,

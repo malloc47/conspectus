@@ -524,6 +524,9 @@ fn runtime_process_graph(
             continue;
         };
         for evidence in process_evidence {
+            if evidence.role() == RuntimeProcessRole::Background {
+                continue;
+            }
             let process_node = runtime_process_node(mux, evidence);
             let process_id = NodeId::RuntimeProcess(process_node.id.clone());
             nodes_by_id.insert(
@@ -961,6 +964,9 @@ fn active_mux_sessions(
             && let Some(process_evidence) = process_evidence
         {
             for evidence in process_evidence {
+                if evidence.role() == RuntimeProcessRole::Background {
+                    continue;
+                }
                 let process_matches: BTreeSet<_> = sessions
                     .iter()
                     .filter(|session| evidence.matches_session(session))
@@ -1071,6 +1077,7 @@ fn activity_harnesses(
         harnesses.extend(
             process_evidence
                 .iter()
+                .filter(|evidence| evidence.role() != RuntimeProcessRole::Background)
                 .map(|evidence| evidence.harness_key.clone()),
         );
     }
@@ -1085,7 +1092,7 @@ fn controlling_agent_process_count(process_evidence: Option<&Vec<ProcessPaneEvid
     process_evidence
         .into_iter()
         .flatten()
-        .filter(|evidence| !evidence.is_opencode_subagent_process())
+        .filter(|evidence| evidence.role() == RuntimeProcessRole::HumanAgent)
         .map(|evidence| evidence.matched_pid)
         .collect::<BTreeSet<_>>()
         .len()
@@ -1176,8 +1183,20 @@ impl ProcessPaneEvidence {
         self.harness_key == "opencode" && self.command.to_ascii_lowercase().contains(" subagent")
     }
 
+    fn is_claude_background_process(&self) -> bool {
+        if self.harness_key != "claude-code" {
+            return false;
+        }
+        let command = self.command.to_ascii_lowercase();
+        command.contains(" daemon run ")
+            || command.contains(" --bg-spare")
+            || command.contains(" --bg-pty-host")
+    }
+
     fn role(&self) -> RuntimeProcessRole {
-        if self.is_opencode_subagent_process() {
+        if self.is_claude_background_process() {
+            RuntimeProcessRole::Background
+        } else if self.is_opencode_subagent_process() {
             RuntimeProcessRole::Subagent
         } else {
             RuntimeProcessRole::HumanAgent
@@ -1795,6 +1814,18 @@ mod tests {
         })
     }
 
+    fn claude_session(id: &str, cwd: Option<&str>) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("claude-code", "/state", id),
+            harness_key: "claude-code".to_string(),
+            cwd: cwd.map(str::to_string),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        })
+    }
+
     fn session_with_activity(id: &str, cwd: Option<&str>, last_active_epoch: i64) -> GraphNode {
         GraphNode::AgentSession(AgentSessionNode {
             id: AgentSessionId::new("codex", "/state", id),
@@ -2269,6 +2300,75 @@ mod tests {
                 .get("process_depth")
                 .and_then(serde_json::Value::as_u64),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn active_pane_process_match_ignores_claude_background_children() {
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                claude_session("16e486da-3fa2-425d-8e59-6838c3d97895", Some("/work/repo")),
+                claude_session("7e2c3973-0b13-4c04-a39d-08100591dd23", Some("/work/repo")),
+                mux_with_active_process(
+                    "editor",
+                    Some("/work/repo"),
+                    "claude --resume 7e2c3973-0b13-4c04-a39d-08100591dd23",
+                    100,
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let processes = FakeProcessSnapshot::new([
+            process(
+                100,
+                None,
+                "claude --resume 7e2c3973-0b13-4c04-a39d-08100591dd23",
+                Some("/work/repo"),
+            ),
+            process(
+                101,
+                Some(100),
+                ".claude-wrapped daemon run --origin transient --spawned-by {}",
+                Some("/work/repo"),
+            ),
+            process(
+                102,
+                Some(101),
+                ".claude-wrapped --bg-spare /tmp/cc-daemon/spare/foo.claim.sock",
+                Some("/work/repo"),
+            ),
+        ]);
+
+        infer_with_process_snapshot(&mut snapshot, &processes);
+
+        let process_nodes: Vec<_> = snapshot
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::RuntimeProcess(process) => Some(process),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(process_nodes.len(), 1);
+        assert_eq!(process_nodes[0].pid, Some(100));
+        assert_eq!(process_nodes[0].role, Some(RuntimeProcessRole::HumanAgent));
+
+        assert!(
+            snapshot.candidate_links.iter().all(|link| {
+                if !matches!(
+                    link.relation,
+                    RelationKind::MuxContainsProcess
+                        | RelationKind::ProcessIdentifiesSession
+                        | RelationKind::ProcessCandidatesSession
+                ) {
+                    return true;
+                }
+                link.source.to_string().contains("pid:100")
+                    || link
+                        .target_node_id()
+                        .is_some_and(|target| target.to_string().contains("pid:100"))
+            }),
+            "background daemon/spare children must not emit mux process links"
         );
     }
 

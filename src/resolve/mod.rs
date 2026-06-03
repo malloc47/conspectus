@@ -74,13 +74,13 @@ fn derive_process_mux_links(snapshot: &GraphSnapshot) -> Vec<GraphLink> {
         })
         .collect();
 
-    let mut non_subagent_processes_by_mux: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
+    let mut human_processes_by_mux: BTreeMap<NodeId, BTreeSet<NodeId>> = BTreeMap::new();
     for (process, mux_links) in &mux_links_by_process {
-        if role_by_process.get(process) == Some(&RuntimeProcessRole::Subagent) {
+        if role_by_process.get(process) != Some(&RuntimeProcessRole::HumanAgent) {
             continue;
         }
         for mux_link in mux_links {
-            non_subagent_processes_by_mux
+            human_processes_by_mux
                 .entry(mux_link.source.clone())
                 .or_default()
                 .insert(process.clone());
@@ -129,7 +129,7 @@ fn derive_process_mux_links(snapshot: &GraphSnapshot) -> Vec<GraphLink> {
                     process.clone(),
                     mux_link,
                     session_link,
-                    non_subagent_processes_by_mux
+                    human_processes_by_mux
                         .get(&mux_link.source)
                         .map(BTreeSet::len)
                         .unwrap_or(0),
@@ -189,7 +189,7 @@ fn process_mux_link(
     process: NodeId,
     mux_link: &GraphLink,
     session_link: &GraphLink,
-    non_subagent_process_count: usize,
+    human_process_count: usize,
 ) -> GraphLink {
     let identifies = session_link.relation == RelationKind::ProcessIdentifiesSession;
     let match_kind = if identifies {
@@ -215,8 +215,8 @@ fn process_mux_link(
         serde_json::Value::String(session_link.id.clone()),
     );
     fields.insert(
-        "non_subagent_process_count".to_string(),
-        serde_json::Value::Number((non_subagent_process_count as u64).into()),
+        "human_process_count".to_string(),
+        serde_json::Value::Number((human_process_count as u64).into()),
     );
 
     GraphLink {
@@ -1090,7 +1090,7 @@ mod tests {
                 && link
                     .source_metadata
                     .fields
-                    .get("non_subagent_process_count")
+                    .get("human_process_count")
                     .and_then(serde_json::Value::as_u64)
                     == Some(1)
         }));
@@ -1163,18 +1163,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_snapshot_counts_non_subagent_runtime_processes() {
+    fn resolve_snapshot_counts_only_human_agent_runtime_processes() {
         let human = process("proc:human");
         let subagent = process("proc:subagent");
+        let background = process("proc:background");
         let mux = mux("tmux:process");
         let snapshot = GraphSnapshot {
             nodes: vec![
                 process_node("proc:human", RuntimeProcessRole::HumanAgent),
                 process_node("proc:subagent", RuntimeProcessRole::Subagent),
+                process_node("proc:background", RuntimeProcessRole::Background),
             ],
             candidate_links: vec![
                 mux_contains_process_link("mux-human", mux.clone(), human.clone()),
-                mux_contains_process_link("mux-subagent", mux, subagent),
+                mux_contains_process_link("mux-subagent", mux.clone(), subagent),
+                mux_contains_process_link("mux-background", mux, background),
                 process_session_link(
                     "human-session",
                     human,
@@ -1199,7 +1202,7 @@ mod tests {
         assert_eq!(
             link.source_metadata
                 .fields
-                .get("non_subagent_process_count")
+                .get("human_process_count")
                 .and_then(serde_json::Value::as_u64),
             Some(1)
         );

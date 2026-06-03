@@ -485,18 +485,20 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
     let work = world.mkdir("work")?;
     let session_a = "c0000000-1111-2222-3333-444444444444";
     let session_b = "d0000000-1111-2222-3333-444444444444";
+    let live_pids = live_scenario_pids();
 
     world.write_claude_code_session(session_a, &work)?;
     world.write_claude_code_session(session_b, &work)?;
-    world.add_tmux_row(
-        TmuxReplayRow::new("pair")
-            .with_cwd(&work)
-            .with_active_pane("claude", 6101, &work, "claude"),
-    );
+    world.add_tmux_row(TmuxReplayRow::new("pair").with_cwd(&work).with_active_pane(
+        "claude",
+        live_pids[0],
+        &work,
+        "claude",
+    ));
 
     for (session_key, pid, ppid, pane_id, observed_epoch) in [
-        (session_a, 6101, 6000, "%1", 1_700_000_500),
-        (session_b, 6201, 6000, "%2", 1_700_000_540),
+        (session_a, live_pids[0], live_pids[1], "%1", 1_700_000_500),
+        (session_b, live_pids[1], live_pids[0], "%2", 1_700_000_540),
     ] {
         world.write_hook_record(HookRecord {
             schema_version: SCHEMA_VERSION,
@@ -518,6 +520,21 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
         })?;
     }
     Ok(())
+}
+
+fn live_scenario_pids() -> [i64; 2] {
+    let current = i64::from(std::process::id());
+    let parent = fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|stat| {
+            let after_command = stat.rsplit_once(") ")?.1;
+            let mut fields = after_command.split_whitespace();
+            let _state = fields.next()?;
+            fields.next()?.parse::<i64>().ok()
+        })
+        .filter(|pid| *pid > 0 && *pid != current)
+        .unwrap_or(1);
+    [current, parent]
 }
 
 fn build_workspace_pr(world: &mut ScenarioWorld) -> Result<()> {

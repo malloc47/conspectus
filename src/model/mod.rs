@@ -449,6 +449,7 @@ pub enum SessionKind {
 pub enum RuntimeProcessRole {
     HumanAgent,
     Subagent,
+    Background,
     Shell,
     Unknown,
 }

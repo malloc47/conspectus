@@ -1274,6 +1274,7 @@ fn runtime_process_core(p: &RuntimeProcessNode, _home: Option<&Path>) -> Vec<Cor
         match p.role {
             Some(RuntimeProcessRole::HumanAgent) => "human_agent",
             Some(RuntimeProcessRole::Subagent) => "subagent",
+            Some(RuntimeProcessRole::Background) => "background",
             Some(RuntimeProcessRole::Shell) => "shell",
             Some(RuntimeProcessRole::Unknown) => "unknown",
             None => "—",

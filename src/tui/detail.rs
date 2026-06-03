@@ -640,6 +640,7 @@ fn runtime_process_fields(
             match role {
                 RuntimeProcessRole::HumanAgent => "human_agent",
                 RuntimeProcessRole::Subagent => "subagent",
+                RuntimeProcessRole::Background => "background",
                 RuntimeProcessRole::Shell => "shell",
                 RuntimeProcessRole::Unknown => "unknown",
             }

@@ -269,6 +269,7 @@ fn insert_runtime_processes(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::
         let role_str = role.map(|role| match role {
             crate::model::RuntimeProcessRole::HumanAgent => "human_agent".to_string(),
             crate::model::RuntimeProcessRole::Subagent => "subagent".to_string(),
+            crate::model::RuntimeProcessRole::Background => "background".to_string(),
             crate::model::RuntimeProcessRole::Shell => "shell".to_string(),
             crate::model::RuntimeProcessRole::Unknown => "unknown".to_string(),
         });

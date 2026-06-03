@@ -40,7 +40,20 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
         };
         let mut link = linked_to_mux(&session, &mux, &record);
 
-        if let Some(created_epoch) = mux.created_epoch
+        let role = hook_runtime_process_role(&record);
+        if let Some(pid) = record.pid
+            && !process_is_live(pid)
+        {
+            link.state = LinkState::Ignored {
+                reason: Some(format!("hook record pid {pid} is no longer active")),
+            };
+        } else if role == RuntimeProcessRole::Background {
+            link.state = LinkState::Ignored {
+                reason: Some(
+                    "hook record identifies a Claude background implementation process".to_string(),
+                ),
+            };
+        } else if let Some(created_epoch) = mux.created_epoch
             && record.observed_epoch < created_epoch
         {
             link.state = LinkState::Ignored {
@@ -85,7 +98,7 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
         }
 
         if link_is_active {
-            emit_runtime_process_observation(snapshot, &session, &mux, &record);
+            emit_runtime_process_observation(snapshot, &session, &mux, &record, role);
         }
     }
 }
@@ -321,6 +334,7 @@ fn emit_runtime_process_observation(
     session: &AgentSessionNode,
     mux: &MuxSessionNode,
     record: &HookRecord,
+    role: RuntimeProcessRole,
 ) {
     let Some(pid) = record.pid else {
         return;
@@ -349,7 +363,7 @@ fn emit_runtime_process_observation(
                 command: None,
                 cwd: record.cwd.clone(),
                 harness_key: Some(record.harness_key.clone()),
-                role: Some(RuntimeProcessRole::HumanAgent),
+                role: Some(role),
                 depth: None,
                 observed_epoch: Some(record.observed_epoch),
             }));
@@ -382,6 +396,43 @@ fn emit_runtime_process_observation(
             snapshot.candidate_links.push(link);
         }
     }
+}
+
+fn process_is_live(pid: i64) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    let proc_root = Path::new("/proc");
+    if !proc_root.is_dir() {
+        return true;
+    }
+    proc_root.join(pid.to_string()).exists()
+}
+
+fn hook_runtime_process_role(record: &HookRecord) -> RuntimeProcessRole {
+    if record.harness_key == "claude-code"
+        && record
+            .pid
+            .and_then(read_claude_session_kind_for_pid)
+            .as_deref()
+            == Some("bg")
+    {
+        return RuntimeProcessRole::Background;
+    }
+    RuntimeProcessRole::HumanAgent
+}
+
+fn read_claude_session_kind_for_pid(pid: i64) -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    let path = PathBuf::from(home)
+        .join(".claude")
+        .join("sessions")
+        .join(format!("{pid}.json"));
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    value
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn hook_process_link(
@@ -612,13 +663,14 @@ mod tests {
     #[test]
     fn fresh_sqlite_hook_record_links_session_to_mux() {
         let temp = tempdir().expect("tempdir");
+        let pid = i64::from(std::process::id());
         hook::HookStore::new(temp.path())
             .write_record(&hook::HookRecord {
                 schema_version: hook::SCHEMA_VERSION,
                 harness_key: "claude-code".to_string(),
                 session_key: "current".to_string(),
                 cwd: Some("/work".to_string()),
-                pid: Some(123),
+                pid: Some(pid),
                 ppid: Some(456),
                 tmux: Some(hook::HookTmuxRecord {
                     session_name: Some("editor".to_string()),
@@ -653,9 +705,10 @@ mod tests {
             matches!(
                 node,
                 GraphNode::RuntimeProcess(process)
-                    if process.pid == Some(123)
+                    if process.pid == Some(pid)
                         && process.parent_pid == Some(456)
                         && process.harness_key.as_deref() == Some("claude-code")
+                        && process.role == Some(RuntimeProcessRole::HumanAgent)
             )
         }));
         assert!(
@@ -663,6 +716,60 @@ mod tests {
                 .candidate_links
                 .iter()
                 .any(|link| link.relation == RelationKind::ProcessIdentifiesSession)
+        );
+    }
+
+    #[test]
+    fn hook_record_with_stale_pid_is_ignored_and_does_not_emit_process_links() {
+        let temp = tempdir().expect("tempdir");
+        hook::HookStore::new(temp.path())
+            .write_record(&hook::HookRecord {
+                schema_version: hook::SCHEMA_VERSION,
+                harness_key: "claude-code".to_string(),
+                session_key: "current".to_string(),
+                cwd: Some("/work".to_string()),
+                pid: Some(i64::MAX),
+                ppid: Some(456),
+                tmux: Some(hook::HookTmuxRecord {
+                    session_name: Some("editor".to_string()),
+                    native_id: None,
+                    pane_id: Some("%1".to_string()),
+                    socket_path: None,
+                }),
+                transcript_path: None,
+                hook_event_name: Some("SessionStart".to_string()),
+                observed_epoch: 1_700_000_000,
+                harness_version: None,
+            })
+            .expect("write hook record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session("current"), mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        let mux_link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::LinkedToMux)
+            .expect("ignored mux link");
+        assert!(matches!(mux_link.state, LinkState::Ignored { .. }));
+        assert!(
+            !snapshot
+                .nodes
+                .iter()
+                .any(|node| matches!(node, GraphNode::RuntimeProcess(_))),
+            "stale hook pid must not create runtime process nodes"
+        );
+        assert!(
+            !snapshot.candidate_links.iter().any(|link| {
+                matches!(
+                    link.relation,
+                    RelationKind::MuxContainsProcess | RelationKind::ProcessIdentifiesSession
+                )
+            }),
+            "stale hook pid must not create process relationship evidence"
         );
     }
 
@@ -1225,7 +1332,7 @@ mod tests {
                 harness_key: "opencode".to_string(),
                 session_key: "current-after-resume".to_string(),
                 cwd: Some("/work/proj".to_string()),
-                pid: Some(4242),
+                pid: Some(i64::from(std::process::id())),
                 ppid: Some(4241),
                 tmux: Some(hook::HookTmuxRecord {
                     session_name: Some("editor".to_string()),
