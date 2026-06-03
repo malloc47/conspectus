@@ -280,13 +280,21 @@ fn emit_reasoning_turn(
             }
         }
     }
-    if body_parts.is_empty() {
-        return;
-    }
+    // Empty-but-present reasoning record: emit a placeholder so the
+    // operator's thinking toggle has visible effect. Matches the
+    // Claude Code parser's behaviour for opaque-content blocks
+    // (`H-VIEWER-NATIVE-011` operator feedback). The *presence* of a
+    // reasoning record is the signal even when the body is
+    // `encrypted_content` only.
+    let body = if body_parts.is_empty() {
+        "(reasoning hidden by the model)".to_string()
+    } else {
+        body_parts.join("\n\n")
+    };
     out.push(TranscriptTurn {
         role: TurnRole::Assistant,
         kind: TurnKind::Thinking,
-        body: body_parts.join("\n\n"),
+        body,
         timestamp,
     });
 }
@@ -537,11 +545,23 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_with_only_encrypted_content_emits_nothing() {
+    fn reasoning_with_only_encrypted_content_emits_placeholder_turn() {
+        // Real-data shape mirroring Claude: codex reasoning records
+        // carry the visible thinking in `summary`/`content`, but
+        // some carry only `encrypted_content`. Operator's thinking
+        // toggle must have visible effect so we emit a placeholder
+        // rather than dropping the record. Matches the Claude
+        // parser's behaviour.
         let line = r#"{"type":"response_item","payload":{"type":"reasoning","summary":[],"content":null,"encrypted_content":"gAAA..."}}"#;
         let (_tmp, locator) = fixture("sess", &[line]);
         let doc = CodexParser.read(&locator).expect("parse");
-        assert!(doc.turns.is_empty());
+        assert_eq!(doc.turns.len(), 1);
+        assert_eq!(doc.turns[0].kind, TurnKind::Thinking);
+        assert!(
+            doc.turns[0].body.contains("hidden"),
+            "placeholder text, got {:?}",
+            doc.turns[0].body
+        );
     }
 
     #[test]

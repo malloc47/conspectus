@@ -228,11 +228,16 @@ fn word_wrap_with_budgets(input: &str, first_budget: u16, rest: u16) -> Vec<Stri
             if !current.is_empty() {
                 out.push(std::mem::take(&mut current));
                 current_width = 0;
-                current_cap = rest;
             }
+            // Whether or not we flushed, we're past the first piece
+            // now — switch to the full `rest` budget before deciding
+            // whether to hard-break. Skipping this swap was the bug
+            // behind `ccview`-style words getting broken into one
+            // character per line when they entered the slow path
+            // with a tiny `first_budget`.
+            current_cap = rest;
             if w > current_cap {
-                // Still too long after switching to rest budget:
-                // hard-break inside this single word.
+                // Word still too wide for normal lines; hard-break.
                 for piece in hard_break(word, current_cap) {
                     out.push(piece);
                 }
@@ -479,6 +484,41 @@ mod tests {
         let texts = flat_text(&out);
         // Should produce ≥ 3 body lines (30/10 = 3). +1 spacer = 4.
         assert!(texts.len() >= 4, "got {texts:?}");
+    }
+
+    #[test]
+    fn wide_word_with_tiny_first_budget_does_not_hard_break_per_char() {
+        // Regression: a styled inline span ("ccview") arriving at
+        // wrap_styled_line with only 1 cell remaining on the
+        // current line used to hard-break the whole word at the
+        // first-budget width (1 cell per piece), so the word
+        // rendered as one character per line. The fix: switch to
+        // the rest budget before deciding whether to hard-break.
+        let body = "leading prefix that takes most of the line ccview tail";
+        let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
+        let theme = Theme::default();
+        let out = render_turn(&t, &theme, 50);
+        let texts = flat_text(&out);
+        // The word "ccview" should appear intact on a single line
+        // somewhere in the wrapped output (without inter-character
+        // breaks).
+        assert!(
+            texts.iter().any(|l| l.contains("ccview")),
+            "ccview should appear intact, got:\n{}",
+            texts.join("\n")
+        );
+        // And specifically no line should be a single-character body.
+        for line in &texts {
+            // Strip the leader (gutter + ` │ `) and check the
+            // post-separator content.
+            if let Some(rest) = line.split_once('│') {
+                let content = rest.1.trim();
+                assert!(
+                    content.len() != 1 || !content.chars().next().unwrap().is_alphabetic(),
+                    "single-alpha-char body line is the hard-break bug: {line:?}"
+                );
+            }
+        }
     }
 
     #[test]
