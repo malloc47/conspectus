@@ -37,6 +37,18 @@ pub const SEPARATOR_WIDTH: u16 = 3;
 /// Total leader cells consumed before the body content begins.
 pub const LEADER_WIDTH: u16 = GUTTER_WIDTH + SEPARATOR_WIDTH;
 
+/// Convert a borrowed [`Line`] into an owned `Line<'static>` by
+/// cloning every span's content. Used by the widget when it caches
+/// composed body lines across draws.
+pub fn into_owned_line(line: Line<'_>) -> Line<'static> {
+    let spans: Vec<Span<'static>> = line
+        .spans
+        .into_iter()
+        .map(|s| Span::styled(s.content.into_owned(), s.style))
+        .collect();
+    Line::from(spans)
+}
+
 /// Render one turn into a flat sequence of [`Line`]s sized for the
 /// given `content_width` (cells available *after* the gutter +
 /// separator). Caller is responsible for picking the content_width

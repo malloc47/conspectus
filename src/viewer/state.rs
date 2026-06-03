@@ -5,12 +5,28 @@
 //! (`viewport_height`, `total_lines`) so navigation messages
 //! (page-down etc.) know how far to move and the scroll offset
 //! can be clamped.
+//!
+//! The optional `rendered` cache holds the previously composed body
+//! lines so scrolling-only frames don't re-run `tui_markdown::from_str`
+//! over every Message turn. Invalidated whenever `content_width`,
+//! `show_tools`, or `show_thinking` change.
+
+use ratatui::text::Line;
 
 use crate::viewer::model::TranscriptDocument;
 
-/// Everything the viewer needs to render itself. Cheap to clone for
-/// snapshot tests.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Cached body-line composition. Lifetime-erased so it can live on
+/// the state across draws.
+#[derive(Clone, Debug)]
+pub struct RenderCache {
+    pub content_width: u16,
+    pub show_tools: bool,
+    pub show_thinking: bool,
+    pub lines: Vec<Line<'static>>,
+}
+
+/// Everything the viewer needs to render itself.
+#[derive(Clone, Debug)]
 pub struct ViewerState {
     pub document: TranscriptDocument,
     /// Current scroll offset (line offset from the rendered body
@@ -38,6 +54,11 @@ pub struct ViewerState {
     /// Total rendered line count produced by the last draw. Used
     /// by the reducer to clamp scroll offsets.
     pub total_lines: usize,
+    /// Cache of composed body lines. `None` means "rebuild on next
+    /// draw". The widget populates this; the reducer invalidates
+    /// it whenever a flag that affects layout changes (`show_tools`,
+    /// `show_thinking`).
+    pub rendered: Option<RenderCache>,
 }
 
 impl ViewerState {
@@ -53,7 +74,14 @@ impl ViewerState {
             show_help: false,
             viewport_height: 0,
             total_lines: 0,
+            rendered: None,
         }
+    }
+
+    /// Drop the cached body-line composition. Called by the reducer
+    /// when a flag that affects layout changes.
+    pub fn invalidate_render_cache(&mut self) {
+        self.rendered = None;
     }
 
     /// Maximum scroll offset given the latest layout. Saturating

@@ -87,12 +87,15 @@ pub fn reduce(mut state: ViewerState, msg: ViewerMsg) -> (ViewerState, ViewerEff
         }
         ViewerMsg::ToggleTools => {
             state.show_tools = !state.show_tools;
-            // Layout changed — re-clamp on next draw.
+            // Layout changed — re-clamp on next draw and drop the
+            // cached body lines so the widget recomposes.
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
+            state.invalidate_render_cache();
         }
         ViewerMsg::ToggleThinking => {
             state.show_thinking = !state.show_thinking;
             state.scroll_offset = state.scroll_offset.min(state.max_scroll());
+            state.invalidate_render_cache();
         }
         ViewerMsg::ToggleHelp => {
             state.show_help = !state.show_help;

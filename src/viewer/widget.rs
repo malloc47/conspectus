@@ -32,8 +32,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::viewer::model::{TranscriptDocument, TurnKind};
-use crate::viewer::render::{LEADER_WIDTH, render_turn};
-use crate::viewer::state::ViewerState;
+use crate::viewer::render::{LEADER_WIDTH, into_owned_line, render_turn};
+use crate::viewer::state::{RenderCache, ViewerState};
 use crate::viewer::theme::Theme;
 
 /// Draw the transcript viewer onto `area`. Mutates `state` to
@@ -147,8 +147,36 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
     }
 
     let content_width = area.width.saturating_sub(LEADER_WIDTH);
-    let lines = build_body_lines(state, theme, content_width);
-    let total = lines.len();
+
+    // Cache hit: reuse the previously composed body. Cache key is
+    // (content_width, show_tools, show_thinking); the reducer
+    // invalidates whenever a toggle flips. This is the difference
+    // between scrolling-by-keystroke being O(turns × markdown_render)
+    // and being O(1) on a large session with tools shown.
+    let need_rebuild = match &state.rendered {
+        Some(cache) => {
+            cache.content_width != content_width
+                || cache.show_tools != state.show_tools
+                || cache.show_thinking != state.show_thinking
+        }
+        None => true,
+    };
+    if need_rebuild {
+        let owned: Vec<ratatui::text::Line<'static>> =
+            build_body_lines(state, theme, content_width)
+                .into_iter()
+                .map(into_owned_line)
+                .collect();
+        state.rendered = Some(RenderCache {
+            content_width,
+            show_tools: state.show_tools,
+            show_thinking: state.show_thinking,
+            lines: owned,
+        });
+    }
+
+    let cache = state.rendered.as_ref().expect("just populated");
+    let total = cache.lines.len();
     let viewport_height = area.height;
     let max_offset = total.saturating_sub(viewport_height as usize);
     let scroll_offset = if state.stick_to_end {
@@ -157,7 +185,10 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
         state.scroll_offset.min(max_offset)
     };
 
-    let paragraph = Paragraph::new(lines).scroll((scroll_offset as u16, 0));
+    // Clone the cached lines for Paragraph (it consumes by value).
+    // Each Span carries Cow::Owned content already, so this is just
+    // span-vec clone + Cow ref-bump (cheap).
+    let paragraph = Paragraph::new(cache.lines.clone()).scroll((scroll_offset as u16, 0));
     frame.render_widget(paragraph, area);
 
     state.viewport_height = viewport_height;
@@ -668,6 +699,65 @@ mod tests {
         assert!(s.contains("Toggle this help panel"), "? binding listed");
         assert!(s.contains("Jump to end"), "G/End binding listed");
         insta::assert_snapshot!(snapshot_string(&buf));
+    }
+
+    #[test]
+    fn render_cache_persists_across_draws_until_toggle_invalidates() {
+        let theme = Theme::default();
+        let mut state = ViewerState::new(document_with_tools());
+        let _ = render_to_buffer(&mut state, &theme, 60, 14);
+        let cache = state
+            .rendered
+            .as_ref()
+            .expect("cache populated on first draw");
+        let cached_lines = cache.lines.len();
+        let cached_width = cache.content_width;
+
+        // Second draw at the same width must hit the cache. We can't
+        // *prove* it from the outside without instrumentation, but
+        // we can at least assert the cache is still populated and
+        // the metrics are stable.
+        let _ = render_to_buffer(&mut state, &theme, 60, 14);
+        let cache_after = state.rendered.as_ref().expect("cache still up");
+        assert_eq!(cache_after.lines.len(), cached_lines);
+        assert_eq!(cache_after.content_width, cached_width);
+
+        // Toggling tools must invalidate via the reducer. The next
+        // draw rebuilds.
+        let (mut state, _) =
+            crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::ToggleTools);
+        assert!(state.rendered.is_none(), "ToggleTools invalidates cache");
+        let _ = render_to_buffer(&mut state, &theme, 60, 14);
+        let cache_post = state.rendered.as_ref().expect("cache repopulated");
+        assert!(
+            cache_post.show_tools,
+            "rebuilt cache reflects new toggle state"
+        );
+        assert!(
+            cache_post.lines.len() > cached_lines,
+            "show_tools=true adds tool turns; lines should grow ({} → {})",
+            cached_lines,
+            cache_post.lines.len()
+        );
+    }
+
+    #[test]
+    fn render_cache_invalidates_on_width_change() {
+        let theme = Theme::default();
+        let mut state = ViewerState::new(sample_document());
+        let _ = render_to_buffer(&mut state, &theme, 80, 12);
+        let lines_at_80 = state.rendered.as_ref().unwrap().lines.len();
+        let _ = render_to_buffer(&mut state, &theme, 40, 12);
+        let cache = state.rendered.as_ref().unwrap();
+        let content_width_at_40 = 40u16 - LEADER_WIDTH;
+        assert_eq!(
+            cache.content_width, content_width_at_40,
+            "cache reports the latest content_width"
+        );
+        // Narrower terminals usually produce more wrapped lines but
+        // may also be the same for short bodies; just confirm the
+        // cache was rebuilt (different width key).
+        let _ = lines_at_80;
     }
 
     #[test]
