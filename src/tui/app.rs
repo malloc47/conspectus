@@ -559,14 +559,6 @@ impl App {
         ));
     }
 
-    /// Open the controls overlay with the cursor on the Filters >
-    /// Harness row. Used by the `f` accelerator (F8-005).
-    pub fn open_controls_overlay_at_filters(&mut self) {
-        let ctx = self.controls_context();
-        self.controls_overlay =
-            Some(crate::tui::widgets::controls::ControlsOverlayState::new_at_filters(&ctx));
-    }
-
     /// Close the controls overlay without applying anything.
     pub fn close_controls_overlay(&mut self) {
         self.controls_overlay = None;

@@ -220,12 +220,6 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                         "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
                     )));
                 }
-                Some(Action::OpenControlsAtFilters) => {
-                    app.open_controls_overlay_at_filters();
-                    app.update(Msg::SetStatus(Some(
-                        "controls: editing filters · Esc closes".to_string(),
-                    )));
-                }
                 Some(Action::ControlsOverlayKey(key)) => {
                     handle_controls_overlay_key(&mut app, &config, key)
                 }
@@ -333,12 +327,6 @@ fn static_event_loop(
                     app.open_controls_overlay();
                     app.update(Msg::SetStatus(Some(
                         "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::OpenControlsAtFilters) => {
-                    app.open_controls_overlay_at_filters();
-                    app.update(Msg::SetStatus(Some(
-                        "controls: editing filters · Esc closes".to_string(),
                     )));
                 }
                 Some(Action::ControlsOverlayKey(key)) => {
@@ -963,9 +951,6 @@ enum Action {
     /// Open the controls overlay (ADR 0031, F8-005) at its top
     /// section.
     OpenControls,
-    /// Open the controls overlay positioned at the Filters section
-    /// (the `f` accelerator).
-    OpenControlsAtFilters,
     /// Forward a key event into the open controls overlay.
     ControlsOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Switch to a specific view (1–5 accelerators).
@@ -1450,19 +1435,21 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             | (KeyModifiers::NONE, KeyCode::Char('S')) => Some(Action::Resume),
             (KeyModifiers::SHIFT, KeyCode::Char('R'))
             | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
-            (KeyModifiers::SHIFT, KeyCode::Char('T'))
-            | (KeyModifiers::NONE, KeyCode::Char('T')) => Some(Action::View),
-            // ADR 0031 / F8-005 accelerator surface. `v` opens the
-            // controls overlay; `1`–`5` switch view directly;
-            // `]`/`[` cycle views; `f` jumps into the controls
-            // overlay's Filters section; `F` clears every active
-            // filter; `Ctrl-G` cycles grouping (plain `G` is the
-            // existing End binding).
-            (m, KeyCode::Char('v')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::OpenControls)
-            }
+            // ADR 0031 / F8-005 accelerator surface (reshuffled
+            // alongside H-VIEWER-NATIVE-008 to give the more
+            // discoverable `v` to the session viewer):
+            //   `v` opens the session transcript viewer (was `T`).
+            //   `f` opens the controls overlay (was `v`).
+            //   `F` clears every active filter (unchanged).
+            //   `1`–`5` switch view; `]`/`[` cycle views;
+            //   `Ctrl-G` cycles grouping.
+            // The pre-existing `f` → "jump to Filters section"
+            // shortcut was retired; the controls overlay places
+            // the cursor at the top and the operator navigates
+            // from there.
+            (m, KeyCode::Char('v')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::View),
             (m, KeyCode::Char('f')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::OpenControlsAtFilters)
+                Some(Action::OpenControls)
             }
             (KeyModifiers::SHIFT, KeyCode::Char('F'))
             | (KeyModifiers::NONE, KeyCode::Char('F')) => Some(Action::ClearFilters),
@@ -1608,18 +1595,32 @@ mod tests {
     }
 
     #[test]
-    fn translate_v_opens_controls_overlay() {
+    fn translate_v_opens_viewer() {
         assert_eq!(
             translate(press(KeyCode::Char('v'), KeyModifiers::NONE), 24),
+            Some(Action::View)
+        );
+    }
+
+    #[test]
+    fn translate_f_opens_controls_overlay() {
+        assert_eq!(
+            translate(press(KeyCode::Char('f'), KeyModifiers::NONE), 24),
             Some(Action::OpenControls)
         );
     }
 
     #[test]
-    fn translate_f_opens_controls_at_filters() {
+    fn translate_upper_t_no_longer_bound_to_view() {
+        // Post H-VIEWER-NATIVE-008 reshuffle: `v` owns View;
+        // `T` is unbound and falls through to None.
         assert_eq!(
-            translate(press(KeyCode::Char('f'), KeyModifiers::NONE), 24),
-            Some(Action::OpenControlsAtFilters)
+            translate(press(KeyCode::Char('T'), KeyModifiers::NONE), 24),
+            None,
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('T'), KeyModifiers::SHIFT), 24),
+            None,
         );
     }
 

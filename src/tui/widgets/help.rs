@@ -102,7 +102,7 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     section(&mut lines, "Discoverable controls (ADR 0031)");
     bind(
         &mut lines,
-        "v",
+        "f",
         "Open the controls overlay (view / grouping / filters / sort)",
     );
     bind(&mut lines, "?", "This help");
@@ -113,7 +113,7 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(&mut lines, "R", "Rename the selected agent session");
     bind(
         &mut lines,
-        "T",
+        "v",
         "Open the selected session's transcript (q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t tools, y thinking)",
     );
     bind(&mut lines, "r", "Refresh discovery now");
@@ -130,11 +130,6 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     blank(&mut lines);
 
     section(&mut lines, "Filters & grouping");
-    bind(
-        &mut lines,
-        "f",
-        "Jump into the controls overlay's Filters section",
-    );
     bind(
         &mut lines,
         "F",
