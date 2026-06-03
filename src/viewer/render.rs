@@ -69,7 +69,7 @@ pub fn render_turn<'a>(
     tool_detail: ToolDetail,
 ) -> Vec<Line<'a>> {
     let chip_color = chip_color(turn, theme);
-    let body_lines = build_body_lines(turn, content_width, tool_detail);
+    let body_lines = build_body_lines(turn, theme, content_width, tool_detail);
     if body_lines.is_empty() {
         // Even an empty turn deserves its chip — render the chip
         // alone so the operator sees the role marker.
@@ -260,6 +260,7 @@ fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
 /// [`Line`]s ready for gutter composition.
 fn build_body_lines<'a>(
     turn: &'a TranscriptTurn,
+    theme: &Theme,
     content_width: u16,
     tool_detail: ToolDetail,
 ) -> Vec<Line<'a>> {
@@ -285,7 +286,7 @@ fn build_body_lines<'a>(
             wrap_plain(&turn.body, content_width, style)
         }
         TurnKind::ToolUse | TurnKind::ToolResult => {
-            render_tool_body(turn, content_width, tool_detail)
+            render_tool_body(turn, theme, content_width, tool_detail)
         }
     }
 }
@@ -298,6 +299,7 @@ fn build_body_lines<'a>(
 /// distinctly so it visually recedes.
 fn render_tool_body(
     turn: &TranscriptTurn,
+    theme: &Theme,
     content_width: u16,
     detail: ToolDetail,
 ) -> Vec<Line<'static>> {
@@ -329,7 +331,7 @@ fn render_tool_body(
         let total = detabbed.lines().count();
         let mut wrapped: Vec<Line<'static>> = Vec::new();
         for raw in detabbed.lines().take(TRUNCATED_TOOL_LINES) {
-            for line in line_with_styled_prefix(raw, content_width, body_style) {
+            for line in line_with_styled_prefix(raw, theme, content_width, body_style) {
                 wrapped.push(line);
             }
         }
@@ -346,7 +348,7 @@ fn render_tool_body(
     // Full detail: every line, line-number-prefix-aware.
     let mut wrapped: Vec<Line<'static>> = Vec::new();
     for raw in detabbed.lines() {
-        for line in line_with_styled_prefix(raw, content_width, body_style) {
+        for line in line_with_styled_prefix(raw, theme, content_width, body_style) {
             wrapped.push(line);
         }
     }
@@ -361,10 +363,19 @@ fn first_line_of(s: &str) -> String {
 /// separator, e.g. `9 ` or `9:` or `9→`), emit a `Line` whose
 /// first span is the prefix in a fainter style than the body. If
 /// no prefix matches, fall back to a single-style wrap.
-fn line_with_styled_prefix(raw: &str, content_width: u16, body_style: Style) -> Vec<Line<'static>> {
-    let prefix_style = Style::new()
-        .fg(ratatui::style::Color::DarkGray)
-        .add_modifier(Modifier::DIM);
+fn line_with_styled_prefix(
+    raw: &str,
+    theme: &Theme,
+    content_width: u16,
+    body_style: Style,
+) -> Vec<Line<'static>> {
+    // Route through the theme's secondary-text color so users can
+    // override via `[tui.theme]` config. No `DIM` modifier — the
+    // secondary-text color is already chosen for de-emphasis, and
+    // double-dimming (color-fg + DIM) renders inconsistently across
+    // terminals: some honor only one of the SGR codes, leaving the
+    // prefix *more* visible than intended.
+    let prefix_style = Style::new().fg(theme.secondary_text);
     if let Some((prefix_end, _)) = detect_line_number_prefix(raw) {
         let prefix = &raw[..prefix_end];
         let rest = &raw[prefix_end..];
