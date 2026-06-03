@@ -3171,17 +3171,52 @@ transcript with a cursor at the last turn".
   - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
     `H-VIEWER-NATIVE-007` since both touch the renderer.
 
-- [ ] `H-VIEWER-NATIVE-009` Retire patched recall from
+- [x] `H-VIEWER-NATIVE-009` Retire patched recall from
   `pkgs/recall/`.
-  - Scope: once `H-VIEWER-NATIVE-008` ships and the native
-    viewer is the default for all four harnesses, decide
-    whether to (a) revert `pkgs/recall/` to a thin prebuilt
-    wrapper for operators who configure recall via
-    `H-TRANSCRIPT-013`, or (b) remove the package entirely.
-    Update `H-TRANSCRIPT-012` outcome and the `dev-toolchain.nix`
-    inclusion accordingly.
-  - Tests: NixOS host evals.
-  - Blockers: `H-VIEWER-NATIVE-008`.
+  - Outcome: option (b) chosen ahead of `H-VIEWER-NATIVE-008`
+    when the recall debt became clear. `pkgs/recall/` (default.nix
+    + Cargo.lock + session-flag.patch + .gitignore) removed in
+    nix-config commit `f6a7b46 chore(pkgs): retire patched
+    recall after conspectus pivot`. `recall` dropped from
+    `home/modules/dev-toolchain.nix` in the same commit.
+    Conspectus-side `RecallViewer` + `supports_flag` capability
+    probe + `required_flags` trait method ripped in conspectus
+    commit `8c949a0 refactor(viewer): rip recall-specific
+    surface`. `claude-history` remains as the
+    `ClaudeHistoryViewer` escape-hatch backend for harnesses
+    without a native parser (currently: aider).
+
+- [ ] `H-VIEWER-NATIVE-012` Mouse bindings inside the viewer.
+  - Scope: scroll-wheel events translate to ScrollUp /
+    ScrollDown; click positions the cursor / selects a turn
+    boundary. crossterm mouse events are already enabled
+    elsewhere in the TUI; the modal just needs a handler
+    branch in `handle_viewer_overlay_key` (or a new
+    `handle_viewer_overlay_mouse`).
+  - Tests: mouse-event smoke through the reducer.
+  - Blockers: `H-VIEWER-NATIVE-011` (styling) so click
+    targets land on visually-meaningful elements.
+
+- [ ] `H-VIEWER-NATIVE-013` In-viewer navigation into forks /
+  child sessions.
+  - Scope: when the displayed transcript references a fork or
+    a child session, expose a way to jump into that session's
+    transcript without leaving the modal (e.g. `→` over a
+    chip, or a per-fork chip with `Enter`). Needs lineage
+    from the graph layer; the bridge gains
+    `build_viewer_state_for_child(parent, child_session_id)`
+    or similar. Stack-of-states inside the modal so
+    Backspace returns to the previous transcript.
+  - Open questions: should the lineage walk go through
+    conspectus's resolved graph (per ADR 0005 / ADR 0018) or
+    through harness-specific intra-session lineage encoded in
+    the transcripts themselves? The latter keeps the viewer
+    extractable; the former is richer.
+  - Tests: bridge mapping for `parent_session` references in
+    each harness; modal stack push/pop; lineage-not-found
+    fallback.
+  - Blockers: `H-VIEWER-NATIVE-008`. Pairs naturally with
+    `H-VIEWER-NATIVE-011` for chip-as-click-target affordance.
 
 - [ ] `H-VIEWER-NATIVE-010` (later) Extraction prep: lift
   `src/viewer/` into a workspace member crate.
