@@ -3834,6 +3834,39 @@ failure:
     are observed. Inotify / fanotify continuous-mode event ingestion
     remains deferred to the continuous server workstream.
 
+- [ ] `H-MUXPROC-016` Treat harness session keys as opaque strings in
+  runtime attribution.
+  - Scope: document and enforce the rule that `AgentSessionId.session_key`
+    is an opaque harness-native string. UUID-shaped extraction remains a
+    conservative generic fallback for arbitrary blobs, but any path,
+    command, fd target, hook payload, or state record with known harness
+    context should use that harness's session-key grammar. Initial
+    grammars: Codex/Claude UUID-shaped transcript keys, opencode `ses_…`
+    keys, plus command-token extraction when the harness binary is known.
+  - Tests: extractor unit tests proving opencode `ses_…` ids are extracted
+    from process commands and fd/path evidence, while unrelated UUIDs
+    outside known harness paths are ignored.
+  - Manual checks: inspect `graph --format json` for a live opencode mux
+    session and confirm `process_identifies_session` evidence names the
+    `ses_…` session key instead of falling back to same-cwd candidates.
+  - Blockers: `H-MUXPROC-002`.
+
+- [ ] `H-MUXPROC-017` Sweep remaining UUID-only extractor call sites.
+  - Scope: audit discovery, viewer bridge, resolver metadata, and output
+    helpers for UUID-shaped session-key assumptions. Replace them with
+    either typed `AgentSessionId` comparisons or harness-aware opaque
+    string extractors. Keep UUID-only helpers private to generic fallback
+    paths and rename them so call sites must choose between generic and
+    harness-aware extraction deliberately.
+  - Tests: add regression coverage for opencode `ses_…`, Codex UUID, and
+    Claude UUID session keys in the same fixtures. Include at least one
+    negative test where an ordinary path token does not become a session
+    key.
+  - Manual checks: run a mixed Codex/opencode/Claude tmux graph smoke and
+    verify resolved links and right-pane IDs preserve full external session
+    keys.
+  - Blockers: `H-MUXPROC-016`.
+
 - [x] `H-MUXPROC-FU-001` Evaluate first-class runtime process nodes.
   - Scope: turn ADR 0047's proposed model into a concrete workstream
     proposal if process evidence continues to accumulate resolver,

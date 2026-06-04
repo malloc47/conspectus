@@ -912,6 +912,7 @@ fn active_mux_sessions(
         let process_evidence = process_evidence_by_mux.get(&mux.id);
         let enforce_single_agent_session =
             has_process_snapshot && controlling_agent_process_count(process_evidence) <= 1;
+        let activity_match = session_file_activity_match(mux, sessions, process_evidence);
 
         if let Some(evidence) = active_pane_evidence(mux, fd_reader) {
             let direct_matches: BTreeSet<_> = sessions
@@ -957,6 +958,26 @@ fn active_mux_sessions(
                     sessions: matched_sessions,
                     evidence: evidence.link_evidence,
                 });
+                if evidence.link_evidence == "active_pane_command_session_match"
+                    && let Some(activity_match) = &activity_match
+                    && most_recent_epoch(&activity_match.sessions, sessions)
+                        > most_recent_epoch(
+                            &matches
+                                .identity
+                                .as_ref()
+                                .expect("identity just set")
+                                .sessions,
+                            sessions,
+                        )
+                {
+                    matches.identity = Some(if enforce_single_agent_session {
+                        activity_match
+                            .clone()
+                            .collapse_to_freshest_human_session(sessions)
+                    } else {
+                        activity_match.clone()
+                    });
+                }
             }
         }
 
@@ -986,8 +1007,7 @@ fn active_mux_sessions(
         }
 
         if matches.identity.is_none()
-            && let Some(activity_match) =
-                session_file_activity_match(mux, sessions, process_evidence)
+            && let Some(activity_match) = activity_match
         {
             matches.identity = Some(if enforce_single_agent_session {
                 activity_match.collapse_to_freshest_human_session(sessions)
@@ -1134,6 +1154,7 @@ impl ActiveMuxSessionMatches {
     }
 }
 
+#[derive(Clone)]
 struct ActiveMuxSessionMatch {
     sessions: BTreeSet<crate::model::AgentSessionId>,
     evidence: &'static str,
@@ -1361,8 +1382,8 @@ fn active_pane_process_evidence(
             for harness_key in process_command_harnesses(command) {
                 if seen_harness_pid.insert((harness_key.clone(), pid)) {
                     output.push(ProcessPaneEvidence {
+                        session_keys: command_session_keys_for_harness(command, &harness_key),
                         harness_key,
-                        session_keys: uuid_like_values(command),
                         root_pid,
                         matched_pid: pid,
                         parent_pid: record.parent_pid,
@@ -1537,7 +1558,7 @@ where
             continue;
         };
 
-        let keys = uuid_like_values(path);
+        let keys = session_keys_for_harness_text(harness, path);
         if keys.is_empty() {
             continue;
         }
@@ -1560,6 +1581,54 @@ fn command_session_keys(command: &str) -> BTreeSet<String> {
     command
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
         .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn command_session_keys_for_harness(command: &str, harness: &str) -> BTreeSet<String> {
+    let parts: Vec<_> = command_session_keys(command).into_iter().collect();
+    let mut keys = BTreeSet::new();
+
+    for (idx, part) in parts.iter().enumerate() {
+        match part.as_str() {
+            "resume" | "-s" | "--session" | "session" => {
+                if let Some(next) = parts.get(idx + 1)
+                    && !looks_like_command_flag(next)
+                {
+                    keys.insert(next.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    keys.extend(session_keys_for_harness_text(harness, command));
+    keys
+}
+
+fn looks_like_command_flag(value: &str) -> bool {
+    value.starts_with('-')
+}
+
+fn session_keys_for_harness_text(harness: &str, value: &str) -> BTreeSet<String> {
+    match harness {
+        "opencode" => {
+            let mut keys = opencode_session_key_values(value);
+            keys.extend(uuid_like_values(value));
+            keys
+        }
+        _ => uuid_like_values(value),
+    }
+}
+
+fn opencode_session_key_values(value: &str) -> BTreeSet<String> {
+    value
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .filter(|part| {
+            part.strip_prefix("ses_").is_some_and(|rest| {
+                rest.len() >= 8 && rest.chars().all(|ch| ch.is_ascii_alphanumeric())
+            })
+        })
         .map(str::to_string)
         .collect()
 }
@@ -2208,6 +2277,63 @@ mod tests {
     }
 
     #[test]
+    fn opencode_file_activity_supersedes_stale_command_session_id() {
+        let stale = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "/state", "ses_stale"),
+            harness_key: "opencode".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_000),
+            session_kind: None,
+        });
+        let current = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("opencode", "/state", "ses_current"),
+            harness_key: "opencode".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(5_020),
+            session_kind: None,
+        });
+        let mux = GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("tmux:one"),
+            backend: "tmux".to_string(),
+            native_id: "one".to_string(),
+            cwd: Some("/work/repo".to_string()),
+            active_pane_command: Some("opencode".to_string()),
+            active_pane_pid: None,
+            active_pane_current_path: Some("/work/repo".to_string()),
+            active_pane_start_command: Some("opencode -s ses_stale".to_string()),
+            client_attached: None,
+            activity_epoch: Some(5_030),
+            created_epoch: Some(5_000),
+        });
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![stale, current, mux],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let mux_links: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::LinkedToMux)
+            .collect();
+        assert_eq!(mux_links.len(), 1);
+        let link = mux_links[0];
+        assert_eq!(
+            link.source,
+            NodeId::AgentSession(AgentSessionId::new("opencode", "/state", "ses_current"))
+        );
+        assert_eq!(
+            link.source_metadata.evidence.as_deref(),
+            Some("session_file_activity_match")
+        );
+    }
+
+    #[test]
     fn active_pane_process_match_links_direct_harness_process() {
         let mut snapshot = GraphSnapshot {
             nodes: vec![
@@ -2463,6 +2589,52 @@ mod tests {
             process_link.target_node_id(),
             Some(&NodeId::AgentSession(AgentSessionId::new(
                 "codex", "/state", target
+            )))
+        );
+    }
+
+    #[test]
+    fn active_pane_process_match_uses_opencode_string_session_key() {
+        let target = "ses_16d204c1dffeIkBjxxbpD9uujI";
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                opencode_session("ses_18f56c3f2ffeBjnY8BDLxIC7ru", Some("/work/repo")),
+                opencode_session(target, Some("/work/repo")),
+                mux_with_active_process("editor", Some("/work/repo"), "opencode", 100),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        let processes = FakeProcessSnapshot::new([process(
+            100,
+            None,
+            &format!("opencode -s {target}"),
+            Some("/work/repo"),
+        )]);
+
+        infer_with_process_snapshot(&mut snapshot, &processes);
+
+        let link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.source, NodeId::AgentSession(_))
+            })
+            .expect("exact opencode process command link");
+        assert_eq!(
+            link.source,
+            NodeId::AgentSession(AgentSessionId::new("opencode", "/state", target))
+        );
+
+        let process_link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::ProcessIdentifiesSession)
+            .expect("process identifies opencode session link");
+        assert_eq!(
+            process_link.target_node_id(),
+            Some(&NodeId::AgentSession(AgentSessionId::new(
+                "opencode", "/state", target
             )))
         );
     }
@@ -2900,6 +3072,7 @@ mod tests {
         let evidence = session_key_evidence_from_fd_paths([
             "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
             "/home/me/.claude/tasks/e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6/.lock",
+            "/home/me/.local/share/opencode/session/ses_16d204c1dffeIkBjxxbpD9uujI/state.json",
             "/home/me/.config/other/11111111-2222-3333-4444-555555555555",
         ]);
 
@@ -2908,11 +3081,16 @@ mod tests {
             BTreeSet::from([
                 "019e4354-26b9-7ad2-9521-4ad921cc312b".to_string(),
                 "e7a0ba3e-68a9-4ae1-bebc-c174e78de1e6".to_string(),
+                "ses_16d204c1dffeIkBjxxbpD9uujI".to_string(),
             ])
         );
         assert_eq!(
             evidence.harnesses,
-            BTreeSet::from(["claude-code".to_string(), "codex".to_string()])
+            BTreeSet::from([
+                "claude-code".to_string(),
+                "codex".to_string(),
+                "opencode".to_string()
+            ])
         );
     }
 
