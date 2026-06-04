@@ -324,7 +324,7 @@ bar rather than offered through a separate menu.
 | Key   | Acts on                          | Meaning                                                |
 | ----- | -------------------------------- | ------------------------------------------------------ |
 | `a`   | mux row, or agent row with mux   | Attach to the mux target                               |
-| `i`   | any row                          | Copy the node's short id to the clipboard for `node show` |
+| `i`   | agent / mux session row          | Copy the selected session's full id to the clipboard |
 | `o`   | PR row                           | Open the PR URL in `$BROWSER` (if available)           |
 | `R`   | agent session row                | Open the rename overlay (ADR 0029 / ADR 0030); `Enter` commits the alias and the optional lockstep tmux rename, `Esc` cancels |
 
@@ -359,7 +359,7 @@ The v1 action surface is intentionally narrow and read-only-with-attach:
 - **Attach to existing mux session** (`a` / `Enter` on mux row).
 - **Attach to the mux session linked to an agent row** (`a` / `Enter`
   on an agent row whose preferred `LinkedToMux` resolves).
-- **Copy the selected node's short id** (`i`).
+- **Copy the selected agent or mux session's full id** (`i`).
 - **Open the selected PR in `$BROWSER`** (`o`).
 - **Rename the selected agent session** (`R`) via the Conspectus alias
   overlay, with optional tmux lockstep rename when the session has a
