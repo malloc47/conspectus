@@ -21,6 +21,7 @@ pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
+pub mod pins;
 pub mod tmux;
 pub mod workspace;
 
@@ -195,6 +196,7 @@ pub fn discover_local_with(
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(&mut snapshot, &context, loader);
         aliases::apply_aliases(&mut snapshot, &context, loader);
+        pins::apply_pins(&mut snapshot, &context, loader);
     }
     Ok(snapshot)
 }
@@ -382,6 +384,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         resolved_relationships: Vec::new(),
         diagnostics,
         aliases: crate::aliases::AliasOverlay::new(),
+        pins: Vec::new(),
     };
     snapshot.canonicalize();
     snapshot

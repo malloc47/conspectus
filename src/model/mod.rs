@@ -512,7 +512,9 @@ impl RelationKind {
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     LocalDeclared,
+    LocalPin,
     GlobalDeclared,
+    GlobalPin,
     StrongDiscovered,
     Discovered,
     Convention,
@@ -520,10 +522,23 @@ pub enum Provenance {
 }
 
 impl Provenance {
+    /// Numeric precedence used for ranking competing candidate links.
+    /// Higher wins.
+    ///
+    /// The local/global axis dominates the explicit/auto axis: a
+    /// project-local pin beats a global declared link because project
+    /// context is more specific than user-wide intent. Within a
+    /// scope, explicit declared links (operator typed `conspectus
+    /// declared create` or `pin bind`) beat pin auto-attribution, so
+    /// `pin bind --to <session>` lands as `LocalDeclared` and
+    /// authoritatively overrides the pin's `LocalPin` evidence per
+    /// ADR 0057 §Resolver Binding Semantics step 5.
     pub fn precedence(self) -> u8 {
         match self {
-            Self::LocalDeclared => 5,
-            Self::GlobalDeclared => 4,
+            Self::LocalDeclared => 7,
+            Self::LocalPin => 6,
+            Self::GlobalDeclared => 5,
+            Self::GlobalPin => 4,
             Self::StrongDiscovered => 3,
             Self::Discovered | Self::Convention => 2,
             Self::Cached => 1,
@@ -534,7 +549,9 @@ impl Provenance {
     pub fn snake_case(self) -> &'static str {
         match self {
             Self::LocalDeclared => "local_declared",
+            Self::LocalPin => "local_pin",
             Self::GlobalDeclared => "global_declared",
+            Self::GlobalPin => "global_pin",
             Self::StrongDiscovered => "strong_discovered",
             Self::Discovered => "discovered",
             Self::Convention => "convention",
@@ -705,6 +722,15 @@ pub struct GraphSnapshot {
     /// that don't load aliases.
     #[serde(skip, default)]
     pub aliases: crate::aliases::AliasOverlay,
+    /// Session pin declarations per ADR 0057. Loaded from
+    /// `[[pins.entries]]` TOML by `discovery::pins`; the resolver
+    /// (H-PIN-004) consumes this to synthesize bound-state
+    /// `LinkedToMux` candidates with `LocalPin`/`GlobalPin`
+    /// provenance. Pins remain in this sidecar even after binding so
+    /// row builders can render unbound pins as first-class rows
+    /// without walking `candidate_links`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pins: Vec<PinCandidate>,
 }
 
 impl GraphSnapshot {
@@ -717,6 +743,70 @@ impl GraphSnapshot {
         self.candidate_links.sort_by_key(stable_json_key);
         self.resolved_relationships.sort();
         self.diagnostics.sort();
+        self.pins.sort_by(|a, b| {
+            a.provenance
+                .cmp(&b.provenance)
+                .then_with(|| a.id.cmp(&b.id))
+                .then_with(|| a.store_path.cmp(&b.store_path))
+        });
+    }
+}
+
+/// Snapshot-resident pin record loaded from `[[pins.entries]]` TOML
+/// per ADR 0057. Carries the declarative fields (ADR schema) plus the
+/// loader-side provenance and store path. Binding state — bound mux,
+/// bound session, and resolver diagnostics — is populated by the
+/// resolver pass in a follow-up story (H-PIN-004) and intentionally
+/// left absent here.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct PinCandidate {
+    /// Pin id from the TOML entry; unique within its store.
+    pub id: String,
+    pub display_name: String,
+    pub harness: String,
+    pub cwd: String,
+    pub mux: PinMuxRef,
+    /// Per-pin launch argv override. `None` means the harness
+    /// adapter's `launch_argv` default applies at launch time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// `Provenance::LocalPin` or `Provenance::GlobalPin`.
+    pub provenance: Provenance,
+    /// Absolute path of the TOML file the pin was loaded from.
+    pub store_path: String,
+}
+
+/// Mux backend coordinates carried inside [`PinCandidate`]. Mirrors
+/// the schema in [`crate::pins::PinMux`] but lives in the model
+/// crate so consumers can read it without depending on the
+/// pin-schema module.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct PinMuxRef {
+    pub backend: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_name: Option<String>,
+}
+
+impl PinMuxRef {
+    /// Mux native id encoding per ADR 0057 (mirrors
+    /// [`crate::pins::PinMux::native_id`] without taking a
+    /// schema-module dependency).
+    pub fn native_id(&self) -> String {
+        match self.effective_socket() {
+            None => format!("{}:{}", self.backend, self.name),
+            Some(socket) => format!("{}:{}:{}", self.backend, socket, self.name),
+        }
+    }
+
+    /// Collapses `None` and the `"default"` sentinel to `None`.
+    pub fn effective_socket(&self) -> Option<&str> {
+        match self.socket_name.as_deref() {
+            None | Some("default") => None,
+            Some(name) => Some(name),
+        }
     }
 }
 

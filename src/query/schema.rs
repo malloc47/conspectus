@@ -140,7 +140,9 @@ pub fn node_kind_tag(id: &NodeId) -> &'static str {
 pub fn provenance_tag(value: Provenance) -> &'static str {
     match value {
         Provenance::LocalDeclared => "local_declared",
+        Provenance::LocalPin => "local_pin",
         Provenance::GlobalDeclared => "global_declared",
+        Provenance::GlobalPin => "global_pin",
         Provenance::StrongDiscovered => "strong_discovered",
         Provenance::Discovered => "discovered",
         Provenance::Convention => "convention",

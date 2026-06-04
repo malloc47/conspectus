@@ -114,7 +114,9 @@ pub fn indicator(provenance: Provenance, confidence: Confidence, ambiguous: bool
 fn provenance_code(provenance: Provenance) -> &'static str {
     match provenance {
         Provenance::LocalDeclared => "LD",
+        Provenance::LocalPin => "LP",
         Provenance::GlobalDeclared => "GD",
+        Provenance::GlobalPin => "GP",
         Provenance::StrongDiscovered => "SD",
         Provenance::Discovered => "D",
         Provenance::Convention => "C",

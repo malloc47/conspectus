@@ -3393,7 +3393,9 @@ fn store_label(store: DeclaredStoreFlag) -> &'static str {
 fn provenance_label(provenance: Provenance) -> &'static str {
     match provenance {
         Provenance::LocalDeclared => "local_declared",
+        Provenance::LocalPin => "local_pin",
         Provenance::GlobalDeclared => "global_declared",
+        Provenance::GlobalPin => "global_pin",
         Provenance::StrongDiscovered => "strong_discovered",
         Provenance::Discovered => "discovered",
         Provenance::Convention => "convention",

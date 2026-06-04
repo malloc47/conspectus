@@ -543,8 +543,10 @@ enum MuxTier {
     Convention = 1,
     Discovered = 2,
     StrongDiscovered = 3,
-    GlobalDeclared = 4,
-    LocalDeclared = 5,
+    GlobalPin = 4,
+    GlobalDeclared = 5,
+    LocalPin = 6,
+    LocalDeclared = 7,
 }
 
 fn mux_score(link: &GraphLink) -> MuxScore {
@@ -593,7 +595,9 @@ fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
 fn mux_tier(provenance: Provenance) -> MuxTier {
     match provenance {
         Provenance::LocalDeclared => MuxTier::LocalDeclared,
+        Provenance::LocalPin => MuxTier::LocalPin,
         Provenance::GlobalDeclared => MuxTier::GlobalDeclared,
+        Provenance::GlobalPin => MuxTier::GlobalPin,
         Provenance::StrongDiscovered => MuxTier::StrongDiscovered,
         Provenance::Discovered => MuxTier::Discovered,
         Provenance::Convention => MuxTier::Convention,
@@ -636,8 +640,10 @@ enum PrProvenanceTier {
     Convention = 1,
     Discovered = 2,
     StrongDiscovered = 3,
-    GlobalDeclared = 4,
-    LocalDeclared = 5,
+    GlobalPin = 4,
+    GlobalDeclared = 5,
+    LocalPin = 6,
+    LocalDeclared = 7,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -676,7 +682,9 @@ fn pr_score(link: &GraphLink) -> PrScore {
 fn pr_provenance_tier(provenance: Provenance) -> PrProvenanceTier {
     match provenance {
         Provenance::LocalDeclared => PrProvenanceTier::LocalDeclared,
+        Provenance::LocalPin => PrProvenanceTier::LocalPin,
         Provenance::GlobalDeclared => PrProvenanceTier::GlobalDeclared,
+        Provenance::GlobalPin => PrProvenanceTier::GlobalPin,
         Provenance::StrongDiscovered => PrProvenanceTier::StrongDiscovered,
         Provenance::Discovered => PrProvenanceTier::Discovered,
         Provenance::Convention => PrProvenanceTier::Convention,
