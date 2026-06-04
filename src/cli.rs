@@ -1909,7 +1909,7 @@ impl TuiArgs {
             // branch; fall back to the default so a `--view mux
             // --grouping host` launch doesn't accidentally drag a
             // sessions grouping along. F8-003 generalizes this.
-            _ => conspectus::tui::SessionsGrouping::Repo,
+            _ => conspectus::tui::SessionsGrouping::Graph,
         };
         let mux_grouping = match initial_grouping {
             conspectus::tui::Grouping::Mux(g) => g,
@@ -2411,7 +2411,7 @@ mod tests {
         let args = filter_args_with(vec![], None, vec![], Some("host"));
         let err = args.to_grouping(View::Sessions).unwrap_err().to_string();
         assert!(err.contains("invalid --grouping `host` for --view sessions"));
-        assert!(err.contains("repo, graph, checkout, scan-root"));
+        assert!(err.contains("graph, repo, checkout, scan-root"));
     }
 
     #[test]

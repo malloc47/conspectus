@@ -4,6 +4,9 @@
 
 Accepted
 
+Amended by ADR 0055, which changes the default sessions grouping from
+`repo` to `graph` while preserving the grouping semantics defined here.
+
 ## Context
 
 The sessions TUI has multiple grouping modes. Before this decision,
@@ -25,8 +28,10 @@ busy once full lineage nesting was applied.
 
 ## Decision
 
-`repo` is the default sessions grouping. It remains location-first:
-repo, optional checkout fan-out, then sessions.
+At the time of this ADR, `repo` was selected as the default sessions
+grouping. ADR 0055 later changed the default to `graph`. `repo`
+remains location-first: repo, optional checkout fan-out, then
+sessions.
 
 `graph` becomes the topology-rich sessions grouping. It keeps the
 existing workspace/repo/checkout hierarchy and also nests resolved

@@ -605,10 +605,11 @@ grouping enum (`SessionsGrouping`, `MuxGrouping`, `UnionGrouping`,
 `PrsGrouping`, `ForksGrouping`) and the same `Grouping` dispatch type
 backs config, CLI flags, and TUI controls.
 
-The sessions view defaults to `grouping = "repo"` so the primary switcher is
-location-first. `grouping = "graph"` is the richer topology view: it includes
-workspace containment when known and nests resolved `parent_session` lineage
-under parent sessions across harnesses. The sessions view also supports
+The sessions view defaults to `grouping = "graph"` so the primary switcher
+shows the richer topology: it includes workspace containment when known and
+nests resolved `parent_session` lineage under parent sessions across harnesses.
+`grouping = "repo"` remains available for a location-first view. The sessions
+view also supports
 `grouping = "none"`. This renders a flat, table-like session list rather than
 workspace/repo/checkout group rows. The flat list carries an inline project-name
 column before the preview text and uses recency order; hierarchy sorting is not

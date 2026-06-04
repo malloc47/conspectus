@@ -4,8 +4,8 @@
 //! `docs/tui-sessions-mockup.md` / phase-08:
 //!
 //! - `graph` grouping renders workspace → repo → worktree → agent
-//!   session lineage.
-//! - `repo` grouping stays location-first and is the default.
+//!   session lineage and is the default.
+//! - `repo` grouping stays location-first.
 //! - The worktree level renders only when its repo has ≥ 2
 //!   worktrees inside the visible set.
 //! - Agent sessions with ≥ 2 active `LinkedToMux` candidates expose

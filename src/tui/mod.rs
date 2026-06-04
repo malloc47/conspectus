@@ -99,7 +99,7 @@ impl RunConfig {
             cwd: None,
             default_view: View::Sessions,
             default_sort: Sort::Hierarchy,
-            sessions_grouping: SessionsGrouping::Repo,
+            sessions_grouping: SessionsGrouping::Graph,
             mux_grouping: MuxGrouping::Session,
             initial_filter: RowFilter::default(),
             refresh_interval: Duration::from_secs(30),
@@ -211,11 +211,11 @@ impl Grouping {
     }
 
     /// The default grouping for a view. Sessions defaults to
-    /// location-first `repo`; `graph` remains available for the
-    /// richer workspace / lineage topology.
+    /// graph-first topology so workspace containment and resolved
+    /// lineage are visible without extra controls.
     pub fn default_for(view: View) -> Self {
         match view {
-            View::Sessions => Self::Sessions(SessionsGrouping::Repo),
+            View::Sessions => Self::Sessions(SessionsGrouping::Graph),
             View::Mux => Self::Mux(MuxGrouping::Session),
             View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Repo),
@@ -267,8 +267,8 @@ impl Grouping {
     pub fn values_for(view: View) -> &'static [Grouping] {
         match view {
             View::Sessions => &[
-                Self::Sessions(SessionsGrouping::Repo),
                 Self::Sessions(SessionsGrouping::Graph),
+                Self::Sessions(SessionsGrouping::Repo),
                 Self::Sessions(SessionsGrouping::Checkout),
                 Self::Sessions(SessionsGrouping::ScanRoot),
                 Self::Sessions(SessionsGrouping::None),
@@ -330,7 +330,7 @@ mod tests {
     fn default_for_each_view_matches_adr_first_entry() {
         assert_eq!(
             Grouping::default_for(View::Sessions),
-            Grouping::Sessions(SessionsGrouping::Repo)
+            Grouping::Sessions(SessionsGrouping::Graph)
         );
         assert_eq!(
             Grouping::default_for(View::Mux),

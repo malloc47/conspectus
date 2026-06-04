@@ -517,10 +517,10 @@ contract.
 ### From the P8-001a walkthrough
 
 - **"Project" grouping** in the sessions tree: configurable from
-  day one. Default `repo` keeps the session list location-first.
-  `graph` derives the tree from `WorkspaceContainsRepo` /
+  day one. Default `graph` derives the tree from `WorkspaceContainsRepo` /
   `BelongsToRepo` / cwd-match relationships and follows resolved
-  session lineage; other values `checkout`, `scan-root`.
+  session lineage. `repo` remains the location-first grouping; other
+  values include `checkout`, `scan-root`.
   Configurable via `[tui].sessions_grouping` and the
   `--sessions-grouping` flag. Orphan sessions always land in a
   single "Ungrouped" bucket.
