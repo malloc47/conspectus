@@ -21,7 +21,13 @@ use conspectus::declared::{
 };
 use conspectus::discovery::tmux::{SystemTmux, TmuxRenameOutcome, TmuxRunner};
 use conspectus::hook::{HookStore, HookTmuxRecord};
-use conspectus::model::{GraphLink, GraphSnapshot, LinkEndpoint, NodeId, Provenance, RelationKind};
+use conspectus::model::{
+    GraphLink, GraphSnapshot, LinkEndpoint, NodeId, PinBinding, Provenance, RelationKind,
+};
+use conspectus::pins::{
+    PinEntry, PinLaunch, PinMux, PinStoreKind, PinStoreSelection, TMUX_MUX_BACKEND,
+    load_pin_entry_by_id, remove_pin_entry, select_store_for_pin, upsert_pin_entry, user_pin_store,
+};
 use conspectus::rename::{MuxNativeRename, RenamePlan, plan_session_rename};
 
 #[derive(Debug, Parser)]
@@ -44,6 +50,7 @@ impl Cli {
             Command::Rename(args) => args.run(),
             Command::Alias(args) => args.run(),
             Command::Query(args) => args.run(),
+            Command::Pin(args) => args.run(),
             #[cfg(debug_assertions)]
             Command::Dev(args) => args.run(),
         }
@@ -76,6 +83,8 @@ enum Command {
     Alias(AliasArgs),
     /// Run a read-only SQL query against the graph (ADR 0036).
     Query(QueryArgs),
+    /// Author or inspect session pins (ADR 0057).
+    Pin(Box<PinArgs>),
     /// Debug-only developer commands.
     #[cfg(debug_assertions)]
     #[command(hide = true)]
@@ -3269,6 +3278,484 @@ fn format_alias_endpoint(endpoint: &DeclaredEndpoint) -> String {
             repo,
             number,
         } => format!("forge_pr:{provider}:{host}/{owner}/{repo}#{number}"),
+    }
+}
+
+// =====================================================================
+// Pin command tree (ADR 0057 / H-PIN-007/008/009).
+// =====================================================================
+
+#[derive(Debug, Args)]
+pub struct PinArgs {
+    #[command(subcommand)]
+    command: PinCommand,
+}
+
+impl PinArgs {
+    fn run(self) -> Result<()> {
+        match self.command {
+            PinCommand::Create(args) => args.run(),
+            PinCommand::List(args) => args.run(),
+            PinCommand::Show(args) => args.run(),
+            PinCommand::Rename(args) => args.run(),
+            PinCommand::Rm(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum PinCommand {
+    /// Declare a session pin.
+    Create(Box<PinCreateArgs>),
+    /// List session pins from the discovered config stores.
+    List(PinListArgs),
+    /// Show a single pin by id, including resolver binding state.
+    Show(PinShowArgs),
+    /// Rename a pin's `id` or `display_name`.
+    Rename(PinRenameArgs),
+    /// Remove a pin by id.
+    Rm(PinRmArgs),
+}
+
+/// Filter the binding states `pin list` includes (ADR 0057).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum PinStateFilter {
+    All,
+    Bound,
+    Unbound,
+    Stale,
+}
+
+#[derive(Debug, Args)]
+struct PinCreateArgs {
+    /// Stable pin id (unique within the chosen store).
+    id: String,
+    /// Harness key (`codex`, `claude-code`, `opencode`, `aider`).
+    #[arg(long)]
+    harness: String,
+    /// Absolute path the pin anchors on (also passed as `tmux -c` at
+    /// launch). Required to exist on disk at write time.
+    #[arg(long, value_name = "PATH")]
+    cwd: PathBuf,
+    /// Operator-chosen display name. Defaults to `<id>`.
+    #[arg(long)]
+    display: Option<String>,
+    /// Mux session name. Defaults to the chosen `--display` (and
+    /// therefore to `<id>` when neither is set).
+    #[arg(long = "mux-name", value_name = "NAME")]
+    mux_name: Option<String>,
+    /// Optional tmux socket name (the equivalent of `tmux -L
+    /// <name>`). Absent ⇒ default socket.
+    #[arg(long = "mux-socket", value_name = "NAME")]
+    mux_socket: Option<String>,
+    /// Override the per-harness default `launch.argv`. Repeatable —
+    /// each value is one argv token.
+    #[arg(long = "launch-arg", value_name = "ARG")]
+    launch_argv: Vec<String>,
+    /// Free-form explanatory text written under the pin's `reason`
+    /// field.
+    #[arg(long)]
+    reason: Option<String>,
+    /// Override automatic nearest-store selection.
+    #[arg(long, value_enum)]
+    store: Option<DeclaredStoreFlag>,
+}
+
+impl PinCreateArgs {
+    fn run(self) -> Result<()> {
+        let display = self.display.clone().unwrap_or_else(|| self.id.clone());
+        let mux_name = self.mux_name.clone().unwrap_or_else(|| display.clone());
+
+        let entry = PinEntry {
+            id: self.id.clone(),
+            display_name: display,
+            harness: self.harness,
+            cwd: self.cwd.display().to_string(),
+            mux: PinMux {
+                backend: TMUX_MUX_BACKEND.to_string(),
+                name: mux_name,
+                socket_name: self.mux_socket,
+            },
+            launch: if self.launch_argv.is_empty() {
+                None
+            } else {
+                Some(PinLaunch {
+                    argv: self.launch_argv,
+                })
+            },
+            reason: self.reason,
+        };
+
+        let selection = resolve_pin_write_store(self.store, &self.cwd)?;
+
+        let outcome = upsert_pin_entry(&selection.path, entry.clone())
+            .map_err(|err| anyhow!(err.to_string()))?;
+        let verb = if outcome.changed {
+            if outcome.entry_count == 1 {
+                "wrote"
+            } else {
+                "updated"
+            }
+        } else {
+            "unchanged"
+        };
+        println!(
+            "{verb} pin `{}` in {} ({})",
+            entry.id,
+            selection.path.display(),
+            pin_store_label(selection.kind)
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinListArgs {
+    /// Limit the list to a store.
+    #[arg(long, value_enum, default_value_t = DeclaredStoreFlag::All)]
+    store: DeclaredStoreFlag,
+    /// Filter by binding state.
+    #[arg(long, value_enum, default_value_t = PinStateFilter::All)]
+    state: PinStateFilter,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinListArgs {
+    fn run(self) -> Result<()> {
+        let snapshot = discover_and_resolve(&self.scan_roots)?;
+        let include_project = matches!(
+            self.store,
+            DeclaredStoreFlag::All | DeclaredStoreFlag::Project
+        );
+        let include_user = matches!(self.store, DeclaredStoreFlag::All | DeclaredStoreFlag::User);
+
+        let mut rows: Vec<String> = Vec::new();
+        for pin in &snapshot.pins {
+            let store_flag = match pin.provenance {
+                Provenance::LocalPin => DeclaredStoreFlag::Project,
+                Provenance::GlobalPin => DeclaredStoreFlag::User,
+                _ => continue,
+            };
+            if matches!(store_flag, DeclaredStoreFlag::Project) && !include_project {
+                continue;
+            }
+            if matches!(store_flag, DeclaredStoreFlag::User) && !include_user {
+                continue;
+            }
+            if !pin_matches_filter(pin.binding.as_ref(), self.state) {
+                continue;
+            }
+            rows.push(render_pin_row(
+                store_flag,
+                pin.provenance,
+                &pin.id,
+                &pin.display_name,
+                &pin.harness,
+                &pin.cwd,
+                pin.mux.native_id(),
+                bound_session_label(pin.binding.as_ref()).unwrap_or_default(),
+                pin_state_label(pin.binding.as_ref()),
+                &pin.store_path,
+            ));
+        }
+
+        rows.sort();
+        for row in rows {
+            println!("{row}");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinShowArgs {
+    /// Pin id.
+    id: String,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinShowArgs {
+    fn run(self) -> Result<()> {
+        let snapshot = discover_and_resolve(&self.scan_roots)?;
+        let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
+            bail!("no pin `{}` in any discovered store", self.id);
+        };
+        println!("id           {}", pin.id);
+        println!("display_name {}", pin.display_name);
+        println!("harness      {}", pin.harness);
+        println!("cwd          {}", pin.cwd);
+        println!("mux          {}", pin.mux.native_id());
+        if let Some(socket) = pin.mux.socket_name.as_deref() {
+            println!("socket_name  {}", socket);
+        }
+        if let Some(argv) = pin.launch_argv.as_ref() {
+            println!("launch_argv  {}", argv.join(" "));
+        }
+        if let Some(reason) = pin.reason.as_deref() {
+            println!("reason       {}", reason);
+        }
+        println!("provenance   {}", provenance_label(pin.provenance));
+        println!("store        {}", pin.store_path);
+        println!("state        {}", pin_state_label(pin.binding.as_ref()));
+        match pin.binding.as_ref() {
+            Some(PinBinding::Bound { session, mux }) => {
+                println!("bound_mux    {}", mux.native_id);
+                println!("bound_session {}", session.session_key);
+            }
+            Some(PinBinding::StaleMux { mux }) => {
+                println!("bound_mux    {} (no live harness session)", mux.native_id);
+            }
+            _ => {}
+        }
+        // Surface pin-specific diagnostics for this pin (PinAmbiguous,
+        // PinDrift, etc.). Each is rendered on its own line so the
+        // operator can pipe / grep the output.
+        for diagnostic in snapshot
+            .diagnostics
+            .iter()
+            .filter(|d| pin_diagnostic_matches(d, &self.id))
+        {
+            println!("diagnostic   {}", format_pin_diagnostic(diagnostic));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinRenameArgs {
+    /// Existing pin id.
+    id: String,
+    /// New pin id. Omit to keep the current id and only change
+    /// `--display`.
+    new_id: Option<String>,
+    /// New display name.
+    #[arg(long)]
+    display: Option<String>,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinRenameArgs {
+    fn run(self) -> Result<()> {
+        if self.new_id.is_none() && self.display.is_none() {
+            bail!("`pin rename` requires either a new id, `--display <name>`, or both");
+        }
+        let paths = candidate_pin_store_paths(&self.scan_roots)?;
+        let Some((path, mut entry)) =
+            load_pin_entry_by_id(&paths, &self.id).map_err(|err| anyhow!(err.to_string()))?
+        else {
+            bail!("no pin `{}` in any discovered store", self.id);
+        };
+
+        let original_id = entry.id.clone();
+        if let Some(new_display) = self.display {
+            entry.display_name = new_display;
+        }
+        let new_id_value = self.new_id.clone().unwrap_or_else(|| entry.id.clone());
+
+        if new_id_value != original_id {
+            // Storage rename: remove the old entry, then upsert the
+            // entry under the new id. Both writes target the same
+            // store so the operation is a single
+            // remove-then-upsert flow.
+            entry.id = new_id_value.clone();
+            remove_pin_entry(&path, &original_id).map_err(|err| anyhow!(err.to_string()))?;
+        }
+        let outcome = upsert_pin_entry(&path, entry).map_err(|err| anyhow!(err.to_string()))?;
+        let verb = if outcome.changed {
+            "renamed"
+        } else {
+            "unchanged"
+        };
+        if new_id_value != original_id {
+            println!(
+                "{verb} pin `{}` → `{}` in {}",
+                original_id,
+                new_id_value,
+                path.display()
+            );
+        } else {
+            println!("{verb} pin `{}` in {}", original_id, path.display());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct PinRmArgs {
+    /// Pin id to remove.
+    id: String,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinRmArgs {
+    fn run(self) -> Result<()> {
+        let paths = candidate_pin_store_paths(&self.scan_roots)?;
+        for path in &paths {
+            let outcome =
+                remove_pin_entry(path, &self.id).map_err(|err| anyhow!(err.to_string()))?;
+            if outcome.changed {
+                println!("removed pin `{}` from {}", self.id, path.display());
+                return Ok(());
+            }
+        }
+        bail!("no pin `{}` in any discovered store", self.id);
+    }
+}
+
+fn resolve_pin_write_store(
+    flag: Option<DeclaredStoreFlag>,
+    cwd: &Path,
+) -> Result<PinStoreSelection> {
+    let loader = ConfigLoader::from_env();
+    match flag {
+        Some(DeclaredStoreFlag::User) => {
+            user_pin_store(&loader).map_err(|err| anyhow!(err.to_string()))
+        }
+        Some(DeclaredStoreFlag::All) => {
+            bail!("`--store all` is not valid for `pin create` (pick `project` or `user`)");
+        }
+        Some(DeclaredStoreFlag::Project) | None => {
+            select_store_for_pin(cwd, &loader).map_err(|err| anyhow!(err.to_string()))
+        }
+    }
+}
+
+/// Candidate stores `pin rename` / `pin rm` should look in. Order
+/// matters: project before user so a project-local pin shadows a
+/// same-id user pin, matching the resolver's local-over-global rule.
+fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let loader = ConfigLoader::from_env();
+    let cwd = std::env::current_dir()?;
+    let roots = effective_scan_roots(scan_roots, &cwd);
+    let mut paths = Vec::new();
+    let mut seen = BTreeSet::new();
+    for root in roots {
+        if let Some(path) = loader.locate_project_config(&root)
+            && seen.insert(path.clone())
+        {
+            paths.push(path);
+        }
+    }
+    if let Some(path) = loader.user_config_path()
+        && seen.insert(path.clone())
+    {
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
+fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
+    let snapshot = discover_for_store_selection(scan_roots)?;
+    Ok(conspectus::resolve::resolve_snapshot(snapshot))
+}
+
+fn pin_state_label(binding: Option<&PinBinding>) -> &'static str {
+    match binding {
+        Some(PinBinding::Bound { .. }) => "bound",
+        Some(PinBinding::StaleMux { .. }) => "stale",
+        Some(PinBinding::Unbound) => "unbound",
+        None => "unresolved",
+    }
+}
+
+fn pin_matches_filter(binding: Option<&PinBinding>, filter: PinStateFilter) -> bool {
+    match filter {
+        PinStateFilter::All => true,
+        PinStateFilter::Bound => matches!(binding, Some(PinBinding::Bound { .. })),
+        PinStateFilter::Stale => matches!(binding, Some(PinBinding::StaleMux { .. })),
+        PinStateFilter::Unbound => matches!(binding, Some(PinBinding::Unbound) | None),
+    }
+}
+
+fn pin_store_label(kind: PinStoreKind) -> &'static str {
+    match kind {
+        PinStoreKind::Project => "project",
+        PinStoreKind::User => "user",
+    }
+}
+
+fn bound_session_label(binding: Option<&PinBinding>) -> Option<String> {
+    match binding {
+        Some(PinBinding::Bound { session, .. }) => Some(session.session_key.clone()),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_pin_row(
+    store: DeclaredStoreFlag,
+    provenance: Provenance,
+    id: &str,
+    display_name: &str,
+    harness: &str,
+    cwd: &str,
+    mux_native_id: String,
+    bound_session: String,
+    state_label: &str,
+    store_path: &str,
+) -> String {
+    [
+        store_label(store).to_string(),
+        provenance_label(provenance).to_string(),
+        state_label.to_string(),
+        id.to_string(),
+        display_name.to_string(),
+        harness.to_string(),
+        cwd.to_string(),
+        mux_native_id,
+        bound_session,
+        store_path.to_string(),
+    ]
+    .join("\t")
+}
+
+fn pin_diagnostic_matches(diagnostic: &conspectus::model::Diagnostic, pin_id: &str) -> bool {
+    use conspectus::model::Diagnostic;
+    match diagnostic {
+        Diagnostic::PinUnbound { pin_id: id, .. }
+        | Diagnostic::PinStaleMux { pin_id: id, .. }
+        | Diagnostic::PinAmbiguous { pin_id: id, .. }
+        | Diagnostic::PinDrift { pin_id: id, .. } => id == pin_id,
+        _ => false,
+    }
+}
+
+fn format_pin_diagnostic(diagnostic: &conspectus::model::Diagnostic) -> String {
+    use conspectus::model::Diagnostic;
+    match diagnostic {
+        Diagnostic::PinUnbound {
+            expected_mux_native_id,
+            ..
+        } => format!("unbound (no live mux matching `{expected_mux_native_id}`)"),
+        Diagnostic::PinStaleMux { mux, .. } => {
+            format!("stale_mux (mux `{}` has no live harness)", mux.native_id)
+        }
+        Diagnostic::PinAmbiguous {
+            chosen, competing, ..
+        } => format!(
+            "ambiguous (chose `{}`; {} competing: [{}])",
+            chosen.session_key,
+            competing.len(),
+            competing
+                .iter()
+                .map(|s| s.session_key.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Diagnostic::PinDrift {
+            declared_cwd,
+            observed_cwd,
+            ..
+        } => format!("drift (declared `{declared_cwd}`, observed `{observed_cwd}`)"),
+        _ => format!("{diagnostic:?}"),
     }
 }
 
