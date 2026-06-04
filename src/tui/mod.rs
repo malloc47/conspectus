@@ -25,6 +25,7 @@ use crate::filter::RowFilter;
 
 pub mod actions;
 mod app;
+pub mod clipboard;
 pub mod detail;
 pub mod explorer;
 pub mod preview;
