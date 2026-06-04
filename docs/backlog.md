@@ -5114,6 +5114,348 @@ blocks TUI wire-up (`011`).
   - Tests: doctest where applicable; `git diff --check`; insta review.
   - Blockers: `H-RENAME-011`, `H-RENAME-013`.
 
+### Session Pins
+
+Settled by ADR 0057 (Proposed). Pins are user-authored declarations of
+a logical agent session — a `(harness, cwd, display_name, mux)` tuple
+persisted in a sibling `[[pins.entries]]` TOML table that renders as a
+first-class dashboard row whether or not a live session realizes it,
+binds 1:1 on the mux native name through the existing mux-to-agent-
+session attribution pipeline (ADR 0006 / ADR 0028 / ADR 0046 / ADR
+0047 / ADR 0048), and launches via new `TmuxRunner` mutation methods
+plus the existing P8-010 exec-replace attach.
+
+Pins replace the agent-deck "new card" workflow without inheriting the
+broader orchestrator scope. They compose with — rather than replace —
+ADR 0014 declared links and ADR 0029 aliases: `display_name` is the
+overlay alias for the bound session, ambiguity overrides write a
+`LocalDeclared linked_to_mux` link tagged with the pin id, and the
+sibling TOML tables share store-selection rules.
+
+Dependency shape inside the workstream:
+
+```
+H-PIN-001 (ADR) ──┬─→ H-PIN-002 ──┬─→ H-PIN-003 ──→ H-PIN-004 ──┬─→ H-PIN-016 ──→ H-PIN-017
+                  │               │                              │
+                  │               └─→ H-PIN-005 ──→ H-PIN-006 ──→│
+                  │                                              ├─→ H-PIN-009 ──→ H-PIN-013
+                  └─→ H-PIN-010 ──→ H-PIN-011 ──→ H-PIN-012 ─────┤              ──→ H-PIN-014
+                                                                 │              ──→ H-PIN-015
+                                                                 └─→ H-PIN-018
+                                          H-PIN-007 ──→ H-PIN-008 (CLI read path)
+                                          H-PIN-019  H-PIN-020  H-PIN-021 (closeout)
+```
+
+`H-PIN-001` (the ADR) is unblocked; `H-PIN-002` (schema + TOML) and
+`H-PIN-010` (TmuxRunner extensions) can land in parallel after it.
+`H-PIN-004` (resolver binding) is the integration spine that the TUI
+and launch stories converge on. The closeout stories
+(`H-PIN-019..021`) document and lock in the surface once everything
+else has landed.
+
+- [ ] `H-PIN-001` ADR: session pin schema, binding, and launch contract.
+  - Scope: record the schema (`[[pins.entries]]` TOML sibling to
+    `[declared]` and `[aliases]`), the mux-anchored binding rules,
+    cwd as launch-parameter-not-discriminator, the four pin-specific
+    diagnostics (`PinUnbound` / `PinStaleMux` / `PinAmbiguous` /
+    `PinDrift` plus `PinDuplicate` safety net), launch via
+    `TmuxRunner::new_session` + exec-replace attach, lockstep rename
+    contract, operator escape hatches (`bind` / `rebind` / `adopt`),
+    optional `mux.socket_name` for tmux `-L`, identity encoding
+    `tmux:<name>` for default socket and `tmux:<socket>:<name>` for
+    non-default, prior art comparison, and the hooks-future-proofing
+    guarantee.
+  - Tests: docs-only; `git diff --check`.
+  - Outcome: ADR 0057 (Proposed) captures the decision. Promote to
+    Accepted once a v1 slice (H-PIN-002 through H-PIN-006 plus
+    H-PIN-008 / 009) is in place to validate the schema against
+    real code.
+  - Blockers: none.
+
+- [ ] `H-PIN-002` Pin schema + TOML round-trip.
+  - Scope: add `src/pins.rs` with `PinEntry`, `PinMux`, `PinLaunch`
+    serde models matching ADR 0057. `schema_version`, unknown-field
+    tolerance, malformed-entry diagnostics, validation
+    (non-empty `id` / `display_name` / `harness`, absolute `cwd`,
+    `mux.backend == "tmux"` in v1, `mux.name` non-empty,
+    `mux.socket_name` non-empty when present, duplicate-id rejection,
+    duplicate-(`mux.backend`, `mux.name`, `mux.socket_name`)
+    rejection). Round-trip TOML decode/encode preserves unrelated
+    sections.
+  - Tests: unit tests for happy-path TOML, missing-section default,
+    unknown keys, malformed entries, duplicate id, duplicate mux
+    triple, empty / missing required fields, the default-socket vs
+    non-default-socket cases, and a round-trip preserving `[session]`
+    / `[declared]` / `[aliases]` siblings.
+  - Blockers: `H-PIN-001`.
+
+- [ ] `H-PIN-003` Load pins into discovery as GraphLink candidates.
+  - Scope: add a read-only `discovery::pins` pass analogous to
+    `discovery::declared`. Map each entry into a new `Pin` candidate
+    kind carrying `(id, harness, cwd, display_name, mux.backend,
+    mux.name, mux.socket_name, store)`. `LocalPin` vs `GlobalPin`
+    provenance follows config-file location (mirror ADR 0014 rule).
+    Local beats global on `id` collision. Emit a diagnostic when both
+    stores claim the same id with conflicting fields.
+  - Tests: unit tests for local-only, global-only, local-over-global,
+    malformed-file diagnostic isolation, empty stores, and config
+    paths matching ADR 0012.
+  - Blockers: `H-PIN-002`.
+
+- [ ] `H-PIN-004` Resolver binding pass.
+  - Scope: extend the resolver to bind each pin to a live
+    `(MuxSession, AgentSession)` pair per ADR 0057. Mux lookup is
+    exact-match on `native_id` (default-socket: `tmux:<name>`,
+    non-default: `tmux:<socket>:<name>`). Harness attribution
+    restricts the existing mux-to-agent-session candidate pipeline to
+    the bound mux + `harness_key == pin.harness`. Emit synthesized
+    in-memory alias overlay (no TOML write) and a `LinkedToMux`
+    candidate with `PinDerived` provenance on bind. Emit
+    `PinUnbound` / `PinStaleMux` / `PinAmbiguous` / `PinDrift`
+    diagnostics as specified.
+  - Tests: snapshot tests against fixture graphs covering bound,
+    unbound, stale-mux, ambiguous-multi-harness, drift (cwd
+    divergence), duplicate-pin, and pin-with-non-default-socket-not-
+    yet-discovered cases.
+  - Blockers: `H-PIN-003`.
+
+- [ ] `H-PIN-005` Extend store selection for pin writes.
+  - Scope: reuse `select_store_for_declaration` for pin writes. Verify
+    behavior for repo-rooted, checkout-rooted, workspace-rooted, and
+    orphan-cwd pins. Reject pins whose `cwd` does not exist on the
+    filesystem at write time (differs from declared links, per ADR
+    0057).
+  - Tests: unit tests for each store-selection case plus the
+    nonexistent-cwd rejection.
+  - Blockers: `H-PIN-002`.
+
+- [ ] `H-PIN-006` Atomic write helpers for `[pins]`.
+  - Scope: read-modify-write upsert/remove for project and user
+    config `[pins]` sections. Preserve unrelated TOML sections, sort
+    entries deterministically (by `id`), replace duplicates by id,
+    create parent directories only on writes, temp-file-and-rename
+    atomicity, leave malformed pre-existing files untouched.
+  - Tests: unit tests for upsert / remove / preserve-others / sort /
+    duplicate-replacement / malformed-file refusal.
+  - Blockers: `H-PIN-005`.
+
+- [ ] `H-PIN-007` Pin CLI command tree skeleton.
+  - Scope: add `conspectus pin {create,list,show,rename,rm,launch,
+    attach,bind,rebind,adopt}` subcommand structure with flag
+    surface from ADR 0057. Validation only — write commands stub
+    `bail!("not yet implemented")`. Read commands wire up in
+    H-PIN-008. `--help` text matches ADR. `--mux-socket` flag
+    accepts a tmux socket name (the equivalent of `tmux -L`); the
+    TOML key it writes is `mux.socket_name`.
+  - Tests: CLI smoke tests for `--help`, invalid flag combinations,
+    and missing required arguments per subcommand.
+  - Blockers: `H-PIN-001`.
+
+- [ ] `H-PIN-008` CLI `pin list` and `pin show`.
+  - Scope: render pins from local + global stores with their
+    provenance, binding state (`bound` / `unbound` / `stale` /
+    `ambiguous`), store path, and bound agent-session id when bound.
+    `--bound` / `--unbound` / `--stale` filters. `pin show <id>`
+    prints the full entry plus binding diagnostic if any.
+  - Tests: CLI integration tests for empty stores, mixed local/global,
+    each binding state via fixture graphs, deterministic ordering.
+  - Blockers: `H-PIN-004`, `H-PIN-007`.
+
+- [ ] `H-PIN-009` CLI `pin create` / `rename` / `rm`.
+  - Scope: write commands that persist user intent via the H-PIN-006
+    helpers. `create` uses nearest-store selection by default;
+    `--store` overrides. `rename` changes `id` and/or `display_name`;
+    `--display` change applies the ADR 0029 lockstep mux rename when
+    the pin is currently bound (delegate to the H-RENAME-009 lockstep
+    helper). `rm` removes from the first matching store. All commands
+    refuse to mutate a malformed config file and surface a clear
+    diagnostic instead.
+  - Tests: CLI integration tests for create-into-project-config,
+    create-into-user-config, explicit `--store`, rename
+    (with-display-change-and-lockstep, with-id-change-only),
+    rm-from-project, rm-not-found, idempotent re-create, and a
+    snapshot of the generated TOML.
+  - Blockers: `H-PIN-006`, `H-PIN-007`.
+
+- [ ] `H-PIN-010` Extend `TmuxRunner` with launch mutation seams.
+  - Scope: add three new defaulted `TmuxRunner` methods —
+    `new_session(socket_name, name, cwd, argv)`,
+    `attach_session(socket_name, name)`,
+    `send_keys(socket_name, target, literal, press_enter)` — and
+    thread `socket_name: Option<&str>` through the existing
+    `rename_session` and `capture_pane` methods. `SystemTmux` adds
+    `-L <name>` only when `socket_name` is `Some(s)` and
+    `s != "default"`, preserving default-socket invocation
+    byte-for-byte. `FakeTmux` records calls.
+  - Tests: unit tests for the new methods, the socket-name
+    threading on both `SystemTmux` (mocked) and `FakeTmux`,
+    and `Unsupported` defaulting.
+  - Blockers: `H-RENAME-003` (the `rename_session` seam this extends),
+    `H-PIN-001`.
+
+- [ ] `H-PIN-011` `HarnessAdapter::launch_argv` defaults.
+  - Scope: add a `launch_argv(&self) -> Vec<OsString>` method to
+    `HarnessAdapter`. Default implementations: codex `["codex"]`,
+    claude-code `["claude"]`, opencode `["opencode"]`, aider
+    `["aider"]`. Override via `pin.launch.argv` flows through the
+    launch primitive (H-PIN-012).
+  - Tests: per-adapter unit tests for the default; integration test
+    that the launch primitive prefers `pin.launch.argv` when set.
+  - Blockers: none beyond `H-PIN-001`.
+
+- [ ] `H-PIN-012` CLI `pin launch` and `pin attach`.
+  - Scope: orchestrate the launch flow per ADR 0057 §Launch
+    Semantics: load pin → run discovery + resolver → branch on
+    binding state. Bound → exec-replace `attach_session`. Stale-mux
+    → `send_keys(argv...) ; Enter` then `attach_session`. Unbound +
+    name-free → `new_session(socket_name, name, cwd, argv)` then
+    `attach_session`. Unbound + name-taken-by-unrelated-tmux →
+    `PinLaunchError::NameTaken` with hint about `pin adopt`.
+    Unix-only exec-replace; `--no-attach` returns after spawn and
+    prints the attach command.
+  - Tests: integration tests via `FakeTmux` for each branch + the
+    bound/stale/unbound transitions; one Unix-gated test for the
+    exec path.
+  - Blockers: `H-PIN-004`, `H-PIN-009`, `H-PIN-010`, `H-PIN-011`.
+
+- [ ] `H-PIN-013` CLI `pin bind` (PinAmbiguous override).
+  - Scope: write a `LocalDeclared linked_to_mux` link (per ADR 0014)
+    between the named agent session and the pin's mux. Tag the
+    declared link with the pin id in `label` or a new
+    `bound_by_pin` field (decide during impl; prefer `label =
+    "pin:<id>"` to avoid a schema migration). Resolver treats that
+    declared link as authoritative when present, suppressing the
+    auto-attribution.
+  - Tests: integration tests for the bind path (resolves
+    `PinAmbiguous` deterministically), and a graph-JSON snapshot
+    showing the declared link survives alongside the original
+    candidate evidence.
+  - Blockers: `H-PIN-004`, `H-PIN-009`.
+
+- [ ] `H-PIN-014` CLI `pin rebind` (external-rename recovery).
+  - Scope: update `pin.mux.name` (and optionally `pin.mux.socket_name`)
+    in the pin's owning TOML store. Validates that no other pin
+    already targets the new mux triple. Does not touch tmux.
+  - Tests: integration tests for rebind on a stale pin, rebind into
+    a duplicate (rejected), rebind across stores (refused — operator
+    moves the entry instead).
+  - Blockers: `H-PIN-006`, `H-PIN-009`.
+
+- [ ] `H-PIN-015` CLI `pin adopt`.
+  - Scope: convert an existing live tmux session into a pin without
+    creating a new mux. Required positional `<pin-id>` and
+    `<mux-name>`; optional `--harness` (default: infer from the
+    resolver's current attribution for that mux); `--display`
+    (default: pin-id); `--mux-socket` (default: absent). `cwd`
+    defaults to the mux's observed `cwd` if known, otherwise refused
+    with a hint. The v1 migration path for replacing agent-deck.
+  - Tests: integration tests for adopt with explicit harness, adopt
+    with inferred harness, adopt with unresolvable mux (rejected),
+    adopt of an already-adopted mux (rejected).
+  - Blockers: `H-PIN-004`, `H-PIN-009`.
+
+- [ ] `H-PIN-016` TUI row tree integration.
+  - Scope: extend `build_sessions_tree` and the mux row builder to
+    render a row per pin. Unbound pins render with a dim glyph and
+    secondary `(pin · <harness> · ~/...)` text. Bound pins render
+    like the underlying agent-session row plus a small star glyph
+    (final glyph chosen against `Theme`; see open question below).
+    Mux view renders the pin-derived mux as an ordinary mux row when
+    bound; unbound pins do not synthesize a mux row.
+  - Tests: row-tree builder unit tests for empty/bound/unbound/stale/
+    ambiguous/multi-pin fixtures; insta snapshots over a 80×24 TUI
+    render.
+  - Blockers: `H-PIN-004`; friendlier after `P8-004` parts 2-5 land
+    the per-view row builders.
+
+- [ ] `H-PIN-017` TUI keybindings for pin actions.
+  - Scope: bind `Enter` on a pin row to launch (unbound) or attach
+    (bound) via H-PIN-012; `R` to rename (lockstep via ADR 0029);
+    `Delete` to remove with confirmation. Wire create / bind /
+    rebind / adopt into the ADR 0031 Controls overlay under a new
+    Pins action group (menu-first per the
+    `feedback_tui_discoverability` memory). Decide the bound-pin
+    glyph in coordination with ADR 0032's theme vocabulary.
+  - Tests: reducer tests for the new keys; snapshot tests for the
+    Controls overlay open state with the Pins group.
+  - Blockers: `H-PIN-016`.
+
+- [ ] `H-PIN-018` Pin diagnostic surfaces in the TUI.
+  - Scope: each pin diagnostic gets a specific affordance — status
+    bar text for unbound (`Enter to launch`), stale-mux (`Enter to
+    relaunch in existing mux`), ambiguous (`b to bind`), drift
+    (advisory). Right-pane detail surfaces the diagnostic plus, for
+    ambiguous, the list of competing `agent_session_id`s.
+  - Tests: snapshot tests for each diagnostic state; reducer test
+    for the `b` accelerator routing to the bind picker.
+  - Blockers: `H-PIN-016`, `H-PIN-004`.
+
+- [ ] `H-PIN-019` Read-only invariant audit.
+  - Scope: explicit CLI integration tests proving `graph`,
+    `node show`, `table`, `tui`, `query` never create, mtime-touch,
+    or content-modify `.conspectus.toml` / user-config files
+    bearing a `[pins]` section. Mirrors `P5-004` for declared links
+    and the equivalent rename audit.
+  - Tests: invariant tests for each command in a clean repo and a
+    repo with a hand-written `[pins]` section.
+  - Blockers: `H-PIN-003`.
+
+- [ ] `H-PIN-020` Snapshot and JSON coverage.
+  - Scope: extend `tests/declared_snapshots.rs` (or sibling file
+    `tests/pins_snapshots.rs`) with scenarios covering bound,
+    unbound, stale-mux, ambiguous, drift, duplicate, local-over-
+    global, declared-override-via-bind, and a non-default-socket
+    pin. Graph JSON snapshots and table-projection snapshots both
+    covered.
+  - Tests: `cargo nextest run --all-targets --all-features`.
+  - Blockers: `H-PIN-009`, `H-PIN-013`, `H-PIN-014`, `H-PIN-015`.
+
+- [ ] `H-PIN-021` Docs and operations guide.
+  - Scope: update `docs/operations.md` and `README.md` with the
+    `conspectus pin` command surface, the agent-deck migration path
+    via `pin adopt`, and the read-only invariant. Update the Phase 8
+    TUI doc with pin keybindings. Cross-link from `docs/design.md`
+    Session Pins section to operations doc once it exists. Promote
+    ADR 0057 from Proposed to Accepted.
+  - Tests: doctest where applicable; `git diff --check`; insta
+    review.
+  - Blockers: `H-PIN-012`, `H-PIN-017`, `H-PIN-018`.
+
+#### Deferred follow-ups (post-v1)
+
+These are explicitly out of v1 scope but recorded so the design
+surface stays coherent. Each is documented in ADR 0057's Open
+Questions Deferred section.
+
+- [ ] `H-PIN-F-001` Tmux non-default socket discovery enumeration.
+  - Extend the tmux runner to scan
+    `{default} ∪ {pin.mux.socket_name | active pin}` so non-default-
+    socket pins become bindable. Decide whether to expose a
+    `[tmux] sockets = [...]` config knob for sockets without an
+    owning pin.
+
+- [ ] `H-PIN-F-002` Lifecycle hooks beyond `launch.argv`.
+  - When a concrete pattern emerges that prefix tooling
+    (`nix develop --command`, `direnv exec`, `op run`) cannot
+    express cleanly, grow a `launch.before` / `launch.after`
+    surface (or `[[pins.hooks]]`). v1 schema is forward-compatible
+    with such an addition.
+
+- [ ] `H-PIN-F-003` Importers from tmuxinator / tmuxp / smug configs.
+  - One-shot converters for operators with existing setups.
+    Granularity collapse rule (one pin per declared session,
+    dropping per-window/per-pane detail) documented during impl.
+
+- [ ] `H-PIN-F-004` Glob/wildcard pin patterns.
+  - `[[pins.patterns]]` surface synthesizing ephemeral pins from
+    path globs (`~/work/*` → one codex pin per matched checkout),
+    modeled on sesh's `[[wildcard]]` table.
+
+- [ ] `H-PIN-F-005` Absolute tmux socket paths (`tmux -S <path>`).
+  - Adds a separate `mux.socket_path` field (distinct from
+    `mux.socket_name`) plus the identity-encoding extension for
+    absolute-path sockets.
+
 ### AI Session Naming
 
 Sibling workstream to `H-RENAME-*`. Layers AI-driven name suggestions on

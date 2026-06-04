@@ -501,6 +501,68 @@ node-id stability rule, and lockstep contract. ADR 0030 settles the shared
 TUI text-input primitive used by the rename overlay (and reused by the
 search overlay and inline mux-picker).
 
+## Session Pins
+
+Per ADR 0057, Conspectus supports user-authored **Session Pins** as
+the surface that replaces agent-deck's "new" workflow. A pin is a
+declared `(harness, cwd, display_name, mux)` tuple that
+
+- persists in a sibling `[[pins.entries]]` TOML table alongside
+  `[declared]` (ADR 0014) and `[aliases]` (ADR 0029), in the same
+  local/global config files,
+- renders as a first-class row in the sessions and mux views whether or
+  not a live session currently realizes it,
+- binds 1:1 at resolve time on the **mux native name**
+  (`pin.mux.name`, optionally namespaced by an explicit `mux.socket_name`
+  for tmux's `-L <name>` server isolation): the resolver looks up
+  the live `MuxSession` with that `(socket, name)` pair, then
+  identifies the harness session via the existing mux-to-agent-
+  session attribution pipeline (ADR 0006 / ADR 0028 / ADR 0046 /
+  ADR 0047 / ADR 0048). Intra-harness lineage (ADR 0018) carries
+  the binding through `/compact` / `/resume` transparently. Cwd is
+  a launch parameter and a drift sanity check, not the
+  discriminator — at realistic densities (the dev tree has 47+
+  historical sessions at one cwd) cwd alone is too weak to
+  attribute uniquely.
+- launches a fresh `tmux [-L <socket>] new-session -s <mux.name>
+  -c <cwd> <argv>` via the `TmuxRunner` mutation surface, then hands
+  the terminal off through the existing P8-010 exec-replace path.
+  When the mux exists but the harness has exited (`PinStaleMux`),
+  launch injects the command into the existing pane via
+  `tmux send-keys` rather than recreating the mux. Non-default tmux
+  sockets (`mux.socket_name = "<name>"`) launch and attach correctly in
+  v1; discovery-side enumeration of non-default sockets is a
+  deferred follow-up, so until that lands, non-default-socket pins
+  render as `PinUnbound` even when their tmux session is live.
+
+Per-harness default launch argv lives on `HarnessAdapter::launch_argv`.
+The pin's `display_name` doubles as the bound agent session's alias
+overlay (ADR 0029 precedence) and as the initial tmux session name;
+renames apply the ADR 0029 lockstep contract. The binding is *not*
+persisted — it is recomputed every discovery pass from live evidence
+plus the pin declaration, mirroring how ADR 0005 unresolved-endpoint
+evidence resolves opportunistically. The resolver emits four
+pin-specific diagnostics — `PinUnbound`, `PinStaleMux`, `PinAmbiguous`,
+`PinDrift` — each mapped to a specific TUI affordance and CLI escape
+hatch (`pin bind`, `pin rebind`, `pin adopt`); ambiguity overrides
+reuse the ADR 0014 declared-link surface rather than introducing a
+new persisted binding type.
+
+Pins declare the *next* logical session; the H-AGENTMUX adapter
+workstream extracts evidence from *existing* agent-mux orchestrators
+(agent-deck, dmux, workmux, agent-of-empires). The two surfaces are
+complementary — adopting pins does not block, replace, or require
+the H-AGENTMUX adapters.
+
+CLI surface: `conspectus pin create|list|show|rename|rm|launch|attach|bind|rebind|adopt`.
+TUI surface: pin rows appear in the sessions and mux row trees;
+`Enter` launches when unbound and attaches when bound; `R` renames with
+lockstep; create/remove/bind/rebind/adopt are reachable from the
+ADR 0031 Controls overlay. ADR 0057 records the schema, mux-anchored
+binding rules, diagnostics, read-only invariants, and the deferred
+questions (Windows/non-tmux launch, multi-harness pins, pre-launch
+hooks, env overrides, atelier-fork auto-suggestion).
+
 ## Status Views
 
 The default `conspectus session` table should be AgentSession-oriented: one row
@@ -993,6 +1055,24 @@ backed by SQLite. The shape:
     Theming grows a shared `[theme]` table with `[tui.theme]` /
     `[html.theme]` overrides. A live server-hosted HTML view is left to
     a follow-up ADR.
+  - ADR 0057 (Proposed): add **Session Pins** as a third sibling
+    TOML write surface (`[[pins.entries]]`) alongside `[declared]`
+    and `[aliases]`. A pin is a user-authored
+    `(harness, cwd, display_name, mux)` declaration that renders as a
+    first-class row whether or not a live session realizes it, binds
+    1:1 on the mux native name through the existing mux-to-agent-
+    session attribution pipeline (ADR 0006 / ADR 0028 / ADR 0046 /
+    ADR 0047 / ADR 0048) — cwd is a launch parameter and drift
+    sanity check, not the discriminator — and launches via
+    `TmuxRunner::new_session` (or `send_keys` into an existing stale
+    mux) plus the existing P8-010 attach exec-replace. `display_name`
+    doubles as the bound session's alias overlay (ADR 0029
+    precedence) and as the initial tmux name. The binding is
+    recomputed each discovery pass rather than persisted. Per-harness
+    default launch argv lives on `HarnessAdapter::launch_argv`.
+    Operator escape hatches (`pin bind` / `pin rebind` / `pin adopt`)
+    handle ambiguity, external renames, and migration from existing
+    tmux sessions.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
