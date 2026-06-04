@@ -186,6 +186,10 @@ pub fn diagnostic_kind_tag(diagnostic: &Diagnostic) -> &'static str {
         Diagnostic::UnresolvedEndpoint { .. } => "unresolved_endpoint",
         Diagnostic::Config { .. } => "config",
         Diagnostic::Conflict { .. } => "conflict",
+        Diagnostic::PinUnbound { .. } => "pin_unbound",
+        Diagnostic::PinStaleMux { .. } => "pin_stale_mux",
+        Diagnostic::PinAmbiguous { .. } => "pin_ambiguous",
+        Diagnostic::PinDrift { .. } => "pin_drift",
     }
 }
 

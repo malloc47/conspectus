@@ -130,6 +130,9 @@ fn pin_candidate_from(store: &PinStore, entry: &PinEntry) -> PinCandidate {
         reason: entry.reason.clone(),
         provenance: store.provenance,
         store_path: store.path.to_string_lossy().into_owned(),
+        // Loader leaves the binding state empty; the resolver pass
+        // populates it.
+        binding: None,
     }
 }
 

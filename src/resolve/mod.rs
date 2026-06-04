@@ -8,12 +8,20 @@ use crate::model::{
     SourceMetadata,
 };
 
+pub mod pins;
+
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     let process_links = derive_process_mux_links(&snapshot);
     append_unique_links(&mut snapshot.candidate_links, process_links);
+    // Pin binding runs before link resolution so the synthesized
+    // pin-derived `LinkedToMux` candidates participate in resolver
+    // ranking. The pin pass emits its own diagnostics, which we
+    // merge in after `resolve_links` reassigns `snapshot.diagnostics`.
+    let pin_diagnostics = pins::apply_pin_bindings(&mut snapshot);
     let output = resolve_links(&snapshot.candidate_links);
     snapshot.resolved_relationships = output.resolved_relationships;
     snapshot.diagnostics = output.diagnostics;
+    snapshot.diagnostics.extend(pin_diagnostics);
     snapshot.canonicalize();
     snapshot
 }

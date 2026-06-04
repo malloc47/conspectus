@@ -516,6 +516,82 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     json_array(competing_link_ids),
                 ])?;
             }
+            // Pin diagnostics (ADR 0057) reuse the `config_message`
+            // column for now; a future query-layer story can grow
+            // dedicated columns or a structured JSON `details` field.
+            Diagnostic::PinUnbound {
+                pin_id,
+                expected_mux_native_id,
+            } => {
+                stmt.execute(params![
+                    kind,
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                    format!(
+                        "pin '{pin_id}' has no live mux with native_id '{expected_mux_native_id}'"
+                    ),
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                ])?;
+            }
+            Diagnostic::PinStaleMux { pin_id, mux } => {
+                stmt.execute(params![
+                    kind,
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                    format!(
+                        "pin '{pin_id}' mux {} is live but no matching harness session is attributed",
+                        mux.native_id
+                    ),
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                ])?;
+            }
+            Diagnostic::PinAmbiguous {
+                pin_id,
+                chosen,
+                competing,
+            } => {
+                let competing_keys: Vec<String> =
+                    competing.iter().map(|id| id.session_key.clone()).collect();
+                stmt.execute(params![
+                    kind,
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                    format!(
+                        "pin '{pin_id}' bound to '{}' with {} competing candidate(s): [{}]",
+                        chosen.session_key,
+                        competing.len(),
+                        competing_keys.join(", "),
+                    ),
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                ])?;
+            }
+            Diagnostic::PinDrift {
+                pin_id,
+                declared_cwd,
+                observed_cwd,
+            } => {
+                stmt.execute(params![
+                    kind,
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                    format!(
+                        "pin '{pin_id}' cwd drift: declared '{declared_cwd}', observed '{observed_cwd}'"
+                    ),
+                    None::<&str>,
+                    None::<&str>,
+                    None::<&str>,
+                ])?;
+            }
         }
     }
     Ok(())

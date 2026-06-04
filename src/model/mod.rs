@@ -708,6 +708,34 @@ pub enum Diagnostic {
         selected_link_id: String,
         competing_link_ids: Vec<String>,
     },
+    /// ADR 0057. No live mux matches the pin's `mux.native_id()`.
+    PinUnbound {
+        pin_id: String,
+        expected_mux_native_id: String,
+    },
+    /// ADR 0057. Mux exists but no harness session matching
+    /// `pin.harness` is attributed to it.
+    PinStaleMux {
+        pin_id: String,
+        mux: MuxSessionId,
+    },
+    /// ADR 0057. Multiple harness sessions are attributed to the
+    /// bound mux for this pin's harness. The resolver picks
+    /// `chosen` per its existing ranking; `competing` lists the
+    /// runners-up so the operator can override with
+    /// `conspectus pin bind --to <session-id>`.
+    PinAmbiguous {
+        pin_id: String,
+        chosen: AgentSessionId,
+        competing: Vec<AgentSessionId>,
+    },
+    /// ADR 0057. Bound session's first-observed cwd diverges from
+    /// the pin's declared cwd. Binding still holds; this is advisory.
+    PinDrift {
+        pin_id: String,
+        declared_cwd: String,
+        observed_cwd: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -754,10 +782,10 @@ impl GraphSnapshot {
 
 /// Snapshot-resident pin record loaded from `[[pins.entries]]` TOML
 /// per ADR 0057. Carries the declarative fields (ADR schema) plus the
-/// loader-side provenance and store path. Binding state — bound mux,
-/// bound session, and resolver diagnostics — is populated by the
-/// resolver pass in a follow-up story (H-PIN-004) and intentionally
-/// left absent here.
+/// loader-side provenance and store path. `binding` is populated by
+/// the resolver pass ([`crate::resolve::pins`]) once mux lookup and
+/// harness attribution have run; pre-resolve snapshots leave it as
+/// `None`.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct PinCandidate {
     /// Pin id from the TOML entry; unique within its store.
@@ -776,6 +804,37 @@ pub struct PinCandidate {
     pub provenance: Provenance,
     /// Absolute path of the TOML file the pin was loaded from.
     pub store_path: String,
+    /// Resolver-populated binding state per ADR 0057. `None` after
+    /// loader-only discovery; populated by the resolver pass.
+    /// `Some(PinBinding::Unbound)` means the resolver ran and found
+    /// no live mux matching `mux.native_id()`; `Some(PinBinding::Bound)`
+    /// means the resolver found a live mux and attributed a harness
+    /// session to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<PinBinding>,
+}
+
+/// Resolver-determined binding state for a [`PinCandidate`].
+/// Ambiguous-binding cases resolve to `Bound` for the resolver's
+/// preferred candidate and emit a parallel `Diagnostic::PinAmbiguous`
+/// listing the competing candidates so the operator can override.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PinBinding {
+    /// The mux exists and a `pin.harness` session was attributed to
+    /// it. The resolver synthesizes a `LinkedToMux` candidate carrying
+    /// the pin's provenance (`LocalPin` / `GlobalPin`).
+    Bound {
+        mux: MuxSessionId,
+        session: AgentSessionId,
+    },
+    /// The mux exists but no live `pin.harness` session is attributed
+    /// to it. Operator action: relaunch the harness inside the
+    /// existing mux.
+    StaleMux { mux: MuxSessionId },
+    /// No mux matching `pin.mux.native_id()` exists in the current
+    /// snapshot. Operator action: launch the pin to create the mux.
+    Unbound,
 }
 
 /// Mux backend coordinates carried inside [`PinCandidate`]. Mirrors
