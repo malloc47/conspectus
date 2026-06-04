@@ -41,7 +41,7 @@ use rusqlite::Connection;
 
 use super::render::{
     self, RenderOptions, SESSIONS_COLUMNS, current_epoch, format_relative_age, header_label,
-    node_short_id_from_display, pick_strongest, strip_branch_prefix, unique_prefix_len,
+    pick_strongest, strip_branch_prefix,
 };
 use super::table::{agent_session_key_for_label, short_session_id};
 use crate::filter::{MuxStateKey, SessionMatchInputs};
@@ -65,9 +65,6 @@ fn session_key(harness_key: &str, state_scope: &str, session_key: &str) -> Sessi
 /// [`fetch_session_rows`] and consumed by the cell extractors.
 #[derive(Debug, Clone)]
 struct SessionRow {
-    /// `NodeId::Display` of the session — used to compute the
-    /// short id hash in the `id` column.
-    node_id_display: String,
     harness_key: String,
     state_scope: String,
     session_key: String,
@@ -155,19 +152,10 @@ pub fn build_agent_rows_from_conn(
     let declared_lookup = fetch_declared_lookup(conn)?;
     let pr_global = fetch_global_pr(conn)?;
 
-    // Apply RowFilter before computing short-id prefix lengths so the
-    // narrowed set determines the prefix budget (matches the in-memory
-    // renderer's behavior).
     let filtered: Vec<&SessionRow> = sessions
         .iter()
         .filter(|row| row_matches(options, row, &mux_lookup))
         .collect();
-
-    let body_full_ids: Vec<String> = filtered
-        .iter()
-        .map(|r| node_short_id_from_display(&r.node_id_display))
-        .collect();
-    let id_len = unique_prefix_len(&body_full_ids);
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(
@@ -177,15 +165,13 @@ pub fn build_agent_rows_from_conn(
             .collect(),
     );
 
-    for (row, full_short) in filtered.iter().zip(body_full_ids.iter()) {
-        let short_id = &full_short[..id_len];
+    for row in filtered {
         let branch_refname = row
             .checkout_node_id
             .as_deref()
             .and_then(|id| branch_lookup.get(id));
         let ctx = CellCtx {
             row,
-            short_id,
             mux: mux_lookup.get(&row.key()),
             branch_refname,
             lineage: lineage_lookup.get(&row.key()),
@@ -202,7 +188,6 @@ pub fn build_agent_rows_from_conn(
 
 struct CellCtx<'a> {
     row: &'a SessionRow,
-    short_id: &'a str,
     mux: Option<&'a MuxInfo>,
     /// Preferred `checked_out_branch` candidate's refname for the
     /// session's checkout (already deduped against the session row's
@@ -224,7 +209,7 @@ struct CellCtx<'a> {
 fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
     let dash = || "—".to_string();
     match key {
-        "id" => ctx.short_id.to_string(),
+        "id" => agent_session_key_for_label(&ctx.row.session_key),
         "agent" => format!(
             "{}:{}",
             ctx.row.harness_key,
@@ -323,8 +308,7 @@ fn fetch_session_rows(conn: &Connection) -> rusqlite::Result<Vec<SessionRow>> {
     // exactly: `{"type":"agent_session","harness_key":...,
     // "state_scope":...,"session_key":...}`.
     let mut stmt = conn.prepare(
-        "SELECT a.node_id, \
-                a.harness_key, a.state_scope, a.session_key, \
+        "SELECT a.harness_key, a.state_scope, a.session_key, \
                 a.cwd, a.title, a.last_message_preview, a.last_active_epoch, \
                 s.checkout_node_id, s.checkout_root, s.repo_common_dir, \
                 al.display_name AS alias_display_name \
@@ -339,18 +323,17 @@ fn fetch_session_rows(conn: &Connection) -> rusqlite::Result<Vec<SessionRow>> {
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(SessionRow {
-            node_id_display: row.get(0)?,
-            harness_key: row.get(1)?,
-            state_scope: row.get(2)?,
-            session_key: row.get(3)?,
-            cwd: row.get(4)?,
-            title: row.get(5)?,
-            preview: row.get(6)?,
-            last_active_epoch: row.get(7)?,
-            checkout_node_id: row.get(8)?,
-            checkout_root: row.get(9)?,
-            repo_common_dir: row.get(10)?,
-            alias_display_name: row.get(11)?,
+            harness_key: row.get(0)?,
+            state_scope: row.get(1)?,
+            session_key: row.get(2)?,
+            cwd: row.get(3)?,
+            title: row.get(4)?,
+            preview: row.get(5)?,
+            last_active_epoch: row.get(6)?,
+            checkout_node_id: row.get(7)?,
+            checkout_root: row.get(8)?,
+            repo_common_dir: row.get(9)?,
+            alias_display_name: row.get(10)?,
         })
     })?;
     rows.collect()

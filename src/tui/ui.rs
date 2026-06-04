@@ -3091,7 +3091,7 @@ mod tests {
         app.update(Msg::ExplorerActivate);
         let drilled = buffer_to_string(&render_to_buffer(&app, area));
         assert!(
-            drilled.contains("backend · native_id"),
+            drilled.contains("backend") && drilled.contains("tmux"),
             "after drilldown the Node zone should expose the mux fields: {drilled}"
         );
         assert!(

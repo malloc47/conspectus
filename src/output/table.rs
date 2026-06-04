@@ -1884,7 +1884,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_projection_prepends_id_column() {
+    fn agent_projection_id_column_uses_session_key() {
         let snapshot = GraphSnapshot {
             nodes: vec![
                 agent_session("codex", "alpha", Some("/work/a")),
@@ -1895,7 +1895,6 @@ mod tests {
 
         let rendered = render(&snapshot, Projection::Agent);
         let header = rendered.lines().next().expect("header");
-        // ID is leftmost.
         assert!(
             header.starts_with("ID"),
             "agent projection header should start with ID:\n{header}",
@@ -1903,22 +1902,15 @@ mod tests {
 
         let body: Vec<&str> = rendered.lines().skip(2).collect();
         assert_eq!(body.len(), 2);
-        for row in &body {
-            let leading: String = row.chars().take_while(|c| !c.is_whitespace()).collect();
-            assert_eq!(
-                leading.len(),
-                SHORT_ID_FLOOR,
-                "short id should be at the floor for an uncolliding pair: {row:?}",
-            );
-            assert!(
-                leading.chars().all(|c| c.is_ascii_hexdigit()),
-                "short id should be hex: {row:?}",
-            );
-        }
+        let leading: Vec<String> = body
+            .iter()
+            .map(|row| row.chars().take_while(|c| !c.is_whitespace()).collect())
+            .collect();
+        assert_eq!(leading, vec!["alpha", "beta"]);
     }
 
     #[test]
-    fn agent_projection_short_ids_are_stable_across_renders() {
+    fn agent_projection_external_ids_are_stable_across_renders() {
         let snapshot = GraphSnapshot {
             nodes: vec![agent_session("codex", "alpha", Some("/work/a"))],
             ..GraphSnapshot::empty()

@@ -835,7 +835,7 @@ fn link_target_label_by_id(snapshot: &GraphSnapshot, target: &NodeId) -> Option<
         )),
         GraphNode::RuntimeProcess(process) => Some(runtime_process_display_label(process)),
         GraphNode::Repo(repo) => Some(format!("repo:{}", repo.common_dir)),
-        other => Some(format!("{}", other.id())),
+        other => Some(node_reference_label(other)),
     }
 }
 
@@ -979,6 +979,24 @@ fn runtime_process_display_label(process: &RuntimeProcessNode) -> String {
         (Some(pid), None) => format!("pid {pid}"),
         (None, Some(command)) => command.to_string(),
         (None, None) => process.observation_key.clone(),
+    }
+}
+
+fn node_reference_label(node: &GraphNode) -> String {
+    match node {
+        GraphNode::AgentSession(session) => agent_session_display_id(session),
+        GraphNode::MuxSession(mux) => mux_display_label(mux),
+        GraphNode::RuntimeProcess(process) => runtime_process_display_label(process),
+        GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),
+        GraphNode::Fork(fork) => fork
+            .name
+            .as_deref()
+            .unwrap_or(&fork.provider_source_key)
+            .to_string(),
+        GraphNode::Repo(repo) => format!("repo:{}", repo.common_dir),
+        GraphNode::Checkout(checkout) => format!("checkout:{}", checkout.root),
+        GraphNode::Workspace(workspace) => format!("workspace:{}", workspace.root),
+        GraphNode::Branch(branch) => format!("branch:{}", branch.refname),
     }
 }
 

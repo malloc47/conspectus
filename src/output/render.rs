@@ -250,7 +250,7 @@ pub const SESSIONS_COLUMNS: &[ColumnSpec] = &[
     ColumnSpec {
         key: "id",
         header: "ID",
-        description: "Short content-addressed row identifier.",
+        description: "Harness-native agent session id.",
         default: true,
     },
     ColumnSpec {

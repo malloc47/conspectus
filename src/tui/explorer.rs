@@ -1091,7 +1091,7 @@ fn agent_session_core(
 ) -> Vec<CoreField> {
     let id_node = NodeId::AgentSession(s.id.clone());
     let mut fields = vec![
-        CoreField::plain("id", node_short_id(&id_node)),
+        CoreField::plain("id", s.id.session_key.clone()),
         CoreField::plain("harness", s.harness_key.clone()),
     ];
     let alias = snapshot
@@ -1103,7 +1103,12 @@ fn agent_session_core(
     if let Some(alias) = &alias {
         fields.push(CoreField::plain("alias", alias.clone()));
     } else if let Some(title) = s.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        fields.push(CoreField::plain("alias", title.to_string()));
+        let truncated = truncate(title, 48);
+        let mut field = CoreField::plain("title", truncated.clone());
+        if truncated.len() < title.len() {
+            field = field.with_long(title.to_string());
+        }
+        fields.push(field);
     } else {
         fields.push(CoreField::placeholder("alias", "—"));
     }
@@ -1165,12 +1170,14 @@ fn mux_session_core(
     m: &MuxSessionNode,
     home: Option<&Path>,
 ) -> Vec<CoreField> {
+    // `id` carries the external mux session name (e.g. the raw tmux
+    // session id), mirroring the agent-session detail's external
+    // `id` field. The internal backend-prefixed graph id stays
+    // available through `NodeId::MuxSession`; surfacing it here
+    // would duplicate `backend` + `id`.
     let mut fields = vec![
-        CoreField::plain("id", node_short_id(&NodeId::MuxSession(m.id.clone()))),
-        CoreField::plain(
-            "backend · native_id",
-            format!("{} · {}", m.backend, m.native_id),
-        ),
+        CoreField::plain("id", m.native_id.clone()),
+        CoreField::plain("backend", m.backend.clone()),
     ];
     fields.push(match &m.cwd {
         Some(cwd) => {
@@ -1807,9 +1814,59 @@ mod tests {
         assert_eq!(view.title_line, "claude-code:abc");
         let labels: Vec<&str> = view.core_fields.iter().map(|f| f.label).collect();
         assert_eq!(labels, vec!["id", "harness", "alias", "cwd", "status"]);
+        let id = view
+            .core_fields
+            .iter()
+            .find(|f| f.label == "id")
+            .expect("id field");
+        assert_eq!(id.value, "abc");
         assert_eq!(view.upstream.groups.len(), 0);
         assert_eq!(view.downstream.groups.len(), 0);
         assert_eq!(view.upstream.link_count(), 0);
+    }
+
+    #[test]
+    fn agent_session_core_id_shows_full_external_session_key() {
+        let long_id = "ffffffff-1111-2222-3333-444444444444";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(agent("opencode", long_id, Some("/home/op/src/x"), None));
+        let snapshot = resolve_snapshot(snapshot);
+        let target = NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id));
+
+        let view = build(&snapshot, &target, Some(home().as_path()));
+        let id = view
+            .core_fields
+            .iter()
+            .find(|f| f.label == "id")
+            .expect("id field");
+        assert_eq!(id.value, long_id);
+    }
+
+    #[test]
+    fn agent_session_title_is_not_labeled_as_alias_in_core_fields() {
+        let long_title = "The conspectus TUI, fashioned after a long prompt, should remain a title";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(agent(
+            "codex",
+            "abc",
+            Some("/home/op/src/x"),
+            Some(long_title),
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let target = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+
+        let view = build(&snapshot, &target, Some(home().as_path()));
+        let labels: Vec<&str> = view.core_fields.iter().map(|f| f.label).collect();
+        assert_eq!(labels, vec!["id", "harness", "title", "cwd", "status"]);
+        let title = view
+            .core_fields
+            .iter()
+            .find(|f| f.label == "title")
+            .expect("title field");
+        assert!(title.value.contains('…'));
+        assert_eq!(title.long_value.as_deref(), Some(long_title));
     }
 
     #[test]
@@ -1837,18 +1894,26 @@ mod tests {
         assert_eq!(group.links.len(), 1);
         assert!(group.links[0].resolved_winner);
         assert_eq!(group.links[0].edge_state, EdgeStateLabel::Resolves);
-        // Preview carries mux core fields.
+        // Preview carries mux core fields. The `id` field shows the
+        // external mux name and `backend` carries the backend label
+        // (e.g. `tmux`), mirroring the agent-session detail layout.
         let labels: Vec<&str> = group.links[0].preview.iter().map(|f| f.label).collect();
         assert_eq!(
             labels,
-            vec![
-                "id",
-                "backend · native_id",
-                "cwd",
-                "attached",
-                "last_active"
-            ]
+            vec!["id", "backend", "cwd", "attached", "last_active"]
         );
+        let id_field = group.links[0]
+            .preview
+            .iter()
+            .find(|f| f.label == "id")
+            .expect("id field");
+        let backend_field = group.links[0]
+            .preview
+            .iter()
+            .find(|f| f.label == "backend")
+            .expect("backend field");
+        assert_eq!(id_field.value, "work-claude");
+        assert_eq!(backend_field.value, "tmux");
     }
 
     #[test]

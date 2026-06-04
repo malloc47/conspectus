@@ -12,6 +12,8 @@
 //! - The harness/mux label that appears in the session table's `AGENT`
 //!   or `MUX` column, e.g. `codex:session-x` or `tmux:editor`. The label
 //!   only resolves when it uniquely identifies one node.
+//! - A bare harness-native agent session key from the session table's `ID`
+//!   column, when it uniquely identifies one node.
 //!
 //! H-TBL-005 wires these forms through the CLI command added by H-OBS-002.
 //!
@@ -118,6 +120,7 @@ pub fn resolve_node_id_from_conn(
 
     // 2. Label matches against agent and mux sessions only.
     //    `<harness>:<session_key>` or `<harness>:<title>` for agents,
+    //    bare `<session_key>` for agents when unique,
     //    `<backend>:<native_id>` for muxes — same as the in-memory
     //    `label_matches`.
     let mut agent_stmt = conn
@@ -130,7 +133,7 @@ pub fn resolve_node_id_from_conn(
     for (harness, scope, key, title) in agent_rows {
         let key_label = format!("{harness}:{key}");
         let title_label = title.as_deref().map(|t| format!("{harness}:{t}"));
-        if key_label == trimmed || title_label.as_deref() == Some(trimmed) {
+        if key == trimmed || key_label == trimmed || title_label.as_deref() == Some(trimmed) {
             let id = NodeId::AgentSession(crate::model::AgentSessionId::new(
                 harness.clone(),
                 scope.clone(),
@@ -327,6 +330,129 @@ fn node_kind_label(id: &NodeId) -> &'static str {
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
         NodeId::ForgePr(_) => "forge_pr",
+    }
+}
+
+fn node_reference_label_from_display(conn: &Connection, display: &str) -> rusqlite::Result<String> {
+    let kind = display.split_once(':').map(|(k, _)| k).unwrap_or("");
+    match kind {
+        "agent_session" => {
+            let row: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT harness_key, session_key FROM node_agent_sessions WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            Ok(row
+                .map(|(harness, key)| format!("{harness}:{key}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "mux_session" => {
+            let row: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT backend, native_id FROM node_mux_sessions WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            Ok(row
+                .map(|(backend, native_id)| format!("{backend}:{native_id}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "runtime_process" => {
+            let row: Option<(String, Option<i64>, Option<String>)> = conn
+                .query_row(
+                    "SELECT observation_key, pid, command FROM node_runtime_processes \
+                     WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            Ok(row
+                .map(
+                    |(observation_key, pid, command)| match (pid, command.as_deref()) {
+                        (Some(pid), Some(command)) => format!("pid {pid}: {command}"),
+                        (Some(pid), None) => format!("pid {pid}"),
+                        (None, Some(command)) => command.to_string(),
+                        (None, None) => observation_key,
+                    },
+                )
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "forge_pr" => {
+            let row: Option<(String, String, i64)> = conn
+                .query_row(
+                    "SELECT owner, repo, number FROM node_forge_prs WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            Ok(row
+                .map(|(owner, repo, number)| format!("{owner}/{repo}#{number}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "fork" => {
+            let row: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT provider_source_key, name FROM node_forks WHERE node_id = ?1",
+                    [display],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            Ok(row
+                .map(|(source_key, name)| name.unwrap_or(source_key))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "checkout" => {
+            let root: Option<String> = conn
+                .query_row(
+                    "SELECT root FROM node_checkouts WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(root
+                .map(|root| format!("checkout:{root}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "workspace" => {
+            let root: Option<String> = conn
+                .query_row(
+                    "SELECT root FROM node_workspaces WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(root
+                .map(|root| format!("workspace:{root}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "repo" => {
+            let common_dir: Option<String> = conn
+                .query_row(
+                    "SELECT common_dir FROM node_repos WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(common_dir
+                .map(|common_dir| format!("repo:{common_dir}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        "branch" => {
+            let refname: Option<String> = conn
+                .query_row(
+                    "SELECT refname FROM node_branches WHERE node_id = ?1",
+                    [display],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(refname
+                .map(|refname| format!("branch:{refname}"))
+                .unwrap_or_else(|| display.to_string()))
+        }
+        _ => Ok(display.to_string()),
     }
 }
 
@@ -634,9 +760,9 @@ fn write_forge_pr(out: &mut String, conn: &Connection, node_id: &str) -> rusqlit
 #[derive(Debug, Clone)]
 struct LinkRow {
     link_id: String,
-    source_display: String,
+    source_label: String,
     target_kind: String,
-    target_node_display: Option<String>,
+    target_node_label: Option<String>,
     target_node_type: Option<String>,
     target_harness_key: Option<String>,
     target_native_id: Option<String>,
@@ -669,15 +795,22 @@ fn fetch_link_rows(
         let source_json: String = row.get(1)?;
         let target_node_json: Option<String> = row.get(3)?;
         let source_id = crate::query::reader::parse_node_id_json(&source_json, 1)?;
-        let target_node_display = match target_node_json.as_deref() {
-            Some(json) => Some(crate::query::reader::parse_node_id_json(json, 3)?.to_string()),
+        let source_display = source_id.to_string();
+        let target_node_label = match target_node_json.as_deref() {
+            Some(json) => {
+                let target_id = crate::query::reader::parse_node_id_json(json, 3)?;
+                Some(node_reference_label_from_display(
+                    conn,
+                    &target_id.to_string(),
+                )?)
+            }
             None => None,
         };
         Ok(LinkRow {
             link_id: row.get(0)?,
-            source_display: source_id.to_string(),
+            source_label: node_reference_label_from_display(conn, &source_display)?,
             target_kind: row.get(2)?,
-            target_node_display,
+            target_node_label,
             target_node_type: row.get(4)?,
             target_harness_key: row.get(5)?,
             target_native_id: row.get(6)?,
@@ -733,7 +866,7 @@ enum LinkDirection {
 fn write_link(out: &mut String, link: &LinkRow, dir: LinkDirection) {
     let other = match dir {
         LinkDirection::Outgoing => match link.target_kind.as_str() {
-            "node" => match &link.target_node_display {
+            "node" => match &link.target_node_label {
                 Some(display) => format!("→ {display}"),
                 None => "→ ?".to_string(),
             },
@@ -754,7 +887,7 @@ fn write_link(out: &mut String, link: &LinkRow, dir: LinkDirection) {
                 format!("→ unresolved({})", parts.join(", "))
             }
         },
-        LinkDirection::Incoming => format!("← {}", link.source_display),
+        LinkDirection::Incoming => format!("← {}", link.source_label),
     };
     let _ = writeln!(
         out,
@@ -793,8 +926,8 @@ fn write_resolved_from_conn(
     )?;
     #[derive(Clone)]
     struct Raw {
-        source_display: String,
-        target_display: String,
+        source_label: String,
+        target_label: String,
         relation: String,
         selected: String,
         competing: Vec<String>,
@@ -802,9 +935,11 @@ fn write_resolved_from_conn(
     let rows = stmt.query_map([&id_json], |row| {
         let source_json: String = row.get(0)?;
         let target_json: String = row.get(1)?;
+        let source_display = crate::query::reader::parse_node_id_json(&source_json, 0)?.to_string();
+        let target_display = crate::query::reader::parse_node_id_json(&target_json, 1)?.to_string();
         Ok(Raw {
-            source_display: crate::query::reader::parse_node_id_json(&source_json, 0)?.to_string(),
-            target_display: crate::query::reader::parse_node_id_json(&target_json, 1)?.to_string(),
+            source_label: node_reference_label_from_display(conn, &source_display)?,
+            target_label: node_reference_label_from_display(conn, &target_display)?,
             relation: row.get(2)?,
             selected: row.get(3)?,
             competing: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
@@ -822,8 +957,8 @@ fn write_resolved_from_conn(
             out,
             "  - {relation:15} {source} → {target} (selected={selected})",
             relation = rel.relation,
-            source = rel.source_display,
-            target = rel.target_display,
+            source = rel.source_label,
+            target = rel.target_label,
             selected = rel.selected,
         );
         if !rel.competing.is_empty() {
@@ -1094,7 +1229,15 @@ mod tests {
         assert!(rendered.contains("kind: agent_session"));
         assert!(rendered.contains("outgoing candidate links: 1"));
         assert!(rendered.contains("linked_to_mux"));
+        assert!(
+            rendered.contains("linked_to_mux   → tmux:editor"),
+            "candidate link should use mux-native label:\n{rendered}",
+        );
         assert!(rendered.contains("resolved relationships: 1"));
+        assert!(
+            rendered.contains("linked_to_mux   codex:alpha → tmux:editor"),
+            "resolved relationship should use external labels:\n{rendered}",
+        );
         assert!(rendered.contains("selected=link-1"));
     }
 }

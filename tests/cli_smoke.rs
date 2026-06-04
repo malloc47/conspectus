@@ -1153,7 +1153,7 @@ fn node_show_resolves_harness_label() {
 }
 
 #[test]
-fn node_show_resolves_short_id_from_table_sessions() {
+fn node_show_resolves_external_session_id_from_table_sessions() {
     let home = tempfile::TempDir::new().expect("home temp");
     let scan_root = tempfile::TempDir::new().expect("scan temp");
     let codex_state = home.path().join(".codex").join("sessions");
@@ -1165,7 +1165,7 @@ fn node_show_resolves_short_id_from_table_sessions() {
     .expect("write codex session");
 
     let codex_state_root: PathBuf = home.path().join(".codex");
-    // Pull the short id off the session table.
+    // Pull the harness-native session id off the session table.
     let session_assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
@@ -1181,21 +1181,18 @@ fn node_show_resolves_short_id_from_table_sessions() {
         .skip(2)
         .find(|line| line.contains("codex:short-id-test"))
         .expect("body row with session");
-    let short_id: String = body_row
+    let session_id: String = body_row
         .chars()
         .take_while(|c| !c.is_whitespace())
         .collect();
-    assert!(
-        !short_id.is_empty() && short_id.chars().all(|c| c.is_ascii_hexdigit()),
-        "short id from session table was {short_id:?}",
-    );
+    assert_eq!(session_id, "short-id-test");
 
     let assert = isolated_cmd(home.path())
         .env("CONSPECTUS_CODEX_STATE", &codex_state_root)
         .current_dir(scan_root.path())
         .arg("node")
         .arg("show")
-        .arg(&short_id)
+        .arg(&session_id)
         .assert()
         .success();
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
