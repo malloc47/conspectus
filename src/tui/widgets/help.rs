@@ -115,6 +115,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         "Default action on the selected row (T8-043): attach mux/muxed sessions, view un-muxed sessions, expand groups",
     );
     bind(&mut lines, "a", "Attach to the selected mux");
+    bind(
+        &mut lines,
+        "i",
+        "Copy the selected agent or mux session's full id to the clipboard",
+    );
     bind(&mut lines, "R", "Rename the selected agent session");
     bind(
         &mut lines,
@@ -186,7 +191,7 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     bind(
         &mut lines,
         "Enter",
-        "Drill into the neighbor on a link row · expand on a group header",
+        "Copy the value on a Node-zone field row · drill on a link row · expand on a group header",
     );
     bind(
         &mut lines,

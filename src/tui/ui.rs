@@ -71,6 +71,15 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
     draw_help_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
     draw_value_modal(app, frame, area);
+    draw_toast(app, frame, area);
+}
+
+fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.toast() else {
+        return;
+    };
+    use crate::tui::widgets::toast::ToastWidget;
+    frame.render_widget(ToastWidget::new(state, app.theme()), area);
 }
 
 fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {

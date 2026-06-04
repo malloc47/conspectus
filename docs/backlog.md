@@ -1522,6 +1522,24 @@ area is already being touched. Group prefixes:
     timestamps.
   - Blockers: `H-REF-008` (typed source-metadata fields makes recency
     extraction safer).
+- [ ] `H-OBS-007` Gate left-pane tree navigation keys on left-pane focus.
+  - Scope: `h` / `l` and `←` / `→` (plus `g`/`G`/Tab) in the TUI always
+    operate on the left-pane tree (`Msg::ExpandRow`, `Msg::CollapseRow`,
+    `Msg::Home`, `Msg::End`, `Msg::CycleFocus`) regardless of which pane
+    has focus. `remap_for_focus()` in `src/tui/runtime.rs:1517`
+    remaps `NavDown`/`NavUp`/`PageDown`/`PageUp`/`ToggleLinkedDetails`/
+    `DefaultAction` when focus is `Right` but passes `ExpandRow`,
+    `CollapseRow`, `Home`, `End`, and `CycleFocus` through unchanged
+    via the `other => other` arm (line 1534). The left-pane reducer
+    handlers (`expand_selected`, `collapse_selected`, `move_selection`,
+    `move_selection_to`) never check `self.focus`, so they always
+    mutate the left-pane selection. Fix: add a no-op or right-pane-
+    equivalent remapping in `remap_for_focus()` for each affected
+    message when focus is `Right`, or gate the reducer handlers on
+    `self.focus == Focus::Left`.
+  - Tests: TUI key-dispatch unit tests for each affected key with focus
+    on both panes.
+  - Blockers: none.
 
 ### Table Output Modernization
 
@@ -6290,7 +6308,7 @@ than recursive inline detail panes.
   - Blockers: `T8-027`, `T8-038` (so the breadcrumb short-form can
     pick up the chip too).
 
-- [ ] `T8-040` Enter-to-copy on Node-zone fields with a toast
+- [x] `T8-040` Enter-to-copy on Node-zone fields with a toast
   widget.
   - Scope: `Enter` on a Node-zone field row is a no-op today.
     Wire it to copy the field's full value to the system
@@ -6300,18 +6318,34 @@ than recursive inline detail panes.
     cleanly splits the contract: `o` for *reading* a long value
     (modal, scrollable), `Enter` for *copying*. Reuse the toast
     for `i` (copy short id) and any future copy actions so
-    feedback is consistent. Requires an ADR covering the
-    clipboard backend choice — OSC 52 (terminal escape, works
-    over SSH, not universally honored) vs `arboard` (native, no
-    SSH support, new dep). Recommend OSC 52 as the no-new-dep
-    default with `arboard` behind a feature flag if needed.
+    feedback is consistent. The `i` binding copies the full id of
+    the selected agent or mux session (not a short id) so the
+    output drops directly into `node show` / external tooling.
+    Clipboard backend is OSC 52 per
+    ADR 0056 (no new deps, SSH-friendly, hand-rolled escape
+    writer at `src/tui/clipboard.rs`); `arboard` deferred until
+    operator feedback shows the OSC 52 gap biting.
   - Tests: reducer/keymap tests for Enter-on-Node-field copying
     the value and surfacing a toast; toast widget unit tests for
     auto-dismiss timing and replacement (newer toast supersedes
     older); regression test that Enter on link rows still drills
     and Enter on group headers still toggles; coverage that empty
     or absent values don't surface a misleading "copied" toast.
-  - Blockers: `T8-027`; ADR for the clipboard backend.
+  - Blockers: `T8-027` (cleared). Clipboard backend ADR landed as
+    ADR 0056.
+  - **slice landed**: OSC 52 clipboard primitive at
+    `src/tui/clipboard.rs` (in-tree base64 encoder, no new deps per
+    ADR 0056). Reusable `ToastWidget` at
+    `src/tui/widgets/toast.rs` auto-dismisses after 1500ms and is
+    rendered as a non-blocking bottom-centered overlay; newer toasts
+    replace older. Right-pane `Enter` on a Node-zone field row now
+    copies the field value (preferring the untruncated `long_value`
+    when present) and posts a `copied: <label>` toast; link rows
+    still drill, group headers still toggle. `i` copies the selected
+    agent or mux session's full id (e.g.
+    `agent_session:claude:proj_a:7d3f…`) via the same toast surface
+    and surfaces a status hint when the selection isn't a session
+    row. Help overlay advertises both bindings.
 
 - [x] `T8-041` Flip the Upstream / Downstream header layout so
   zone labels anchor to the right.

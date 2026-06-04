@@ -279,6 +279,8 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::ViewerOverlayKey(key)) => {
                     handle_viewer_overlay_key(&mut app, key);
                 }
+                Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
+                Some(Action::CopySessionId) => copy_session_id_action(&mut app),
                 None => {}
             }
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
@@ -412,6 +414,8 @@ fn static_event_loop(
                         "scenario TUI keeps mutating actions disabled".to_string(),
                     )));
                 }
+                Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
+                Some(Action::CopySessionId) => copy_session_id_action(&mut app),
                 None => {}
             }
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
@@ -1015,9 +1019,21 @@ enum Action {
     /// `Enter` on the left pane (T8-043). The dispatcher resolves
     /// the selected row's default action: attach a mux row, view an
     /// un-muxed session, or expand/collapse a group row. Right-pane
-    /// focus is remapped to [`Msg::ExplorerActivate`] before this
+    /// focus is remapped to [`Action::ExplorerEnter`] before this
     /// variant ever reaches the dispatcher.
     DefaultAction,
+    /// `Enter` on the right pane (T8-040 / T8-043). When the
+    /// explorer cursor is on a Node-zone field row with a copyable
+    /// value, the runtime writes the value to the clipboard via OSC
+    /// 52 (ADR 0056) and posts a toast. Otherwise the dispatcher
+    /// falls through to [`Msg::ExplorerActivate`] (group expand,
+    /// link drill).
+    ExplorerEnter,
+    /// `i` on any row (T8-040). When the selected row is an agent
+    /// session or mux session, copies the full id to the clipboard
+    /// (ADR 0056) and posts a toast. No-op with a status hint
+    /// otherwise.
+    CopySessionId,
 }
 
 /// Resolved default action for the left-pane cursor (T8-043). Pure
@@ -1198,6 +1214,40 @@ fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunCon
         SelectedDefault::Attach => attach_action(terminal, app, config),
         SelectedDefault::View => view_action(terminal, app, config),
     }
+}
+
+/// Right-pane Enter (T8-040 / T8-043). When the explorer cursor is on
+/// a Node-zone field row with a copyable value, write it to the
+/// clipboard via OSC 52 (ADR 0056) and post a toast. Otherwise
+/// dispatch the normal `Msg::ExplorerActivate` so group expansion and
+/// link drill still work.
+fn explorer_enter_action(app: &mut App) {
+    if let Some((label, value)) = app.explorer_copy_target() {
+        copy_and_toast(app, format!("copied: {label}"), value);
+        return;
+    }
+    app.update(Msg::ExplorerActivate);
+}
+
+/// `i` keybinding (T8-040). Copies the selected agent or mux session's
+/// full id to the clipboard, posting a toast. Surfaces a status hint
+/// when the selection is something else (a group row, a PR, …).
+fn copy_session_id_action(app: &mut App) {
+    match app.selected_session_id() {
+        Some((label, value)) => copy_and_toast(app, label, value),
+        None => app.update(Msg::SetStatus(Some(
+            "i: select an agent or mux session row to copy its id".to_string(),
+        ))),
+    }
+}
+
+/// Shared copy-side-effect: write `value` to the clipboard via OSC 52
+/// and post the `label` as a toast. Clipboard errors are silenced —
+/// OSC 52 is fire-and-forget per ADR 0056, and the toast is the
+/// operator-facing signal.
+fn copy_and_toast(app: &mut App, label: String, value: String) {
+    let _ = crate::tui::clipboard::copy_to_clipboard(&value);
+    app.post_toast(label);
 }
 
 /// Handle the `a` key. On success, suspend the TUI, spawn
@@ -1483,11 +1533,15 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
             Msg::ToggleLinkedDetails => Msg::ExplorerToggleGroup,
             other => other,
         })),
-        // T8-043: Enter on the explorer cursor expands a group
-        // header or drills into a link row (locked decision 8).
-        // Left-pane Enter (DefaultAction) is dispatched against the
-        // selected row's kind by the main loop.
-        Action::DefaultAction => Action::Msg(Box::new(Msg::ExplorerActivate)),
+        // T8-040 / T8-043: Enter on the explorer cursor either
+        // copies a Node-zone field value (T8-040) or expands a
+        // group header / drills into a link row (T8-043). The
+        // dispatcher inspects the cursor row at action time, so
+        // remap to [`Action::ExplorerEnter`] and let the main
+        // loop branch with App state in hand. Left-pane Enter
+        // (DefaultAction) is dispatched against the selected
+        // row's kind separately.
+        Action::DefaultAction => Action::ExplorerEnter,
         // T8-034: `F` toggles the Expanded Node Detail view when the
         // right pane is focused. The same key still clears filters
         // when the left tree has focus (ADR 0031).
@@ -1609,6 +1663,13 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (m, KeyCode::Char('o')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenValueModal)
             }
+            // T8-040: `i` copies the selected agent or mux session's
+            // full id to the clipboard via OSC 52 (ADR 0056) and
+            // posts a toast. The runtime branches on selection kind;
+            // a non-session row surfaces a status hint instead.
+            (m, KeyCode::Char('i')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::CopySessionId)
+            }
             (_, KeyCode::Tab) => Some(Action::Msg(Box::new(Msg::CycleFocus))),
             (_, KeyCode::Char('J')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(1)))),
             (_, KeyCode::Char('K')) => Some(Action::Msg(Box::new(Msg::ScrollPreviewBy(-1)))),
@@ -1690,6 +1751,23 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
             Some(Action::Attach)
+        );
+    }
+
+    #[test]
+    fn translate_i_requests_copy_session_id() {
+        // T8-040: `i` resolves the selected agent or mux session's
+        // full id and routes it through the OSC 52 clipboard
+        // primitive (ADR 0056) at the main-loop boundary.
+        assert_eq!(
+            translate(press(KeyCode::Char('i'), KeyModifiers::NONE), 24),
+            Some(Action::CopySessionId)
+        );
+        // Ctrl-I is the terminal alias for Tab; the binding must not
+        // claim it.
+        assert_ne!(
+            translate(press(KeyCode::Char('i'), KeyModifiers::CONTROL), 24),
+            Some(Action::CopySessionId)
         );
     }
 
@@ -1945,13 +2023,14 @@ mod tests {
             Action::Msg(Box::new(Msg::CycleFocus))
         );
         // Locked decision 8: Enter is the universal "do the obvious
-        // thing" key on the explorer cursor. T8-043 changed the
-        // incoming variant from Msg::ToggleExpand to the new
-        // Action::DefaultAction, but the right-pane outcome is the
-        // same.
+        // thing" key on the explorer cursor. T8-040 made the
+        // dispatch App-aware (Node-zone fields copy; other rows
+        // drill/expand), so the remap produces the new
+        // [`Action::ExplorerEnter`] variant that the main loop
+        // resolves against [`App::explorer_copy_target`].
         assert_eq!(
             remap_for_focus(Action::DefaultAction, Focus::Right),
-            Action::Msg(Box::new(Msg::ExplorerActivate))
+            Action::ExplorerEnter
         );
         // Left-pane DefaultAction is left untouched here so the main
         // loop can resolve it against the selected row.

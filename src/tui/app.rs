@@ -179,6 +179,12 @@ pub struct App {
     /// the entire two-panel layout with the native viewer widget
     /// and routes input through its reducer.
     viewer_modal: Option<crate::viewer::state::ViewerState>,
+    /// Active transient toast (T8-040). Non-blocking: input continues
+    /// to flow to the underlying view. The renderer reads `posted_at`
+    /// against the toast's auto-dismiss window; expired toasts simply
+    /// don't paint. Set from the runtime at the `Cmd` boundary so the
+    /// reducer doesn't observe `Instant`.
+    toast: Option<crate::tui::widgets::toast::ToastState>,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -462,6 +468,7 @@ impl App {
             help_overlay: None,
             value_modal: None,
             viewer_modal: None,
+            toast: None,
             sort,
             filter,
             grouping,
@@ -648,6 +655,69 @@ impl App {
 
     pub fn close_viewer_modal(&mut self) {
         self.viewer_modal = None;
+    }
+
+    /// Active transient toast (T8-040), if any. Expired toasts may
+    /// still be `Some` between frames; the renderer treats expired
+    /// state as no-op via `ToastState::is_expired`.
+    pub fn toast(&self) -> Option<&crate::tui::widgets::toast::ToastState> {
+        self.toast.as_ref()
+    }
+
+    /// Post a transient toast that auto-dismisses after the widget's
+    /// `TOAST_DURATION` window. Called from the runtime side (the
+    /// `Cmd` boundary per ADR 0024) so the reducer never observes
+    /// `Instant::now()`. A second call replaces the prior toast and
+    /// resets the timer — newer feedback supersedes older.
+    pub fn post_toast(&mut self, label: impl Into<String>) {
+        self.toast = Some(crate::tui::widgets::toast::ToastState::new(label));
+    }
+
+    /// Resolve whatever copyable value the explorer cursor points at.
+    /// Returns `(label, value)` for the toast caption + clipboard
+    /// payload, or `None` if the row is not a Node-zone field or the
+    /// field has no value (empty or absent — see T8-040's
+    /// "no misleading copied toast" contract).
+    pub fn explorer_copy_target(&self) -> Option<(String, String)> {
+        let state = self.explorer.as_ref()?;
+        let row = state.selected_row()?;
+        match row {
+            ExplorerRow::NodeField { index, label, .. } => {
+                let field = state.view.core_fields.get(index)?;
+                // Prefer the untruncated form when present so the
+                // clipboard always carries the full value; fall back
+                // to the rendered short form for fields without a
+                // separately-tracked long form.
+                let value = field
+                    .long_value
+                    .clone()
+                    .unwrap_or_else(|| field.value.clone());
+                if value.is_empty() {
+                    return None;
+                }
+                Some((label.to_string(), value))
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve the full id of the selected agent or mux session row
+    /// for the `i` keybinding. Returns `(label, id)` where `label` is
+    /// the toast caption ("copied: agent_session id" /
+    /// "copied: mux id") and `id` is the full id string (e.g.
+    /// `agent_session:claude:proj_a:7d3f…`) the clipboard should
+    /// receive. Returns `None` when the selection is anything other
+    /// than an agent session or mux session row.
+    pub fn selected_session_id(&self) -> Option<(String, String)> {
+        match self.selection.as_ref()? {
+            RowId::AgentSession(node @ NodeId::AgentSession(_)) => {
+                Some(("copied: agent_session id".to_string(), node.to_string()))
+            }
+            RowId::MuxSession(node @ NodeId::MuxSession(_)) => {
+                Some(("copied: mux id".to_string(), node.to_string()))
+            }
+            _ => None,
+        }
     }
 
     /// Open the full-value modal for whatever value the active
@@ -3035,5 +3105,80 @@ mod tests {
         let after = app.explorer().expect("explorer after reselect");
         assert_eq!(after.view.focused, initial_focused);
         assert!(after.breadcrumb.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // T8-040: Enter-to-copy on Node-zone field rows + `i` for full id.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn explorer_copy_target_returns_value_on_node_field_row() {
+        let app = app_for_explorer();
+        // Cursor defaults to the first Node-zone field row, which is
+        // the focused agent session's `id` field.
+        let (label, value) = app
+            .explorer_copy_target()
+            .expect("Node-zone field rows have a copy target");
+        assert!(!label.is_empty(), "label must caption the toast");
+        assert!(!value.is_empty(), "value must be the clipboard payload");
+    }
+
+    #[test]
+    fn explorer_copy_target_is_none_when_cursor_walks_onto_link_row() {
+        // T8-040: Enter on link rows still drills; the copy seam must
+        // refuse so the runtime falls through to ExplorerActivate.
+        let mut app = app_for_explorer();
+        let link_idx = app
+            .explorer()
+            .expect("explorer state present")
+            .rows()
+            .iter()
+            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .expect("link row");
+        for _ in 0..link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+        assert!(app.explorer_copy_target().is_none());
+    }
+
+    #[test]
+    fn selected_session_id_returns_full_id_for_agent_session_row() {
+        let app = app_for_explorer();
+        let (label, value) = app
+            .selected_session_id()
+            .expect("agent session selection has a full id");
+        assert_eq!(label, "copied: agent_session id");
+        // Display form is `agent_session:<harness>:<scope>:<key>`
+        // per NodeId / AgentSessionId — full id, not a short form.
+        assert!(
+            value.starts_with("agent_session:"),
+            "expected full id prefix, got {value:?}",
+        );
+    }
+
+    #[test]
+    fn selected_session_id_is_none_on_non_session_selection() {
+        let mut app = app_for_explorer();
+        // Drop the selection so we cover the "nothing selected" arm
+        // (which is the same as a non-session selection from the
+        // runtime's perspective).
+        app.selection = None;
+        assert!(app.selected_session_id().is_none());
+    }
+
+    #[test]
+    fn post_toast_supersedes_prior_toast() {
+        let mut app = app_for_explorer();
+        app.post_toast("copied: cwd");
+        let first_at = app.toast().expect("first toast posted").posted_at;
+        // Spin a tiny gap so the second timer is observably newer.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.post_toast("copied: id");
+        let second = app.toast().expect("second toast posted");
+        assert_eq!(second.label, "copied: id");
+        assert!(
+            second.posted_at > first_at,
+            "newer toast must reset the timer"
+        );
     }
 }
