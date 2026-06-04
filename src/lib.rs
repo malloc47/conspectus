@@ -11,6 +11,7 @@ pub mod filter;
 pub mod hook;
 pub mod model;
 pub mod output;
+pub mod pins;
 #[cfg(feature = "query")]
 pub mod query;
 pub mod rename;
