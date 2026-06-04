@@ -3834,7 +3834,7 @@ failure:
     are observed. Inotify / fanotify continuous-mode event ingestion
     remains deferred to the continuous server workstream.
 
-- [ ] `H-MUXPROC-016` Treat harness session keys as opaque strings in
+- [x] `H-MUXPROC-016` Treat harness session keys as opaque strings in
   runtime attribution.
   - Scope: document and enforce the rule that `AgentSessionId.session_key`
     is an opaque harness-native string. UUID-shaped extraction remains a
@@ -3850,8 +3850,13 @@ failure:
     session and confirm `process_identifies_session` evidence names the
     `ses_…` session key instead of falling back to same-cwd candidates.
   - Blockers: `H-MUXPROC-002`.
+  - Outcome: active-pane process command extraction now uses
+    harness-aware session-key parsing. OpenCode `ses_…` ids are
+    first-class session keys in process command and fd/path evidence,
+    while UUID-shaped extraction remains a generic fallback for Codex,
+    Claude Code, and unknown harness contexts.
 
-- [ ] `H-MUXPROC-017` Sweep remaining UUID-only extractor call sites.
+- [x] `H-MUXPROC-017` Sweep remaining UUID-only extractor call sites.
   - Scope: audit discovery, viewer bridge, resolver metadata, and output
     helpers for UUID-shaped session-key assumptions. Replace them with
     either typed `AgentSessionId` comparisons or harness-aware opaque
@@ -3866,6 +3871,13 @@ failure:
     verify resolved links and right-pane IDs preserve full external session
     keys.
   - Blockers: `H-MUXPROC-016`.
+  - Outcome: the process-link extractor now exposes explicit
+    harness-aware helpers and renamed the UUID-only helper to
+    `generic_uuid_like_session_keys`, making generic UUID matching
+    visible at call sites. Command evidence no longer treats every
+    ordinary argv token as a session key; it recognizes session-bearing
+    command forms such as `resume <id>` / `-s <id>` and harness-specific
+    tokens such as opencode `ses_…`.
 
 - [x] `H-MUXPROC-FU-001` Evaluate first-class runtime process nodes.
   - Scope: turn ADR 0047's proposed model into a concrete workstream

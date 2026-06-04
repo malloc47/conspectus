@@ -1571,13 +1571,23 @@ where
 }
 
 fn command_session_evidence(command: &str) -> SessionKeyEvidence {
+    let harnesses = command_harnesses(command);
+    let mut session_keys = BTreeSet::new();
+    if harnesses.is_empty() {
+        session_keys.extend(generic_uuid_like_session_keys(command));
+    } else {
+        for harness in &harnesses {
+            session_keys.extend(command_session_keys_for_harness(command, harness));
+        }
+    }
+
     SessionKeyEvidence {
-        session_keys: command_session_keys(command),
-        harnesses: command_harnesses(command),
+        session_keys,
+        harnesses,
     }
 }
 
-fn command_session_keys(command: &str) -> BTreeSet<String> {
+fn ordered_command_tokens(command: &str) -> Vec<String> {
     command
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
         .filter(|part| !part.is_empty())
@@ -1586,7 +1596,7 @@ fn command_session_keys(command: &str) -> BTreeSet<String> {
 }
 
 fn command_session_keys_for_harness(command: &str, harness: &str) -> BTreeSet<String> {
-    let parts: Vec<_> = command_session_keys(command).into_iter().collect();
+    let parts = ordered_command_tokens(command);
     let mut keys = BTreeSet::new();
 
     for (idx, part) in parts.iter().enumerate() {
@@ -1614,10 +1624,10 @@ fn session_keys_for_harness_text(harness: &str, value: &str) -> BTreeSet<String>
     match harness {
         "opencode" => {
             let mut keys = opencode_session_key_values(value);
-            keys.extend(uuid_like_values(value));
+            keys.extend(generic_uuid_like_session_keys(value));
             keys
         }
-        _ => uuid_like_values(value),
+        _ => generic_uuid_like_session_keys(value),
     }
 }
 
@@ -1633,7 +1643,7 @@ fn opencode_session_key_values(value: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn uuid_like_values(value: &str) -> BTreeSet<String> {
+fn generic_uuid_like_session_keys(value: &str) -> BTreeSet<String> {
     const UUID_LEN: usize = 36;
 
     if value.len() < UUID_LEN {
@@ -3056,8 +3066,8 @@ mod tests {
     }
 
     #[test]
-    fn uuid_like_values_extracts_uuid_shaped_tokens() {
-        let values = uuid_like_values(
+    fn generic_uuid_like_session_keys_extracts_uuid_shaped_tokens() {
+        let values = generic_uuid_like_session_keys(
             "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
         );
 
@@ -3065,6 +3075,17 @@ mod tests {
             values,
             BTreeSet::from(["019e4354-26b9-7ad2-9521-4ad921cc312b".to_string()])
         );
+    }
+
+    #[test]
+    fn command_session_evidence_ignores_ordinary_command_tokens() {
+        let evidence = command_session_evidence("opencode run --flag project-name");
+
+        assert!(
+            evidence.session_keys.is_empty(),
+            "ordinary argv tokens are not session keys"
+        );
+        assert_eq!(evidence.harnesses, BTreeSet::from(["opencode".to_string()]));
     }
 
     #[test]
