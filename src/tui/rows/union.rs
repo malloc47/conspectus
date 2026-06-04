@@ -178,6 +178,7 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             primary_node: node_id,
+            pin_id: None,
         }),
     }
 }

@@ -162,6 +162,7 @@ fn agent_row(
         kind: RowKind::AgentSession(AgentSessionRow {
             session: agent.id.clone(),
             short_id,
+            pin_id: None,
             harness_label: harness_label(&agent.id.harness_key),
             cwd_display: agent.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,

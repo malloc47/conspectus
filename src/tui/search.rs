@@ -261,6 +261,14 @@ pub fn items_from_rows<'a>(rows: &'a [Row]) -> Vec<SearchItem<'a>> {
                 label: Cow::Owned(fork.fork_label.clone()),
                 haystack: Cow::Owned(fork.fork_label.clone()),
             },
+            RowKind::Pin(pin) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(format!("pin:{}", pin.display_name)),
+                haystack: Cow::Owned(format!(
+                    "pin {} {} {} {}",
+                    pin.display_name, pin.harness_label, pin.cwd_display, pin.mux_label
+                )),
+            },
         })
         .collect()
 }
@@ -313,6 +321,7 @@ mod tests {
                 title: None,
                 alias: alias.map(str::to_string),
                 primary_node: primary,
+                pin_id: None,
             }),
         }
     }

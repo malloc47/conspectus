@@ -1231,6 +1231,11 @@ impl App {
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
             RowId::Fork(node) => Some(node.clone()),
+            // Pin rows are not graph nodes — the detail pane for a
+            // selected unbound pin row is wired in a follow-up
+            // (H-PIN-018); for v1 we clear the detail and let the
+            // status bar surface the binding hint.
+            RowId::Pin { .. } => None,
             RowId::Synthetic(_) => None,
         };
         let Some(target) = target else {
@@ -1579,6 +1584,9 @@ fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
         RowKind::MuxSession(m) => &m.primary_node == target,
         RowKind::Pr(p) => &p.primary_node == target,
         RowKind::Fork(f) => &f.primary_node == target,
+        // Unbound pin rows have no underlying graph node — they
+        // never match a follow-sync `target`.
+        RowKind::Pin(_) => false,
     }
 }
 

@@ -410,6 +410,7 @@ mod tests {
                 title: None,
                 alias: alias.map(str::to_string),
                 primary_node: primary,
+                pin_id: None,
             }),
         }
     }

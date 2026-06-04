@@ -56,6 +56,15 @@ pub enum RowId {
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
+    /// An unbound session pin row (ADR 0057). Keyed on the pin id
+    /// so the row is stable across refreshes even as the pin's
+    /// binding state changes — once a pin binds, the same logical
+    /// entry switches from a [`RowKind::Pin`] row to a
+    /// [`RowKind::AgentSession`] row whose `pin_id` field carries
+    /// the pin marker.
+    Pin {
+        pin_id: String,
+    },
     /// Synthetic row not backed by a single node — used for the
     /// "Ungrouped" bucket and any other rendered-only structure.
     Synthetic(&'static str),
@@ -119,6 +128,12 @@ pub enum RowKind {
     MuxSession(MuxSessionRow),
     Pr(PrRow),
     Fork(ForkRow),
+    /// Unbound pin row (ADR 0057). Emitted by the sessions builder
+    /// for `PinCandidate`s whose `binding` is `Unbound` or
+    /// `StaleMux` — i.e. no live agent session is realizing the
+    /// pin. Bound pins flow through the existing
+    /// [`RowKind::AgentSession`] surface with `pin_id` set.
+    Pin(PinRow),
 }
 
 /// A workspace / repo / worktree label row.
@@ -176,6 +191,13 @@ pub struct AgentSessionRow {
     /// projection site via [`Self::display_label`].
     pub alias: Option<String>,
     pub primary_node: NodeId,
+    /// Pin id when this agent-session row is the live realization of
+    /// a [`crate::model::PinCandidate`] (ADR 0057). Renderers add a
+    /// pin glyph so the operator can distinguish pin-bound sessions
+    /// at a glance; the rest of the row shape stays identical to a
+    /// non-pinned session — the alias overlay already injected the
+    /// pin's `display_name` via [`crate::resolve::pins`].
+    pub pin_id: Option<String>,
 }
 
 impl AgentSessionRow {
@@ -263,6 +285,22 @@ pub struct ForkRow {
     pub parent_label: Option<String>,
     pub child_count: usize,
     pub primary_node: NodeId,
+}
+
+/// An unbound session pin row (ADR 0057). Rendered when the pin has
+/// no live mux (`PinBinding::Unbound`) or has a live mux but no
+/// harness session attributed to it (`PinBinding::StaleMux`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PinRow {
+    pub pin_id: String,
+    pub display_name: String,
+    pub harness_label: String,
+    pub cwd_display: String,
+    pub mux_label: String,
+    /// Human-readable binding state ("unbound" or "stale-mux"). The
+    /// renderer surfaces this so the operator can pick the right next
+    /// action (launch vs relaunch in existing mux).
+    pub state_label: &'static str,
 }
 
 // -----------------------------------------------------------------------------

@@ -940,6 +940,28 @@ fn render_left_row(
                 Style::default().add_modifier(theme.placeholder),
             ));
         }
+        RowKind::Pin(pin) => {
+            // Pinned, but unbound — dim "📌" marker + display name.
+            // Final glyph + theme entry land alongside the rest of
+            // H-PIN-016's TUI polish; for the v1 slice we reuse the
+            // existing `placeholder` modifier to keep the row visibly
+            // distinct without inventing a new Theme key.
+            spans.push(Span::styled(
+                "📌  ".to_string(),
+                Style::default().add_modifier(theme.placeholder),
+            ));
+            spans.push(Span::styled(
+                pin.display_name.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!(
+                    "  ({} · {} · {} · {})",
+                    pin.state_label, pin.harness_label, pin.cwd_display, pin.mux_label
+                ),
+                Style::default().add_modifier(theme.placeholder),
+            ));
+        }
     }
 
     let mut line = Line::from(spans);
@@ -986,6 +1008,16 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     spans.push(Span::styled(format!("{recency:>4}"), recency_style));
     spans.push(Span::raw("  "));
     spans.push(mux_indicator_span(session.mux_state, theme));
+    if session.pin_id.is_some() {
+        // ADR 0057 bound-pin marker. Glyph + theme entry are
+        // finalized alongside the rest of the H-PIN-016 styling
+        // polish; for the v1 slice we reuse `placeholder` so the
+        // marker reads without depending on a new theme key.
+        spans.push(Span::styled(
+            "  📌",
+            Style::default().add_modifier(theme.placeholder),
+        ));
+    }
     if let Some(label) = session.display_label().filter(|label| !label.is_empty()) {
         let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
         let style = if session
@@ -3484,6 +3516,7 @@ mod tests {
             title: None,
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            pin_id: None,
         };
         let spans = render_session_spans(&row, &theme, now);
         let badge = spans
@@ -3514,6 +3547,7 @@ mod tests {
             title: Some("harness title".into()),
             alias: Some("ingest-refactor".into()),
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            pin_id: None,
         };
 
         let spans = render_session_spans(&row, &theme, now);
@@ -3552,6 +3586,7 @@ mod tests {
             title: None,
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
+            pin_id: None,
         };
 
         let spans = render_session_spans(&row, &theme, now);
@@ -3582,6 +3617,7 @@ mod tests {
             title: Some(long_title.into()),
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            pin_id: None,
         };
 
         let spans = render_session_spans(&row, &theme, now);
@@ -3686,6 +3722,7 @@ mod tests {
             title: None,
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            pin_id: None,
         };
 
         let mut spans = render_session_spans(&row, &theme, now);
@@ -3724,6 +3761,7 @@ mod tests {
             title: None,
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+            pin_id: None,
         };
         // Locate the recency span by its formatted content (4-cell
         // right-aligned tag). Index varies with harness label length

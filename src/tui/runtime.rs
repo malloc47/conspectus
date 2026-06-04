@@ -1067,6 +1067,10 @@ fn selected_default_action(app: &App) -> SelectedDefault {
         // PR / Fork rows: no muxable target and no viewer; fall back
         // to toggle so expandable parents still behave.
         RowKind::Pr(_) | RowKind::Fork(_) => SelectedDefault::ToggleExpand,
+        // Unbound pin rows will launch in a follow-up (H-PIN-012).
+        // For v1 fall back to toggle so Enter is harmless until the
+        // launch primitive lands.
+        RowKind::Pin(_) => SelectedDefault::ToggleExpand,
     }
 }
 
