@@ -6463,6 +6463,23 @@ than recursive inline detail panes.
     expands/collapses.
   - Blockers: `P8-010`, `T8-018`, `H-VIEWER-NATIVE-008`,
     `T8-014`.
+  - **slice landed**: `Enter` on the left pane now dispatches the
+    selected row's default action. Mux rows and muxed/ambiguous agent
+    sessions attach (reusing `attach_action`); un-muxed agent
+    sessions open the native transcript viewer (reusing
+    `view_action`); group rows still expand/collapse. Right-pane
+    `Enter` continues to fire `ExplorerActivate` for drill/expand.
+    As a companion, `v` now also works on mux rows: it resolves the
+    mux's preferred linked agent session and opens its transcript,
+    so `v` is the inverse of `a` on agent rows. Because `Enter` no
+    longer toggles every row, the left tree picks up vi-style fold
+    bindings: `l` / `→` expand the selected row, `h` / `←` collapse
+    it (idempotent: a second press is a no-op). The status hint
+    advertises `Enter/a attach …` for attachable rows,
+    `Enter/v view …` for viewable un-muxed sessions, and
+    `Enter/l expand · h collapse` for group rows. The help overlay's
+    Actions section lists `Enter` as the row-kind default and the
+    Navigation section documents the new fold bindings.
 
 - [ ] `T8-015` Add sessions-tree density modes.
   - Scope: add a user-facing density setting for the sessions view

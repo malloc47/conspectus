@@ -109,12 +109,17 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     blank(&mut lines);
 
     section(&mut lines, "Actions");
+    bind(
+        &mut lines,
+        "Enter",
+        "Default action on the selected row (T8-043): attach mux/muxed sessions, view un-muxed sessions, expand groups",
+    );
     bind(&mut lines, "a", "Attach to the selected mux");
     bind(&mut lines, "R", "Rename the selected agent session");
     bind(
         &mut lines,
         "v",
-        "Open the selected session's transcript (q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking)",
+        "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
     );
     bind(&mut lines, "r", "Refresh discovery now");
     bind(&mut lines, "q / Ctrl-C", "Quit");
@@ -151,13 +156,18 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     blank(&mut lines);
 
     section(&mut lines, "Navigation");
-    bind(&mut lines, "j / k / arrows", "Move selection down / up");
+    bind(&mut lines, "j / k / ↓ / ↑", "Move selection down / up");
+    bind(
+        &mut lines,
+        "l / → / h / ←",
+        "Expand / collapse the selected left-tree row (vi-style fold)",
+    );
     bind(&mut lines, "PgDn / PgUp", "Page through the row tree");
     bind(&mut lines, "g / G", "First / last row");
     bind(
         &mut lines,
         "Enter",
-        "Expand left-tree row; with right focus, drill or expand a group",
+        "Left tree: row-kind default action (attach / view / expand); right pane: drill or expand a group",
     );
     bind(
         &mut lines,

@@ -5,9 +5,12 @@
 //! driven attach, and the rest of the action surface land in later
 //! stories per `docs/implementation/phase-08-interactive-tui.md`.
 
-use crate::model::{GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId, RelationKind};
+use crate::model::{
+    AgentSessionId, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId, RelationKind,
+};
 use crate::tui::app::App;
 use crate::tui::rows::{RowId, RowKind};
+use crate::tui::viewer::ViewerDisabled;
 
 /// Resolved target for an attach action.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +123,69 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
             Ok(target)
         }
         other => Err(AttachDisabled::UnsupportedBackend(other.to_string())),
+    }
+}
+
+/// Resolve the viewer target for the current selection. Mirrors
+/// [`resolve_attach_target`] so `Enter` (T8-043) and the `v`
+/// accelerator can pick the right session id whether the cursor
+/// sits on an agent session row or a mux row.
+///
+/// For agent session rows the selection's session id wins directly.
+/// For mux rows we walk active `LinkedToMux` candidates and pick the
+/// resolver-preferred linked session (highest provenance precedence,
+/// breaking ties on confidence then link id). Mux rows with no
+/// linked sessions report [`ViewerDisabled::UnsupportedRow`] — the
+/// caller surfaces a one-line status bar reason.
+pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled> {
+    let Some(selection) = app.selection() else {
+        return Err(ViewerDisabled::NoSelection);
+    };
+    let row = app
+        .tree()
+        .rows
+        .iter()
+        .find(|r| &r.id == selection)
+        .ok_or(ViewerDisabled::NoSelection)?;
+    match &row.kind {
+        RowKind::AgentSession(session) => Ok(session.session.clone()),
+        RowKind::MuxSession(mux_row) => {
+            let database = app.graph_db().ok_or(ViewerDisabled::UnsupportedRow)?;
+            let snapshot = crate::query::read_snapshot(database.conn())
+                .map_err(|_| ViewerDisabled::UnsupportedRow)?;
+            let mux_node_id = NodeId::MuxSession(mux_row.mux.clone());
+            preferred_session_for_mux(&snapshot, &mux_node_id).ok_or(ViewerDisabled::UnsupportedRow)
+        }
+        _ => Err(ViewerDisabled::UnsupportedRow),
+    }
+}
+
+/// Inverse of [`preferred_mux_for_session`]: find the resolver-
+/// preferred agent session linked to `mux`. Used by the `v`
+/// accelerator and T8-043's default-action dispatcher so a mux row's
+/// "view" complements its "attach".
+fn preferred_session_for_mux(snapshot: &GraphSnapshot, mux: &NodeId) -> Option<AgentSessionId> {
+    let mut candidates: Vec<&GraphLink> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && matches!(link.state, crate::model::LinkState::Active)
+                && matches!(link.target_node_id(), Some(t) if t == mux)
+        })
+        .collect();
+    candidates.sort_by(|left, right| {
+        right
+            .provenance
+            .precedence()
+            .cmp(&left.provenance.precedence())
+            .then_with(|| right.confidence.cmp(&left.confidence))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let chosen = candidates.into_iter().next()?;
+    match &chosen.source {
+        NodeId::AgentSession(id) => Some(id.clone()),
+        _ => None,
     }
 }
 
@@ -507,5 +573,113 @@ mod tests {
         let target = resolve_attach_target(&app).expect("mux row attachable");
         assert_eq!(target.backend, "tmux");
         assert_eq!(target.native_id, "editor");
+    }
+
+    fn build_mux_view_app_with_attachments(snapshot: GraphSnapshot) -> App {
+        let snapshot = resolve_snapshot(snapshot);
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize snapshot");
+        let tree = crate::tui::rows::mux::build_mux_tree_from_conn(
+            crate::tui::rows::mux::MuxBuildInputsFromConn {
+                conn: &conn,
+                home: None,
+                now: None,
+                filter: RowFilter::default(),
+                grouping: crate::tui::MuxGrouping::Session,
+            },
+        )
+        .expect("build mux tree");
+        let mut cfg = RunConfig::defaults();
+        cfg.default_view = View::Mux;
+        let mut app = App::new(cfg);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::new(conn),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app
+    }
+
+    #[test]
+    fn view_resolves_agent_session_row_directly() {
+        let mut snapshot = GraphSnapshot::empty();
+        add_repo_and_worktree(&mut snapshot, "/p/proj");
+        snapshot
+            .nodes
+            .push(session_node("codex", "/state", "abc", "/p/proj"));
+        let mut app = build_app(snapshot);
+        app.update(Msg::NavDown);
+        let session = resolve_view_session(&app).expect("agent session is viewable");
+        assert_eq!(session.harness_key, "codex");
+        assert_eq!(session.session_key, "abc");
+    }
+
+    #[test]
+    fn view_resolves_mux_row_to_linked_session() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        snapshot
+            .nodes
+            .push(session_node("codex", "/state", "abc", "/p/proj"));
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mux_id = mux_node_id("tmux", "editor");
+        snapshot.candidate_links.push(linked_to_mux(
+            &session_id,
+            &mux_id,
+            Provenance::Discovered,
+            "1",
+        ));
+
+        let app = build_mux_view_app_with_attachments(snapshot);
+        let session = resolve_view_session(&app).expect("mux row resolves linked session");
+        assert_eq!(session.harness_key, "codex");
+        assert_eq!(session.session_key, "abc");
+    }
+
+    #[test]
+    fn view_on_mux_row_picks_preferred_when_multiple_sessions_linked() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        snapshot
+            .nodes
+            .push(session_node("codex", "/state", "abc", "/p/proj"));
+        snapshot
+            .nodes
+            .push(session_node("claude-code", "/state", "def", "/p/proj"));
+        let codex_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let claude_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "def"));
+        let mux_id = mux_node_id("tmux", "editor");
+        // codex link is the lower-precedence Discovered; claude link
+        // is StrongDiscovered and should win.
+        snapshot.candidate_links.push(linked_to_mux(
+            &codex_id,
+            &mux_id,
+            Provenance::Discovered,
+            "1",
+        ));
+        snapshot.candidate_links.push(linked_to_mux(
+            &claude_id,
+            &mux_id,
+            Provenance::StrongDiscovered,
+            "2",
+        ));
+
+        let app = build_mux_view_app_with_attachments(snapshot);
+        let session = resolve_view_session(&app).expect("preferred session resolves");
+        assert_eq!(
+            session.harness_key, "claude-code",
+            "StrongDiscovered candidate wins over Discovered"
+        );
+    }
+
+    #[test]
+    fn view_on_unattached_mux_row_reports_unsupported() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("tmux", "editor"));
+        let app = build_mux_view_app_with_attachments(snapshot);
+        assert_eq!(
+            resolve_view_session(&app),
+            Err(ViewerDisabled::UnsupportedRow)
+        );
     }
 }

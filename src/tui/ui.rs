@@ -951,12 +951,18 @@ fn render_left_row(
 
 fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> Vec<Span<'static>> {
     use crate::tui::widgets::badge::harness_badge;
+    const SESSION_ID_COLUMN_WIDTH: usize = 8;
+    const SESSION_DISPLAY_LABEL_WIDTH: usize = 32;
+
     let mut spans = Vec::new();
-    // Short id is a recognition aid, not a primary column — render
-    // it in the secondary fg so it stays readable but lighter than
-    // the harness badge / recency / mux glyph that follow.
+    // Lead with the harness-native session key rather than
+    // Conspectus's internal short node id. Operators recognize the
+    // external session id; the internal id is still accepted by
+    // explicit node lookup commands.
+    let session_id =
+        truncate_to_width_no_marker(&session.session.session_key, SESSION_ID_COLUMN_WIDTH);
     spans.push(Span::styled(
-        format!("{}  ", session.short_id),
+        format!("{session_id}  "),
         Style::default().fg(theme.secondary_text),
     ));
     // The badge widget pads internally so every chip is the same
@@ -971,11 +977,18 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     spans.push(Span::styled(format!("{recency:>4}"), recency_style));
     spans.push(Span::raw("  "));
     spans.push(mux_indicator_span(session.mux_state, theme));
-    if let Some(alias) = session.alias.as_deref().filter(|alias| !alias.is_empty()) {
-        spans.push(Span::styled(
-            format!("  {alias}"),
-            Style::default().add_modifier(Modifier::BOLD),
-        ));
+    if let Some(label) = session.display_label().filter(|label| !label.is_empty()) {
+        let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
+        let style = if session
+            .alias
+            .as_deref()
+            .is_some_and(|alias| !alias.is_empty())
+        {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(format!("  {label}"), style));
     }
     if let Some(project) = session
         .project_display
@@ -1247,6 +1260,23 @@ fn truncate_to_width_strict(text: &str, width: usize) -> String {
     out
 }
 
+fn truncate_to_width_no_marker(text: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(width);
+    let mut used = 0;
+    for ch in text.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + ch_width > width {
+            break;
+        }
+        out.push(ch);
+        used += ch_width;
+    }
+    out
+}
+
 fn pad_to_width(mut text: String, width: usize) -> String {
     let used = UnicodeWidthStr::width(text.as_str());
     if used < width {
@@ -1465,14 +1495,6 @@ fn render_explorer_lines(
     let cursor = state.cursor;
     let view = &state.view;
 
-    // Node section.
-    lines.push(chip_divider_line(
-        "Node",
-        None,
-        width,
-        theme,
-        ChipAnchor::Left,
-    ));
     for (idx, field) in view.fields(state.full_detail_expanded).iter().enumerate() {
         let flat_index = rows
             .iter()
@@ -2413,26 +2435,70 @@ fn render_captured_pane(text: &str, color: bool) -> Text<'static> {
 
 fn contextual_status_text(app: &App) -> String {
     let focus_hint = match app.focus() {
-        Focus::Left => "j/k move · Enter expand",
+        Focus::Left => "j/k move · h/l fold · Enter default",
         // T8-029: with the right pane focused, j/k drive the graph
         // explorer cursor (T8-028), Enter drills or expands a group
         // depending on the cursor position, `e` toggles a group,
         // and Backspace pops the breadcrumb stack.
         Focus::Right => "j/k cursor · Enter drill/expand · e group · ⌫ back",
     };
-    let action_hint = match resolve_attach_target(app) {
+    let action_hint = default_action_status_hint(app);
+    format!("{action_hint} · {focus_hint} · Tab focus · r refresh · q quit")
+}
+
+/// Status-bar action hint that advertises `Enter` as the primary
+/// default action on the selected row (T8-043), with the legacy
+/// single-key accelerator (`a` / `v`) listed alongside. Falls back
+/// to the attach-disabled reason for rows that have neither a mux
+/// target nor a viewable transcript so the operator still sees a
+/// one-line "disabled because …" cue.
+fn default_action_status_hint(app: &App) -> String {
+    let selection = match app.selection() {
+        Some(id) => id,
+        None => return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection),
+    };
+    let row = match app.tree().rows.iter().find(|r| &r.id == selection) {
+        Some(row) => row,
+        None => return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection),
+    };
+    // Group rows: Enter expands/collapses; h/l explicitly fold.
+    if matches!(row.kind, RowKind::Group(_)) {
+        return "Enter/l expand · h collapse".to_string();
+    }
+    match resolve_attach_target(app) {
         Ok(target) => {
             let label = target_label(&target);
             match selected_mux_state(app) {
                 Some(MuxIndicator::Ambiguous { .. }) => {
-                    format!("a attach preferred {label} · m choose")
+                    format!("Enter/a attach preferred {label} · m choose")
                 }
-                _ => format!("a attach {}", compact_mux_label(&label)),
+                _ => format!("Enter/a attach {}", compact_mux_label(&label)),
             }
         }
-        Err(reason) => attach_disabled_reason(&reason),
-    };
-    format!("{action_hint} · {focus_hint} · Tab focus · r refresh · q quit")
+        Err(reason) => {
+            // Un-muxed agent session rows still have a viewer-based
+            // default action — `Enter` opens the transcript, `v`
+            // does the same. Advertise that primary action instead
+            // of the attach-disabled reason.
+            if let RowKind::AgentSession(session) = &row.kind
+                && matches!(session.mux_state, MuxIndicator::Unmuxed)
+            {
+                return format!("Enter/v view {}", compact_session_label(session));
+            }
+            attach_disabled_reason(&reason)
+        }
+    }
+}
+
+/// Compact label for an agent session row used in the status hint.
+/// Shows the alias / title when one is set; otherwise falls back to
+/// `harness:short_id` so the operator can still tell which row Enter
+/// will act on.
+fn compact_session_label(session: &AgentSessionRow) -> String {
+    if let Some(label) = session.display_label() {
+        return label.to_string();
+    }
+    format!("{}:{}", session.harness_label, session.short_id)
 }
 
 fn selected_mux_state(app: &App) -> Option<MuxIndicator> {
@@ -2848,20 +2914,17 @@ mod tests {
     }
 
     #[test]
-    fn detail_pane_renders_section_dividers_when_multiple_sections_present() {
-        // T8-029: the section dividers in the new layout are
-        // Node / Upstream / Downstream / Preview. A session with at
-        // least one linked mux exercises the Node + Downstream +
-        // Preview path; the Upstream divider is omitted when there
-        // are no incoming edges per the mockup's "empty sections
-        // are suppressed entirely" rule.
+    fn detail_pane_omits_initial_node_divider() {
+        // The right pane starts directly with the selected node's
+        // fields. Later zones still render labeled dividers; empty
+        // sections are suppressed entirely.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         assert!(
-            text.contains(" Node "),
-            "expected Node section divider label: {text}",
+            !text.contains(" Node "),
+            "unexpected Node section divider label: {text}",
         );
         assert!(
             text.contains(" Downstream "),
@@ -3451,14 +3514,82 @@ mod tests {
             "alias should render after the mux glyph: {rendered}"
         );
         assert!(
-            rendered.starts_with("abcdef  "),
-            "short id should remain the fixed leading column: {rendered}"
+            rendered.starts_with("abc  "),
+            "external session id should lead the row: {rendered}"
         );
         let alias = spans
             .iter()
             .find(|span| span.content.trim() == "ingest-refactor")
             .expect("alias span present");
         assert!(alias.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn session_id_is_strictly_truncated_in_left_row() {
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+        let long_id = "ffffffff-1111-2222-3333-444444444444";
+        let row = AgentSessionRow {
+            session: AgentSessionId::new("opencode", "/state", long_id),
+            short_id: "abcdef".into(),
+            harness_label: "opencode".into(),
+            cwd_display: None,
+            project_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: None,
+            title: None,
+            alias: None,
+            primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
+        };
+
+        let spans = render_session_spans(&row, &theme, now);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        assert!(
+            rendered.starts_with("ffffffff  "),
+            "left row should strictly truncate long session id without ellipsis: {rendered}"
+        );
+    }
+
+    #[test]
+    fn session_display_label_is_truncated_in_left_row() {
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let now: i64 = 1_700_000_000;
+        let long_title =
+            "The conspectus TUI, fashioned after a long prompt, should not consume the row";
+        let row = AgentSessionRow {
+            session: AgentSessionId::new("codex", "/state", "abc"),
+            short_id: "abcdef".into(),
+            harness_label: "codex".into(),
+            cwd_display: None,
+            project_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: None,
+            title: Some(long_title.into()),
+            alias: None,
+            primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
+        };
+
+        let spans = render_session_spans(&row, &theme, now);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        let label = spans
+            .iter()
+            .find(|span| span.content.contains("The conspectus"))
+            .expect("display label span present");
+        assert!(
+            rendered.contains("The conspectus TUI, fashioned a…"),
+            "long display label should be capped: {rendered}"
+        );
+        assert_eq!(
+            unicode_width::UnicodeWidthStr::width(label.content.trim()),
+            32
+        );
+        assert!(!label.style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -3802,19 +3933,42 @@ mod tests {
     }
 
     #[test]
-    fn contextual_status_reports_unmuxed_attach_reason() {
+    fn contextual_status_offers_enter_view_for_unmuxed_session() {
         let mut app = seeded_app();
         app.update(Msg::NavDown);
-        let area = Rect::new(0, 0, 100, 24);
+        let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
+        // T8-043: un-muxed agent sessions now advertise Enter
+        // (and `v`) as the primary default action rather than the
+        // attach-disabled reason.
         assert!(
-            text.contains("attach: session is not attached to any mux"),
-            "expected contextual attach-disabled reason: {text}"
+            text.contains("Enter/v view"),
+            "expected Enter/v view hint for un-muxed session: {text}"
+        );
+        assert!(
+            !text.contains("attach: session is not attached to any mux"),
+            "Enter hint should replace the attach-disabled reason on viewable rows: {text}"
         );
         assert!(
             !text.contains("resume"),
             "status line should not describe R as resume: {text}"
+        );
+    }
+
+    #[test]
+    fn contextual_status_advertises_enter_attach_for_muxed_session() {
+        // Muxed session: Enter (and `a`) attach to the resolved mux.
+        let app = muxed_app("editor", None);
+        // muxed_app already navigates onto the session row.
+        let mut app = app;
+        app.update(Msg::NavDown);
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("Enter/a attach"),
+            "expected Enter/a attach hint for muxed session: {text}"
         );
     }
 
@@ -4026,21 +4180,21 @@ mod tests {
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
 
-        // The last row should be visible. Confirm via the short
-        // id of the last session pushed (s19).
+        // The last row should be visible. Confirm via the external
+        // session id of the last session pushed (s19).
         let visible = app.visible_rows();
-        let last_id = match &visible.last().unwrap().kind {
-            RowKind::AgentSession(s) => s.short_id.clone(),
+        let last_session_id = match &visible.last().unwrap().kind {
+            RowKind::AgentSession(s) => s.session.session_key.clone(),
             other => panic!("expected last row to be a session, got {other:?}"),
         };
         assert!(
-            text.contains(&last_id),
-            "selected row's short id ({last_id}) should be visible after End; got:\n{text}"
+            text.contains(&last_session_id),
+            "selected row's external id ({last_session_id}) should be visible after End; got:\n{text}"
         );
         let bottom_left_line: String = (1..59).map(|x| buffer[(x, 21)].symbol()).collect();
         assert!(
-            bottom_left_line.contains(&last_id),
-            "selected row's short id ({last_id}) should land on the bottom visible left-panel line; got {bottom_left_line:?}\n{text}"
+            bottom_left_line.contains(&last_session_id),
+            "selected row's external id ({last_session_id}) should land on the bottom visible left-panel line; got {bottom_left_line:?}\n{text}"
         );
 
         // The first row (the repo group) should now be scrolled

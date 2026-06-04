@@ -22,7 +22,9 @@ use crate::discovery::discover_local_at_roots;
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
 use crate::model::MuxSessionId;
 use crate::resolve::resolve_snapshot;
-use crate::tui::actions::{AttachTarget, attach_disabled_reason, resolve_attach_target};
+use crate::tui::actions::{
+    AttachTarget, attach_disabled_reason, resolve_attach_target, resolve_view_session,
+};
 use crate::tui::app::{App, GraphDb, Msg};
 use crate::tui::preview::capture_via;
 use crate::tui::resume::{
@@ -32,8 +34,7 @@ use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputsFromConn, build_sessions_tree_from_conn};
 use crate::tui::viewer::{
-    LaunchPlan, PathBinaryProbe, ViewerDisabled, ViewerTarget, resolve_viewer_target,
-    viewer_disabled_reason,
+    LaunchPlan, PathBinaryProbe, ViewerTarget, resolve_viewer_target, viewer_disabled_reason,
 };
 use crate::tui::{RunConfig, View, ui};
 
@@ -213,6 +214,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::Attach) => attach_action(terminal, &mut app, &config),
                 Some(Action::Resume) => resume_action(&mut app),
                 Some(Action::View) => view_action(terminal, &mut app, &config),
+                Some(Action::DefaultAction) => default_action(terminal, &mut app, &config),
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
                     handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
@@ -372,6 +374,15 @@ fn static_event_loop(
                         "scenario TUI is static; view is disabled".to_string(),
                     )));
                 }
+                Some(Action::DefaultAction) => match selected_default_action(&app) {
+                    SelectedDefault::ToggleExpand => app.update(Msg::ToggleExpand),
+                    SelectedDefault::Attach => app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; attach is disabled".to_string(),
+                    ))),
+                    SelectedDefault::View => app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; view is disabled".to_string(),
+                    ))),
+                },
                 Some(Action::CycleGrouping(delta)) => {
                     let next = if delta >= 0 {
                         app.grouping().cycle_next()
@@ -942,6 +953,13 @@ fn current_unix_epoch() -> Option<i64> {
 /// the enum past clippy's `large_enum_variant` threshold, even
 /// though `Action::Msg` only ever carries the small navigation
 /// variants in practice.
+//
+// `EnterDefault` ends in `Action` semantically (it names the key's
+// behavior) and lives alongside `Attach`, `Resume`, `View`, etc.,
+// which all read as actions implicitly. Suppress the
+// `enum_variant_names` lint locally so the name doesn't have to be
+// twisted to satisfy the lint.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 enum Action {
     Msg(Box<Msg>),
@@ -994,6 +1012,46 @@ enum Action {
     View,
     /// Forward a key event into the open viewer modal.
     ViewerOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// `Enter` on the left pane (T8-043). The dispatcher resolves
+    /// the selected row's default action: attach a mux row, view an
+    /// un-muxed session, or expand/collapse a group row. Right-pane
+    /// focus is remapped to [`Msg::ExplorerActivate`] before this
+    /// variant ever reaches the dispatcher.
+    DefaultAction,
+}
+
+/// Resolved default action for the left-pane cursor (T8-043). Pure
+/// over [`App`] state so it can be reused by the live and static
+/// event loops and snapshot-tested.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectedDefault {
+    /// Group row — `Enter` expands/collapses.
+    ToggleExpand,
+    /// Mux row or attachable agent session — `Enter` attaches.
+    Attach,
+    /// Un-muxed agent session — `Enter` opens the transcript viewer.
+    View,
+}
+
+fn selected_default_action(app: &App) -> SelectedDefault {
+    use crate::tui::rows::{MuxIndicator, RowKind};
+    let Some(selection) = app.selection() else {
+        return SelectedDefault::ToggleExpand;
+    };
+    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
+        return SelectedDefault::ToggleExpand;
+    };
+    match &row.kind {
+        RowKind::Group(_) => SelectedDefault::ToggleExpand,
+        RowKind::MuxSession(_) | RowKind::AgentSessionMuxCandidate(_) => SelectedDefault::Attach,
+        RowKind::AgentSession(session) => match session.mux_state {
+            MuxIndicator::Unmuxed => SelectedDefault::View,
+            MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => SelectedDefault::Attach,
+        },
+        // PR / Fork rows: no muxable target and no viewer; fall back
+        // to toggle so expandable parents still behave.
+        RowKind::Pr(_) | RowKind::Fork(_) => SelectedDefault::ToggleExpand,
+    }
 }
 
 /// Dispatch a key into the open help overlay and close it on
@@ -1129,6 +1187,19 @@ fn cycle_view(view: View, delta: i32) -> View {
     VIEW_OPTIONS[next as usize]
 }
 
+/// Dispatch `Enter` on the left pane (T8-043) to the selected
+/// row's default action. Group rows expand/collapse; mux rows and
+/// muxed agent sessions attach; un-muxed agent sessions open the
+/// transcript viewer. Right-pane focus is handled in
+/// [`remap_for_focus`] before this is reached.
+fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
+    match selected_default_action(app) {
+        SelectedDefault::ToggleExpand => app.update(Msg::ToggleExpand),
+        SelectedDefault::Attach => attach_action(terminal, app, config),
+        SelectedDefault::View => view_action(terminal, app, config),
+    }
+}
+
 /// Handle the `a` key. On success, suspend the TUI, spawn
 /// `tmux attach-session` and wait for it to exit, then re-enter
 /// the alt screen so the operator returns to the TUI ready to
@@ -1240,18 +1311,14 @@ fn target_short(target: &AttachTarget) -> String {
 /// harness has no native parser registered (currently: `aider`).
 /// On disabled, set a status-bar message and stay in the TUI.
 fn view_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
-    let Some(selection) = app.selection() else {
-        app.update(Msg::SetStatus(Some(viewer_disabled_reason(
-            &ViewerDisabled::NoSelection,
-        ))));
-        return;
-    };
-    let session_id = match selection {
-        RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
-        _ => {
-            app.update(Msg::SetStatus(Some(viewer_disabled_reason(
-                &ViewerDisabled::UnsupportedRow,
-            ))));
+    // Resolve the session through the actions module so mux rows
+    // open the viewer for their preferred linked session (T8-043
+    // companion: `v` on a mux row is the inverse of `a` on a
+    // session). Agent-session rows pass through unchanged.
+    let session_id = match resolve_view_session(app) {
+        Ok(id) => id,
+        Err(reason) => {
+            app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
             return;
         }
     };
@@ -1411,14 +1478,16 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
             Msg::NavUp => Msg::ExplorerNavUp,
             Msg::PageDown(_) => Msg::ExplorerNavDown,
             Msg::PageUp(_) => Msg::ExplorerNavUp,
-            // Enter on the explorer cursor expands a group header or
-            // drills into a link row per locked decision 8.
-            Msg::ToggleExpand => Msg::ExplorerActivate,
             // `e` toggles group expansion; on a non-header row the
             // reducer surfaces a status hint.
             Msg::ToggleLinkedDetails => Msg::ExplorerToggleGroup,
             other => other,
         })),
+        // T8-043: Enter on the explorer cursor expands a group
+        // header or drills into a link row (locked decision 8).
+        // Left-pane Enter (DefaultAction) is dispatched against the
+        // selected row's kind by the main loop.
+        Action::DefaultAction => Action::Msg(Box::new(Msg::ExplorerActivate)),
         // T8-034: `F` toggles the Expanded Node Detail view when the
         // right pane is focused. The same key still clears filters
         // when the left tree has focus (ADR 0031).
@@ -1503,11 +1572,30 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
                 Some(Action::Msg(Box::new(Msg::NavDown)))
             }
             (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::Msg(Box::new(Msg::NavUp))),
+            // Vi-style tree expand/collapse on the left pane. `l` /
+            // `→` open the selected row's children, `h` / `←`
+            // collapse them. Enter is still the default-action key
+            // (T8-043); these bindings give the operator an explicit
+            // expand/collapse path now that Enter no longer plays
+            // that role for every row kind.
+            (m, KeyCode::Char('l')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Msg(Box::new(Msg::ExpandRow)))
+            }
+            (m, KeyCode::Char('h')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::Msg(Box::new(Msg::CollapseRow)))
+            }
+            (_, KeyCode::Right) => Some(Action::Msg(Box::new(Msg::ExpandRow))),
+            (_, KeyCode::Left) => Some(Action::Msg(Box::new(Msg::CollapseRow))),
             (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown(viewport_height)))),
             (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp(viewport_height)))),
             (_, KeyCode::Home) | (_, KeyCode::Char('g')) => Some(Action::Msg(Box::new(Msg::Home))),
             (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Box::new(Msg::End))),
-            (_, KeyCode::Enter) => Some(Action::Msg(Box::new(Msg::ToggleExpand))),
+            // T8-043: `Enter` resolves to the selected row's default
+            // action when the left pane has focus (attach mux rows,
+            // view un-muxed sessions, expand/collapse groups). Right
+            // pane focus is remapped to `ExplorerActivate` in
+            // `remap_for_focus`.
+            (_, KeyCode::Enter) => Some(Action::DefaultAction),
             // Backspace on the explorer pops a drilldown hop. The
             // reducer no-ops on left focus / empty stack and surfaces
             // a status hint when appropriate.
@@ -1759,9 +1847,31 @@ mod tests {
             msg(translate(press(KeyCode::Up, KeyModifiers::NONE), 24)),
             Some(Msg::NavUp)
         );
+        // T8-043: Enter no longer maps to a Msg directly. It is
+        // resolved against the selected row's kind by the dispatcher
+        // at the call site (and remapped to ExplorerActivate when
+        // the right pane has focus).
         assert_eq!(
-            msg(translate(press(KeyCode::Enter, KeyModifiers::NONE), 24)),
-            Some(Msg::ToggleExpand)
+            translate(press(KeyCode::Enter, KeyModifiers::NONE), 24),
+            Some(Action::DefaultAction)
+        );
+        // Vi-style tree fold keys: `l` / `→` expand, `h` / `←`
+        // collapse the selected left-tree row.
+        assert_eq!(
+            msg(translate(press(KeyCode::Char('l'), KeyModifiers::NONE), 24)),
+            Some(Msg::ExpandRow)
+        );
+        assert_eq!(
+            msg(translate(press(KeyCode::Right, KeyModifiers::NONE), 24)),
+            Some(Msg::ExpandRow)
+        );
+        assert_eq!(
+            msg(translate(press(KeyCode::Char('h'), KeyModifiers::NONE), 24)),
+            Some(Msg::CollapseRow)
+        );
+        assert_eq!(
+            msg(translate(press(KeyCode::Left, KeyModifiers::NONE), 24)),
+            Some(Msg::CollapseRow)
         );
         assert_eq!(
             msg(translate(press(KeyCode::Tab, KeyModifiers::NONE), 24)),
@@ -1835,10 +1945,19 @@ mod tests {
             Action::Msg(Box::new(Msg::CycleFocus))
         );
         // Locked decision 8: Enter is the universal "do the obvious
-        // thing" key on the explorer cursor.
+        // thing" key on the explorer cursor. T8-043 changed the
+        // incoming variant from Msg::ToggleExpand to the new
+        // Action::DefaultAction, but the right-pane outcome is the
+        // same.
         assert_eq!(
-            remap_for_focus(Action::Msg(Box::new(Msg::ToggleExpand)), Focus::Right),
+            remap_for_focus(Action::DefaultAction, Focus::Right),
             Action::Msg(Box::new(Msg::ExplorerActivate))
+        );
+        // Left-pane DefaultAction is left untouched here so the main
+        // loop can resolve it against the selected row.
+        assert_eq!(
+            remap_for_focus(Action::DefaultAction, Focus::Left),
+            Action::DefaultAction
         );
         // `e` is the explicit expand/collapse accelerator.
         assert_eq!(
@@ -1866,6 +1985,199 @@ mod tests {
             remap_for_focus(Action::ClearFilters, Focus::Right),
             Action::Msg(Box::new(Msg::ExplorerToggleFullDetail))
         );
+    }
+
+    mod selected_default_action_tests {
+        use super::*;
+        use crate::filter::RowFilter;
+        use crate::model::{
+            AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, GraphLink,
+            GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
+            NodeId, Provenance, RelationKind, RepoId, RepoNode,
+        };
+        use crate::resolve::resolve_snapshot;
+        use crate::tui::SessionsGrouping;
+        use crate::tui::app::{GraphDb, Msg};
+        use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
+
+        fn session_node(harness: &str, scope: &str, key: &str, cwd: &str) -> GraphNode {
+            GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new(harness, scope, key),
+                harness_key: harness.to_string(),
+                cwd: Some(cwd.to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            })
+        }
+
+        fn mux_node(backend: &str, native: &str) -> GraphNode {
+            GraphNode::MuxSession(MuxSessionNode {
+                id: MuxSessionId::new(format!("{backend}:{native}")),
+                backend: backend.to_string(),
+                native_id: native.to_string(),
+                cwd: None,
+                active_pane_command: None,
+                active_pane_pid: None,
+                active_pane_current_path: None,
+                active_pane_start_command: None,
+                client_attached: None,
+                activity_epoch: None,
+                created_epoch: None,
+            })
+        }
+
+        fn linked_to_mux(session: &NodeId, mux: &NodeId, suffix: &str) -> GraphLink {
+            GraphLink {
+                id: format!("session-mux-{suffix}"),
+                source: session.clone(),
+                target: LinkEndpoint::Node { id: mux.clone() },
+                relation: RelationKind::LinkedToMux,
+                provenance: Provenance::Discovered,
+                confidence: Confidence::Medium,
+                freshness: crate::model::Freshness::Fresh,
+                source_metadata: crate::model::SourceMetadata::default(),
+                state: LinkState::Active,
+            }
+        }
+
+        fn add_repo_and_worktree(snapshot: &mut GraphSnapshot, common_dir: &str) {
+            snapshot
+                .nodes
+                .push(GraphNode::Repo(RepoNode::new(RepoId::new(common_dir))));
+            snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+                id: CheckoutId::new(RepoId::new(common_dir), common_dir.to_string()),
+                root: common_dir.to_string(),
+                git_dir: None,
+                current_branch: None,
+            }));
+        }
+
+        fn build_sessions_app(snapshot: GraphSnapshot) -> App {
+            let snapshot = resolve_snapshot(snapshot);
+            let tree = build_sessions_tree(SessionsBuildInputs {
+                snapshot: &snapshot,
+                grouping: SessionsGrouping::Graph,
+                home: None,
+                now: None,
+                cwd: None,
+                filter: RowFilter::default(),
+            });
+            let mut cfg = RunConfig::defaults();
+            cfg.default_view = View::Sessions;
+            let mut app = App::new(cfg);
+            app.update(Msg::SetData {
+                snapshot: GraphDb::from_snapshot(&snapshot),
+                tree,
+                loaded_at_epoch: 1_700_000_000,
+                initial_selection_hint: None,
+            });
+            app
+        }
+
+        #[test]
+        fn empty_selection_falls_back_to_toggle_expand() {
+            let app = App::new(RunConfig::defaults());
+            assert_eq!(selected_default_action(&app), SelectedDefault::ToggleExpand);
+        }
+
+        #[test]
+        fn group_row_resolves_to_toggle_expand() {
+            let mut snapshot = GraphSnapshot::empty();
+            add_repo_and_worktree(&mut snapshot, "/p/proj");
+            snapshot
+                .nodes
+                .push(session_node("codex", "/state", "abc", "/p/proj"));
+            // Auto-selection lands on the repo group row.
+            let app = build_sessions_app(snapshot);
+            assert_eq!(selected_default_action(&app), SelectedDefault::ToggleExpand);
+        }
+
+        #[test]
+        fn unmuxed_session_resolves_to_view() {
+            let mut snapshot = GraphSnapshot::empty();
+            add_repo_and_worktree(&mut snapshot, "/p/proj");
+            snapshot
+                .nodes
+                .push(session_node("codex", "/state", "abc", "/p/proj"));
+            let mut app = build_sessions_app(snapshot);
+            // Step past the group row to the session row.
+            app.update(Msg::NavDown);
+            assert_eq!(selected_default_action(&app), SelectedDefault::View);
+        }
+
+        #[test]
+        fn muxed_session_resolves_to_attach() {
+            let mut snapshot = GraphSnapshot::empty();
+            add_repo_and_worktree(&mut snapshot, "/p/proj");
+            snapshot
+                .nodes
+                .push(session_node("codex", "/state", "abc", "/p/proj"));
+            snapshot.nodes.push(mux_node("tmux", "editor"));
+            let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+            let mux_id = NodeId::MuxSession(MuxSessionId::new("tmux:editor"));
+            snapshot
+                .candidate_links
+                .push(linked_to_mux(&session_id, &mux_id, "1"));
+            let mut app = build_sessions_app(snapshot);
+            app.update(Msg::NavDown);
+            assert_eq!(selected_default_action(&app), SelectedDefault::Attach);
+        }
+
+        #[test]
+        fn mux_candidate_child_resolves_to_attach() {
+            let mut snapshot = GraphSnapshot::empty();
+            add_repo_and_worktree(&mut snapshot, "/p/proj");
+            snapshot
+                .nodes
+                .push(session_node("codex", "/state", "abc", "/p/proj"));
+            snapshot.nodes.push(mux_node("tmux", "editor"));
+            snapshot.nodes.push(mux_node("tmux", "scratch"));
+            let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+            let editor = NodeId::MuxSession(MuxSessionId::new("tmux:editor"));
+            let scratch = NodeId::MuxSession(MuxSessionId::new("tmux:scratch"));
+            snapshot
+                .candidate_links
+                .push(linked_to_mux(&session_id, &editor, "1"));
+            snapshot
+                .candidate_links
+                .push(linked_to_mux(&session_id, &scratch, "2"));
+            let mut app = build_sessions_app(snapshot);
+            // Group → ambiguous session → expand → candidate child.
+            app.update(Msg::NavDown);
+            app.update(Msg::ToggleExpand);
+            app.update(Msg::NavDown);
+            assert_eq!(selected_default_action(&app), SelectedDefault::Attach);
+        }
+
+        #[test]
+        fn mux_view_mux_row_resolves_to_attach() {
+            let mut snapshot = GraphSnapshot::empty();
+            snapshot.nodes.push(mux_node("tmux", "editor"));
+            let snapshot = resolve_snapshot(snapshot);
+            let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize snapshot");
+            let tree = crate::tui::rows::mux::build_mux_tree_from_conn(
+                crate::tui::rows::mux::MuxBuildInputsFromConn {
+                    conn: &conn,
+                    home: None,
+                    now: None,
+                    filter: RowFilter::default(),
+                    grouping: crate::tui::MuxGrouping::Session,
+                },
+            )
+            .expect("build mux tree");
+            let mut cfg = RunConfig::defaults();
+            cfg.default_view = View::Mux;
+            let mut app = App::new(cfg);
+            app.update(Msg::SetData {
+                snapshot: GraphDb::new(conn),
+                tree,
+                loaded_at_epoch: 1_700_000_000,
+                initial_selection_hint: None,
+            });
+            assert_eq!(selected_default_action(&app), SelectedDefault::Attach);
+        }
     }
 
     #[test]

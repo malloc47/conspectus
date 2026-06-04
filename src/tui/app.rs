@@ -355,6 +355,13 @@ pub enum Msg {
     /// Left panel: expand/collapse the selected row. No-op on a
     /// leaf row.
     ToggleExpand,
+    /// Left panel: expand the selected row when it has children.
+    /// No-op when the row is a leaf or is already expanded. Bound
+    /// to `→` / `l` for vi-style tree navigation.
+    ExpandRow,
+    /// Left panel: collapse the selected row when it is expanded.
+    /// No-op on already-collapsed or leaf rows. Bound to `←` / `h`.
+    CollapseRow,
     /// Right panel: expand/collapse linked entity details under the
     /// selected node's compact link rows.
     ToggleLinkedDetails,
@@ -967,6 +974,8 @@ impl App {
             Msg::Home => self.move_selection_to(0),
             Msg::End => self.move_selection_to(usize::MAX),
             Msg::ToggleExpand => self.toggle_expand_selected(),
+            Msg::ExpandRow => self.expand_selected(),
+            Msg::CollapseRow => self.collapse_selected(),
             Msg::ToggleLinkedDetails => self.toggle_linked_details(),
             Msg::ExplorerNavDown => self.explorer_move_cursor(1),
             Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
@@ -1095,6 +1104,28 @@ impl App {
         } else {
             self.expanded.insert(id);
         }
+    }
+
+    fn expand_selected(&mut self) {
+        let Some(id) = self.selection.as_ref().cloned() else {
+            return;
+        };
+        let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
+        if !is_expandable {
+            return;
+        }
+        self.expanded.insert(id);
+    }
+
+    fn collapse_selected(&mut self) {
+        let Some(id) = self.selection.as_ref().cloned() else {
+            return;
+        };
+        let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
+        if !is_expandable {
+            return;
+        }
+        self.expanded.remove(&id);
     }
 
     fn visible_rows_owned(&self) -> Vec<RowId> {
@@ -1817,6 +1848,53 @@ mod tests {
             visible_again, visible_before,
             "re-expansion restores the view"
         );
+    }
+
+    #[test]
+    fn expand_row_opens_then_no_ops_when_already_open() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        // Selection starts on the first group row.
+        let group_id = app.selection().cloned().unwrap();
+        assert!(matches!(group_id, RowId::Group(_)));
+        // Force-collapse to mirror the user pressing `h` on an
+        // already-expanded row.
+        app.update(Msg::CollapseRow);
+        let visible_after_collapse = app.visible_rows_owned().len();
+        app.update(Msg::ExpandRow);
+        let visible_after_expand = app.visible_rows_owned().len();
+        assert!(
+            visible_after_expand > visible_after_collapse,
+            "expand reveals children"
+        );
+        // Repeated expand is a no-op (it doesn't re-collapse).
+        app.update(Msg::ExpandRow);
+        assert_eq!(app.visible_rows_owned().len(), visible_after_expand);
+    }
+
+    #[test]
+    fn collapse_row_hides_descendants_and_then_no_ops() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        let visible_before = app.visible_rows_owned().len();
+        app.update(Msg::CollapseRow);
+        let visible_after = app.visible_rows_owned().len();
+        assert!(visible_after < visible_before, "collapse hides descendants");
+        // Repeated collapse is a no-op.
+        app.update(Msg::CollapseRow);
+        assert_eq!(app.visible_rows_owned().len(), visible_after);
+    }
+
+    #[test]
+    fn expand_collapse_no_op_on_leaf_row() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        // Move past the group row to the leaf session row.
+        app.update(Msg::NavDown);
+        let leaf_id = app.selection().cloned().unwrap();
+        assert!(matches!(leaf_id, RowId::AgentSession(_)));
+        let visible = app.visible_rows_owned().len();
+        app.update(Msg::ExpandRow);
+        assert_eq!(app.visible_rows_owned().len(), visible);
+        app.update(Msg::CollapseRow);
+        assert_eq!(app.visible_rows_owned().len(), visible);
     }
 
     #[test]
