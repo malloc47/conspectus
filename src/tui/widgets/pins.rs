@@ -84,6 +84,7 @@ pub enum PinsCursor {
 pub enum PinsSubEditor {
     Create(PinCreateState),
     Edit(PinEditState),
+    Rebind(PinRebindState),
     Bind(PinBindState),
     Remove(PinRemoveState),
 }
@@ -203,6 +204,20 @@ pub struct PinRemoveState {
     target: PinMutationTarget,
 }
 
+/// Mux-only rebind form used by the `B` direct shortcut. Surfaces
+/// only `mux.name` and `mux.socket_name` for editing; every other
+/// field is carried through from the target unchanged. The runtime
+/// still serializes as a [`PinEditRequest`] so the write path stays
+/// shared with the full edit form.
+#[derive(Debug, Clone)]
+pub struct PinRebindState {
+    target: PinMutationTarget,
+    cursor: usize,
+    mux_name: TextInputState,
+    mux_socket: TextInputState,
+    error: Option<String>,
+}
+
 /// Pure state for the pins overlay: cursor position plus the active
 /// sub-editor (if any).
 #[derive(Debug, Clone)]
@@ -251,11 +266,21 @@ impl PinsOverlayState {
     }
 
     /// Open directly into the edit form for `target`. Used by the
-    /// rename / rebind direct shortcuts.
+    /// rename direct shortcut.
     pub fn open_with_edit(target: PinMutationTarget) -> Self {
         Self {
             cursor: PinsCursor::Action(1),
             sub_editor: Some(PinsSubEditor::Edit(PinEditState::new(target))),
+        }
+    }
+
+    /// Open directly into the mux-only rebind form. Backed by the
+    /// `B` direct shortcut so external tmux renames recover in one
+    /// keystroke without paging through the full edit form.
+    pub fn open_with_rebind(target: PinMutationTarget) -> Self {
+        Self {
+            cursor: PinsCursor::Action(4),
+            sub_editor: Some(PinsSubEditor::Rebind(PinRebindState::new(target))),
         }
     }
 
@@ -303,9 +328,16 @@ impl PinsOverlayState {
                 ctx.pin_create_defaults.clone(),
             )));
             PinsOutcome::Continue
-        } else if label == "rename" || label == "rebind" {
+        } else if label == "rename" {
             if let Some(target) = ctx.pin_target.clone() {
                 self.sub_editor = Some(PinsSubEditor::Edit(PinEditState::new(target)));
+                PinsOutcome::Continue
+            } else {
+                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+            }
+        } else if label == "rebind" {
+            if let Some(target) = ctx.pin_target.clone() {
+                self.sub_editor = Some(PinsSubEditor::Rebind(PinRebindState::new(target)));
                 PinsOutcome::Continue
             } else {
                 PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
@@ -346,6 +378,17 @@ impl PinsOverlayState {
                 }
             },
             PinsSubEditor::Edit(state) => match state.handle_key(event) {
+                PinEditOutcome::Continue => PinsOutcome::Continue,
+                PinEditOutcome::Cancel => {
+                    *slot = None;
+                    PinsOutcome::Continue
+                }
+                PinEditOutcome::Confirm(request) => {
+                    *slot = None;
+                    PinsOutcome::ApplyAndClose(PinsAction::EditPin(*request))
+                }
+            },
+            PinsSubEditor::Rebind(state) => match state.handle_key(event) {
                 PinEditOutcome::Continue => PinsOutcome::Continue,
                 PinEditOutcome::Cancel => {
                     *slot = None;
@@ -715,6 +758,89 @@ impl PinRemoveState {
     }
 }
 
+impl PinRebindState {
+    const FIELD_COUNT: usize = 2;
+
+    fn new(target: PinMutationTarget) -> Self {
+        Self {
+            cursor: 0,
+            mux_name: TextInputState::new(" mux ", target.mux_name.clone()),
+            mux_socket: TextInputState::new(
+                " socket ",
+                target.mux_socket.clone().unwrap_or_default(),
+            ),
+            error: None,
+            target,
+        }
+    }
+
+    fn handle_key(&mut self, event: KeyEvent) -> PinEditOutcome {
+        match event.code {
+            KeyCode::Esc => PinEditOutcome::Cancel,
+            KeyCode::Enter => match self.request() {
+                Ok(request) => PinEditOutcome::Confirm(Box::new(request)),
+                Err(err) => {
+                    self.error = Some(err);
+                    PinEditOutcome::Continue
+                }
+            },
+            KeyCode::Up => {
+                self.move_cursor(-1);
+                PinEditOutcome::Continue
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.move_cursor(1);
+                PinEditOutcome::Continue
+            }
+            _ => {
+                if event.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(event.code, KeyCode::Char('c'))
+                {
+                    return PinEditOutcome::Cancel;
+                }
+                if let Some(input) = self.active_input_mut() {
+                    let _ = input.handle_key(event);
+                    self.error = None;
+                }
+                PinEditOutcome::Continue
+            }
+        }
+    }
+
+    fn move_cursor(&mut self, delta: i32) {
+        let len = Self::FIELD_COUNT as i32;
+        let next = ((self.cursor as i32 + delta) % len + len) % len;
+        self.cursor = next as usize;
+    }
+
+    fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
+        match self.cursor {
+            0 => Some(&mut self.mux_name),
+            1 => Some(&mut self.mux_socket),
+            _ => None,
+        }
+    }
+
+    fn request(&self) -> Result<PinEditRequest, String> {
+        let mux_name = required(self.mux_name.value(), "mux.name")?;
+        let mux_socket = optional(self.mux_socket.value());
+        // Rebind only swaps the mux target; every other field is
+        // preserved verbatim so the runtime's shared write path
+        // can treat this as an ordinary edit.
+        Ok(PinEditRequest {
+            original_id: self.target.id.clone(),
+            id: self.target.id.clone(),
+            display_name: self.target.display_name.clone(),
+            harness: self.target.harness.clone(),
+            cwd: self.target.cwd.clone(),
+            mux_name,
+            mux_socket,
+            launch_argv: self.target.launch_argv.clone(),
+            store_path: self.target.store_path.clone(),
+        })
+    }
+}
+
 fn required(raw: &str, label: &str) -> Result<String, String> {
     optional(raw).ok_or_else(|| format!("pin create: {label} is required"))
 }
@@ -781,6 +907,7 @@ fn render_sub_editor(editor: &PinsSubEditor, area: Rect, buf: &mut Buffer) {
     match editor {
         PinsSubEditor::Create(state) => PinCreateWidget::new(state).render(area, buf),
         PinsSubEditor::Edit(state) => PinEditWidget::new(state).render(area, buf),
+        PinsSubEditor::Rebind(state) => PinRebindWidget::new(state).render(area, buf),
         PinsSubEditor::Bind(state) => PinBindWidget::new(state).render(area, buf),
         PinsSubEditor::Remove(state) => PinRemoveWidget::new(state).render(area, buf),
     }
@@ -951,6 +1078,75 @@ impl Widget for PinEditWidget<'_> {
 
         Paragraph::new(lines).render(inner, buf);
     }
+}
+
+struct PinRebindWidget<'a> {
+    state: &'a PinRebindState,
+}
+
+impl<'a> PinRebindWidget<'a> {
+    fn new(state: &'a PinRebindState) -> Self {
+        Self { state }
+    }
+}
+
+impl Widget for PinRebindWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let modal = pin_rebind_modal_rect(area);
+        for y in modal.top()..modal.bottom() {
+            for x in modal.left()..modal.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.reset();
+                }
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Rebind Pin "));
+        let inner = block.inner(modal);
+        block.render(modal, buf);
+
+        let mut lines = vec![
+            Line::from(format!("  id          {}", self.state.target.id)),
+            Line::from(format!("  display     {}", self.state.target.display_name)),
+            pin_create_field(
+                0,
+                "mux.name",
+                self.state.mux_name.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(
+                1,
+                "mux.socket",
+                self.state.mux_socket.value(),
+                self.state.cursor,
+            ),
+            Line::from(format!("  store       {}", self.state.target.store_path)),
+        ];
+        if let Some(error) = &self.state.error {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                error.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Up/Down field · type to edit · Enter save · Esc cancel",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+
+        Paragraph::new(lines).render(inner, buf);
+    }
+}
+
+fn pin_rebind_modal_rect(area: Rect) -> Rect {
+    let width = std::cmp::min(70, area.width.saturating_sub(4)).max(44);
+    let height = std::cmp::min(12, area.height.saturating_sub(2)).max(9);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
 }
 
 fn pin_edit_modal_rect(area: Rect) -> Rect {
@@ -1431,5 +1627,49 @@ mod tests {
     #[test]
     fn open_with_bind_returns_none_for_empty_options() {
         assert!(PinsOverlayState::open_with_bind(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn open_with_rebind_opens_mux_only_form() {
+        let state = PinsOverlayState::open_with_rebind(pin_target());
+        assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Rebind(_))));
+    }
+
+    #[test]
+    fn rebind_form_preserves_unchanged_target_fields() {
+        let target = pin_target();
+        let mut state = PinRebindState::new(target.clone());
+        // Enter without editing should round-trip the target's
+        // mux fields and carry the rest through verbatim.
+        let outcome = state.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match outcome {
+            PinEditOutcome::Confirm(request) => {
+                assert_eq!(request.original_id, target.id);
+                assert_eq!(request.id, target.id);
+                assert_eq!(request.display_name, target.display_name);
+                assert_eq!(request.harness, target.harness);
+                assert_eq!(request.cwd, target.cwd);
+                assert_eq!(request.mux_name, target.mux_name);
+                assert_eq!(request.mux_socket, target.mux_socket);
+                assert_eq!(request.launch_argv, target.launch_argv);
+                assert_eq!(request.store_path, target.store_path);
+            }
+            other => panic!("expected confirm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn menu_rebind_uses_mux_only_form() {
+        // The Pins menu's `rebind` entry routes through the
+        // narrower form, not the full edit form.
+        let ctx = PinsContext {
+            pin_target: Some(pin_target()),
+            ..PinsContext::default()
+        };
+        let mut state = PinsOverlayState::new();
+        state.cursor = PinsCursor::Action(4); // rebind
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(outcome, PinsOutcome::Continue);
+        assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Rebind(_))));
     }
 }

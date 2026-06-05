@@ -229,6 +229,9 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 }
                 Some(Action::RemovePin) => remove_pin_action(&mut app, &config),
                 Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
+                Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
+                Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
+                Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
                 Some(Action::OpenControls) => {
                     app.open_controls_overlay();
                     app.update(Msg::SetStatus(Some(
@@ -451,6 +454,9 @@ fn static_event_loop(
                     )));
                 }
                 Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
+                Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
+                Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
+                Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
                 Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
                 Some(Action::CopySessionId) => copy_session_id_action(&mut app),
                 None => {}
@@ -893,6 +899,18 @@ fn remove_pin_action(app: &mut App, config: &RunConfig) {
 }
 
 fn pin_bind_hint_action(app: &mut App) {
+    // Selection has competing PinAmbiguous candidates → open the
+    // picker directly. Otherwise fall back to the existing hint
+    // surface so the operator gets a single-line nudge instead of a
+    // silent press.
+    let options = app.pins_context().pin_bind_options;
+    if let Some(state) = crate::tui::widgets::pins::PinsOverlayState::open_with_bind(options) {
+        app.set_pins_overlay(state);
+        app.update(Msg::SetStatus(Some(
+            "pins: bind ↑/↓ pick · Enter confirm · Esc cancel".to_string(),
+        )));
+        return;
+    }
     let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
     match crate::tui::actions::pin_bind_hint(&diagnostics) {
         Some(message) => app.update(Msg::SetStatus(Some(message))),
@@ -900,6 +918,48 @@ fn pin_bind_hint_action(app: &mut App) {
             "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
         ))),
     }
+}
+
+fn open_pin_create_action(app: &mut App) {
+    let defaults = app.pins_context().pin_create_defaults;
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create(defaults);
+    app.set_pins_overlay(state);
+    app.update(Msg::SetStatus(Some(
+        "pins: new pin · Up/Down field · Enter create · Esc cancel".to_string(),
+    )));
+}
+
+fn open_pin_rebind_action(app: &mut App) {
+    let Some(target) = app.pins_context().pin_target else {
+        app.update(Msg::SetStatus(Some(
+            "pin rebind: select a pin row first".to_string(),
+        )));
+        return;
+    };
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_rebind(target);
+    app.set_pins_overlay(state);
+    app.update(Msg::SetStatus(Some(
+        "pins: rebind mux · Enter save · Esc cancel".to_string(),
+    )));
+}
+
+fn open_pin_adopt_action(app: &mut App) {
+    // Adopt only makes sense from a live mux row: pin defaults are
+    // seeded from the mux's name, observed cwd, and current
+    // attribution. Refuse on any other selection so the operator
+    // doesn't have to type those fields from scratch.
+    if !app.selection_is_live_mux() {
+        app.update(Msg::SetStatus(Some(
+            "pin adopt: select a live mux row first".to_string(),
+        )));
+        return;
+    }
+    let defaults = app.pins_context().pin_create_defaults;
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create(defaults);
+    app.set_pins_overlay(state);
+    app.update(Msg::SetStatus(Some(
+        "pins: adopt mux · Enter create · Esc cancel".to_string(),
+    )));
 }
 
 /// Append an informational advisory when the rename target is a
@@ -1128,10 +1188,19 @@ enum Action {
     /// `Delete` on an unbound/stale pin row. First press arms a
     /// confirmation; second press shells out to `conspectus pin rm`.
     RemovePin,
-    /// `b` on a selected ambiguous pin-bound row. H-PIN-018 routes
-    /// to a bind escape-hatch hint; the structured picker lands in
-    /// H-PIN-024.
+    /// `b` on a selected ambiguous pin-bound row. Opens the bind
+    /// picker when the resolver flagged competing `PinAmbiguous`
+    /// candidates; otherwise surfaces a status hint.
     PinBindHint,
+    /// `N` opens the pin create form seeded from the current
+    /// selection. Direct counterpart to `Pins > create` on `p`.
+    OpenPinCreate,
+    /// `B` opens the mux-only rebind form for the selected pin.
+    /// Refuses with a status hint when no pin row is selected.
+    OpenPinRebind,
+    /// `A` adopts the selected live mux row as a new pin. Refuses
+    /// with a status hint on any other row kind.
+    OpenPinAdopt,
     /// Open the controls overlay (ADR 0031, F8-005) at its top
     /// section.
     OpenControls,
@@ -2162,6 +2231,15 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (m, KeyCode::Char('b')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::PinBindHint)
             }
+            // ADR 0057 direct pin shortcuts. `p` opens the discoverable
+            // menu (added in the modal split); these capitals reach
+            // each action without a menu pick.
+            (KeyModifiers::SHIFT, KeyCode::Char('N'))
+            | (KeyModifiers::NONE, KeyCode::Char('N')) => Some(Action::OpenPinCreate),
+            (KeyModifiers::SHIFT, KeyCode::Char('B'))
+            | (KeyModifiers::NONE, KeyCode::Char('B')) => Some(Action::OpenPinRebind),
+            (KeyModifiers::SHIFT, KeyCode::Char('A'))
+            | (KeyModifiers::NONE, KeyCode::Char('A')) => Some(Action::OpenPinAdopt),
             // ADR 0031 / F8-005 accelerator surface (reshuffled
             // alongside H-VIEWER-NATIVE-008 to give the more
             // discoverable `v` to the session viewer):
@@ -2402,6 +2480,52 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('f'), KeyModifiers::NONE), 24),
             Some(Action::OpenControls)
+        );
+    }
+
+    #[test]
+    fn translate_p_opens_pins_overlay() {
+        assert_eq!(
+            translate(press(KeyCode::Char('p'), KeyModifiers::NONE), 24),
+            Some(Action::OpenPins)
+        );
+    }
+
+    #[test]
+    fn translate_capital_n_requests_open_pin_create() {
+        assert_eq!(
+            translate(press(KeyCode::Char('N'), KeyModifiers::SHIFT), 24),
+            Some(Action::OpenPinCreate)
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('N'), KeyModifiers::NONE), 24),
+            Some(Action::OpenPinCreate)
+        );
+    }
+
+    #[test]
+    fn translate_capital_b_requests_open_pin_rebind() {
+        assert_eq!(
+            translate(press(KeyCode::Char('B'), KeyModifiers::SHIFT), 24),
+            Some(Action::OpenPinRebind)
+        );
+        // Lowercase b still routes to the bind picker / hint.
+        assert_eq!(
+            translate(press(KeyCode::Char('b'), KeyModifiers::NONE), 24),
+            Some(Action::PinBindHint)
+        );
+    }
+
+    #[test]
+    fn translate_capital_a_requests_open_pin_adopt() {
+        assert_eq!(
+            translate(press(KeyCode::Char('A'), KeyModifiers::SHIFT), 24),
+            Some(Action::OpenPinAdopt)
+        );
+        // Lowercase a still attaches.
+        assert_eq!(
+            translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
+            Some(Action::Attach)
         );
     }
 

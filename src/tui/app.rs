@@ -961,6 +961,21 @@ impl App {
         }
     }
 
+    /// Returns true when the active selection is a live mux row.
+    /// Used by the `A` (adopt) direct shortcut, which is scoped to
+    /// mux rows because the rest of the flow seeds pin defaults from
+    /// the mux's name / cwd.
+    pub fn selection_is_live_mux(&self) -> bool {
+        let Some(selection) = self.selection.as_ref() else {
+            return false;
+        };
+        self.tree
+            .rows
+            .iter()
+            .find(|row| &row.id == selection)
+            .is_some_and(|row| matches!(row.kind, RowKind::MuxSession(_)))
+    }
+
     /// Active row filter for the visible view. F8-003 will
     /// generalize this to per-view state.
     pub fn filter(&self) -> &crate::filter::RowFilter {
