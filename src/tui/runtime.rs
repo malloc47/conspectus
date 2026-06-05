@@ -450,12 +450,14 @@ fn static_handle_controls_overlay_key(
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
     let pin_create_defaults = app.controls_context().pin_create_defaults;
+    let pin_target = app.controls_context().pin_target;
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
         pin_create_defaults,
+        pin_target,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -487,6 +489,7 @@ fn static_apply_controls_action_and_refresh(
     if matches!(
         action,
         crate::tui::widgets::controls::ControlsAction::CreatePin(_)
+            | crate::tui::widgets::controls::ControlsAction::RemovePin(_)
     ) {
         app.update(Msg::SetStatus(Some(
             "scenario TUI keeps mutating actions disabled".to_string(),
@@ -1256,12 +1259,14 @@ fn handle_controls_overlay_key(
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
     let pin_create_defaults = app.controls_context().pin_create_defaults;
+    let pin_target = app.controls_context().pin_target;
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
         pin_create_defaults,
+        pin_target,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -1294,6 +1299,9 @@ fn apply_controls_action_and_refresh(
     match action {
         crate::tui::widgets::controls::ControlsAction::CreatePin(request) => {
             create_pin_action(app, config, request);
+        }
+        crate::tui::widgets::controls::ControlsAction::RemovePin(request) => {
+            remove_pin_controls_action(app, config, request);
         }
         other => {
             app.apply_controls_action(other);
@@ -1372,6 +1380,40 @@ fn pin_store_label(kind: PinStoreKind) -> &'static str {
         PinStoreKind::Project => "project",
         PinStoreKind::User => "user",
     }
+}
+
+fn remove_pin_controls_action(
+    app: &mut App,
+    config: &RunConfig,
+    request: crate::tui::widgets::controls::PinRemoveRequest,
+) {
+    match write_pin_remove(&request) {
+        Ok(outcome) if outcome.changed => {
+            refresh(app, config);
+            app.update(Msg::SetStatus(Some(format!(
+                "removed pin `{}` from {}",
+                request.id,
+                outcome.path.display()
+            ))));
+        }
+        Ok(outcome) => {
+            refresh(app, config);
+            app.update(Msg::SetStatus(Some(format!(
+                "pin `{}` was already absent from {}",
+                request.id,
+                outcome.path.display()
+            ))));
+        }
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("pin remove failed: {err}"))));
+        }
+    }
+}
+
+fn write_pin_remove(
+    request: &crate::tui::widgets::controls::PinRemoveRequest,
+) -> Result<PinWriteOutcome> {
+    crate::pins::remove_pin_entry(&request.store_path, &request.id).map_err(Into::into)
 }
 
 /// Switch view and refresh. Shared between the `1`–`5` direct keys
@@ -1918,7 +1960,7 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::widgets::controls::{PinCreateRequest, PinCreateStore};
+    use crate::tui::widgets::controls::{PinCreateRequest, PinCreateStore, PinRemoveRequest};
     use ratatui::crossterm::event::KeyEvent;
     use std::fs;
 
@@ -2149,6 +2191,37 @@ mod tests {
         assert_eq!(outcome.path, xdg.join(crate::config::USER_CONFIG_RELATIVE));
         assert!(outcome.path.exists());
         assert!(!project.path().join(".conspectus.toml").exists());
+    }
+
+    #[test]
+    fn write_pin_remove_removes_from_explicit_store_path() {
+        let project = tempfile::TempDir::new().expect("project");
+        let path = project.path().join(".conspectus.toml");
+        let entry = PinEntry {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux: PinMux {
+                backend: TMUX_MUX_BACKEND.to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch: None,
+            reason: None,
+        };
+        crate::pins::upsert_pin_entry(&path, entry).expect("seed pin");
+        assert!(path.exists());
+
+        let outcome = write_pin_remove(&PinRemoveRequest {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            store_path: path.display().to_string(),
+        })
+        .expect("remove pin");
+        assert!(outcome.changed);
+        assert_eq!(outcome.path, path);
+        assert!(!outcome.path.exists());
     }
 
     #[test]

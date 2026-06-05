@@ -294,6 +294,7 @@ pub struct ForkRow {
 pub struct PinRow {
     pub pin_id: String,
     pub display_name: String,
+    pub store_path: String,
     pub harness_label: String,
     pub cwd_display: String,
     pub mux_label: String,

@@ -74,6 +74,7 @@ pub struct ControlsContext<'a> {
     pub filter: &'a RowFilter,
     pub sort: Sort,
     pub pin_create_defaults: PinCreateDefaults,
+    pub pin_target: Option<PinMutationTarget>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -83,6 +84,13 @@ pub struct PinCreateDefaults {
     pub harness: String,
     pub cwd: String,
     pub mux_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinMutationTarget {
+    pub id: String,
+    pub display_name: String,
+    pub store_path: String,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -119,6 +127,7 @@ pub enum SubEditor {
     MaxAge(TextInputState),
     MuxState(MultiSelectState),
     PinCreate(PinCreateState),
+    PinRemove(PinRemoveState),
 }
 
 /// What the controls overlay returned from a single key event.
@@ -146,6 +155,7 @@ pub enum ControlsAction {
     SetFilter(RowFilter),
     SetSort(Sort),
     CreatePin(PinCreateRequest),
+    RemovePin(PinRemoveRequest),
     PinPlaceholder(&'static str),
 }
 
@@ -159,6 +169,13 @@ pub struct PinCreateRequest {
     pub mux_socket: Option<String>,
     pub launch_argv: Vec<String>,
     pub store: PinCreateStore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinRemoveRequest {
+    pub id: String,
+    pub display_name: String,
+    pub store_path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +207,11 @@ pub struct PinCreateState {
     launch_argv: TextInputState,
     store: PinCreateStore,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PinRemoveState {
+    target: PinMutationTarget,
 }
 
 /// Pure state for the controls overlay: cursor position plus the
@@ -323,6 +345,13 @@ impl ControlsOverlayState {
                         ctx.pin_create_defaults.clone(),
                     )));
                     ControlsOutcome::Continue
+                } else if label == "remove" {
+                    if let Some(target) = ctx.pin_target.clone() {
+                        self.sub_editor = Some(SubEditor::PinRemove(PinRemoveState::new(target)));
+                        ControlsOutcome::Continue
+                    } else {
+                        ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
+                    }
                 } else {
                     ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
                 }
@@ -403,6 +432,17 @@ impl ControlsOverlayState {
                     ControlsOutcome::ApplyAndClose(ControlsAction::CreatePin(request))
                 }
             },
+            SubEditor::PinRemove(state) => match state.handle_key(event) {
+                PinRemoveOutcome::Continue => ControlsOutcome::Continue,
+                PinRemoveOutcome::Cancel => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                PinRemoveOutcome::Confirm(request) => {
+                    *slot = None;
+                    ControlsOutcome::ApplyAndClose(ControlsAction::RemovePin(request))
+                }
+            },
         }
     }
 }
@@ -411,6 +451,13 @@ impl ControlsOverlayState {
 enum PinCreateOutcome {
     Continue,
     Confirm(PinCreateRequest),
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PinRemoveOutcome {
+    Continue,
+    Confirm(PinRemoveRequest),
     Cancel,
 }
 
@@ -552,6 +599,29 @@ fn required(raw: &str, label: &str) -> Result<String, String> {
 fn optional(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+impl PinRemoveState {
+    fn new(target: PinMutationTarget) -> Self {
+        Self { target }
+    }
+
+    fn handle_key(&mut self, event: KeyEvent) -> PinRemoveOutcome {
+        match event.code {
+            KeyCode::Esc => PinRemoveOutcome::Cancel,
+            KeyCode::Enter => PinRemoveOutcome::Confirm(PinRemoveRequest {
+                id: self.target.id.clone(),
+                display_name: self.target.display_name.clone(),
+                store_path: self.target.store_path.clone(),
+            }),
+            _ if event.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(event.code, KeyCode::Char('c')) =>
+            {
+                PinRemoveOutcome::Cancel
+            }
+            _ => PinRemoveOutcome::Continue,
+        }
+    }
 }
 
 fn build_harness_editor(filter: &RowFilter) -> MultiSelectState {
@@ -790,6 +860,9 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer) {
         SubEditor::PinCreate(state) => {
             PinCreateWidget::new(state).render(area, buf);
         }
+        SubEditor::PinRemove(state) => {
+            PinRemoveWidget::new(state).render(area, buf);
+        }
     }
 }
 
@@ -881,6 +954,61 @@ fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize)
 fn pin_create_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
     let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
+}
+
+struct PinRemoveWidget<'a> {
+    state: &'a PinRemoveState,
+}
+
+impl<'a> PinRemoveWidget<'a> {
+    fn new(state: &'a PinRemoveState) -> Self {
+        Self { state }
+    }
+}
+
+impl Widget for PinRemoveWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let modal = pin_remove_modal_rect(area);
+        for y in modal.top()..modal.bottom() {
+            for x in modal.left()..modal.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.reset();
+                }
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Remove Pin "));
+        let inner = block.inner(modal);
+        block.render(modal, buf);
+
+        let lines = vec![
+            Line::from(vec![
+                Span::raw("id       "),
+                Span::styled(
+                    self.state.target.id.clone(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(format!("display  {}", self.state.target.display_name)),
+            Line::from(format!("store    {}", self.state.target.store_path)),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Enter remove · Esc cancel",
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+        ];
+        Paragraph::new(lines).render(inner, buf);
+    }
+}
+
+fn pin_remove_modal_rect(area: Rect) -> Rect {
+    let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
+    let height = std::cmp::min(8, area.height.saturating_sub(2)).max(7);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width, height)
@@ -1112,6 +1240,7 @@ mod tests {
             filter,
             sort,
             pin_create_defaults: PinCreateDefaults::default(),
+            pin_target: None,
         }
     }
 
@@ -1398,6 +1527,81 @@ mod tests {
             outcome,
             ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder("rename"))
         );
+    }
+
+    #[test]
+    fn enter_on_remove_pin_action_opens_remove_confirmation_for_pin_target() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_target = Some(PinMutationTarget {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            store_path: "/workspace/project/.conspectus.toml".to_string(),
+        });
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(2);
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        assert!(matches!(state.sub_editor(), Some(SubEditor::PinRemove(_))));
+    }
+
+    #[test]
+    fn remove_pin_confirmation_emits_remove_action() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_target = Some(PinMutationTarget {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            store_path: "/workspace/project/.conspectus.toml".to_string(),
+        });
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(2);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            ControlsOutcome::ApplyAndClose(ControlsAction::RemovePin(PinRemoveRequest {
+                id: "ingest".to_string(),
+                display_name: "Ingest".to_string(),
+                store_path: "/workspace/project/.conspectus.toml".to_string(),
+            }))
+        );
+        assert!(state.sub_editor().is_none());
+    }
+
+    #[test]
+    fn remove_pin_confirmation_cancel_does_not_emit_action() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_target = Some(PinMutationTarget {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            store_path: "/workspace/project/.conspectus.toml".to_string(),
+        });
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(2);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Esc));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        assert!(state.sub_editor().is_none());
     }
 
     #[test]

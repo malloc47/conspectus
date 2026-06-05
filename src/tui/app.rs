@@ -26,7 +26,7 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::controls::PinCreateDefaults;
+use crate::tui::widgets::controls::{PinCreateDefaults, PinMutationTarget};
 use crate::tui::{RunConfig, View};
 
 pub struct GraphDb(Rc<rusqlite::Connection>);
@@ -800,7 +800,50 @@ impl App {
             filter: &self.filter,
             sort: self.sort,
             pin_create_defaults: self.pin_create_defaults(),
+            pin_target: self.pin_mutation_target(),
         }
+    }
+
+    fn pin_mutation_target(&self) -> Option<PinMutationTarget> {
+        let selection = self.selection.as_ref()?;
+        let row = self.tree.rows.iter().find(|row| &row.id == selection)?;
+        let (id, display_name) = match &row.kind {
+            RowKind::Pin(pin) => {
+                return Some(PinMutationTarget {
+                    id: pin.pin_id.clone(),
+                    display_name: pin.display_name.clone(),
+                    store_path: pin.store_path.clone(),
+                });
+            }
+            RowKind::AgentSession(session) => {
+                let id = session.pin_id.clone()?;
+                let display_name = session
+                    .display_label()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| id.clone());
+                (id, display_name)
+            }
+            _ => return None,
+        };
+        let store_path = self.pin_store_path(&id)?;
+        Some(PinMutationTarget {
+            id,
+            display_name,
+            store_path,
+        })
+    }
+
+    fn pin_store_path(&self, id: &str) -> Option<String> {
+        self.database
+            .as_ref()
+            .and_then(|db| crate::query::read_snapshot(db.conn()).ok())
+            .and_then(|snapshot| {
+                snapshot
+                    .pins
+                    .into_iter()
+                    .find(|pin| pin.id == id)
+                    .map(|pin| pin.store_path)
+            })
     }
 
     fn pin_create_defaults(&self) -> PinCreateDefaults {
@@ -917,6 +960,10 @@ impl App {
             ControlsAction::CreatePin(_) => {
                 self.status_message =
                     Some("pins: create is handled by the TUI runtime".to_string());
+            }
+            ControlsAction::RemovePin(_) => {
+                self.status_message =
+                    Some("pins: remove is handled by the TUI runtime".to_string());
             }
             ControlsAction::PinPlaceholder(label) => {
                 self.status_message = Some(format!(
@@ -1783,7 +1830,7 @@ mod tests {
     use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
-        RepoId, RepoNode,
+        PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode,
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::SessionsGrouping;
@@ -1898,6 +1945,53 @@ mod tests {
         assert_eq!(defaults.cwd, "/p/proja");
         assert_eq!(defaults.id, "");
         assert_eq!(defaults.harness, "");
+    }
+
+    #[test]
+    fn controls_context_seeds_pin_mutation_target_from_selected_pin_row() {
+        let mut snap = GraphSnapshot::empty();
+        snap.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/project".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/project/.conspectus.toml".to_string(),
+            binding: None,
+        });
+        let snap = resolve_snapshot(snap);
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let pin_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::Pin(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("pin row");
+        app.set_selection(pin_id);
+
+        let target = app
+            .controls_context()
+            .pin_target
+            .expect("pin mutation target");
+        assert_eq!(target.id, "ingest");
+        assert_eq!(target.display_name, "Ingest");
+        assert_eq!(target.store_path, "/p/project/.conspectus.toml");
     }
 
     #[test]
@@ -2468,8 +2562,7 @@ mod tests {
     // ----- T8-028: explorer navigation / drilldown / breadcrumb -----
 
     use crate::model::{
-        Confidence, LinkEndpoint, LinkState, MuxSessionNode, Provenance, RelationKind,
-        SourceMetadata,
+        Confidence, LinkEndpoint, LinkState, MuxSessionNode, RelationKind, SourceMetadata,
     };
     use crate::tui::explorer::ExplorerRow;
 
