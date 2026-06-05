@@ -13,6 +13,8 @@
 //! is a [`DiscoveryProvider`] that runs every registered adapter and merges
 //! fragments deterministically through [`merge_fragments`].
 
+use std::path::Path;
+
 use anyhow::Result;
 
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
@@ -45,6 +47,20 @@ pub trait HarnessAdapter: Send + Sync {
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         Vec::new()
     }
+
+    /// Argv for resuming a specific session of this harness (ADR 0058).
+    /// Returns `None` when the harness has no single-command resume
+    /// CLI; callers fall back to `launch_argv` plus a status hint.
+    ///
+    /// `cwd` is provided for adapters that need context-aware resume
+    /// (e.g., aider-style "load history from this directory"); the
+    /// default-shape adapters that take `--resume <id>` ignore it.
+    /// The default implementation returns `None` so adapters opt in
+    /// explicitly.
+    fn resume_argv(&self, session_id: &str, cwd: &Path) -> Option<Vec<std::ffi::OsString>> {
+        let _ = (session_id, cwd);
+        None
+    }
 }
 
 /// Look up the per-harness default launch argv. Convenience for the
@@ -57,6 +73,24 @@ pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
         opencode::HARNESS_KEY => OpenCodeAdapter::new().launch_argv(),
         aider::HARNESS_KEY => AiderAdapter::new().launch_argv(),
         _ => Vec::new(),
+    }
+}
+
+/// Look up the per-harness resume argv. Sibling of [`launch_argv_for`]
+/// for the H-PIN-RESUME-004 launch path. Returns `None` when the
+/// harness key is unknown or the adapter does not expose a resume
+/// command (currently `opencode` and `aider`).
+pub fn resume_argv_for(
+    harness_key: &str,
+    session_id: &str,
+    cwd: &Path,
+) -> Option<Vec<std::ffi::OsString>> {
+    match harness_key {
+        codex::HARNESS_KEY => CodexAdapter::new().resume_argv(session_id, cwd),
+        claude_code::HARNESS_KEY => ClaudeCodeAdapter::new().resume_argv(session_id, cwd),
+        opencode::HARNESS_KEY => OpenCodeAdapter::new().resume_argv(session_id, cwd),
+        aider::HARNESS_KEY => AiderAdapter::new().resume_argv(session_id, cwd),
+        _ => None,
     }
 }
 
@@ -261,5 +295,69 @@ mod tests {
             .expect("discovery succeeds");
 
         assert_eq!(fragment.nodes, vec![session_alpha, session_beta]);
+    }
+
+    // ----- H-PIN-RESUME-002: per-adapter resume_argv -----
+
+    #[test]
+    fn codex_resume_argv_matches_tui_resume_shape() {
+        let argv =
+            resume_argv_for("codex", "abc123", Path::new("/p")).expect("codex supports resume");
+        assert_eq!(
+            argv,
+            vec![
+                std::ffi::OsString::from("codex"),
+                std::ffi::OsString::from("exec"),
+                std::ffi::OsString::from("--resume"),
+                std::ffi::OsString::from("abc123"),
+            ]
+        );
+    }
+
+    #[test]
+    fn claude_code_resume_argv_matches_tui_resume_shape() {
+        let argv = resume_argv_for("claude-code", "abc123", Path::new("/p"))
+            .expect("claude-code supports resume");
+        assert_eq!(
+            argv,
+            vec![
+                std::ffi::OsString::from("claude"),
+                std::ffi::OsString::from("--resume"),
+                std::ffi::OsString::from("abc123"),
+            ]
+        );
+    }
+
+    #[test]
+    fn aider_resume_argv_returns_none() {
+        // Aider tracks chat history per-cwd, not per-session; no
+        // resume CLI to splice in.
+        assert!(resume_argv_for("aider", "abc123", Path::new("/p")).is_none());
+    }
+
+    #[test]
+    fn opencode_resume_argv_returns_none() {
+        // No known single-command resume path per src/tui/resume.rs.
+        assert!(resume_argv_for("opencode", "abc123", Path::new("/p")).is_none());
+    }
+
+    #[test]
+    fn unknown_harness_resume_argv_returns_none() {
+        assert!(resume_argv_for("nonesuch", "abc123", Path::new("/p")).is_none());
+    }
+
+    #[test]
+    fn default_trait_impl_returns_none() {
+        // Adapters that don't override get None for free.
+        struct NoOpAdapter;
+        impl HarnessAdapter for NoOpAdapter {
+            fn harness_key(&self) -> &str {
+                "noop"
+            }
+            fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+                Ok(GraphFragment::empty())
+            }
+        }
+        assert!(NoOpAdapter.resume_argv("abc", Path::new("/p")).is_none());
     }
 }

@@ -74,6 +74,21 @@ impl HarnessAdapter for CodexAdapter {
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("codex")]
     }
+
+    fn resume_argv(
+        &self,
+        session_id: &str,
+        _cwd: &std::path::Path,
+    ) -> Option<Vec<std::ffi::OsString>> {
+        // Matches the TUI resume-command shape in
+        // `src/tui/resume.rs:46`.
+        Some(vec![
+            std::ffi::OsString::from("codex"),
+            std::ffi::OsString::from("exec"),
+            std::ffi::OsString::from("--resume"),
+            std::ffi::OsString::from(session_id),
+        ])
+    }
 }
 
 fn discover_state(state_root: &Path) -> Result<GraphFragment> {

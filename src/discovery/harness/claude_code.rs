@@ -99,6 +99,20 @@ impl HarnessAdapter for ClaudeCodeAdapter {
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("claude")]
     }
+
+    fn resume_argv(
+        &self,
+        session_id: &str,
+        _cwd: &std::path::Path,
+    ) -> Option<Vec<std::ffi::OsString>> {
+        // Matches the TUI resume-command shape in
+        // `src/tui/resume.rs:42`.
+        Some(vec![
+            std::ffi::OsString::from("claude"),
+            std::ffi::OsString::from("--resume"),
+            std::ffi::OsString::from(session_id),
+        ])
+    }
 }
 
 fn discover_state(state_root: &Path) -> Result<GraphFragment> {
