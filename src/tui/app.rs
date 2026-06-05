@@ -26,6 +26,7 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
+use crate::tui::widgets::controls::PinCreateDefaults;
 use crate::tui::{RunConfig, View};
 
 pub struct GraphDb(Rc<rusqlite::Connection>);
@@ -798,6 +799,57 @@ impl App {
             grouping: self.grouping,
             filter: &self.filter,
             sort: self.sort,
+            pin_create_defaults: self.pin_create_defaults(),
+        }
+    }
+
+    fn pin_create_defaults(&self) -> PinCreateDefaults {
+        let Some(selection) = self.selection.as_ref() else {
+            return PinCreateDefaults::default();
+        };
+        let Some(row) = self.tree.rows.iter().find(|row| &row.id == selection) else {
+            return PinCreateDefaults::default();
+        };
+        match &row.kind {
+            RowKind::AgentSession(session) => {
+                let cwd = self
+                    .database
+                    .as_ref()
+                    .and_then(|db| crate::query::read_snapshot(db.conn()).ok())
+                    .and_then(|snapshot| {
+                        snapshot.nodes.into_iter().find_map(|node| match node {
+                            crate::model::GraphNode::AgentSession(node)
+                                if node.id == session.session =>
+                            {
+                                node.cwd
+                            }
+                            _ => None,
+                        })
+                    })
+                    .unwrap_or_default();
+                let display = session
+                    .display_label()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| session.session.session_key.clone());
+                let id = pin_id_candidate(&display);
+                PinCreateDefaults {
+                    id: id.clone(),
+                    display_name: display,
+                    harness: session.session.harness_key.clone(),
+                    cwd,
+                    mux_name: id,
+                }
+            }
+            RowKind::Group(group) => group
+                .primary_node
+                .as_ref()
+                .and_then(pin_cwd_from_node)
+                .map(|cwd| PinCreateDefaults {
+                    cwd,
+                    ..PinCreateDefaults::default()
+                })
+                .unwrap_or_default(),
+            _ => PinCreateDefaults::default(),
         }
     }
 
@@ -861,6 +913,10 @@ impl App {
                 };
                 self.sort = sort;
                 self.config.default_sort = sort;
+            }
+            ControlsAction::CreatePin(_) => {
+                self.status_message =
+                    Some("pins: create is handled by the TUI runtime".to_string());
             }
             ControlsAction::PinPlaceholder(label) => {
                 self.status_message = Some(format!(
@@ -1612,6 +1668,38 @@ impl App {
     }
 }
 
+fn pin_cwd_from_node(id: &NodeId) -> Option<String> {
+    match id {
+        NodeId::Checkout(checkout) => Some(checkout.root.clone()),
+        NodeId::Repo(repo) => repo
+            .common_dir
+            .strip_suffix("/.git")
+            .map(str::to_string)
+            .or_else(|| Some(repo.common_dir.clone())),
+        _ => None,
+    }
+}
+
+fn pin_id_candidate(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "new-pin".to_string()
+    } else {
+        trimmed
+    }
+}
+
 /// Does `row` represent `target` in the left-pane tree (T8-035)?
 /// Group rows match when their `primary_node` (when set) equals
 /// `target`; mux candidate rows match their parent mux's node id.
@@ -1778,6 +1866,38 @@ mod tests {
             .expect("visible session row");
         app.set_selection(id.clone());
         id
+    }
+
+    #[test]
+    fn controls_context_seeds_pin_create_defaults_from_selected_session() {
+        let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+        select_session(&mut app, "Session One");
+
+        let defaults = app.controls_context().pin_create_defaults;
+        assert_eq!(defaults.id, "session-one");
+        assert_eq!(defaults.display_name, "Session One");
+        assert_eq!(defaults.harness, "codex");
+        assert_eq!(defaults.cwd, "/p/project");
+        assert_eq!(defaults.mux_name, "session-one");
+    }
+
+    #[test]
+    fn controls_context_seeds_pin_create_cwd_from_selected_group() {
+        let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
+        let group_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::Group(group) if group.primary_node.is_some() => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("group row with primary node");
+        app.set_selection(group_id);
+
+        let defaults = app.controls_context().pin_create_defaults;
+        assert_eq!(defaults.cwd, "/p/proja");
+        assert_eq!(defaults.id, "");
+        assert_eq!(defaults.harness, "");
     }
 
     #[test]

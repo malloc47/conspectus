@@ -73,6 +73,16 @@ pub struct ControlsContext<'a> {
     pub grouping: Grouping,
     pub filter: &'a RowFilter,
     pub sort: Sort,
+    pub pin_create_defaults: PinCreateDefaults,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PinCreateDefaults {
+    pub id: String,
+    pub display_name: String,
+    pub harness: String,
+    pub cwd: String,
+    pub mux_name: String,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -108,6 +118,7 @@ pub enum SubEditor {
     Harness(MultiSelectState),
     MaxAge(TextInputState),
     MuxState(MultiSelectState),
+    PinCreate(PinCreateState),
 }
 
 /// What the controls overlay returned from a single key event.
@@ -134,7 +145,51 @@ pub enum ControlsAction {
     SetGrouping(Grouping),
     SetFilter(RowFilter),
     SetSort(Sort),
+    CreatePin(PinCreateRequest),
     PinPlaceholder(&'static str),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinCreateRequest {
+    pub id: String,
+    pub display_name: String,
+    pub harness: String,
+    pub cwd: String,
+    pub mux_name: String,
+    pub mux_socket: Option<String>,
+    pub launch_argv: Vec<String>,
+    pub store: PinCreateStore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinCreateStore {
+    Auto,
+    Project,
+    User,
+}
+
+impl PinCreateStore {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Project => "project",
+            Self::User => "user",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PinCreateState {
+    cursor: usize,
+    id: TextInputState,
+    display_name: TextInputState,
+    harness: TextInputState,
+    cwd: TextInputState,
+    mux_name: TextInputState,
+    mux_socket: TextInputState,
+    launch_argv: TextInputState,
+    store: PinCreateStore,
+    error: Option<String>,
 }
 
 /// Pure state for the controls overlay: cursor position plus the
@@ -263,7 +318,14 @@ impl ControlsOverlayState {
             }
             ControlsCursor::Pin(idx) => {
                 let label = PIN_ACTION_OPTIONS.get(idx).copied().unwrap_or("help");
-                ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
+                if label == "create" {
+                    self.sub_editor = Some(SubEditor::PinCreate(PinCreateState::new(
+                        ctx.pin_create_defaults.clone(),
+                    )));
+                    ControlsOutcome::Continue
+                } else {
+                    ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
+                }
             }
         }
     }
@@ -330,8 +392,166 @@ impl ControlsOverlayState {
                     }
                 }
             },
+            SubEditor::PinCreate(state) => match state.handle_key(event) {
+                PinCreateOutcome::Continue => ControlsOutcome::Continue,
+                PinCreateOutcome::Cancel => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                PinCreateOutcome::Confirm(request) => {
+                    *slot = None;
+                    ControlsOutcome::ApplyAndClose(ControlsAction::CreatePin(request))
+                }
+            },
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PinCreateOutcome {
+    Continue,
+    Confirm(PinCreateRequest),
+    Cancel,
+}
+
+impl PinCreateState {
+    const FIELD_COUNT: usize = 8;
+
+    fn new(defaults: PinCreateDefaults) -> Self {
+        let id = if defaults.id.is_empty() {
+            "new-pin".to_string()
+        } else {
+            defaults.id
+        };
+        let display_name = if defaults.display_name.is_empty() {
+            id.clone()
+        } else {
+            defaults.display_name
+        };
+        let mux_name = if defaults.mux_name.is_empty() {
+            display_name.clone()
+        } else {
+            defaults.mux_name
+        };
+        Self {
+            cursor: 0,
+            id: TextInputState::new(" id ", id),
+            display_name: TextInputState::new(" display ", display_name),
+            harness: TextInputState::new(" harness ", defaults.harness),
+            cwd: TextInputState::new(" cwd ", defaults.cwd),
+            mux_name: TextInputState::new(" mux ", mux_name),
+            mux_socket: TextInputState::new(" socket ", String::new()),
+            launch_argv: TextInputState::new(" launch argv ", String::new()),
+            store: PinCreateStore::Auto,
+            error: None,
+        }
+    }
+
+    fn handle_key(&mut self, event: KeyEvent) -> PinCreateOutcome {
+        match event.code {
+            KeyCode::Esc => PinCreateOutcome::Cancel,
+            KeyCode::Enter => match self.request() {
+                Ok(request) => PinCreateOutcome::Confirm(request),
+                Err(err) => {
+                    self.error = Some(err);
+                    PinCreateOutcome::Continue
+                }
+            },
+            KeyCode::Up => {
+                self.move_cursor(-1);
+                PinCreateOutcome::Continue
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.move_cursor(1);
+                PinCreateOutcome::Continue
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                if self.cursor == Self::FIELD_COUNT - 1 =>
+            {
+                self.cycle_store(if matches!(event.code, KeyCode::Left) {
+                    -1
+                } else {
+                    1
+                });
+                PinCreateOutcome::Continue
+            }
+            _ => {
+                if event.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(event.code, KeyCode::Char('c'))
+                {
+                    return PinCreateOutcome::Cancel;
+                }
+                if let Some(input) = self.active_input_mut() {
+                    let _ = input.handle_key(event);
+                    self.error = None;
+                }
+                PinCreateOutcome::Continue
+            }
+        }
+    }
+
+    fn move_cursor(&mut self, delta: i32) {
+        let len = Self::FIELD_COUNT as i32;
+        let next = ((self.cursor as i32 + delta) % len + len) % len;
+        self.cursor = next as usize;
+    }
+
+    fn cycle_store(&mut self, delta: i32) {
+        let idx = match self.store {
+            PinCreateStore::Auto => 0,
+            PinCreateStore::Project => 1,
+            PinCreateStore::User => 2,
+        };
+        self.store = match ((idx + delta) % 3 + 3) % 3 {
+            0 => PinCreateStore::Auto,
+            1 => PinCreateStore::Project,
+            _ => PinCreateStore::User,
+        };
+    }
+
+    fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
+        match self.cursor {
+            0 => Some(&mut self.id),
+            1 => Some(&mut self.display_name),
+            2 => Some(&mut self.harness),
+            3 => Some(&mut self.cwd),
+            4 => Some(&mut self.mux_name),
+            5 => Some(&mut self.mux_socket),
+            6 => Some(&mut self.launch_argv),
+            _ => None,
+        }
+    }
+
+    fn request(&self) -> Result<PinCreateRequest, String> {
+        let id = required(self.id.value(), "id")?;
+        let harness = required(self.harness.value(), "harness")?;
+        let cwd = required(self.cwd.value(), "cwd")?;
+        let display_name = optional(self.display_name.value()).unwrap_or_else(|| id.clone());
+        let mux_name = optional(self.mux_name.value()).unwrap_or_else(|| display_name.clone());
+        let mux_socket = optional(self.mux_socket.value());
+        let launch_argv = optional(self.launch_argv.value())
+            .map(|raw| raw.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default();
+        Ok(PinCreateRequest {
+            id,
+            display_name,
+            harness,
+            cwd,
+            mux_name,
+            mux_socket,
+            launch_argv,
+            store: self.store,
+        })
+    }
+}
+
+fn required(raw: &str, label: &str) -> Result<String, String> {
+    optional(raw).ok_or_else(|| format!("pin create: {label} is required"))
+}
+
+fn optional(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 fn build_harness_editor(filter: &RowFilter) -> MultiSelectState {
@@ -567,7 +787,103 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer) {
             use crate::tui::widgets::input::TextInputWidget;
             TextInputWidget::new(state).render(area, buf);
         }
+        SubEditor::PinCreate(state) => {
+            PinCreateWidget::new(state).render(area, buf);
+        }
     }
+}
+
+struct PinCreateWidget<'a> {
+    state: &'a PinCreateState,
+}
+
+impl<'a> PinCreateWidget<'a> {
+    fn new(state: &'a PinCreateState) -> Self {
+        Self { state }
+    }
+}
+
+impl Widget for PinCreateWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let modal = pin_create_modal_rect(area);
+        for y in modal.top()..modal.bottom() {
+            for x in modal.left()..modal.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.reset();
+                }
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Create Pin "));
+        let inner = block.inner(modal);
+        block.render(modal, buf);
+
+        let mut lines = vec![
+            pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
+            pin_create_field(
+                1,
+                "display",
+                self.state.display_name.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(2, "harness", self.state.harness.value(), self.state.cursor),
+            pin_create_field(3, "cwd", self.state.cwd.value(), self.state.cursor),
+            pin_create_field(
+                4,
+                "mux.name",
+                self.state.mux_name.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(
+                5,
+                "mux.socket",
+                self.state.mux_socket.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(
+                6,
+                "launch argv",
+                self.state.launch_argv.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(7, "store", self.state.store.label(), self.state.cursor),
+        ];
+        if let Some(error) = &self.state.error {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                error.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Up/Down field · type to edit · Space cycles store · Enter create · Esc cancel",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+
+        Paragraph::new(lines).render(inner, buf);
+    }
+}
+
+fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize) -> Line<'static> {
+    let marker = if cursor == idx { "> " } else { "  " };
+    let style = if cursor == idx {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    let value = if value.trim().is_empty() { "-" } else { value };
+    Line::from(Span::styled(format!("{marker}{label:11} {value}"), style))
+}
+
+fn pin_create_modal_rect(area: Rect) -> Rect {
+    let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
+    let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
 }
 
 impl ControlsOverlayWidget<'_> {
@@ -795,6 +1111,7 @@ mod tests {
             grouping,
             filter,
             sort,
+            pin_create_defaults: PinCreateDefaults::default(),
         }
     }
 
@@ -1043,7 +1360,30 @@ mod tests {
     }
 
     #[test]
-    fn enter_on_pin_action_emits_placeholder_action() {
+    fn enter_on_create_pin_action_opens_create_editor() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_create_defaults = PinCreateDefaults {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "ingest".to_string(),
+        };
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(0);
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        assert!(matches!(state.sub_editor(), Some(SubEditor::PinCreate(_))));
+    }
+
+    #[test]
+    fn enter_on_non_create_pin_action_still_emits_placeholder_action() {
         let filter = RowFilter::default();
         let ctx = ctx_with(
             View::Sessions,
@@ -1052,12 +1392,119 @@ mod tests {
             Sort::Hierarchy,
         );
         let mut state = ControlsOverlayState::new(&ctx);
-        state.cursor = ControlsCursor::Pin(0);
+        state.cursor = ControlsCursor::Pin(1);
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder("create"))
+            ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder("rename"))
         );
+    }
+
+    #[test]
+    fn create_pin_editor_confirms_defaults() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_create_defaults = PinCreateDefaults {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "ingest-mux".to_string(),
+        };
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(0);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            ControlsOutcome::ApplyAndClose(ControlsAction::CreatePin(PinCreateRequest {
+                id: "ingest".to_string(),
+                display_name: "Ingest".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "ingest-mux".to_string(),
+                mux_socket: None,
+                launch_argv: Vec::new(),
+                store: PinCreateStore::Auto,
+            }))
+        );
+        assert!(state.sub_editor().is_none());
+    }
+
+    #[test]
+    fn create_pin_editor_keeps_validation_errors_open() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_create_defaults = PinCreateDefaults {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            mux_name: "ingest".to_string(),
+            ..PinCreateDefaults::default()
+        };
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(0);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        match state.sub_editor() {
+            Some(SubEditor::PinCreate(editor)) => {
+                assert_eq!(
+                    editor.error.as_deref(),
+                    Some("pin create: harness is required")
+                );
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_pin_editor_cycles_store_and_parses_launch_argv() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_create_defaults = PinCreateDefaults {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "ingest".to_string(),
+        };
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(0);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+        for _ in 0..6 {
+            state.handle_key(&ctx, key(KeyCode::Down));
+        }
+        for ch in "codex --resume ingest".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+        state.handle_key(&ctx, key(KeyCode::Down));
+        state.handle_key(&ctx, key(KeyCode::Char(' ')));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        match outcome {
+            ControlsOutcome::ApplyAndClose(ControlsAction::CreatePin(request)) => {
+                assert_eq!(request.launch_argv, ["codex", "--resume", "ingest"]);
+                assert_eq!(request.store, PinCreateStore::Project);
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
     }
 
     #[test]

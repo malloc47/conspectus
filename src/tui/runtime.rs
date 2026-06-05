@@ -21,6 +21,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use crate::discovery::discover_local_at_roots;
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
 use crate::model::MuxSessionId;
+use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
 use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{
     AttachTarget, attach_disabled_reason, resolve_attach_target, resolve_view_session,
@@ -448,11 +449,13 @@ fn static_handle_controls_overlay_key(
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
+    let pin_create_defaults = app.controls_context().pin_create_defaults;
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
+        pin_create_defaults,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -481,6 +484,15 @@ fn static_apply_controls_action_and_refresh(
     snapshot: &crate::model::GraphSnapshot,
     action: crate::tui::widgets::controls::ControlsAction,
 ) -> Result<()> {
+    if matches!(
+        action,
+        crate::tui::widgets::controls::ControlsAction::CreatePin(_)
+    ) {
+        app.update(Msg::SetStatus(Some(
+            "scenario TUI keeps mutating actions disabled".to_string(),
+        )));
+        return Ok(());
+    }
     app.apply_controls_action(action);
     set_static_data(app, config, snapshot)
 }
@@ -1243,11 +1255,13 @@ fn handle_controls_overlay_key(
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
+    let pin_create_defaults = app.controls_context().pin_create_defaults;
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
+        pin_create_defaults,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -1277,8 +1291,87 @@ fn apply_controls_action_and_refresh(
     config: &RunConfig,
     action: crate::tui::widgets::controls::ControlsAction,
 ) {
-    app.apply_controls_action(action);
-    refresh(app, config);
+    match action {
+        crate::tui::widgets::controls::ControlsAction::CreatePin(request) => {
+            create_pin_action(app, config, request);
+        }
+        other => {
+            app.apply_controls_action(other);
+            refresh(app, config);
+        }
+    }
+}
+
+fn create_pin_action(
+    app: &mut App,
+    config: &RunConfig,
+    request: crate::tui::widgets::controls::PinCreateRequest,
+) {
+    match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
+        Ok((outcome, entry, store_kind)) => {
+            let verb = if outcome.changed {
+                if outcome.entry_count == 1 {
+                    "wrote"
+                } else {
+                    "updated"
+                }
+            } else {
+                "unchanged"
+            };
+            refresh(app, config);
+            app.update(Msg::SetStatus(Some(format!(
+                "{verb} pin `{}` in {} ({})",
+                entry.id,
+                outcome.path.display(),
+                pin_store_label(store_kind)
+            ))));
+        }
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("pin create failed: {err}"))));
+        }
+    }
+}
+
+fn write_pin_create(
+    request: &crate::tui::widgets::controls::PinCreateRequest,
+    loader: &crate::config::ConfigLoader,
+) -> Result<(PinWriteOutcome, PinEntry, PinStoreKind)> {
+    let cwd = std::path::PathBuf::from(&request.cwd);
+    let selection = match request.store {
+        crate::tui::widgets::controls::PinCreateStore::Auto
+        | crate::tui::widgets::controls::PinCreateStore::Project => {
+            crate::pins::select_store_for_pin(&cwd, loader)?
+        }
+        crate::tui::widgets::controls::PinCreateStore::User => crate::pins::user_pin_store(loader)?,
+    };
+    let entry = PinEntry {
+        id: request.id.clone(),
+        display_name: request.display_name.clone(),
+        harness: request.harness.clone(),
+        cwd: request.cwd.clone(),
+        mux: PinMux {
+            backend: TMUX_MUX_BACKEND.to_string(),
+            name: request.mux_name.clone(),
+            socket_name: request.mux_socket.clone(),
+        },
+        launch: if request.launch_argv.is_empty() {
+            None
+        } else {
+            Some(PinLaunch {
+                argv: request.launch_argv.clone(),
+            })
+        },
+        reason: None,
+    };
+    let outcome = crate::pins::upsert_pin_entry(&selection.path, entry.clone())?;
+    Ok((outcome, entry, selection.kind))
+}
+
+fn pin_store_label(kind: PinStoreKind) -> &'static str {
+    match kind {
+        PinStoreKind::Project => "project",
+        PinStoreKind::User => "user",
+    }
 }
 
 /// Switch view and refresh. Shared between the `1`–`5` direct keys
@@ -1825,7 +1918,9 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::widgets::controls::{PinCreateRequest, PinCreateStore};
     use ratatui::crossterm::event::KeyEvent;
+    use std::fs;
 
     fn press(code: KeyCode, mods: KeyModifiers) -> Event {
         let mut key = KeyEvent::new(code, mods);
@@ -1991,6 +2086,69 @@ mod tests {
             translate(press(KeyCode::Char('F'), KeyModifiers::NONE), 24),
             Some(Action::ClearFilters)
         );
+    }
+
+    #[test]
+    fn write_pin_create_writes_project_store() {
+        let home = tempfile::TempDir::new().expect("home");
+        let project = tempfile::TempDir::new().expect("project");
+        let loader = crate::config::ConfigLoader::new()
+            .with_home(home.path())
+            .with_xdg_config_home(home.path().join(".config"));
+        let request = PinCreateRequest {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux_name: "ingest-mux".to_string(),
+            mux_socket: Some("scratch".to_string()),
+            launch_argv: vec!["codex".to_string(), "--resume".to_string()],
+            store: PinCreateStore::Project,
+        };
+
+        let (outcome, entry, kind) = write_pin_create(&request, &loader).expect("write pin");
+        assert!(outcome.changed);
+        assert_eq!(kind, PinStoreKind::Project);
+        assert_eq!(entry.id, "ingest");
+        assert_eq!(entry.mux.native_id(), "tmux:scratch:ingest-mux");
+        assert_eq!(outcome.path, project.path().join(".conspectus.toml"));
+
+        let written = fs::read_to_string(&outcome.path).expect("project config");
+        assert!(written.contains("[pins]"));
+        assert!(written.contains(r#"id = "ingest""#));
+        assert!(written.contains(r#"display_name = "Ingest""#));
+        assert!(written.contains(r#"harness = "codex""#));
+        assert!(written.contains(r#"name = "ingest-mux""#));
+        assert!(written.contains(r#"socket_name = "scratch""#));
+        assert!(written.contains("argv = ["));
+        assert!(written.contains(r#""codex""#));
+        assert!(written.contains(r#""--resume""#));
+    }
+
+    #[test]
+    fn write_pin_create_user_store_uses_user_config_path() {
+        let home = tempfile::TempDir::new().expect("home");
+        let xdg = home.path().join(".config");
+        let project = tempfile::TempDir::new().expect("project");
+        let loader = crate::config::ConfigLoader::new()
+            .with_home(home.path())
+            .with_xdg_config_home(&xdg);
+        let request = PinCreateRequest {
+            id: "scratch".to_string(),
+            display_name: "Scratch".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux_name: "scratch".to_string(),
+            mux_socket: None,
+            launch_argv: Vec::new(),
+            store: PinCreateStore::User,
+        };
+
+        let (outcome, _, kind) = write_pin_create(&request, &loader).expect("write user pin");
+        assert_eq!(kind, PinStoreKind::User);
+        assert_eq!(outcome.path, xdg.join(crate::config::USER_CONFIG_RELATIVE));
+        assert!(outcome.path.exists());
+        assert!(!project.path().join(".conspectus.toml").exists());
     }
 
     #[test]

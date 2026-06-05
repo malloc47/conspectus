@@ -5414,7 +5414,7 @@ once everything else has landed.
     session ids for ambiguous bindings, and the `b` accelerator routes
     to a bind command hint until the full picker lands in `H-PIN-024`.
 
-- [ ] `H-PIN-022` TUI pin create flow.
+- [x] `H-PIN-022` TUI pin create flow.
   - Scope: make the Controls overlay Pins group capable of creating
     pins without dropping to the CLI. Reuse the H-PIN-009 mutation
     helper and ADR 0030 text input primitive. Fields: `id`,
@@ -5430,6 +5430,13 @@ once everything else has landed.
     and successful create through the shared write helper. Snapshot
     tests for the create overlay and validation messages.
   - Blockers: `H-PIN-009`, `H-PIN-017`, `F8-004`.
+  - Delivered: Controls overlay `Pins > create` opens a
+    multi-field create modal, seeds fields from the selected session
+    or graph group where possible, validates required fields before
+    dispatch, and routes successful creates through the shared pin
+    write helper with `auto` / `project` / `user` store selection.
+    Static scenario TUIs keep mutation disabled and surface a status
+    message instead of writing.
 
 - [ ] `H-PIN-023` TUI pin edit and remove flow.
   - Scope: bring existing pins to CRUD parity with CLI
