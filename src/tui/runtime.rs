@@ -451,6 +451,7 @@ fn static_handle_controls_overlay_key(
     let sort = app.sort();
     let pin_create_defaults = app.controls_context().pin_create_defaults;
     let pin_target = app.controls_context().pin_target;
+    let pin_bind_options = app.controls_context().pin_bind_options;
     let ctx = ControlsContext {
         view,
         grouping,
@@ -458,6 +459,7 @@ fn static_handle_controls_overlay_key(
         sort,
         pin_create_defaults,
         pin_target,
+        pin_bind_options,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -490,6 +492,7 @@ fn static_apply_controls_action_and_refresh(
         action,
         crate::tui::widgets::controls::ControlsAction::CreatePin(_)
             | crate::tui::widgets::controls::ControlsAction::EditPin(_)
+            | crate::tui::widgets::controls::ControlsAction::BindPin(_)
             | crate::tui::widgets::controls::ControlsAction::RemovePin(_)
     ) {
         app.update(Msg::SetStatus(Some(
@@ -1270,6 +1273,7 @@ fn handle_controls_overlay_key(
     let sort = app.sort();
     let pin_create_defaults = app.controls_context().pin_create_defaults;
     let pin_target = app.controls_context().pin_target;
+    let pin_bind_options = app.controls_context().pin_bind_options;
     let ctx = ControlsContext {
         view,
         grouping,
@@ -1277,6 +1281,7 @@ fn handle_controls_overlay_key(
         sort,
         pin_create_defaults,
         pin_target,
+        pin_bind_options,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -1312,6 +1317,9 @@ fn apply_controls_action_and_refresh(
         }
         crate::tui::widgets::controls::ControlsAction::EditPin(request) => {
             edit_pin_action(app, config, request);
+        }
+        crate::tui::widgets::controls::ControlsAction::BindPin(request) => {
+            bind_pin_action(app, config, request);
         }
         crate::tui::widgets::controls::ControlsAction::RemovePin(request) => {
             remove_pin_controls_action(app, config, request);
@@ -1393,6 +1401,103 @@ fn pin_store_label(kind: PinStoreKind) -> &'static str {
         PinStoreKind::Project => "project",
         PinStoreKind::User => "user",
     }
+}
+
+fn bind_pin_action(
+    app: &mut App,
+    config: &RunConfig,
+    request: crate::tui::widgets::controls::PinBindRequest,
+) {
+    let Some(database) = app.graph_db() else {
+        app.update(Msg::SetStatus(Some(
+            "pin bind failed: no graph database available".to_string(),
+        )));
+        return;
+    };
+    let snapshot = match crate::query::read_snapshot(database.conn()) {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("pin bind failed: {err}"))));
+            return;
+        }
+    };
+    match write_pin_bind(
+        &request,
+        &snapshot,
+        &crate::config::ConfigLoader::from_env(),
+    ) {
+        Ok(outcome) => {
+            let verb = if outcome.changed {
+                "bound"
+            } else {
+                "unchanged"
+            };
+            refresh(app, config);
+            app.update(Msg::SetStatus(Some(format!(
+                "{verb} pin `{}` to session `{}` in {}",
+                request.pin_id,
+                request.session_key,
+                outcome.path.display()
+            ))));
+        }
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("pin bind failed: {err}"))));
+        }
+    }
+}
+
+fn write_pin_bind(
+    request: &crate::tui::widgets::controls::PinBindRequest,
+    snapshot: &crate::model::GraphSnapshot,
+    loader: &crate::config::ConfigLoader,
+) -> Result<crate::declared::DeclaredWriteOutcome> {
+    let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == request.pin_id) else {
+        bail!("no pin `{}` in current graph", request.pin_id);
+    };
+    let target = snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            crate::model::GraphNode::AgentSession(session)
+                if session.id.harness_key == pin.harness
+                    && session.id.session_key == request.session_key =>
+            {
+                Some(session.id.clone())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no `{}` agent session with session_key `{}` in current graph",
+                pin.harness,
+                request.session_key
+            )
+        })?;
+
+    let source = crate::declared::DeclaredEndpoint::AgentSession {
+        harness_key: target.harness_key.clone(),
+        state_scope: target.state_scope.clone(),
+        session_key: target.session_key.clone(),
+    };
+    let target_endpoint = crate::declared::DeclaredEndpoint::MuxSession {
+        native_id: pin.mux.native_id(),
+    };
+    let link = crate::declared::DeclaredLink {
+        id: format!("pin:{}:bound", pin.id),
+        relation: crate::model::RelationKind::LinkedToMux,
+        state: crate::declared::DeclaredLinkState::Active,
+        source: source.clone(),
+        target: target_endpoint.clone(),
+        reason: None,
+        overridden_by: None,
+        label: Some(format!("pin:{}", pin.id)),
+    };
+    let path =
+        crate::declared::select_store_for_declaration(&source, &target_endpoint, snapshot, loader)
+            .map(|selection| selection.path)
+            .or_else(|| loader.user_config_path())
+            .ok_or_else(|| anyhow::anyhow!("no declared-link store available for pin bind"))?;
+    Ok(crate::declared::upsert_declared_link(&path, link)?)
 }
 
 fn edit_pin_action(
@@ -2072,7 +2177,7 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
 mod tests {
     use super::*;
     use crate::tui::widgets::controls::{
-        PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
+        PinBindRequest, PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
     };
     use ratatui::crossterm::event::KeyEvent;
     use std::fs;
@@ -2428,6 +2533,60 @@ mod tests {
         .expect_err("duplicate mux");
         assert!(err.to_string().contains("already used"));
         assert_eq!(fs::read_to_string(&path).expect("after"), before);
+    }
+
+    #[test]
+    fn write_pin_bind_writes_declared_override() {
+        let temp = tempfile::TempDir::new().expect("temp");
+        let loader = crate::config::ConfigLoader::new()
+            .with_home(temp.path())
+            .with_xdg_config_home(temp.path().join(".config"));
+        let session_id = crate::model::AgentSessionId::new("codex", "/state", "session-a");
+        let mut snapshot = crate::model::GraphSnapshot::empty();
+        snapshot.nodes.push(crate::model::GraphNode::AgentSession(
+            crate::model::AgentSessionNode {
+                id: session_id,
+                harness_key: "codex".to_string(),
+                cwd: Some("/workspace".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            },
+        ));
+        snapshot.pins.push(crate::model::PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace".to_string(),
+            mux: crate::model::PinMuxRef {
+                backend: TMUX_MUX_BACKEND.to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: crate::model::Provenance::LocalPin,
+            store_path: "/workspace/.conspectus.toml".to_string(),
+            binding: None,
+        });
+
+        let outcome = write_pin_bind(
+            &PinBindRequest {
+                pin_id: "ingest".to_string(),
+                session_key: "session-a".to_string(),
+            },
+            &snapshot,
+            &loader,
+        )
+        .expect("bind pin");
+
+        assert!(outcome.changed);
+        let written = fs::read_to_string(outcome.path).expect("declared config");
+        assert!(written.contains(r#"id = "pin:ingest:bound""#));
+        assert!(written.contains(r#"label = "pin:ingest""#));
+        assert!(written.contains(r#"session_key = "session-a""#));
+        assert!(written.contains(r#"native_id = "tmux:ingest""#));
     }
 
     #[test]

@@ -5461,7 +5461,7 @@ once everything else has landed.
     instead of shelling out. Edit preflights duplicate id and
     duplicate mux conflicts before mutating the TOML store.
 
-- [ ] `H-PIN-024` TUI pin bind / rebind / adopt flows.
+- [x] `H-PIN-024` TUI pin bind / rebind / adopt flows.
   - Scope: expose the CLI escape hatches from the Controls overlay
     and contextual accelerators so `PinAmbiguous`, external tmux
     renames, and agent-deck migration are solvable in the TUI.
@@ -5479,6 +5479,14 @@ once everything else has landed.
     for each picker / confirmation state.
   - Blockers: `H-PIN-013`, `H-PIN-014`, `H-PIN-015`, `H-PIN-018`,
     `F8-004`.
+  - Delivered: Controls overlay `Pins > bind` opens a picker from
+    the selected row's `PinAmbiguous` diagnostic and writes the same
+    `pin:<id>:bound` declared override as the CLI. `Pins > rebind`
+    routes through the edit modal's mux-name/socket fields with the
+    duplicate-mux preflight from `H-PIN-023`. `Pins > adopt` opens
+    the create form with selection-derived defaults, so adopting a
+    live mux uses the same validated create/write path instead of a
+    separate mutation implementation.
 
 - [x] `H-PIN-019` Read-only invariant audit.
   - Scope: explicit CLI integration tests proving `graph`,

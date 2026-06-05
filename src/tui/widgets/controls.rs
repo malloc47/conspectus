@@ -75,6 +75,7 @@ pub struct ControlsContext<'a> {
     pub sort: Sort,
     pub pin_create_defaults: PinCreateDefaults,
     pub pin_target: Option<PinMutationTarget>,
+    pub pin_bind_options: Vec<PinBindOption>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -96,6 +97,13 @@ pub struct PinMutationTarget {
     pub mux_socket: Option<String>,
     pub launch_argv: Vec<String>,
     pub store_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinBindOption {
+    pub pin_id: String,
+    pub session_key: String,
+    pub label: String,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -133,6 +141,7 @@ pub enum SubEditor {
     MuxState(MultiSelectState),
     PinCreate(PinCreateState),
     PinEdit(PinEditState),
+    PinBind(PinBindState),
     PinRemove(PinRemoveState),
 }
 
@@ -162,6 +171,7 @@ pub enum ControlsAction {
     SetSort(Sort),
     CreatePin(PinCreateRequest),
     EditPin(PinEditRequest),
+    BindPin(PinBindRequest),
     RemovePin(PinRemoveRequest),
     PinPlaceholder(&'static str),
 }
@@ -196,6 +206,12 @@ pub struct PinEditRequest {
     pub mux_socket: Option<String>,
     pub launch_argv: Vec<String>,
     pub store_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinBindRequest {
+    pub pin_id: String,
+    pub session_key: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +255,12 @@ pub struct PinEditState {
     mux_socket: TextInputState,
     launch_argv: TextInputState,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PinBindState {
+    cursor: usize,
+    options: Vec<PinBindOption>,
 }
 
 #[derive(Debug, Clone)]
@@ -372,12 +394,12 @@ impl ControlsOverlayState {
             }
             ControlsCursor::Pin(idx) => {
                 let label = PIN_ACTION_OPTIONS.get(idx).copied().unwrap_or("help");
-                if label == "create" {
+                if label == "create" || label == "adopt" {
                     self.sub_editor = Some(SubEditor::PinCreate(PinCreateState::new(
                         ctx.pin_create_defaults.clone(),
                     )));
                     ControlsOutcome::Continue
-                } else if label == "rename" {
+                } else if label == "rename" || label == "rebind" {
                     if let Some(target) = ctx.pin_target.clone() {
                         self.sub_editor = Some(SubEditor::PinEdit(PinEditState::new(target)));
                         ControlsOutcome::Continue
@@ -390,6 +412,15 @@ impl ControlsOverlayState {
                         ControlsOutcome::Continue
                     } else {
                         ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
+                    }
+                } else if label == "bind" {
+                    if ctx.pin_bind_options.is_empty() {
+                        ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
+                    } else {
+                        self.sub_editor = Some(SubEditor::PinBind(PinBindState::new(
+                            ctx.pin_bind_options.clone(),
+                        )));
+                        ControlsOutcome::Continue
                     }
                 } else {
                     ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
@@ -482,6 +513,17 @@ impl ControlsOverlayState {
                     ControlsOutcome::ApplyAndClose(ControlsAction::EditPin(request))
                 }
             },
+            SubEditor::PinBind(state) => match state.handle_key(event) {
+                PinBindOutcome::Continue => ControlsOutcome::Continue,
+                PinBindOutcome::Cancel => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                PinBindOutcome::Confirm(request) => {
+                    *slot = None;
+                    ControlsOutcome::ApplyAndClose(ControlsAction::BindPin(request))
+                }
+            },
             SubEditor::PinRemove(state) => match state.handle_key(event) {
                 PinRemoveOutcome::Continue => ControlsOutcome::Continue,
                 PinRemoveOutcome::Cancel => {
@@ -508,6 +550,13 @@ enum PinCreateOutcome {
 enum PinEditOutcome {
     Continue,
     Confirm(PinEditRequest),
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PinBindOutcome {
+    Continue,
+    Confirm(PinBindRequest),
     Cancel,
 }
 
@@ -737,6 +786,50 @@ impl PinEditState {
             launch_argv,
             store_path: self.target.store_path.clone(),
         })
+    }
+}
+
+impl PinBindState {
+    fn new(options: Vec<PinBindOption>) -> Self {
+        Self { cursor: 0, options }
+    }
+
+    fn handle_key(&mut self, event: KeyEvent) -> PinBindOutcome {
+        match event.code {
+            KeyCode::Esc => PinBindOutcome::Cancel,
+            KeyCode::Enter => {
+                let Some(option) = self.options.get(self.cursor) else {
+                    return PinBindOutcome::Continue;
+                };
+                PinBindOutcome::Confirm(PinBindRequest {
+                    pin_id: option.pin_id.clone(),
+                    session_key: option.session_key.clone(),
+                })
+            }
+            KeyCode::Up => {
+                self.move_cursor(-1);
+                PinBindOutcome::Continue
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.move_cursor(1);
+                PinBindOutcome::Continue
+            }
+            _ if event.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(event.code, KeyCode::Char('c')) =>
+            {
+                PinBindOutcome::Cancel
+            }
+            _ => PinBindOutcome::Continue,
+        }
+    }
+
+    fn move_cursor(&mut self, delta: i32) {
+        if self.options.is_empty() {
+            return;
+        }
+        let len = self.options.len() as i32;
+        let next = ((self.cursor as i32 + delta) % len + len) % len;
+        self.cursor = next as usize;
     }
 }
 
@@ -1011,6 +1104,9 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer) {
         SubEditor::PinEdit(state) => {
             PinEditWidget::new(state).render(area, buf);
         }
+        SubEditor::PinBind(state) => {
+            PinBindWidget::new(state).render(area, buf);
+        }
         SubEditor::PinRemove(state) => {
             PinRemoveWidget::new(state).render(area, buf);
         }
@@ -1187,6 +1283,66 @@ impl Widget for PinEditWidget<'_> {
 fn pin_edit_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(78, area.width.saturating_sub(4)).max(46);
     let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
+}
+
+struct PinBindWidget<'a> {
+    state: &'a PinBindState,
+}
+
+impl<'a> PinBindWidget<'a> {
+    fn new(state: &'a PinBindState) -> Self {
+        Self { state }
+    }
+}
+
+impl Widget for PinBindWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let modal = pin_bind_modal_rect(area);
+        for y in modal.top()..modal.bottom() {
+            for x in modal.left()..modal.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.reset();
+                }
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Bind Pin "));
+        let inner = block.inner(modal);
+        block.render(modal, buf);
+
+        let mut lines = Vec::new();
+        if let Some(first) = self.state.options.first() {
+            lines.push(Line::from(format!("pin       {}", first.pin_id)));
+        }
+        for (idx, option) in self.state.options.iter().enumerate() {
+            let marker = if idx == self.state.cursor { "> " } else { "  " };
+            let style = if idx == self.state.cursor {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("{marker}{}", option.label),
+                style,
+            )));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Up/Down choose · Enter bind · Esc cancel",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+        Paragraph::new(lines).render(inner, buf);
+    }
+}
+
+fn pin_bind_modal_rect(area: Rect) -> Rect {
+    let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
+    let height = std::cmp::min(12, area.height.saturating_sub(2)).max(7);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width, height)
@@ -1474,6 +1630,7 @@ mod tests {
             sort,
             pin_create_defaults: PinCreateDefaults::default(),
             pin_target: None,
+            pin_bind_options: Vec::new(),
         }
     }
 
@@ -1841,6 +1998,71 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Esc));
         assert_eq!(outcome, ControlsOutcome::Continue);
         assert!(state.sub_editor().is_none());
+    }
+
+    #[test]
+    fn enter_on_bind_pin_action_opens_bind_picker_for_ambiguous_options() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_bind_options = vec![
+            PinBindOption {
+                pin_id: "ingest".to_string(),
+                session_key: "a".to_string(),
+                label: "codex:a".to_string(),
+            },
+            PinBindOption {
+                pin_id: "ingest".to_string(),
+                session_key: "b".to_string(),
+                label: "codex:b".to_string(),
+            },
+        ];
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(3);
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        assert!(matches!(state.sub_editor(), Some(SubEditor::PinBind(_))));
+    }
+
+    #[test]
+    fn bind_pin_picker_confirms_selected_session() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_bind_options = vec![
+            PinBindOption {
+                pin_id: "ingest".to_string(),
+                session_key: "a".to_string(),
+                label: "codex:a".to_string(),
+            },
+            PinBindOption {
+                pin_id: "ingest".to_string(),
+                session_key: "b".to_string(),
+                label: "codex:b".to_string(),
+            },
+        ];
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(3);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+        state.handle_key(&ctx, key(KeyCode::Down));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            ControlsOutcome::ApplyAndClose(ControlsAction::BindPin(PinBindRequest {
+                pin_id: "ingest".to_string(),
+                session_key: "b".to_string(),
+            }))
+        );
     }
 
     #[test]

@@ -26,7 +26,7 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::controls::{PinCreateDefaults, PinMutationTarget};
+use crate::tui::widgets::controls::{PinBindOption, PinCreateDefaults, PinMutationTarget};
 use crate::tui::{RunConfig, View};
 
 pub struct GraphDb(Rc<rusqlite::Connection>);
@@ -801,7 +801,31 @@ impl App {
             sort: self.sort,
             pin_create_defaults: self.pin_create_defaults(),
             pin_target: self.pin_mutation_target(),
+            pin_bind_options: self.pin_bind_options(),
         }
+    }
+
+    fn pin_bind_options(&self) -> Vec<PinBindOption> {
+        crate::tui::actions::selected_pin_diagnostics(self)
+            .into_iter()
+            .find_map(|diagnostic| match diagnostic {
+                crate::tui::actions::PinDiagnosticView::Ambiguous {
+                    pin_id,
+                    chosen,
+                    competing,
+                } => Some(
+                    std::iter::once(chosen)
+                        .chain(competing)
+                        .map(|session| PinBindOption {
+                            pin_id: pin_id.clone(),
+                            session_key: session.session_key.clone(),
+                            label: format!("{}:{}", session.harness_key, session.session_key),
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     fn pin_mutation_target(&self) -> Option<PinMutationTarget> {
@@ -890,6 +914,13 @@ impl App {
                     ..PinCreateDefaults::default()
                 })
                 .unwrap_or_default(),
+            RowKind::MuxSession(mux) => PinCreateDefaults {
+                id: pin_id_candidate(&mux.native_id),
+                display_name: mux.native_id.clone(),
+                harness: String::new(),
+                cwd: mux.cwd_display.clone().unwrap_or_default(),
+                mux_name: mux.native_id.clone(),
+            },
             _ => PinCreateDefaults::default(),
         }
     }
@@ -961,6 +992,9 @@ impl App {
             }
             ControlsAction::EditPin(_) => {
                 self.status_message = Some("pins: edit is handled by the TUI runtime".to_string());
+            }
+            ControlsAction::BindPin(_) => {
+                self.status_message = Some("pins: bind is handled by the TUI runtime".to_string());
             }
             ControlsAction::RemovePin(_) => {
                 self.status_message =
