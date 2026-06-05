@@ -3352,6 +3352,9 @@ impl PinArgs {
             PinCommand::Rm(args) => args.run(),
             PinCommand::Launch(args) => args.run(PinLaunchIntent::Launch),
             PinCommand::Attach(args) => args.run(PinLaunchIntent::Attach),
+            PinCommand::Bind(args) => args.run(),
+            PinCommand::Rebind(args) => args.run(),
+            PinCommand::Adopt(args) => args.run(),
         }
     }
 }
@@ -3374,6 +3377,18 @@ enum PinCommand {
     /// Attach to a pin's already-bound session, or fall through to
     /// launch when no live session exists yet.
     Attach(PinLaunchArgs),
+    /// Resolve `PinAmbiguous` by binding the pin to a specific
+    /// agent-session id. Writes a `LocalDeclared linked_to_mux`
+    /// link the resolver treats as authoritative.
+    Bind(PinBindArgs),
+    /// Update the pin's `mux.name` (and optionally
+    /// `mux.socket_name`) after an external tmux rename. Pure TOML
+    /// mutation — does not touch tmux.
+    Rebind(PinRebindArgs),
+    /// Convert an existing live tmux session into a pin without
+    /// creating a new mux. Harness and cwd are inferred from the
+    /// running session unless overridden.
+    Adopt(PinAdoptArgs),
 }
 
 /// Filter the binding states `pin list` includes (ADR 0057).
@@ -3666,6 +3681,267 @@ impl PinRmArgs {
             }
         }
         bail!("no pin `{}` in any discovered store", self.id);
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct PinBindArgs {
+    /// Pin id to bind.
+    id: String,
+    /// Harness-native session key of the agent session the pin
+    /// should bind to. Must already be visible in discovery.
+    #[arg(long = "to", value_name = "SESSION_KEY")]
+    to: String,
+    /// Optional reason recorded on the declared link.
+    #[arg(long)]
+    reason: Option<String>,
+    /// Override automatic nearest-store selection for the declared
+    /// link write.
+    #[arg(long, value_enum)]
+    store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinBindArgs {
+    fn run(self) -> Result<()> {
+        let snapshot = discover_and_resolve(&self.scan_roots)?;
+        let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
+            bail!("no pin `{}` in any discovered store", self.id);
+        };
+
+        // Pin and target must share a harness so the resolver's
+        // post-bind attribution sees the LocalDeclared link as the
+        // authoritative `LinkedToMux` for the pin's harness.
+        let target = snapshot
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                conspectus::model::GraphNode::AgentSession(session)
+                    if session.id.harness_key == pin.harness
+                        && session.id.session_key == self.to =>
+                {
+                    Some(session.id.clone())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| {
+                anyhow!(
+                    "no `{}` agent session with session_key `{}` in discovery",
+                    pin.harness,
+                    self.to
+                )
+            })?;
+
+        let source_endpoint = DeclaredEndpoint::AgentSession {
+            harness_key: target.harness_key.clone(),
+            state_scope: target.state_scope.clone(),
+            session_key: target.session_key.clone(),
+        };
+        let target_endpoint = DeclaredEndpoint::MuxSession {
+            native_id: pin.mux.native_id(),
+        };
+        let link = DeclaredLink {
+            id: format!("pin:{}:bound", pin.id),
+            relation: RelationKind::LinkedToMux,
+            state: DeclaredLinkState::Active,
+            source: source_endpoint.clone(),
+            target: target_endpoint.clone(),
+            reason: self.reason,
+            overridden_by: None,
+            // Operator-facing breadcrumb tying the declared link to
+            // its originating pin. Read by `declared list` so
+            // operators see WHY this override exists.
+            label: Some(format!("pin:{}", pin.id)),
+        };
+
+        let path = resolve_write_store(
+            self.store,
+            Some(&link.source),
+            Some(&link.target),
+            &self.scan_roots,
+        )?;
+        let outcome =
+            upsert_declared_link(&path, link.clone()).map_err(|err| anyhow!(err.to_string()))?;
+        let verb = if outcome.changed {
+            "wrote"
+        } else {
+            "unchanged"
+        };
+        println!(
+            "{verb} declared override for pin `{}` → session `{}` in {}",
+            pin.id,
+            self.to,
+            path.display()
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct PinRebindArgs {
+    /// Pin id to rebind.
+    id: String,
+    /// New tmux session name to bind the pin to.
+    #[arg(long = "mux", value_name = "NAME")]
+    mux: String,
+    /// Optional non-default tmux socket. Absent ⇒ default socket.
+    #[arg(long = "mux-socket", value_name = "NAME")]
+    mux_socket: Option<String>,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinRebindArgs {
+    fn run(self) -> Result<()> {
+        let paths = candidate_pin_store_paths(&self.scan_roots)?;
+        let Some((path, mut entry)) =
+            load_pin_entry_by_id(&paths, &self.id).map_err(|err| anyhow!(err.to_string()))?
+        else {
+            bail!("no pin `{}` in any discovered store", self.id);
+        };
+        let previous = entry.mux.clone();
+        entry.mux = PinMux {
+            backend: previous.backend,
+            name: self.mux,
+            socket_name: self.mux_socket,
+        };
+        let outcome =
+            upsert_pin_entry(&path, entry.clone()).map_err(|err| anyhow!(err.to_string()))?;
+        let verb = if outcome.changed {
+            "rebound"
+        } else {
+            "unchanged"
+        };
+        println!(
+            "{verb} pin `{}` → mux `{}` in {}",
+            entry.id,
+            entry.mux.native_id(),
+            path.display()
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct PinAdoptArgs {
+    /// New pin id.
+    id: String,
+    /// Existing tmux session name to adopt as this pin's bound mux.
+    mux_name: String,
+    /// Override the inferred harness when discovery can't or
+    /// shouldn't attribute one.
+    #[arg(long)]
+    harness: Option<String>,
+    /// Display name for the new pin. Defaults to `<id>`.
+    #[arg(long)]
+    display: Option<String>,
+    /// Optional non-default tmux socket. Absent ⇒ default socket.
+    #[arg(long = "mux-socket", value_name = "NAME")]
+    mux_socket: Option<String>,
+    /// Override the inferred cwd. By default, adopt uses the mux's
+    /// observed cwd; pass `--cwd` to set a different anchor.
+    #[arg(long, value_name = "PATH")]
+    cwd: Option<PathBuf>,
+    /// Override automatic nearest-store selection.
+    #[arg(long, value_enum)]
+    store: Option<DeclaredStoreFlag>,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinAdoptArgs {
+    fn run(self) -> Result<()> {
+        let snapshot = discover_and_resolve(&self.scan_roots)?;
+
+        let backend = TMUX_MUX_BACKEND.to_string();
+        let native_id = match self.mux_socket.as_deref() {
+            None | Some("default") => format!("{}:{}", backend, self.mux_name),
+            Some(socket) => format!("{}:{}:{}", backend, socket, self.mux_name),
+        };
+
+        let mux_node = snapshot
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                conspectus::model::GraphNode::MuxSession(mux) if mux.native_id == native_id => {
+                    Some(mux)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| {
+                anyhow!(
+                    "no live mux with native_id `{native_id}` — start the tmux session first or rebind to an existing pin"
+                )
+            })?;
+
+        // Harness inference: walk active LinkedToMux candidates with
+        // this mux as the target; the first AgentSession source wins.
+        let inferred_harness = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.state, conspectus::model::LinkState::Active)
+                    && link.target_node_id() == Some(&NodeId::MuxSession(mux_node.id.clone()))
+            })
+            .find_map(|link| match &link.source {
+                NodeId::AgentSession(session) => Some(session.harness_key.clone()),
+                _ => None,
+            });
+
+        let harness = match (self.harness, inferred_harness) {
+            (Some(explicit), _) => explicit,
+            (None, Some(inferred)) => inferred,
+            (None, None) => bail!(
+                "could not infer a harness for mux `{native_id}`; pass `--harness <key>` explicitly"
+            ),
+        };
+
+        let cwd = match self.cwd {
+            Some(explicit) => explicit,
+            None => {
+                let observed = mux_node.cwd.as_deref().ok_or_else(|| {
+                    anyhow!("mux `{native_id}` has no observed cwd; pass `--cwd <PATH>` explicitly")
+                })?;
+                PathBuf::from(observed)
+            }
+        };
+
+        let display = self.display.clone().unwrap_or_else(|| self.id.clone());
+        let entry = PinEntry {
+            id: self.id.clone(),
+            display_name: display,
+            harness,
+            cwd: cwd.display().to_string(),
+            mux: PinMux {
+                backend,
+                name: self.mux_name.clone(),
+                socket_name: self.mux_socket.clone(),
+            },
+            launch: None,
+            reason: None,
+        };
+
+        let selection = resolve_pin_write_store(self.store, &cwd)?;
+        let outcome = upsert_pin_entry(&selection.path, entry.clone())
+            .map_err(|err| anyhow!(err.to_string()))?;
+        let verb = if outcome.changed {
+            "adopted"
+        } else {
+            "unchanged"
+        };
+        println!(
+            "{verb} pin `{}` from mux `{}` (harness: {}) in {}",
+            entry.id,
+            entry.mux.native_id(),
+            entry.harness,
+            selection.path.display()
+        );
+        Ok(())
     }
 }
 

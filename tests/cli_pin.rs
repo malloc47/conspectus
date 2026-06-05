@@ -351,6 +351,113 @@ fn pin_launch_no_attach_prints_attach_command_when_unbound() {
 }
 
 #[test]
+fn pin_bind_fails_on_unknown_pin() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "bind", "missing", "--to", "alpha"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no pin `missing`"));
+}
+
+#[test]
+fn pin_bind_fails_when_session_not_in_discovery() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "create", "ingest", "--harness", "codex", "--cwd"])
+        .arg(project.path())
+        .assert()
+        .success();
+
+    // Sandboxed discovery sees no agent sessions, so any `--to` is
+    // unknown and bind should refuse rather than fabricate a session.
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "bind", "ingest", "--to", "no-such-session"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no `codex` agent session"));
+}
+
+#[test]
+fn pin_rebind_updates_mux_name_and_socket() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "create", "ingest", "--harness", "codex", "--cwd"])
+        .arg(project.path())
+        .args(["--mux-name", "old-mux"])
+        .assert()
+        .success();
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args([
+            "pin",
+            "rebind",
+            "ingest",
+            "--mux",
+            "new-mux",
+            "--mux-socket",
+            "scratch",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "rebound pin `ingest` → mux `tmux:scratch:new-mux`",
+        ));
+
+    let contents =
+        fs::read_to_string(project.path().join(".conspectus.toml")).expect("config exists");
+    assert!(contents.contains(r#"name = "new-mux""#));
+    assert!(contents.contains(r#"socket_name = "scratch""#));
+    assert!(!contents.contains(r#"name = "old-mux""#));
+}
+
+#[test]
+fn pin_rebind_fails_on_unknown_pin() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "rebind", "missing", "--mux", "anything"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no pin `missing`"));
+}
+
+#[test]
+fn pin_adopt_fails_when_mux_not_live() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args([
+            "pin",
+            "adopt",
+            "ingest",
+            "no-such-mux",
+            "--harness",
+            "codex",
+            "--cwd",
+        ])
+        .arg(project.path())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no live mux"));
+}
+
+#[test]
 fn pin_list_filters_by_state() {
     let home = tempfile::TempDir::new().expect("home");
     let project = tempfile::TempDir::new().expect("project");
