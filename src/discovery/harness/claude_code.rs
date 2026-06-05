@@ -95,6 +95,10 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         };
         discover_state(state_root)
     }
+
+    fn launch_argv(&self) -> Vec<std::ffi::OsString> {
+        vec![std::ffi::OsString::from("claude")]
+    }
 }
 
 fn discover_state(state_root: &Path) -> Result<GraphFragment> {

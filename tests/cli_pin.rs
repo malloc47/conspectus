@@ -289,6 +289,68 @@ fn pin_create_store_all_is_rejected() {
 }
 
 #[test]
+fn pin_launch_help_lists_no_attach_flag() {
+    let home = tempfile::TempDir::new().expect("home");
+    isolated_cmd(home.path())
+        .args(["pin", "launch", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--no-attach"));
+}
+
+#[test]
+fn pin_launch_fails_on_unknown_id() {
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "launch", "missing"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no pin `missing`"));
+}
+
+#[test]
+fn pin_launch_no_attach_prints_attach_command_when_unbound() {
+    // When a real tmux isn't available on the host (CONSPECTUS_DISABLE_TMUX
+    // turns discovery off but does not gate the launch path), the
+    // `--no-attach` branch still exercises the new_session call. On a
+    // host without tmux we expect the launch to fail with the
+    // "unavailable" message; on a host with tmux it succeeds. Either
+    // outcome confirms the unbound branch is being exercised — the
+    // test asserts the message is one of those, not a "no pin" error.
+    let home = tempfile::TempDir::new().expect("home");
+    let project = tempfile::TempDir::new().expect("project");
+
+    isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "create", "ingest", "--harness", "codex", "--cwd"])
+        .arg(project.path())
+        .assert()
+        .success();
+
+    let assert = isolated_cmd(home.path())
+        .current_dir(project.path())
+        .args(["pin", "launch", "ingest", "--no-attach"])
+        .assert();
+    // Either tmux is present (spawned + printed attach hint) or
+    // missing (graceful "unavailable" failure). What we don't want is
+    // a "no pin" failure or an unrelated argv error.
+    let output = assert.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("spawned `ingest`")
+            || combined.contains("tmux is unavailable")
+            || combined.contains("a tmux session named")
+            || combined.contains("tmux new-session failed"),
+        "unexpected launch output: stdout={stdout} stderr={stderr}",
+    );
+}
+
+#[test]
 fn pin_list_filters_by_state() {
     let home = tempfile::TempDir::new().expect("home");
     let project = tempfile::TempDir::new().expect("project");

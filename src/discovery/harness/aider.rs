@@ -31,6 +31,10 @@ impl HarnessAdapter for AiderAdapter {
         HARNESS_KEY
     }
 
+    fn launch_argv(&self) -> Vec<std::ffi::OsString> {
+        vec![std::ffi::OsString::from("aider")]
+    }
+
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         let mut nodes = Vec::new();
 

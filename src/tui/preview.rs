@@ -77,7 +77,10 @@ impl PreviewStore {
 /// [`PreviewContent`]. Pure (modulo the runner call); callers
 /// supply the runner so tests inject [`crate::discovery::tmux::FakeTmux`].
 pub fn capture_via(runner: &dyn TmuxRunner, native_id: &str) -> PreviewContent {
-    match runner.capture_pane(native_id) {
+    // Today's preview path always queries the default socket;
+    // non-default-socket previews are part of the deferred
+    // H-PIN-F-001 discovery story.
+    match runner.capture_pane(None, native_id) {
         Ok(TmuxCaptureOutcome::Captured(text)) => PreviewContent::Text(text),
         Ok(TmuxCaptureOutcome::NoTarget) => PreviewContent::NoTarget,
         Ok(TmuxCaptureOutcome::Unavailable(reason)) => {

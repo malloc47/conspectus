@@ -70,6 +70,10 @@ impl HarnessAdapter for CodexAdapter {
         };
         discover_state(state_root)
     }
+
+    fn launch_argv(&self) -> Vec<std::ffi::OsString> {
+        vec![std::ffi::OsString::from("codex")]
+    }
 }
 
 fn discover_state(state_root: &Path) -> Result<GraphFragment> {

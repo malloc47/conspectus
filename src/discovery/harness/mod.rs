@@ -34,6 +34,30 @@ pub trait HarnessAdapter: Send + Sync {
     fn harness_key(&self) -> &str;
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
+
+    /// Default argv for spawning a fresh session of this harness when
+    /// no per-pin `launch.argv` override is supplied (ADR 0057
+    /// §Launch). Pure data; no I/O. Each adapter returns the bare
+    /// binary invocation — model selection, prompt injection, and
+    /// other harness-specific flags are intentionally out of v1 scope
+    /// per ADR 0057 §Deferred. Operators who need richer launch
+    /// commands use `pin.launch.argv` (a per-pin override).
+    fn launch_argv(&self) -> Vec<std::ffi::OsString> {
+        Vec::new()
+    }
+}
+
+/// Look up the per-harness default launch argv. Convenience for the
+/// CLI launch path so it can resolve `pin.harness` → argv without
+/// re-instantiating an adapter or walking the discovery registry.
+pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
+    match harness_key {
+        codex::HARNESS_KEY => CodexAdapter::new().launch_argv(),
+        claude_code::HARNESS_KEY => ClaudeCodeAdapter::new().launch_argv(),
+        opencode::HARNESS_KEY => OpenCodeAdapter::new().launch_argv(),
+        aider::HARNESS_KEY => AiderAdapter::new().launch_argv(),
+        _ => Vec::new(),
+    }
 }
 
 #[derive(Default)]

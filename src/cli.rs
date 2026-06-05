@@ -19,7 +19,11 @@ use conspectus::declared::{
     declared_endpoint_from_node_id, load_declared_link_by_id, parse_declared_document,
     remove_declared_link, select_store_for_declaration, upsert_declared_link,
 };
-use conspectus::discovery::tmux::{SystemTmux, TmuxRenameOutcome, TmuxRunner};
+use conspectus::discovery::harness::launch_argv_for;
+use conspectus::discovery::tmux::{
+    SystemTmux, TmuxAttachOutcome, TmuxNewSessionOutcome, TmuxRenameOutcome, TmuxRunner,
+    TmuxSendKeysOutcome,
+};
 use conspectus::hook::{HookStore, HookTmuxRecord};
 use conspectus::model::{
     GraphLink, GraphSnapshot, LinkEndpoint, NodeId, PinBinding, Provenance, RelationKind,
@@ -2429,6 +2433,49 @@ mod tests {
         let args = FilterArgs::default();
         assert!(args.to_grouping(View::Sessions).expect("parse").is_none());
     }
+
+    // ---- H-PIN-012 pin launch helpers --------------------------
+
+    #[test]
+    fn format_attach_command_uses_bare_tmux_for_default_socket() {
+        assert_eq!(
+            super::format_attach_command(None, "ingest"),
+            "tmux attach-session -t ingest"
+        );
+    }
+
+    #[test]
+    fn format_attach_command_threads_socket_via_dash_l() {
+        assert_eq!(
+            super::format_attach_command(Some("scratch"), "ingest"),
+            "tmux -L scratch attach-session -t ingest"
+        );
+    }
+
+    #[test]
+    fn format_argv_for_send_keys_quotes_whitespace_tokens() {
+        let argv = vec![
+            std::ffi::OsString::from("codex"),
+            std::ffi::OsString::from("--prompt"),
+            std::ffi::OsString::from("hello world"),
+        ];
+        assert_eq!(
+            super::format_argv_for_send_keys(&argv),
+            "codex --prompt \"hello world\""
+        );
+    }
+
+    #[test]
+    fn format_argv_for_send_keys_leaves_bare_tokens_unquoted() {
+        let argv = vec![
+            std::ffi::OsString::from("codex"),
+            std::ffi::OsString::from("--model=opus"),
+        ];
+        assert_eq!(
+            super::format_argv_for_send_keys(&argv),
+            "codex --model=opus"
+        );
+    }
 }
 
 #[derive(Debug, Args)]
@@ -3027,7 +3074,11 @@ fn execute_rename_plan(
 
 fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn TmuxRunner) -> Result<()> {
     let outcome = tmux
-        .rename_session(&rename.mux.native_id, &rename.new_name)
+        // Default-socket rename — `conspectus rename` is the alias
+        // overlay surface (ADR 0029) that runs on whatever socket
+        // owned the discovered mux. Pin-driven non-default-socket
+        // renames will run from `pin rename` via H-PIN-014 instead.
+        .rename_session(None, &rename.mux.native_id, &rename.new_name)
         .map_err(|err| anyhow!("tmux rename-session failed: {err}"))?;
     match outcome {
         TmuxRenameOutcome::Renamed => {
@@ -3299,6 +3350,8 @@ impl PinArgs {
             PinCommand::Show(args) => args.run(),
             PinCommand::Rename(args) => args.run(),
             PinCommand::Rm(args) => args.run(),
+            PinCommand::Launch(args) => args.run(PinLaunchIntent::Launch),
+            PinCommand::Attach(args) => args.run(PinLaunchIntent::Attach),
         }
     }
 }
@@ -3315,6 +3368,12 @@ enum PinCommand {
     Rename(PinRenameArgs),
     /// Remove a pin by id.
     Rm(PinRmArgs),
+    /// Launch a pin's session (creating the tmux session if needed)
+    /// and attach the terminal.
+    Launch(PinLaunchArgs),
+    /// Attach to a pin's already-bound session, or fall through to
+    /// launch when no live session exists yet.
+    Attach(PinLaunchArgs),
 }
 
 /// Filter the binding states `pin list` includes (ADR 0057).
@@ -3608,6 +3667,196 @@ impl PinRmArgs {
         }
         bail!("no pin `{}` in any discovered store", self.id);
     }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum PinLaunchIntent {
+    /// `pin launch` — operator wants the pin running. Spawn if
+    /// needed, then attach.
+    Launch,
+    /// `pin attach` — operator expects the pin already running but
+    /// will accept a fresh spawn if not.
+    Attach,
+}
+
+#[derive(Debug, Args)]
+pub struct PinLaunchArgs {
+    /// Pin id to launch / attach.
+    id: String,
+    /// Skip the terminal hand-off. The new session (if any) is
+    /// spawned detached and the attach command is printed for the
+    /// operator to run by hand. Useful for scripts and CI dry runs.
+    #[arg(long = "no-attach")]
+    no_attach: bool,
+    /// Root used to discover project-local pin stores.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl PinLaunchArgs {
+    fn run(self, intent: PinLaunchIntent) -> Result<()> {
+        let runner = SystemTmux::new();
+        self.run_with_runner(intent, &runner)
+    }
+
+    fn run_with_runner(self, intent: PinLaunchIntent, runner: &dyn TmuxRunner) -> Result<()> {
+        let snapshot = discover_and_resolve(&self.scan_roots)?;
+        let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
+            bail!("no pin `{}` in any discovered store", self.id);
+        };
+
+        let socket = pin.mux.effective_socket();
+        let mux_name = pin.mux.name.as_str();
+        let argv: Vec<std::ffi::OsString> = pin
+            .launch_argv
+            .as_ref()
+            .map(|argv| argv.iter().map(std::ffi::OsString::from).collect())
+            .filter(|argv: &Vec<_>| !argv.is_empty())
+            .unwrap_or_else(|| launch_argv_for(&pin.harness));
+
+        if argv.is_empty() {
+            bail!(
+                "no launch argv configured for harness `{}`; set `launch.argv` on the pin",
+                pin.harness
+            );
+        }
+
+        match pin.binding.as_ref() {
+            Some(PinBinding::Bound { mux, session }) => {
+                println!(
+                    "pin `{}` already bound to session `{}` in mux `{}`",
+                    pin.id, session.session_key, mux.native_id
+                );
+                if !self.no_attach {
+                    attach_and_report(runner, socket, mux_name)?;
+                }
+                Ok(())
+            }
+            Some(PinBinding::StaleMux { mux }) => {
+                println!(
+                    "pin `{}` mux `{}` is live but has no `{}` session; relaunching via send-keys",
+                    pin.id, mux.native_id, pin.harness
+                );
+                let literal = format_argv_for_send_keys(&argv);
+                let outcome = runner
+                    .send_keys(socket, mux_name, &literal, true)
+                    .map_err(|err| anyhow!("tmux send-keys failed: {err}"))?;
+                report_send_keys(outcome, mux_name)?;
+                if !self.no_attach {
+                    attach_and_report(runner, socket, mux_name)?;
+                }
+                Ok(())
+            }
+            Some(PinBinding::Unbound) | None => {
+                if matches!(intent, PinLaunchIntent::Attach) {
+                    eprintln!(
+                        "conspectus: note: pin `{}` is unbound; falling through to launch",
+                        pin.id
+                    );
+                }
+                let cwd = std::path::PathBuf::from(&pin.cwd);
+                let outcome = runner
+                    .new_session(socket, mux_name, &cwd, &argv)
+                    .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
+                report_new_session(outcome, mux_name)?;
+                if self.no_attach {
+                    let attach_cmd = format_attach_command(socket, mux_name);
+                    println!("spawned `{mux_name}` (detached); attach with: {attach_cmd}");
+                    return Ok(());
+                }
+                attach_and_report(runner, socket, mux_name)?;
+                Ok(())
+            }
+        }
+    }
+}
+
+fn attach_and_report(runner: &dyn TmuxRunner, socket: Option<&str>, name: &str) -> Result<()> {
+    let outcome = runner
+        .attach_session(socket, name)
+        .map_err(|err| anyhow!("tmux attach failed: {err}"))?;
+    match outcome {
+        TmuxAttachOutcome::Detached => Ok(()),
+        TmuxAttachOutcome::NoTarget => {
+            bail!("tmux session `{name}` vanished between launch and attach (race) — try again")
+        }
+        TmuxAttachOutcome::Unavailable(reason) => bail!(
+            "tmux is unavailable on this host: {reason}",
+            reason = reason.as_str()
+        ),
+        TmuxAttachOutcome::Failed { code, message } => {
+            bail!("tmux attach failed (exit {code:?}): {message}")
+        }
+        TmuxAttachOutcome::Unsupported => {
+            bail!("this tmux runner does not support attach; run `tmux attach -t {name}` manually")
+        }
+    }
+}
+
+fn report_send_keys(outcome: TmuxSendKeysOutcome, name: &str) -> Result<()> {
+    match outcome {
+        TmuxSendKeysOutcome::Sent => Ok(()),
+        TmuxSendKeysOutcome::NoTarget => {
+            bail!("tmux session `{name}` disappeared before send-keys reached it")
+        }
+        TmuxSendKeysOutcome::Unavailable(reason) => bail!(
+            "tmux is unavailable on this host: {reason}",
+            reason = reason.as_str()
+        ),
+        TmuxSendKeysOutcome::Failed { code, message } => {
+            bail!("tmux send-keys failed (exit {code:?}): {message}")
+        }
+        TmuxSendKeysOutcome::Unsupported => bail!("this tmux runner does not support send-keys"),
+    }
+}
+
+fn report_new_session(outcome: TmuxNewSessionOutcome, name: &str) -> Result<()> {
+    match outcome {
+        TmuxNewSessionOutcome::Created => Ok(()),
+        TmuxNewSessionOutcome::NameTaken => bail!(
+            "a tmux session named `{name}` already exists; rename the existing tmux or pick a different `mux.name`"
+        ),
+        TmuxNewSessionOutcome::Unavailable(reason) => bail!(
+            "tmux is unavailable on this host: {reason}",
+            reason = reason.as_str()
+        ),
+        TmuxNewSessionOutcome::Failed { code, message } => {
+            bail!("tmux new-session failed (exit {code:?}): {message}")
+        }
+        TmuxNewSessionOutcome::Unsupported => {
+            bail!("this tmux runner does not support new-session")
+        }
+    }
+}
+
+/// Build the `tmux [-L <socket>] attach-session -t <name>` command
+/// string used in `--no-attach` output. Single-arg quoting is
+/// intentionally minimal — `mux.name` is operator-typed and the
+/// schema rejects shell metacharacters by virtue of tmux's own
+/// session-name rules (alphanumeric + a small set of punctuation).
+fn format_attach_command(socket: Option<&str>, name: &str) -> String {
+    match socket {
+        None => format!("tmux attach-session -t {name}"),
+        Some(socket) => format!("tmux -L {socket} attach-session -t {name}"),
+    }
+}
+
+/// Render an argv slice as a tmux `send-keys` literal so the
+/// harness command lands in the existing pane. We quote each
+/// arg with double-quotes when it contains spaces; this matches
+/// the way operators would type the command interactively.
+fn format_argv_for_send_keys(argv: &[std::ffi::OsString]) -> String {
+    argv.iter()
+        .map(|token| {
+            let token = token.to_string_lossy();
+            if token.is_empty() || token.contains(char::is_whitespace) {
+                format!("\"{token}\"")
+            } else {
+                token.into_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn resolve_pin_write_store(

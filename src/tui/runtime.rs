@@ -725,7 +725,9 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
     };
 
     if let Some(mux_rename) = &plan.mux_native_rename {
-        match tmux.rename_session(&mux_rename.mux.native_id, &mux_rename.new_name) {
+        // Default-socket rename for now; the pin-driven socket
+        // propagation lands with H-PIN-017's TUI lockstep work.
+        match tmux.rename_session(None, &mux_rename.mux.native_id, &mux_rename.new_name) {
             Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
             Ok(other) => {
                 app.update(Msg::SetStatus(Some(format!(
