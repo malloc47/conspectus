@@ -37,6 +37,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::declared::write_atomic;
+use crate::model::{GraphSnapshot, PinBinding};
 
 /// Current sidecar schema version. Bumped only on incompatible
 /// format changes; additive field growth lands without a bump.
@@ -300,6 +301,51 @@ pub enum WriteOutcome {
     Skipped,
 }
 
+/// Per-pin outcome of [`record_bindings`]. The string is the pin id,
+/// the inner result is the write outcome (or the error that prevented
+/// it). Callers route these to logging — sidecar write failures
+/// should never propagate up through discovery.
+pub type RecordOutcome = (String, Result<WriteOutcome, PinBindingError>);
+
+/// Post-resolve sidecar write pass (ADR 0058 §Write path). Iterates
+/// `snapshot.pins`; for each pin whose binding settled to
+/// [`PinBinding::Bound`] (including bindings sourced from `pin bind`
+/// declared overrides per Q6), build a [`PinBindingRecord`] and write
+/// it via [`write`]. Pins with `Unbound`, `StaleMux`, or no binding
+/// at all are skipped — the sidecar only records observed successful
+/// bindings, never failure modes.
+///
+/// Returns one entry per pin that was a candidate for writing
+/// (whether the write succeeded, was skipped as unchanged, or
+/// errored). Pins with non-Bound bindings are omitted from the
+/// result so callers don't have to filter noise.
+///
+/// `now_epoch` is the timestamp stamped into each new record. Passed
+/// in rather than read from the clock so tests can pin it
+/// deterministically.
+pub fn record_bindings(
+    snapshot: &GraphSnapshot,
+    cache: &PinBindingsCache,
+    now_epoch: i64,
+) -> Vec<RecordOutcome> {
+    let mut outcomes = Vec::new();
+    for pin in &snapshot.pins {
+        let Some(PinBinding::Bound { session, .. }) = pin.binding.as_ref() else {
+            continue;
+        };
+        let record = PinBindingRecord::new(
+            &pin.id,
+            &pin.mux.name,
+            pin.mux.socket_name.clone(),
+            &session.session_key,
+            &pin.harness,
+            now_epoch,
+        );
+        outcomes.push((pin.id.clone(), write(cache, &record)));
+    }
+    outcomes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,5 +598,157 @@ mod tests {
         let cache = PinBindingsCache::new();
         let removed = delete(&cache, "ingest").unwrap();
         assert!(!removed);
+    }
+
+    // ----- record_bindings: post-resolve write pass -----
+
+    mod record {
+        use super::*;
+        use crate::model::{
+            AgentSessionId, GraphSnapshot, MuxSessionId, PinBinding, PinCandidate, PinMuxRef,
+            Provenance,
+        };
+
+        fn make_pin(id: &str, binding: Option<PinBinding>) -> PinCandidate {
+            PinCandidate {
+                id: id.to_string(),
+                display_name: id.to_string(),
+                harness: "codex".to_string(),
+                cwd: "/p".to_string(),
+                mux: PinMuxRef {
+                    backend: "tmux".to_string(),
+                    name: id.to_string(),
+                    socket_name: None,
+                },
+                launch_argv: None,
+                reason: None,
+                provenance: Provenance::LocalPin,
+                store_path: "/p/.conspectus.toml".to_string(),
+                binding,
+            }
+        }
+
+        fn bound(session_key: &str, mux_name: &str) -> PinBinding {
+            PinBinding::Bound {
+                mux: MuxSessionId::new(format!("tmux:{mux_name}")),
+                session: AgentSessionId::new("codex", "/state", session_key),
+            }
+        }
+
+        #[test]
+        fn writes_sidecar_for_each_bound_pin() {
+            let temp = tempdir().unwrap();
+            let cache = cache_in(temp.path());
+            let mut snap = GraphSnapshot::empty();
+            snap.pins
+                .push(make_pin("ingest", Some(bound("session-a", "ingest"))));
+            snap.pins
+                .push(make_pin("review", Some(bound("session-b", "review"))));
+
+            let outcomes = record_bindings(&snap, &cache, 1_738_742_400);
+
+            assert_eq!(outcomes.len(), 2);
+            assert!(outcomes.iter().all(|(_, r)| r.is_ok()));
+
+            let ingest = read(&cache, "ingest").unwrap().expect("ingest sidecar");
+            assert_eq!(ingest.session_id, "session-a");
+            assert_eq!(ingest.observed_epoch, 1_738_742_400);
+
+            let review = read(&cache, "review").unwrap().expect("review sidecar");
+            assert_eq!(review.session_id, "session-b");
+        }
+
+        #[test]
+        fn skips_unbound_and_stale_pins() {
+            let temp = tempdir().unwrap();
+            let cache = cache_in(temp.path());
+            let mut snap = GraphSnapshot::empty();
+            snap.pins.push(make_pin("u", Some(PinBinding::Unbound)));
+            snap.pins.push(make_pin(
+                "s",
+                Some(PinBinding::StaleMux {
+                    mux: MuxSessionId::new("tmux:s"),
+                }),
+            ));
+            snap.pins.push(make_pin("n", None));
+
+            let outcomes = record_bindings(&snap, &cache, 1);
+
+            assert!(
+                outcomes.is_empty(),
+                "no Bound pins should produce no writes"
+            );
+            assert!(read(&cache, "u").unwrap().is_none());
+            assert!(read(&cache, "s").unwrap().is_none());
+            assert!(read(&cache, "n").unwrap().is_none());
+        }
+
+        #[test]
+        fn empty_pins_is_noop() {
+            let temp = tempdir().unwrap();
+            let cache = cache_in(temp.path());
+            let snap = GraphSnapshot::empty();
+            let outcomes = record_bindings(&snap, &cache, 1);
+            assert!(outcomes.is_empty());
+        }
+
+        #[test]
+        fn idempotent_second_call_skips_unchanged() {
+            let temp = tempdir().unwrap();
+            let cache = cache_in(temp.path());
+            let mut snap = GraphSnapshot::empty();
+            snap.pins
+                .push(make_pin("ingest", Some(bound("session-a", "ingest"))));
+
+            let first = record_bindings(&snap, &cache, 1);
+            let second = record_bindings(&snap, &cache, 1);
+
+            assert_eq!(first[0].1.as_ref().unwrap(), &WriteOutcome::Wrote);
+            assert_eq!(second[0].1.as_ref().unwrap(), &WriteOutcome::Skipped);
+        }
+
+        #[test]
+        fn observed_epoch_change_triggers_replacement() {
+            let temp = tempdir().unwrap();
+            let cache = cache_in(temp.path());
+            let mut snap = GraphSnapshot::empty();
+            snap.pins
+                .push(make_pin("ingest", Some(bound("session-a", "ingest"))));
+
+            let _ = record_bindings(&snap, &cache, 1);
+            let second = record_bindings(&snap, &cache, 2);
+
+            assert_eq!(second[0].1.as_ref().unwrap(), &WriteOutcome::Wrote);
+            let stored = read(&cache, "ingest").unwrap().unwrap();
+            assert_eq!(stored.observed_epoch, 2);
+        }
+
+        #[test]
+        fn carries_mux_socket_into_sidecar() {
+            let temp = tempdir().unwrap();
+            let cache = cache_in(temp.path());
+            let mut pin = make_pin("ingest", Some(bound("session-a", "ingest")));
+            pin.mux.socket_name = Some("scratch".to_string());
+            let mut snap = GraphSnapshot::empty();
+            snap.pins.push(pin);
+
+            record_bindings(&snap, &cache, 1);
+
+            let stored = read(&cache, "ingest").unwrap().unwrap();
+            assert_eq!(stored.mux_socket.as_deref(), Some("scratch"));
+        }
+
+        #[test]
+        fn cache_without_root_surfaces_error_per_pin() {
+            let cache = PinBindingsCache::new();
+            let mut snap = GraphSnapshot::empty();
+            snap.pins
+                .push(make_pin("ingest", Some(bound("session-a", "ingest"))));
+
+            let outcomes = record_bindings(&snap, &cache, 1);
+
+            assert_eq!(outcomes.len(), 1);
+            assert!(outcomes[0].1.is_err());
+        }
     }
 }

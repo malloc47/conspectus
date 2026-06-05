@@ -4179,7 +4179,31 @@ fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
 fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
     let snapshot = discover_for_store_selection(scan_roots)?;
-    Ok(conspectus::resolve::resolve_snapshot(snapshot))
+    let resolved = conspectus::resolve::resolve_snapshot(snapshot);
+    record_pin_bindings_best_effort(&resolved);
+    Ok(resolved)
+}
+
+/// Record the resolver's pin bindings to per-pin sidecar files
+/// (ADR 0058 / H-PIN-RESUME-003). Best-effort — sidecar I/O failures
+/// log to stderr and never propagate up through discovery, so a
+/// missing cache directory or read-only mount degrades pin launch's
+/// continuity story without breaking the cycle.
+fn record_pin_bindings_best_effort(snapshot: &GraphSnapshot) {
+    use conspectus::pin_bindings::{PinBindingsCache, record_bindings};
+    let cache = PinBindingsCache::from_env();
+    if cache.directory().is_none() {
+        // No $XDG_CACHE_HOME, no $HOME — silently skip rather than
+        // log on every cycle. Operators without a cache directory
+        // opt out of the continuity feature implicitly.
+        return;
+    }
+    let now = conspectus::hook::current_epoch();
+    for (pin_id, result) in record_bindings(snapshot, &cache, now) {
+        if let Err(err) = result {
+            eprintln!("conspectus: pin-binding sidecar write failed for `{pin_id}`: {err}");
+        }
+    }
 }
 
 fn pin_state_label(binding: Option<&PinBinding>) -> &'static str {
