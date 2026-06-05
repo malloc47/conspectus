@@ -384,6 +384,9 @@ fn static_event_loop(
                     SelectedDefault::View => app.update(Msg::SetStatus(Some(
                         "scenario TUI is static; view is disabled".to_string(),
                     ))),
+                    SelectedDefault::LaunchPin => app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; pin launch is disabled".to_string(),
+                    ))),
                 },
                 Some(Action::CycleGrouping(delta)) => {
                     let next = if delta >= 0 {
@@ -1049,6 +1052,9 @@ enum SelectedDefault {
     Attach,
     /// Un-muxed agent session — `Enter` opens the transcript viewer.
     View,
+    /// Unbound / stale-mux pin row — `Enter` shells out to
+    /// `conspectus pin launch <id>` per ADR 0057.
+    LaunchPin,
 }
 
 fn selected_default_action(app: &App) -> SelectedDefault {
@@ -1069,10 +1075,10 @@ fn selected_default_action(app: &App) -> SelectedDefault {
         // PR / Fork rows: no muxable target and no viewer; fall back
         // to toggle so expandable parents still behave.
         RowKind::Pr(_) | RowKind::Fork(_) => SelectedDefault::ToggleExpand,
-        // Unbound pin rows will launch in a follow-up (H-PIN-012).
-        // For v1 fall back to toggle so Enter is harmless until the
-        // launch primitive lands.
-        RowKind::Pin(_) => SelectedDefault::ToggleExpand,
+        // Unbound / stale-mux pin rows hand off to the launch
+        // primitive (H-PIN-012) via a subprocess so the launch
+        // logic stays in one place.
+        RowKind::Pin(_) => SelectedDefault::LaunchPin,
     }
 }
 
@@ -1219,7 +1225,48 @@ fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunCon
         SelectedDefault::ToggleExpand => app.update(Msg::ToggleExpand),
         SelectedDefault::Attach => attach_action(terminal, app, config),
         SelectedDefault::View => view_action(terminal, app, config),
+        SelectedDefault::LaunchPin => launch_pin_action(terminal, app, config),
     }
+}
+
+/// Handle `Enter` on a pin row (ADR 0057 / H-PIN-017). Suspends
+/// the TUI, re-execs into `conspectus pin launch <id>` as a
+/// subprocess so the launch logic stays in `cli::PinLaunchArgs`
+/// without re-implementing it across the runtime, waits for the
+/// nested process to exit (typically when the operator detaches
+/// from tmux), then re-enters the alt screen and refreshes the
+/// row tree.
+fn launch_pin_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
+    let Some(selection) = app.selection() else {
+        app.update(Msg::SetStatus(Some("launch: nothing selected".to_string())));
+        return;
+    };
+    let pin_id = match selection {
+        crate::tui::rows::RowId::Pin { pin_id } => pin_id.clone(),
+        _ => {
+            app.update(Msg::SetStatus(Some(
+                "launch: select an unbound pin row".to_string(),
+            )));
+            return;
+        }
+    };
+
+    ratatui::restore();
+    let status = std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
+    )
+    .args(["pin", "launch", &pin_id])
+    .status();
+    *terminal = ratatui::init();
+    let _ = terminal.clear();
+
+    refresh(app, config);
+    let message = match status {
+        Ok(s) if s.success() => format!("pin `{pin_id}` launch finished"),
+        Ok(s) => format!("pin `{pin_id}` launch exited with {s}"),
+        Err(err) => format!("pin `{pin_id}` launch failed to spawn: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
 }
 
 /// Right-pane Enter (T8-040 / T8-043). When the explorer cursor is on
@@ -2262,6 +2309,43 @@ mod tests {
                 initial_selection_hint: None,
             });
             assert_eq!(selected_default_action(&app), SelectedDefault::Attach);
+        }
+
+        #[test]
+        fn unbound_pin_row_resolves_to_launch_pin() {
+            use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
+
+            let mut snapshot = GraphSnapshot::empty();
+            snapshot.pins.push(PinCandidate {
+                id: "ingest".to_string(),
+                display_name: "ingest".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/p/proj".to_string(),
+                mux: PinMuxRef {
+                    backend: "tmux".to_string(),
+                    name: "ingest".to_string(),
+                    socket_name: None,
+                },
+                launch_argv: None,
+                reason: None,
+                provenance: Provenance::LocalPin,
+                store_path: "/tmp/.conspectus.toml".to_string(),
+                binding: Some(PinBinding::Unbound),
+            });
+            // Auto-selection lands on the first row of the synthetic
+            // "Pins" group (the group header). Walk the tree to find
+            // the actual pin row id and select it so the dispatch
+            // exercises `RowKind::Pin` instead of the group header.
+            let mut app = build_sessions_app(snapshot);
+            let pin_row_id = app
+                .tree()
+                .rows
+                .iter()
+                .find(|r| matches!(&r.id, crate::tui::rows::RowId::Pin { .. }))
+                .map(|r| r.id.clone())
+                .expect("pin row emitted");
+            app.set_selection(pin_row_id);
+            assert_eq!(selected_default_action(&app), SelectedDefault::LaunchPin);
         }
     }
 

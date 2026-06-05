@@ -2506,6 +2506,16 @@ fn default_action_status_hint(app: &App) -> String {
     if matches!(row.kind, RowKind::Group(_)) {
         return "Enter/l expand · h collapse".to_string();
     }
+    // Pin rows surface a per-binding-state hint (ADR 0057 / H-PIN-018).
+    if let RowKind::Pin(pin) = &row.kind {
+        return match pin.state_label {
+            "stale-mux" => format!(
+                "Enter to relaunch `{}` in existing mux `{}`",
+                pin.display_name, pin.mux_label
+            ),
+            _ => format!("Enter to launch `{}`", pin.display_name),
+        };
+    }
     match resolve_attach_target(app) {
         Ok(target) => {
             let label = target_label(&target);
@@ -2753,6 +2763,80 @@ mod tests {
             });
         }
         app
+    }
+
+    fn pinned_app(binding: crate::model::PinBinding) -> App {
+        use crate::model::{PinCandidate, PinMuxRef, Provenance};
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/home/op/src/proj".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/tmp/.conspectus.toml".to_string(),
+            binding: Some(binding),
+        });
+        // Skip `resolve_snapshot` here — it would overwrite the
+        // explicit binding state with whatever the resolver derives
+        // from the empty live evidence. Builder consumes the
+        // pre-bound snapshot directly.
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: crate::tui::app::GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        // Step to the synthetic Pins group header, then to the pin row.
+        let pin_row = app
+            .tree()
+            .rows
+            .iter()
+            .find(|r| matches!(&r.id, crate::tui::rows::RowId::Pin { .. }))
+            .map(|r| r.id.clone())
+            .expect("pin row emitted");
+        app.set_selection(pin_row);
+        app
+    }
+
+    #[test]
+    fn status_hint_for_unbound_pin_advertises_enter_to_launch() {
+        let app = pinned_app(crate::model::PinBinding::Unbound);
+        let hint = default_action_status_hint(&app);
+        assert!(
+            hint.contains("Enter to launch") && hint.contains("ingest"),
+            "unexpected hint for unbound pin: {hint}"
+        );
+    }
+
+    #[test]
+    fn status_hint_for_stale_mux_pin_advertises_relaunch_in_existing_mux() {
+        let app = pinned_app(crate::model::PinBinding::StaleMux {
+            mux: crate::model::MuxSessionId::new("tmux:ingest"),
+        });
+        let hint = default_action_status_hint(&app);
+        assert!(
+            hint.contains("relaunch") && hint.contains("existing mux"),
+            "unexpected hint for stale-mux pin: {hint}"
+        );
     }
 
     #[test]
