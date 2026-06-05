@@ -953,12 +953,41 @@ impl App {
             RowKind::MuxSession(mux) => PinCreateDefaults {
                 id: pin_id_candidate(&mux.native_id),
                 display_name: mux.native_id.clone(),
-                harness: String::new(),
+                // Mirror the CLI `pin adopt` harness inference
+                // (`src/cli.rs:3883-3902`): the first active
+                // `LinkedToMux` candidate whose source is an
+                // AgentSession wins. Seeded as a default — the
+                // operator can still edit the field before commit.
+                harness: self.infer_harness_for_mux(&mux.mux).unwrap_or_default(),
                 cwd: mux.cwd_display.clone().unwrap_or_default(),
                 mux_name: mux.native_id.clone(),
             },
             _ => PinCreateDefaults::default(),
         }
+    }
+
+    /// Walk active `LinkedToMux` candidates whose target is `mux` and
+    /// return the harness key of the first AgentSession source.
+    /// Mirrors `PinAdoptArgs::run`'s inference path in `src/cli.rs`
+    /// so the TUI `A` shortcut seeds the same harness the CLI's
+    /// `pin adopt` would pick. Returns `None` when no active link
+    /// attributes a harness to the mux.
+    fn infer_harness_for_mux(&self, mux: &MuxSessionId) -> Option<String> {
+        let db = self.database.as_ref()?;
+        let snapshot = crate::query::read_snapshot(db.conn()).ok()?;
+        let target = NodeId::MuxSession(mux.clone());
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == crate::model::RelationKind::LinkedToMux
+                    && matches!(link.state, crate::model::LinkState::Active)
+                    && link.target_node_id() == Some(&target)
+            })
+            .find_map(|link| match &link.source {
+                NodeId::AgentSession(session) => Some(session.harness_key.clone()),
+                _ => None,
+            })
     }
 
     /// Returns true when the active selection is a live mux row.
@@ -2043,6 +2072,39 @@ mod tests {
         assert_eq!(defaults.cwd, "/p/proja");
         assert_eq!(defaults.id, "");
         assert_eq!(defaults.harness, "");
+    }
+
+    #[test]
+    fn infer_harness_for_mux_picks_first_active_linked_to_mux_source() {
+        // Reuses the session+mux+LinkedToMux fixture defined below in
+        // the explorer test block: one claude-code AgentSession linked
+        // to a `tmux:work` MuxSession via an Active LinkedToMux
+        // candidate. The inference walk should land on
+        // `claude-code` as the harness seed.
+        let snap = snapshot_session_with_mux();
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let mux_id = crate::model::MuxSessionId::new("work");
+        assert_eq!(
+            app.infer_harness_for_mux(&mux_id).as_deref(),
+            Some("claude-code"),
+        );
+    }
+
+    #[test]
+    fn infer_harness_for_mux_returns_none_without_attribution() {
+        // Empty graph → no candidate links → no inference. Confirms the
+        // method is safe to call from `pin_create_defaults` regardless
+        // of selection state.
+        let app = App::new(RunConfig::defaults());
+        let mux_id = crate::model::MuxSessionId::new("nowhere");
+        assert!(app.infer_harness_for_mux(&mux_id).is_none());
     }
 
     #[test]
