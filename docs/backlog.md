@@ -5465,7 +5465,7 @@ once everything else has landed.
   - Blockers: `H-PIN-013`, `H-PIN-014`, `H-PIN-015`, `H-PIN-018`,
     `F8-004`.
 
-- [ ] `H-PIN-019` Read-only invariant audit.
+- [x] `H-PIN-019` Read-only invariant audit.
   - Scope: explicit CLI integration tests proving `graph`,
     `node show`, `table`, `tui`, `query` never create, mtime-touch,
     or content-modify `.conspectus.toml` / user-config files
@@ -5474,6 +5474,14 @@ once everything else has landed.
   - Tests: invariant tests for each command in a clean repo and a
     repo with a hand-written `[pins]` section.
   - Blockers: `H-PIN-003`.
+  - Outcome: `tests/cli_pin_invariants.rs` asserts that read-only
+    commands do not create pin config files in a clean repo and do
+    not content- or mtime-touch existing project/user configs bearing
+    `[pins]`. Covered commands: `graph`, `table`, `query`,
+    `node show`, `pin list`, `pin show`, plus `tui` prelaunch
+    validation for the non-PTY process path; in-process TUI
+    navigation/read-only surfaces remain covered by reducer and UI
+    tests.
 
 - [x] `H-PIN-020` Snapshot and JSON coverage.
   - Scope: extend `tests/declared_snapshots.rs` (or sibling file
