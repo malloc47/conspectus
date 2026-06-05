@@ -193,6 +193,13 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     }
                     _ => None,
                 }
+            } else if app.pins_overlay().is_some() {
+                match event {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Some(Action::PinsOverlayKey(key))
+                    }
+                    _ => None,
+                }
             } else if app.rename_overlay().is_some() {
                 match event {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -230,6 +237,15 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 }
                 Some(Action::ControlsOverlayKey(key)) => {
                     handle_controls_overlay_key(&mut app, &config, key)
+                }
+                Some(Action::OpenPins) => {
+                    app.open_pins_overlay();
+                    app.update(Msg::SetStatus(Some(
+                        "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
+                    )));
+                }
+                Some(Action::PinsOverlayKey(key)) => {
+                    handle_pins_overlay_key(&mut app, &config, key)
                 }
                 Some(Action::SwitchView(view)) => apply_view_switch(&mut app, &config, view),
                 Some(Action::CycleView(delta)) => {
@@ -345,6 +361,15 @@ fn static_event_loop(
                 Some(Action::ControlsOverlayKey(key)) => {
                     static_handle_controls_overlay_key(&mut app, &config, &snapshot, key)?;
                 }
+                Some(Action::OpenPins) => {
+                    app.open_pins_overlay();
+                    app.update(Msg::SetStatus(Some(
+                        "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
+                    )));
+                }
+                Some(Action::PinsOverlayKey(key)) => {
+                    static_handle_pins_overlay_key(&mut app, &config, &snapshot, key)?;
+                }
                 Some(Action::SwitchView(view)) => {
                     app.apply_controls_action(
                         crate::tui::widgets::controls::ControlsAction::SwitchView(view),
@@ -449,17 +474,11 @@ fn static_handle_controls_overlay_key(
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
-    let pin_create_defaults = app.controls_context().pin_create_defaults;
-    let pin_target = app.controls_context().pin_target;
-    let pin_bind_options = app.controls_context().pin_bind_options;
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
-        pin_create_defaults,
-        pin_target,
-        pin_bind_options,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -488,20 +507,32 @@ fn static_apply_controls_action_and_refresh(
     snapshot: &crate::model::GraphSnapshot,
     action: crate::tui::widgets::controls::ControlsAction,
 ) -> Result<()> {
-    if matches!(
-        action,
-        crate::tui::widgets::controls::ControlsAction::CreatePin(_)
-            | crate::tui::widgets::controls::ControlsAction::EditPin(_)
-            | crate::tui::widgets::controls::ControlsAction::BindPin(_)
-            | crate::tui::widgets::controls::ControlsAction::RemovePin(_)
-    ) {
-        app.update(Msg::SetStatus(Some(
-            "scenario TUI keeps mutating actions disabled".to_string(),
-        )));
-        return Ok(());
-    }
     app.apply_controls_action(action);
     set_static_data(app, config, snapshot)
+}
+
+#[cfg(any(test, debug_assertions))]
+fn static_apply_pins_action_and_refresh(
+    app: &mut App,
+    _config: &RunConfig,
+    _snapshot: &crate::model::GraphSnapshot,
+    action: crate::tui::widgets::pins::PinsAction,
+) -> Result<()> {
+    use crate::tui::widgets::pins::PinsAction;
+    match action {
+        PinsAction::CreatePin(_)
+        | PinsAction::EditPin(_)
+        | PinsAction::BindPin(_)
+        | PinsAction::RemovePin(_) => {
+            app.update(Msg::SetStatus(Some(
+                "scenario TUI keeps mutating actions disabled".to_string(),
+            )));
+        }
+        PinsAction::PinPlaceholder(_) => {
+            app.apply_pins_action(action);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(any(test, debug_assertions))]
@@ -559,6 +590,12 @@ fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Act
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 Some(Action::ControlsOverlayKey(key))
             }
+            _ => None,
+        };
+    }
+    if app.pins_overlay().is_some() {
+        return match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::PinsOverlayKey(key)),
             _ => None,
         };
     }
@@ -793,13 +830,13 @@ fn commit_pin_rename(app: &mut App, config: &RunConfig, pin_id: &str, value: Str
         )));
         return;
     }
-    let Some(target) = app.controls_context().pin_target else {
+    let Some(target) = app.pins_context().pin_target else {
         app.update(Msg::SetStatus(Some(format!(
             "pin rename: no editable pin `{pin_id}` in current selection"
         ))));
         return;
     };
-    let request = crate::tui::widgets::controls::PinEditRequest {
+    let request = crate::tui::widgets::pins::PinEditRequest {
         original_id: target.id.clone(),
         id: target.id,
         display_name: display.to_string(),
@@ -838,7 +875,7 @@ fn remove_pin_action(app: &mut App, config: &RunConfig) {
         return;
     }
     app.set_pending_pin_remove(None);
-    let Some(target) = app.controls_context().pin_target else {
+    let Some(target) = app.pins_context().pin_target else {
         app.update(Msg::SetStatus(Some(format!(
             "pin remove: no editable pin `{pin_id}` in current selection"
         ))));
@@ -847,7 +884,7 @@ fn remove_pin_action(app: &mut App, config: &RunConfig) {
     remove_pin_controls_action(
         app,
         config,
-        crate::tui::widgets::controls::PinRemoveRequest {
+        crate::tui::widgets::pins::PinRemoveRequest {
             id: target.id,
             display_name: target.display_name,
             store_path: target.store_path,
@@ -1100,6 +1137,12 @@ enum Action {
     OpenControls,
     /// Forward a key event into the open controls overlay.
     ControlsOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// Open the pins overlay (ADR 0057) at the top of the action
+    /// menu. Sibling of `OpenControls`; kept separate so view/filter
+    /// and pin CRUD stay one-key-each on `f` and `p`.
+    OpenPins,
+    /// Forward a key event into the open pins overlay.
+    PinsOverlayKey(ratatui::crossterm::event::KeyEvent),
     /// Switch to a specific view (1–5 accelerators).
     SwitchView(View),
     /// Cycle to the next (delta > 0) or previous (delta < 0) view
@@ -1271,17 +1314,11 @@ fn handle_controls_overlay_key(
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
-    let pin_create_defaults = app.controls_context().pin_create_defaults;
-    let pin_target = app.controls_context().pin_target;
-    let pin_bind_options = app.controls_context().pin_bind_options;
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
-        pin_create_defaults,
-        pin_target,
-        pin_bind_options,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle_key(&ctx, key),
@@ -1302,6 +1339,86 @@ fn handle_controls_overlay_key(
     }
 }
 
+/// Handle the pins overlay's key event and apply the resulting
+/// action to the app. Mirrors [`handle_controls_overlay_key`] but
+/// dispatches `PinsAction` through the pin-specific write path.
+fn handle_pins_overlay_key(
+    app: &mut App,
+    config: &RunConfig,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::widgets::pins::PinsOutcome;
+    let ctx = app.pins_context();
+    let outcome = match app.pins_overlay_mut() {
+        Some(state) => state.handle_key(&ctx, key),
+        None => return,
+    };
+    match outcome {
+        PinsOutcome::Continue => {}
+        PinsOutcome::Close => {
+            app.close_pins_overlay();
+        }
+        PinsOutcome::ApplyAndStay(action) => {
+            apply_pins_action_and_refresh(app, config, action);
+        }
+        PinsOutcome::ApplyAndClose(action) => {
+            app.close_pins_overlay();
+            apply_pins_action_and_refresh(app, config, action);
+        }
+    }
+}
+
+/// Apply a pins action and rebuild the row tree so the change is
+/// visible immediately. Mirrors [`apply_controls_action_and_refresh`]
+/// but only handles the pin-specific variants; everything else routes
+/// through the placeholder status hint.
+fn apply_pins_action_and_refresh(
+    app: &mut App,
+    config: &RunConfig,
+    action: crate::tui::widgets::pins::PinsAction,
+) {
+    use crate::tui::widgets::pins::PinsAction;
+    match action {
+        PinsAction::CreatePin(request) => create_pin_action(app, config, request),
+        PinsAction::EditPin(request) => edit_pin_action(app, config, request),
+        PinsAction::BindPin(request) => bind_pin_action(app, config, request),
+        PinsAction::RemovePin(request) => remove_pin_controls_action(app, config, request),
+        PinsAction::PinPlaceholder(_) => {
+            app.apply_pins_action(action);
+        }
+    }
+}
+
+/// Scenario-mode counterpart to [`handle_pins_overlay_key`].
+#[cfg(any(test, debug_assertions))]
+fn static_handle_pins_overlay_key(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: &crate::model::GraphSnapshot,
+    key: ratatui::crossterm::event::KeyEvent,
+) -> Result<()> {
+    use crate::tui::widgets::pins::PinsOutcome;
+    let ctx = app.pins_context();
+    let outcome = match app.pins_overlay_mut() {
+        Some(state) => state.handle_key(&ctx, key),
+        None => return Ok(()),
+    };
+    match outcome {
+        PinsOutcome::Continue => {}
+        PinsOutcome::Close => {
+            app.close_pins_overlay();
+        }
+        PinsOutcome::ApplyAndStay(action) => {
+            static_apply_pins_action_and_refresh(app, config, snapshot, action)?;
+        }
+        PinsOutcome::ApplyAndClose(action) => {
+            app.close_pins_overlay();
+            static_apply_pins_action_and_refresh(app, config, snapshot, action)?;
+        }
+    }
+    Ok(())
+}
+
 /// Apply a controls action and rebuild the row tree so the change
 /// is visible immediately. Side-effecting in two places (App state
 /// plus discovery refresh) but kept in one helper so the call
@@ -1311,30 +1428,14 @@ fn apply_controls_action_and_refresh(
     config: &RunConfig,
     action: crate::tui::widgets::controls::ControlsAction,
 ) {
-    match action {
-        crate::tui::widgets::controls::ControlsAction::CreatePin(request) => {
-            create_pin_action(app, config, request);
-        }
-        crate::tui::widgets::controls::ControlsAction::EditPin(request) => {
-            edit_pin_action(app, config, request);
-        }
-        crate::tui::widgets::controls::ControlsAction::BindPin(request) => {
-            bind_pin_action(app, config, request);
-        }
-        crate::tui::widgets::controls::ControlsAction::RemovePin(request) => {
-            remove_pin_controls_action(app, config, request);
-        }
-        other => {
-            app.apply_controls_action(other);
-            refresh(app, config);
-        }
-    }
+    app.apply_controls_action(action);
+    refresh(app, config);
 }
 
 fn create_pin_action(
     app: &mut App,
     config: &RunConfig,
-    request: crate::tui::widgets::controls::PinCreateRequest,
+    request: crate::tui::widgets::pins::PinCreateRequest,
 ) {
     match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
         Ok((outcome, entry, store_kind)) => {
@@ -1362,16 +1463,16 @@ fn create_pin_action(
 }
 
 fn write_pin_create(
-    request: &crate::tui::widgets::controls::PinCreateRequest,
+    request: &crate::tui::widgets::pins::PinCreateRequest,
     loader: &crate::config::ConfigLoader,
 ) -> Result<(PinWriteOutcome, PinEntry, PinStoreKind)> {
     let cwd = std::path::PathBuf::from(&request.cwd);
     let selection = match request.store {
-        crate::tui::widgets::controls::PinCreateStore::Auto
-        | crate::tui::widgets::controls::PinCreateStore::Project => {
+        crate::tui::widgets::pins::PinCreateStore::Auto
+        | crate::tui::widgets::pins::PinCreateStore::Project => {
             crate::pins::select_store_for_pin(&cwd, loader)?
         }
-        crate::tui::widgets::controls::PinCreateStore::User => crate::pins::user_pin_store(loader)?,
+        crate::tui::widgets::pins::PinCreateStore::User => crate::pins::user_pin_store(loader)?,
     };
     let entry = PinEntry {
         id: request.id.clone(),
@@ -1406,7 +1507,7 @@ fn pin_store_label(kind: PinStoreKind) -> &'static str {
 fn bind_pin_action(
     app: &mut App,
     config: &RunConfig,
-    request: crate::tui::widgets::controls::PinBindRequest,
+    request: crate::tui::widgets::pins::PinBindRequest,
 ) {
     let Some(database) = app.graph_db() else {
         app.update(Msg::SetStatus(Some(
@@ -1447,7 +1548,7 @@ fn bind_pin_action(
 }
 
 fn write_pin_bind(
-    request: &crate::tui::widgets::controls::PinBindRequest,
+    request: &crate::tui::widgets::pins::PinBindRequest,
     snapshot: &crate::model::GraphSnapshot,
     loader: &crate::config::ConfigLoader,
 ) -> Result<crate::declared::DeclaredWriteOutcome> {
@@ -1503,7 +1604,7 @@ fn write_pin_bind(
 fn edit_pin_action(
     app: &mut App,
     config: &RunConfig,
-    request: crate::tui::widgets::controls::PinEditRequest,
+    request: crate::tui::widgets::pins::PinEditRequest,
 ) {
     match write_pin_edit(&request) {
         Ok(outcome) => {
@@ -1525,9 +1626,7 @@ fn edit_pin_action(
     }
 }
 
-fn write_pin_edit(
-    request: &crate::tui::widgets::controls::PinEditRequest,
-) -> Result<PinWriteOutcome> {
+fn write_pin_edit(request: &crate::tui::widgets::pins::PinEditRequest) -> Result<PinWriteOutcome> {
     let path = std::path::PathBuf::from(&request.store_path);
     preflight_pin_edit(request, &path)?;
     if request.original_id != request.id {
@@ -1556,7 +1655,7 @@ fn write_pin_edit(
 }
 
 fn preflight_pin_edit(
-    request: &crate::tui::widgets::controls::PinEditRequest,
+    request: &crate::tui::widgets::pins::PinEditRequest,
     path: &std::path::Path,
 ) -> Result<()> {
     let text = std::fs::read_to_string(path)?;
@@ -1601,7 +1700,7 @@ fn preflight_pin_edit(
 fn remove_pin_controls_action(
     app: &mut App,
     config: &RunConfig,
-    request: crate::tui::widgets::controls::PinRemoveRequest,
+    request: crate::tui::widgets::pins::PinRemoveRequest,
 ) {
     match write_pin_remove(&request) {
         Ok(outcome) if outcome.changed => {
@@ -1627,7 +1726,7 @@ fn remove_pin_controls_action(
 }
 
 fn write_pin_remove(
-    request: &crate::tui::widgets::controls::PinRemoveRequest,
+    request: &crate::tui::widgets::pins::PinRemoveRequest,
 ) -> Result<PinWriteOutcome> {
     crate::pins::remove_pin_entry(&request.store_path, &request.id).map_err(Into::into)
 }
@@ -2079,6 +2178,11 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (m, KeyCode::Char('f')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenControls)
             }
+            // ADR 0057 §TUI: `p` opens the dedicated pins management
+            // modal. Sibling of `f` (view/filter controls); pin CRUD
+            // also has direct shortcuts so the modal is the
+            // discoverable surface rather than a required step.
+            (m, KeyCode::Char('p')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::OpenPins),
             (KeyModifiers::SHIFT, KeyCode::Char('F'))
             | (KeyModifiers::NONE, KeyCode::Char('F')) => Some(Action::ClearFilters),
             // T8-042: `E` toggles the explorer's edge-meta visibility
@@ -2176,7 +2280,7 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::widgets::controls::{
+    use crate::tui::widgets::pins::{
         PinBindRequest, PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
     };
     use ratatui::crossterm::event::KeyEvent;

@@ -26,7 +26,7 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::controls::{PinBindOption, PinCreateDefaults, PinMutationTarget};
+use crate::tui::widgets::pins::{PinBindOption, PinCreateDefaults, PinMutationTarget};
 use crate::tui::{RunConfig, View};
 
 pub struct GraphDb(Rc<rusqlite::Connection>);
@@ -168,6 +168,10 @@ pub struct App {
     /// overlay is closed; `Some` suspends the surrounding keymap
     /// and routes input through the modal.
     controls_overlay: Option<crate::tui::widgets::controls::ControlsOverlayState>,
+    /// Active pins overlay (ADR 0057). Dedicated modal for pin CRUD,
+    /// kept separate from the controls overlay so view/filter and
+    /// pin management stay one-key-each on `f` and `p`.
+    pins_overlay: Option<crate::tui::widgets::pins::PinsOverlayState>,
     /// Active `/` search overlay (T8-017). `None` when closed;
     /// `Some` suspends the surrounding keymap, routes input
     /// through the modal, and overlays a ranked match list within
@@ -470,6 +474,7 @@ impl App {
             rename_overlay: None,
             pending_pin_remove: None,
             controls_overlay: None,
+            pins_overlay: None,
             search_overlay: None,
             help_overlay: None,
             value_modal: None,
@@ -590,6 +595,40 @@ impl App {
     /// Close the controls overlay without applying anything.
     pub fn close_controls_overlay(&mut self) {
         self.controls_overlay = None;
+    }
+
+    /// Active pins-overlay state (ADR 0057), if any.
+    pub fn pins_overlay(&self) -> Option<&crate::tui::widgets::pins::PinsOverlayState> {
+        self.pins_overlay.as_ref()
+    }
+
+    pub fn pins_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::pins::PinsOverlayState> {
+        self.pins_overlay.as_mut()
+    }
+
+    /// Open the pins overlay at the top of the action list.
+    pub fn open_pins_overlay(&mut self) {
+        self.pins_overlay = Some(crate::tui::widgets::pins::PinsOverlayState::new());
+    }
+
+    /// Replace the pins overlay state — used by direct shortcuts
+    /// (`N`/`B`/`A`/`b`) that skip the menu and open a sub-editor.
+    pub fn set_pins_overlay(&mut self, state: crate::tui::widgets::pins::PinsOverlayState) {
+        self.pins_overlay = Some(state);
+    }
+
+    /// Close the pins overlay without applying anything.
+    pub fn close_pins_overlay(&mut self) {
+        self.pins_overlay = None;
+    }
+
+    /// Snapshot of the live pin state the pins overlay renders against.
+    pub fn pins_context(&self) -> crate::tui::widgets::pins::PinsContext {
+        crate::tui::widgets::pins::PinsContext {
+            pin_create_defaults: self.pin_create_defaults(),
+            pin_target: self.pin_mutation_target(),
+            pin_bind_options: self.pin_bind_options(),
+        }
     }
 
     /// Active `/` search overlay (T8-017), if any.
@@ -799,9 +838,6 @@ impl App {
             grouping: self.grouping,
             filter: &self.filter,
             sort: self.sort,
-            pin_create_defaults: self.pin_create_defaults(),
-            pin_target: self.pin_mutation_target(),
-            pin_bind_options: self.pin_bind_options(),
         }
     }
 
@@ -986,23 +1022,35 @@ impl App {
                 self.sort = sort;
                 self.config.default_sort = sort;
             }
-            ControlsAction::CreatePin(_) => {
+        }
+    }
+
+    /// Apply a [`crate::tui::widgets::pins::PinsAction`] to the app
+    /// state. Mirrors [`Self::apply_controls_action`] but covers the
+    /// pin-specific surfaces (CRUD requests and the placeholder hint
+    /// for menu entries without prerequisites). The CRUD write paths
+    /// themselves live in the runtime so direct shortcuts can share
+    /// the same plumbing.
+    pub fn apply_pins_action(&mut self, action: crate::tui::widgets::pins::PinsAction) {
+        use crate::tui::widgets::pins::PinsAction;
+        match action {
+            PinsAction::CreatePin(_) => {
                 self.status_message =
                     Some("pins: create is handled by the TUI runtime".to_string());
             }
-            ControlsAction::EditPin(_) => {
+            PinsAction::EditPin(_) => {
                 self.status_message = Some("pins: edit is handled by the TUI runtime".to_string());
             }
-            ControlsAction::BindPin(_) => {
+            PinsAction::BindPin(_) => {
                 self.status_message = Some("pins: bind is handled by the TUI runtime".to_string());
             }
-            ControlsAction::RemovePin(_) => {
+            PinsAction::RemovePin(_) => {
                 self.status_message =
                     Some("pins: remove is handled by the TUI runtime".to_string());
             }
-            ControlsAction::PinPlaceholder(label) => {
+            PinsAction::PinPlaceholder(label) => {
                 self.status_message = Some(format!(
-                    "pins: `{label}` opens in a follow-up TUI CRUD flow; use `conspectus pin {label}` for now"
+                    "pins: `{label}` needs a pin selection; press `p` for the picker or use `conspectus pin {label}`"
                 ));
             }
         }
@@ -1951,11 +1999,11 @@ mod tests {
     }
 
     #[test]
-    fn controls_context_seeds_pin_create_defaults_from_selected_session() {
+    fn pins_context_seeds_pin_create_defaults_from_selected_session() {
         let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
         select_session(&mut app, "Session One");
 
-        let defaults = app.controls_context().pin_create_defaults;
+        let defaults = app.pins_context().pin_create_defaults;
         assert_eq!(defaults.id, "session-one");
         assert_eq!(defaults.display_name, "Session One");
         assert_eq!(defaults.harness, "codex");
@@ -1964,7 +2012,7 @@ mod tests {
     }
 
     #[test]
-    fn controls_context_seeds_pin_create_cwd_from_selected_group() {
+    fn pins_context_seeds_pin_create_cwd_from_selected_group() {
         let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
         let group_id = app
             .visible_rows()
@@ -1976,14 +2024,14 @@ mod tests {
             .expect("group row with primary node");
         app.set_selection(group_id);
 
-        let defaults = app.controls_context().pin_create_defaults;
+        let defaults = app.pins_context().pin_create_defaults;
         assert_eq!(defaults.cwd, "/p/proja");
         assert_eq!(defaults.id, "");
         assert_eq!(defaults.harness, "");
     }
 
     #[test]
-    fn controls_context_seeds_pin_mutation_target_from_selected_pin_row() {
+    fn pins_context_seeds_pin_mutation_target_from_selected_pin_row() {
         let mut snap = GraphSnapshot::empty();
         snap.pins.push(PinCandidate {
             id: "ingest".to_string(),
@@ -2020,10 +2068,7 @@ mod tests {
             .expect("pin row");
         app.set_selection(pin_id);
 
-        let target = app
-            .controls_context()
-            .pin_target
-            .expect("pin mutation target");
+        let target = app.pins_context().pin_target.expect("pin mutation target");
         assert_eq!(target.id, "ingest");
         assert_eq!(target.display_name, "Ingest");
         assert_eq!(target.harness, "codex");
