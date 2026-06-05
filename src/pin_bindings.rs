@@ -36,8 +36,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use std::collections::BTreeSet;
+
 use crate::declared::write_atomic;
-use crate::model::{GraphSnapshot, PinBinding};
+use crate::model::{
+    AgentSessionId, GraphNode, GraphSnapshot, LinkState, NodeId, PinBinding, RelationKind,
+};
 
 /// Current sidecar schema version. Bumped only on incompatible
 /// format changes; additive field growth lands without a bump.
@@ -299,6 +303,103 @@ pub enum WriteOutcome {
     /// Existing sidecar already matched; no I/O performed beyond the
     /// read+parse.
     Skipped,
+}
+
+/// Outcome of walking a recorded session id forward through ADR 0018
+/// `parent_session` lineage to find the current head. See
+/// [`lineage_head`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LineageOutcome {
+    /// Walk completed: `head` is the current leaf of the chain. May
+    /// be the starting session itself when the recorded session has
+    /// no successors.
+    Head(AgentSessionId),
+    /// The starting session was not found in the snapshot (deleted,
+    /// not yet discovered, or never existed). The launch consumer
+    /// per ADR 0058 Q7 deletes the sidecar in this case.
+    SessionMissing,
+    /// The walk encountered a fork — an ancestor with multiple
+    /// recorded successors. Per ADR 0058 Q8 the launch consumer
+    /// refuses to disambiguate and falls back to default argv.
+    Fork {
+        at: AgentSessionId,
+        successors: Vec<AgentSessionId>,
+    },
+}
+
+/// Walk forward through ADR 0018 `parent_session` lineage starting
+/// from `(harness, session_key)` in `snapshot`. Each step finds
+/// `ParentSession` candidate links whose target is the current
+/// session (i.e., successors with `parent_session = current`) and
+/// follows them. Stops at the first session with zero or more than
+/// one successor.
+///
+/// Cycle defense: a visited-set prevents infinite walks if the
+/// graph is malformed; on cycle detection the walk returns the
+/// current session as the head (best-effort honesty rather than
+/// looping or panicking).
+pub fn lineage_head(snapshot: &GraphSnapshot, harness: &str, session_key: &str) -> LineageOutcome {
+    let start = match find_session(snapshot, harness, session_key) {
+        Some(id) => id,
+        None => return LineageOutcome::SessionMissing,
+    };
+
+    let mut current = start;
+    let mut visited: BTreeSet<AgentSessionId> = BTreeSet::new();
+    visited.insert(current.clone());
+
+    loop {
+        let target = NodeId::AgentSession(current.clone());
+        let mut successors: Vec<AgentSessionId> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::ParentSession
+                    && matches!(link.state, LinkState::Active)
+                    && link.target_node_id() == Some(&target)
+            })
+            .filter_map(|link| match &link.source {
+                NodeId::AgentSession(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        successors.sort();
+        successors.dedup();
+
+        match successors.len() {
+            0 => return LineageOutcome::Head(current),
+            1 => {
+                let next = successors.into_iter().next().unwrap();
+                if !visited.insert(next.clone()) {
+                    // Defensive: cycle in `parent_session` would
+                    // otherwise loop forever. Return what we have.
+                    return LineageOutcome::Head(current);
+                }
+                current = next;
+            }
+            _ => {
+                return LineageOutcome::Fork {
+                    at: current,
+                    successors,
+                };
+            }
+        }
+    }
+}
+
+fn find_session(
+    snapshot: &GraphSnapshot,
+    harness: &str,
+    session_key: &str,
+) -> Option<AgentSessionId> {
+    snapshot.nodes.iter().find_map(|node| match node {
+        GraphNode::AgentSession(s)
+            if s.id.harness_key == harness && s.id.session_key == session_key =>
+        {
+            Some(s.id.clone())
+        }
+        _ => None,
+    })
 }
 
 /// Per-pin outcome of [`record_bindings`]. The string is the pin id,
@@ -749,6 +850,166 @@ mod tests {
 
             assert_eq!(outcomes.len(), 1);
             assert!(outcomes[0].1.is_err());
+        }
+    }
+
+    // ----- lineage_head: forward walk through parent_session links -----
+
+    mod lineage {
+        use super::*;
+        use crate::model::{
+            AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode,
+            GraphSnapshot, LinkEndpoint, LinkState, NodeId, Provenance, RelationKind,
+            SourceMetadata,
+        };
+
+        fn session(key: &str) -> AgentSessionNode {
+            AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", key),
+                harness_key: "codex".to_string(),
+                cwd: None,
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }
+        }
+
+        /// Append a `child --parent_session--> parent` link to `snap`.
+        fn parent_link(snap: &mut GraphSnapshot, child: &str, parent: &str) {
+            snap.candidate_links.push(GraphLink {
+                id: format!("{child}-parent-of-{parent}"),
+                source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", child)),
+                target: LinkEndpoint::Node {
+                    id: NodeId::AgentSession(AgentSessionId::new("codex", "/state", parent)),
+                },
+                relation: RelationKind::ParentSession,
+                provenance: Provenance::StrongDiscovered,
+                confidence: Confidence::High,
+                freshness: Freshness::Fresh,
+                source_metadata: SourceMetadata::default(),
+                state: LinkState::Active,
+            });
+        }
+
+        #[test]
+        fn session_missing_when_not_in_snapshot() {
+            let snap = GraphSnapshot::empty();
+            assert_eq!(
+                lineage_head(&snap, "codex", "nowhere"),
+                LineageOutcome::SessionMissing,
+            );
+        }
+
+        #[test]
+        fn no_successors_returns_current_as_head() {
+            let mut snap = GraphSnapshot::empty();
+            snap.nodes.push(GraphNode::AgentSession(session("a")));
+
+            match lineage_head(&snap, "codex", "a") {
+                LineageOutcome::Head(id) => assert_eq!(id.session_key, "a"),
+                other => panic!("expected Head, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn walks_single_successor_chain_to_leaf() {
+            // a -> b -> c (each child's parent_session points back)
+            let mut snap = GraphSnapshot::empty();
+            for key in ["a", "b", "c"] {
+                snap.nodes.push(GraphNode::AgentSession(session(key)));
+            }
+            parent_link(&mut snap, "b", "a");
+            parent_link(&mut snap, "c", "b");
+
+            match lineage_head(&snap, "codex", "a") {
+                LineageOutcome::Head(id) => assert_eq!(id.session_key, "c"),
+                other => panic!("expected Head=c, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn fork_stops_walk_and_lists_successors() {
+            // a -> {b, c}  (both b and c have parent_session = a)
+            let mut snap = GraphSnapshot::empty();
+            for key in ["a", "b", "c"] {
+                snap.nodes.push(GraphNode::AgentSession(session(key)));
+            }
+            parent_link(&mut snap, "b", "a");
+            parent_link(&mut snap, "c", "a");
+
+            match lineage_head(&snap, "codex", "a") {
+                LineageOutcome::Fork { at, successors } => {
+                    assert_eq!(at.session_key, "a");
+                    let keys: Vec<&str> =
+                        successors.iter().map(|s| s.session_key.as_str()).collect();
+                    assert_eq!(keys, vec!["b", "c"]);
+                }
+                other => panic!("expected Fork at a, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn ignores_inactive_parent_links() {
+            // a -> b with state=Ignored should be skipped.
+            let mut snap = GraphSnapshot::empty();
+            for key in ["a", "b"] {
+                snap.nodes.push(GraphNode::AgentSession(session(key)));
+            }
+            parent_link(&mut snap, "b", "a");
+            snap.candidate_links[0].state = LinkState::Ignored { reason: None };
+
+            match lineage_head(&snap, "codex", "a") {
+                LineageOutcome::Head(id) => assert_eq!(id.session_key, "a"),
+                other => panic!("expected Head=a (b's link is inactive), got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn cycle_in_parent_session_returns_best_effort_head() {
+            // a -> b -> a — malformed but the walk must not loop.
+            let mut snap = GraphSnapshot::empty();
+            for key in ["a", "b"] {
+                snap.nodes.push(GraphNode::AgentSession(session(key)));
+            }
+            parent_link(&mut snap, "b", "a");
+            parent_link(&mut snap, "a", "b");
+
+            // Either a or b is acceptable depending on walk order;
+            // both are reachable and the visited-set kicks in on the
+            // second step. The key invariant is no infinite loop.
+            match lineage_head(&snap, "codex", "a") {
+                LineageOutcome::Head(_) => {}
+                other => panic!("expected Head (cycle defense), got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn other_harness_links_are_invisible() {
+            // a (codex) -> b (codex) succession exists; an unrelated
+            // claude-code session that happens to share the key "a"
+            // shouldn't interfere.
+            let mut snap = GraphSnapshot::empty();
+            snap.nodes.push(GraphNode::AgentSession(session("a")));
+            snap.nodes.push(GraphNode::AgentSession(session("b")));
+            snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("claude-code", "/cc", "a"),
+                harness_key: "claude-code".to_string(),
+                cwd: None,
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+            parent_link(&mut snap, "b", "a");
+
+            match lineage_head(&snap, "codex", "a") {
+                LineageOutcome::Head(id) => {
+                    assert_eq!(id.harness_key, "codex");
+                    assert_eq!(id.session_key, "b");
+                }
+                other => panic!("expected Head=codex:b, got {other:?}"),
+            }
         }
     }
 }

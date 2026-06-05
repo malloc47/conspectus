@@ -2476,6 +2476,228 @@ mod tests {
             "codex --model=opus"
         );
     }
+
+    // ----- H-PIN-RESUME-004: launch-time resume resolver -----
+
+    mod resume_resolver {
+        use conspectus::model::{
+            AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode,
+            GraphSnapshot, LinkEndpoint, LinkState, NodeId, PinCandidate, PinMuxRef, Provenance,
+            RelationKind, SourceMetadata,
+        };
+        use conspectus::pin_bindings::{
+            PinBindingRecord, PinBindingsCache, read as read_sidecar, write as write_sidecar,
+        };
+        use std::path::Path;
+        use tempfile::tempdir;
+
+        fn make_pin(harness: &str) -> PinCandidate {
+            PinCandidate {
+                id: "ingest".to_string(),
+                display_name: "Ingest".to_string(),
+                harness: harness.to_string(),
+                cwd: "/p".to_string(),
+                mux: PinMuxRef {
+                    backend: "tmux".to_string(),
+                    name: "ingest".to_string(),
+                    socket_name: None,
+                },
+                launch_argv: None,
+                reason: None,
+                provenance: Provenance::LocalPin,
+                store_path: "/p/.conspectus.toml".to_string(),
+                binding: None,
+            }
+        }
+
+        fn make_session(harness: &str, key: &str) -> AgentSessionNode {
+            AgentSessionNode {
+                id: AgentSessionId::new(harness, "/state", key),
+                harness_key: harness.to_string(),
+                cwd: None,
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }
+        }
+
+        fn parent_link(snap: &mut GraphSnapshot, harness: &str, child: &str, parent: &str) {
+            snap.candidate_links.push(GraphLink {
+                id: format!("{child}-parent-{parent}"),
+                source: NodeId::AgentSession(AgentSessionId::new(harness, "/state", child)),
+                target: LinkEndpoint::Node {
+                    id: NodeId::AgentSession(AgentSessionId::new(harness, "/state", parent)),
+                },
+                relation: RelationKind::ParentSession,
+                provenance: Provenance::StrongDiscovered,
+                confidence: Confidence::High,
+                freshness: Freshness::Fresh,
+                source_metadata: SourceMetadata::default(),
+                state: LinkState::Active,
+            });
+        }
+
+        fn seed_sidecar(cache: &PinBindingsCache, session_key: &str, harness: &str) {
+            let record = PinBindingRecord::new(
+                "ingest",
+                "ingest",
+                None,
+                session_key,
+                harness,
+                1_738_742_400,
+            );
+            write_sidecar(cache, &record).expect("seed sidecar");
+        }
+
+        #[test]
+        fn no_sidecar_returns_none() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            let snap = GraphSnapshot::empty();
+            let pin = make_pin("codex");
+            assert!(
+                super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn sidecar_with_recorded_session_in_snapshot_splices_resume_argv() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            seed_sidecar(&cache, "session-a", "codex");
+
+            let mut snap = GraphSnapshot::empty();
+            snap.nodes
+                .push(GraphNode::AgentSession(make_session("codex", "session-a")));
+            let pin = make_pin("codex");
+
+            let argv = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
+                .expect("resume argv produced");
+            // codex resume_argv per H-PIN-RESUME-002: ["codex",
+            // "exec", "--resume", "session-a"].
+            assert_eq!(
+                argv,
+                vec![
+                    std::ffi::OsString::from("codex"),
+                    std::ffi::OsString::from("exec"),
+                    std::ffi::OsString::from("--resume"),
+                    std::ffi::OsString::from("session-a"),
+                ]
+            );
+        }
+
+        #[test]
+        fn lineage_walks_forward_to_head_before_resume() {
+            // a -> b -> c. Sidecar recorded `a`; we expect resume to
+            // target `c`.
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            seed_sidecar(&cache, "a", "codex");
+
+            let mut snap = GraphSnapshot::empty();
+            for key in ["a", "b", "c"] {
+                snap.nodes
+                    .push(GraphNode::AgentSession(make_session("codex", key)));
+            }
+            parent_link(&mut snap, "codex", "b", "a");
+            parent_link(&mut snap, "codex", "c", "b");
+
+            let pin = make_pin("codex");
+            let argv = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
+                .expect("resume argv");
+            assert!(argv.contains(&std::ffi::OsString::from("c")));
+            assert!(!argv.contains(&std::ffi::OsString::from("a")));
+        }
+
+        #[test]
+        fn fork_in_lineage_returns_none_and_keeps_sidecar() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            seed_sidecar(&cache, "a", "codex");
+
+            let mut snap = GraphSnapshot::empty();
+            for key in ["a", "b", "c"] {
+                snap.nodes
+                    .push(GraphNode::AgentSession(make_session("codex", key)));
+            }
+            parent_link(&mut snap, "codex", "b", "a");
+            parent_link(&mut snap, "codex", "c", "a");
+
+            let pin = make_pin("codex");
+            let outcome =
+                super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache);
+            assert!(outcome.is_none(), "fork should fall back to default argv");
+            // Sidecar is NOT deleted on fork — the data isn't stale,
+            // just ambiguous.
+            assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
+        }
+
+        #[test]
+        fn missing_session_deletes_sidecar() {
+            // ADR 0058 Q7: recorded session not on disk → delete the
+            // sidecar before falling back.
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            seed_sidecar(&cache, "gone", "codex");
+            let snap = GraphSnapshot::empty();
+            let pin = make_pin("codex");
+
+            let outcome =
+                super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache);
+            assert!(outcome.is_none());
+            assert!(
+                read_sidecar(&cache, "ingest").unwrap().is_none(),
+                "stale sidecar should be deleted per ADR 0058 Q7",
+            );
+        }
+
+        #[test]
+        fn harness_without_resume_returns_none() {
+            // aider has no resume CLI.
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            seed_sidecar(&cache, "session-a", "aider");
+
+            let mut snap = GraphSnapshot::empty();
+            snap.nodes
+                .push(GraphNode::AgentSession(make_session("aider", "session-a")));
+            let pin = make_pin("aider");
+
+            let outcome =
+                super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache);
+            assert!(outcome.is_none());
+            // Sidecar is not deleted — the session exists, just
+            // can't be resumed via CLI.
+            assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
+        }
+
+        #[test]
+        fn claude_code_returns_claude_resume_argv() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            seed_sidecar(&cache, "session-c", "claude-code");
+
+            let mut snap = GraphSnapshot::empty();
+            snap.nodes.push(GraphNode::AgentSession(make_session(
+                "claude-code",
+                "session-c",
+            )));
+            let pin = make_pin("claude-code");
+
+            let argv = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
+                .expect("claude resume argv");
+            assert_eq!(
+                argv,
+                vec![
+                    std::ffi::OsString::from("claude"),
+                    std::ffi::OsString::from("--resume"),
+                    std::ffi::OsString::from("session-c"),
+                ]
+            );
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -4031,8 +4253,16 @@ impl PinLaunchArgs {
                     );
                 }
                 let cwd = std::path::PathBuf::from(&pin.cwd);
+                // ADR 0058 / H-PIN-RESUME-004: consult the
+                // per-pin sidecar to splice in resume_argv when a
+                // prior session is known and still reachable.
+                // Falls back to the default argv on every honest
+                // failure path (no sidecar, session missing, fork,
+                // harness without resume CLI).
+                let effective_argv =
+                    resolve_resume_argv(&snapshot, pin, &cwd).unwrap_or_else(|| argv.clone());
                 let outcome = runner
-                    .new_session(socket, mux_name, &cwd, &argv)
+                    .new_session(socket, mux_name, &cwd, &effective_argv)
                     .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
                 report_new_session(outcome, mux_name)?;
                 if self.no_attach {
@@ -4043,6 +4273,96 @@ impl PinLaunchArgs {
                 attach_and_report(runner, socket, mux_name)?;
                 Ok(())
             }
+        }
+    }
+}
+
+/// Consult the per-pin sidecar (ADR 0058) for a prior session and, when
+/// reachable, build the harness's `resume_argv` for it. Returns `None`
+/// (so the caller falls back to default argv) on every honest failure
+/// mode: no sidecar, recorded session no longer on disk (deletes the
+/// sidecar), fork in the lineage chain, or the harness has no
+/// resume CLI.
+fn resolve_resume_argv(
+    snapshot: &GraphSnapshot,
+    pin: &conspectus::model::PinCandidate,
+    cwd: &std::path::Path,
+) -> Option<Vec<std::ffi::OsString>> {
+    let cache = conspectus::pin_bindings::PinBindingsCache::from_env();
+    cache.directory()?;
+    resolve_resume_argv_with_cache(snapshot, pin, cwd, &cache)
+}
+
+fn resolve_resume_argv_with_cache(
+    snapshot: &GraphSnapshot,
+    pin: &conspectus::model::PinCandidate,
+    cwd: &std::path::Path,
+    cache: &conspectus::pin_bindings::PinBindingsCache,
+) -> Option<Vec<std::ffi::OsString>> {
+    use conspectus::discovery::harness::resume_argv_for;
+    use conspectus::pin_bindings::{LineageOutcome, delete as delete_sidecar, lineage_head, read};
+
+    let record = match read(cache, &pin.id) {
+        Ok(Some(record)) => record,
+        Ok(None) => return None,
+        Err(err) => {
+            eprintln!(
+                "conspectus: pin `{}`: ignoring unreadable sidecar ({err}); launching fresh",
+                pin.id
+            );
+            return None;
+        }
+    };
+
+    let head = match lineage_head(snapshot, &record.harness, &record.session_id) {
+        LineageOutcome::Head(head) => head,
+        LineageOutcome::SessionMissing => {
+            // ADR 0058 Q7: stale sidecar — recorded session can't
+            // be found anywhere in the current snapshot. Delete it
+            // so it doesn't keep producing this hint on subsequent
+            // launches.
+            match delete_sidecar(cache, &pin.id) {
+                Ok(_) => eprintln!(
+                    "conspectus: pin `{}`: previous session `{}` no longer exists; \
+                     cleared sidecar, launching fresh",
+                    pin.id, record.session_id
+                ),
+                Err(err) => eprintln!(
+                    "conspectus: pin `{}`: previous session `{}` no longer exists; \
+                     could not clear sidecar ({err}); launching fresh",
+                    pin.id, record.session_id
+                ),
+            }
+            return None;
+        }
+        LineageOutcome::Fork { at, successors } => {
+            eprintln!(
+                "conspectus: pin `{}`: session `{}` has {} compacted successors; \
+                 launching fresh — pick one with `conspectus session continue <id>` or \
+                 resume manually",
+                pin.id,
+                at.session_key,
+                successors.len(),
+            );
+            return None;
+        }
+    };
+
+    match resume_argv_for(&pin.harness, &head.session_key, cwd) {
+        Some(argv) => {
+            println!(
+                "pin `{}`: resuming recorded session `{}`",
+                pin.id, head.session_key
+            );
+            Some(argv)
+        }
+        None => {
+            eprintln!(
+                "conspectus: pin `{}`: harness `{}` does not expose a resume command; \
+                 launching fresh",
+                pin.id, pin.harness
+            );
+            None
         }
     }
 }
