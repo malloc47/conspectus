@@ -541,14 +541,22 @@ Per-harness default launch argv lives on `HarnessAdapter::launch_argv`.
 The pin's `display_name` doubles as the bound agent session's alias
 overlay (ADR 0029 precedence) and as the initial tmux session name;
 renames apply the ADR 0029 lockstep contract. The binding is *not*
-persisted — it is recomputed every discovery pass from live evidence
-plus the pin declaration, mirroring how ADR 0005 unresolved-endpoint
-evidence resolves opportunistically. The resolver emits four
-pin-specific diagnostics — `PinUnbound`, `PinStaleMux`, `PinAmbiguous`,
-`PinDrift` — each mapped to a specific TUI affordance and CLI escape
-hatch (`pin bind`, `pin rebind`, `pin adopt`); ambiguity overrides
-reuse the ADR 0014 declared-link surface rather than introducing a
-new persisted binding type.
+persisted as resolver-canonical state — it is recomputed every
+discovery pass from live evidence plus the pin declaration, mirroring
+how ADR 0005 unresolved-endpoint evidence resolves opportunistically.
+Per ADR 0058, the most recent fresh binding *is* recorded to a
+per-pin sidecar under `$XDG_CACHE_HOME/conspectus/pin-bindings/` so
+that a subsequent `pin launch` after the mux dies can splice
+`HarnessAdapter::resume_argv(<session>, <cwd>)` into the launch
+instead of starting a fresh session. The sidecar is a rebuildable
+cache, not authoritative state; the resolver never reads it. The
+resolver emits four pin-specific diagnostics — `PinUnbound`
+(optionally carrying a `last_session` hint when the sidecar has
+one), `PinStaleMux`, `PinAmbiguous`, `PinDrift` — each mapped to a
+specific TUI affordance and CLI escape hatch (`pin bind`, `pin
+rebind`, `pin adopt`); ambiguity overrides reuse the ADR 0014
+declared-link surface rather than introducing a new persisted binding
+type.
 
 Pins declare the *next* logical session; the H-AGENTMUX adapter
 workstream extracts evidence from *existing* agent-mux orchestrators
@@ -558,12 +566,16 @@ the H-AGENTMUX adapters.
 
 CLI surface: `conspectus pin create|list|show|rename|rm|launch|attach|bind|rebind|adopt`.
 TUI surface: pin rows appear in the sessions and mux row trees;
-`Enter` launches when unbound and attaches when bound; `R` renames with
-lockstep; create/remove/bind/rebind/adopt are reachable from the
-ADR 0031 Controls overlay. ADR 0057 records the schema, mux-anchored
-binding rules, diagnostics, read-only invariants, and the deferred
-questions (Windows/non-tmux launch, multi-harness pins, pre-launch
-hooks, env overrides, atelier-fork auto-suggestion).
+`Enter` launches when unbound and attaches when bound; `R` renames
+with lockstep; `N` / `B` / `b` / `A` / `Delete` are direct shortcuts
+for create / rebind / bind / adopt / remove, and `p` opens a
+dedicated Pins management modal (separate from the ADR 0031 Controls
+overlay) that surfaces every action with selection-aware defaults.
+ADR 0057 records the schema, mux-anchored binding rules, diagnostics,
+read-only invariants, and the deferred questions (Windows/non-tmux
+launch, multi-harness pins, pre-launch hooks, env overrides,
+atelier-fork auto-suggestion). ADR 0058 records the continuity
+sidecar and per-harness `resume_argv` story.
 
 ## Status Views
 
