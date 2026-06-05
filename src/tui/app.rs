@@ -807,33 +807,22 @@ impl App {
     fn pin_mutation_target(&self) -> Option<PinMutationTarget> {
         let selection = self.selection.as_ref()?;
         let row = self.tree.rows.iter().find(|row| &row.id == selection)?;
-        let (id, display_name) = match &row.kind {
+        let id = match &row.kind {
             RowKind::Pin(pin) => {
                 return Some(PinMutationTarget {
                     id: pin.pin_id.clone(),
                     display_name: pin.display_name.clone(),
+                    harness: pin.harness.clone(),
+                    cwd: pin.cwd.clone(),
+                    mux_name: pin.mux_name.clone(),
+                    mux_socket: pin.mux_socket.clone(),
+                    launch_argv: pin.launch_argv.clone(),
                     store_path: pin.store_path.clone(),
                 });
             }
-            RowKind::AgentSession(session) => {
-                let id = session.pin_id.clone()?;
-                let display_name = session
-                    .display_label()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| id.clone());
-                (id, display_name)
-            }
+            RowKind::AgentSession(session) => session.pin_id.clone()?,
             _ => return None,
         };
-        let store_path = self.pin_store_path(&id)?;
-        Some(PinMutationTarget {
-            id,
-            display_name,
-            store_path,
-        })
-    }
-
-    fn pin_store_path(&self, id: &str) -> Option<String> {
         self.database
             .as_ref()
             .and_then(|db| crate::query::read_snapshot(db.conn()).ok())
@@ -842,7 +831,16 @@ impl App {
                     .pins
                     .into_iter()
                     .find(|pin| pin.id == id)
-                    .map(|pin| pin.store_path)
+                    .map(|pin| PinMutationTarget {
+                        id: pin.id,
+                        display_name: pin.display_name,
+                        harness: pin.harness,
+                        cwd: pin.cwd,
+                        mux_name: pin.mux.name,
+                        mux_socket: pin.mux.socket_name,
+                        launch_argv: pin.launch_argv.unwrap_or_default(),
+                        store_path: pin.store_path,
+                    })
             })
     }
 
@@ -960,6 +958,9 @@ impl App {
             ControlsAction::CreatePin(_) => {
                 self.status_message =
                     Some("pins: create is handled by the TUI runtime".to_string());
+            }
+            ControlsAction::EditPin(_) => {
+                self.status_message = Some("pins: edit is handled by the TUI runtime".to_string());
             }
             ControlsAction::RemovePin(_) => {
                 self.status_message =
@@ -1991,6 +1992,11 @@ mod tests {
             .expect("pin mutation target");
         assert_eq!(target.id, "ingest");
         assert_eq!(target.display_name, "Ingest");
+        assert_eq!(target.harness, "codex");
+        assert_eq!(target.cwd, "/p/project");
+        assert_eq!(target.mux_name, "ingest");
+        assert_eq!(target.mux_socket, None);
+        assert_eq!(target.launch_argv, Vec::<String>::new());
         assert_eq!(target.store_path, "/p/project/.conspectus.toml");
     }
 

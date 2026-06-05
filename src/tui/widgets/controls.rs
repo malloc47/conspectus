@@ -90,6 +90,11 @@ pub struct PinCreateDefaults {
 pub struct PinMutationTarget {
     pub id: String,
     pub display_name: String,
+    pub harness: String,
+    pub cwd: String,
+    pub mux_name: String,
+    pub mux_socket: Option<String>,
+    pub launch_argv: Vec<String>,
     pub store_path: String,
 }
 
@@ -127,6 +132,7 @@ pub enum SubEditor {
     MaxAge(TextInputState),
     MuxState(MultiSelectState),
     PinCreate(PinCreateState),
+    PinEdit(PinEditState),
     PinRemove(PinRemoveState),
 }
 
@@ -155,6 +161,7 @@ pub enum ControlsAction {
     SetFilter(RowFilter),
     SetSort(Sort),
     CreatePin(PinCreateRequest),
+    EditPin(PinEditRequest),
     RemovePin(PinRemoveRequest),
     PinPlaceholder(&'static str),
 }
@@ -175,6 +182,19 @@ pub struct PinCreateRequest {
 pub struct PinRemoveRequest {
     pub id: String,
     pub display_name: String,
+    pub store_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinEditRequest {
+    pub original_id: String,
+    pub id: String,
+    pub display_name: String,
+    pub harness: String,
+    pub cwd: String,
+    pub mux_name: String,
+    pub mux_socket: Option<String>,
+    pub launch_argv: Vec<String>,
     pub store_path: String,
 }
 
@@ -206,6 +226,18 @@ pub struct PinCreateState {
     mux_socket: TextInputState,
     launch_argv: TextInputState,
     store: PinCreateStore,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PinEditState {
+    target: PinMutationTarget,
+    cursor: usize,
+    id: TextInputState,
+    display_name: TextInputState,
+    mux_name: TextInputState,
+    mux_socket: TextInputState,
+    launch_argv: TextInputState,
     error: Option<String>,
 }
 
@@ -345,6 +377,13 @@ impl ControlsOverlayState {
                         ctx.pin_create_defaults.clone(),
                     )));
                     ControlsOutcome::Continue
+                } else if label == "rename" {
+                    if let Some(target) = ctx.pin_target.clone() {
+                        self.sub_editor = Some(SubEditor::PinEdit(PinEditState::new(target)));
+                        ControlsOutcome::Continue
+                    } else {
+                        ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
+                    }
                 } else if label == "remove" {
                     if let Some(target) = ctx.pin_target.clone() {
                         self.sub_editor = Some(SubEditor::PinRemove(PinRemoveState::new(target)));
@@ -432,6 +471,17 @@ impl ControlsOverlayState {
                     ControlsOutcome::ApplyAndClose(ControlsAction::CreatePin(request))
                 }
             },
+            SubEditor::PinEdit(state) => match state.handle_key(event) {
+                PinEditOutcome::Continue => ControlsOutcome::Continue,
+                PinEditOutcome::Cancel => {
+                    *slot = None;
+                    ControlsOutcome::Continue
+                }
+                PinEditOutcome::Confirm(request) => {
+                    *slot = None;
+                    ControlsOutcome::ApplyAndClose(ControlsAction::EditPin(request))
+                }
+            },
             SubEditor::PinRemove(state) => match state.handle_key(event) {
                 PinRemoveOutcome::Continue => ControlsOutcome::Continue,
                 PinRemoveOutcome::Cancel => {
@@ -451,6 +501,13 @@ impl ControlsOverlayState {
 enum PinCreateOutcome {
     Continue,
     Confirm(PinCreateRequest),
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PinEditOutcome {
+    Continue,
+    Confirm(PinEditRequest),
     Cancel,
 }
 
@@ -588,6 +645,97 @@ impl PinCreateState {
             mux_socket,
             launch_argv,
             store: self.store,
+        })
+    }
+}
+
+impl PinEditState {
+    const FIELD_COUNT: usize = 5;
+
+    fn new(target: PinMutationTarget) -> Self {
+        Self {
+            cursor: 0,
+            id: TextInputState::new(" id ", target.id.clone()),
+            display_name: TextInputState::new(" display ", target.display_name.clone()),
+            mux_name: TextInputState::new(" mux ", target.mux_name.clone()),
+            mux_socket: TextInputState::new(
+                " socket ",
+                target.mux_socket.clone().unwrap_or_default(),
+            ),
+            launch_argv: TextInputState::new(" launch argv ", target.launch_argv.join(" ")),
+            target,
+            error: None,
+        }
+    }
+
+    fn handle_key(&mut self, event: KeyEvent) -> PinEditOutcome {
+        match event.code {
+            KeyCode::Esc => PinEditOutcome::Cancel,
+            KeyCode::Enter => match self.request() {
+                Ok(request) => PinEditOutcome::Confirm(request),
+                Err(err) => {
+                    self.error = Some(err);
+                    PinEditOutcome::Continue
+                }
+            },
+            KeyCode::Up => {
+                self.move_cursor(-1);
+                PinEditOutcome::Continue
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.move_cursor(1);
+                PinEditOutcome::Continue
+            }
+            _ => {
+                if event.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(event.code, KeyCode::Char('c'))
+                {
+                    return PinEditOutcome::Cancel;
+                }
+                if let Some(input) = self.active_input_mut() {
+                    let _ = input.handle_key(event);
+                    self.error = None;
+                }
+                PinEditOutcome::Continue
+            }
+        }
+    }
+
+    fn move_cursor(&mut self, delta: i32) {
+        let len = Self::FIELD_COUNT as i32;
+        let next = ((self.cursor as i32 + delta) % len + len) % len;
+        self.cursor = next as usize;
+    }
+
+    fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
+        match self.cursor {
+            0 => Some(&mut self.id),
+            1 => Some(&mut self.display_name),
+            2 => Some(&mut self.mux_name),
+            3 => Some(&mut self.mux_socket),
+            4 => Some(&mut self.launch_argv),
+            _ => None,
+        }
+    }
+
+    fn request(&self) -> Result<PinEditRequest, String> {
+        let id = required(self.id.value(), "id")?;
+        let display_name = required(self.display_name.value(), "display")?;
+        let mux_name = required(self.mux_name.value(), "mux.name")?;
+        let mux_socket = optional(self.mux_socket.value());
+        let launch_argv = optional(self.launch_argv.value())
+            .map(|raw| raw.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default();
+        Ok(PinEditRequest {
+            original_id: self.target.id.clone(),
+            id,
+            display_name,
+            harness: self.target.harness.clone(),
+            cwd: self.target.cwd.clone(),
+            mux_name,
+            mux_socket,
+            launch_argv,
+            store_path: self.target.store_path.clone(),
         })
     }
 }
@@ -860,6 +1008,9 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer) {
         SubEditor::PinCreate(state) => {
             PinCreateWidget::new(state).render(area, buf);
         }
+        SubEditor::PinEdit(state) => {
+            PinEditWidget::new(state).render(area, buf);
+        }
         SubEditor::PinRemove(state) => {
             PinRemoveWidget::new(state).render(area, buf);
         }
@@ -953,6 +1104,88 @@ fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize)
 
 fn pin_create_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
+    let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
+}
+
+struct PinEditWidget<'a> {
+    state: &'a PinEditState,
+}
+
+impl<'a> PinEditWidget<'a> {
+    fn new(state: &'a PinEditState) -> Self {
+        Self { state }
+    }
+}
+
+impl Widget for PinEditWidget<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let modal = pin_edit_modal_rect(area);
+        for y in modal.top()..modal.bottom() {
+            for x in modal.left()..modal.right() {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.reset();
+                }
+            }
+        }
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(Line::from(" Edit Pin "));
+        let inner = block.inner(modal);
+        block.render(modal, buf);
+
+        let mut lines = vec![
+            pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
+            pin_create_field(
+                1,
+                "display",
+                self.state.display_name.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(
+                2,
+                "mux.name",
+                self.state.mux_name.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(
+                3,
+                "mux.socket",
+                self.state.mux_socket.value(),
+                self.state.cursor,
+            ),
+            pin_create_field(
+                4,
+                "launch argv",
+                self.state.launch_argv.value(),
+                self.state.cursor,
+            ),
+            Line::from(format!("  harness     {}", self.state.target.harness)),
+            Line::from(format!("  cwd         {}", self.state.target.cwd)),
+            Line::from(format!("  store       {}", self.state.target.store_path)),
+        ];
+        if let Some(error) = &self.state.error {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                error.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Up/Down field · type to edit · Enter save · Esc cancel",
+            Style::default().add_modifier(Modifier::DIM),
+        )));
+
+        Paragraph::new(lines).render(inner, buf);
+    }
+}
+
+fn pin_edit_modal_rect(area: Rect) -> Rect {
+    let width = std::cmp::min(78, area.width.saturating_sub(4)).max(46);
     let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -1244,6 +1477,19 @@ mod tests {
         }
     }
 
+    fn pin_target() -> PinMutationTarget {
+        PinMutationTarget {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "ingest-mux".to_string(),
+            mux_socket: Some("scratch".to_string()),
+            launch_argv: vec!["codex".to_string(), "--resume".to_string()],
+            store_path: "/workspace/project/.conspectus.toml".to_string(),
+        }
+    }
+
     #[test]
     fn opens_with_active_view_selected() {
         let filter = RowFilter::default();
@@ -1530,6 +1776,74 @@ mod tests {
     }
 
     #[test]
+    fn enter_on_rename_pin_action_opens_edit_form_for_pin_target() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_target = Some(pin_target());
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(1);
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        assert!(matches!(state.sub_editor(), Some(SubEditor::PinEdit(_))));
+    }
+
+    #[test]
+    fn edit_pin_form_confirms_target_fields() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_target = Some(pin_target());
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(1);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            ControlsOutcome::ApplyAndClose(ControlsAction::EditPin(PinEditRequest {
+                original_id: "ingest".to_string(),
+                id: "ingest".to_string(),
+                display_name: "Ingest".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "ingest-mux".to_string(),
+                mux_socket: Some("scratch".to_string()),
+                launch_argv: vec!["codex".to_string(), "--resume".to_string()],
+                store_path: "/workspace/project/.conspectus.toml".to_string(),
+            }))
+        );
+    }
+
+    #[test]
+    fn edit_pin_form_cancel_does_not_emit_action() {
+        let filter = RowFilter::default();
+        let mut ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        ctx.pin_target = Some(pin_target());
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(1);
+        state.handle_key(&ctx, key(KeyCode::Enter));
+
+        let outcome = state.handle_key(&ctx, key(KeyCode::Esc));
+        assert_eq!(outcome, ControlsOutcome::Continue);
+        assert!(state.sub_editor().is_none());
+    }
+
+    #[test]
     fn enter_on_remove_pin_action_opens_remove_confirmation_for_pin_target() {
         let filter = RowFilter::default();
         let mut ctx = ctx_with(
@@ -1538,11 +1852,7 @@ mod tests {
             &filter,
             Sort::Hierarchy,
         );
-        ctx.pin_target = Some(PinMutationTarget {
-            id: "ingest".to_string(),
-            display_name: "Ingest".to_string(),
-            store_path: "/workspace/project/.conspectus.toml".to_string(),
-        });
+        ctx.pin_target = Some(pin_target());
         let mut state = ControlsOverlayState::new(&ctx);
         state.cursor = ControlsCursor::Pin(2);
 
@@ -1560,11 +1870,7 @@ mod tests {
             &filter,
             Sort::Hierarchy,
         );
-        ctx.pin_target = Some(PinMutationTarget {
-            id: "ingest".to_string(),
-            display_name: "Ingest".to_string(),
-            store_path: "/workspace/project/.conspectus.toml".to_string(),
-        });
+        ctx.pin_target = Some(pin_target());
         let mut state = ControlsOverlayState::new(&ctx);
         state.cursor = ControlsCursor::Pin(2);
         state.handle_key(&ctx, key(KeyCode::Enter));
@@ -1590,11 +1896,7 @@ mod tests {
             &filter,
             Sort::Hierarchy,
         );
-        ctx.pin_target = Some(PinMutationTarget {
-            id: "ingest".to_string(),
-            display_name: "Ingest".to_string(),
-            store_path: "/workspace/project/.conspectus.toml".to_string(),
-        });
+        ctx.pin_target = Some(pin_target());
         let mut state = ControlsOverlayState::new(&ctx);
         state.cursor = ControlsCursor::Pin(2);
         state.handle_key(&ctx, key(KeyCode::Enter));

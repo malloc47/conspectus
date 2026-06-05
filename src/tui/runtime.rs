@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
@@ -489,6 +489,7 @@ fn static_apply_controls_action_and_refresh(
     if matches!(
         action,
         crate::tui::widgets::controls::ControlsAction::CreatePin(_)
+            | crate::tui::widgets::controls::ControlsAction::EditPin(_)
             | crate::tui::widgets::controls::ControlsAction::RemovePin(_)
     ) {
         app.update(Msg::SetStatus(Some(
@@ -789,16 +790,24 @@ fn commit_pin_rename(app: &mut App, config: &RunConfig, pin_id: &str, value: Str
         )));
         return;
     }
-    let status = current_exe_command()
-        .args(["pin", "rename", pin_id, "--display", display])
-        .status();
-    refresh(app, config);
-    let message = match status {
-        Ok(s) if s.success() => format!("renamed pin `{pin_id}`"),
-        Ok(s) => format!("pin rename `{pin_id}` exited with {s}"),
-        Err(err) => format!("pin rename `{pin_id}` failed to spawn: {err}"),
+    let Some(target) = app.controls_context().pin_target else {
+        app.update(Msg::SetStatus(Some(format!(
+            "pin rename: no editable pin `{pin_id}` in current selection"
+        ))));
+        return;
     };
-    app.update(Msg::SetStatus(Some(message)));
+    let request = crate::tui::widgets::controls::PinEditRequest {
+        original_id: target.id.clone(),
+        id: target.id,
+        display_name: display.to_string(),
+        harness: target.harness,
+        cwd: target.cwd,
+        mux_name: target.mux_name,
+        mux_socket: target.mux_socket,
+        launch_argv: target.launch_argv,
+        store_path: target.store_path,
+    };
+    edit_pin_action(app, config, request);
 }
 
 fn remove_pin_action(app: &mut App, config: &RunConfig) {
@@ -826,14 +835,21 @@ fn remove_pin_action(app: &mut App, config: &RunConfig) {
         return;
     }
     app.set_pending_pin_remove(None);
-    let status = current_exe_command().args(["pin", "rm", &pin_id]).status();
-    refresh(app, config);
-    let message = match status {
-        Ok(s) if s.success() => format!("removed pin `{pin_id}`"),
-        Ok(s) => format!("pin remove `{pin_id}` exited with {s}"),
-        Err(err) => format!("pin remove `{pin_id}` failed to spawn: {err}"),
+    let Some(target) = app.controls_context().pin_target else {
+        app.update(Msg::SetStatus(Some(format!(
+            "pin remove: no editable pin `{pin_id}` in current selection"
+        ))));
+        return;
     };
-    app.update(Msg::SetStatus(Some(message)));
+    remove_pin_controls_action(
+        app,
+        config,
+        crate::tui::widgets::controls::PinRemoveRequest {
+            id: target.id,
+            display_name: target.display_name,
+            store_path: target.store_path,
+        },
+    );
 }
 
 fn pin_bind_hint_action(app: &mut App) {
@@ -844,12 +860,6 @@ fn pin_bind_hint_action(app: &mut App) {
             "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
         ))),
     }
-}
-
-fn current_exe_command() -> std::process::Command {
-    std::process::Command::new(
-        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
-    )
 }
 
 /// Append an informational advisory when the rename target is a
@@ -1300,6 +1310,9 @@ fn apply_controls_action_and_refresh(
         crate::tui::widgets::controls::ControlsAction::CreatePin(request) => {
             create_pin_action(app, config, request);
         }
+        crate::tui::widgets::controls::ControlsAction::EditPin(request) => {
+            edit_pin_action(app, config, request);
+        }
         crate::tui::widgets::controls::ControlsAction::RemovePin(request) => {
             remove_pin_controls_action(app, config, request);
         }
@@ -1380,6 +1393,104 @@ fn pin_store_label(kind: PinStoreKind) -> &'static str {
         PinStoreKind::Project => "project",
         PinStoreKind::User => "user",
     }
+}
+
+fn edit_pin_action(
+    app: &mut App,
+    config: &RunConfig,
+    request: crate::tui::widgets::controls::PinEditRequest,
+) {
+    match write_pin_edit(&request) {
+        Ok(outcome) => {
+            let verb = if outcome.changed {
+                "saved"
+            } else {
+                "unchanged"
+            };
+            refresh(app, config);
+            app.update(Msg::SetStatus(Some(format!(
+                "{verb} pin `{}` in {}",
+                request.id,
+                outcome.path.display()
+            ))));
+        }
+        Err(err) => {
+            app.update(Msg::SetStatus(Some(format!("pin edit failed: {err}"))));
+        }
+    }
+}
+
+fn write_pin_edit(
+    request: &crate::tui::widgets::controls::PinEditRequest,
+) -> Result<PinWriteOutcome> {
+    let path = std::path::PathBuf::from(&request.store_path);
+    preflight_pin_edit(request, &path)?;
+    if request.original_id != request.id {
+        crate::pins::remove_pin_entry(&path, &request.original_id)?;
+    }
+    let entry = PinEntry {
+        id: request.id.clone(),
+        display_name: request.display_name.clone(),
+        harness: request.harness.clone(),
+        cwd: request.cwd.clone(),
+        mux: PinMux {
+            backend: TMUX_MUX_BACKEND.to_string(),
+            name: request.mux_name.clone(),
+            socket_name: request.mux_socket.clone(),
+        },
+        launch: if request.launch_argv.is_empty() {
+            None
+        } else {
+            Some(PinLaunch {
+                argv: request.launch_argv.clone(),
+            })
+        },
+        reason: None,
+    };
+    Ok(crate::pins::upsert_pin_entry(&path, entry)?)
+}
+
+fn preflight_pin_edit(
+    request: &crate::tui::widgets::controls::PinEditRequest,
+    path: &std::path::Path,
+) -> Result<()> {
+    let text = std::fs::read_to_string(path)?;
+    let document = crate::pins::parse_pins_document(&text)?;
+    let mut found_original = false;
+    let requested_socket = request.mux_socket.as_deref().unwrap_or("default");
+    for entry in document.entries() {
+        if entry.id == request.original_id {
+            found_original = true;
+            continue;
+        }
+        if entry.id == request.id {
+            bail!(
+                "pin id `{}` already exists in {}",
+                request.id,
+                path.display()
+            );
+        }
+        let entry_socket = entry.mux.socket_name.as_deref().unwrap_or("default");
+        if entry.mux.backend == TMUX_MUX_BACKEND
+            && entry.mux.name == request.mux_name
+            && entry_socket == requested_socket
+        {
+            bail!(
+                "mux `{}` is already used by pin `{}` in {}",
+                entry.mux.native_id(),
+                entry.id,
+                path.display()
+            );
+        }
+    }
+    if !found_original {
+        bail!(
+            "pin `{}` was not found in {}",
+            request.original_id,
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 fn remove_pin_controls_action(
@@ -1960,7 +2071,9 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::widgets::controls::{PinCreateRequest, PinCreateStore, PinRemoveRequest};
+    use crate::tui::widgets::controls::{
+        PinCreateRequest, PinCreateStore, PinEditRequest, PinRemoveRequest,
+    };
     use ratatui::crossterm::event::KeyEvent;
     use std::fs;
 
@@ -2191,6 +2304,130 @@ mod tests {
         assert_eq!(outcome.path, xdg.join(crate::config::USER_CONFIG_RELATIVE));
         assert!(outcome.path.exists());
         assert!(!project.path().join(".conspectus.toml").exists());
+    }
+
+    #[test]
+    fn write_pin_edit_updates_id_display_mux_and_launch() {
+        let project = tempfile::TempDir::new().expect("project");
+        let path = project.path().join(".conspectus.toml");
+        let entry = PinEntry {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux: PinMux {
+                backend: TMUX_MUX_BACKEND.to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch: None,
+            reason: None,
+        };
+        crate::pins::upsert_pin_entry(&path, entry).expect("seed pin");
+
+        let outcome = write_pin_edit(&PinEditRequest {
+            original_id: "ingest".to_string(),
+            id: "daily-ingest".to_string(),
+            display_name: "Daily Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux_name: "daily".to_string(),
+            mux_socket: Some("scratch".to_string()),
+            launch_argv: vec!["codex".to_string(), "--resume".to_string()],
+            store_path: path.display().to_string(),
+        })
+        .expect("edit pin");
+
+        assert!(outcome.changed);
+        let written = fs::read_to_string(&path).expect("config");
+        assert!(!written.contains(r#"id = "ingest""#));
+        assert!(written.contains(r#"id = "daily-ingest""#));
+        assert!(written.contains(r#"display_name = "Daily Ingest""#));
+        assert!(written.contains(r#"name = "daily""#));
+        assert!(written.contains(r#"socket_name = "scratch""#));
+        assert!(written.contains(r#""--resume""#));
+    }
+
+    #[test]
+    fn write_pin_edit_rejects_duplicate_id_without_mutating() {
+        let project = tempfile::TempDir::new().expect("project");
+        let path = project.path().join(".conspectus.toml");
+        for (id, mux) in [("ingest", "ingest"), ("scratch", "scratch")] {
+            crate::pins::upsert_pin_entry(
+                &path,
+                PinEntry {
+                    id: id.to_string(),
+                    display_name: id.to_string(),
+                    harness: "codex".to_string(),
+                    cwd: project.path().display().to_string(),
+                    mux: PinMux {
+                        backend: TMUX_MUX_BACKEND.to_string(),
+                        name: mux.to_string(),
+                        socket_name: None,
+                    },
+                    launch: None,
+                    reason: None,
+                },
+            )
+            .expect("seed pin");
+        }
+        let before = fs::read_to_string(&path).expect("before");
+
+        let err = write_pin_edit(&PinEditRequest {
+            original_id: "ingest".to_string(),
+            id: "scratch".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux_name: "ingest".to_string(),
+            mux_socket: None,
+            launch_argv: Vec::new(),
+            store_path: path.display().to_string(),
+        })
+        .expect_err("duplicate id");
+        assert!(err.to_string().contains("already exists"));
+        assert_eq!(fs::read_to_string(&path).expect("after"), before);
+    }
+
+    #[test]
+    fn write_pin_edit_rejects_duplicate_mux_without_mutating() {
+        let project = tempfile::TempDir::new().expect("project");
+        let path = project.path().join(".conspectus.toml");
+        for (id, mux) in [("ingest", "ingest"), ("scratch", "scratch")] {
+            crate::pins::upsert_pin_entry(
+                &path,
+                PinEntry {
+                    id: id.to_string(),
+                    display_name: id.to_string(),
+                    harness: "codex".to_string(),
+                    cwd: project.path().display().to_string(),
+                    mux: PinMux {
+                        backend: TMUX_MUX_BACKEND.to_string(),
+                        name: mux.to_string(),
+                        socket_name: None,
+                    },
+                    launch: None,
+                    reason: None,
+                },
+            )
+            .expect("seed pin");
+        }
+        let before = fs::read_to_string(&path).expect("before");
+
+        let err = write_pin_edit(&PinEditRequest {
+            original_id: "ingest".to_string(),
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: project.path().display().to_string(),
+            mux_name: "scratch".to_string(),
+            mux_socket: None,
+            launch_argv: Vec::new(),
+            store_path: path.display().to_string(),
+        })
+        .expect_err("duplicate mux");
+        assert!(err.to_string().contains("already used"));
+        assert_eq!(fs::read_to_string(&path).expect("after"), before);
     }
 
     #[test]

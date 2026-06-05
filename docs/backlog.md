@@ -5438,7 +5438,7 @@ once everything else has landed.
     Static scenario TUIs keep mutation disabled and surface a status
     message instead of writing.
 
-- [ ] `H-PIN-023` TUI pin edit and remove flow.
+- [x] `H-PIN-023` TUI pin edit and remove flow.
   - Scope: bring existing pins to CRUD parity with CLI
     `pin rename` / `pin rm` from the Controls overlay, while keeping
     the row-level `R` and `Delete` accelerators from H-PIN-017.
@@ -5452,11 +5452,14 @@ once everything else has landed.
     rejection, duplicate-mux rejection, lockstep rename handoff, and
     remove confirmation. Snapshot tests for edit and delete states.
   - Blockers: `H-PIN-009`, `H-PIN-014`, `H-PIN-017`, `F8-004`.
-  - Progress: Controls overlay `Pins > remove` now opens a
-    confirmation modal for selected unbound/stale pin rows, names the
-    pin id, display name, and exact source store path, and removes
-    through the shared `remove_pin_entry` write helper. Edit/rename
-    parity remains open.
+  - Delivered: Controls overlay `Pins > rename` opens an edit modal
+    for selected unbound/stale pin rows with id, display name,
+    mux-name, optional socket, launch argv, and store-path fields;
+    `Pins > remove` opens a confirmation modal naming the pin and
+    exact source store path. Both Controls actions and row-level `R`
+    / `Delete` accelerators now write through shared pin helpers
+    instead of shelling out. Edit preflights duplicate id and
+    duplicate mux conflicts before mutating the TOML store.
 
 - [ ] `H-PIN-024` TUI pin bind / rebind / adopt flows.
   - Scope: expose the CLI escape hatches from the Controls overlay

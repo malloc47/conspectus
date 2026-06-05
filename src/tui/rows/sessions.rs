@@ -268,6 +268,11 @@ fn emit_unbound_pins(tree: &mut RowTree, data: &SessionsData<'_>, home: Option<&
             kind: RowKind::Pin(PinRow {
                 pin_id: pin.id.clone(),
                 display_name: pin.display_name.clone(),
+                harness: pin.harness.clone(),
+                cwd: pin.cwd.clone(),
+                mux_name: pin.mux.name.clone(),
+                mux_socket: pin.mux.socket_name.clone(),
+                launch_argv: pin.launch_argv.clone().unwrap_or_default(),
                 store_path: pin.store_path.clone(),
                 harness_label: harness_label(&pin.harness),
                 cwd_display: shorten_home(&pin.cwd, home),
