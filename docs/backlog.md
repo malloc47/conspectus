@@ -8455,7 +8455,132 @@ this phase migrates whichever ones exist when each story lands.
     `src/output/dot.rs` (optional: render reason in the DOT edge
     tooltip), and `src/query/` (selected_reason column).
 
-## Later
+### Command Search And Minibuffer
 
-- [ ] Evaluate Backlog.md migration once task count, dependencies, or
-  multi-agent coordination make manual tracking cumbersome.
+The TUI surface (`conspectus tui`) is growing in keybindings, sub-views,
+and modal surfaces (viewer, rename, graph export). Users need a
+discoverable, keyboard-driven way to find and invoke commands — without
+leaving the keyboard or memorizing dozens of arcane chords.
+
+Two complementary approaches, drawn from mature terminal-first ecosystems:
+
+1. **Emacs-like minibuffer**: a single-line prompt at the bottom of the
+   screen that accepts text commands with tab completion, history,
+   and inline validation. Every TUI action eventually routes through
+   it. Inspired by Emacs `M-x` and the classic readline pattern.
+2. **OpenCode-style command search modal**: a fuzzy-filtered overlay
+   that indexes every available command, action, and sub-view. The
+   operator types a few characters, arrows through results, and
+   presses Enter. Inspired by VS Code's Command Palette and opencode's
+   `/` command surface.
+
+The H-TBL workstream already established a column registry and
+`conspectus columns <ROWS>` discovery surface; the TUI command palette
+can reuse the same registry-plus-description pattern at the action
+level. The text-input primitive (`src/tui/widgets/input.rs`) from
+ADR 0030 (H-RENAME-010) provides the base widget. The fuzzy filter can
+reuse the structural matching approach from the existing
+`node_short_id` prefix resolver or adopt a lightweight substring scorer.
+
+- [ ] `H-CMD-001` ADR: command palette surface and minibuffer scope.
+  - Scope: settle the two-phase delivery (command palette first as the
+    lower-risk, higher-discoverability surface; minibuffer second as
+    the general-purpose prompt once the action registry is mature).
+    Decide the fuzzy-match algorithm (substring with smart-case vs
+    `nucleo` / `skim`-style scoring), the action registry shape (enum
+    vs trait + `describe()`), whether commands are statically
+    registered or discovered at runtime, how user-defined keybindings
+    and aliases plug into the registry, and the overlay placement
+    (H-RENAME-010's centered modal pattern vs a bottom-anchored
+    palette vs a full-screen overlay for the command-search variant).
+    Record the relationship with ADR 0030 (text-input widget), ADR
+    0033 (extensible keybinding config), and the existing `Controls`
+    overlay. Does not introduce new crate dependencies unless the ADR
+    explicitly justifies one.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: review the ADR against the existing TUI surface,
+    the Controls overlay help text, and the column-registry pattern
+    from H-TBL.
+  - Blockers: none.
+- [ ] `H-CMD-002` Action registry: enumerate the command surface.
+  - Scope: walk every `Action` variant, TUI keybinding, runtime helper
+    (`src/tui/runtime.rs`), and modal surface (viewer, rename, graph
+    export, pinned-row launcher) and produce a structured action
+    registry — one entry per user-visible command — with a stable
+    command id, a short description, the category (navigation /
+    session / mux / display / export / transcript / rename), default
+    keybinding, and applicability guard (e.g. `pinned-row` actions
+    only apply when a pinned row is selected). Keep the registry in a
+    new `src/tui/actions.rs` or similar, separate from the existing
+    key-dispatch map, so the command palette can enumerate it without
+    importing the runtime. This is the foundation the ADR describes;
+    the palette overlay (`H-CMD-003`) and the minibuffer
+    (`H-CMD-004+`) both consume it.
+  - Tests: unit tests for the registry shape, uniqueness of command
+    ids, applicability-guard coverage for at least four categories,
+    and a snapshot of the full command list for discovery parity with
+    the existing Controls overlay.
+  - Manual checks: confirm the registry matches the Controls overlay
+    help text byte-for-byte (same descriptions, same keybindings);
+    spot-check `conspectus tui --help` for consistency.
+  - Blockers: `H-CMD-001`.
+- [ ] `H-CMD-003` Command palette overlay (first deliverable).
+  - Scope: on a single key chord (`Ctrl+P` or `M-x`-style `Alt+X`,
+    decided by the ADR), open a centered or top-anchored overlay
+    listing every registered action. The input line at the top accepts
+    a fuzzy filter query; the result list scrolls. `Enter` executes
+    the selected action by routing it through the existing
+    `Action`→`Msg` dispatch; `Esc` dismisses. Reuse
+    `src/tui/widgets/input.rs` for the text field. The palette
+    should feel like a discoverability surface, not a replacement for
+    the existing direct keybindings — those continue to work
+    unchanged. Show the keybinding beside each result so the operator
+    learns shortcuts organically. Initial query is empty (show all);
+    typing refines. Category headers (`Navigation`, `Session`, …) in
+    the result list when results span multiple categories.
+  - Tests: buffer snapshot tests for the empty-query "show all" state,
+    a filtered result set, the no-matches state, and palette dismissal
+    without side effects. Reducer tests for action dispatch through the
+    palette (confirm, cancel, arrow-navigate, re-filter-on-type).
+  - Manual checks: open the palette in a live TUI, type a partial
+    command name, confirm the filter works, execute a command, verify
+    the TUI state changes correctly.
+  - Blockers: `H-CMD-002`.
+- [ ] `H-CMD-004` Minibuffer prompt (second deliverable, deferred).
+  - Scope: add a bottom-anchored single-line prompt bar that can host
+    any text-command interaction — rename, search, filter, command
+    palette entry — without spawning a new modal overlay. The
+    minibuffer is the *unified* prompt surface; individual commands
+    declare their prompt content and completion set. Emacs conventions:
+    `M-x` opens the minibuffer in command-palette mode,
+    `C-g`/`Esc` cancels. Tab completion cycles candidates. History
+    persists per-command-type for the session lifetime. The existing
+    rename input (`H-RENAME-011`) should route through the minibuffer
+    rather than its own modal once this lands; the search overlay
+    (`T8-017` / `/`) should use it too. Do not replace the viewer
+    modal or graph-export dialogs — they need more screen real estate.
+  - Tests: snapshot tests for empty prompt, text entry with completion
+    candidates, history navigation (`M-p`/`M-n`), cancellation, and
+    confirm. Reducer tests for per-command-type routing (command
+    palette dispatch, rename dispatch, search dispatch).
+  - Manual checks: open minibuffer, type a partial command, tab-
+    complete, execute; then open rename via minibuffer and confirm the
+    alias update flow works identically to the current modal path.
+  - Blockers: `H-CMD-003`, `H-RENAME-011` (rename flow is the first
+    non-palette consumer).
+- [ ] `H-CMD-005` Migrate rename, search, and view-switch prompts into
+  the minibuffer.
+  - Scope: once the minibuffer exists, route the existing inline
+    prompts through it: `R` (rename) opens the minibuffer pre-
+    populated; `/` (search, `T8-017`) opens the minibuffer; `v`
+    (view-switch) opens the minibuffer with completion over the
+    registered views. Keep the existing modal fallback for terminals
+    where the minibuffer layout is impractical. Remove the standalone
+    text-input modals only after the minibuffer versions have been
+    exercised for at least one release cycle.
+  - Tests: integration tests for each migrated prompt; regression
+    tests proving the removed modals no longer register keybindings.
+  - Manual checks: run through the full rename → search → view-switch
+    flow using only the minibuffer; confirm history and completion
+    work across each prompt type.
+  - Blockers: `H-CMD-004`, `T8-017`.

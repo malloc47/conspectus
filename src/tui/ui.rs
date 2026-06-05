@@ -2568,22 +2568,35 @@ fn default_action_status_hint(app: &App) -> String {
     // Pin rows surface a per-binding-state hint (ADR 0057 / H-PIN-018).
     if let RowKind::Pin(pin) = &row.kind {
         let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-        if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
-            return hint;
-        }
-        return match pin.state_label {
+        let has_b = if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
+            let has_binding = hint.contains(" b bind");
+            if has_binding {
+                return format!("{hint} · Del remove");
+            }
+            return format!("{hint} · b bind · Del remove");
+        } else {
+            false
+        };
+        let launch_hint = match pin.state_label {
             "stale-mux" => format!(
                 "Enter to relaunch `{}` in existing mux `{}`",
                 pin.display_name, pin.mux_label
             ),
             _ => format!("Enter to launch `{}`", pin.display_name),
         };
+        if has_b {
+            return format!("{launch_hint} · b bind · Del remove");
+        }
+        return format!("{launch_hint} · b bind · Del remove");
     }
     if let RowKind::AgentSession(session) = &row.kind
         && session.pin_id.is_some()
     {
         let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
         if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
+            if !hint.contains(" b bind") {
+                return format!("{hint} · b bind");
+            }
             return hint;
         }
     }
@@ -2605,6 +2618,10 @@ fn default_action_status_hint(app: &App) -> String {
             if let RowKind::AgentSession(session) = &row.kind
                 && matches!(session.mux_state, MuxIndicator::Unmuxed)
             {
+                let resume = crate::tui::resume::resolve_resume_target(&session.session);
+                if matches!(resume, crate::tui::resume::ResumeTarget::Launch { .. }) {
+                    return format!("Enter/v view {} · S resume", compact_session_label(session));
+                }
                 return format!("Enter/v view {}", compact_session_label(session));
             }
             attach_disabled_reason(&reason)
@@ -4161,7 +4178,8 @@ mod tests {
         let text = buffer_to_string(&buffer);
         // T8-043: un-muxed agent sessions now advertise Enter
         // (and `v`) as the primary default action rather than the
-        // attach-disabled reason.
+        // attach-disabled reason. Sessions backed by a harness that
+        // exposes a resume command additionally surface `S` resume.
         assert!(
             text.contains("Enter/v view"),
             "expected Enter/v view hint for un-muxed session: {text}"
@@ -4171,8 +4189,8 @@ mod tests {
             "Enter hint should replace the attach-disabled reason on viewable rows: {text}"
         );
         assert!(
-            !text.contains("resume"),
-            "status line should not describe R as resume: {text}"
+            text.contains("S resume"),
+            "codex sessions should advertise S resume: {text}"
         );
     }
 

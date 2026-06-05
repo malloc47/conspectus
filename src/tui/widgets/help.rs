@@ -16,18 +16,21 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::tui::Theme;
 
-/// Pure state for the help overlay. Carries no settings today — the
-/// renderer reads the static keymap below.
+/// Pure state for the help overlay. Carries vertical scroll
+/// position so long keymaps stay reachable on short terminals.
 #[derive(Debug, Clone, Default)]
-pub struct HelpOverlayState;
+pub struct HelpOverlayState {
+    pub scroll: u16,
+}
 
 impl HelpOverlayState {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
     /// Dispatch a crossterm key event. Esc / Ctrl-C / `q` close the
-    /// overlay; everything else is swallowed so navigation keys
+    /// overlay; j/k/PgDn/PgUp/g/G scroll the keymap if it overflows
+    /// the modal; everything else is swallowed so navigation keys
     /// don't accidentally affect the row tree behind it.
     pub fn handle_key(&mut self, event: KeyEvent) -> HelpOutcome {
         if event.modifiers.contains(KeyModifiers::CONTROL)
@@ -37,8 +40,38 @@ impl HelpOverlayState {
         }
         match event.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => HelpOutcome::Close,
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.scroll_by(1);
+                HelpOutcome::Continue
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.scroll_by(-1);
+                HelpOutcome::Continue
+            }
+            KeyCode::PageDown | KeyCode::Char(' ') => {
+                self.scroll_by(8);
+                HelpOutcome::Continue
+            }
+            KeyCode::PageUp => {
+                self.scroll_by(-8);
+                HelpOutcome::Continue
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                self.scroll = 0;
+                HelpOutcome::Continue
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                self.scroll = u16::MAX;
+                HelpOutcome::Continue
+            }
             _ => HelpOutcome::Continue,
         }
+    }
+
+    fn scroll_by(&mut self, delta: i32) {
+        let current = i32::from(self.scroll);
+        let next = current.saturating_add(delta).max(0);
+        self.scroll = u16::try_from(next.min(i32::from(u16::MAX))).unwrap_or(u16::MAX);
     }
 }
 
@@ -52,14 +85,16 @@ pub enum HelpOutcome {
 
 /// Centered modal that renders the keymap reference. Lays out two
 /// columns of `key · action` pairs grouped into sections so the
-/// operator can scan for the action they want.
+/// operator can scan for the action they want. Supports vertical
+/// scrolling when the keymap overflows the modal.
 pub struct HelpOverlayWidget<'a> {
+    state: &'a HelpOverlayState,
     theme: &'a Theme,
 }
 
 impl<'a> HelpOverlayWidget<'a> {
-    pub fn new(_state: &HelpOverlayState, theme: &'a Theme) -> Self {
-        Self { theme }
+    pub fn new(state: &'a HelpOverlayState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
@@ -78,7 +113,7 @@ impl Widget for HelpOverlayWidget<'_> {
             .title(Line::from(" Help "));
         let inner = block.inner(modal);
         block.render(modal, buf);
-        let para = Paragraph::new(body_lines(self.theme));
+        let para = Paragraph::new(body_lines(self.theme)).scroll((self.state.scroll, 0));
         para.render(inner, buf);
     }
 }
@@ -136,6 +171,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
     );
     bind(&mut lines, "r", "Refresh discovery now");
+    bind(
+        &mut lines,
+        "S",
+        "Resume the selected un-muxed agent session in a new terminal",
+    );
     bind(&mut lines, "q / Ctrl-C", "Quit");
     blank(&mut lines);
 
@@ -290,7 +330,7 @@ fn blank(lines: &mut Vec<Line<'static>>) {
 pub fn centered_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(78, area.width.saturating_sub(4)).max(40);
     let max_height = area.height.saturating_sub(2);
-    let desired = 26;
+    let desired = 28;
     let height = (desired as u16).clamp(10, max_height.max(10));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -365,19 +405,84 @@ mod tests {
             .flat_map(|line| line.spans.iter().map(|s| s.content.as_ref()))
             .collect::<Vec<_>>()
             .join(" ");
-        // Spot-check the new ADR 0031 / T8-017 keys plus the
-        // rename action, which must stay visible in the help popup.
+        // Every key-literal reference used in a bind() call must
+        // appear in the rendered help text.
         for needle in [
-            "v ", "a ", "R ", "r ", "f ", "F ", "Ctrl-G", "] / [", "/ ", "1 – 5", "Tab", "?",
+            "f ",
+            "? ",
+            "Enter ",
+            "a ",
+            "i ",
+            "R ",
+            "v ",
+            "r ",
+            "S ",
+            "b ",
+            "Delete ",
+            "q / Ctrl-C",
+            "1 – 5",
+            "] / [",
+            "F ",
+            "Ctrl-G",
+            "/ ",
+            "j / k / ↓ / ↑",
+            "l / → / h / ←",
+            "PgDn / PgUp",
+            "g / G",
+            "Tab",
+            "J / K",
+            "j / k",
+            "e ",
+            "Backspace",
+            "E ",
+            "o ",
         ] {
             assert!(
                 rendered.contains(needle),
                 "help text missing `{needle}` reference; full text:\n{rendered}"
             );
         }
-        assert!(
-            rendered.contains("Rename the selected agent session"),
-            "help text should document R as rename; full text:\n{rendered}"
-        );
+        // Every action description must also be visible so the
+        // operator knows what each binding does.
+        for desc in [
+            "Open the controls overlay",
+            "This help",
+            "Default action on the selected row",
+            "Attach to the selected mux",
+            "Copy the selected agent or mux session's full id",
+            "Rename the selected agent session or pin's display name",
+            "Open the selected session's transcript",
+            "Refresh discovery now",
+            "Resume the selected un-muxed agent session",
+            "Quit",
+            "Open the pins overlay (menu listing every action)",
+            "New pin — opens the create form",
+            "Rebind the selected pin's mux target",
+            "Bind picker for the selected PinAmbiguous row",
+            "Adopt the selected live mux row as a new pin",
+            "Remove the selected pin (two-press confirmation)",
+            "Switch directly to view",
+            "Cycle to next / previous view",
+            "Clear all active filters",
+            "Cycle grouping forward",
+            "Open the search overlay",
+            "Move selection down / up",
+            "Expand / collapse the selected left-tree row",
+            "Page through the row tree",
+            "First / last row",
+            "Cycle focus",
+            "Scroll the right-panel preview",
+            "Move the explorer cursor",
+            "Toggle expand/collapse on a multi-link",
+            "Back out of the most recent drilldown",
+            "Toggle Expanded Node Detail",
+            "Toggle edge meta",
+            "Open the full untruncated value",
+        ] {
+            assert!(
+                rendered.contains(desc),
+                "help text missing description `{desc}`; full text:\n{rendered}"
+            );
+        }
     }
 }
