@@ -5,9 +5,10 @@ sessions, muxes, repos, checkouts, workspaces, forks, branches, and forge PRs.
 It reads local state, records relationship evidence in a provider-neutral graph,
 and renders deterministic JSON or compact session tables.
 
-Conspectus is read-only except for explicit `conspectus declared` commands,
-which store user-authored relationship intent in `.conspectus.toml` or user
-config.
+Conspectus is read-only except for explicit `conspectus declared`,
+`conspectus alias`, `conspectus rename`, and `conspectus pin`
+commands, which store user-authored intent in `.conspectus.toml` or
+user config.
 
 ## CLI
 
@@ -20,6 +21,7 @@ conspectus graph --format {json|dot|html} [--scan-root PATH]...
 conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
 
 conspectus declared list [--store {all|project|user}] [--scan-root PATH]...
+conspectus pin {create|list|show|launch|attach|bind|rebind|adopt|rename|rm} ...
 ```
 
 Running `conspectus` without a subcommand opens the interactive TUI.
@@ -30,7 +32,16 @@ explorer (see [graph visualization guide](docs/graph-visualization.md)).
 `session` renders
 agent-, mux-, or union-oriented table projections after resolution. The
 `declared` subcommands can pin, ignore, remove, confirm, or override
-relationships.
+relationships. `conspectus pin` (ADR 0057) declares a session pin — a
+`(harness, cwd, display_name, mux)` tuple persisted in
+`.conspectus.toml` — that renders as a first-class dashboard row
+whether or not a live session realizes it, binds 1:1 on the mux
+native name through the existing attribution pipeline, and can
+launch the configured harness into a fresh tmux session on demand.
+This replaces the agent-deck "new card" workflow without inheriting
+the broader orchestrator scope; see
+[`docs/operations.md`](docs/operations.md#session-pins) for the full
+command surface and the agent-deck migration path via `pin adopt`.
 
 ## Docs
 

@@ -504,7 +504,9 @@ search overlay and inline mux-picker).
 ## Session Pins
 
 Per ADR 0057, Conspectus supports user-authored **Session Pins** as
-the surface that replaces agent-deck's "new" workflow. A pin is a
+the surface that replaces agent-deck's "new" workflow. The
+[operations guide](operations.md#session-pins) documents the command
+and TUI surface in detail. A pin is a
 declared `(harness, cwd, display_name, mux)` tuple that
 
 - persists in a sibling `[[pins.entries]]` TOML table alongside
@@ -1055,7 +1057,7 @@ backed by SQLite. The shape:
     Theming grows a shared `[theme]` table with `[tui.theme]` /
     `[html.theme]` overrides. A live server-hosted HTML view is left to
     a follow-up ADR.
-  - ADR 0057 (Proposed): add **Session Pins** as a third sibling
+  - ADR 0057 (Accepted): add **Session Pins** as a third sibling
     TOML write surface (`[[pins.entries]]`) alongside `[declared]`
     and `[aliases]`. A pin is a user-authored
     `(harness, cwd, display_name, mux)` declaration that renders as a
