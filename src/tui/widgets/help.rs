@@ -105,6 +105,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         "f",
         "Open the controls overlay (view / grouping / filters / sort)",
     );
+    bind(
+        &mut lines,
+        "p",
+        "Open the pins overlay (create / rename / remove / bind / rebind / adopt)",
+    );
     bind(&mut lines, "?", "This help");
     blank(&mut lines);
 
@@ -120,7 +125,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         "i",
         "Copy the selected agent or mux session's full id to the clipboard",
     );
-    bind(&mut lines, "R", "Rename the selected agent session");
+    bind(
+        &mut lines,
+        "R",
+        "Rename the selected agent session or pin's display name",
+    );
     bind(
         &mut lines,
         "v",
@@ -128,6 +137,44 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     );
     bind(&mut lines, "r", "Refresh discovery now");
     bind(&mut lines, "q / Ctrl-C", "Quit");
+    blank(&mut lines);
+
+    section(&mut lines, "Pins (ADR 0057)");
+    bind(
+        &mut lines,
+        "p",
+        "Open the pins overlay (menu listing every action)",
+    );
+    bind(
+        &mut lines,
+        "N",
+        "New pin — opens the create form seeded from the current selection",
+    );
+    bind(
+        &mut lines,
+        "R",
+        "Rename the selected pin's display name (same key as session rename)",
+    );
+    bind(
+        &mut lines,
+        "B",
+        "Rebind the selected pin's mux target (mux name + optional socket)",
+    );
+    bind(
+        &mut lines,
+        "b",
+        "Bind picker for the selected PinAmbiguous row (status hint otherwise)",
+    );
+    bind(
+        &mut lines,
+        "A",
+        "Adopt the selected live mux row as a new pin",
+    );
+    bind(
+        &mut lines,
+        "Delete",
+        "Remove the selected pin (two-press confirmation)",
+    );
     blank(&mut lines);
 
     section(&mut lines, "View switching");

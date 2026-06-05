@@ -487,28 +487,40 @@ stays in one place.
 
 ### TUI controls
 
-Pin rows participate in the same TUI navigation and Controls overlay
-as discovered sessions:
+Pin CRUD lives in its own modal, separate from the view/grouping/
+filter controls overlay (`f`). Every action also has a direct
+shortcut so the modal is the discoverable surface, not a required
+step.
+
+Direct shortcuts:
 
 - `Enter` on a pin launches/attaches through `conspectus pin launch`.
-- `R` opens the pin edit flow for display-name and mux-target changes.
-- `Delete` opens a confirmation prompt before removing the pin.
-- `Controls > Pins > create` opens a multi-field create form with
-  selection-derived defaults when the current row exposes harness,
-  cwd, or mux context.
-- `Controls > Pins > rename` edits id, display name, mux name,
-  optional socket name, and launch argv, while showing the TOML store
-  that will be touched.
-- `Controls > Pins > remove` confirms the pin id, display name, and
-  store path before writing.
-- `Controls > Pins > bind` appears for `PinAmbiguous` diagnostics and
-  lets the operator pick a competing session id; it writes the same
-  declared `pin:<id>` override as `conspectus pin bind`.
-- `Controls > Pins > rebind` uses the edit flow's mux fields to
-  recover from external tmux renames with duplicate-mux preflight.
-- `Controls > Pins > adopt` opens the create flow seeded from the
-  selected live mux when available, so migrating an existing agent-deck
-  style tmux session uses the same validated write path as `pin create`.
+- `N` opens the create form seeded from the current selection
+  (harness/cwd/display from a selected session, cwd from a selected
+  group, or harness/cwd/mux from a selected mux row).
+- `R` opens the display-name edit on a pin row (same key as session
+  rename).
+- `B` opens the mux-only rebind form for the selected pin —
+  `mux.name` and optional `mux.socket_name`, matching the CLI's
+  `pin rebind` scope.
+- `b` opens the bind picker when the selected pin has a
+  `PinAmbiguous` diagnostic; surfaces a status hint otherwise.
+- `A` adopts the selected live mux row as a new pin. Refuses with a
+  status hint on any other row kind because the form needs the
+  mux's name, observed cwd, and harness as seeds.
+- `Delete` opens a two-press confirmation before removing the pin.
+
+Pins modal (`p`):
+
+- `p` opens the discoverable menu listing
+  `create / rename / remove / bind / rebind / adopt`. `↑/↓` navigate,
+  `Enter` opens the form for the chosen action, `Esc` closes the
+  modal. Each form is the same one the direct shortcut opens, so the
+  two surfaces stay 1:1.
+- Entries that need a pin selection (`rename`, `remove`, `rebind`)
+  surface a status hint instead when no pin row is selected, and
+  `bind` only opens its picker when the resolver flagged
+  `PinAmbiguous` candidates.
 
 Static scenario TUIs and read-only navigation paths keep these
 mutations disabled; they surface a status message instead of writing.
