@@ -43,6 +43,124 @@ the broader orchestrator scope; see
 [`docs/operations.md`](docs/operations.md#session-pins) for the full
 command surface and the agent-deck migration path via `pin adopt`.
 
+## Session Pins
+
+A **session pin** is a small TOML entry that declares "I want a logical
+agent session here" — a `(harness, cwd, display_name, mux)` tuple
+stored in `.conspectus.toml` (project) or the user-level config. It
+behaves as a stable, one-keystroke dashboard row whether or not the
+underlying tmux session is currently running. When a matching live mux
+exists, the resolver binds the pin to its attributed agent session 1:1;
+when nothing matches, the pin renders as `unbound` and `pin launch`
+spawns the tmux session on demand.
+
+Pins are a lightweight alternative to a full mux/agent orchestrator.
+Conspectus does not own your tmux server, does not manage long-running
+processes, and does not impose a window/pane layout. It just records
+the *intent* of a session, watches what's actually running, and lets
+you reach the running pieces with consistent keystrokes from the TUI
+or scripts from the CLI.
+
+### Lifecycle at a glance
+
+```
+pin create  ──►  pin launch  ──►  bound to live mux  ──►  pin attach
+                                                              │
+                  ▲                                            │
+                  │                                            ▼
+            pin adopt           ◄── operator already running tmux
+            pin rebind          ◄── mux was renamed outside conspectus
+            pin bind            ◄── multiple harness sessions claim the mux
+```
+
+The leftmost path is "I'm starting fresh"; the bottom-right transitions
+are recovery paths — none of them touch tmux, they only update the
+TOML so the resolver re-binds correctly.
+
+### Command guide
+
+| Command | What it does |
+|---|---|
+| `pin create <id> --harness <K> --cwd <PATH>` | Declare a new pin. Mux may not exist yet; the pin renders `unbound` until `pin launch`. |
+| `pin list [--store ...] [--state ...]` | Print every pin, its binding state, store path, and bound session id. Read-only. |
+| `pin show <id>` | Show the full entry plus any resolver diagnostic. Read-only. |
+| `pin launch <id> [--no-attach]` | Resolve the pin's binding and act: bound → attach; stale → send-keys then attach; unbound → `tmux new-session` then attach. |
+| `pin attach <id> [--no-attach]` | Same as `launch` semantically; intent label differs. Unbound falls through to launch with a note. |
+| `pin rename <id> [<new-id>] [--display <name>]` | Rename the pin's id and/or display name. With `--display`, applies the ADR 0029 lockstep mux rename when bound. |
+| `pin rm <id>` | Remove the pin from its owning store. Live tmux is left alone. |
+| `pin bind <id> --to <SESSION_KEY>` | Resolve `PinAmbiguous` by writing a `LocalDeclared linked_to_mux` override (`label = "pin:<id>"`) the resolver treats as authoritative. |
+| `pin rebind <id> --mux <NEW_NAME>` | Update the pin's `mux.name` (and optional `--mux-socket`) after an external tmux rename. Pure TOML write — never touches tmux. |
+| `pin adopt <new-id> <existing-mux-name>` | Capture an already-running tmux session as a pin. Harness inferred from active attribution; cwd from the mux's observed `cwd`. |
+
+The TUI exposes every action with a direct shortcut and a discoverable
+`p` modal — see `docs/operations.md` for the keymap.
+
+### Watch for these confusable pairs
+
+**`create` vs `adopt`** — both write a new TOML entry, but they answer
+different questions:
+- `create` is a **forward declaration**. The mux may not exist; the
+  pin sits `unbound` until you launch it. Use this for sessions you
+  haven't started yet.
+- `adopt` is **reverse capture**. The mux *must* already be running
+  (CLI bails otherwise). Use this when you're migrating an existing
+  agent-deck / hand-managed tmux session into a managed pin without
+  restarting anything. Harness and cwd default from current
+  attribution; `create` demands you type them.
+
+**`bind` vs `rebind`** — both write to disk, but to different places:
+- `bind` resolves **`PinAmbiguous`**: multiple harness sessions are
+  attributed to the same mux and the resolver can't pick one. The
+  override is a `LocalDeclared` link tagged `pin:<id>`, not an edit to
+  the pin entry itself. The pin's `mux.name` stays the same.
+- `rebind` recovers from an **external tmux rename**: the pin's
+  configured `mux.name` no longer matches a running mux. The fix is to
+  edit the pin's own TOML entry to point at the new mux name. No
+  declared links involved.
+
+**`launch` vs `attach`** — they share the same code path, only the
+intent label differs. `pin attach` on an unbound pin falls through to
+launch with a one-line note; `pin launch` on a bound pin just
+attaches. Prefer `launch` in scripts that may run before the mux
+exists; prefer `attach` in muscle-memory wrappers when you know the
+mux is up.
+
+**`rename` vs `rebind`** — `rename` changes how the *operator* refers
+to the pin (`id`, `display_name`); when `--display` changes and the
+pin is bound, it also lockstep-renames the mux per ADR 0029.
+`rebind` changes which *mux* the pin points at and never touches
+tmux. Use `rename` when you don't like the label; use `rebind` when
+the mux moved.
+
+### Diagnostics
+
+The resolver emits four pin-specific diagnostics that surface in
+`pin show`, the TUI status line, and the right detail pane:
+
+- **`PinUnbound`** — `pin.mux.name` matches no live mux. Action:
+  `pin launch <id>`.
+- **`PinStaleMux`** — mux is live but no `pin.harness` session is
+  attributed. Action: `pin launch <id>` to inject the harness into
+  the existing pane.
+- **`PinAmbiguous`** — multiple harness sessions of the right kind
+  are attributed to the bound mux. Action: `pin bind <id> --to
+  <session-key>`.
+- **`PinDrift`** — bound session's observed cwd diverges from the
+  pin's declared cwd. Advisory; the binding still holds.
+
+### Read-only invariant
+
+Read commands (`graph`, `node show`, `table`, `query`, `pin list`,
+`pin show`, `tui`) never create, mtime-touch, or content-modify any
+`.conspectus.toml` / user config bearing a `[pins]` section. Mutation
+is reserved to `pin create / rename / rm / bind / rebind / adopt` and
+the TUI write paths they back. Enforced by
+[`tests/cli_pin_invariants.rs`](tests/cli_pin_invariants.rs).
+
+For the full reference — TOML schema, store-selection rules, launch
+semantics, TUI keymap, scenario-mode behavior — see
+[`docs/operations.md`](docs/operations.md#session-pins) and ADR 0057.
+
 ## Docs
 
 - [Feature summary](docs/feature-summary.md) describes the current CLI,
