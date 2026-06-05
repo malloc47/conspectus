@@ -447,6 +447,8 @@ fn agent_session_fields(
         fields.push(plain("title", title.to_string()));
     }
 
+    fields.extend(pin_diagnostic_fields(snapshot, session));
+
     fields.push(session_mux_field(snapshot, &session_id));
     fields.extend(session_process_fields(snapshot, &session_id));
     fields.push(session_pr_field(snapshot, &session_id, home));
@@ -456,6 +458,71 @@ fn agent_session_fields(
     }
 
     fields
+}
+
+fn pin_diagnostic_fields(snapshot: &GraphSnapshot, session: &AgentSessionNode) -> Vec<HeaderField> {
+    let pin_id = snapshot.pins.iter().find_map(|pin| match &pin.binding {
+        Some(crate::model::PinBinding::Bound { session: bound, .. }) if bound == &session.id => {
+            Some(pin.id.as_str())
+        }
+        _ => None,
+    });
+    let Some(pin_id) = pin_id else {
+        return Vec::new();
+    };
+    crate::tui::actions::pin_diagnostics_for_id(snapshot, pin_id)
+        .into_iter()
+        .map(|diagnostic| match diagnostic {
+            crate::tui::actions::PinDiagnosticView::Ambiguous {
+                pin_id,
+                chosen,
+                competing,
+            } => {
+                let competitors = competing
+                    .iter()
+                    .map(|id| format!("{}:{}", id.harness_key, id.session_key))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut field = plain(
+                    "pin",
+                    format!(
+                        "{pin_id} ambiguous: chosen {}:{}; competing {competitors}",
+                        chosen.harness_key, chosen.session_key
+                    ),
+                );
+                field.annotation = Some("b to bind");
+                field
+            }
+            crate::tui::actions::PinDiagnosticView::Drift {
+                pin_id,
+                declared_cwd,
+                observed_cwd,
+            } => {
+                let mut field = plain(
+                    "pin",
+                    format!("{pin_id} cwd drift: declared {declared_cwd}; observed {observed_cwd}"),
+                );
+                field.annotation = Some("advisory");
+                field
+            }
+            crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => {
+                let mut field = plain("pin", format!("{pin_id} stale mux {}", mux.native_id));
+                field.annotation = Some("Enter relaunch");
+                field
+            }
+            crate::tui::actions::PinDiagnosticView::Unbound {
+                pin_id,
+                expected_mux_native_id,
+            } => {
+                let mut field = plain(
+                    "pin",
+                    format!("{pin_id} unbound: expected {expected_mux_native_id}"),
+                );
+                field.annotation = Some("Enter launch");
+                field
+            }
+        })
+        .collect()
 }
 
 fn session_mux_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField {
@@ -1108,10 +1175,10 @@ fn diagnostic_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<Diagnostic
 mod tests {
     use super::*;
     use crate::model::{
-        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, ForgePrId,
-        ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
-        Provenance, RepoId, RepoNode, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole,
-        SourceMetadata,
+        AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, Diagnostic,
+        ForgePrId, ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId,
+        MuxSessionNode, PinBinding, PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode,
+        RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -1258,6 +1325,56 @@ mod tests {
         );
         let session_field_labels: Vec<&str> = sections[0].fields.iter().map(|f| f.label).collect();
         assert_eq!(session_field_labels, vec!["id", "harness", "cwd"]);
+    }
+
+    #[test]
+    fn agent_session_bound_to_ambiguous_pin_shows_bind_hint() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(agent("codex", "alpha", Some("/home/op/src/x"), None));
+        let chosen = AgentSessionId::new("codex", "/state", "alpha");
+        let competing = AgentSessionId::new("codex", "/state", "beta");
+        snapshot.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/home/op/src/x".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/home/op/src/x/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::Bound {
+                mux: MuxSessionId::new("tmux:ingest"),
+                session: chosen.clone(),
+            }),
+        });
+        snapshot.diagnostics.push(Diagnostic::PinAmbiguous {
+            pin_id: "ingest".to_string(),
+            chosen: chosen.clone(),
+            competing: vec![competing],
+        });
+
+        let detail = build(
+            &snapshot,
+            &NodeId::AgentSession(chosen),
+            Some(home().as_path()),
+        );
+        let pin = detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "pin")
+            .expect("pin diagnostic field");
+
+        assert!(pin.value.contains("ingest ambiguous"));
+        assert!(pin.value.contains("chosen codex:alpha"));
+        assert!(pin.value.contains("competing codex:beta"));
+        assert_eq!(pin.annotation, Some("b to bind"));
     }
 
     #[test]

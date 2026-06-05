@@ -6,7 +6,8 @@
 //! stories per `docs/implementation/phase-08-interactive-tui.md`.
 
 use crate::model::{
-    AgentSessionId, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId, RelationKind,
+    AgentSessionId, Diagnostic, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId,
+    RelationKind,
 };
 use crate::tui::app::App;
 use crate::tui::rows::{RowId, RowKind};
@@ -29,6 +30,42 @@ pub struct AttachTarget {
     /// (`tmux:editor`) to keep ids unique across backends, but
     /// the tmux binary needs the unprefixed name.
     pub native_id: String,
+}
+
+/// Pin diagnostic attached to the currently selected row. Mirrors
+/// ADR 0057's resolver diagnostics but keeps only the fields needed
+/// by the TUI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinDiagnosticView {
+    Unbound {
+        pin_id: String,
+        expected_mux_native_id: String,
+    },
+    StaleMux {
+        pin_id: String,
+        mux: MuxSessionId,
+    },
+    Ambiguous {
+        pin_id: String,
+        chosen: AgentSessionId,
+        competing: Vec<AgentSessionId>,
+    },
+    Drift {
+        pin_id: String,
+        declared_cwd: String,
+        observed_cwd: String,
+    },
+}
+
+impl PinDiagnosticView {
+    pub fn pin_id(&self) -> &str {
+        match self {
+            Self::Unbound { pin_id, .. }
+            | Self::StaleMux { pin_id, .. }
+            | Self::Ambiguous { pin_id, .. }
+            | Self::Drift { pin_id, .. } => pin_id,
+        }
+    }
 }
 
 /// Why an attach attempt cannot proceed. The runtime surfaces these
@@ -158,6 +195,143 @@ pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled>
         }
         _ => Err(ViewerDisabled::UnsupportedRow),
     }
+}
+
+/// Diagnostics for the selected pin-bearing row. Unbound/stale pin
+/// rows carry the pin id directly; bound pin rows surface as regular
+/// agent-session rows with `pin_id` set.
+pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
+    let Some(selection) = app.selection() else {
+        return Vec::new();
+    };
+    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
+        return Vec::new();
+    };
+    let pin_id = match &row.kind {
+        RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
+        RowKind::AgentSession(session) => session.pin_id.as_deref(),
+        _ => None,
+    };
+    let Some(pin_id) = pin_id else {
+        return Vec::new();
+    };
+    let Some(database) = app.graph_db() else {
+        return Vec::new();
+    };
+    let Ok(snapshot) = crate::query::read_snapshot(database.conn()) else {
+        return Vec::new();
+    };
+    pin_diagnostics_for_id(&snapshot, pin_id)
+}
+
+pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<PinDiagnosticView> {
+    snapshot
+        .diagnostics
+        .iter()
+        .filter_map(|diagnostic| match diagnostic {
+            Diagnostic::PinUnbound {
+                pin_id: id,
+                expected_mux_native_id,
+            } if id == pin_id => Some(PinDiagnosticView::Unbound {
+                pin_id: id.clone(),
+                expected_mux_native_id: expected_mux_native_id.clone(),
+            }),
+            Diagnostic::PinStaleMux { pin_id: id, mux } if id == pin_id => {
+                Some(PinDiagnosticView::StaleMux {
+                    pin_id: id.clone(),
+                    mux: mux.clone(),
+                })
+            }
+            Diagnostic::PinAmbiguous {
+                pin_id: id,
+                chosen,
+                competing,
+            } if id == pin_id => Some(PinDiagnosticView::Ambiguous {
+                pin_id: id.clone(),
+                chosen: chosen.clone(),
+                competing: competing.clone(),
+            }),
+            Diagnostic::PinDrift {
+                pin_id: id,
+                declared_cwd,
+                observed_cwd,
+            } if id == pin_id => Some(PinDiagnosticView::Drift {
+                pin_id: id.clone(),
+                declared_cwd: declared_cwd.clone(),
+                observed_cwd: observed_cwd.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn pin_status_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
+    diagnostics
+        .iter()
+        .find_map(|diagnostic| match diagnostic {
+            PinDiagnosticView::Ambiguous {
+                pin_id,
+                chosen,
+                competing,
+            } => Some(format!(
+                "pin `{pin_id}` ambiguous: chosen {} · {} competing · b bind",
+                session_label(chosen),
+                competing.len()
+            )),
+            _ => None,
+        })
+        .or_else(|| {
+            diagnostics.iter().find_map(|diagnostic| match diagnostic {
+                PinDiagnosticView::Drift {
+                    pin_id,
+                    declared_cwd,
+                    observed_cwd,
+                } => Some(format!(
+                    "pin `{pin_id}` cwd drift: declared {declared_cwd} · observed {observed_cwd}"
+                )),
+                _ => None,
+            })
+        })
+        .or_else(|| {
+            diagnostics.iter().find_map(|diagnostic| match diagnostic {
+                PinDiagnosticView::StaleMux { pin_id, mux } => Some(format!(
+                    "pin `{pin_id}` stale mux {}: Enter relaunch",
+                    mux.native_id
+                )),
+                PinDiagnosticView::Unbound {
+                    pin_id,
+                    expected_mux_native_id,
+                } => Some(format!(
+                    "pin `{pin_id}` unbound: expected {expected_mux_native_id} · Enter launch"
+                )),
+                _ => None,
+            })
+        })
+}
+
+pub fn pin_bind_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
+    diagnostics.iter().find_map(|diagnostic| {
+        let PinDiagnosticView::Ambiguous {
+            pin_id,
+            chosen,
+            competing,
+        } = diagnostic
+        else {
+            return None;
+        };
+        let candidates = std::iter::once(chosen)
+            .chain(competing.iter())
+            .map(session_label)
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!(
+            "pin bind `{pin_id}`: choose one of [{candidates}] with `conspectus pin bind {pin_id} --to <session-id>`"
+        ))
+    })
+}
+
+fn session_label(id: &AgentSessionId) -> String {
+    format!("{}:{}", id.harness_key, id.session_key)
 }
 
 /// Inverse of [`preferred_mux_for_session`]: find the resolver-

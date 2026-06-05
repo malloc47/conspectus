@@ -159,6 +159,10 @@ pub struct App {
     /// when no overlay is open; `Some` suspends the surrounding
     /// keymap and routes input through the modal.
     rename_overlay: Option<crate::tui::widgets::input::TextInputState>,
+    /// Pin id waiting for a second `Delete` press. This gives pin
+    /// removal a confirmation step without introducing a full modal
+    /// before the H-PIN-023 edit/remove flow lands.
+    pending_pin_remove: Option<String>,
     /// Active controls overlay (ADR 0031, F8-004). `None` when the
     /// overlay is closed; `Some` suspends the surrounding keymap
     /// and routes input through the modal.
@@ -463,6 +467,7 @@ impl App {
             preview_store: PreviewStore::new(),
             left_scroll: Cell::new(0),
             rename_overlay: None,
+            pending_pin_remove: None,
             controls_overlay: None,
             search_overlay: None,
             help_overlay: None,
@@ -550,6 +555,14 @@ impl App {
     /// Close the rename overlay without committing.
     pub fn close_rename_overlay(&mut self) {
         self.rename_overlay = None;
+    }
+
+    pub fn pending_pin_remove(&self) -> Option<&str> {
+        self.pending_pin_remove.as_deref()
+    }
+
+    pub fn set_pending_pin_remove(&mut self, pin_id: Option<String>) {
+        self.pending_pin_remove = pin_id;
     }
 
     /// Active controls-overlay state (ADR 0031, F8-004), if any.
@@ -849,6 +862,11 @@ impl App {
                 self.sort = sort;
                 self.config.default_sort = sort;
             }
+            ControlsAction::PinPlaceholder(label) => {
+                self.status_message = Some(format!(
+                    "pins: `{label}` opens in a follow-up TUI CRUD flow; use `conspectus pin {label}` for now"
+                ));
+            }
         }
     }
 
@@ -1036,13 +1054,34 @@ impl App {
                 tree,
                 loaded_at_epoch,
                 initial_selection_hint,
-            } => self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint),
-            Msg::NavDown => self.move_selection(1),
-            Msg::NavUp => self.move_selection(-1),
-            Msg::PageDown(viewport) => self.move_selection(i32::from(viewport.max(1))),
-            Msg::PageUp(viewport) => self.move_selection(-i32::from(viewport.max(1))),
-            Msg::Home => self.move_selection_to(0),
-            Msg::End => self.move_selection_to(usize::MAX),
+            } => {
+                self.pending_pin_remove = None;
+                self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
+            }
+            Msg::NavDown => {
+                self.pending_pin_remove = None;
+                self.move_selection(1);
+            }
+            Msg::NavUp => {
+                self.pending_pin_remove = None;
+                self.move_selection(-1);
+            }
+            Msg::PageDown(viewport) => {
+                self.pending_pin_remove = None;
+                self.move_selection(i32::from(viewport.max(1)));
+            }
+            Msg::PageUp(viewport) => {
+                self.pending_pin_remove = None;
+                self.move_selection(-i32::from(viewport.max(1)));
+            }
+            Msg::Home => {
+                self.pending_pin_remove = None;
+                self.move_selection_to(0);
+            }
+            Msg::End => {
+                self.pending_pin_remove = None;
+                self.move_selection_to(usize::MAX);
+            }
             Msg::ToggleExpand => self.toggle_expand_selected(),
             Msg::ExpandRow => self.expand_selected(),
             Msg::CollapseRow => self.collapse_selected(),

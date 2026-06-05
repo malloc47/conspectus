@@ -5142,6 +5142,7 @@ H-PIN-001 (ADR) ──┬─→ H-PIN-002 ──┬─→ H-PIN-003 ──→ H-
                   └─→ H-PIN-010 ──→ H-PIN-011 ──→ H-PIN-012 ─────┤              ──→ H-PIN-014
                                                                  │              ──→ H-PIN-015
                                                                  └─→ H-PIN-018
+                                          H-PIN-022  H-PIN-023  H-PIN-024 (TUI CRUD parity)
                                           H-PIN-007 ──→ H-PIN-008 (CLI read path)
                                           H-PIN-019  H-PIN-020  H-PIN-021 (closeout)
 ```
@@ -5149,9 +5150,11 @@ H-PIN-001 (ADR) ──┬─→ H-PIN-002 ──┬─→ H-PIN-003 ──→ H-
 `H-PIN-001` (the ADR) is unblocked; `H-PIN-002` (schema + TOML) and
 `H-PIN-010` (TmuxRunner extensions) can land in parallel after it.
 `H-PIN-004` (resolver binding) is the integration spine that the TUI
-and launch stories converge on. The closeout stories
-(`H-PIN-019..021`) document and lock in the surface once everything
-else has landed.
+and launch stories converge on. `H-PIN-017` provides the immediate
+row-level actions; `H-PIN-022..024` bring the Controls overlay to
+CLI-parity for create / edit / remove / bind / rebind / adopt. The
+closeout stories (`H-PIN-019..021`) document and lock in the surface
+once everything else has landed.
 
 - [ ] `H-PIN-001` ADR: session pin schema, binding, and launch contract.
   - Scope: record the schema (`[[pins.entries]]` TOML sibling to
@@ -5354,7 +5357,7 @@ else has landed.
     adopt of an already-adopted mux (rejected).
   - Blockers: `H-PIN-004`, `H-PIN-009`.
 
-- [ ] `H-PIN-016` TUI row tree integration.
+- [x] `H-PIN-016` TUI row tree integration.
   - Scope: extend `build_sessions_tree` and the mux row builder to
     render a row per pin. Unbound pins render with a dim glyph and
     secondary `(pin · <harness> · ~/...)` text. Bound pins render
@@ -5367,20 +5370,33 @@ else has landed.
     render.
   - Blockers: `H-PIN-004`; friendlier after `P8-004` parts 2-5 land
     the per-view row builders.
+  - Outcome: sessions row tree emits unbound/stale pins under a
+    synthetic Pins group, marks bound agent-session rows with
+    `pin_id`, renders pin rows/status hints in the TUI, and covers
+    unbound/stale/bound/mixed/end-to-end resolver cases with unit
+    tests.
 
-- [ ] `H-PIN-017` TUI keybindings for pin actions.
+- [x] `H-PIN-017` TUI keybindings for pin actions.
   - Scope: bind `Enter` on a pin row to launch (unbound) or attach
     (bound) via H-PIN-012; `R` to rename (lockstep via ADR 0029);
-    `Delete` to remove with confirmation. Wire create / bind /
-    rebind / adopt into the ADR 0031 Controls overlay under a new
-    Pins action group (menu-first per the
-    `feedback_tui_discoverability` memory). Decide the bound-pin
-    glyph in coordination with ADR 0032's theme vocabulary.
+    `Delete` to remove with confirmation. Add a Pins action group
+    placeholder to the ADR 0031 Controls overlay that opens the
+    richer CRUD flows tracked in `H-PIN-022..024`. Decide the
+    bound-pin glyph in coordination with ADR 0032's theme
+    vocabulary.
   - Tests: reducer tests for the new keys; snapshot tests for the
     Controls overlay open state with the Pins group.
   - Blockers: `H-PIN-016`.
+  - Outcome: `Enter` on a pin row shells out to `conspectus pin
+    launch <id>` and refreshes on return; `R` opens the existing
+    text-input overlay for pin display-name edits and commits via
+    `conspectus pin rename --display`; `Delete` uses a second-press
+    confirmation before `conspectus pin rm`; static scenario TUIs
+    keep these mutating actions disabled. Controls overlay includes
+    a discoverable Pins action group whose structured CRUD editors
+    remain in `H-PIN-022..024`.
 
-- [ ] `H-PIN-018` Pin diagnostic surfaces in the TUI.
+- [x] `H-PIN-018` Pin diagnostic surfaces in the TUI.
   - Scope: each pin diagnostic gets a specific affordance — status
     bar text for unbound (`Enter to launch`), stale-mux (`Enter to
     relaunch in existing mux`), ambiguous (`b to bind`), drift
@@ -5389,6 +5405,65 @@ else has landed.
   - Tests: snapshot tests for each diagnostic state; reducer test
     for the `b` accelerator routing to the bind picker.
   - Blockers: `H-PIN-016`, `H-PIN-004`.
+  - Outcome: selected pin rows and bound pinned sessions now derive
+    status-bar hints from resolver diagnostics: unbound pins advertise
+    launch, stale mux pins advertise relaunch, ambiguous bindings
+    advertise `b` for bind guidance, and cwd drift is marked
+    advisory. Pin rows render a right-pane diagnostic preview, bound
+    agent-session details add pin diagnostic fields with competing
+    session ids for ambiguous bindings, and the `b` accelerator routes
+    to a bind command hint until the full picker lands in `H-PIN-024`.
+
+- [ ] `H-PIN-022` TUI pin create flow.
+  - Scope: make the Controls overlay Pins group capable of creating
+    pins without dropping to the CLI. Reuse the H-PIN-009 mutation
+    helper and ADR 0030 text input primitive. Fields: `id`,
+    `display_name`, `harness`, `cwd`, `mux.name`, optional
+    `mux.socket_name`, optional launch argv override, and store
+    (`auto` / `project` / `user`). Defaults should come from the
+    current selection where possible: selected session gives harness
+    + cwd + display candidate; selected checkout/repo gives cwd;
+    otherwise cwd starts blank. Validation mirrors CLI create and
+    never writes until the confirmation step succeeds.
+  - Tests: reducer tests for field editing, defaults from session
+    and checkout selections, validation failures, cancel-no-write,
+    and successful create through the shared write helper. Snapshot
+    tests for the create overlay and validation messages.
+  - Blockers: `H-PIN-009`, `H-PIN-017`, `F8-004`.
+
+- [ ] `H-PIN-023` TUI pin edit and remove flow.
+  - Scope: bring existing pins to CRUD parity with CLI
+    `pin rename` / `pin rm` from the Controls overlay, while keeping
+    the row-level `R` and `Delete` accelerators from H-PIN-017.
+    Edit supports id changes, display-name changes, mux-name changes
+    when the operator explicitly chooses rebind semantics, optional
+    socket-name changes, launch argv edits, and store/path display so
+    the user can see which TOML file will be touched. Remove uses a
+    confirmation modal that names the pin id, display name, and store
+    path before invoking the shared remove helper.
+  - Tests: reducer tests for edit confirmation, cancel, duplicate-id
+    rejection, duplicate-mux rejection, lockstep rename handoff, and
+    remove confirmation. Snapshot tests for edit and delete states.
+  - Blockers: `H-PIN-009`, `H-PIN-014`, `H-PIN-017`, `F8-004`.
+
+- [ ] `H-PIN-024` TUI pin bind / rebind / adopt flows.
+  - Scope: expose the CLI escape hatches from the Controls overlay
+    and contextual accelerators so `PinAmbiguous`, external tmux
+    renames, and agent-deck migration are solvable in the TUI.
+    Bind presents competing agent-session ids from the selected
+    `PinAmbiguous` diagnostic, with a manual id entry fallback, then
+    calls the H-PIN-013 helper. Rebind edits the pin's mux target via
+    H-PIN-014 and shows live mux-name candidates when available.
+    Adopt starts from a selected live mux or an entered mux name,
+    infers harness/cwd when the resolver can, and calls H-PIN-015.
+    Each flow must surface the exact config store that will be
+    mutated and leave read-only navigation paths untouched.
+  - Tests: reducer tests for bind-from-ambiguous, manual bind, rebind
+    duplicate rejection, adopt with inferred fields, adopt refusal
+    when cwd cannot be determined, and cancel-no-write. Snapshot tests
+    for each picker / confirmation state.
+  - Blockers: `H-PIN-013`, `H-PIN-014`, `H-PIN-015`, `H-PIN-018`,
+    `F8-004`.
 
 - [ ] `H-PIN-019` Read-only invariant audit.
   - Scope: explicit CLI integration tests proving `graph`,
@@ -5400,7 +5475,7 @@ else has landed.
     repo with a hand-written `[pins]` section.
   - Blockers: `H-PIN-003`.
 
-- [ ] `H-PIN-020` Snapshot and JSON coverage.
+- [x] `H-PIN-020` Snapshot and JSON coverage.
   - Scope: extend `tests/declared_snapshots.rs` (or sibling file
     `tests/pins_snapshots.rs`) with scenarios covering bound,
     unbound, stale-mux, ambiguous, drift, duplicate, local-over-
@@ -5409,17 +5484,29 @@ else has landed.
     covered.
   - Tests: `cargo nextest run --all-targets --all-features`.
   - Blockers: `H-PIN-009`, `H-PIN-013`, `H-PIN-014`, `H-PIN-015`.
+  - Outcome: `tests/pins_snapshots.rs` snapshots a combined pin
+    state matrix covering bound, unbound, stale-mux, ambiguous,
+    drift, and non-default-socket pins in graph JSON, plus the
+    sessions table projection for bound pin relationships. Dedicated
+    discovery snapshots cover duplicate pin config diagnostics and
+    local-over-global store shadowing, and a resolver snapshot covers
+    declared-override-via-bind choosing the `LocalDeclared`
+    `linked_to_mux` candidate over strong discovery.
 
 - [ ] `H-PIN-021` Docs and operations guide.
   - Scope: update `docs/operations.md` and `README.md` with the
     `conspectus pin` command surface, the agent-deck migration path
     via `pin adopt`, and the read-only invariant. Update the Phase 8
     TUI doc with pin keybindings. Cross-link from `docs/design.md`
-    Session Pins section to operations doc once it exists. Promote
-    ADR 0057 from Proposed to Accepted.
+    Session Pins section to operations doc once it exists. This can
+    run in parallel with implementation; final closeout should add
+    the Controls overlay CRUD details from `H-PIN-022..024` before
+    promoting ADR 0057 from Proposed to Accepted.
   - Tests: doctest where applicable; `git diff --check`; insta
     review.
-  - Blockers: `H-PIN-012`, `H-PIN-017`, `H-PIN-018`.
+  - Blockers: none for the initial docs slice. Final closeout waits
+    on `H-PIN-012`, `H-PIN-017`, `H-PIN-018`, `H-PIN-022`,
+    `H-PIN-023`, `H-PIN-024`.
 
 #### Deferred follow-ups (post-v1)
 

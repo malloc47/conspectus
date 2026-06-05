@@ -2402,6 +2402,14 @@ fn preview_text_for_selection(app: &App, height: usize) -> Text<'static> {
             ),
         },
         RowKind::AgentSessionMuxCandidate(_) => mux_preview_text(app, live_preview, height),
+        RowKind::Pin(_) => {
+            let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
+            if diagnostics.is_empty() {
+                Text::raw("pin diagnostic unavailable — try `r` to refresh")
+            } else {
+                Text::raw(render_pin_diagnostics(&diagnostics))
+            }
+        }
         _ => match selection {
             RowId::Group(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
             RowId::MuxSession(NodeId::MuxSession(_)) => mux_preview_text(app, live_preview, height),
@@ -2453,6 +2461,47 @@ fn format_preview_for_mux(
         },
         None => Text::raw("loading mux preview…"),
     }
+}
+
+fn render_pin_diagnostics(diagnostics: &[crate::tui::actions::PinDiagnosticView]) -> String {
+    diagnostics
+        .iter()
+        .map(|diagnostic| match diagnostic {
+            crate::tui::actions::PinDiagnosticView::Unbound {
+                pin_id,
+                expected_mux_native_id,
+            } => format!(
+                "Pin `{pin_id}` is unbound.\nExpected mux: {expected_mux_native_id}\nEnter launches the pin."
+            ),
+            crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => format!(
+                "Pin `{pin_id}` has a stale mux.\nMux: {}\nEnter relaunches the harness in the existing mux.",
+                mux.native_id
+            ),
+            crate::tui::actions::PinDiagnosticView::Ambiguous {
+                pin_id,
+                chosen,
+                competing,
+            } => {
+                let competing = competing
+                    .iter()
+                    .map(|id| format!("{}:{}", id.harness_key, id.session_key))
+                    .collect::<Vec<_>>()
+                    .join("\n  ");
+                format!(
+                    "Pin `{pin_id}` is ambiguous.\nChosen: {}:{}\nCompeting sessions:\n  {competing}\nPress b for the bind command.",
+                    chosen.harness_key, chosen.session_key
+                )
+            }
+            crate::tui::actions::PinDiagnosticView::Drift {
+                pin_id,
+                declared_cwd,
+                observed_cwd,
+            } => format!(
+                "Pin `{pin_id}` has cwd drift.\nDeclared cwd: {declared_cwd}\nObserved cwd: {observed_cwd}\nBinding still holds."
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Translate a raw `tmux capture-pane -e` payload into styled
@@ -2508,6 +2557,10 @@ fn default_action_status_hint(app: &App) -> String {
     }
     // Pin rows surface a per-binding-state hint (ADR 0057 / H-PIN-018).
     if let RowKind::Pin(pin) = &row.kind {
+        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
+        if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
+            return hint;
+        }
         return match pin.state_label {
             "stale-mux" => format!(
                 "Enter to relaunch `{}` in existing mux `{}`",
@@ -2515,6 +2568,14 @@ fn default_action_status_hint(app: &App) -> String {
             ),
             _ => format!("Enter to launch `{}`", pin.display_name),
         };
+    }
+    if let RowKind::AgentSession(session) = &row.kind
+        && session.pin_id.is_some()
+    {
+        let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
+        if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
+            return hint;
+        }
     }
     match resolve_attach_target(app) {
         Ok(target) => {
@@ -2837,6 +2898,24 @@ mod tests {
             hint.contains("relaunch") && hint.contains("existing mux"),
             "unexpected hint for stale-mux pin: {hint}"
         );
+    }
+
+    #[test]
+    fn pin_diagnostic_preview_lists_ambiguous_competitors() {
+        let text = render_pin_diagnostics(&[crate::tui::actions::PinDiagnosticView::Ambiguous {
+            pin_id: "ingest".to_string(),
+            chosen: AgentSessionId::new("codex", "/state", "alpha"),
+            competing: vec![
+                AgentSessionId::new("codex", "/state", "beta"),
+                AgentSessionId::new("codex", "/state", "gamma"),
+            ],
+        }]);
+
+        assert!(text.contains("Pin `ingest` is ambiguous."));
+        assert!(text.contains("Chosen: codex:alpha"));
+        assert!(text.contains("codex:beta"));
+        assert!(text.contains("codex:gamma"));
+        assert!(text.contains("Press b for the bind command."));
     }
 
     #[test]

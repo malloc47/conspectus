@@ -1,0 +1,218 @@
+---
+source: tests/pins_snapshots.rs
+expression: rendered
+---
+{
+  "nodes": [
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "harness_key": "codex",
+      "cwd": "/home/op/src/work"
+    },
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "strong-discovered"
+      },
+      "harness_key": "codex",
+      "cwd": "/home/op/src/work"
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:bound-by-declared"
+      },
+      "backend": "tmux",
+      "native_id": "tmux:bound-by-declared",
+      "cwd": "/home/op/src/work"
+    }
+  ],
+  "candidate_links": [
+    {
+      "id": "pin-bind-override",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:bound-by-declared"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "local_declared",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "declared",
+        "evidence": "pin bind override",
+        "fields": {
+          "label": "pin:override-local"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin:local_pin:override-local",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:bound-by-declared"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "synthesized from pin `override-local`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "override-local",
+          "pin_id": "override-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "strong-discovered",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "strong-discovered"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:bound-by-declared"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": ""
+      },
+      "state": {
+        "state": "active"
+      }
+    }
+  ],
+  "resolved_relationships": [
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:bound-by-declared"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "pin-bind-override",
+      "competing_link_ids": [
+        "pin:local_pin:override-local"
+      ]
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "strong-discovered"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:bound-by-declared"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "strong-discovered"
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "conflict",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "pin-bind-override",
+      "competing_link_ids": [
+        "pin:local_pin:override-local"
+      ]
+    },
+    {
+      "kind": "pin_ambiguous",
+      "pin_id": "override-local",
+      "chosen": {
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "competing": [
+        {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "strong-discovered"
+        }
+      ]
+    }
+  ],
+  "pins": [
+    {
+      "id": "override-local",
+      "display_name": "override-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "bound-by-declared"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "bound",
+        "mux": {
+          "native_id": "tmux:bound-by-declared"
+        },
+        "session": {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "chosen-by-declared"
+        }
+      }
+    }
+  ]
+}

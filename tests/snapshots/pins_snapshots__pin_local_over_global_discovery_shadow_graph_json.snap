@@ -1,0 +1,30 @@
+---
+source: tests/pins_snapshots.rs
+expression: fixture.run_discovered_graph_json()
+---
+{
+  "nodes": [],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": [
+    {
+      "kind": "config",
+      "path": "/fixture/.config/conspectus/config.toml",
+      "message": "pin `ingest` is shadowed by a same-id project-local pin (this entry skipped)"
+    }
+  ],
+  "pins": [
+    {
+      "id": "ingest",
+      "display_name": "project ingest",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "project-mux"
+      },
+      "provenance": "local_pin",
+      "store_path": "/fixture/project/.conspectus.toml"
+    }
+  ]
+}

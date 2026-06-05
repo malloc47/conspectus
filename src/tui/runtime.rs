@@ -219,6 +219,8 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::RenameOverlayKey(key)) => {
                     handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
                 }
+                Some(Action::RemovePin) => remove_pin_action(&mut app, &config),
+                Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
                 Some(Action::OpenControls) => {
                     app.open_controls_overlay();
                     app.update(Msg::SetStatus(Some(
@@ -417,6 +419,12 @@ fn static_event_loop(
                         "scenario TUI keeps mutating actions disabled".to_string(),
                     )));
                 }
+                Some(Action::RemovePin) => {
+                    app.update(Msg::SetStatus(Some(
+                        "scenario TUI keeps mutating actions disabled".to_string(),
+                    )));
+                }
+                Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
                 Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
                 Some(Action::CopySessionId) => copy_session_id_action(&mut app),
                 None => {}
@@ -570,38 +578,33 @@ fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapsho
     Ok(resolve_snapshot(snapshot))
 }
 
-/// Resolve the current selection to an agent session and seed the
-/// rename overlay with the strongest display label available
-/// (alias > harness title > empty). No-op for non-session
-/// selections; a status-bar message explains why.
+/// Resolve the current selection to a renameable row and seed the
+/// rename overlay. Agent sessions use alias > harness title > empty;
+/// pin rows use the pin display name.
 fn open_rename_overlay(app: &mut App) {
     use crate::tui::rows::{RowId, RowKind};
     let Some(selection) = app.selection().cloned() else {
         app.update(Msg::SetStatus(Some("rename: nothing selected".to_string())));
         return;
     };
-    if !matches!(
-        selection,
-        RowId::AgentSession(crate::model::NodeId::AgentSession(_))
-    ) {
-        app.update(Msg::SetStatus(Some(
-            "rename: select an agent session row first".to_string(),
-        )));
-        return;
-    }
-    let initial = app
-        .tree()
-        .rows
-        .iter()
-        .find(|row| row.id == selection)
-        .and_then(|row| match &row.kind {
-            RowKind::AgentSession(session_row) => {
-                Some(session_row.display_label().unwrap_or("").to_string())
-            }
-            _ => None,
-        })
-        .unwrap_or_default();
-    let state = crate::tui::widgets::input::TextInputState::new(" rename session ", initial);
+    let row = app.tree().rows.iter().find(|row| row.id == selection);
+    let (title, initial) = match (selection, row.map(|row| &row.kind)) {
+        (
+            RowId::AgentSession(crate::model::NodeId::AgentSession(_)),
+            Some(RowKind::AgentSession(session_row)),
+        ) => (
+            " rename session ",
+            session_row.display_label().unwrap_or("").to_string(),
+        ),
+        (RowId::Pin { .. }, Some(RowKind::Pin(pin))) => (" rename pin ", pin.display_name.clone()),
+        _ => {
+            app.update(Msg::SetStatus(Some(
+                "rename: select an agent session or pin row first".to_string(),
+            )));
+            return;
+        }
+    };
+    let state = crate::tui::widgets::input::TextInputState::new(title, initial);
     app.open_rename_overlay(state);
     app.update(Msg::SetStatus(Some(
         "rename: Enter confirm · Esc cancel".to_string(),
@@ -638,8 +641,13 @@ fn handle_rename_overlay_key(
 
 fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value: String) {
     use crate::tui::rows::RowId;
-    let session_id = match app.selection().cloned() {
+    let selection = app.selection().cloned();
+    let session_id = match selection {
         Some(RowId::AgentSession(crate::model::NodeId::AgentSession(id))) => id,
+        Some(RowId::Pin { pin_id }) => {
+            commit_pin_rename(app, config, &pin_id, value);
+            return;
+        }
         _ => {
             app.update(Msg::SetStatus(Some(
                 "rename: lost selection before commit".to_string(),
@@ -756,6 +764,77 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
         None => alias_status,
     };
     app.update(Msg::SetStatus(Some(final_status)));
+}
+
+fn commit_pin_rename(app: &mut App, config: &RunConfig, pin_id: &str, value: String) {
+    let display = value.trim();
+    if display.is_empty() {
+        app.update(Msg::SetStatus(Some(
+            "pin rename: display name cannot be empty".to_string(),
+        )));
+        return;
+    }
+    let status = current_exe_command()
+        .args(["pin", "rename", pin_id, "--display", display])
+        .status();
+    refresh(app, config);
+    let message = match status {
+        Ok(s) if s.success() => format!("renamed pin `{pin_id}`"),
+        Ok(s) => format!("pin rename `{pin_id}` exited with {s}"),
+        Err(err) => format!("pin rename `{pin_id}` failed to spawn: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn remove_pin_action(app: &mut App, config: &RunConfig) {
+    let Some(selection) = app.selection().cloned() else {
+        app.update(Msg::SetStatus(Some(
+            "pin remove: nothing selected".to_string(),
+        )));
+        return;
+    };
+    let pin_id = match selection {
+        RowId::Pin { pin_id } => pin_id,
+        _ => {
+            app.set_pending_pin_remove(None);
+            app.update(Msg::SetStatus(Some(
+                "pin remove: select an unbound pin row".to_string(),
+            )));
+            return;
+        }
+    };
+    if app.pending_pin_remove() != Some(pin_id.as_str()) {
+        app.set_pending_pin_remove(Some(pin_id.clone()));
+        app.update(Msg::SetStatus(Some(format!(
+            "pin remove: press Delete again to remove `{pin_id}`"
+        ))));
+        return;
+    }
+    app.set_pending_pin_remove(None);
+    let status = current_exe_command().args(["pin", "rm", &pin_id]).status();
+    refresh(app, config);
+    let message = match status {
+        Ok(s) if s.success() => format!("removed pin `{pin_id}`"),
+        Ok(s) => format!("pin remove `{pin_id}` exited with {s}"),
+        Err(err) => format!("pin remove `{pin_id}` failed to spawn: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn pin_bind_hint_action(app: &mut App) {
+    let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
+    match crate::tui::actions::pin_bind_hint(&diagnostics) {
+        Some(message) => app.update(Msg::SetStatus(Some(message))),
+        None => app.update(Msg::SetStatus(Some(
+            "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
+        ))),
+    }
+}
+
+fn current_exe_command() -> std::process::Command {
+    std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
+    )
 }
 
 /// Append an informational advisory when the rename target is a
@@ -981,6 +1060,13 @@ enum Action {
     OpenRename,
     /// Forward a key event into the open rename overlay.
     RenameOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// `Delete` on an unbound/stale pin row. First press arms a
+    /// confirmation; second press shells out to `conspectus pin rm`.
+    RemovePin,
+    /// `b` on a selected ambiguous pin-bound row. H-PIN-018 routes
+    /// to a bind escape-hatch hint; the structured picker lands in
+    /// H-PIN-024.
+    PinBindHint,
     /// Open the controls overlay (ADR 0031, F8-005) at its top
     /// section.
     OpenControls,
@@ -1622,6 +1708,10 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             | (KeyModifiers::NONE, KeyCode::Char('S')) => Some(Action::Resume),
             (KeyModifiers::SHIFT, KeyCode::Char('R'))
             | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
+            (_, KeyCode::Delete) => Some(Action::RemovePin),
+            (m, KeyCode::Char('b')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::PinBindHint)
+            }
             // ADR 0031 / F8-005 accelerator surface (reshuffled
             // alongside H-VIEWER-NATIVE-008 to give the more
             // discoverable `v` to the session viewer):
@@ -1804,6 +1894,22 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('a'), KeyModifiers::NONE), 24),
             Some(Action::Attach)
+        );
+    }
+
+    #[test]
+    fn translate_delete_requests_pin_remove() {
+        assert_eq!(
+            translate(press(KeyCode::Delete, KeyModifiers::NONE), 24),
+            Some(Action::RemovePin)
+        );
+    }
+
+    #[test]
+    fn translate_b_requests_pin_bind_hint() {
+        assert_eq!(
+            translate(press(KeyCode::Char('b'), KeyModifiers::NONE), 24),
+            Some(Action::PinBindHint)
         );
     }
 

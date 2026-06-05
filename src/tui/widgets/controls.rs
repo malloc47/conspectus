@@ -59,6 +59,11 @@ pub const VIEW_OPTIONS: &[View] = &[
 /// Sort options surfaced in the Sort section, in stable order.
 pub const SORT_OPTIONS: &[Sort] = &[Sort::Hierarchy, Sort::Recency];
 
+/// Discoverable Pins action group. Full in-overlay editors land in
+/// H-PIN-022..024; these rows make the planned CRUD surface visible
+/// from the H-PIN-017 keybinding slice.
+pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "rename", "remove", "bind", "rebind", "adopt"];
+
 /// Read-only snapshot of the live state the overlay renders against.
 /// The renderer and the key dispatcher both consume this so the
 /// overlay never holds a stale copy.
@@ -89,6 +94,10 @@ pub enum ControlsCursor {
     FilterClear,
     /// Sort option at index in [`SORT_OPTIONS`].
     Sort(usize),
+    /// Pin CRUD placeholder action. Full editors land in
+    /// H-PIN-022..024; H-PIN-017 makes the action group
+    /// discoverable.
+    Pin(usize),
 }
 
 /// Sub-editor that owns key input while open. The host overlay
@@ -125,6 +134,7 @@ pub enum ControlsAction {
     SetGrouping(Grouping),
     SetFilter(RowFilter),
     SetSort(Sort),
+    PinPlaceholder(&'static str),
 }
 
 /// Pure state for the controls overlay: cursor position plus the
@@ -250,6 +260,10 @@ impl ControlsOverlayState {
             ControlsCursor::Sort(idx) => {
                 let sort = SORT_OPTIONS.get(idx).copied().unwrap_or(ctx.sort);
                 ControlsOutcome::ApplyAndStay(ControlsAction::SetSort(sort))
+            }
+            ControlsCursor::Pin(idx) => {
+                let label = PIN_ACTION_OPTIONS.get(idx).copied().unwrap_or("help");
+                ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder(label))
             }
         }
     }
@@ -474,6 +488,9 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
     }
+    for idx in 0..PIN_ACTION_OPTIONS.len() {
+        rows.push(ControlsCursor::Pin(idx));
+    }
     rows
 }
 
@@ -628,6 +645,13 @@ impl ControlsOverlayWidget<'_> {
                 active,
                 cursor == row,
             ));
+        }
+        lines.push(Line::from(""));
+
+        lines.push(section_header("Pins"));
+        for (idx, label) in PIN_ACTION_OPTIONS.iter().enumerate() {
+            let row = ControlsCursor::Pin(idx);
+            lines.push(row_line((*label).to_string(), false, cursor == row));
         }
 
         lines
@@ -799,8 +823,9 @@ mod tests {
         let mut state = ControlsOverlayState::new(&ctx);
         // Five views + 5 sessions groupings + 5 filter rows
         // (3 predicates + 1 sessions-only float checkbox + clear) +
-        // 2 sort rows = 17 actionable rows on Sessions.
-        for _ in 0..17 {
+        // 2 sort rows + 6 pin action rows = 23 actionable rows on
+        // Sessions.
+        for _ in 0..flatten_rows(&ctx).len() {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(
@@ -1014,6 +1039,24 @@ mod tests {
         assert_eq!(
             outcome,
             ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(RowFilter::default()))
+        );
+    }
+
+    #[test]
+    fn enter_on_pin_action_emits_placeholder_action() {
+        let filter = RowFilter::default();
+        let ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let mut state = ControlsOverlayState::new(&ctx);
+        state.cursor = ControlsCursor::Pin(0);
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            ControlsOutcome::ApplyAndStay(ControlsAction::PinPlaceholder("create"))
         );
     }
 

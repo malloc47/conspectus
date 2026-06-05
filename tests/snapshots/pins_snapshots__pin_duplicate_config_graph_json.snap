@@ -1,0 +1,30 @@
+---
+source: tests/pins_snapshots.rs
+expression: fixture.run_discovered_graph_json()
+---
+{
+  "nodes": [],
+  "candidate_links": [],
+  "resolved_relationships": [],
+  "diagnostics": [
+    {
+      "kind": "config",
+      "path": "/fixture/project/.conspectus.toml",
+      "message": "failed to parse pins: duplicate pin id `duplicate`"
+    }
+  ],
+  "pins": [
+    {
+      "id": "global-only",
+      "display_name": "global only",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "global-mux"
+      },
+      "provenance": "global_pin",
+      "store_path": "/fixture/.config/conspectus/config.toml"
+    }
+  ]
+}
