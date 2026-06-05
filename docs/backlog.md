@@ -5618,6 +5618,150 @@ Questions Deferred section.
     `mux.socket_name`) plus the identity-encoding extension for
     absolute-path sockets.
 
+#### Session Continuity (H-PIN-RESUME-*)
+
+Settled by ADR 0058 (Accepted). Each discovery cycle writes the
+most recent fresh `(pin_id, mux_name, session_id, harness,
+observed_epoch)` binding to a per-pin sidecar under
+`$XDG_CACHE_HOME/conspectus/pin-bindings/<pin_id>.json`. On `pin
+launch`, when the resolver returns `PinUnbound`, the launch path
+consults the sidecar, walks the ADR 0018 `parent_session` chain
+forward to the current head (stopping at any fork), validates the
+session still exists on disk, and splices
+`HarnessAdapter::resume_argv(session_id, cwd)` into the tmux
+new-session call. The sidecar is a rebuildable cache — the resolver
+never reads it; stale entries are deleted at launch time when their
+recorded session can no longer be found.
+
+Dependency shape:
+
+```
+H-PIN-RESUME-001 (sidecar I/O) ──┬─→ H-PIN-RESUME-003 (write pass)
+                                 │
+H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer + lineage walk)
+                                              │
+                                              ├─→ H-PIN-RESUME-005 (PinUnbound extension + TUI/CLI surfaces)
+                                              │
+                                              └─→ H-PIN-RESUME-006 (invariants + snapshots + closeout)
+```
+
+- [ ] `H-PIN-RESUME-001` Sidecar schema + atomic I/O helpers.
+  - Scope: add `src/pin_bindings.rs` (or a sibling module under
+    `src/pins/`) with the per-pin JSON record per ADR 0058 §Sidecar
+    shape: `schema_version: u32`, `pin_id`, `mux_name`,
+    `mux_socket`, `session_id`, `harness`, `observed_epoch`. Serde
+    models with unknown-field tolerance on read, validation on
+    write, malformed-file diagnostic that leaves the sidecar alone.
+    Atomic write helpers (tempfile + rename) for per-pin files
+    under `$XDG_CACHE_HOME/conspectus/pin-bindings/<pin_id>.json`.
+    Skip-on-unchanged comparison to avoid churning quiet cycles.
+    Pure read/write — no discovery, no launch wiring.
+  - Tests: unit tests for happy-path round-trip, unknown-field
+    tolerance, malformed-file refusal, atomic write under
+    interruption simulation, skip-on-unchanged, path resolution
+    against an `$XDG_CACHE_HOME` override fixture.
+  - Blockers: ADR 0058 (Accepted).
+
+- [ ] `H-PIN-RESUME-002` `HarnessAdapter::resume_argv` method + defaults.
+  - Scope: add `fn resume_argv(&self, session_id: &str, cwd: &Path)
+    -> Option<Vec<OsString>>` to `HarnessAdapter`. Per-adapter
+    defaults: `codex` returns `Some(vec!["codex", "resume",
+    session_id])` (or whatever its CLI shape is), `claude-code`
+    returns `Some(vec!["claude", "--resume", session_id])`,
+    `opencode` returns `Some(...)` if its CLI supports resume
+    (decide during impl from the actual CLI), `aider` returns
+    `None`. Cwd argument is accepted by every adapter even when
+    unused so the signature stays consistent. No launch wiring
+    yet.
+  - Tests: per-adapter unit tests for the default; one test
+    asserting `None` for `aider`; one CLI fixture invocation
+    confirming the constructed argv parses correctly with the
+    real binary (gated behind a feature flag or env check so CI
+    doesn't depend on the harness being installed).
+  - Blockers: none.
+
+- [ ] `H-PIN-RESUME-003` Sidecar write pass post-resolve.
+  - Scope: after the resolver completes a discovery cycle, for
+    each pin resolution where the binding is `Bound` (including
+    bindings sourced from a `LocalDeclared` `linked_to_mux`
+    override written by `pin bind`, per ADR 0058 Q6), update the
+    sidecar via the H-PIN-RESUME-001 helpers. Skip writes where
+    the payload is unchanged. Never write on `PinUnbound`,
+    `PinStaleMux`, or `PinAmbiguous` outcomes. Wire into the
+    main `discover_and_resolve` pipeline behind a config gate so
+    tests / scenario TUIs can opt out cleanly.
+  - Tests: integration tests covering the bound case (sidecar
+    written), the `pin bind` override case (sidecar still
+    written), the unbound case (no write), unchanged-payload
+    skipping, and read-only invariant non-write on the `tui`,
+    `graph`, `table`, `query`, `pin list`, and `pin show`
+    commands (verify via mtime fingerprinting like
+    `H-PIN-019`).
+  - Blockers: `H-PIN-RESUME-001`.
+
+- [ ] `H-PIN-RESUME-004` Launch decision tree: sidecar consumer + lineage walk.
+  - Scope: extend the `pin launch` decision tree (`src/cli.rs`
+    `PinLaunchArgs::run`, hook into the existing branch on
+    `PinUnbound`) per ADR 0058 §Read path:
+    1. Load the sidecar via H-PIN-RESUME-001 helpers; absent →
+       default argv with status hint.
+    2. Look up the recorded `session_id` in the snapshot, then
+       fall back to the harness state root per Q3 if missing
+       from the snapshot.
+    3. Walk the ADR 0018 `parent_session` chain forward to the
+       current head; stop at any fork (multiple successors
+       sharing an ancestor) and treat as default-argv launch
+       with a "multiple successors" status hint per Q8.
+    4. If the chosen session still cannot be found (or the
+       step-2 lookup found nothing at all), **delete the
+       sidecar file** per Q7, status hint, fall back to default
+       argv.
+    5. Consult `HarnessAdapter::resume_argv(session_id, cwd)`;
+       `None` → status hint + default argv; `Some(argv)` →
+       splice into the `tmux new-session` call.
+    Same flow applies to `pin attach` when it falls through to
+    launch. `--no-attach` short-circuits after spawn as today.
+  - Tests: CLI integration tests for each branch: sidecar
+    absent, snapshot hit, state-root fallback hit, linear
+    lineage walk (one successor per step), fork in lineage,
+    missing-session sidecar deletion, `resume_argv` returns
+    `None` (aider), happy-path resume. Use `FakeTmux` to assert
+    the constructed `new-session` argv.
+  - Blockers: `H-PIN-RESUME-001`, `H-PIN-RESUME-002`,
+    `H-PIN-RESUME-003`.
+
+- [ ] `H-PIN-RESUME-005` `PinUnbound` diagnostic extension + UX surfaces.
+  - Scope: extend the `PinUnbound` resolver diagnostic with an
+    optional `last_session: Option<{session_id,
+    observed_epoch}>` field per ADR 0058 Q5. Populate from the
+    sidecar at resolve time when the pin is unbound. Wire the
+    TUI status hint to read `Enter to resume <session_id>` when
+    populated and fall through to `Enter to launch <name>`
+    otherwise. Extend `pin show <id>` to surface a `last
+    session   <session_id> (observed <iso8601>)` line. Right
+    detail pane shows the same alongside the unbound state.
+  - Tests: resolver tests covering the unbound-with-sidecar
+    and unbound-without-sidecar cases; reducer + snapshot tests
+    for the TUI status hint and detail pane; CLI snapshot tests
+    for `pin show` output.
+  - Blockers: `H-PIN-RESUME-003`, `H-PIN-RESUME-004`.
+
+- [ ] `H-PIN-RESUME-006` Invariants, snapshots, and closeout.
+  - Scope: add `tests/cli_pin_resume_invariants.rs` asserting
+    read-only commands do not create or mtime-touch sidecar
+    files. Extend `tests/pins_snapshots.rs` with continuity
+    scenarios: bound writes sidecar; unbound + sidecar present
+    populates `last_session`; unbound + missing session deletes
+    sidecar; fork in lineage falls back. Update
+    `docs/operations.md` §"Session Pins" with the continuity
+    section (sidecar location, fallback behavior, the
+    `PinUnbound` hint). Update `README.md` §"Session Pins" with
+    a one-paragraph mention of continuity behavior and a
+    pointer to ADR 0058.
+  - Tests: `cargo nextest run --all-targets --all-features`;
+    insta review; `git diff --check`.
+  - Blockers: `H-PIN-RESUME-005`.
+
 ### AI Session Naming
 
 Sibling workstream to `H-RENAME-*`. Layers AI-driven name suggestions on
