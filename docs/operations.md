@@ -525,6 +525,55 @@ Pins modal (`p`):
 Static scenario TUIs and read-only navigation paths keep these
 mutations disabled; they surface a status message instead of writing.
 
+### Session continuity
+
+Per ADR 0058, every fresh discovery cycle records the resolver's
+`Bound` pin → session attribution to a per-pin JSON sidecar under
+`$XDG_CACHE_HOME/conspectus/pin-bindings/<pin_id>.json`. The sidecar
+is a *rebuildable cache*, not authoritative state: the resolver
+never reads it, and the binding shown in `pin show` / the TUI
+always reflects the current cycle's observation, not the cache.
+
+When a pin's mux dies (operator closes the tmux session, machine
+reboots, etc.) and discovery flips the pin to `PinUnbound`,
+`pin launch <id>` consults the sidecar before falling back to a
+fresh start:
+
+1. Read the sidecar. Absent → default argv.
+2. Look up the recorded session in the current snapshot. Missing
+   on disk → **delete the sidecar** and fall back to default argv.
+3. Walk forward through ADR 0018 `parent_session` lineage to the
+   current head. If the chain forks (multiple successors share an
+   ancestor), refuse to disambiguate — fall back to default argv
+   with a `multiple successors` hint.
+4. Look up `HarnessAdapter::resume_argv(<head>, <cwd>)`. `None`
+   (the harness has no resume CLI, e.g. aider/opencode today) →
+   fall back to default argv with a hint. `Some(argv)` → splice
+   into the tmux `new-session` call.
+
+The `PinUnbound` diagnostic carries an optional `last_session`
+field populated from the sidecar so downstream consumers can
+advertise the resume affordance without re-reading the cache:
+
+- `pin show <id>` adds a `last_session <session-id> (observed
+  <iso8601>)` line for unbound pins with a recorded prior session.
+- The TUI status hint reads `Enter resume <session-id>` instead
+  of `Enter launch` when `last_session` is populated.
+- The right detail pane mirrors the same with an `Enter resume`
+  annotation.
+
+**Per-harness support.** Codex (`codex exec --resume <id>`) and
+Claude Code (`claude --resume <id>`) expose resume commands and
+participate fully. Aider and opencode currently return `None` from
+`resume_argv`; their unbound pins always launch fresh with a hint
+naming the missing capability.
+
+**Sidecar lifecycle.** Files are written atomically (tempfile +
+rename) and use a `skip-on-unchanged` comparison so quiet cycles
+produce no mtime churn. Stale entries (session deleted) are
+cleared at launch time by the consumer rather than on a TTL —
+the cache self-prunes as the operator drives it.
+
 ### Read-only invariant
 
 `graph`, `node show`, `table <rows>`, `query`, `pin list`, and
@@ -535,10 +584,25 @@ bind / rebind / adopt` commands and the TUI write paths they back.
 H-PIN-019's `tests/cli_pin_invariants.rs` enforces this with
 content + mtime fingerprinting around each read-only command.
 
+The same commands also leave the pin-binding sidecar cache alone
+when no `Bound` resolution is in play: a command run against a
+config with only unbound pins (no live mux yet) will not create
+`$XDG_CACHE_HOME/conspectus/pin-bindings/`, and an existing
+sidecar for an unbound pin is preserved byte-for-byte (no mtime
+bump) across read-only commands. The positive case — a `Bound`
+resolution producing a sidecar write — is by design, since the
+sidecar is what powers the next `pin launch`'s continuity.
+H-PIN-RESUME-006's `tests/cli_pin_resume_invariants.rs` enforces
+the cache-side rules.
+
 ## Caches
 
-Conspectus does not maintain a machine-generated cache yet. When a
-cache is introduced (per CLAUDE.md), it will live outside the project
-tree under `$XDG_CACHE_HOME/conspectus/` (or the platform
-equivalent) rather than inside `.conspectus.toml` or the project
-config directory.
+Conspectus's first cache surface is the pin-binding sidecar
+described under [Session continuity](#session-continuity) —
+per-pin JSON files under
+`$XDG_CACHE_HOME/conspectus/pin-bindings/`. The cache is fully
+rebuildable from a fresh discovery cycle, so clearing it (`rm -r`)
+only loses continuity until the next `pin launch` from a bound
+state. Future caches (PR fetches, transcript indices, etc.) will
+land under the same `$XDG_CACHE_HOME/conspectus/` root rather
+than inside `.conspectus.toml` or the project config directory.

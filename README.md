@@ -138,7 +138,10 @@ The resolver emits four pin-specific diagnostics that surface in
 `pin show`, the TUI status line, and the right detail pane:
 
 - **`PinUnbound`** — `pin.mux.name` matches no live mux. Action:
-  `pin launch <id>`.
+  `pin launch <id>`. Carries an optional `last_session` field
+  populated from the continuity sidecar (see below); when present,
+  `pin show` and the TUI advertise `Enter resume <session-id>`
+  instead of a generic `Enter launch`.
 - **`PinStaleMux`** — mux is live but no `pin.harness` session is
   attributed. Action: `pin launch <id>` to inject the harness into
   the existing pane.
@@ -147,6 +150,27 @@ The resolver emits four pin-specific diagnostics that surface in
   <session-key>`.
 - **`PinDrift`** — bound session's observed cwd diverges from the
   pin's declared cwd. Advisory; the binding still holds.
+
+### Session continuity
+
+Per ADR 0058, every fresh `Bound` resolution is recorded to a
+per-pin JSON sidecar under
+`$XDG_CACHE_HOME/conspectus/pin-bindings/<pin_id>.json`. When the
+mux later dies and `pin launch <id>` flips to the unbound branch,
+the launch path reads the sidecar, walks the ADR 0018
+`parent_session` chain forward to the current head (stopping at
+any fork), validates the session still exists on disk, and splices
+the harness's `resume_argv(<head>, <cwd>)` into the tmux
+`new-session` call. The result: closing tmux and relaunching the
+pin resumes the same agent session you were last working in
+(codex / claude-code) rather than starting fresh. Aider and
+opencode have no resume CLI and fall back to launch with a hint.
+
+The sidecar is a rebuildable cache, not authoritative state — the
+resolver never reads it, stale entries self-prune at launch time,
+and clearing
+`$XDG_CACHE_HOME/conspectus/pin-bindings/` only loses continuity
+until the next `pin launch` from a bound state.
 
 ### Read-only invariant
 
@@ -157,9 +181,19 @@ is reserved to `pin create / rename / rm / bind / rebind / adopt` and
 the TUI write paths they back. Enforced by
 [`tests/cli_pin_invariants.rs`](tests/cli_pin_invariants.rs).
 
+The same invariant extends to the continuity sidecar: read-only
+commands run against configs with only unbound pins leave the
+cache directory untouched, and existing sidecars survive
+byte-for-byte across read-only commands. The positive case (a
+`Bound` resolution producing a sidecar write) is by design.
+Enforced by [`tests/cli_pin_resume_invariants.rs`](tests/cli_pin_resume_invariants.rs).
+
 For the full reference — TOML schema, store-selection rules, launch
-semantics, TUI keymap, scenario-mode behavior — see
-[`docs/operations.md`](docs/operations.md#session-pins) and ADR 0057.
+semantics, TUI keymap, scenario-mode behavior, continuity sidecar
+internals — see
+[`docs/operations.md`](docs/operations.md#session-pins) and ADRs
+[0057](docs/adr/0057-session-pins.md) and
+[0058](docs/adr/0058-pin-session-continuity.md).
 
 ## Docs
 

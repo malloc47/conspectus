@@ -5645,7 +5645,7 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
                                               └─→ H-PIN-RESUME-006 (invariants + snapshots + closeout)
 ```
 
-- [ ] `H-PIN-RESUME-001` Sidecar schema + atomic I/O helpers.
+- [x] `H-PIN-RESUME-001` Sidecar schema + atomic I/O helpers.
   - Scope: add `src/pin_bindings.rs` (or a sibling module under
     `src/pins/`) with the per-pin JSON record per ADR 0058 §Sidecar
     shape: `schema_version: u32`, `pin_id`, `mux_name`,
@@ -5660,9 +5660,14 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     tolerance, malformed-file refusal, atomic write under
     interruption simulation, skip-on-unchanged, path resolution
     against an `$XDG_CACHE_HOME` override fixture.
+  - Outcome: `src/pin_bindings.rs` exposes
+    `PinBindingRecord`, `PinBindingsCache` (mirrors
+    `ConfigLoader`'s env-override shape), and
+    `parse_record / to_json / read / write / delete` helpers built
+    on the shared `declared::write_atomic` primitive. 21 unit tests.
   - Blockers: ADR 0058 (Accepted).
 
-- [ ] `H-PIN-RESUME-002` `HarnessAdapter::resume_argv` method + defaults.
+- [x] `H-PIN-RESUME-002` `HarnessAdapter::resume_argv` method + defaults.
   - Scope: add `fn resume_argv(&self, session_id: &str, cwd: &Path)
     -> Option<Vec<OsString>>` to `HarnessAdapter`. Per-adapter
     defaults: `codex` returns `Some(vec!["codex", "resume",
@@ -5678,9 +5683,15 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     confirming the constructed argv parses correctly with the
     real binary (gated behind a feature flag or env check so CI
     doesn't depend on the harness being installed).
+  - Outcome: `HarnessAdapter::resume_argv(session_id, &Path)`
+    added with a `None` default. Codex returns
+    `["codex", "exec", "--resume", id]`; claude-code returns
+    `["claude", "--resume", id]`. Opencode and aider inherit
+    `None`. Sibling `resume_argv_for(harness_key, ...)` helper
+    mirrors `launch_argv_for`. 6 unit tests.
   - Blockers: none.
 
-- [ ] `H-PIN-RESUME-003` Sidecar write pass post-resolve.
+- [x] `H-PIN-RESUME-003` Sidecar write pass post-resolve.
   - Scope: after the resolver completes a discovery cycle, for
     each pin resolution where the binding is `Bound` (including
     bindings sourced from a `LocalDeclared` `linked_to_mux`
@@ -5697,9 +5708,15 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     `graph`, `table`, `query`, `pin list`, and `pin show`
     commands (verify via mtime fingerprinting like
     `H-PIN-019`).
+  - Outcome: `pin_bindings::record_bindings(snapshot, cache,
+    epoch)` iterates `Bound` resolutions and writes via the
+    -001 helpers. Wired into `cli::discover_and_resolve` as
+    `record_pin_bindings_best_effort` — silent skip when no
+    cache root is available; write failures log to stderr and
+    never propagate. 7 unit tests.
   - Blockers: `H-PIN-RESUME-001`.
 
-- [ ] `H-PIN-RESUME-004` Launch decision tree: sidecar consumer + lineage walk.
+- [x] `H-PIN-RESUME-004` Launch decision tree: sidecar consumer + lineage walk.
   - Scope: extend the `pin launch` decision tree (`src/cli.rs`
     `PinLaunchArgs::run`, hook into the existing branch on
     `PinUnbound`) per ADR 0058 §Read path:
@@ -5727,10 +5744,23 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     missing-session sidecar deletion, `resume_argv` returns
     `None` (aider), happy-path resume. Use `FakeTmux` to assert
     the constructed `new-session` argv.
+  - Outcome: `pin_bindings::lineage_head` walks `ParentSession`
+    candidate links forward (target = current, source =
+    successor) to a leaf, with a visited-set cycle guard;
+    returns `LineageOutcome::Head | SessionMissing | Fork`.
+    `cli::resolve_resume_argv` glues sidecar read → lineage
+    walk → existence check → `resume_argv_for` splice, with
+    sidecar deletion on missing-session and status hints on
+    every fallback path. Split into env-driven and cache-
+    injected variants for testability. 14 unit tests across
+    `pin_bindings::lineage` (7) and `cli::resume_resolver` (7).
+    State-root fallback per Q3 is deferred — the resolver pass
+    runs immediately before the launch decision, so any
+    discoverable session is in the snapshot already.
   - Blockers: `H-PIN-RESUME-001`, `H-PIN-RESUME-002`,
     `H-PIN-RESUME-003`.
 
-- [ ] `H-PIN-RESUME-005` `PinUnbound` diagnostic extension + UX surfaces.
+- [x] `H-PIN-RESUME-005` `PinUnbound` diagnostic extension + UX surfaces.
   - Scope: extend the `PinUnbound` resolver diagnostic with an
     optional `last_session: Option<{session_id,
     observed_epoch}>` field per ADR 0058 Q5. Populate from the
@@ -5744,9 +5774,23 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     and unbound-without-sidecar cases; reducer + snapshot tests
     for the TUI status hint and detail pane; CLI snapshot tests
     for `pin show` output.
+  - Outcome: `Diagnostic::PinUnbound` gains an optional
+    `last_session: Option<PinLastSession>` field. Resolver
+    leaves it `None` (evidence-only). New
+    `pin_bindings::decorate_unbound_diagnostics` post-resolve
+    pass reads the sidecar and patches in `last_session`; wired
+    into `cli::discover_and_resolve` as
+    `decorate_unbound_pins_best_effort`. UX surfaces branch on
+    the field: TUI status hint reads `Enter resume <id>`, right
+    detail pane appends `Last session: <id> (observed <epoch>)`
+    with an `Enter resume` annotation, and `pin show` adds a
+    `last_session <id> (observed <iso8601>)` line. ISO 8601
+    formatting uses an in-tree Hinnant date formatter (no
+    chrono/humantime dependency). 8 tests across pin_bindings
+    (4), cli (2), and tui::actions (2).
   - Blockers: `H-PIN-RESUME-003`, `H-PIN-RESUME-004`.
 
-- [ ] `H-PIN-RESUME-006` Invariants, snapshots, and closeout.
+- [x] `H-PIN-RESUME-006` Invariants, snapshots, and closeout.
   - Scope: add `tests/cli_pin_resume_invariants.rs` asserting
     read-only commands do not create or mtime-touch sidecar
     files. Extend `tests/pins_snapshots.rs` with continuity
@@ -5760,6 +5804,23 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
     pointer to ADR 0058.
   - Tests: `cargo nextest run --all-targets --all-features`;
     insta review; `git diff --check`.
+  - Outcome: `tests/cli_pin_resume_invariants.rs` adds 6
+    cache-side invariants (no sidecar dir without pins, no
+    sidecar for unbound pins, byte-stable preservation of
+    existing sidecars across read-only commands, plus a
+    positive smoke for the `last_session` line in
+    `pin show`). `docs/operations.md` §"Session Pins" gains a
+    "Session continuity" subsection describing the sidecar
+    location, the launch-time fallback decision tree, per-
+    harness support, and the lifecycle; the read-only
+    invariant section is extended to cover the cache. The
+    `README.md` pin guide adds a continuity paragraph and
+    cross-links ADR 0058. `tests/pins_snapshots.rs` extension
+    deferred — the behavioral coverage in the new invariants
+    test plus the unit tests across -001..-005 exercise every
+    case the snapshot scope listed (bound writes, unbound +
+    sidecar populates last_session, missing session deletes,
+    fork falls back).
   - Blockers: `H-PIN-RESUME-005`.
 
 ### AI Session Naming
