@@ -60,6 +60,23 @@ impl HarnessAdapter for OpenCodeAdapter {
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {
         vec![std::ffi::OsString::from("opencode")]
     }
+
+    fn resume_argv(
+        &self,
+        session_id: &str,
+        _cwd: &std::path::Path,
+    ) -> Option<Vec<std::ffi::OsString>> {
+        // `opencode --session <id>` continues a specific session
+        // (see `opencode --help`). The positional `[project]`
+        // argument is left out so tmux's `-c <cwd>` handles the
+        // working directory, mirroring the codex / claude-code
+        // pattern.
+        Some(vec![
+            std::ffi::OsString::from("opencode"),
+            std::ffi::OsString::from("--session"),
+            std::ffi::OsString::from(session_id),
+        ])
+    }
 }
 
 fn discover_state(state_root: &Path) -> Result<GraphFragment> {

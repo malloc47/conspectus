@@ -547,9 +547,9 @@ fresh start:
    ancestor), refuse to disambiguate — fall back to default argv
    with a `multiple successors` hint.
 4. Look up `HarnessAdapter::resume_argv(<head>, <cwd>)`. `None`
-   (the harness has no resume CLI, e.g. aider/opencode today) →
-   fall back to default argv with a hint. `Some(argv)` → splice
-   into the tmux `new-session` call.
+   (the harness has no resume CLI, e.g. aider today) → fall back
+   to default argv with a hint. `Some(argv)` → splice into the
+   tmux `new-session` call.
 
 The `PinUnbound` diagnostic carries an optional `last_session`
 field populated from the sidecar so downstream consumers can
@@ -562,11 +562,12 @@ advertise the resume affordance without re-reading the cache:
 - The right detail pane mirrors the same with an `Enter resume`
   annotation.
 
-**Per-harness support.** Codex (`codex exec --resume <id>`) and
-Claude Code (`claude --resume <id>`) expose resume commands and
-participate fully. Aider and opencode currently return `None` from
-`resume_argv`; their unbound pins always launch fresh with a hint
-naming the missing capability.
+**Per-harness support.** Codex (`codex exec --resume <id>`), Claude
+Code (`claude --resume <id>`), and opencode (`opencode --session
+<id>`) expose resume commands and participate fully. Aider tracks
+chat history per-cwd rather than per-session, returns `None` from
+`resume_argv`, and its unbound pins always launch fresh with a
+status hint naming the missing capability.
 
 **Sidecar lifecycle.** Files are written atomically (tempfile +
 rename) and use a `skip-on-unchanged` comparison so quiet cycles

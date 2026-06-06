@@ -163,8 +163,9 @@ any fork), validates the session still exists on disk, and splices
 the harness's `resume_argv(<head>, <cwd>)` into the tmux
 `new-session` call. The result: closing tmux and relaunching the
 pin resumes the same agent session you were last working in
-(codex / claude-code) rather than starting fresh. Aider and
-opencode have no resume CLI and fall back to launch with a hint.
+(codex, claude-code, opencode) rather than starting fresh. Aider
+tracks chat history per-cwd rather than per-session and falls back
+to a fresh launch with a hint.
 
 The sidecar is a rebuildable cache, not authoritative state — the
 resolver never reads it, stale entries self-prune at launch time,

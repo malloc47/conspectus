@@ -3,11 +3,12 @@
 //! harness-specific and best-effort — unsupported harnesses degrade
 //! to a disabled-action reason.
 //!
-//! Supported harnesses (v1):
+//! Supported harnesses:
 //!   claude-code: `claude --resume <session_key>`
 //!   codex:       `codex exec --resume <session_key>`
-//!   opencode:    unsupported (no known single-command resume path)
-//!   aider:       unsupported
+//!   opencode:    `opencode --session <session_key>`
+//!   aider:       unsupported (per-cwd chat history, no
+//!                single-command "resume this session" path)
 
 use std::process::Command;
 
@@ -46,7 +47,11 @@ pub fn resolve_resume_target(session: &AgentSessionId) -> ResumeTarget {
             command: format!("codex exec --resume {}", session.session_key),
             label: session.session_key.clone(),
         },
-        "opencode" | "aider" => ResumeTarget::Unsupported {
+        "opencode" => ResumeTarget::Launch {
+            command: format!("opencode --session {}", session.session_key),
+            label: session.session_key.clone(),
+        },
+        "aider" => ResumeTarget::Unsupported {
             harness_key: session.harness_key.clone(),
         },
         other => ResumeTarget::Unsupported {

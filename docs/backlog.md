@@ -5686,9 +5686,13 @@ H-PIN-RESUME-002 (resume_argv) ──┴─→ H-PIN-RESUME-004 (launch consumer
   - Outcome: `HarnessAdapter::resume_argv(session_id, &Path)`
     added with a `None` default. Codex returns
     `["codex", "exec", "--resume", id]`; claude-code returns
-    `["claude", "--resume", id]`. Opencode and aider inherit
-    `None`. Sibling `resume_argv_for(harness_key, ...)` helper
-    mirrors `launch_argv_for`. 6 unit tests.
+    `["claude", "--resume", id]`; opencode returns
+    `["opencode", "--session", id]`. Aider tracks chat history
+    per-cwd rather than per-session and inherits `None`. Sibling
+    `resume_argv_for(harness_key, ...)` helper mirrors
+    `launch_argv_for`. 6 unit tests (one per supported
+    adapter / one for aider / one for unknown harness / one for
+    the trait default).
   - Blockers: none.
 
 - [x] `H-PIN-RESUME-003` Sidecar write pass post-resolve.

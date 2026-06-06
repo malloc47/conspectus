@@ -79,7 +79,8 @@ pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
 /// Look up the per-harness resume argv. Sibling of [`launch_argv_for`]
 /// for the H-PIN-RESUME-004 launch path. Returns `None` when the
 /// harness key is unknown or the adapter does not expose a resume
-/// command (currently `opencode` and `aider`).
+/// command (currently only `aider`, which tracks chat history
+/// per-cwd rather than per-session).
 pub fn resume_argv_for(
     harness_key: &str,
     session_id: &str,
@@ -336,9 +337,20 @@ mod tests {
     }
 
     #[test]
-    fn opencode_resume_argv_returns_none() {
-        // No known single-command resume path per src/tui/resume.rs.
-        assert!(resume_argv_for("opencode", "abc123", Path::new("/p")).is_none());
+    fn opencode_resume_argv_matches_session_flag_shape() {
+        // `opencode --session <id>` per `opencode --help` (the
+        // earlier "unsupported" comment in src/tui/resume.rs was
+        // stale; opencode added a session flag).
+        let argv = resume_argv_for("opencode", "abc123", Path::new("/p"))
+            .expect("opencode supports resume");
+        assert_eq!(
+            argv,
+            vec![
+                std::ffi::OsString::from("opencode"),
+                std::ffi::OsString::from("--session"),
+                std::ffi::OsString::from("abc123"),
+            ]
+        );
     }
 
     #[test]
