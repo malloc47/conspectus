@@ -709,9 +709,18 @@ pub enum Diagnostic {
         competing_link_ids: Vec<String>,
     },
     /// ADR 0057. No live mux matches the pin's `mux.native_id()`.
+    /// Per ADR 0058 Q5, `last_session` carries the most recent
+    /// recorded binding when the pin-bindings sidecar (ADR 0058) has
+    /// one — so the launch path can advertise "Enter to resume X"
+    /// instead of a generic "Enter to launch" when continuity is
+    /// available. `None` means the sidecar was absent, unreadable,
+    /// or the resolver ran without consulting one (the default in
+    /// scenario TUIs).
     PinUnbound {
         pin_id: String,
         expected_mux_native_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_session: Option<PinLastSession>,
     },
     /// ADR 0057. Mux exists but no harness session matching
     /// `pin.harness` is attributed to it.
@@ -736,6 +745,15 @@ pub enum Diagnostic {
         declared_cwd: String,
         observed_cwd: String,
     },
+}
+
+/// ADR 0058 §Q5: the recorded last-bound session a `PinUnbound`
+/// diagnostic optionally carries. Drives the launch path's
+/// "Enter to resume X" hint surface.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct PinLastSession {
+    pub session_id: String,
+    pub observed_epoch: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

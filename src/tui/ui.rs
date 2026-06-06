@@ -2480,9 +2480,19 @@ fn render_pin_diagnostics(diagnostics: &[crate::tui::actions::PinDiagnosticView]
             crate::tui::actions::PinDiagnosticView::Unbound {
                 pin_id,
                 expected_mux_native_id,
-            } => format!(
-                "Pin `{pin_id}` is unbound.\nExpected mux: {expected_mux_native_id}\nEnter launches the pin."
-            ),
+                last_session,
+            } => match last_session {
+                Some(last) => format!(
+                    "Pin `{pin_id}` is unbound.\nExpected mux: {expected_mux_native_id}\n\
+                     Last session: {} (observed {})\n\
+                     Enter resumes into the recorded session.",
+                    last.session_id, last.observed_epoch
+                ),
+                None => format!(
+                    "Pin `{pin_id}` is unbound.\nExpected mux: {expected_mux_native_id}\n\
+                     Enter launches the pin."
+                ),
+            },
             crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => format!(
                 "Pin `{pin_id}` has a stale mux.\nMux: {}\nEnter relaunches the harness in the existing mux.",
                 mux.native_id

@@ -522,6 +522,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
             Diagnostic::PinUnbound {
                 pin_id,
                 expected_mux_native_id,
+                last_session: _,
             } => {
                 stmt.execute(params![
                     kind,

@@ -2477,6 +2477,27 @@ mod tests {
         );
     }
 
+    // ----- H-PIN-RESUME-005: ISO 8601 formatting for pin show -----
+
+    #[test]
+    fn format_epoch_iso8601_renders_known_unix_dates() {
+        // 2024-01-01T00:00:00Z = 1704067200
+        assert_eq!(format_epoch_iso8601(1_704_067_200), "2024-01-01T00:00:00Z");
+        // 2026-06-05T12:34:56Z (mid-day timestamp)
+        // Computed: days_from_1970 = 20609, secs = 20609*86400 + 12*3600+34*60+56
+        // = 1780_624_096
+        assert_eq!(format_epoch_iso8601(1_780_662_896), "2026-06-05T12:34:56Z");
+        // Epoch zero.
+        assert_eq!(format_epoch_iso8601(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn format_epoch_iso8601_clamps_negative_epochs_to_zero() {
+        // Defensive — sidecars shouldn't carry negative epochs, but
+        // we shouldn't panic if they do.
+        assert_eq!(format_epoch_iso8601(-1), "1970-01-01T00:00:00Z");
+    }
+
     // ----- H-PIN-RESUME-004: launch-time resume resolver -----
 
     mod resume_resolver {
@@ -3807,6 +3828,16 @@ impl PinShowArgs {
             }
             _ => {}
         }
+        // ADR 0058 H-PIN-RESUME-005: when the pin is unbound and the
+        // sidecar has a recorded last-bound session, surface it so
+        // the operator can see what `pin launch` would resume into.
+        if let Some(last) = pin_last_session_for(&snapshot, &self.id) {
+            println!(
+                "last_session {} (observed {})",
+                last.session_id,
+                format_epoch_iso8601(last.observed_epoch),
+            );
+        }
         // Surface pin-specific diagnostics for this pin (PinAmbiguous,
         // PinDrift, etc.). Each is rendered on its own line so the
         // operator can pipe / grep the output.
@@ -3819,6 +3850,56 @@ impl PinShowArgs {
         }
         Ok(())
     }
+}
+
+fn pin_last_session_for<'a>(
+    snapshot: &'a GraphSnapshot,
+    pin_id: &str,
+) -> Option<&'a conspectus::model::PinLastSession> {
+    use conspectus::model::Diagnostic;
+    snapshot.diagnostics.iter().find_map(|d| match d {
+        Diagnostic::PinUnbound {
+            pin_id: id,
+            last_session: Some(last),
+            ..
+        } if id == pin_id => Some(last),
+        _ => None,
+    })
+}
+
+fn format_epoch_iso8601(epoch: i64) -> String {
+    // Minimal UTC ISO 8601 formatter using the standard library's
+    // civil-time algorithm. Mirrors RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`)
+    // without pulling in chrono/humantime for a single output line.
+    let secs = epoch.max(0) as u64;
+    let (year, month, day, hour, minute, second) = civil_from_unix_seconds(secs);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+/// Convert a Unix epoch (seconds, UTC) into a civil
+/// `(year, month, day, hour, minute, second)` tuple. Uses the
+/// Hinnant algorithm (Howard Hinnant's `days_from_civil` inverse)
+/// so we don't need a date library for one CLI line.
+fn civil_from_unix_seconds(secs: u64) -> (i32, u32, u32, u32, u32, u32) {
+    let days = (secs / 86_400) as i64;
+    let time_of_day = secs % 86_400;
+    let hour = (time_of_day / 3_600) as u32;
+    let minute = ((time_of_day % 3_600) / 60) as u32;
+    let second = (time_of_day % 60) as u32;
+
+    // Hinnant: days since 1970-01-01 → civil date.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = (y + if month <= 2 { 1 } else { 0 }) as i32;
+
+    (year, month, day, hour, minute, second)
 }
 
 #[derive(Debug, Args)]
@@ -4499,9 +4580,24 @@ fn candidate_pin_store_paths(scan_roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
 
 fn discover_and_resolve(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
     let snapshot = discover_for_store_selection(scan_roots)?;
-    let resolved = conspectus::resolve::resolve_snapshot(snapshot);
+    let mut resolved = conspectus::resolve::resolve_snapshot(snapshot);
     record_pin_bindings_best_effort(&resolved);
+    decorate_unbound_pins_best_effort(&mut resolved);
     Ok(resolved)
+}
+
+/// Enrich `PinUnbound` diagnostics with the sidecar's recorded
+/// last-bound session so the launch path's UX surfaces
+/// (`pin show`, TUI hint, right detail pane) can advertise resume
+/// affordances. Mirrors `record_pin_bindings_best_effort`: silent
+/// no-op when the cache root is absent.
+fn decorate_unbound_pins_best_effort(snapshot: &mut GraphSnapshot) {
+    use conspectus::pin_bindings::{PinBindingsCache, decorate_unbound_diagnostics};
+    let cache = PinBindingsCache::from_env();
+    if cache.directory().is_none() {
+        return;
+    }
+    decorate_unbound_diagnostics(snapshot, &cache);
 }
 
 /// Record the resolver's pin bindings to per-pin sidecar files

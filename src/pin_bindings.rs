@@ -40,7 +40,8 @@ use std::collections::BTreeSet;
 
 use crate::declared::write_atomic;
 use crate::model::{
-    AgentSessionId, GraphNode, GraphSnapshot, LinkState, NodeId, PinBinding, RelationKind,
+    AgentSessionId, Diagnostic, GraphNode, GraphSnapshot, LinkState, NodeId, PinBinding,
+    PinLastSession, RelationKind,
 };
 
 /// Current sidecar schema version. Bumped only on incompatible
@@ -400,6 +401,39 @@ fn find_session(
         }
         _ => None,
     })
+}
+
+/// Decorate `PinUnbound` diagnostics in `snapshot` with the recorded
+/// last-bound session from the sidecar, when one exists (ADR 0058
+/// §TUI surface / Q5). Resolver attribution stays purely
+/// observation-driven; this post-resolve pass enriches the
+/// already-emitted diagnostic so downstream consumers (TUI status
+/// hint, `pin show`, right detail pane) can advertise resume
+/// affordances when continuity is available.
+///
+/// Pins whose `PinUnbound` already carries a `last_session` are left
+/// alone. Sidecar read failures (malformed JSON, etc.) leave the
+/// diagnostic unenriched rather than overwriting it with garbage.
+pub fn decorate_unbound_diagnostics(snapshot: &mut GraphSnapshot, cache: &PinBindingsCache) {
+    for diagnostic in &mut snapshot.diagnostics {
+        let Diagnostic::PinUnbound {
+            pin_id,
+            last_session,
+            ..
+        } = diagnostic
+        else {
+            continue;
+        };
+        if last_session.is_some() {
+            continue;
+        }
+        if let Ok(Some(record)) = read(cache, pin_id) {
+            *last_session = Some(PinLastSession {
+                session_id: record.session_id,
+                observed_epoch: record.observed_epoch,
+            });
+        }
+    }
 }
 
 /// Per-pin outcome of [`record_bindings`]. The string is the pin id,
@@ -858,9 +892,9 @@ mod tests {
     mod lineage {
         use super::*;
         use crate::model::{
-            AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode,
-            GraphSnapshot, LinkEndpoint, LinkState, NodeId, Provenance, RelationKind,
-            SourceMetadata,
+            AgentSessionId, AgentSessionNode, Confidence, Diagnostic, Freshness, GraphLink,
+            GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId, PinLastSession, Provenance,
+            RelationKind, SourceMetadata,
         };
 
         fn session(key: &str) -> AgentSessionNode {
@@ -982,6 +1016,113 @@ mod tests {
                 LineageOutcome::Head(_) => {}
                 other => panic!("expected Head (cycle defense), got {other:?}"),
             }
+        }
+
+        // ----- decorate_unbound_diagnostics: post-resolve enrichment -----
+
+        #[test]
+        fn decorate_populates_last_session_from_sidecar() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            // Seed a sidecar for `ingest`.
+            let record = PinBindingRecord::new(
+                "ingest",
+                "ingest",
+                None,
+                "session-a",
+                "codex",
+                1_738_742_400,
+            );
+            write(&cache, &record).unwrap();
+
+            let mut snap = GraphSnapshot::empty();
+            snap.diagnostics.push(Diagnostic::PinUnbound {
+                pin_id: "ingest".to_string(),
+                expected_mux_native_id: "tmux:ingest".to_string(),
+                last_session: None,
+            });
+
+            decorate_unbound_diagnostics(&mut snap, &cache);
+
+            match &snap.diagnostics[0] {
+                Diagnostic::PinUnbound { last_session, .. } => {
+                    let last = last_session
+                        .as_ref()
+                        .expect("decorator populated last_session");
+                    assert_eq!(last.session_id, "session-a");
+                    assert_eq!(last.observed_epoch, 1_738_742_400);
+                }
+                other => panic!("expected PinUnbound, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn decorate_leaves_unbound_alone_when_no_sidecar() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+
+            let mut snap = GraphSnapshot::empty();
+            snap.diagnostics.push(Diagnostic::PinUnbound {
+                pin_id: "noprior".to_string(),
+                expected_mux_native_id: "tmux:noprior".to_string(),
+                last_session: None,
+            });
+
+            decorate_unbound_diagnostics(&mut snap, &cache);
+
+            match &snap.diagnostics[0] {
+                Diagnostic::PinUnbound { last_session, .. } => assert!(last_session.is_none()),
+                other => panic!("expected PinUnbound, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn decorate_skips_already_populated_diagnostics() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+            // Sidecar disagrees with the pre-populated diagnostic;
+            // we want the existing value preserved.
+            let record =
+                PinBindingRecord::new("ingest", "ingest", None, "from-sidecar", "codex", 2);
+            write(&cache, &record).unwrap();
+
+            let mut snap = GraphSnapshot::empty();
+            snap.diagnostics.push(Diagnostic::PinUnbound {
+                pin_id: "ingest".to_string(),
+                expected_mux_native_id: "tmux:ingest".to_string(),
+                last_session: Some(PinLastSession {
+                    session_id: "pre-populated".to_string(),
+                    observed_epoch: 1,
+                }),
+            });
+
+            decorate_unbound_diagnostics(&mut snap, &cache);
+
+            match &snap.diagnostics[0] {
+                Diagnostic::PinUnbound { last_session, .. } => {
+                    let last = last_session.as_ref().unwrap();
+                    assert_eq!(last.session_id, "pre-populated");
+                }
+                other => panic!("expected PinUnbound, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn decorate_ignores_non_pinunbound_diagnostics() {
+            let temp = tempdir().unwrap();
+            let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+
+            let mut snap = GraphSnapshot::empty();
+            snap.diagnostics.push(Diagnostic::PinDrift {
+                pin_id: "ingest".to_string(),
+                declared_cwd: "/p".to_string(),
+                observed_cwd: "/q".to_string(),
+            });
+
+            decorate_unbound_diagnostics(&mut snap, &cache);
+
+            // Untouched.
+            assert!(matches!(&snap.diagnostics[0], Diagnostic::PinDrift { .. }));
         }
 
         #[test]

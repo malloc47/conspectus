@@ -513,12 +513,23 @@ fn pin_diagnostic_fields(snapshot: &GraphSnapshot, session: &AgentSessionNode) -
             crate::tui::actions::PinDiagnosticView::Unbound {
                 pin_id,
                 expected_mux_native_id,
+                last_session,
             } => {
-                let mut field = plain(
-                    "pin",
-                    format!("{pin_id} unbound: expected {expected_mux_native_id}"),
-                );
-                field.annotation = Some("Enter launch");
+                let (value, annotation) = match last_session {
+                    Some(last) => (
+                        format!(
+                            "{pin_id} unbound: expected {expected_mux_native_id} · last session {}",
+                            last.session_id
+                        ),
+                        "Enter resume",
+                    ),
+                    None => (
+                        format!("{pin_id} unbound: expected {expected_mux_native_id}"),
+                        "Enter launch",
+                    ),
+                };
+                let mut field = plain("pin", value);
+                field.annotation = Some(annotation);
                 field
             }
         })

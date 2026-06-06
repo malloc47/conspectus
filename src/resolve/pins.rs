@@ -60,6 +60,11 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
             diagnostics.push(Diagnostic::PinUnbound {
                 pin_id: pin.id.clone(),
                 expected_mux_native_id: target_native_id,
+                // Populated by the post-resolve sidecar consumer
+                // (ADR 0058 / H-PIN-RESUME-005); the bare resolver
+                // pass stays evidence-only and never reads from
+                // the cache directly.
+                last_session: None,
             });
             binding_updates.push((idx, PinBinding::Unbound));
             continue;
@@ -386,9 +391,11 @@ mod tests {
             Diagnostic::PinUnbound {
                 pin_id,
                 expected_mux_native_id,
+                last_session,
             } => {
                 assert_eq!(pin_id, "ingest");
                 assert_eq!(expected_mux_native_id, "tmux:ingest");
+                assert!(last_session.is_none());
             }
             other => panic!("expected PinUnbound, got {other:?}"),
         }

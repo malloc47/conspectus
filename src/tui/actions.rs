@@ -7,7 +7,7 @@
 
 use crate::model::{
     AgentSessionId, Diagnostic, GraphLink, GraphSnapshot, MuxSessionId, MuxSessionNode, NodeId,
-    RelationKind,
+    PinLastSession, RelationKind,
 };
 use crate::tui::app::App;
 use crate::tui::rows::{RowId, RowKind};
@@ -40,6 +40,11 @@ pub enum PinDiagnosticView {
     Unbound {
         pin_id: String,
         expected_mux_native_id: String,
+        /// Optional last-recorded session from the pin-bindings
+        /// sidecar (ADR 0058). When present, the launch path can
+        /// advertise a "resume <id>" affordance instead of a plain
+        /// "launch" hint.
+        last_session: Option<PinLastSession>,
     },
     StaleMux {
         pin_id: String,
@@ -232,9 +237,11 @@ pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<Pin
             Diagnostic::PinUnbound {
                 pin_id: id,
                 expected_mux_native_id,
+                last_session,
             } if id == pin_id => Some(PinDiagnosticView::Unbound {
                 pin_id: id.clone(),
                 expected_mux_native_id: expected_mux_native_id.clone(),
+                last_session: last_session.clone(),
             }),
             Diagnostic::PinStaleMux { pin_id: id, mux } if id == pin_id => {
                 Some(PinDiagnosticView::StaleMux {
@@ -301,9 +308,17 @@ pub fn pin_status_hint(diagnostics: &[PinDiagnosticView]) -> Option<String> {
                 PinDiagnosticView::Unbound {
                     pin_id,
                     expected_mux_native_id,
-                } => Some(format!(
-                    "pin `{pin_id}` unbound: expected {expected_mux_native_id} · Enter launch"
-                )),
+                    last_session,
+                } => Some(match last_session {
+                    Some(last) => format!(
+                        "pin `{pin_id}` unbound: expected {expected_mux_native_id} · \
+                         Enter resume `{}`",
+                        last.session_id
+                    ),
+                    None => format!(
+                        "pin `{pin_id}` unbound: expected {expected_mux_native_id} · Enter launch"
+                    ),
+                }),
                 _ => None,
             })
         })
@@ -855,5 +870,34 @@ mod tests {
             resolve_view_session(&app),
             Err(ViewerDisabled::UnsupportedRow)
         );
+    }
+
+    // ----- H-PIN-RESUME-005: pin status hint branches on last_session -----
+
+    #[test]
+    fn pin_status_hint_unbound_without_last_session_advertises_launch() {
+        let diagnostic = PinDiagnosticView::Unbound {
+            pin_id: "ingest".to_string(),
+            expected_mux_native_id: "tmux:ingest".to_string(),
+            last_session: None,
+        };
+        let hint = pin_status_hint(&[diagnostic]).expect("status hint produced");
+        assert!(hint.contains("Enter launch"), "hint: {hint}");
+        assert!(!hint.contains("resume"), "hint: {hint}");
+    }
+
+    #[test]
+    fn pin_status_hint_unbound_with_last_session_advertises_resume() {
+        let diagnostic = PinDiagnosticView::Unbound {
+            pin_id: "ingest".to_string(),
+            expected_mux_native_id: "tmux:ingest".to_string(),
+            last_session: Some(PinLastSession {
+                session_id: "session-a".to_string(),
+                observed_epoch: 1,
+            }),
+        };
+        let hint = pin_status_hint(&[diagnostic]).expect("status hint produced");
+        assert!(hint.contains("Enter resume"), "hint: {hint}");
+        assert!(hint.contains("session-a"), "hint: {hint}");
     }
 }
