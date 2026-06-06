@@ -232,6 +232,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
                 Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
                 Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
+                Some(Action::LaunchPin) => launch_pin_action(terminal, &mut app, &config),
                 Some(Action::OpenControls) => {
                     app.open_controls_overlay();
                     app.update(Msg::SetStatus(Some(
@@ -248,7 +249,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     )));
                 }
                 Some(Action::PinsOverlayKey(key)) => {
-                    handle_pins_overlay_key(&mut app, &config, key)
+                    handle_pins_overlay_key(terminal, &mut app, &config, key)
                 }
                 Some(Action::SwitchView(view)) => apply_view_switch(&mut app, &config, view),
                 Some(Action::CycleView(delta)) => {
@@ -457,6 +458,11 @@ fn static_event_loop(
                 Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
                 Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
                 Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
+                Some(Action::LaunchPin) => {
+                    app.update(Msg::SetStatus(Some(
+                        "scenario TUI is static; pin launch is disabled".to_string(),
+                    )));
+                }
                 Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
                 Some(Action::CopySessionId) => copy_session_id_action(&mut app),
                 None => {}
@@ -529,7 +535,8 @@ fn static_apply_pins_action_and_refresh(
         PinsAction::CreatePin(_)
         | PinsAction::EditPin(_)
         | PinsAction::BindPin(_)
-        | PinsAction::RemovePin(_) => {
+        | PinsAction::RemovePin(_)
+        | PinsAction::LaunchPin { .. } => {
             app.update(Msg::SetStatus(Some(
                 "scenario TUI keeps mutating actions disabled".to_string(),
             )));
@@ -1201,6 +1208,10 @@ enum Action {
     /// `A` adopts the selected live mux row as a new pin. Refuses
     /// with a status hint on any other row kind.
     OpenPinAdopt,
+    /// `L` launches the selected pin via `conspectus pin launch
+    /// <id>`. Sibling of `Enter` on a `RowKind::Pin`; refuses with
+    /// a status hint when no pin row is selected.
+    LaunchPin,
     /// Open the controls overlay (ADR 0031, F8-005) at its top
     /// section.
     OpenControls,
@@ -1412,6 +1423,7 @@ fn handle_controls_overlay_key(
 /// action to the app. Mirrors [`handle_controls_overlay_key`] but
 /// dispatches `PinsAction` through the pin-specific write path.
 fn handle_pins_overlay_key(
+    terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
     key: ratatui::crossterm::event::KeyEvent,
@@ -1428,11 +1440,11 @@ fn handle_pins_overlay_key(
             app.close_pins_overlay();
         }
         PinsOutcome::ApplyAndStay(action) => {
-            apply_pins_action_and_refresh(app, config, action);
+            apply_pins_action_and_refresh(terminal, app, config, action);
         }
         PinsOutcome::ApplyAndClose(action) => {
             app.close_pins_overlay();
-            apply_pins_action_and_refresh(app, config, action);
+            apply_pins_action_and_refresh(terminal, app, config, action);
         }
     }
 }
@@ -1441,7 +1453,12 @@ fn handle_pins_overlay_key(
 /// visible immediately. Mirrors [`apply_controls_action_and_refresh`]
 /// but only handles the pin-specific variants; everything else routes
 /// through the placeholder status hint.
+///
+/// `terminal` is threaded through so the `LaunchPin` variant can
+/// suspend the alt screen and re-exec into the CLI's launch path —
+/// every other variant only writes TOML and does not need it.
 fn apply_pins_action_and_refresh(
+    terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
     action: crate::tui::widgets::pins::PinsAction,
@@ -1452,6 +1469,7 @@ fn apply_pins_action_and_refresh(
         PinsAction::EditPin(request) => edit_pin_action(app, config, request),
         PinsAction::BindPin(request) => bind_pin_action(app, config, request),
         PinsAction::RemovePin(request) => remove_pin_controls_action(app, config, request),
+        PinsAction::LaunchPin { pin_id } => launch_pin_by_id(terminal, app, config, &pin_id),
         PinsAction::PinPlaceholder(_) => {
             app.apply_pins_action(action);
         }
@@ -1855,12 +1873,24 @@ fn launch_pin_action(terminal: &mut DefaultTerminal, app: &mut App, config: &Run
             return;
         }
     };
+    launch_pin_by_id(terminal, app, config, &pin_id);
+}
 
+/// Shared body of `pin launch <id>`: suspend the TUI, re-exec into
+/// the CLI, and refresh on return. Used by both the row-level
+/// `Enter` / `L` dispatch and the Pins modal's `launch` entry so
+/// the modal flow doesn't reinvent the terminal hand-off.
+fn launch_pin_by_id(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    pin_id: &str,
+) {
     ratatui::restore();
     let status = std::process::Command::new(
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
     )
-    .args(["pin", "launch", &pin_id])
+    .args(["pin", "launch", pin_id])
     .status();
     *terminal = ratatui::init();
     let _ = terminal.clear();
@@ -2240,6 +2270,8 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             | (KeyModifiers::NONE, KeyCode::Char('B')) => Some(Action::OpenPinRebind),
             (KeyModifiers::SHIFT, KeyCode::Char('A'))
             | (KeyModifiers::NONE, KeyCode::Char('A')) => Some(Action::OpenPinAdopt),
+            (KeyModifiers::SHIFT, KeyCode::Char('L'))
+            | (KeyModifiers::NONE, KeyCode::Char('L')) => Some(Action::LaunchPin),
             // ADR 0031 / F8-005 accelerator surface (reshuffled
             // alongside H-VIEWER-NATIVE-008 to give the more
             // discoverable `v` to the session viewer):
@@ -2513,6 +2545,18 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Char('b'), KeyModifiers::NONE), 24),
             Some(Action::PinBindHint)
+        );
+    }
+
+    #[test]
+    fn translate_capital_l_requests_pin_launch() {
+        assert_eq!(
+            translate(press(KeyCode::Char('L'), KeyModifiers::SHIFT), 24),
+            Some(Action::LaunchPin)
+        );
+        assert_eq!(
+            translate(press(KeyCode::Char('L'), KeyModifiers::NONE), 24),
+            Some(Action::LaunchPin)
         );
     }
 

@@ -32,7 +32,9 @@ use crate::tui::widgets::input::TextInputState;
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
 /// presentation of the underlying surface.
-pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "rename", "remove", "bind", "rebind", "adopt"];
+pub const PIN_ACTION_OPTIONS: &[&str] = &[
+    "create", "launch", "rename", "remove", "bind", "rebind", "adopt",
+];
 
 /// Read-only snapshot the pins overlay renders against. Borrowed
 /// each frame so the overlay never holds a stale copy.
@@ -106,6 +108,13 @@ pub enum PinsAction {
     EditPin(PinEditRequest),
     BindPin(PinBindRequest),
     RemovePin(PinRemoveRequest),
+    /// Launch the named pin via the CLI's `pin launch` path (ADR
+    /// 0057 / ADR 0058). The runtime suspends the TUI, re-execs
+    /// into the binary, and refreshes on return — same code path
+    /// the row-level `Enter` / `L` shortcuts use.
+    LaunchPin {
+        pin_id: String,
+    },
     /// Action chosen from the menu without the prerequisites met
     /// (e.g. `rename` with no pin row selected). The runtime surfaces
     /// a status hint instead of mutating.
@@ -252,7 +261,8 @@ impl PinsOverlayState {
             return None;
         }
         Some(Self {
-            cursor: PinsCursor::Action(3),
+            // "bind" is index 4 in PIN_ACTION_OPTIONS.
+            cursor: PinsCursor::Action(4),
             sub_editor: Some(PinsSubEditor::Bind(PinBindState::new(options))),
         })
     }
@@ -260,7 +270,8 @@ impl PinsOverlayState {
     /// Open directly into the remove confirmation for `target`.
     pub fn open_with_remove(target: PinMutationTarget) -> Self {
         Self {
-            cursor: PinsCursor::Action(2),
+            // "remove" is index 3 in PIN_ACTION_OPTIONS.
+            cursor: PinsCursor::Action(3),
             sub_editor: Some(PinsSubEditor::Remove(PinRemoveState::new(target))),
         }
     }
@@ -269,7 +280,8 @@ impl PinsOverlayState {
     /// rename direct shortcut.
     pub fn open_with_edit(target: PinMutationTarget) -> Self {
         Self {
-            cursor: PinsCursor::Action(1),
+            // "rename" is index 2 in PIN_ACTION_OPTIONS.
+            cursor: PinsCursor::Action(2),
             sub_editor: Some(PinsSubEditor::Edit(PinEditState::new(target))),
         }
     }
@@ -279,7 +291,8 @@ impl PinsOverlayState {
     /// keystroke without paging through the full edit form.
     pub fn open_with_rebind(target: PinMutationTarget) -> Self {
         Self {
-            cursor: PinsCursor::Action(4),
+            // "rebind" is index 5 in PIN_ACTION_OPTIONS.
+            cursor: PinsCursor::Action(5),
             sub_editor: Some(PinsSubEditor::Rebind(PinRebindState::new(target))),
         }
     }
@@ -328,6 +341,16 @@ impl PinsOverlayState {
                 ctx.pin_create_defaults.clone(),
             )));
             PinsOutcome::Continue
+        } else if label == "launch" {
+            // Launch has no sub-editor — the runtime takes the
+            // pin id and re-execs into `conspectus pin launch`,
+            // suspending the TUI. Requires a pin selection;
+            // placeholder otherwise.
+            if let Some(target) = ctx.pin_target.clone() {
+                PinsOutcome::ApplyAndClose(PinsAction::LaunchPin { pin_id: target.id })
+            } else {
+                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+            }
         } else if label == "rename" {
             if let Some(target) = ctx.pin_target.clone() {
                 self.sub_editor = Some(PinsSubEditor::Edit(PinEditState::new(target)));
@@ -1376,7 +1399,7 @@ mod tests {
     fn enter_on_rename_without_target_emits_placeholder() {
         let ctx = PinsContext::default();
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(1);
+        state.cursor = PinsCursor::Action(2); // rename
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
@@ -1391,7 +1414,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(1);
+        state.cursor = PinsCursor::Action(2); // rename
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(outcome, PinsOutcome::Continue);
         assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Edit(_))));
@@ -1404,7 +1427,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(1);
+        state.cursor = PinsCursor::Action(2); // rename
         state.handle_key(&ctx, key(KeyCode::Enter));
 
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
@@ -1431,7 +1454,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(1);
+        state.cursor = PinsCursor::Action(2); // rename
         state.handle_key(&ctx, key(KeyCode::Enter));
 
         let outcome = state.handle_key(&ctx, key(KeyCode::Esc));
@@ -1446,7 +1469,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(2);
+        state.cursor = PinsCursor::Action(3); // remove
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(outcome, PinsOutcome::Continue);
         assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Remove(_))));
@@ -1459,7 +1482,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(2);
+        state.cursor = PinsCursor::Action(3); // remove
         state.handle_key(&ctx, key(KeyCode::Enter));
 
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
@@ -1492,7 +1515,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(3);
+        state.cursor = PinsCursor::Action(4); // bind
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(outcome, PinsOutcome::Continue);
         assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Bind(_))));
@@ -1516,7 +1539,7 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(3);
+        state.cursor = PinsCursor::Action(4); // bind
         state.handle_key(&ctx, key(KeyCode::Enter));
         state.handle_key(&ctx, key(KeyCode::Down));
 
@@ -1534,7 +1557,7 @@ mod tests {
     fn bind_with_no_options_emits_placeholder() {
         let ctx = PinsContext::default();
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(3);
+        state.cursor = PinsCursor::Action(4); // bind
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
@@ -1667,9 +1690,44 @@ mod tests {
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
-        state.cursor = PinsCursor::Action(4); // rebind
+        state.cursor = PinsCursor::Action(5); // rebind
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(outcome, PinsOutcome::Continue);
         assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Rebind(_))));
+    }
+
+    // ----- launch menu entry -----
+
+    #[test]
+    fn enter_on_launch_without_target_emits_placeholder() {
+        let ctx = PinsContext::default();
+        let mut state = PinsOverlayState::new();
+        state.cursor = PinsCursor::Action(1); // launch
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder("launch"))
+        );
+    }
+
+    #[test]
+    fn enter_on_launch_with_target_emits_launch_pin_action() {
+        // The launch entry has no sub-editor — it commits the pin
+        // id straight to the runtime so the TUI can suspend and
+        // re-exec into `conspectus pin launch <id>`.
+        let ctx = PinsContext {
+            pin_target: Some(pin_target()),
+            ..PinsContext::default()
+        };
+        let mut state = PinsOverlayState::new();
+        state.cursor = PinsCursor::Action(1); // launch
+        let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+        assert_eq!(
+            outcome,
+            PinsOutcome::ApplyAndClose(PinsAction::LaunchPin {
+                pin_id: "ingest".to_string()
+            })
+        );
+        assert!(state.sub_editor().is_none());
     }
 }

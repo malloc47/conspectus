@@ -192,6 +192,11 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     );
     bind(
         &mut lines,
+        "L",
+        "Launch the selected pin (same code path as Enter on an unbound pin row)",
+    );
+    bind(
+        &mut lines,
         "R",
         "Rename the selected pin's display name (same key as session rename)",
     );
@@ -457,6 +462,7 @@ mod tests {
             "Quit",
             "Open the pins overlay (menu listing every action)",
             "New pin — opens the create form",
+            "Launch the selected pin",
             "Rebind the selected pin's mux target",
             "Bind picker for the selected PinAmbiguous row",
             "Adopt the selected live mux row as a new pin",

@@ -495,6 +495,10 @@ step.
 Direct shortcuts:
 
 - `Enter` on a pin launches/attaches through `conspectus pin launch`.
+- `L` launches the selected pin via the same code path as `Enter`;
+  useful when muscle-memory wants a distinct key independent of the
+  row's default action. Refuses with a status hint when no pin row
+  is selected.
 - `N` opens the create form seeded from the current selection
   (harness/cwd/display from a selected session, cwd from a selected
   group, or harness/cwd/mux from a selected mux row).
@@ -513,14 +517,15 @@ Direct shortcuts:
 Pins modal (`p`):
 
 - `p` opens the discoverable menu listing
-  `create / rename / remove / bind / rebind / adopt`. `↑/↓` navigate,
-  `Enter` opens the form for the chosen action, `Esc` closes the
+  `create / launch / rename / remove / bind / rebind / adopt`. `↑/↓`
+  navigate, `Enter` opens the form (or in the case of `launch` /
+  `bind`, executes directly) for the chosen action, `Esc` closes the
   modal. Each form is the same one the direct shortcut opens, so the
   two surfaces stay 1:1.
-- Entries that need a pin selection (`rename`, `remove`, `rebind`)
-  surface a status hint instead when no pin row is selected, and
-  `bind` only opens its picker when the resolver flagged
-  `PinAmbiguous` candidates.
+- Entries that need a pin selection (`launch`, `rename`, `remove`,
+  `rebind`) surface a status hint instead when no pin row is
+  selected, and `bind` only opens its picker when the resolver
+  flagged `PinAmbiguous` candidates.
 
 Static scenario TUIs and read-only navigation paths keep these
 mutations disabled; they surface a status message instead of writing.

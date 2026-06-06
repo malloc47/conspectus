@@ -1092,6 +1092,10 @@ impl App {
                 self.status_message =
                     Some("pins: remove is handled by the TUI runtime".to_string());
             }
+            PinsAction::LaunchPin { .. } => {
+                self.status_message =
+                    Some("pins: launch is handled by the TUI runtime".to_string());
+            }
             PinsAction::PinPlaceholder(label) => {
                 self.status_message = Some(format!(
                     "pins: `{label}` needs a pin selection; press `p` for the picker or use `conspectus pin {label}`"
