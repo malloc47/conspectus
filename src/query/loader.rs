@@ -18,8 +18,8 @@ use rusqlite::{Connection, Transaction, params};
 use crate::aliases::AliasOverlay;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Diagnostic, ForgePrNode, ForkNode, GraphLink,
-    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, RepoNode,
-    ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
+    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, PinBinding, PinCandidate,
+    Provenance, RepoNode, ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
 };
 
 use super::reader::BadEnum;
@@ -52,6 +52,7 @@ pub fn load(snapshot: &GraphSnapshot, conn: &mut Connection) -> rusqlite::Result
     insert_candidate_links(&tx, &snapshot.candidate_links)?;
     insert_resolved(&tx, &snapshot.resolved_relationships)?;
     insert_diagnostics(&tx, &snapshot.diagnostics)?;
+    insert_pins(&tx, &snapshot.pins)?;
     insert_aliases(&tx, &snapshot.aliases)?;
     tx.commit()
 }
@@ -59,6 +60,7 @@ pub fn load(snapshot: &GraphSnapshot, conn: &mut Connection) -> rusqlite::Result
 fn clear_all(tx: &Transaction) -> rusqlite::Result<()> {
     for table in [
         "aliases",
+        "pins",
         "diagnostics",
         "resolved_relationships",
         "candidate_links",
@@ -615,6 +617,54 @@ fn serialize_diagnostic_details(d: &Diagnostic) -> rusqlite::Result<String> {
             "serialize diagnostic: {err}"
         ))))
     })
+}
+
+fn insert_pins(tx: &Transaction, pins: &[PinCandidate]) -> rusqlite::Result<()> {
+    let mut stmt = tx.prepare(
+        "INSERT INTO pins (\
+           pin_id, display_name, harness, cwd, mux_native_id, \
+           provenance, store_path, binding_kind, details\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?;
+    for pin in pins {
+        let details = serde_json::to_string(pin).map_err(|err| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(BadEnum(format!(
+                "serialize pin: {err}"
+            ))))
+        })?;
+        stmt.execute(params![
+            pin.id,
+            pin.display_name,
+            pin.harness,
+            pin.cwd,
+            pin.mux.native_id(),
+            pin_provenance_tag(pin.provenance),
+            pin.store_path,
+            pin.binding.as_ref().map(pin_binding_tag),
+            details,
+        ])?;
+    }
+    Ok(())
+}
+
+fn pin_provenance_tag(provenance: Provenance) -> &'static str {
+    match provenance {
+        Provenance::LocalPin => "local_pin",
+        Provenance::GlobalPin => "global_pin",
+        // Pins always carry LocalPin or GlobalPin per the discovery
+        // pass; anything else is a resolver bug. Surface it as
+        // "unknown" rather than panicking so a misclassified row
+        // doesn't break the whole materialize.
+        _ => "unknown",
+    }
+}
+
+fn pin_binding_tag(binding: &PinBinding) -> &'static str {
+    match binding {
+        PinBinding::Bound { .. } => "bound",
+        PinBinding::StaleMux { .. } => "stale_mux",
+        PinBinding::Unbound => "unbound",
+    }
 }
 
 fn insert_aliases(tx: &Transaction, aliases: &AliasOverlay) -> rusqlite::Result<()> {
@@ -1250,6 +1300,82 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(observed, expected);
+    }
+
+    #[test]
+    fn pin_candidates_round_trip_through_reader() {
+        // Regression: pins were never materialized to SQLite, so
+        // the TUI's `build_sessions_tree_from_conn` (which reads
+        // through `read_snapshot`) couldn't see them. The synthetic
+        // "Pins" group never emitted, and users wondered where
+        // their newly-created pins went.
+        use crate::model::{
+            AgentSessionId, MuxSessionId, PinBinding, PinCandidate, PinMuxRef, Provenance,
+        };
+
+        let mut conn = fresh_conn();
+        let mut snap = GraphSnapshot::empty();
+
+        let unbound = PinCandidate {
+            id: "ingest".into(),
+            display_name: "Ingest".into(),
+            harness: "codex".into(),
+            cwd: "/p/work".into(),
+            mux: PinMuxRef {
+                backend: "tmux".into(),
+                name: "ingest".into(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/work/.conspectus.toml".into(),
+            binding: Some(PinBinding::Unbound),
+        };
+        let bound = PinCandidate {
+            id: "review".into(),
+            display_name: "Code Review".into(),
+            harness: "claude-code".into(),
+            cwd: "/p/work".into(),
+            mux: PinMuxRef {
+                backend: "tmux".into(),
+                name: "review".into(),
+                socket_name: Some("scratch".into()),
+            },
+            launch_argv: Some(vec!["claude".into(), "--model".into(), "opus".into()]),
+            reason: Some("paired review".into()),
+            provenance: Provenance::GlobalPin,
+            store_path: "/home/op/.config/conspectus/config.toml".into(),
+            binding: Some(PinBinding::Bound {
+                mux: MuxSessionId::new("tmux:scratch:review"),
+                session: AgentSessionId::new("claude-code", "/state", "session-a"),
+            }),
+        };
+        snap.pins.extend([unbound.clone(), bound.clone()]);
+        load(&snap, &mut conn).unwrap();
+
+        let round_tripped = crate::query::read_snapshot(&conn).expect("read snapshot");
+        let observed: std::collections::BTreeSet<_> = round_tripped.pins.iter().cloned().collect();
+        let expected: std::collections::BTreeSet<_> = [unbound, bound].into_iter().collect();
+        assert_eq!(observed, expected);
+
+        // The columnar fields are also queryable directly without
+        // parsing `details`, which is the whole point of carrying
+        // them alongside the JSON.
+        let kinds: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT pin_id, binding_kind FROM pins ORDER BY pin_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            kinds,
+            vec![
+                ("ingest".to_string(), Some("unbound".to_string())),
+                ("review".to_string(), Some("bound".to_string())),
+            ]
+        );
     }
 
     #[test]

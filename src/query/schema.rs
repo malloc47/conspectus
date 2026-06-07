@@ -405,6 +405,18 @@ pub const DIAGNOSTICS_COLUMNS: &[&str] = &[
     "details",
 ];
 
+pub const PINS_COLUMNS: &[&str] = &[
+    "pin_id",
+    "display_name",
+    "harness",
+    "cwd",
+    "mux_native_id",
+    "provenance",
+    "store_path",
+    "binding_kind",
+    "details",
+];
+
 pub const ALIASES_COLUMNS: &[&str] = &["node", "node_kind", "display_name"];
 
 pub const PROVIDER_STATE_COLUMNS: &[&str] =
@@ -486,6 +498,7 @@ pub const TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ("candidate_links", CANDIDATE_LINKS_COLUMNS),
     ("resolved_relationships", RESOLVED_RELATIONSHIPS_COLUMNS),
     ("diagnostics", DIAGNOSTICS_COLUMNS),
+    ("pins", PINS_COLUMNS),
     ("aliases", ALIASES_COLUMNS),
     ("provider_state", PROVIDER_STATE_COLUMNS),
     ("embeddings", EMBEDDINGS_COLUMNS),

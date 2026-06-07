@@ -42,9 +42,9 @@ use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence,
     Diagnostic, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
     GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId,
-    Provenance, RelationKind, RepoId, RepoNode, ResolvedRelationship, RuntimeProcessId,
-    RuntimeProcessNode, RuntimeProcessRole, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
-    WorkspaceNode,
+    PinCandidate, Provenance, RelationKind, RepoId, RepoNode, ResolvedRelationship,
+    RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata, UnresolvedEndpoint,
+    WorkspaceId, WorkspaceNode,
 };
 
 /// Read a complete [`GraphSnapshot`] from `conn`. The snapshot is
@@ -64,6 +64,7 @@ pub fn read_snapshot(conn: &Connection) -> rusqlite::Result<GraphSnapshot> {
     snap.candidate_links = read_candidate_links(conn)?;
     snap.resolved_relationships = read_resolved(conn)?;
     snap.diagnostics = read_diagnostics(conn)?;
+    snap.pins = read_pins(conn)?;
     snap.aliases = read_aliases(conn)?;
     Ok(snap)
 }
@@ -495,6 +496,21 @@ fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
                 Box::new(BadEnum(format!("diagnostic kind={other}"))),
             )),
         }
+    })?;
+    rows.collect()
+}
+
+fn read_pins(conn: &Connection) -> rusqlite::Result<Vec<PinCandidate>> {
+    let mut stmt = conn.prepare("SELECT details FROM pins ORDER BY pin_id")?;
+    let rows = stmt.query_map([], |row| {
+        let details: String = row.get(0)?;
+        serde_json::from_str::<PinCandidate>(&details).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(BadEnum(format!("pin details parse: {err}"))),
+            )
+        })
     })?;
     rows.collect()
 }

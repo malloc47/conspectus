@@ -273,6 +273,30 @@ CREATE TABLE IF NOT EXISTS diagnostics (
 );
 
 -- =============================================================
+-- Pin candidates (ADR 0057 / ADR 0058)
+-- =============================================================
+
+-- One row per `PinCandidate` in the resolved snapshot. Indexed by
+-- `pin_id` for direct lookup; `details` holds
+-- `serde_json::to_string(&PinCandidate)` so the reader can
+-- reconstruct the full struct (including launch_argv overrides,
+-- mux socket, and the resolver-populated binding state) without a
+-- per-field column explosion. The flat columns above `details`
+-- enable readable `SELECT … FROM pins` queries without parsing
+-- JSON.
+CREATE TABLE IF NOT EXISTS pins (
+    pin_id        TEXT NOT NULL PRIMARY KEY,
+    display_name  TEXT NOT NULL,
+    harness       TEXT NOT NULL,
+    cwd           TEXT NOT NULL,
+    mux_native_id TEXT NOT NULL,           -- pin.mux.native_id() encoded form
+    provenance    TEXT NOT NULL,           -- 'local_pin' / 'global_pin'
+    store_path    TEXT NOT NULL,
+    binding_kind  TEXT,                    -- 'bound' / 'stale_mux' / 'unbound' / NULL
+    details       TEXT NOT NULL
+);
+
+-- =============================================================
 -- Alias overlay (ADR 0029)
 -- =============================================================
 
