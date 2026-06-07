@@ -8355,7 +8355,7 @@ this phase migrates whichever ones exist when each story lands.
   - Blockers: P10 has landed and downstream tests/users have had a
     chance to move to `render_conn` / `render_with_conn`.
 
-- [ ] `P10-FU-002` Audit GraphSnapshot round-trip and force coverage
+- [x] `P10-FU-002` Audit GraphSnapshot round-trip and force coverage
   on future fields.
   - Context: two silently-latent round-trip gaps shipped before any
     test caught them. `Diagnostic::PinUnbound` (and the three sibling
@@ -8415,11 +8415,28 @@ this phase migrates whichever ones exist when each story lands.
     they already exist; this story doesn't add or remove them.
   - Blockers: none. Independent hardening pass on the layer
     `P10-001` audited but didn't fully nail down.
-  - Outcome (after landing): every existing GraphSnapshot field is
-    proven round-trip-equal under a canonical fixture, and the
-    compile-time destructure / exhaustive-match harnesses ensure
-    the next model addition fails CI rather than silently dropping
-    data on the floor.
+  - Outcome: `full_snapshot_round_trips` extended to cover all 4
+    pin-* diagnostic variants (including PinUnbound with and
+    without last_session) and all 3 PinBinding states plus the
+    pre-resolve None case. Seven new audit tests in
+    `src/query/reader.rs`:
+    `graph_snapshot_field_drift_guard` (destructures GraphSnapshot
+    so a new top-level field fails to compile),
+    `every_diagnostic_variant_round_trips`,
+    `every_pin_binding_state_round_trips`,
+    `every_link_state_round_trips`,
+    `every_link_endpoint_round_trips`,
+    `every_session_kind_round_trips`,
+    `every_runtime_process_role_round_trips`,
+    `clear_all_handles_every_materialized_table`. Each uses an
+    exhaustive match on its enum so adding a variant is a
+    compile error until the matrix covers it. SessionKind and
+    RuntimeProcessRole tests in particular catch the reader's
+    silent-`None` asymmetry on unknown strings (writer is
+    exhaustive; reader fan-in maps unknowns to None). The
+    `clear_all` test catches the recent `pins` missing-table
+    regression by reloading-with-empty and asserting every
+    materialized table is empty afterwards.
 
 ## Graph Visualization Workstream
 
