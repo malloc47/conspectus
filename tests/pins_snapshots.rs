@@ -25,10 +25,18 @@ fn agent(key: &str, cwd: &str) -> GraphNode {
 }
 
 fn mux(native_id: &str, cwd: &str) -> GraphNode {
+    // Callers pass the fully-prefixed form like "tmux:bound" for
+    // ergonomics, but `MuxSessionNode.native_id` should hold the
+    // bare post-backend portion (`bound`) per production
+    // discovery. Strip the `tmux:` prefix here so the fixture
+    // matches what discovery emits and the resolver's lookup
+    // (`mux_index`) reconstructs the same prefixed key on the
+    // way out.
+    let bare = native_id.strip_prefix("tmux:").unwrap_or(native_id);
     GraphNode::MuxSession(MuxSessionNode {
         id: MuxSessionId::new(native_id),
         backend: "tmux".to_string(),
-        native_id: native_id.to_string(),
+        native_id: bare.to_string(),
         cwd: Some(cwd.to_string()),
         active_pane_command: None,
         active_pane_pid: None,

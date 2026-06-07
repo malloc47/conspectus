@@ -1,5 +1,6 @@
 ---
 source: tests/pins_snapshots.rs
+assertion_line: 361
 expression: rendered
 ---
 {
@@ -30,7 +31,7 @@ expression: rendered
         "native_id": "tmux:bound-by-declared"
       },
       "backend": "tmux",
-      "native_id": "tmux:bound-by-declared",
+      "native_id": "bound-by-declared",
       "cwd": "/home/op/src/work"
     }
   ],

@@ -1,5 +1,6 @@
 ---
 source: tests/pins_snapshots.rs
+assertion_line: 316
 expression: rendered
 ---
 {
@@ -60,7 +61,7 @@ expression: rendered
         "native_id": "tmux:ambig"
       },
       "backend": "tmux",
-      "native_id": "tmux:ambig",
+      "native_id": "ambig",
       "cwd": "/home/op/src/work"
     },
     {
@@ -69,7 +70,7 @@ expression: rendered
         "native_id": "tmux:bound"
       },
       "backend": "tmux",
-      "native_id": "tmux:bound",
+      "native_id": "bound",
       "cwd": "/home/op/src/work"
     },
     {
@@ -78,7 +79,7 @@ expression: rendered
         "native_id": "tmux:drift"
       },
       "backend": "tmux",
-      "native_id": "tmux:drift",
+      "native_id": "drift",
       "cwd": "/home/op/src/work"
     },
     {
@@ -87,7 +88,7 @@ expression: rendered
         "native_id": "tmux:stale"
       },
       "backend": "tmux",
-      "native_id": "tmux:stale",
+      "native_id": "stale",
       "cwd": "/home/op/src/work"
     },
     {
@@ -96,7 +97,7 @@ expression: rendered
         "native_id": "tmux:work:socketed"
       },
       "backend": "tmux",
-      "native_id": "tmux:work:socketed",
+      "native_id": "work:socketed",
       "cwd": "/home/op/src/work"
     }
   ],
