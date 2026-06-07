@@ -345,6 +345,20 @@ pub struct AgentSessionNode {
 pub struct MuxSessionNode {
     pub id: MuxSessionId,
     pub backend: String,
+    /// The post-backend portion of the mux's identifier. For
+    /// default-socket tmux sessions this is just the bare session
+    /// name (e.g. `editor`). For non-default-socket sessions
+    /// (when discovery for them lands per H-PIN-F-001) it would
+    /// be `<socket>:<name>` (e.g. `scratch:editor`). The fully-
+    /// prefixed form `<backend>:<native_id>` lives on
+    /// [`MuxSessionId.native_id`] — same field name on the id
+    /// type, but the id holds the prefixed form while this field
+    /// drops the backend prefix.
+    ///
+    /// Resolver consumers (`resolve::pins::mux_index`, the pin
+    /// lookup path) reconstruct the prefixed key by formatting
+    /// `<backend>:<native_id>` so the bookkeeping stays
+    /// consistent with `PinMux::native_id()`'s output.
     pub native_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,

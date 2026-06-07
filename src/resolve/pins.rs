@@ -181,11 +181,24 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn mux_index(nodes: &[GraphNode]) -> BTreeMap<&str, &MuxSessionNode> {
+/// Key muxes by the prefixed encoding `pin.mux.native_id()` produces
+/// (`tmux:<name>` for default sockets, `tmux:<socket>:<name>` for
+/// non-default sockets per ADR 0057). `MuxSessionNode.native_id`
+/// itself holds the *bare* tmux session name (per production
+/// discovery at `discovery/tmux/mod.rs:1038`); we reconstruct the
+/// prefixed form here so the lookup matches what the pin entries
+/// declare. Non-default-socket muxes can't be reconstructed without
+/// a socket field on the node (deferred per H-PIN-F-001), so they
+/// never appear in the index and their pins resolve to
+/// `PinUnbound` until the socket-aware discovery story lands.
+fn mux_index(nodes: &[GraphNode]) -> BTreeMap<String, &MuxSessionNode> {
     nodes
         .iter()
         .filter_map(|node| match node {
-            GraphNode::MuxSession(mux) => Some((mux.native_id.as_str(), mux)),
+            GraphNode::MuxSession(mux) => {
+                let key = format!("{}:{}", mux.backend, mux.native_id);
+                Some((key, mux))
+            }
             _ => None,
         })
         .collect()
@@ -281,11 +294,16 @@ mod tests {
     };
 
     fn mux_node(name: &str) -> GraphNode {
-        let native_id = format!("tmux:{name}");
+        // Production tmux discovery encodes the *id* as the
+        // prefixed form `tmux:<name>` but stores the bare tmux
+        // session name in `native_id` (see
+        // `discovery/tmux/mod.rs:1038`). Test fixtures must match
+        // so the resolver's `mux_index` can reconstruct the
+        // prefixed key — otherwise default-socket pins never bind.
         GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(native_id.clone()),
+            id: MuxSessionId::new(format!("tmux:{name}")),
             backend: "tmux".to_string(),
-            native_id,
+            native_id: name.to_string(),
             cwd: Some("/home/me/work/repo".to_string()),
             active_pane_command: None,
             active_pane_pid: None,
@@ -641,11 +659,15 @@ mod tests {
         ));
 
         // Add the correctly-encoded non-default-socket mux and rerun.
-        let native_id = "tmux:scratch:ingest".to_string();
+        // Convention: `id` is the prefixed form `tmux:<socket>:<name>`,
+        // `native_id` holds the post-backend portion (`<socket>:<name>`
+        // for non-default sockets, just `<name>` for default). The
+        // resolver's `mux_index` reconstructs the full lookup key
+        // as `format!("{}:{}", backend, native_id)`.
         snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(native_id.clone()),
+            id: MuxSessionId::new("tmux:scratch:ingest"),
             backend: "tmux".to_string(),
-            native_id,
+            native_id: "scratch:ingest".to_string(),
             cwd: Some("/home/me/work/repo".to_string()),
             active_pane_command: None,
             active_pane_pid: None,
@@ -674,6 +696,75 @@ mod tests {
             Some(PinBinding::Bound { .. })
         ));
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn production_style_mux_node_binds_default_socket_pin() {
+        // Regression for the inconsistency between resolver test
+        // fixtures (which used to set `native_id` to the prefixed
+        // `tmux:<name>` form) and production discovery (which sets
+        // `native_id` to the bare `<name>` per
+        // `discovery/tmux/mod.rs:1038`). Before the
+        // `mux_index` reconstruction-key fix, default-socket pins
+        // could never bind against a production-shaped snapshot —
+        // the lookup key (`pin.mux.native_id()` = "tmux:editor")
+        // never matched the index key (mux.native_id = "editor").
+        // This test exercises the binding path with the production
+        // convention to lock the fix in.
+        use crate::model::PinMuxRef;
+
+        let mut snap = GraphSnapshot::empty();
+        // Production-shaped mux node: prefixed id, bare native_id.
+        snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("tmux:editor"),
+            backend: "tmux".to_string(),
+            native_id: "editor".to_string(),
+            cwd: Some("/home/op/work".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        snap.nodes
+            .push(agent_session_node("codex", "alpha", "/home/op/work"));
+        snap.candidate_links.push(linked_to_mux(
+            "discovered-alpha",
+            "codex",
+            "alpha",
+            "editor",
+            Provenance::Discovered,
+        ));
+        snap.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/home/op/work".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "editor".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/home/op/work/.conspectus.toml".to_string(),
+            binding: None,
+        });
+
+        let diagnostics = apply_pin_bindings(&mut snap);
+
+        assert!(
+            matches!(snap.pins[0].binding, Some(PinBinding::Bound { .. })),
+            "expected Bound binding, got {:?}",
+            snap.pins[0].binding,
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "expected no diagnostics on a clean bind, got {diagnostics:?}",
+        );
     }
 
     #[test]

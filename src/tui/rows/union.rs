@@ -85,6 +85,7 @@ pub fn build_union_tree_from_conn(
 ) -> rusqlite::Result<RowTree> {
     let rows = fetch_union_rows(inputs.conn)?;
     let candidate_counts = fetch_agent_mux_candidate_counts(inputs.conn)?;
+    let pin_id_by_bound_mux = fetch_pin_id_by_bound_mux(inputs.conn)?;
 
     let full_ids: Vec<String> = rows
         .iter()
@@ -142,10 +143,11 @@ pub fn build_union_tree_from_conn(
                         activity_epoch: mux.activity_epoch,
                         agent_labels: Vec::new(),
                         single_session_preview: None,
-                        // Union view doesn't yet surface the
-                        // pin-bound glyph on mux rows; populate
-                        // when the union builder learns about pins.
-                        pin_id: None,
+                        // Bound-pin glyph: same convention as the
+                        // sessions and mux views — pin lookups
+                        // reconstruct the prefixed key from the
+                        // mux's bare native_id.
+                        pin_id: pin_id_by_bound_mux.get(&mux.native_id).cloned(),
                         primary_node: node_id,
                     }),
                 });
@@ -294,6 +296,40 @@ fn fetch_union_rows(conn: &Connection) -> rusqlite::Result<Vec<UnionSqlRow>> {
     rows.collect()
 }
 
+/// Read the `pins` table and build a `mux_native_id -> pin_id` map
+/// of bound pins. Used by the union view to paint the bound-pin
+/// glyph on mux rows. The pin's encoded
+/// `pin.mux.native_id() = "<backend>:<mux_native_id>"` form is
+/// stored in the table; we strip the backend prefix to match the
+/// bare `mux.native_id` carried on the mux row.
+fn fetch_pin_id_by_bound_mux(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
+    let mut stmt = conn.prepare(
+        "SELECT pin_id, mux_native_id FROM pins WHERE binding_kind = 'bound' ORDER BY pin_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let pin_id: String = row.get(0)?;
+        let mux_native_id: String = row.get(1)?;
+        Ok((pin_id, mux_native_id))
+    })?;
+    let mut map: HashMap<String, String> = HashMap::new();
+    for entry in rows {
+        let (pin_id, full) = entry?;
+        if let Some(bare) = strip_backend_prefix(&full) {
+            map.insert(bare.to_string(), pin_id);
+        }
+    }
+    Ok(map)
+}
+
+/// Strip the leading `<backend>:` from a pin's
+/// `pin.mux.native_id()` so it lines up with the bare
+/// `MuxSessionNode.native_id` carried on the mux row. Returns
+/// `None` for non-tmux backends since the mux view only knows
+/// about tmux today.
+fn strip_backend_prefix(pin_mux_native_id: &str) -> Option<&str> {
+    pin_mux_native_id.strip_prefix("tmux:")
+}
+
 fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
     let mut stmt = conn.prepare(
         "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
@@ -316,4 +352,99 @@ fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashM
         out.insert(node_id, count);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filter::RowFilter;
+    use crate::model::{
+        AgentSessionId, GraphNode, GraphSnapshot, MuxSessionId, MuxSessionNode, PinBinding,
+        PinCandidate, PinMuxRef, Provenance,
+    };
+
+    fn mux(name: &str) -> GraphNode {
+        GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new(format!("tmux:{name}")),
+            backend: "tmux".to_string(),
+            native_id: name.to_string(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: Some(1_700_000_050),
+            created_epoch: None,
+        })
+    }
+
+    #[test]
+    fn union_view_paints_pin_id_on_bound_mux_rows() {
+        // Mirrors the equivalent mux-view test. A pin bound to
+        // `tmux:editor` should leave its `pin_id` on the union
+        // view's mux row so the renderer paints the bound-pin
+        // glyph here too.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux("editor"));
+        snapshot.nodes.push(mux("scratch"));
+        snapshot.pins.push(PinCandidate {
+            id: "code".to_string(),
+            display_name: "Code Review".to_string(),
+            harness: "claude-code".to_string(),
+            cwd: "/p/work".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "editor".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/work/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::Bound {
+                mux: MuxSessionId::new("tmux:editor"),
+                session: AgentSessionId::new("claude-code", "/state", "session"),
+            }),
+        });
+
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+        let tree = build_union_tree_from_conn(UnionBuildInputsFromConn {
+            conn: &conn,
+            home: None,
+            now: Some(1_700_000_000),
+            filter: RowFilter::default(),
+        })
+        .expect("union tree");
+
+        let mut pin_ids: Vec<(String, Option<String>)> = tree
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::MuxSession(mux) => Some((mux.native_id.clone(), mux.pin_id.clone())),
+                _ => None,
+            })
+            .collect();
+        pin_ids.sort();
+        assert_eq!(
+            pin_ids,
+            vec![
+                ("editor".to_string(), Some("code".to_string())),
+                ("scratch".to_string(), None),
+            ],
+        );
+    }
+
+    #[test]
+    fn strip_backend_prefix_normalizes_pin_mux_native_id() {
+        assert_eq!(super::strip_backend_prefix("tmux:editor"), Some("editor"));
+        assert_eq!(
+            super::strip_backend_prefix("tmux:scratch:editor"),
+            Some("scratch:editor"),
+        );
+        // Non-tmux backends aren't yet supported by the mux view.
+        assert_eq!(super::strip_backend_prefix("zellij:foo"), None);
+        // Unprefixed (defensive): leave it alone.
+        assert_eq!(super::strip_backend_prefix("editor"), None);
+    }
 }
