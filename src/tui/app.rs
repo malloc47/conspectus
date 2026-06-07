@@ -959,7 +959,11 @@ impl App {
                 // AgentSession wins. Seeded as a default — the
                 // operator can still edit the field before commit.
                 harness: self.infer_harness_for_mux(&mux.mux).unwrap_or_default(),
-                cwd: mux.cwd_display.clone().unwrap_or_default(),
+                // Read the raw cwd from the snapshot rather than
+                // `cwd_display`, which is tilde-shortened for
+                // rendering and would be rejected by the pin
+                // validator's `is_absolute` check on commit.
+                cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
                 mux_name: mux.native_id.clone(),
             },
             _ => PinCreateDefaults::default(),
@@ -988,6 +992,19 @@ impl App {
                 NodeId::AgentSession(session) => Some(session.harness_key.clone()),
                 _ => None,
             })
+    }
+
+    /// Look up the absolute `cwd` for a mux node from the persisted
+    /// snapshot. Used to seed the pin-create form so the cwd field
+    /// holds an absolute path that survives the validator in
+    /// `pins::validate_entry`.
+    fn mux_cwd_for(&self, mux: &MuxSessionId) -> Option<String> {
+        let db = self.database.as_ref()?;
+        let snapshot = crate::query::read_snapshot(db.conn()).ok()?;
+        snapshot.nodes.into_iter().find_map(|node| match node {
+            crate::model::GraphNode::MuxSession(node) if &node.id == mux => node.cwd,
+            _ => None,
+        })
     }
 
     /// Returns true when the active selection is a live mux row.
@@ -2076,6 +2093,51 @@ mod tests {
         assert_eq!(defaults.cwd, "/p/proja");
         assert_eq!(defaults.id, "");
         assert_eq!(defaults.harness, "");
+    }
+
+    #[test]
+    fn pins_context_seeds_pin_create_cwd_from_selected_mux_absolute() {
+        // Regression: the MuxSession branch of `pin_create_defaults`
+        // used to seed `cwd` from `MuxSessionRow.cwd_display`, which
+        // tilde-shortens the path. The pin write path then rejected
+        // it via `Path::is_absolute`. The form must instead carry
+        // the raw absolute cwd off the mux node.
+        let mut snap = snapshot_session_with_mux();
+        for node in snap.nodes.iter_mut() {
+            if let crate::model::GraphNode::MuxSession(mux) = node {
+                mux.cwd = Some("/p/proj".to_string());
+            }
+        }
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snap,
+            home: None,
+            filter: crate::tui::RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Session,
+        });
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let mux_row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::MuxSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("mux row in tree");
+        app.set_selection(mux_row_id);
+
+        let defaults = app.pins_context().pin_create_defaults;
+        assert_eq!(defaults.cwd, "/p/proj");
+        assert!(
+            std::path::Path::new(&defaults.cwd).is_absolute(),
+            "pin create cwd must be absolute: {:?}",
+            defaults.cwd,
+        );
     }
 
     #[test]
