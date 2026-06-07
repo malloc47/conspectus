@@ -396,6 +396,13 @@ pub const DIAGNOSTICS_COLUMNS: &[&str] = &[
     "conflict_source_kind",
     "conflict_selected_link_id",
     "conflict_competing_link_ids",
+    // Structured JSON for diagnostic variants whose fields don't
+    // fit the columnar shape above (currently pin_unbound /
+    // pin_stale_mux / pin_ambiguous / pin_drift per ADR 0057 +
+    // ADR 0058). Holds `serde_json::to_string(&Diagnostic)`. Older
+    // diagnostic variants leave this NULL and keep using the
+    // dedicated columns for backward compatibility.
+    "details",
 ];
 
 pub const ALIASES_COLUMNS: &[&str] = &["node", "node_kind", "display_name"];

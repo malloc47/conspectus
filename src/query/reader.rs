@@ -439,7 +439,7 @@ fn read_resolved(conn: &Connection) -> rusqlite::Result<Vec<ResolvedRelationship
 fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
     let mut stmt = conn.prepare(
         "SELECT kind, link_id, relation, config_path, config_message, \
-                conflict_source, conflict_selected_link_id, conflict_competing_link_ids \
+                conflict_source, conflict_selected_link_id, conflict_competing_link_ids, details \
          FROM diagnostics ORDER BY kind, link_id, conflict_selected_link_id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -470,6 +470,25 @@ fn read_diagnostics(conn: &Connection) -> rusqlite::Result<Vec<Diagnostic>> {
                     &row.get::<_, Option<String>>(7)?.unwrap_or_default(),
                 ),
             }),
+            // Pin diagnostics (ADR 0057 / ADR 0058) round-trip via
+            // the `details` column rather than the columnar shape
+            // because their structured fields (pin_id, mux,
+            // last_session, competing candidates, etc.) don't fit
+            // it cleanly. The loader writes
+            // `serde_json::to_string(&Diagnostic)` into `details`
+            // for these variants.
+            "pin_unbound" | "pin_stale_mux" | "pin_ambiguous" | "pin_drift" => {
+                let details = row.get::<_, Option<String>>(8)?.unwrap_or_default();
+                serde_json::from_str::<Diagnostic>(&details).map_err(|err| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        8,
+                        rusqlite::types::Type::Text,
+                        Box::new(BadEnum(format!(
+                            "diagnostic kind={kind}: details parse: {err}"
+                        ))),
+                    )
+                })
+            }
             other => Err(rusqlite::Error::FromSqlConversionFailure(
                 0,
                 rusqlite::types::Type::Text,
@@ -552,7 +571,7 @@ fn parse_node_id_json_required(text: Option<&str>, idx: usize) -> rusqlite::Resu
 }
 
 #[derive(Debug)]
-struct BadEnum(String);
+pub(crate) struct BadEnum(pub(crate) String);
 
 impl std::fmt::Display for BadEnum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

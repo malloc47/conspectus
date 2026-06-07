@@ -22,6 +22,7 @@ use crate::model::{
     ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
 };
 
+use super::reader::BadEnum;
 use super::schema::{
     confidence_tag, diagnostic_kind_tag, freshness_tag, link_state_tag, provenance_tag,
     relation_kind_tag,
@@ -469,8 +470,8 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
     let mut stmt = tx.prepare(
         "INSERT INTO diagnostics (\
            kind, link_id, relation, config_path, config_message, \
-           conflict_source, conflict_selected_link_id, conflict_competing_link_ids\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+           conflict_source, conflict_selected_link_id, conflict_competing_link_ids, details\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
     for d in items {
         let kind = diagnostic_kind_tag(d);
@@ -485,6 +486,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     None::<&str>,
                     None::<&str>,
                     None::<&str>,
+                    None::<&str>,
                 ])?;
             }
             Diagnostic::Config { path, message } => {
@@ -494,6 +496,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     None::<&str>,
                     path,
                     message,
+                    None::<&str>,
                     None::<&str>,
                     None::<&str>,
                     None::<&str>,
@@ -514,11 +517,15 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     json_node_id(source),
                     selected_link_id,
                     json_array(competing_link_ids),
+                    None::<&str>,
                 ])?;
             }
-            // Pin diagnostics (ADR 0057) reuse the `config_message`
-            // column for now; a future query-layer story can grow
-            // dedicated columns or a structured JSON `details` field.
+            // Pin diagnostics (ADR 0057 / ADR 0058) carry richer
+            // structured fields than the legacy columnar shape can
+            // hold. `config_message` keeps the human-readable
+            // string for `SELECT … FROM diagnostics` ergonomics;
+            // `details` stores the full structured Diagnostic JSON
+            // so the reader can reconstruct it losslessly.
             Diagnostic::PinUnbound {
                 pin_id,
                 expected_mux_native_id,
@@ -535,6 +542,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     None::<&str>,
                     None::<&str>,
                     None::<&str>,
+                    serialize_diagnostic_details(d)?,
                 ])?;
             }
             Diagnostic::PinStaleMux { pin_id, mux } => {
@@ -550,6 +558,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     None::<&str>,
                     None::<&str>,
                     None::<&str>,
+                    serialize_diagnostic_details(d)?,
                 ])?;
             }
             Diagnostic::PinAmbiguous {
@@ -573,6 +582,7 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     None::<&str>,
                     None::<&str>,
                     None::<&str>,
+                    serialize_diagnostic_details(d)?,
                 ])?;
             }
             Diagnostic::PinDrift {
@@ -591,11 +601,20 @@ fn insert_diagnostics(tx: &Transaction, items: &[Diagnostic]) -> rusqlite::Resul
                     None::<&str>,
                     None::<&str>,
                     None::<&str>,
+                    serialize_diagnostic_details(d)?,
                 ])?;
             }
         }
     }
     Ok(())
+}
+
+fn serialize_diagnostic_details(d: &Diagnostic) -> rusqlite::Result<String> {
+    serde_json::to_string(d).map_err(|err| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(BadEnum(format!(
+            "serialize diagnostic: {err}"
+        ))))
+    })
 }
 
 fn insert_aliases(tx: &Transaction, aliases: &AliasOverlay) -> rusqlite::Result<()> {
@@ -1161,6 +1180,76 @@ mod tests {
         // unresolved_endpoint
         assert_eq!(rows[2].1.as_deref(), Some("L1"));
         assert_eq!(rows[2].2.as_deref(), Some("linked_to_mux"));
+    }
+
+    #[test]
+    fn pin_diagnostics_round_trip_through_reader() {
+        // Regression: pin diagnostics emitted by the resolver (per
+        // ADR 0057 / ADR 0058) must survive a materialize → read
+        // cycle. Before the `details: TEXT` column was added, the
+        // reader's `match kind` arm rejected `pin_unbound` and the
+        // TUI's `build_sessions_tree_from_conn` (which calls
+        // `read_snapshot`) hung at "Loading discovery…" the first
+        // time the user created a pin.
+        use crate::model::{AgentSessionId, MuxSessionId, PinLastSession};
+
+        let mut conn = fresh_conn();
+        let mut snap = GraphSnapshot::empty();
+        let unbound_with_last = Diagnostic::PinUnbound {
+            pin_id: "ingest".to_string(),
+            expected_mux_native_id: "tmux:ingest".to_string(),
+            last_session: Some(PinLastSession {
+                session_id: "session-a".to_string(),
+                observed_epoch: 1_738_742_400,
+            }),
+        };
+        let unbound_without_last = Diagnostic::PinUnbound {
+            pin_id: "scratch".to_string(),
+            expected_mux_native_id: "tmux:scratch".to_string(),
+            last_session: None,
+        };
+        let stale = Diagnostic::PinStaleMux {
+            pin_id: "review".to_string(),
+            mux: MuxSessionId::new("tmux:review"),
+        };
+        let ambiguous = Diagnostic::PinAmbiguous {
+            pin_id: "shared".to_string(),
+            chosen: AgentSessionId::new("codex", "/state", "winner"),
+            competing: vec![
+                AgentSessionId::new("codex", "/state", "alt-a"),
+                AgentSessionId::new("codex", "/state", "alt-b"),
+            ],
+        };
+        let drift = Diagnostic::PinDrift {
+            pin_id: "moved".to_string(),
+            declared_cwd: "/p/old".to_string(),
+            observed_cwd: "/p/new".to_string(),
+        };
+
+        snap.diagnostics.extend([
+            unbound_with_last.clone(),
+            unbound_without_last.clone(),
+            stale.clone(),
+            ambiguous.clone(),
+            drift.clone(),
+        ]);
+        load(&snap, &mut conn).unwrap();
+
+        let round_tripped = crate::query::read_snapshot(&conn).expect("read snapshot");
+        // Reader orders by (kind, link_id, conflict_selected_link_id);
+        // assert via a set rather than position.
+        let observed: std::collections::BTreeSet<_> =
+            round_tripped.diagnostics.iter().cloned().collect();
+        let expected: std::collections::BTreeSet<_> = [
+            unbound_with_last,
+            unbound_without_last,
+            stale,
+            ambiguous,
+            drift,
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(observed, expected);
     }
 
     #[test]

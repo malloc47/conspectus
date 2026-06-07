@@ -251,7 +251,7 @@ CREATE INDEX IF NOT EXISTS idx_resolved_relationships_target_kind_relation
 -- Polymorphic over the three Diagnostic variants. `kind` discriminates;
 -- per-variant columns are nullable.
 CREATE TABLE IF NOT EXISTS diagnostics (
-    kind                         TEXT NOT NULL,             -- 'unresolved_endpoint' | 'config' | 'conflict'
+    kind                         TEXT NOT NULL,             -- 'unresolved_endpoint' | 'config' | 'conflict' | 'pin_*'
     -- UnresolvedEndpoint
     link_id                      TEXT,
     relation                     TEXT,                      -- shared with Conflict
@@ -263,7 +263,13 @@ CREATE TABLE IF NOT EXISTS diagnostics (
     conflict_source_kind         TEXT GENERATED ALWAYS AS
                                      (json_extract(conflict_source, '$.type')) STORED,
     conflict_selected_link_id    TEXT,
-    conflict_competing_link_ids  TEXT                       -- JSON array
+    conflict_competing_link_ids  TEXT,                      -- JSON array
+    -- Pin diagnostics (ADR 0057 / ADR 0058): structured fields
+    -- (pin_id, mux native_id, last_session, competing candidates,
+    -- cwd drift, etc.) don't fit the columnar shape above. The
+    -- loader writes `serde_json::to_string(&Diagnostic)` here so
+    -- the reader can reconstruct the variant losslessly.
+    details                      TEXT
 );
 
 -- =============================================================
