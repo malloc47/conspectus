@@ -142,6 +142,10 @@ pub fn build_union_tree_from_conn(
                         activity_epoch: mux.activity_epoch,
                         agent_labels: Vec::new(),
                         single_session_preview: None,
+                        // Union view doesn't yet surface the
+                        // pin-bound glyph on mux rows; populate
+                        // when the union builder learns about pins.
+                        pin_id: None,
                         primary_node: node_id,
                     }),
                 });

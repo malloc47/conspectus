@@ -259,6 +259,11 @@ pub struct MuxSessionRow {
     /// muxes expose sessions as child rows where each preview is shown
     /// individually.
     pub single_session_preview: Option<String>,
+    /// `Some(pin_id)` when this mux is the bound mux of a declared
+    /// session pin (ADR 0057). Renderers paint a pin glyph next to
+    /// the mux label so the operator can spot pin-linked muxes from
+    /// any view.
+    pub pin_id: Option<String>,
     pub primary_node: NodeId,
 }
 

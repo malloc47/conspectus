@@ -1143,6 +1143,15 @@ fn render_mux_session_spans(
         spans.push(Span::raw(" "));
         spans.push(Span::styled("◐", Style::default().fg(theme.mux_ambiguous)));
     }
+    if mux.pin_id.is_some() {
+        // Bound-pin marker on the mux row. Same glyph the agent-
+        // session row uses (ui.rs:1027) so pin-bound muxes scan
+        // the same way pin-bound sessions do.
+        spans.push(Span::styled(
+            "  📌",
+            Style::default().add_modifier(theme.placeholder),
+        ));
+    }
 
     append_mux_single_session_preview(&mut spans, mux, theme, width);
     fit_spans_to_width(spans, width)
@@ -2592,6 +2601,10 @@ fn default_action_status_hint(app: &App) -> String {
                 "Enter to relaunch `{}` in existing mux `{}`",
                 pin.display_name, pin.mux_label
             ),
+            "bound" => format!(
+                "Enter to attach `{}` via mux `{}`",
+                pin.display_name, pin.mux_label
+            ),
             _ => format!("Enter to launch `{}`", pin.display_name),
         };
         if has_b {
@@ -3853,6 +3866,7 @@ mod tests {
             activity_epoch: Some(now - 3),
             agent_labels: vec!["codex".into()],
             single_session_preview: Some("running cargo test".into()),
+            pin_id: None,
             primary_node: NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
         };
 

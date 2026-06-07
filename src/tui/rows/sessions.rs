@@ -23,8 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxSessionNode,
-    NodeId, PinBinding, PinCandidate, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of,
-    pick_preferred,
+    NodeId, PinBinding, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -186,6 +185,14 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut session_short_ids =
         ShortIds::from_sessions(buckets.values().flatten().chain(&ungrouped));
 
+    // Pins group lives at the top of the grouped sessions view so
+    // operators see the deck's pinned work before scrolling through
+    // the broader session list. Bound pins also stay in their
+    // related session group (their agent-session row carries
+    // `pin_id`), so the Pins group is additive rather than a
+    // replacement.
+    emit_pins_group(&mut tree, &data, inputs.home);
+
     let mut ctx = EmitCtx {
         tree: &mut tree,
         data: &data,
@@ -214,32 +221,21 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         emit_ungrouped(&mut ctx, ungrouped);
     }
 
-    emit_unbound_pins(&mut tree, &data, inputs.home);
-
     mark_launch_context(&mut tree, inputs.cwd);
 
     tree
 }
 
 /// Emit a synthetic "Pins" group with one `RowKind::Pin` child per
-/// `PinCandidate` whose binding is `Unbound` or `StaleMux`. Bound
-/// pins flow through the regular agent-session rows (with `pin_id`
-/// set); pins with no resolver-determined binding (i.e. `binding ==
-/// None`, which only happens when the resolver hasn't run) are
-/// skipped so we don't render pre-resolved noise.
-fn emit_unbound_pins(tree: &mut RowTree, data: &SessionsData<'_>, home: Option<&Path>) {
-    let unbound: Vec<&PinCandidate> = data
-        .snapshot
-        .pins
-        .iter()
-        .filter(|pin| {
-            matches!(
-                pin.binding,
-                Some(PinBinding::Unbound) | Some(PinBinding::StaleMux { .. })
-            )
-        })
-        .collect();
-    if unbound.is_empty() {
+/// declared `PinCandidate`, regardless of binding state. Bound pins
+/// also remain in their natural location: their agent-session row
+/// carries `pin_id = Some(...)` so the renderer paints a pin glyph
+/// next to the in-place row. Pre-resolve pins (`binding == None`)
+/// are surfaced too so operators see what's declared even if the
+/// resolver hasn't run yet — they render with a `(unresolved)`
+/// state label.
+fn emit_pins_group(tree: &mut RowTree, data: &SessionsData<'_>, home: Option<&Path>) {
+    if data.snapshot.pins.is_empty() {
         return;
     }
 
@@ -254,10 +250,12 @@ fn emit_unbound_pins(tree: &mut RowTree, data: &SessionsData<'_>, home: Option<&
         }),
     });
 
-    for pin in unbound {
-        let state_label = match pin.binding {
+    for pin in &data.snapshot.pins {
+        let state_label = match &pin.binding {
+            Some(PinBinding::Bound { .. }) => "bound",
             Some(PinBinding::StaleMux { .. }) => "stale-mux",
-            _ => "unbound",
+            Some(PinBinding::Unbound) => "unbound",
+            None => "unresolved",
         };
         tree.rows.push(Row {
             id: RowId::Pin {
@@ -2929,14 +2927,16 @@ mod tests {
     }
 
     #[test]
-    fn bound_pin_marks_existing_agent_session_row() {
+    fn bound_pin_appears_in_pins_group_and_marks_agent_session_row() {
         // The resolver synthesizes a LinkedToMux candidate when a pin
         // binds; we mimic that here by:
         // - adding the session and mux nodes
         // - adding a LinkedToMux candidate (the discovered one)
         // - declaring the pin with `binding = Bound`
-        // Bound pins do NOT appear under the synthetic "Pins" group;
-        // they ride the regular agent-session row with `pin_id` set.
+        // Bound pins now appear in BOTH the synthetic "Pins" group
+        // (top of view) AND the regular agent-session row (with
+        // `pin_id` set) so the operator sees the pin in both
+        // contexts.
         let session_id = AgentSessionId::new("codex", "/state", "alpha");
         let mux_id = MuxSessionId::new("tmux:ingest");
         let mut snapshot = GraphSnapshot {
@@ -2975,16 +2975,43 @@ mod tests {
 
         let tree = build_tree(&snapshot);
 
-        // No synthetic "Pins" group for a bound pin.
-        assert!(
-            !tree
-                .rows
-                .iter()
-                .any(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins")),
-            "bound pins must not surface under the synthetic Pins group: {:#?}",
-            tree.rows
-        );
+        // Bound pin appears in the synthetic Pins group with state
+        // "bound".
+        let pin_group_row = tree
+            .rows
+            .iter()
+            .find_map(|r| match &r.kind {
+                RowKind::Pin(row) => Some(row),
+                _ => None,
+            })
+            .expect("pin row in synthetic Pins group");
+        assert_eq!(pin_group_row.pin_id, "ingest");
+        assert_eq!(pin_group_row.state_label, "bound");
 
+        // The Pins group must come BEFORE the regular session
+        // groups so it's the first thing the operator sees.
+        let pin_group_idx = tree
+            .rows
+            .iter()
+            .position(|r| matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"))
+            .expect("Pins group present");
+        let first_non_pin_group_idx = tree.rows.iter().position(|r| {
+            matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins" || *tag == "ungrouped")
+                .then_some(false)
+                .unwrap_or(
+                    matches!(&r.kind, RowKind::Group(_))
+                        && !matches!(&r.id, RowId::Synthetic(tag) if *tag == "pins"),
+                )
+        });
+        if let Some(idx) = first_non_pin_group_idx {
+            assert!(
+                pin_group_idx < idx,
+                "Pins group should precede other groups (Pins at {pin_group_idx}, first other at {idx})",
+            );
+        }
+
+        // The agent-session row still carries the pin marker so
+        // the operator sees the pin in-place too.
         let session_row = tree
             .rows
             .iter()
@@ -2997,9 +3024,11 @@ mod tests {
     }
 
     #[test]
-    fn mixed_pin_states_emit_only_unbound_in_synthetic_group() {
-        // One bound pin (marker on its session row) + two unbound
-        // pins (rendered under the Pins group).
+    fn mixed_pin_states_all_emit_in_synthetic_group() {
+        // All declared pins surface in the Pins group regardless
+        // of binding state; bound pins additionally mark their
+        // existing agent-session row with `pin_id` so they're
+        // visible in both places.
         let session_id = AgentSessionId::new("codex", "/state", "alpha");
         let mux_id = MuxSessionId::new("tmux:bound");
         let mut snapshot = GraphSnapshot {
@@ -3064,7 +3093,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(pin_rows, vec!["free-one", "free-two"]);
+        // Bound pin appears alongside the two unbound ones in the
+        // Pins group.
+        assert_eq!(pin_rows, vec!["bound-one", "free-one", "free-two"]);
 
         let bound_marker = tree.rows.iter().any(|row| {
             matches!(
