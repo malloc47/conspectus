@@ -4492,6 +4492,109 @@ failure:
   - Blockers: access to Claude Code v2.1.154+ with workflows enabled.
   - Related: `H-MUXPROC-018`, `H-MUXPROC-015`, ADR 0028.
 
+- [ ] `H-MUXPROC-020` Record the harness pid, not the hook writer's
+  pid, in hook sidecar records.
+  - Problem: `conspectus hook write claude-code` (and the codex /
+    opencode variants) persist `record.pid = std::process::id()` in
+    `src/cli.rs:417`, but `std::process::id()` is the pid of the
+    transient `conspectus hook write …` child process, not of the
+    long-lived claude / codex / opencode process that fired the
+    hook. That child exits within milliseconds, so by the time any
+    later discovery pass runs `process_is_live(record.pid)` in
+    `src/discovery/hook_sidecar.rs:401`, the recorded pid is
+    guaranteed to be dead. The hook adapter then marks every record
+    `LinkState::Ignored` with reason "hook record pid N is no longer
+    active". Live snapshot evidence (the 2026-06-07
+    `agentdeck_-local-command-caveat-…-573ac208` mux case): 42 of 42
+    claude-code `hook_sidecar` candidates resolved to `state:
+    ignored`, hook evidence contributed zero usable input to the
+    resolver, and the mux fell back to the stale launch-argv
+    candidate, attributing the mux to a 14-day-stale resume parent
+    instead of the live session. The earlier "hook records solve
+    `H-MUXPROC-015`" claim in that story is contradicted in practice
+    by this writer-pid bug — every hook record is born stillborn.
+  - Scope: in the `conspectus hook write <harness>` writers (claude,
+    codex, opencode in `src/cli.rs`), resolve the harness pid before
+    handing it to the `*_record_from_payload` builders. Walk up
+    `/proc/<self>/stat`'s `ppid` chain past `sh` / `bash` / wrapper
+    layers until a process whose `comm` matches the expected harness
+    binary set (`claude`, `claude-code`, `codex`, `opencode`, plus any
+    aliases) is found, and record that pid as `record.pid`. Keep
+    `record.ppid = parent_pid()` (the immediate parent) for diagnostic
+    use. On Linux, walking `/proc/<pid>/stat` is enough; non-Linux can
+    keep the existing best-effort behavior (`pid = 0` falls through
+    the liveness check at `process_is_live`'s `<= 0` guard, leaving
+    the record active rather than stillborn). If a hook payload field
+    carries the harness pid directly (claude's `pid` field, codex's
+    process metadata), prefer that over the proc walk to avoid races
+    in deeply-wrapped invocations.
+  - Tests: payload-builder unit tests asserting the recorded `pid` is
+    the harness pid, not the writer pid, given a mocked process tree
+    (writer → sh → harness → ...). Round-trip integration test
+    asserting a written record survives `process_is_live` for the
+    real harness pid lifetime. Regression test in
+    `src/discovery/hook_sidecar.rs` asserting that with the
+    harness-pid convention, fresh hook records produce Active
+    `LinkedToMux` candidates instead of `Ignored`. Use the existing
+    `testing_replay` fixtures or extend them to capture the
+    writer→shell→harness chain.
+  - Manual checks: run `conspectus hook init claude-code`, start a
+    live claude session, capture the SQLite row, and confirm the
+    recorded `pid` matches `pgrep -x claude` rather than a long-dead
+    `conspectus` pid. Run `conspectus graph --format json` and
+    confirm at least one `hook_sidecar` candidate for the live
+    session has `state: active`.
+  - Related: `H-MUXPROC-012`, `H-MUXPROC-015`, `H-MUXPROC-018`,
+    `H-MUXPROC-021`, ADR 0028.
+  - Blockers: none.
+
+- [ ] `H-MUXPROC-021` Use source-session freshness as a tie-breaker
+  in resolver mux scoring.
+  - Problem: `compare_session_mux` in `src/resolve/mod.rs:528` ranks
+    `LinkedToMux` candidates by `(tier, evidence_rank, confidence,
+    mux_activity_epoch)`. None of those terms reflect how fresh the
+    *source* `AgentSession` is. When a tmux pane's
+    `active_pane_start_command` carries a stale `--resume <UUID>` and
+    that UUID's `AgentSession.last_active_epoch` is days old, the
+    `active_pane_command_session_match` candidate (evidence_rank 30,
+    StrongDiscovered tier) still wins by default — even if the mux's
+    `activity_epoch` and other live signals belong to a fresher
+    session. In the live `agentdeck_-local-command-caveat-…-573ac208`
+    case the elected source had `last_active_epoch 1779653903`
+    (~14 days stale) while the mux's `activity_epoch` was
+    `1780882260` (current); the correct source (`7f01dbdf-…`) had
+    `last_active_epoch 1780881982`, within minutes of the mux.
+  - Scope: extend `MuxScore` (`src/resolve/mod.rs:540`) with a
+    source-freshness term derived from the source `AgentSession`'s
+    `last_active_epoch` clamped against the target mux's
+    `activity_epoch`. Penalize candidates whose source session is
+    materially older than the mux — e.g. demote by one tier or zero
+    out the `evidence_rank` term — so a fresh-session candidate at
+    rank 30 beats a 14-day-stale candidate at rank 30. Plumb the
+    `AgentSession` node lookup through `resolve_links` (or take the
+    snapshot, not just `&[GraphLink]`) so the scorer has access to
+    the source node's metadata. Keep the change conservative: do
+    nothing if either the mux `activity_epoch` or the source
+    `last_active_epoch` is missing, and do not penalize Declared or
+    Pin tier candidates (those carry explicit user intent).
+  - Tests: extend the resolver fixtures with a mux that has two
+    Active StrongDiscovered candidates of equal evidence_rank, where
+    one source's `last_active_epoch` matches the mux and the other
+    is 14 days stale; assert the fresh one wins. Add a regression
+    fixture where the stale source is the only Active candidate;
+    assert it still resolves (we don't drop links solely because
+    they're stale). Add a fixture where the stale candidate is
+    `LocalPin` tier; assert it still wins over a fresher
+    `StrongDiscovered` (declared intent beats freshness).
+  - Manual checks: replay the `agentdeck_-local-command-caveat-…`
+    snapshot through `conspectus graph --format json` and confirm
+    `7f01dbdf-…` is attributed to the mux instead of `c1901a9e-…`.
+  - Related: `H-MUXPROC-015`, `H-MUXPROC-020`, ADR 0006
+    (resolver ordering), ADR 0028.
+  - Blockers: none. Land alongside or after `H-MUXPROC-020` so the
+    hook-sidecar evidence is reaching the resolver before the
+    freshness term has to differentiate.
+
 - [x] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
   - Problem: live testing showed a Claude Code process running in
