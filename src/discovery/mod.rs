@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use crate::config::ConfigLoader;
 use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
 
+pub mod agent_deck;
 pub mod aliases;
 pub mod atelier;
 pub mod codex_log;
@@ -160,6 +161,10 @@ pub fn discover_local_with(
         .with_provider(workspace::GenericWorkspaceDiscovery::new())
         .with_provider(harness::HarnessDiscovery::with_default_adapters());
 
+    if let Some(root) = config.agent_deck_root.clone() {
+        providers = providers.with_provider(agent_deck::AgentDeckDiscovery::new(root));
+    }
+
     if let Some(runner) = config.tmux_runner {
         providers = providers.with_provider(tmux::TmuxDiscovery::with_runner(runner));
     }
@@ -208,6 +213,12 @@ pub struct LocalDiscoveryConfig {
     pub forge_runner: Option<Box<dyn forge::GhRunner>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
+    /// Agent-deck multi-repo worktrees root, typically
+    /// `$HOME/.agent-deck/multi-repo-worktrees`. `None` disables the
+    /// adapter entirely; defaults are populated by [`Self::from_env`]
+    /// unless `CONSPECTUS_DISABLE_AGENT_DECK` is set. Override the
+    /// concrete path with `CONSPECTUS_AGENT_DECK_ROOT`.
+    pub agent_deck_root: Option<PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
     /// When `true`, skip the codex log-derived attribution linker entirely.
     /// Even with the codex state root configured. Mirrors the
@@ -264,6 +275,7 @@ impl LocalDiscoveryConfig {
             forge_runner,
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
+            agent_deck_root: default_agent_deck_root(),
             declared_config_loader: Some(ConfigLoader::from_env()),
             codex_log_disabled: env::var_os("CONSPECTUS_DISABLE_CODEX_LOG").is_some(),
             codex_log_window_seconds,
@@ -277,6 +289,7 @@ impl LocalDiscoveryConfig {
             forge_runner: None,
             process_tree_enabled: false,
             hook_sidecar_root: None,
+            agent_deck_root: None,
             declared_config_loader: None,
             codex_log_disabled: false,
             codex_log_window_seconds: codex_log::DEFAULT_WINDOW_SECONDS,
@@ -343,6 +356,16 @@ impl LocalDiscoveryConfig {
         self
     }
 
+    pub fn with_agent_deck_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.agent_deck_root = Some(root.into());
+        self
+    }
+
+    pub fn without_agent_deck(mut self) -> Self {
+        self.agent_deck_root = None;
+        self
+    }
+
     pub fn with_declared_config_loader(mut self, loader: ConfigLoader) -> Self {
         self.declared_config_loader = Some(loader);
         self
@@ -359,6 +382,20 @@ fn env_state_root(env_key: &str, home_relative: &str) -> Option<PathBuf> {
         return Some(PathBuf::from(value));
     }
     env::var_os("HOME").map(|home| PathBuf::from(home).join(home_relative))
+}
+
+fn default_agent_deck_root() -> Option<PathBuf> {
+    if env::var_os("CONSPECTUS_DISABLE_AGENT_DECK").is_some() {
+        return None;
+    }
+    if let Some(value) = env::var_os("CONSPECTUS_AGENT_DECK_ROOT") {
+        return Some(PathBuf::from(value));
+    }
+    env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join(".agent-deck")
+            .join("multi-repo-worktrees")
+    })
 }
 
 pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> GraphSnapshot {

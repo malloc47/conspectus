@@ -3530,72 +3530,45 @@ agent-deck (~/.agent-deck/, SQLite), dmux (`standardagents/dmux`,
 `cdknorow/coral` (~21 stars), `honeymux/honeymux` (~71 stars, runtime
 overlay rather than persistent state).
 
-- [ ] `H-AGENTMUX-001` Audit each candidate orchestrator's evidence
+- [x] `H-AGENTMUX-001` Audit each candidate orchestrator's evidence
   against MUXPROC and decide which adapters to build.
-  - Scope: with `H-MUXPROC-002` landed, enumerate for each candidate
-    tool (agent-deck, dmux, workmux, agent-of-empires) exactly what
-    evidence it produces beyond what MUXPROC already covers. For each
-    tool, classify findings into: (a) workspace composition the
-    process tree cannot see (e.g. multi-repo combined directories),
-    (b) container-isolated agents whose host process tree shows only
-    the runtime, (c) exited / paused / pre-spawn sessions, (d)
-    orchestrator-specific labels / lineage / profiles. Tools whose
-    evidence is fully a MUXPROC subset should be closed as won't-do.
-    For the survivors, design a single `AgentMuxAdapter` trait that
-    carries the surviving evidence types as provider-neutral
-    candidate links + `SourceMetadata.fields`. Record findings and
-    the trait shape as an ADR per CLAUDE.md.
-  - Tests: none directly; ADR + go/no-go decisions per tool are the
-    deliverable. A scaffold trait may land alongside as a compile
-    check.
-  - Blockers: `H-MUXPROC-002` (cannot audit "non-overlapping" until
-    MUXPROC exists). `H-REF-004` is friendlier to settle first if
-    both are in flight, since the runner seam may inform the adapter
-    surface.
+  - Outcome: audit collapsed during implementation work into ADR 0060
+    rather than a standalone paper. Findings: agent-deck's unique
+    evidence is workspace composition (built), dmux is a MUXPROC
+    subset (deferred per `H-AGENTMUX-005`), workmux's resurrect-state
+    is the only plausible non-overlap (deferred per `H-AGENTMUX-006`),
+    agent-of-empires container isolation is unverified
+    (deferred per `H-AGENTMUX-007`). The `AgentMuxAdapter` trait was
+    not introduced — `DiscoveryProvider` is sufficient for the one
+    surviving adapter and a trait would be speculative.
 
-- [ ] `H-AGENTMUX-002` Detect agent-deck multi-repo checkouts as a
+- [x] `H-AGENTMUX-002` Detect agent-deck multi-repo checkouts as a
   workspace provider.
-  - Scope: implement the first concrete `AgentMuxAdapter` for
-    agent-deck. **Justification vs MUXPROC:** the unique evidence is
-    workspace composition — the process tree shows
-    `cwd=~/.agent-deck/multi-repo-worktrees/<id>/` but cannot reveal
-    that the directory is composed of N repo symlinks. The
-    pane ↔ harness link itself is redundant with MUXPROC. Recognize
-    `~/.agent-deck/multi-repo-worktrees/<id>/` (path location +
-    immediate-child symlinks resolving to git common dirs) and emit a
-    `Workspace` node (with an `agent-deck` provider identifier and a
-    short label derived from `<id>`) plus `Workspace`→`Repo`
-    membership candidate links for each resolved symlink. Sessions
-    and mux sessions rooted at the checkout path should associate
-    with the workspace via the existing cross-link inference. Treat
-    the symlink target's canonical git common dir as the `Repo`
-    identity so existing repo nodes from other scan roots merge
-    cleanly. Do not emit pane ↔ harness evidence from this adapter —
-    leave that to MUXPROC.
-  - Tests: fixture tests for a multi-repo checkout with two symlinks,
-    one symlink, broken symlinks, non-symlink children (skip), and a
-    nested directory layout. Snapshot test for the session table
-    confirming the workspace shows up and the participating repos
-    are listed somewhere reachable from the agent row.
-  - Manual checks: `cargo run -- graph --format json` from inside a
-    real agent-deck checkout; `cargo run -- session` and confirm the
-    new workspace/repo links appear.
-  - Blockers: `H-AGENTMUX-001` (must survive the audit), `H-DESIGN-001`
-    (workspace-provider precedence — agent-deck workspaces should not
-    conflict with generic-workspace inference over the same path).
+  - Outcome: `src/discovery/agent_deck.rs` ships the
+    `AgentDeckDiscovery` provider, wired into `discover_local_with`
+    via `LocalDiscoveryConfig::agent_deck_root` (defaults to
+    `$HOME/.agent-deck/multi-repo-worktrees`, opt-out via
+    `CONSPECTUS_DISABLE_AGENT_DECK`, override via
+    `CONSPECTUS_AGENT_DECK_ROOT`). Emits
+    `WorkspaceNode { provider = "agent-deck" }` + symlink-only
+    `WorkspaceContainsRepo` candidate links with the same
+    `logical_path` / `member_path_kind` source-fields shape generic
+    workspace uses, so the column formatter is provider-uniform.
+    Unit + integration tests cover two-symlink, one-symlink,
+    broken-symlink, non-symlink-child, and multi-workspace fixtures.
+    See ADR 0060 for the full decision record.
 
-- [ ] `H-AGENTMUX-003` Surface multi-repo participants in the session
+- [x] `H-AGENTMUX-003` Surface multi-repo participants in the session
   table.
-  - Scope: extend the agent projection so the `CWD` column (or a new
-    "REPOS" column) shows the participating repo set when the session
-    is rooted in an agent-deck workspace (or any future adapter that
-    emits a multi-repo `Workspace`). Decide whether to replace the
-    cwd with a short repo list (`atelier+conspectus`) or add a
-    separate column; either way preserve byte-stable ordering.
-  - Tests: snapshot tests for one-repo, two-repo, and many-repo
-    workspaces.
-  - Blockers: `H-AGENTMUX-002`, `H-OBS-006` (recency column work will
-    touch the same renderer).
+  - Outcome: `output::agent::fetch_workspace_lookup` joins the
+    resolver's chosen `workspace_contains_repo` selections and
+    renders the workspace column as `atelier+conspectus`-style
+    `+`-joined member basenames when ≥2 distinct members exist;
+    single-repo workspaces keep the root path. Opt-in only via
+    `--columns ...,workspace,...` — the default `SESSIONS_COLUMNS`
+    set is unchanged. Promoting `workspace` into the defaults is
+    deferred per ADR 0060 §Alternatives. Atelier multi-repo
+    workspaces exercise the same surface from day one.
 
 - [ ] `H-AGENTMUX-004` Read agent-deck profile state from `state.db`.
   - Scope: agent-deck stores richer per-session metadata
