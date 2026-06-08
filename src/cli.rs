@@ -412,10 +412,11 @@ impl ClaudeHookWriteArgs {
         let payload: serde_json::Value =
             serde_json::from_str(&input).context("failed to parse Claude Code hook JSON")?;
         let root = resolve_hook_state_root(self.state_root)?;
+        let (pid, ppid) = harness_pid_pair("claude-code");
         let record = conspectus::hook::claude_code_record_from_payload(
             &payload,
-            i64::from(std::process::id()),
-            i64::from(parent_pid()),
+            pid,
+            ppid,
             tmux_context(),
             std::env::var("CLAUDE_CODE_VERSION").ok(),
             conspectus::hook::current_epoch(),
@@ -442,10 +443,11 @@ impl CodexHookWriteArgs {
         let payload: serde_json::Value =
             serde_json::from_str(&input).context("failed to parse Codex hook JSON")?;
         let root = resolve_hook_state_root(self.state_root)?;
+        let (pid, ppid) = harness_pid_pair("codex");
         let record = conspectus::hook::codex_record_from_payload(
             &payload,
-            i64::from(std::process::id()),
-            i64::from(parent_pid()),
+            pid,
+            ppid,
             tmux_context(),
             None,
             conspectus::hook::current_epoch(),
@@ -472,10 +474,11 @@ impl OpenCodeHookWriteArgs {
         let payload: serde_json::Value =
             serde_json::from_str(&input).context("failed to parse opencode hook JSON")?;
         let root = resolve_hook_state_root(self.state_root)?;
+        let (pid, ppid) = harness_pid_pair("opencode");
         let record = conspectus::hook::opencode_record_from_payload(
             &payload,
-            i64::from(std::process::id()),
-            i64::from(parent_pid()),
+            pid,
+            ppid,
             tmux_context(),
             std::env::var("CONSPECTUS_OPENCODE_HOOK_VERSION").ok(),
             conspectus::hook::current_epoch(),
@@ -694,24 +697,109 @@ fn resolve_hook_state_root(override_root: Option<PathBuf>) -> Result<PathBuf> {
         })
 }
 
-fn parent_pid() -> u32 {
-    #[cfg(target_os = "linux")]
-    {
-        read_linux_parent_pid().unwrap_or(0)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        0
-    }
+#[cfg(target_os = "linux")]
+fn read_linux_parent_pid() -> Option<u32> {
+    read_linux_ppid_of(std::process::id())
 }
 
 #[cfg(target_os = "linux")]
-fn read_linux_parent_pid() -> Option<u32> {
-    let stat = fs::read_to_string("/proc/self/stat").ok()?;
+fn read_linux_ppid_of(pid: u32) -> Option<u32> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_name = stat.rsplit_once(") ")?.1;
     let mut fields = after_name.split_whitespace();
     fields.next()?;
     fields.next()?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_comm_of(pid: u32) -> Option<String> {
+    fs::read_to_string(format!("/proc/{pid}/comm"))
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// Resolve the (pid, ppid) of the harness process (e.g. `claude`,
+/// `codex`, `opencode`) that triggered this hook invocation.
+///
+/// Walks the parent-pid chain from the current process upward, looking
+/// for the first ancestor whose `/proc/<pid>/comm` matches one of
+/// `expected_binaries`. This is necessary because claude / codex /
+/// opencode launch the hook command via a short-lived shell wrapper
+/// (e.g. `sh -c 'conspectus hook write …'`), so `std::process::id()`
+/// returns the writer's pid — a process that exits within
+/// milliseconds. The hook-sidecar discovery layer's liveness check
+/// (`src/discovery/hook_sidecar.rs`) treats records with a dead pid
+/// as ignored evidence, which would silently disable hook evidence
+/// entirely (see H-MUXPROC-020).
+///
+/// Returns `None` when running on a non-Linux host, when the walk
+/// exhausts its depth budget, or when no ancestor matches. Callers
+/// must treat `None` as "harness pid unknown" and persist it as a
+/// `None` pid in the hook record so the discovery liveness check
+/// is skipped instead of failing.
+fn resolve_harness_pid(expected_binaries: &[&str]) -> Option<(u32, u32)> {
+    #[cfg(target_os = "linux")]
+    {
+        let start = read_linux_parent_pid()?;
+        resolve_harness_pid_with(start, expected_binaries, |pid| {
+            Some((read_linux_comm_of(pid)?, read_linux_ppid_of(pid)?))
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = expected_binaries;
+        None
+    }
+}
+
+/// Pure walker used by `resolve_harness_pid`. Factored out so unit
+/// tests can mock the `/proc` reader. Caps the walk at 8 hops to
+/// prevent runaway recursion on a corrupted process table.
+fn resolve_harness_pid_with<F>(
+    start_pid: u32,
+    expected_binaries: &[&str],
+    mut read: F,
+) -> Option<(u32, u32)>
+where
+    F: FnMut(u32) -> Option<(String, u32)>,
+{
+    let mut pid = start_pid;
+    for _ in 0..8 {
+        if pid <= 1 {
+            return None;
+        }
+        let (comm, ppid) = read(pid)?;
+        if expected_binaries.iter().any(|name| comm == *name) {
+            return Some((pid, ppid));
+        }
+        pid = ppid;
+    }
+    None
+}
+
+/// Process-name set Conspectus expects to see for each harness when
+/// walking the parent-pid chain from a hook writer up to the live
+/// agent process. Mirrors the harness keys recognized elsewhere in
+/// the cross-link and process-tree code.
+fn harness_binaries(harness: &str) -> &'static [&'static str] {
+    match harness {
+        "claude-code" => &["claude", "claude-code"],
+        "codex" => &["codex", "codex-rs"],
+        "opencode" => &["opencode"],
+        _ => &[],
+    }
+}
+
+/// Resolve the `(pid, ppid)` pair to record on a hook sidecar entry
+/// for `harness`. Returns `(None, None)` when the harness pid cannot
+/// be identified — the discovery liveness check then skips the pid
+/// branch entirely so the record stays Active rather than being
+/// marked Ignored against a stillborn writer pid (H-MUXPROC-020).
+fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
+    match resolve_harness_pid(harness_binaries(harness)) {
+        Some((pid, ppid)) => (Some(i64::from(pid)), Some(i64::from(ppid))),
+        None => (None, None),
+    }
 }
 
 fn tmux_context() -> Option<HookTmuxRecord> {
@@ -2037,6 +2125,63 @@ mod tests {
         cmd.get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn resolve_harness_pid_walks_past_wrapper_layers_to_claude() {
+        // Simulated process tree the hook writer would actually see:
+        //   42 = sh -c '<...> conspectus hook write claude-code'
+        //   41 = claude (the long-lived harness)
+        //   40 = bash (login shell, not a harness)
+        // Start walk from pid 42 (parent of the conspectus child).
+        let tree: std::collections::HashMap<u32, (&str, u32)> =
+            [(42, ("sh", 41)), (41, ("claude", 40)), (40, ("bash", 1))]
+                .into_iter()
+                .collect();
+        let pair = resolve_harness_pid_with(42, &["claude", "claude-code"], |pid| {
+            tree.get(&pid).map(|(comm, ppid)| (comm.to_string(), *ppid))
+        });
+        assert_eq!(pair, Some((41, 40)));
+    }
+
+    #[test]
+    fn resolve_harness_pid_returns_none_when_no_ancestor_matches() {
+        let tree: std::collections::HashMap<u32, (&str, u32)> =
+            [(42, ("sh", 41)), (41, ("emacs", 40)), (40, ("bash", 1))]
+                .into_iter()
+                .collect();
+        let pair = resolve_harness_pid_with(42, &["claude", "claude-code"], |pid| {
+            tree.get(&pid).map(|(comm, ppid)| (comm.to_string(), *ppid))
+        });
+        assert_eq!(pair, None);
+    }
+
+    #[test]
+    fn resolve_harness_pid_stops_at_init() {
+        // pid 1 should terminate the walk without consulting the
+        // reader so we never falsely match a process named after a
+        // harness running as init/PID 1 in a container.
+        let pair = resolve_harness_pid_with(1, &["claude"], |_| {
+            panic!("walker must stop at pid 1 without reading")
+        });
+        assert_eq!(pair, None);
+    }
+
+    #[test]
+    fn resolve_harness_pid_terminates_on_missing_proc_entry() {
+        // A pid that has exited mid-walk should fail closed (return
+        // None) instead of panicking or looping. Mirrors what
+        // /proc-based reads do for a vanished process.
+        let pair = resolve_harness_pid_with(99, &["claude"], |_| None);
+        assert_eq!(pair, None);
+    }
+
+    #[test]
+    fn harness_binaries_recognizes_supported_harnesses() {
+        assert_eq!(harness_binaries("claude-code"), &["claude", "claude-code"]);
+        assert_eq!(harness_binaries("codex"), &["codex", "codex-rs"]);
+        assert_eq!(harness_binaries("opencode"), &["opencode"]);
+        assert_eq!(harness_binaries("unknown"), &[] as &[&str]);
     }
 
     #[test]

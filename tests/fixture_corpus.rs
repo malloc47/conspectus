@@ -358,8 +358,8 @@ fn claude_hook_payload_converts_to_record() {
 
     let record = claude_code_record_from_payload(
         &payload,
-        12345,
-        12344,
+        Some(12345),
+        Some(12344),
         Some(HookTmuxRecord {
             session_name: Some("editor".to_string()),
             native_id: Some("$0".to_string()),
@@ -393,8 +393,15 @@ fn claude_ephemeral_hook_handles_null_transcript_path() {
     )
     .unwrap();
 
-    let record = claude_code_record_from_payload(&payload, 12345, 12344, None, None, 1_700_000_600)
-        .expect("convert ephemeral hook payload");
+    let record = claude_code_record_from_payload(
+        &payload,
+        Some(12345),
+        Some(12344),
+        None,
+        None,
+        1_700_000_600,
+    )
+    .expect("convert ephemeral hook payload");
 
     assert!(
         record.transcript_path.is_none(),
@@ -410,8 +417,15 @@ fn codex_hook_payload_converts_to_record() {
     )
     .unwrap();
 
-    let record = codex_record_from_payload(&payload, 12346, 12345, None, None, 1_700_000_650)
-        .expect("convert codex hook payload");
+    let record = codex_record_from_payload(
+        &payload,
+        Some(12346),
+        Some(12345),
+        None,
+        None,
+        1_700_000_650,
+    )
+    .expect("convert codex hook payload");
 
     assert_eq!(record.harness_key, "codex");
     assert_eq!(record.session_key, "eeeeeeee-1111-2222-3333-444444444444");

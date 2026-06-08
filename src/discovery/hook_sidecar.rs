@@ -774,6 +774,54 @@ mod tests {
     }
 
     #[test]
+    fn hook_record_with_unknown_pid_stays_active() {
+        // H-MUXPROC-020: when the hook writer can't resolve the
+        // harness's pid (non-Linux, or no ancestor matches the
+        // harness binary), `record.pid` is persisted as `None` so
+        // the discovery liveness check is skipped rather than
+        // failing against a stillborn writer pid. The record must
+        // remain Active and contribute its `LinkedToMux` candidate.
+        let temp = tempdir().expect("tempdir");
+        hook::HookStore::new(temp.path())
+            .write_record(&hook::HookRecord {
+                schema_version: hook::SCHEMA_VERSION,
+                harness_key: "claude-code".to_string(),
+                session_key: "current".to_string(),
+                cwd: Some("/work".to_string()),
+                pid: None,
+                ppid: None,
+                tmux: Some(hook::HookTmuxRecord {
+                    session_name: Some("editor".to_string()),
+                    native_id: None,
+                    pane_id: Some("%1".to_string()),
+                    socket_path: None,
+                }),
+                transcript_path: None,
+                hook_event_name: Some("SessionStart".to_string()),
+                observed_epoch: 1_700_000_000,
+                harness_version: None,
+            })
+            .expect("write hook record");
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![session("current"), mux("editor")],
+            ..GraphSnapshot::empty()
+        };
+
+        apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_100);
+
+        let mux_link = snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.relation == RelationKind::LinkedToMux)
+            .expect("mux link emitted");
+        assert!(
+            matches!(mux_link.state, LinkState::Active),
+            "hook record without a pid must stay active, got {:?}",
+            mux_link.state,
+        );
+    }
+
+    #[test]
     fn hook_record_with_missing_transcript_does_not_synthesize_phantom_session() {
         let temp = tempdir().expect("tempdir");
         // Hook claims a transcript_path that does not exist on disk —

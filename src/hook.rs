@@ -149,8 +149,8 @@ pub fn current_epoch() -> i64 {
 
 pub fn claude_code_record_from_payload(
     payload: &serde_json::Value,
-    pid: i64,
-    ppid: i64,
+    pid: Option<i64>,
+    ppid: Option<i64>,
     tmux: Option<HookTmuxRecord>,
     harness_version: Option<String>,
     observed_epoch: i64,
@@ -170,8 +170,8 @@ pub fn claude_code_record_from_payload(
         harness_key: "claude-code".to_string(),
         session_key: session_id.to_string(),
         cwd: optional_string(payload, "cwd"),
-        pid: Some(pid),
-        ppid: Some(ppid),
+        pid,
+        ppid,
         tmux: tmux.filter(|tmux| !tmux.is_empty()),
         transcript_path: optional_string(payload, "transcript_path"),
         hook_event_name: optional_string(payload, "hook_event_name"),
@@ -182,8 +182,8 @@ pub fn claude_code_record_from_payload(
 
 pub fn codex_record_from_payload(
     payload: &serde_json::Value,
-    pid: i64,
-    ppid: i64,
+    pid: Option<i64>,
+    ppid: Option<i64>,
     tmux: Option<HookTmuxRecord>,
     harness_version: Option<String>,
     observed_epoch: i64,
@@ -203,8 +203,8 @@ pub fn codex_record_from_payload(
         harness_key: "codex".to_string(),
         session_key: session_id.to_string(),
         cwd: optional_string(payload, "cwd"),
-        pid: Some(pid),
-        ppid: Some(ppid),
+        pid,
+        ppid,
         tmux: tmux.filter(|tmux| !tmux.is_empty()),
         transcript_path: optional_string(payload, "transcript_path"),
         hook_event_name: optional_string(payload, "hook_event_name"),
@@ -221,8 +221,8 @@ pub fn codex_record_from_payload(
 /// `docs/backlog.md` for the field mapping per `Event` variant.
 pub fn opencode_record_from_payload(
     payload: &serde_json::Value,
-    pid: i64,
-    ppid: i64,
+    pid: Option<i64>,
+    ppid: Option<i64>,
     tmux: Option<HookTmuxRecord>,
     harness_version: Option<String>,
     observed_epoch: i64,
@@ -242,8 +242,8 @@ pub fn opencode_record_from_payload(
         harness_key: "opencode".to_string(),
         session_key: session_id.to_string(),
         cwd: optional_string(payload, "cwd"),
-        pid: Some(pid),
-        ppid: Some(ppid),
+        pid,
+        ppid,
         tmux: tmux.filter(|tmux| !tmux.is_empty()),
         // opencode sessions are tracked in the project sqlite store rather
         // than a per-session JSONL transcript file. The plugin may still
@@ -393,8 +393,8 @@ mod tests {
     fn claude_payload_requires_session_id() {
         let err = claude_code_record_from_payload(
             &serde_json::json!({"cwd": "/work"}),
-            1,
-            2,
+            Some(1),
+            Some(2),
             None,
             None,
             100,
@@ -413,8 +413,8 @@ mod tests {
                 "cwd": "/work",
                 "hook_event_name": "SessionStart"
             }),
-            10,
-            9,
+            Some(10),
+            Some(9),
             Some(HookTmuxRecord {
                 session_name: Some("editor".to_string()),
                 native_id: None,
@@ -446,8 +446,8 @@ mod tests {
                 "cwd": "/home/me/src/proj",
                 "hook_event_name": "session.updated"
             }),
-            42,
-            41,
+            Some(42),
+            Some(41),
             Some(HookTmuxRecord {
                 session_name: Some("work".to_string()),
                 native_id: Some("$3".to_string()),
@@ -475,8 +475,8 @@ mod tests {
     fn opencode_payload_requires_session_id() {
         let err = opencode_record_from_payload(
             &serde_json::json!({"cwd": "/work"}),
-            1,
-            2,
+            Some(1),
+            Some(2),
             None,
             None,
             100,
@@ -489,8 +489,8 @@ mod tests {
     fn opencode_payload_rejects_empty_session_id() {
         let err = opencode_record_from_payload(
             &serde_json::json!({"session_id": ""}),
-            1,
-            2,
+            Some(1),
+            Some(2),
             None,
             None,
             100,
