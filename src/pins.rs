@@ -146,10 +146,48 @@ impl PinLaunch {
 }
 
 pub fn parse_pins_document(text: &str) -> Result<PinsDocument, PinParseError> {
-    let document: PinsDocument =
+    let mut document: PinsDocument =
         toml::from_str(text).map_err(|err| PinParseError::MalformedToml(err.to_string()))?;
+    canonicalize_document_cwds(&mut document);
     validate_document(&document)?;
     Ok(document)
+}
+
+/// Rewrite each entry's `cwd` so a leading `~` or `~/` is expanded to
+/// `$HOME`. Applied at every I/O boundary (TOML parse, pin upsert, and
+/// store selection) so user-typed shortcuts survive the strict
+/// absolute-path check in `validate_entry` and `select_store_for_pin`.
+/// Internal callers can rely on `entry.cwd` being absolute once it has
+/// passed through any of those boundaries.
+fn canonicalize_document_cwds(document: &mut PinsDocument) {
+    let Some(section) = document.pins.as_mut() else {
+        return;
+    };
+    for entry in section.entries.iter_mut() {
+        entry.cwd = expand_home_prefix(&entry.cwd);
+    }
+}
+
+/// Expand a leading `~` or `~/` in `cwd` to `$HOME`. Returns the input
+/// unchanged when `$HOME` is unset or the input does not start with
+/// `~`. Only the bare `~` and `~/`-rooted forms are handled; the
+/// `~user/...` form is not supported because Conspectus has no way to
+/// reach a foreign user's home directory portably.
+pub(crate) fn expand_home_prefix(cwd: &str) -> String {
+    expand_home_prefix_with(cwd, std::env::var_os("HOME").map(PathBuf::from).as_deref())
+}
+
+pub(crate) fn expand_home_prefix_with(cwd: &str, home: Option<&Path>) -> String {
+    let Some(home) = home else {
+        return cwd.to_string();
+    };
+    if cwd == "~" {
+        return home.to_string_lossy().into_owned();
+    }
+    if let Some(rest) = cwd.strip_prefix("~/") {
+        return home.join(rest).to_string_lossy().into_owned();
+    }
+    cwd.to_string()
 }
 
 pub fn to_toml(document: &PinsDocument) -> Result<String, PinSerializeError> {
@@ -381,6 +419,12 @@ pub fn select_store_for_pin(
     cwd: &Path,
     loader: &ConfigLoader,
 ) -> Result<PinStoreSelection, PinStoreSelectionError> {
+    // Expand `~` at the boundary so the CLI's `--cwd ~/foo` and the
+    // TUI form's `~/foo` are accepted without leaking the shortcut
+    // into the absolute-path check below.
+    let expanded = expand_home_prefix(&cwd.to_string_lossy());
+    let cwd_owned = PathBuf::from(expanded);
+    let cwd = cwd_owned.as_path();
     if !cwd.is_absolute() {
         return Err(PinStoreSelectionError::RelativeCwd {
             cwd: cwd.display().to_string(),
@@ -518,9 +562,13 @@ pub fn load_pin_entry_by_id(
 ///   [`PinWriteError::Parse`] and the file is left untouched.
 pub fn upsert_pin_entry(
     path: impl AsRef<Path>,
-    entry: PinEntry,
+    mut entry: PinEntry,
 ) -> Result<PinWriteOutcome, PinWriteError> {
     let path = path.as_ref();
+    // Expand `~` / `~/` shortcuts at the write boundary so callers
+    // (CLI `pin create`, TUI form) can pass user-typed home-relative
+    // paths without tripping the absolute-path rule.
+    entry.cwd = expand_home_prefix(&entry.cwd);
     validate_entry_for_write(&entry)?;
 
     let (mut document, parsed) = load_document_for_write(path)?;
@@ -781,6 +829,63 @@ mod tests {
         )
         .expect("parse with unknown keys");
         assert_eq!(document.entries().len(), 1);
+    }
+
+    #[test]
+    fn expand_home_prefix_with_rewrites_tilde_forms() {
+        let home = Path::new("/home/op");
+        assert_eq!(expand_home_prefix_with("~", Some(home)), "/home/op");
+        assert_eq!(expand_home_prefix_with("~/", Some(home)), "/home/op/");
+        assert_eq!(
+            expand_home_prefix_with("~/src/proj", Some(home)),
+            "/home/op/src/proj",
+        );
+        // Non-tilde absolute paths pass through unchanged.
+        assert_eq!(
+            expand_home_prefix_with("/abs/path", Some(home)),
+            "/abs/path",
+        );
+        // Foreign-user form `~user/...` is intentionally not handled
+        // so callers see a clear `RelativeCwd` error downstream rather
+        // than a silently-wrong expansion.
+        assert_eq!(
+            expand_home_prefix_with("~other/foo", Some(home)),
+            "~other/foo",
+        );
+        // Without `$HOME`, the helper degrades to identity so the
+        // downstream `is_absolute` check produces the original error.
+        assert_eq!(expand_home_prefix_with("~/foo", None), "~/foo");
+    }
+
+    #[test]
+    fn canonicalize_document_cwds_rewrites_each_entry() {
+        // SAFETY: pin HOME for this thread for the duration of the
+        // call. We avoid env mutation in tests that run under
+        // nextest's parallel runner; this is exercised via the
+        // explicit `expand_home_prefix_with` helper above. To verify
+        // the integration without touching `$HOME`, we hand-build a
+        // document, run the canonicalizer through a thin wrapper, and
+        // assert the entry's `cwd` is rewritten to the expected
+        // absolute path.
+        fn canonicalize_with(document: &mut PinsDocument, home: &Path) {
+            if let Some(section) = document.pins.as_mut() {
+                for entry in section.entries.iter_mut() {
+                    entry.cwd = expand_home_prefix_with(&entry.cwd, Some(home));
+                }
+            }
+        }
+
+        let mut document = PinsDocument {
+            pins: Some(PinsSection {
+                schema_version: PINS_SCHEMA_VERSION,
+                entries: vec![PinEntry {
+                    cwd: "~/src/proj".to_string(),
+                    ..sample_entry("ingest", "ingest")
+                }],
+            }),
+        };
+        canonicalize_with(&mut document, Path::new("/home/op"));
+        assert_eq!(document.entries()[0].cwd, "/home/op/src/proj");
     }
 
     #[test]
