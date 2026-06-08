@@ -677,13 +677,18 @@ fn fetch_lineage_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKe
 }
 
 /// Resolved `associated_with` relationships whose target is a
-/// workspace, mirroring `session_workspace_identifier`. Multiple
-/// workspaces join with commas. Result: HashMap<session_key, joined string>.
+/// workspace, mirroring `session_workspace_identifier`. For each
+/// workspace, if the resolver picked ≥2 distinct `workspace_contains_repo`
+/// members, the display becomes a `+`-joined list of member names
+/// (basename of each member link's `logical_path`); otherwise the
+/// workspace root is used. Multiple workspaces per session join with
+/// commas.
 fn fetch_workspace_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, String>> {
     let mut stmt = conn.prepare(
         "SELECT json_extract(r.source, '$.harness_key') AS h, \
                 json_extract(r.source, '$.state_scope') AS s, \
                 json_extract(r.source, '$.session_key') AS k, \
+                r.target AS workspace_node, \
                 json_extract(r.target, '$.root') AS workspace_root \
          FROM resolved_relationships r \
          WHERE r.source_kind = 'agent_session' \
@@ -691,25 +696,86 @@ fn fetch_workspace_lookup(conn: &Connection) -> rusqlite::Result<HashMap<Session
            AND r.relation = 'associated_with' \
          ORDER BY workspace_root",
     )?;
-    let mut per_session: HashMap<SessionKey, Vec<String>> = HashMap::new();
+    let mut per_session: HashMap<SessionKey, Vec<(String, String)>> = HashMap::new();
     let rows = stmt.query_map([], |row| {
         let h: String = row.get(0)?;
         let s: String = row.get(1)?;
         let k: String = row.get(2)?;
-        let root: String = row.get(3)?;
-        Ok((session_key(&h, &s, &k), root))
+        let workspace_node: String = row.get(3)?;
+        let workspace_root: String = row.get(4)?;
+        Ok((session_key(&h, &s, &k), workspace_node, workspace_root))
     })?;
     for entry in rows {
-        let (key, root) = entry?;
-        per_session.entry(key).or_default().push(root);
+        let (key, ws_node, ws_root) = entry?;
+        per_session.entry(key).or_default().push((ws_node, ws_root));
     }
+
+    let members = fetch_workspace_member_displays(conn)?;
+
     let mut out = HashMap::new();
-    for (key, mut roots) in per_session {
-        roots.sort();
-        roots.dedup();
-        out.insert(key, roots.join(","));
+    for (key, mut workspaces) in per_session {
+        workspaces.sort();
+        workspaces.dedup();
+        let displays: Vec<String> = workspaces
+            .into_iter()
+            .map(|(ws_node, ws_root)| {
+                members
+                    .get(&ws_node)
+                    .filter(|names| names.len() >= 2)
+                    .map(|names| names.join("+"))
+                    .unwrap_or(ws_root)
+            })
+            .collect();
+        out.insert(key, displays.join(","));
     }
     Ok(out)
+}
+
+/// Index workspace member display names by workspace NodeId JSON.
+/// Reads the resolver's chosen `workspace_contains_repo` selections
+/// and extracts the basename of each link's `logical_path` source
+/// field — atelier's `repo.name` directory and generic workspace
+/// symlink/dir children both surface that way. Members without a
+/// `logical_path` (no provider sets that today, but defensive) are
+/// skipped silently; the threshold check in the caller treats a
+/// short list as "single-repo workspace" and falls back to the
+/// root path.
+fn fetch_workspace_member_displays(
+    conn: &Connection,
+) -> rusqlite::Result<HashMap<String, Vec<String>>> {
+    let mut stmt = conn.prepare(
+        "SELECT r.source AS workspace_node, cl.source_fields \
+         FROM resolved_relationships r \
+         JOIN candidate_links cl ON cl.link_id = r.selected_link_id \
+         WHERE r.relation = 'workspace_contains_repo' \
+           AND r.source_kind = 'workspace' \
+         ORDER BY r.source, r.target",
+    )?;
+    let mut per_workspace: HashMap<String, Vec<String>> = HashMap::new();
+    let rows = stmt.query_map([], |row| {
+        let ws_node: String = row.get(0)?;
+        let source_fields: String = row.get(1)?;
+        Ok((ws_node, source_fields))
+    })?;
+    for entry in rows {
+        let (ws_node, source_fields_json) = entry?;
+        if let Some(display) = repo_display_from_fields(&source_fields_json) {
+            per_workspace.entry(ws_node).or_default().push(display);
+        }
+    }
+    for displays in per_workspace.values_mut() {
+        displays.sort();
+        displays.dedup();
+    }
+    Ok(per_workspace)
+}
+
+fn repo_display_from_fields(json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let logical_path = value.get("logical_path")?.as_str()?;
+    std::path::Path::new(logical_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
 }
 
 /// Active `child_session` candidate links from forks to agent

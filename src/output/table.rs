@@ -170,8 +170,9 @@ mod tests {
     use super::*;
     use crate::model::{
         AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForgePrNode, ForkNode,
-        Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode,
-        NodeId, Provenance, RelationKind, RepoId, SourceMetadata, WorkspaceId,
+        Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState, Metadata, MuxSessionId,
+        MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata,
+        WorkspaceId, WorkspaceNode,
     };
     use crate::resolve::resolve_snapshot;
 
@@ -1372,6 +1373,179 @@ mod tests {
         assert!(
             rendered.contains("/workspace"),
             "workspace column should expose resolved session context:\n{rendered}",
+        );
+    }
+
+    fn workspace_node(root: &str, provider: Option<&str>) -> GraphNode {
+        GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new(root),
+            root: root.to_string(),
+            provider: provider.map(str::to_string),
+            name: None,
+        })
+    }
+
+    fn repo_node(common_dir: &str) -> GraphNode {
+        GraphNode::Repo(RepoNode::new(RepoId::new(common_dir)))
+    }
+
+    fn workspace_contains_repo_link(
+        link_id: &str,
+        workspace_root: &str,
+        repo_common_dir: &str,
+        logical_path: &str,
+    ) -> GraphLink {
+        let mut fields = Metadata::new();
+        fields.insert(
+            "logical_path".to_string(),
+            serde_json::Value::String(logical_path.to_string()),
+        );
+        GraphLink {
+            id: link_id.to_string(),
+            source: NodeId::Workspace(WorkspaceId::new(workspace_root)),
+            target: LinkEndpoint::Node {
+                id: NodeId::Repo(RepoId::new(repo_common_dir)),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "test".to_string(),
+                evidence: None,
+                fields,
+            },
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn sessions_projection_workspace_joins_member_repo_names_when_multi_repo() {
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                agent_session(
+                    "codex",
+                    "alpha",
+                    Some("/work/atelier/conspectus/crates/core"),
+                ),
+                workspace_node("/work/atelier", Some("atelier")),
+                repo_node("/work/atelier/atelier/.git"),
+                repo_node("/work/atelier/conspectus/.git"),
+            ],
+            candidate_links: vec![
+                associated_with_workspace(session_id, "/work/atelier"),
+                workspace_contains_repo_link(
+                    "ws-member-atelier",
+                    "/work/atelier",
+                    "/work/atelier/atelier/.git",
+                    "/work/atelier/atelier",
+                ),
+                workspace_contains_repo_link(
+                    "ws-member-conspectus",
+                    "/work/atelier",
+                    "/work/atelier/conspectus/.git",
+                    "/work/atelier/conspectus",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "workspace"]),
+        );
+
+        assert!(
+            rendered.contains("atelier+conspectus"),
+            "multi-repo workspace should render joined member names:\n{rendered}",
+        );
+        assert!(
+            !rendered.contains("/work/atelier "),
+            "multi-repo workspace should not also render the root path:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn sessions_projection_workspace_falls_back_to_root_when_single_repo() {
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work/solo/repo-a/src")),
+                workspace_node("/work/solo", None),
+                repo_node("/work/solo/repo-a/.git"),
+            ],
+            candidate_links: vec![
+                associated_with_workspace(session_id, "/work/solo"),
+                workspace_contains_repo_link(
+                    "ws-member-solo",
+                    "/work/solo",
+                    "/work/solo/repo-a/.git",
+                    "/work/solo/repo-a",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "workspace"]),
+        );
+
+        assert!(
+            rendered.contains("/work/solo"),
+            "single-repo workspace should keep the root path:\n{rendered}",
+        );
+        assert!(
+            !rendered.contains("repo-a+"),
+            "single-repo workspace should not render a joined name:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn sessions_projection_workspace_dedups_duplicate_member_names() {
+        // Two member links resolving to distinct repo identities but
+        // the same logical path leaf (e.g. an agent-deck workspace
+        // with symlinks to two checkouts both named `repo`). The
+        // joined display should collapse the duplicate so the threshold
+        // check sees only one distinct name and falls back to the root.
+        let session_id = AgentSessionId::new("codex", "global", "alpha");
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                agent_session("codex", "alpha", Some("/work/deck/abc/src")),
+                workspace_node("/work/deck/abc", Some("agent-deck")),
+                repo_node("/repos/first/.git"),
+                repo_node("/repos/second/.git"),
+            ],
+            candidate_links: vec![
+                associated_with_workspace(session_id, "/work/deck/abc"),
+                workspace_contains_repo_link(
+                    "deck-link-a",
+                    "/work/deck/abc",
+                    "/repos/first/.git",
+                    "/work/deck/abc/repo",
+                ),
+                workspace_contains_repo_link(
+                    "deck-link-b",
+                    "/work/deck/abc",
+                    "/repos/second/.git",
+                    "/work/deck/abc/repo",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let rendered = render_with(
+            &snapshot,
+            Projection::Agent,
+            &RenderOptions::wide().with_columns(vec!["id", "agent", "workspace"]),
+        );
+
+        assert!(
+            rendered.contains("/work/deck/abc"),
+            "duplicate member names should collapse and fall back to the workspace root:\n{rendered}",
         );
     }
 
