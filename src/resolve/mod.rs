@@ -18,12 +18,139 @@ pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     // ranking. The pin pass emits its own diagnostics, which we
     // merge in after `resolve_links` reassigns `snapshot.diagnostics`.
     let pin_diagnostics = pins::apply_pin_bindings(&mut snapshot);
+    // H-MUXPROC-021: demote `LinkedToMux` candidates whose source
+    // session is materially stale compared to a fresher candidate
+    // for the same mux, before bucketing kicks in.
+    demote_stale_source_mux_candidates(&mut snapshot);
     let output = resolve_links(&snapshot.candidate_links);
     snapshot.resolved_relationships = output.resolved_relationships;
     snapshot.diagnostics = output.diagnostics;
     snapshot.diagnostics.extend(pin_diagnostics);
     snapshot.canonicalize();
     snapshot
+}
+
+/// Window (in seconds) within which a candidate's source session must
+/// agree with the mux's `activity_epoch` to be eligible as the "fresh
+/// winner" that demotes other candidates for the same mux. Set wide
+/// enough to tolerate clock skew, snapshot-vs-write timing, and short
+/// idle periods between user turns; tight enough that a multi-day
+/// stale source can never qualify.
+const FRESH_MUX_BIND_WINDOW_SECONDS: i64 = 6 * 3600;
+
+/// Minimum gap (in seconds) between the freshest candidate's source
+/// `last_active_epoch` and a competing candidate's source
+/// `last_active_epoch` before the older candidate is demoted. Anything
+/// closer than this stays Active so genuinely-shared muxes (an agent
+/// hand-off between two sessions that were both touched within a
+/// reasonable window) keep both attachments visible.
+const STALE_SOURCE_GAP_SECONDS: i64 = 24 * 3600;
+
+/// Mark `LinkedToMux` candidates whose source `AgentSession` is far
+/// older than a competing candidate's source for the same mux as
+/// `LinkState::Overridden`. The freshest candidate must itself be
+/// within `FRESH_MUX_BIND_WINDOW_SECONDS` of the mux's
+/// `activity_epoch`; otherwise no demotion runs (we don't penalize
+/// other candidates on a weak signal). Declared and Pin provenance
+/// candidates are exempt — explicit user intent always wins.
+///
+/// The resolver buckets `LinkedToMux` candidates per source rather
+/// than per target, so without this pass two sessions both linking
+/// to the same mux each win their own bucket and surface as parallel
+/// attachments. In practice that produces the "stale `--resume <uuid>`
+/// keeps showing as attached" behavior described in `H-MUXPROC-015`,
+/// `H-MUXPROC-020`, and the live caveat-mux case that motivated
+/// `H-MUXPROC-021`.
+fn demote_stale_source_mux_candidates(snapshot: &mut GraphSnapshot) {
+    let last_active_by_session: BTreeMap<NodeId, i64> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(session) => session
+                .last_active_epoch
+                .map(|epoch| (NodeId::AgentSession(session.id.clone()), epoch)),
+            _ => None,
+        })
+        .collect();
+    let mux_activity: BTreeMap<NodeId, i64> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => mux
+                .activity_epoch
+                .map(|epoch| (NodeId::MuxSession(mux.id.clone()), epoch)),
+            _ => None,
+        })
+        .collect();
+
+    // Group eligible Active candidates by target mux. Each entry holds
+    // the index into `candidate_links` and the source's last-active
+    // epoch.
+    let mut by_mux: BTreeMap<NodeId, Vec<(usize, i64)>> = BTreeMap::new();
+    for (idx, link) in snapshot.candidate_links.iter().enumerate() {
+        if link.relation != RelationKind::LinkedToMux
+            || !matches!(link.state, LinkState::Active)
+            || is_declared_or_pin(link.provenance)
+        {
+            continue;
+        }
+        let Some(target) = link.target_node_id().cloned() else {
+            continue;
+        };
+        let Some(&source_epoch) = last_active_by_session.get(&link.source) else {
+            continue;
+        };
+        by_mux.entry(target).or_default().push((idx, source_epoch));
+    }
+
+    // Plan demotions out of the borrow on `snapshot.candidate_links`
+    // so we can mutate state in a second pass.
+    let mut to_demote: Vec<(usize, String)> = Vec::new();
+    for (target, entries) in by_mux {
+        if entries.len() < 2 {
+            continue;
+        }
+        let Some(&mux_epoch) = mux_activity.get(&target) else {
+            continue;
+        };
+        let (winner_idx, winner_epoch) = entries
+            .iter()
+            .copied()
+            .max_by_key(|(_, epoch)| *epoch)
+            .expect("non-empty");
+        if (mux_epoch - winner_epoch).abs() > FRESH_MUX_BIND_WINDOW_SECONDS {
+            continue;
+        }
+        let winner_id = snapshot.candidate_links[winner_idx].id.clone();
+        for (idx, epoch) in entries {
+            if idx == winner_idx {
+                continue;
+            }
+            if winner_epoch - epoch >= STALE_SOURCE_GAP_SECONDS {
+                to_demote.push((idx, winner_id.clone()));
+            }
+        }
+    }
+
+    for (idx, winner_id) in to_demote {
+        snapshot.candidate_links[idx].state = LinkState::Overridden {
+            by: winner_id,
+            reason: Some(
+                "source session stale compared to fresher LinkedToMux candidate for same mux"
+                    .to_string(),
+            ),
+        };
+    }
+}
+
+fn is_declared_or_pin(provenance: Provenance) -> bool {
+    matches!(
+        provenance,
+        Provenance::LocalDeclared
+            | Provenance::GlobalDeclared
+            | Provenance::LocalPin
+            | Provenance::GlobalPin
+    )
 }
 
 fn append_unique_links(links: &mut Vec<GraphLink>, additions: Vec<GraphLink>) {
@@ -2091,5 +2218,297 @@ mod tests {
 
         assert!(output.resolved_relationships.is_empty());
         assert_eq!(output.diagnostics.len(), 2);
+    }
+
+    // ----- H-MUXPROC-021: source-freshness demotion -----
+
+    fn agent_session_with_epoch(id: &str, last_active_epoch: i64) -> GraphNode {
+        GraphNode::AgentSession(crate::model::AgentSessionNode {
+            id: AgentSessionId::new("codex", "global", id),
+            harness_key: "codex".to_string(),
+            cwd: None,
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(last_active_epoch),
+            session_kind: None,
+        })
+    }
+
+    fn mux_with_epoch(name: &str, activity_epoch: i64) -> GraphNode {
+        GraphNode::MuxSession(crate::model::MuxSessionNode {
+            id: MuxSessionId::new(name),
+            backend: "tmux".to_string(),
+            native_id: name.to_string(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: Some(activity_epoch),
+            created_epoch: None,
+        })
+    }
+
+    /// Two sources both link to the same mux. One's `last_active_epoch`
+    /// matches the mux; the other is far stale. Expect the stale
+    /// candidate to be `Overridden` and the resolver to return only
+    /// the fresh relationship for the mux.
+    #[test]
+    fn demote_stale_source_keeps_only_fresh_mux_link() {
+        let mux_epoch = 1_780_000_000_i64;
+        let stale_epoch = mux_epoch - 30 * 24 * 3600; // ~30 days stale
+        let fresh_link = linked_to_mux_link(
+            "fresh",
+            session("fresh"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(mux_epoch),
+            Some("hook_session_path_match"),
+        );
+        let stale_link = linked_to_mux_link(
+            "stale",
+            session("stale"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(mux_epoch),
+            Some("active_pane_command_session_match"),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                mux_with_epoch("tmux:work", mux_epoch),
+                agent_session_with_epoch("fresh", mux_epoch),
+                agent_session_with_epoch("stale", stale_epoch),
+            ],
+            candidate_links: vec![fresh_link, stale_link],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        let stale = resolved
+            .candidate_links
+            .iter()
+            .find(|link| link.id == "stale")
+            .expect("stale candidate retained");
+        assert!(
+            matches!(stale.state, LinkState::Overridden { .. }),
+            "stale candidate must be overridden, got {:?}",
+            stale.state,
+        );
+        let linked_relations: Vec<&ResolvedRelationship> = resolved
+            .resolved_relationships
+            .iter()
+            .filter(|rel| {
+                rel.relation == RelationKind::LinkedToMux && rel.target == mux("tmux:work")
+            })
+            .collect();
+        assert_eq!(linked_relations.len(), 1);
+        assert_eq!(linked_relations[0].source, session("fresh"));
+    }
+
+    /// A single stale candidate with no competition must NOT be
+    /// demoted — there's no fresher alternative to override it.
+    #[test]
+    fn demote_stale_source_leaves_solitary_link_active() {
+        let mux_epoch = 1_780_000_000_i64;
+        let stale_epoch = mux_epoch - 30 * 24 * 3600;
+        let link = linked_to_mux_link(
+            "solo",
+            session("stale"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(mux_epoch),
+            Some("active_pane_command_session_match"),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                mux_with_epoch("tmux:work", mux_epoch),
+                agent_session_with_epoch("stale", stale_epoch),
+            ],
+            candidate_links: vec![link],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        let solo = resolved
+            .candidate_links
+            .iter()
+            .find(|link| link.id == "solo")
+            .expect("solo candidate retained");
+        assert!(
+            matches!(solo.state, LinkState::Active),
+            "solo candidate must remain active, got {:?}",
+            solo.state,
+        );
+    }
+
+    /// Pin / Declared provenance carries explicit user intent and
+    /// must not be demoted by the freshness pass even when a fresher
+    /// Discovered candidate competes.
+    #[test]
+    fn demote_stale_source_does_not_touch_pin_candidates() {
+        let mux_epoch = 1_780_000_000_i64;
+        let stale_epoch = mux_epoch - 30 * 24 * 3600;
+        let pin_link = linked_to_mux_link(
+            "pin",
+            session("stale-pin"),
+            mux("tmux:work"),
+            Provenance::LocalPin,
+            Confidence::High,
+            Some(mux_epoch),
+            None,
+        );
+        let fresh_link = linked_to_mux_link(
+            "fresh",
+            session("fresh"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(mux_epoch),
+            Some("hook_session_path_match"),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                mux_with_epoch("tmux:work", mux_epoch),
+                agent_session_with_epoch("fresh", mux_epoch),
+                agent_session_with_epoch("stale-pin", stale_epoch),
+            ],
+            candidate_links: vec![pin_link, fresh_link],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        let pin = resolved
+            .candidate_links
+            .iter()
+            .find(|link| link.id == "pin")
+            .expect("pin candidate retained");
+        assert!(
+            matches!(pin.state, LinkState::Active),
+            "pin candidate must remain active, got {:?}",
+            pin.state,
+        );
+    }
+
+    /// When neither candidate's source is itself fresh against the
+    /// mux's `activity_epoch`, the pass must NOT demote anyone — we
+    /// have no reliable signal that one source genuinely belongs to
+    /// the live mux.
+    #[test]
+    fn demote_stale_source_no_action_when_no_candidate_is_fresh() {
+        let mux_epoch = 1_780_000_000_i64;
+        let week = 7 * 24 * 3600;
+        let stale_a = linked_to_mux_link(
+            "a",
+            session("a"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(mux_epoch),
+            Some("active_pane_command_session_match"),
+        );
+        let stale_b = linked_to_mux_link(
+            "b",
+            session("b"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(mux_epoch),
+            Some("active_pane_command_session_match"),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                mux_with_epoch("tmux:work", mux_epoch),
+                // Both sources are days/weeks behind the mux.
+                agent_session_with_epoch("a", mux_epoch - 30 * 24 * 3600),
+                agent_session_with_epoch("b", mux_epoch - 30 * 24 * 3600 - week),
+            ],
+            candidate_links: vec![stale_a, stale_b],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        for id in ["a", "b"] {
+            let link = resolved
+                .candidate_links
+                .iter()
+                .find(|link| link.id == id)
+                .expect("candidate retained");
+            assert!(
+                matches!(link.state, LinkState::Active),
+                "candidate {id} must remain active when neither source is fresh, got {:?}",
+                link.state,
+            );
+        }
+    }
+
+    /// When the mux's `activity_epoch` is unknown, the pass has no
+    /// anchor to declare any candidate "fresh"; do nothing.
+    #[test]
+    fn demote_stale_source_no_action_when_mux_activity_unknown() {
+        let mux_epoch = 1_780_000_000_i64;
+        let stale_epoch = mux_epoch - 30 * 24 * 3600;
+        let fresh = linked_to_mux_link(
+            "fresh",
+            session("fresh"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            None,
+            Some("hook_session_path_match"),
+        );
+        let stale = linked_to_mux_link(
+            "stale",
+            session("stale"),
+            mux("tmux:work"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            None,
+            Some("active_pane_command_session_match"),
+        );
+        let snapshot = GraphSnapshot {
+            nodes: vec![
+                // Mux node has no activity_epoch.
+                GraphNode::MuxSession(crate::model::MuxSessionNode {
+                    id: MuxSessionId::new("tmux:work"),
+                    backend: "tmux".to_string(),
+                    native_id: "tmux:work".to_string(),
+                    cwd: None,
+                    active_pane_command: None,
+                    active_pane_pid: None,
+                    active_pane_current_path: None,
+                    active_pane_start_command: None,
+                    client_attached: None,
+                    activity_epoch: None,
+                    created_epoch: None,
+                }),
+                agent_session_with_epoch("fresh", mux_epoch),
+                agent_session_with_epoch("stale", stale_epoch),
+            ],
+            candidate_links: vec![fresh, stale],
+            ..GraphSnapshot::empty()
+        };
+
+        let resolved = resolve_snapshot(snapshot);
+
+        for id in ["fresh", "stale"] {
+            let link = resolved
+                .candidate_links
+                .iter()
+                .find(|link| link.id == id)
+                .expect("candidate retained");
+            assert!(
+                matches!(link.state, LinkState::Active),
+                "candidate {id} must remain active when mux activity is unknown, got {:?}",
+                link.state,
+            );
+        }
     }
 }

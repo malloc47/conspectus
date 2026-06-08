@@ -4548,52 +4548,70 @@ failure:
     `H-MUXPROC-021`, ADR 0028.
   - Blockers: none.
 
-- [ ] `H-MUXPROC-021` Use source-session freshness as a tie-breaker
-  in resolver mux scoring.
-  - Problem: `compare_session_mux` in `src/resolve/mod.rs:528` ranks
-    `LinkedToMux` candidates by `(tier, evidence_rank, confidence,
-    mux_activity_epoch)`. None of those terms reflect how fresh the
-    *source* `AgentSession` is. When a tmux pane's
-    `active_pane_start_command` carries a stale `--resume <UUID>` and
-    that UUID's `AgentSession.last_active_epoch` is days old, the
-    `active_pane_command_session_match` candidate (evidence_rank 30,
-    StrongDiscovered tier) still wins by default — even if the mux's
-    `activity_epoch` and other live signals belong to a fresher
-    session. In the live `agentdeck_-local-command-caveat-…-573ac208`
-    case the elected source had `last_active_epoch 1779653903`
-    (~14 days stale) while the mux's `activity_epoch` was
-    `1780882260` (current); the correct source (`7f01dbdf-…`) had
-    `last_active_epoch 1780881982`, within minutes of the mux.
-  - Scope: extend `MuxScore` (`src/resolve/mod.rs:540`) with a
-    source-freshness term derived from the source `AgentSession`'s
-    `last_active_epoch` clamped against the target mux's
-    `activity_epoch`. Penalize candidates whose source session is
-    materially older than the mux — e.g. demote by one tier or zero
-    out the `evidence_rank` term — so a fresh-session candidate at
-    rank 30 beats a 14-day-stale candidate at rank 30. Plumb the
-    `AgentSession` node lookup through `resolve_links` (or take the
-    snapshot, not just `&[GraphLink]`) so the scorer has access to
-    the source node's metadata. Keep the change conservative: do
-    nothing if either the mux `activity_epoch` or the source
-    `last_active_epoch` is missing, and do not penalize Declared or
-    Pin tier candidates (those carry explicit user intent).
-  - Tests: extend the resolver fixtures with a mux that has two
-    Active StrongDiscovered candidates of equal evidence_rank, where
-    one source's `last_active_epoch` matches the mux and the other
-    is 14 days stale; assert the fresh one wins. Add a regression
-    fixture where the stale source is the only Active candidate;
-    assert it still resolves (we don't drop links solely because
-    they're stale). Add a fixture where the stale candidate is
-    `LocalPin` tier; assert it still wins over a fresher
-    `StrongDiscovered` (declared intent beats freshness).
+- [x] `H-MUXPROC-021` Demote `LinkedToMux` candidates whose source
+  `AgentSession` is materially stale compared to a fresher candidate
+  for the same mux.
+  - Problem: `resolve_links` (`src/resolve/mod.rs:303`) buckets
+    `LinkedToMux` candidates by `(source, relation, target)` and
+    picks one winner *per source*. When two sessions each produce a
+    `LinkedToMux` candidate to the same mux, the resolver does not
+    cross-compare them — each is bucketed alone and both resolve as
+    independent relationships. The TUI mux row builder
+    (`src/tui/rows/mux.rs:653`) then shows every agent with an
+    Active `LinkedToMux` to the mux as attached, with no preference
+    among them. When a tmux pane's `active_pane_start_command`
+    carries a stale `--resume <UUID>` whose `AgentSession` has been
+    untouched for days, the stale session is treated as equally
+    "attached" to the mux as the live session writing the same pane.
+    In the live `agentdeck_-local-command-caveat-…-573ac208` case
+    the stale source had `last_active_epoch 1779653903` (~14 days
+    behind the mux), while the correct source (`7f01dbdf-…`) had
+    `last_active_epoch 1780881982` within minutes of the mux's
+    `activity_epoch`.
+  - Scope: add a pre-resolver pass on `snapshot.candidate_links`
+    that groups Active `LinkedToMux` candidates by target mux,
+    selects the freshest source per mux (by source `AgentSession.
+    last_active_epoch` closeness to the mux's `activity_epoch`), and
+    marks materially-older same-mux candidates as `LinkState::
+    Overridden { by, reason }`. Only run when the mux's
+    `activity_epoch` is present and the freshest candidate's source
+    is itself within a `FRESH_WINDOW` of the mux (don't penalize on
+    weak signals). Skip Declared and Pin provenance entirely — user
+    intent always wins. Run from `resolve_snapshot` between
+    `apply_pin_bindings` and `resolve_links` so the demoted state
+    is visible to the bucketing pass and to SQLite materialization.
+  - Tests: resolver-fixture test where one stale and one fresh
+    source both link to the same mux; assert the stale candidate is
+    Overridden and the resolver returns only the fresh relationship.
+    Regression where the stale source is the only candidate; assert
+    it stays Active. Regression where a `LocalPin` candidate is
+    stale but a fresher `StrongDiscovered` competes; assert the pin
+    is not demoted. Regression where neither source is fresh against
+    the mux; assert no demotion (don't penalize on weak signals).
+    Regression where the mux's `activity_epoch` is missing; assert
+    no demotion.
   - Manual checks: replay the `agentdeck_-local-command-caveat-…`
     snapshot through `conspectus graph --format json` and confirm
     `7f01dbdf-…` is attributed to the mux instead of `c1901a9e-…`.
   - Related: `H-MUXPROC-015`, `H-MUXPROC-020`, ADR 0006
     (resolver ordering), ADR 0028.
   - Blockers: none. Land alongside or after `H-MUXPROC-020` so the
-    hook-sidecar evidence is reaching the resolver before the
-    freshness term has to differentiate.
+    fresh hook-sidecar candidates are reaching `snapshot.candidate_
+    links` Active before the freshness pass has to differentiate.
+  - Outcome: `demote_stale_source_mux_candidates` in
+    `src/resolve/mod.rs` runs from `resolve_snapshot` between
+    `apply_pin_bindings` and `resolve_links`. Groups Active
+    `LinkedToMux` candidates by target mux, selects the freshest
+    candidate per mux (by source `AgentSession.last_active_epoch`
+    closeness to the mux's `activity_epoch`), and marks others
+    `LinkState::Overridden` when the source-epoch gap to the winner
+    is ≥ `STALE_SOURCE_GAP_SECONDS` (24h) and the winner is itself
+    within `FRESH_MUX_BIND_WINDOW_SECONDS` (6h) of the mux. Skips
+    Pin / Declared provenance entirely (user intent always wins),
+    skips when the mux's `activity_epoch` is missing, and skips
+    when no candidate is itself fresh against the mux. Unit tests
+    cover all five paths. Live caveat-mux fix once H-MUXPROC-020
+    starts producing Active hook records.
 
 - [x] `H-MUXPROC-015` Fix Claude Code mux attribution after
   in-process `/resume` switches.
