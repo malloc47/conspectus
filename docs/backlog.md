@@ -1502,6 +1502,21 @@ area is already being touched. Group prefixes:
   - Tests: snapshot tests for ambiguous mux and PR fixtures.
   - Blockers: `H-REF-003` is friendlier to do first because the
     explanation depends on a stable scoring shape.
+  - Related: ADR 0059 (Proposed) frames this as the immediate work and
+    defers the rules-engine question behind it; review and accept/reject
+    via `H-ADR-0059-REVIEW` before scoping `--explain` implementation.
+- [ ] `H-ADR-0059-REVIEW` Review and resolve ADR 0059 (resolver
+  rules-engine evaluation).
+  - Scope: read `docs/adr/0059-resolver-rules-engine-evaluation.md`,
+    decide accept / amend / reject. Key knobs to tune if accepting:
+    (a) the deferred-Ascent posture in §Decision (3), (b) the
+    counted-bug re-trigger threshold in §Decision (4). Update status
+    from `Proposed` to `Accepted` / `Rejected` / `Superseded` and
+    record any amendments inline. Skipping accept-as-drafted is fine;
+    the artifact's purpose is to stop the question from re-surfacing
+    without an explicit re-trigger.
+  - Tests: none (ADR-only).
+  - Blockers: none.
 - [ ] `H-OBS-005` Improve discovery diagnostics for missing providers.
   - Scope: when `gh` is unavailable, `tmux` is not installed, declared
     config is malformed, or a harness state root is missing, surface a
