@@ -524,18 +524,76 @@ fn write_checkout(out: &mut String, conn: &Connection, node_id: &str) -> rusqlit
 }
 
 fn write_workspace(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
-    let row: Option<String> = conn
+    let row: Option<(String, Option<String>, Option<String>)> = conn
         .query_row(
-            "SELECT root FROM node_workspaces WHERE node_id = ?1",
+            "SELECT root, provider_name, name FROM node_workspaces WHERE node_id = ?1",
             [node_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
-    let Some(root) = row else {
+    let Some((root, provider, name)) = row else {
         return Ok(false);
     };
-    let _ = writeln!(out, "  root: {root}");
+    let _ = writeln!(out, "  root:     {root}");
+    if let Some(provider) = provider {
+        let _ = writeln!(out, "  provider: {provider}");
+    }
+    if let Some(name) = name {
+        let _ = writeln!(out, "  name:     {name}");
+    }
+    for member in fetch_workspace_members(conn, node_id)? {
+        let _ = writeln!(out, "  member:   {member}");
+    }
     Ok(true)
+}
+
+/// Resolver-chosen `workspace_contains_repo` members for a workspace,
+/// rendered as the basename of each link's `logical_path` source field
+/// (atelier's `[[repos]].name`, agent-deck symlink leaf, generic
+/// workspace child name). Matches the TUI's `member` HeaderField
+/// labeling so the surfaces stay byte-aligned.
+fn fetch_workspace_members(
+    conn: &Connection,
+    workspace_node_id: &str,
+) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT cl.source_fields, r.target \
+         FROM resolved_relationships r \
+         JOIN candidate_links cl ON cl.link_id = r.selected_link_id \
+         WHERE r.relation = 'workspace_contains_repo' \
+           AND r.source_kind = 'workspace' \
+           AND ('workspace:' || json_extract(r.source, '$.root')) = ?1 \
+         ORDER BY r.target",
+    )?;
+    let rows = stmt.query_map([workspace_node_id], |row| {
+        let source_fields: String = row.get(0)?;
+        let target: String = row.get(1)?;
+        Ok((source_fields, target))
+    })?;
+    let mut members = Vec::new();
+    for entry in rows {
+        let (source_fields, target) = entry?;
+        let display = serde_json::from_str::<serde_json::Value>(&source_fields)
+            .ok()
+            .and_then(|v| {
+                v.get("logical_path")
+                    .and_then(|p| p.as_str())
+                    .and_then(|p| std::path::Path::new(p).file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| {
+                serde_json::from_str::<serde_json::Value>(&target)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("common_dir")
+                            .and_then(|p| p.as_str())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or(target)
+            });
+        members.push(display);
+    }
+    Ok(members)
 }
 
 fn write_agent_session(
@@ -581,7 +639,56 @@ fn write_agent_session(
     {
         let _ = writeln!(out, "  title:       {title}");
     }
+    for workspace_label in fetch_session_workspace_labels(conn, node_id)? {
+        let _ = writeln!(out, "  workspace:   {workspace_label}");
+    }
     Ok(true)
+}
+
+/// Resolved `associated_with` workspace targets for a session, labeled
+/// by `node_workspaces.name` falling back to the basename of `root`.
+/// Mirrors the TUI's `workspace` HeaderField. Multi-workspace sessions
+/// emit one row per association.
+fn fetch_session_workspace_labels(
+    conn: &Connection,
+    session_node_id: &str,
+) -> rusqlite::Result<Vec<String>> {
+    // Display-form JOIN (see write_node_summary_from_conn note): the
+    // `r.source` JSON is keyed by harness/state_scope/session_key and
+    // a reconstructed `agent_session:<harness>:<scope>:<key>` matches
+    // `node_agent_sessions.node_id`. Here we only need the target side
+    // to join into `node_workspaces`.
+    let mut stmt = conn.prepare(
+        "SELECT w.root, w.name \
+         FROM resolved_relationships r \
+         JOIN node_workspaces w \
+             ON ('workspace:' || json_extract(r.target, '$.root')) = w.node_id \
+         WHERE r.source_kind = 'agent_session' \
+           AND r.target_kind = 'workspace' \
+           AND r.relation = 'associated_with' \
+           AND ('agent_session:' || json_extract(r.source, '$.harness_key') \
+                || ':' || json_extract(r.source, '$.state_scope') \
+                || ':' || json_extract(r.source, '$.session_key')) = ?1 \
+         ORDER BY w.root",
+    )?;
+    let rows = stmt.query_map([session_node_id], |row| {
+        let root: String = row.get(0)?;
+        let name: Option<String> = row.get(1)?;
+        Ok((root, name))
+    })?;
+    let mut labels = Vec::new();
+    for entry in rows {
+        let (root, name) = entry?;
+        let label = name.unwrap_or_else(|| {
+            std::path::Path::new(&root)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+                .unwrap_or(root)
+        });
+        labels.push(label);
+    }
+    Ok(labels)
 }
 
 fn write_mux_session(out: &mut String, conn: &Connection, node_id: &str) -> rusqlite::Result<bool> {
@@ -1028,9 +1135,10 @@ mod tests {
     use super::*;
     use crate::model::{
         AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode,
-        LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, Provenance, RelationKind,
-        SourceMetadata,
+        LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, Provenance, RelationKind,
+        RepoId, RepoNode, SourceMetadata, WorkspaceId, WorkspaceNode,
     };
+    use crate::resolve::resolve_snapshot;
 
     fn agent_node(harness: &str, scope: &str, key: &str) -> GraphNode {
         GraphNode::AgentSession(AgentSessionNode {
@@ -1205,6 +1313,196 @@ mod tests {
             "title row should appear when alias is unset:\n{output}",
         );
         assert!(!output.contains("alias:"));
+    }
+
+    fn workspace_node(root: &str, provider: Option<&str>, name: Option<&str>) -> GraphNode {
+        GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new(root),
+            root: root.to_string(),
+            provider: provider.map(str::to_string),
+            name: name.map(str::to_string),
+        })
+    }
+
+    fn repo_node(common_dir: &str) -> GraphNode {
+        GraphNode::Repo(RepoNode::new(RepoId::new(common_dir)))
+    }
+
+    fn workspace_contains_repo_link(
+        link_id: &str,
+        workspace_root: &str,
+        repo_common_dir: &str,
+        logical_path: &str,
+    ) -> GraphLink {
+        let mut fields = Metadata::new();
+        fields.insert(
+            "logical_path".to_string(),
+            serde_json::Value::String(logical_path.to_string()),
+        );
+        GraphLink {
+            id: link_id.to_string(),
+            source: NodeId::Workspace(WorkspaceId::new(workspace_root)),
+            target: LinkEndpoint::Node {
+                id: NodeId::Repo(RepoId::new(repo_common_dir)),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "test".to_string(),
+                evidence: None,
+                fields,
+            },
+            state: LinkState::Active,
+        }
+    }
+
+    fn session_workspace_link(
+        link_id: &str,
+        session_id: NodeId,
+        workspace_root: &str,
+    ) -> GraphLink {
+        GraphLink {
+            id: link_id.to_string(),
+            source: session_id,
+            target: LinkEndpoint::Node {
+                id: NodeId::Workspace(WorkspaceId::new(workspace_root)),
+            },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn workspace_node_show_includes_provider_name_and_member_rows() {
+        let workspace_root = "/work/atelier";
+        let repo_a = "/work/atelier/atelier/.git";
+        let repo_b = "/work/atelier/conspectus/.git";
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                workspace_node(workspace_root, Some("atelier"), Some("atelier-ws")),
+                repo_node(repo_a),
+                repo_node(repo_b),
+            ],
+            candidate_links: vec![
+                workspace_contains_repo_link(
+                    "ws-atelier",
+                    workspace_root,
+                    repo_a,
+                    "/work/atelier/atelier",
+                ),
+                workspace_contains_repo_link(
+                    "ws-conspectus",
+                    workspace_root,
+                    repo_b,
+                    "/work/atelier/conspectus",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+        let target = NodeId::Workspace(WorkspaceId::new(workspace_root));
+        let rendered = render_node_show(&snapshot, &target, false);
+
+        assert!(rendered.contains("kind: workspace"), "got:\n{rendered}");
+        assert!(rendered.contains("provider: atelier"), "got:\n{rendered}");
+        assert!(
+            rendered.contains("name:     atelier-ws"),
+            "got:\n{rendered}"
+        );
+        assert!(rendered.contains("member:   atelier"), "got:\n{rendered}");
+        assert!(
+            rendered.contains("member:   conspectus"),
+            "got:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn workspace_node_show_omits_member_rows_when_no_members() {
+        let workspace_root = "/work/empty";
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![workspace_node(workspace_root, None, None)],
+            ..GraphSnapshot::empty()
+        });
+        let target = NodeId::Workspace(WorkspaceId::new(workspace_root));
+        let rendered = render_node_show(&snapshot, &target, false);
+
+        assert!(rendered.contains("kind: workspace"));
+        assert!(
+            !rendered.contains("member:"),
+            "no member rows expected when the workspace has no resolved repos:\n{rendered}",
+        );
+        assert!(
+            !rendered.contains("provider:"),
+            "no provider row expected when the workspace has no provider:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn agent_session_node_show_includes_workspace_row() {
+        let workspace_root = "/work/atelier";
+        let session = agent_node("codex", "/state", "alpha");
+        let session_id = session.id();
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                session,
+                workspace_node(workspace_root, Some("atelier"), Some("atelier-ws")),
+            ],
+            candidate_links: vec![session_workspace_link(
+                "assoc-1",
+                session_id.clone(),
+                workspace_root,
+            )],
+            ..GraphSnapshot::empty()
+        });
+        let rendered = render_node_show(&snapshot, &session_id, false);
+
+        assert!(rendered.contains("kind: agent_session"));
+        assert!(
+            rendered.contains("workspace:   atelier-ws"),
+            "workspace row missing from agent_session output:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn agent_session_node_show_emits_one_workspace_row_per_association() {
+        let session = agent_node("codex", "/state", "alpha");
+        let session_id = session.id();
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                session,
+                workspace_node("/work/a", None, Some("alpha-ws")),
+                workspace_node("/work/b", None, Some("beta-ws")),
+            ],
+            candidate_links: vec![
+                session_workspace_link("assoc-a", session_id.clone(), "/work/a"),
+                session_workspace_link("assoc-b", session_id.clone(), "/work/b"),
+            ],
+            ..GraphSnapshot::empty()
+        });
+        let rendered = render_node_show(&snapshot, &session_id, false);
+
+        assert!(rendered.contains("workspace:   alpha-ws"));
+        assert!(rendered.contains("workspace:   beta-ws"));
+    }
+
+    #[test]
+    fn agent_session_node_show_omits_workspace_row_when_unassociated() {
+        let session = agent_node("codex", "/state", "alpha");
+        let session_id = session.id();
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![session],
+            ..GraphSnapshot::empty()
+        });
+        let rendered = render_node_show(&snapshot, &session_id, false);
+        assert!(
+            !rendered.contains("workspace:"),
+            "no workspace row expected without an association:\n{rendered}",
+        );
     }
 
     #[test]
