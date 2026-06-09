@@ -57,6 +57,7 @@ pub const VIEW_OPTIONS: &[View] = &[
     View::Union,
     View::Prs,
     View::Forks,
+    View::Workspaces,
 ];
 
 /// Sort options surfaced in the Sort section, in stable order.
@@ -716,6 +717,7 @@ fn view_label(view: View) -> &'static str {
         View::Union => "Union",
         View::Prs => "PRs",
         View::Forks => "Forks",
+        View::Workspaces => "Workspaces",
     }
 }
 
@@ -854,8 +856,8 @@ mod tests {
             Sort::Hierarchy,
         );
         let mut state = ControlsOverlayState::new(&ctx);
-        // Advance 5 rows = past all View options into Grouping(0).
-        for _ in 0..5 {
+        // Advance VIEW_OPTIONS.len() rows = past all View options into Grouping(0).
+        for _ in 0..VIEW_OPTIONS.len() {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         // Land on the second grouping row (Graph).

@@ -124,6 +124,7 @@ pub enum View {
     Union,
     Prs,
     Forks,
+    Workspaces,
 }
 
 /// Row sort within each group.
@@ -179,6 +180,15 @@ pub enum ForksGrouping {
     Parent,
 }
 
+/// Top-level grouping in the workspaces view (H-WS-002 MVP).
+/// `Flat` is the only grouping shipped in v1 — Provider / Activity /
+/// Repo are deferred behind the same view so the menu can grow
+/// without a per-grouping rebuild of the surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspacesGrouping {
+    Flat,
+}
+
 /// Per-view grouping dispatch. Each variant wraps the per-view
 /// grouping enum so a single [`Grouping`] value can be persisted in
 /// [`crate::tui::app::App`], passed through the CLI surface, or
@@ -197,6 +207,7 @@ pub enum Grouping {
     Union(UnionGrouping),
     Prs(PrsGrouping),
     Forks(ForksGrouping),
+    Workspaces(WorkspacesGrouping),
 }
 
 impl Grouping {
@@ -208,6 +219,7 @@ impl Grouping {
             Self::Union(_) => View::Union,
             Self::Prs(_) => View::Prs,
             Self::Forks(_) => View::Forks,
+            Self::Workspaces(_) => View::Workspaces,
         }
     }
 
@@ -221,6 +233,7 @@ impl Grouping {
             View::Union => Self::Union(UnionGrouping::Kind),
             View::Prs => Self::Prs(PrsGrouping::Repo),
             View::Forks => Self::Forks(ForksGrouping::Provider),
+            View::Workspaces => Self::Workspaces(WorkspacesGrouping::Flat),
         }
     }
 
@@ -246,6 +259,7 @@ impl Grouping {
             Self::Prs(PrsGrouping::State) => "state",
             Self::Forks(ForksGrouping::Provider) => "provider",
             Self::Forks(ForksGrouping::Parent) => "parent",
+            Self::Workspaces(WorkspacesGrouping::Flat) => "flat",
         }
     }
 
@@ -295,6 +309,7 @@ impl Grouping {
                 Self::Forks(ForksGrouping::Workspace),
                 Self::Forks(ForksGrouping::Parent),
             ],
+            View::Workspaces => &[Self::Workspaces(WorkspacesGrouping::Flat)],
         }
     }
 

@@ -31,6 +31,7 @@ pub mod mux;
 pub mod prs;
 pub mod sessions;
 pub mod union;
+pub mod workspaces;
 
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -68,6 +69,14 @@ pub enum RowId {
     /// Synthetic row not backed by a single node — used for the
     /// "Ungrouped" bucket and any other rendered-only structure.
     Synthetic(&'static str),
+    /// A labeled subgroup row hanging beneath a parent node. Used by
+    /// the workspaces view (`members` / `in workspace` / `related`
+    /// subgroups under each workspace, H-WS-002) so the row id is
+    /// stable across rebuilds without colliding across workspaces.
+    Subgroup {
+        parent: NodeId,
+        label: &'static str,
+    },
 }
 
 /// Built view-model the renderer consumes. Always rendered top-to-
@@ -89,6 +98,7 @@ pub enum ViewLabel {
     Union,
     Prs,
     Forks,
+    Workspaces,
 }
 
 impl From<View> for ViewLabel {
@@ -99,6 +109,7 @@ impl From<View> for ViewLabel {
             View::Union => Self::Union,
             View::Prs => Self::Prs,
             View::Forks => Self::Forks,
+            View::Workspaces => Self::Workspaces,
         }
     }
 }

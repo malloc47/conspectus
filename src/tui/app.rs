@@ -1064,7 +1064,8 @@ impl App {
                     }
                     super::Grouping::Union(_)
                     | super::Grouping::Prs(_)
-                    | super::Grouping::Forks(_) => {}
+                    | super::Grouping::Forks(_)
+                    | super::Grouping::Workspaces(_) => {}
                 }
             }
             ControlsAction::SetFilter(filter) => {
@@ -1527,6 +1528,11 @@ impl App {
             // status bar surface the binding hint.
             RowId::Pin { .. } => None,
             RowId::Synthetic(_) => None,
+            // Subgroup rows (workspaces view "members" / "in
+            // workspace" / "related" labels) focus their parent
+            // node — the user gets the workspace's detail when
+            // they land on any of its subgroup headers.
+            RowId::Subgroup { parent, .. } => Some(parent.clone()),
         };
         let Some(target) = target else {
             self.explorer = None;

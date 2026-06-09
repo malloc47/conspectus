@@ -1150,6 +1150,14 @@ fn build_tree_for_view(conn: &rusqlite::Connection, config: &RunConfig) -> Resul
                 filter: config.initial_filter.clone(),
             },
         )?,
+        View::Workspaces => crate::tui::rows::workspaces::build_workspaces_tree_from_conn(
+            crate::tui::rows::workspaces::WorkspacesBuildInputsFromConn {
+                conn,
+                home: home.as_deref(),
+                now: current_unix_epoch(),
+                filter: config.initial_filter.clone(),
+            },
+        )?,
     };
     Ok(tree)
 }
@@ -2326,6 +2334,9 @@ fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             (m, KeyCode::Char('5')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::SwitchView(View::Forks))
             }
+            (m, KeyCode::Char('6')) if !m.contains(KeyModifiers::CONTROL) => {
+                Some(Action::SwitchView(View::Workspaces))
+            }
             (m, KeyCode::Char('/')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenSearch)
             }
@@ -2923,6 +2934,7 @@ mod tests {
             ('3', View::Union),
             ('4', View::Prs),
             ('5', View::Forks),
+            ('6', View::Workspaces),
         ];
         for (ch, view) in cases {
             assert_eq!(
@@ -2947,8 +2959,9 @@ mod tests {
 
     #[test]
     fn cycle_view_wraps_in_both_directions() {
-        assert_eq!(cycle_view(View::Sessions, -1), View::Forks);
-        assert_eq!(cycle_view(View::Forks, 1), View::Sessions);
+        assert_eq!(cycle_view(View::Sessions, -1), View::Workspaces);
+        assert_eq!(cycle_view(View::Workspaces, 1), View::Sessions);
+        assert_eq!(cycle_view(View::Forks, 1), View::Workspaces);
         assert_eq!(cycle_view(View::Mux, 1), View::Union);
         assert_eq!(cycle_view(View::Union, -1), View::Mux);
     }
