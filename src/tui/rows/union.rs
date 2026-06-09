@@ -185,6 +185,9 @@ fn agent_row(
             alias: agent.alias.clone(),
             primary_node: node_id,
             pin_id: None,
+            // H-WS-001: chip is Sessions-view-specific; H-WS-003
+            // will audit whether the Union view needs an equivalent.
+            workspace_chip: None,
         }),
     }
 }

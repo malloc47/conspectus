@@ -755,6 +755,10 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             primary_node: node_id,
+            // H-WS-001: chip is Sessions-view-specific evidence.
+            // H-WS-003 will audit whether the Mux view's
+            // workspace grouping needs an equivalent.
+            workspace_chip: None,
         }),
     }
 }

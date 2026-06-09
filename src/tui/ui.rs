@@ -1041,6 +1041,22 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         };
         spans.push(Span::styled(format!("  {label}"), style));
     }
+    // H-WS-001: (B)-class chip surfaces weak workspace membership
+    // without falsely nesting the session under the workspace. Subtle
+    // styling — this is a cross-reference annotation, not a primary
+    // identity column.
+    if let Some(chip) = session
+        .workspace_chip
+        .as_deref()
+        .filter(|chip| !chip.is_empty())
+    {
+        spans.push(Span::styled(
+            format!("  {chip}"),
+            Style::default()
+                .fg(theme.secondary_text)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
     if let Some(project) = session
         .project_display
         .as_deref()
@@ -3730,6 +3746,7 @@ mod tests {
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
+            workspace_chip: None,
         };
         let spans = render_session_spans(&row, &theme, now);
         let badge = spans
@@ -3761,6 +3778,7 @@ mod tests {
             alias: Some("ingest-refactor".into()),
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
+            workspace_chip: None,
         };
 
         let spans = render_session_spans(&row, &theme, now);
@@ -3800,6 +3818,7 @@ mod tests {
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
             pin_id: None,
+            workspace_chip: None,
         };
 
         let spans = render_session_spans(&row, &theme, now);
@@ -3831,6 +3850,7 @@ mod tests {
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
+            workspace_chip: None,
         };
 
         let spans = render_session_spans(&row, &theme, now);
@@ -3937,6 +3957,7 @@ mod tests {
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
+            workspace_chip: None,
         };
 
         let mut spans = render_session_spans(&row, &theme, now);
@@ -3976,6 +3997,7 @@ mod tests {
             alias: None,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
+            workspace_chip: None,
         };
         // Locate the recency span by its formatted content (4-cell
         // right-aligned tag). Index varies with harness label length

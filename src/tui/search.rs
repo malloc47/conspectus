@@ -322,6 +322,7 @@ mod tests {
                 alias: alias.map(str::to_string),
                 primary_node: primary,
                 pin_id: None,
+                workspace_chip: None,
             }),
         }
     }

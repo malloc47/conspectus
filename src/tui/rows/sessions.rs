@@ -20,6 +20,21 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+/// Upper bound on weak workspace memberships before the chip
+/// suppresses to avoid visual noise on shared utility repos that
+/// participate in many workspaces. `1` → name; `2..=MAX` → `[N ws]`;
+/// `MAX+1` and above → no chip. Tuned for the daily-driver case
+/// where most repos land in 0 or 1 workspaces; reach for a config
+/// knob when the chip-suppression cliff bites someone.
+const WEAK_WORKSPACE_CHIP_MAX: usize = 3;
+
+fn basename(path: &str) -> &str {
+    Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+}
+
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxSessionNode,
@@ -564,20 +579,6 @@ impl<'a> SessionsData<'a> {
             .count()
     }
 
-    fn workspace_for_repo(&self, repo: &NodeId) -> Option<&WorkspaceId> {
-        for ((source, relation), links) in &self.by_source_relation {
-            if *relation != RelationKind::WorkspaceContainsRepo {
-                continue;
-            }
-            if links.iter().any(|link| link.target_node_id() == Some(repo))
-                && let NodeId::Workspace(ws) = source
-            {
-                return Some(ws);
-            }
-        }
-        None
-    }
-
     fn workspace_for_session(&self, session: &NodeId) -> Option<&WorkspaceId> {
         self.by_source_relation
             .get(&(session.clone(), RelationKind::AssociatedWith))
@@ -587,6 +588,78 @@ impl<'a> SessionsData<'a> {
                     _ => None,
                 })
             })
+    }
+
+    /// All workspaces whose `WorkspaceContainsRepo` selections include
+    /// `repo`. Returns each `WorkspaceId` at most once, ordered by
+    /// workspace root so the result is deterministic across rebuilds.
+    /// Used by [`Self::weak_workspace_chip`] to compute the (B)-class
+    /// chip; the strict grouping in `resolve_group_key` continues to
+    /// pick a single winner via [`Self::workspace_for_session`].
+    fn workspaces_for_repo(&self, repo: &NodeId) -> Vec<&WorkspaceId> {
+        let mut out: Vec<&WorkspaceId> = self
+            .by_source_relation
+            .iter()
+            .filter(|((_, relation), _)| *relation == RelationKind::WorkspaceContainsRepo)
+            .filter_map(|((source, _), links)| match source {
+                NodeId::Workspace(ws)
+                    if links.iter().any(|link| link.target_node_id() == Some(repo)) =>
+                {
+                    Some(ws)
+                }
+                _ => None,
+            })
+            .collect();
+        out.sort_by(|a, b| a.root.cmp(&b.root));
+        out.dedup_by(|a, b| a.root == b.root);
+        out
+    }
+
+    /// Display label for a `Workspace` by id: prefer the node's `name`
+    /// field, fall back to the basename of `root`. Used by the
+    /// (B)-class chip to render `[atelier-ws]` rather than the
+    /// path-shaped root.
+    fn workspace_display(&self, ws: &WorkspaceId) -> String {
+        self.snapshot
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                crate::model::GraphNode::Workspace(w) if w.id.root == ws.root => Some(
+                    w.name
+                        .clone()
+                        .unwrap_or_else(|| basename(&w.root).to_string()),
+                ),
+                _ => None,
+            })
+            .unwrap_or_else(|| basename(&ws.root).to_string())
+    }
+
+    /// Compute the (B)-class workspace chip for a session whose repo
+    /// is reachable from one or more workspace `WorkspaceContainsRepo`
+    /// edges but which the session itself is not `AssociatedWith`.
+    /// Returns `None` when (A) holds for this session (it would
+    /// already nest under the workspace header), when no workspace
+    /// claims the repo, or when the membership count exceeds
+    /// [`WEAK_WORKSPACE_CHIP_MAX`] (suppressed to avoid chip explosion
+    /// on shared utility repos).
+    ///
+    /// Format:
+    /// - 1 weak membership → `[ws-name]`
+    /// - 2..=MAX weak memberships → `[N ws]`
+    /// - >MAX → `None`
+    fn weak_workspace_chip(&self, session_id: &NodeId, repo_node_id: &NodeId) -> Option<String> {
+        // (A)-class sessions already nest under their workspace; the
+        // chip is a cross-reference signal, not a redundant marker.
+        if self.workspace_for_session(session_id).is_some() {
+            return None;
+        }
+        let workspaces = self.workspaces_for_repo(repo_node_id);
+        match workspaces.len() {
+            0 => None,
+            1 => Some(format!("[{}]", self.workspace_display(workspaces[0]))),
+            n if n <= WEAK_WORKSPACE_CHIP_MAX => Some(format!("[{n} ws]")),
+            _ => None,
+        }
     }
 
     fn repo_display_path(&self, repo: &RepoId) -> String {
@@ -646,11 +719,16 @@ fn resolve_group_key(
     let cwd = entry.node.cwd.as_deref()?;
     let (worktree_id, _worktree) = data.checkout_for_path(cwd)?;
     let repo_id = worktree_id.repo.clone();
-    let repo_node_id = NodeId::Repo(repo_id.clone());
     let workspace = match grouping {
+        // Strict per H-WS-001 / docs/plans/workspace-view-redesign.md:
+        // only nest under a workspace when the session itself carries a
+        // direct `AssociatedWith Workspace` edge (case A — the session
+        // is workspace-rooted). Case B (the session's repo happens to
+        // be a workspace member but the session has no workspace edge)
+        // falls through to repo-level grouping. Weak membership is
+        // surfaced via the `[ws-name]` chip on the session row instead.
         SessionsGrouping::Graph => data
             .workspace_for_session(&entry.id)
-            .or_else(|| data.workspace_for_repo(&repo_node_id))
             .map(|ws| ws.root.clone()),
         // Repo/Worktree/ScanRoot collapse the workspace level.
         // ScanRoot fallback to repo grouping until the runtime
@@ -825,6 +903,14 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
         .as_deref()
         .map(|cwd| shorten_home(cwd, ctx.home));
 
+    let workspace_chip = entry
+        .node
+        .cwd
+        .as_deref()
+        .and_then(|cwd| ctx.data.checkout_for_path(cwd))
+        .map(|(worktree_id, _)| NodeId::Repo(worktree_id.repo.clone()))
+        .and_then(|repo_node_id| ctx.data.weak_workspace_chip(&entry.id, &repo_node_id));
+
     ctx.tree.rows.push(Row {
         id: RowId::AgentSession(entry.id.clone()),
         depth,
@@ -843,6 +929,7 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             alias: ctx.data.snapshot.aliases.get(&entry.id).map(str::to_string),
             primary_node: entry.id.clone(),
             pin_id: ctx.data.pin_id_by_bound_session.get(&entry.id).cloned(),
+            workspace_chip,
         }),
     });
 
@@ -1233,6 +1320,31 @@ mod tests {
         }
     }
 
+    fn workspace_with_name(root: &str, name: &str) -> GraphNode {
+        GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new(root),
+            root: root.to_string(),
+            provider: None,
+            name: Some(name.to_string()),
+        })
+    }
+
+    fn workspace_contains_repo_link(workspace_root: &str, repo_common_dir: &str) -> GraphLink {
+        GraphLink {
+            id: format!("test:wcr:{workspace_root}:{repo_common_dir}"),
+            source: NodeId::Workspace(WorkspaceId::new(workspace_root)),
+            target: LinkEndpoint::Node {
+                id: NodeId::Repo(RepoId::new(repo_common_dir)),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
     fn build(inputs: SessionsBuildInputs<'_>) -> RowTree {
         build_sessions_tree(inputs)
     }
@@ -1606,6 +1718,291 @@ mod tests {
         assert!(matches!(group.primary_node, Some(NodeId::Repo(_))));
         assert_eq!(tree.rows[0].depth, 0);
         assert_eq!(tree.rows[1].depth, 1);
+    }
+
+    // -----------------------------------------------------------------
+    // H-WS-001: strict workspace grouping + weak-membership chip
+    // -----------------------------------------------------------------
+    //
+    // Helper that pulls the session row out of a tree so the chip and
+    // grouping depth can be asserted without repeating the matching
+    // boilerplate. The session-of-interest in these tests is always
+    // the lone AgentSession row.
+    fn first_session_row(tree: &RowTree) -> (&Row, &AgentSessionRow) {
+        for row in &tree.rows {
+            if let RowKind::AgentSession(s) = &row.kind {
+                return (row, s);
+            }
+        }
+        panic!("no AgentSession row in tree:\n{:#?}", tree.rows);
+    }
+
+    #[test]
+    fn workspace_rooted_session_nests_under_workspace_with_no_chip() {
+        // Case A — session has AssociatedWith Workspace edge.
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/atelier", "atelier-ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/atelier/conspectus/.git",
+            "/home/op/atelier/conspectus",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/atelier/conspectus/.git",
+            "/home/op/atelier/conspectus",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/atelier/conspectus/crates/core"),
+            None,
+            None,
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/atelier",
+            "/home/op/atelier/conspectus/.git",
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&session_id, "/home/op/atelier"));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let (row, session) = first_session_row(&tree);
+        assert_eq!(
+            row.depth, 2,
+            "workspace-rooted session should sit two levels deep (under workspace → repo):\n{:#?}",
+            tree.rows
+        );
+        assert_eq!(
+            session.workspace_chip, None,
+            "(A)-class session must not carry a weak-membership chip",
+        );
+    }
+
+    #[test]
+    fn repo_shared_session_stays_at_repo_level_with_chip() {
+        // Case B — session has no AssociatedWith but its repo is a
+        // workspace member. Strict grouping puts it under repo only;
+        // the chip surfaces the cross-reference.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/atelier", "atelier-ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/conspectus/.git",
+            "/home/op/src/conspectus",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/src/conspectus/.git",
+            "/home/op/src/conspectus",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/conspectus/crates/core"),
+            None,
+            None,
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/atelier",
+            "/home/op/src/conspectus/.git",
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let (row, session) = first_session_row(&tree);
+        assert_eq!(
+            row.depth, 1,
+            "repo-shared session should sit under repo, not workspace:\n{:#?}",
+            tree.rows
+        );
+        assert_eq!(
+            session.workspace_chip.as_deref(),
+            Some("[atelier-ws]"),
+            "chip should surface the single weak-membership workspace name",
+        );
+        // No workspace group row should be emitted for the (B)-class
+        // session — the repo is the top-level group.
+        assert!(
+            !tree.rows.iter().any(|r| match &r.kind {
+                RowKind::Group(g) => matches!(g.primary_node, Some(NodeId::Workspace(_))),
+                _ => false,
+            }),
+            "no workspace group should appear in the tree:\n{:#?}",
+            tree.rows,
+        );
+    }
+
+    #[test]
+    fn repo_in_multiple_workspaces_renders_n_ws_chip() {
+        // Case B with N=2: chip degrades from a name to `[N ws]`.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/atelier", "atelier-ws"));
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/other", "other-ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/conspectus/.git",
+            "/home/op/src/conspectus",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/src/conspectus/.git",
+            "/home/op/src/conspectus",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/conspectus"),
+            None,
+            None,
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/atelier",
+            "/home/op/src/conspectus/.git",
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/other",
+            "/home/op/src/conspectus/.git",
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let (_, session) = first_session_row(&tree);
+        assert_eq!(
+            session.workspace_chip.as_deref(),
+            Some("[2 ws]"),
+            "chip should degrade to `[N ws]` when the repo belongs to multiple workspaces",
+        );
+    }
+
+    #[test]
+    fn repo_in_many_workspaces_suppresses_chip() {
+        // Case B with N > WEAK_WORKSPACE_CHIP_MAX: chip omitted to
+        // avoid cluttering rows for shared utility repos.
+        let mut snapshot = GraphSnapshot::empty();
+        for i in 0..(WEAK_WORKSPACE_CHIP_MAX + 1) {
+            let root = format!("/home/op/ws-{i}");
+            snapshot
+                .nodes
+                .push(workspace_with_name(&root, &format!("ws-{i}")));
+            snapshot.candidate_links.push(workspace_contains_repo_link(
+                &root,
+                "/home/op/src/shared/.git",
+            ));
+        }
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/shared/.git",
+            "/home/op/src/shared",
+        ));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/shared/.git", "/home/op/src/shared"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/src/shared"),
+            None,
+            None,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let (_, session) = first_session_row(&tree);
+        assert_eq!(
+            session.workspace_chip, None,
+            "chip should be suppressed above WEAK_WORKSPACE_CHIP_MAX memberships",
+        );
+    }
+
+    #[test]
+    fn workspace_rooted_session_has_no_chip_even_when_repo_is_in_other_workspaces() {
+        // Case A overrides: the row nests under its workspace AND the
+        // chip is suppressed even when other workspaces also claim
+        // the repo. The cross-reference signal would be redundant
+        // next to the workspace header the row already sits under.
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/atelier", "atelier-ws"));
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/other", "other-ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/atelier/conspectus/.git",
+            "/home/op/atelier/conspectus",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/atelier/conspectus/.git",
+            "/home/op/atelier/conspectus",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            Some("/home/op/atelier/conspectus"),
+            None,
+            None,
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/atelier",
+            "/home/op/atelier/conspectus/.git",
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/other",
+            "/home/op/atelier/conspectus/.git",
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&session_id, "/home/op/atelier"));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let (row, session) = first_session_row(&tree);
+        assert_eq!(row.depth, 2, "nested under workspace → repo");
+        assert_eq!(
+            session.workspace_chip, None,
+            "(A) row should not carry a chip even when other workspaces share the repo",
+        );
     }
 
     #[test]

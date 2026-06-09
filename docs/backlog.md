@@ -3669,33 +3669,29 @@ member with no session-level workspace edge. Today's grouping
 promotes (B) to look like (A); the fix surfaces them as different
 concepts everywhere they appear.
 
-- [ ] `H-WS-001` Strict-only + chip in Sessions/Graph workspace nesting.
-  - Scope: in `src/tui/rows/sessions.rs::resolve_group_key`, remove
-    the `.or_else(|| data.workspace_for_repo(&repo_node_id))`
-    fallback so workspaces only group sessions with a direct
-    `AssociatedWith Workspace` edge (case A). Sessions whose repo is
-    *also* a workspace member but lack the session-level edge (case
-    B) fall through to repo-level grouping. Add a small `[ws-name]`
-    chip on those (B) rows so the cross-reference signal survives
-    without the false nesting. Chip degrades to `[N ws]` when the
-    repo belongs to more than one workspace; suppressed entirely
-    above a configurable threshold (default 3). Chip is (B)-only —
-    (A)-class rows are already under their workspace header.
-  - Tests: row-tree unit tests for: workspace-rooted session nests
-    under workspace; repo-shared session (no AssociatedWith) stays
-    at repo level and carries the chip; repo in 2 workspaces shows
-    `[ws-a +1]` (or chosen format); repo in N>threshold workspaces
-    suppresses the chip; the (A)-class case has no chip even when
-    its repo is also a workspace member from elsewhere.
-  - Manual checks: launch the TUI against a fixture with one atelier
-    workspace plus an unrelated session running in
-    `~/src/conspectus` and confirm the unrelated session sits at
-    repo level with the atelier chip, not under the atelier
-    workspace header.
-  - Blockers: none. No ADR required — the change is a single
-    conditional and a chip helper, behavior captured by the row-tree
-    tests. Update `docs/plans/workspace-view-redesign.md` once the
-    chip-format question (count, format, threshold) is resolved.
+- [x] `H-WS-001` Strict-only + chip in Sessions/Graph workspace nesting.
+  - Outcome: `resolve_group_key` now sets the workspace level only
+    when the session carries a direct `AssociatedWith Workspace`
+    edge; the previous `workspace_for_repo` fallback is removed.
+    Repo-shared (B-class) sessions fall through to repo-level
+    grouping and carry a `workspace_chip` on `AgentSessionRow` that
+    surfaces the cross-reference: `[ws-name]` for one weak
+    membership, `[N ws]` for `2..=WEAK_WORKSPACE_CHIP_MAX` (default
+    3), suppressed above. (A)-class rows never carry the chip,
+    even when their repo also reaches other workspaces. The chip
+    renders in `render_session_spans` between the display label
+    and project column, styled as dim secondary text. Helpers in
+    `SessionsData` (`workspaces_for_repo`, `workspace_display`,
+    `weak_workspace_chip`) keep the policy testable in isolation.
+    Mux/Prs/Forks/Union row builders set `workspace_chip: None`
+    pending `H-WS-003`. Five unit tests cover: workspace-rooted
+    nesting with no chip, repo-shared at repo level with `[name]`
+    chip, repo-in-2-workspaces shows `[2 ws]`, repo above threshold
+    suppresses chip, (A) row has no chip even with other workspaces
+    on the repo. Chip-format / threshold decision recorded in
+    `docs/plans/workspace-view-redesign.md` §Axis 1 (default
+    `WEAK_WORKSPACE_CHIP_MAX = 3`; revisit as a config knob if the
+    cliff bites someone).
 
 - [ ] `H-WS-002` Dedicated Workspaces view.
   - Scope: new `View::Workspaces` with its own row tree
@@ -9081,3 +9077,167 @@ reuse the structural matching approach from the existing
     flow using only the minibuffer; confirm history and completion
     work across each prompt type.
   - Blockers: `H-CMD-004`, `T8-017`.
+
+### Per-Node-Type Visual Identity
+
+The TUI row tree renders nine `GraphNode` / `NodeId` variants, but only
+`AgentSession` and `MuxSession` carry a strong visual identity (colored
+harness pill badge, mux-state circle glyphs). Nodes that render as group
+rows — `Workspace`, `Repo`, `Checkout` — and types that appear only in
+detail panels — `Branch`, `RuntimeProcess` — are visually
+indistinguishable: every group row is a bold path with a disclosure
+glyph, every detail-panel node-kinds chip is a dim `[kind]` label.
+
+Operators scanning a dense sessions tree or a right-panel explorer do
+not have a consistently fast way to tell *what kind of thing* a row
+represents before reading its label. OpenCode's TUI assigns a per-entity
+glyph and color; Emacs `dired` and `ibuffer` use per-type faces; Tmux
+uses status-line symbols.
+
+This workstream assigns a stable, terminal-safe visual identity — a
+**glyph** (geometric shape / Nerd Font symbol / limited emoji), a
+**color** (foreground or badge-fill), and a consistent **placement rule**
+— to every `GraphNode` variant, so the operator recognizes node kinds at
+a glance regardless of view, grouping, or filter state.
+
+The `Theme` struct (`src/tui/theme.rs`) centralizes all TUI colors
+including per-harness and mux-state; node-type colors follow the same
+pattern and live under `[tui.theme]` config overrides. Node-type glyphs
+live in `src/tui/icons.rs` (or a similar single-source-of-truth module)
+so the row renderer, detail panel, graph explorer, and any future
+surfaces all read from one definition.
+
+- [ ] `H-VIS-001` ADR: node-type visual identity system.
+  - Scope: decide the glyph strategy (Nerd Font / Unicode geometric
+    shapes / limited emoji / mixed), the per-type assignment for
+    `Repo`, `Checkout`, `Workspace`, `AgentSession`, `MuxSession`,
+    `RuntimeProcess`, `Branch`, `Fork`, `ForgePr`, the color strategy
+    (per-type foreground vs badge-fill vs both), and the placement
+    rule (prefix glyph before the node label, consistent indent
+    accounting so column alignment survives). Settle whether
+    `AgentSession` rows keep their harness-badge color override or add
+    a separate node-kind glyph with harness-badge color applied via a
+    different channel (e.g. badge-background for harness, foreground
+    glyph for node-kind). Record the accessibility concerns (color-
+    blind-safe palette, glyphs distinguishable without color,
+    `NO_COLOR` fallback). Decide whether the glyph set lives behind a
+    theme key (`[tui.theme.icons]`) so a future operator can swap
+    Nerd Font symbols for plain-ASCII equivalents without patching the
+    source. Does not introduce new crate dependencies.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: review the proposed glyph/color assignments against
+    the existing `Theme` fields (no conflicting meanings), the
+    `Theme::default()` palette (no adjacent hues that blend under
+    common color-blindness profiles), and a representative sessions
+    tree mockup.
+  - Blockers: none.
+- [ ] `H-VIS-002` Define the per-node-type glyph and color assignments.
+  - Scope: add `src/tui/icons.rs` (or extend `src/tui/theme.rs`) with
+    a public constant or `NodeKindStyle` struct per `GraphNode`
+    variant — a `&'static str` glyph and a color field — and a
+    `fn node_kind_style(kind: NodeKind) -> NodeKindStyle` lookup.
+    Extend `Theme` with per-node-type color fields (`node_repo`,
+    `node_checkout`, `node_workspace`, `node_branch`,
+    `node_runtime_process`, `node_fork`, `node_forge_pr`). Keep
+    harness colors on `AgentSession` for harness distinction and mux
+    colors on `MuxSession` for state; the new *node-kind* glyph and
+    color are *additional* identity markers (a prefix glyph at the row
+    start), not replacements for existing badges. Add a `NodeKind`
+    enum (or `from` conversion) so callers do not match on the full
+    `GraphNode` / `NodeId` enum everywhere. Design guidance
+    (assignments finalized by the ADR and locked in by snapshot
+    tests): prefer Unicode geometric shapes or Nerd Font symbols that
+    render at 1 cell wide on common terminals; avoid symbols that
+    collide with existing TUI glyphs (mux `◉` / `◐` / `◯`,
+    disclosure `▶` / `▼`, pin `📌`); when a node kind maps to an
+    emoji, keep the glyph to 1-2 cells and provide an ASCII fallback
+    glyph behind the theme icon key.
+  - Tests: unit tests for the complete `NodeKind` → glyph → color
+    lookup, `GraphNode` → `NodeKind` conversion, fallback for future
+    node variants, and `Theme::default()` coverage for the new color
+    fields. A catalog snapshot test that renders every kind + glyph +
+    color for visual review.
+  - Blockers: `H-VIS-001`.
+- [ ] `H-VIS-003` Apply node-kind glyphs and colors to the TUI row
+  tree.
+  - Scope: prepend the node-kind glyph (styled with the node-kind
+    color) to every row in the left pane. Group rows
+    (`Workspace`/`Repo`/`Checkout`) gain their glyph between the
+    indent and the bold path label, with the node-kind color applied
+    to the glyph span. `AgentSession` rows gain a prefix glyph in the
+    node-kind color *before* the harness badge (which retains its
+    harness color), giving two independent signals: node-kind = "this
+    is an agent session", harness color = "this is a claude session".
+    `MuxSession` rows gain a prefix glyph in the node-kind color
+    before the native-id column; the existing mux-state glyph (`◉` /
+    `◐` / `◯`) moves one position right and keeps its state-driven
+    color independent of the node-kind glyph. `Fork` and `Pr` rows
+    gain their glyph prefix. `Branch` and `RuntimeProcess` rows (if
+    promoted from detail-panel-only to dedicated row types by a future
+    workstream) gain their glyph at the row start. Indent arithmetic
+    accounts for the new glyph width so disclosure alignment does not
+    regress. Column budgets subtract the glyph width deterministically
+    (1 cell for geometric shapes, 1-2 cells for emoji).
+  - Tests: insta buffer snapshots for sessions, mux, prs, forks, and
+    union views with the new glyph prefix. Snapshot tests for the
+    column-budget adjustment with and without `--wide`. Regression
+    tests proving the new glyph does not shift disclosure alignment
+    for nested rows.
+  - Manual checks: run `conspectus tui` against a dev scenario with
+    all node kinds present; visually scan each view for consistent
+    glyph placement and color; toggle `--grouping` modes and confirm
+    glyphs appear on group rows.
+  - Blockers: `H-VIS-002`.
+- [ ] `H-VIS-004` Apply node-kind glyphs and colors to the detail
+  panel and graph explorer.
+  - Scope: replace the current dim `[kind]` chip in the right-panel
+    `kind_chip_span()` and `kind_label()` functions with the
+    node-kind glyph + color from the icon registry. The node-header
+    line should render as `<glyph> <kind_label>` with the glyph in
+    the node-kind color and the label bold. Extend `NodeDetail` field
+    builders so the `type` / `kind` line uses the new style. In the
+    graph explorer view (`ui.rs:1714`), the dim `[kind]` chip becomes
+    a colored glyph + dim label, matching the row-tree convention.
+  - Tests: insta snapshots for detail-panel output across all nine
+    node types; graph-explorer snapshots for each node kind.
+  - Manual checks: navigate `conspectus tui` to each node type in the
+    detail panel and confirm the glyph and color match the row tree.
+  - Blockers: `H-VIS-002`.
+- [ ] `H-VIS-005` Surface node-kind identity in non-TUI outputs
+  (cross-surface consistency).
+  - Scope: extend `NodeId` / `GraphNode` with a `node_kind()` method
+    returning the stable string tag (`"repo"`, `"agent_session"`,
+    etc.) so non-TUI consumers — `conspectus graph --format json`,
+    `conspectus node show`, the HTML explorer, DOT output — receive
+    the same node-kind identity. The TUI glyph is a *rendering*
+    choice; the stable identifier is a *model* concern. Add the
+    machine-readable `node_kind` field alongside the display glyph so
+    consumers that can render symbols (HTML with Nerd Font CSS, a TUI
+    with a compatible terminal) use the glyph, while JSON consumers
+    use the string tag. The DOT renderer already labels nodes by kind;
+    this story gives it the node-kind color as a fill or font color.
+    The HTML explorer applies the node-kind glyph via a CSS class or
+    data attribute.
+  - Tests: JSON snapshot updates confirming the new field does not
+    break existing consumers; DOT snapshot updates confirming node-
+    kind colors appear; HTML payload snapshot updates confirming
+    glyph/color propagation.
+  - Blockers: `H-VIS-002`, `H-VIS-004`.
+- [ ] `H-VIS-006` Docs and snapshot coverage.
+  - Scope: update `docs/operations.md` with the icon key — a table
+    listing every `NodeKind`, its glyph, its default color, and its
+    meaning. Update `Theme` docs in `src/tui/theme.rs` with the new
+    per-node-type color fields. Refresh all affected insta snapshots
+    (row tree × 5 views, detail panel, graph explorer, JSON, DOT,
+    HTML). Add a `NO_COLOR` / `--no-color` snapshot variant proving
+    glyphs remain distinguishable without ANSI codes.
+  - Tests: `cargo test --all-targets --all-features`; `cargo nextest
+    run --all-targets --all-features`; `git diff --check`. Insta
+    review of every changed snapshot for stable ordering and
+    consistent glyph placement.
+  - Blockers: `H-VIS-003`, `H-VIS-004`, `H-VIS-005`.
+
+## Later
+
+- [ ] Evaluate Backlog.md migration once task count, dependencies, or
+  multi-agent coordination make manual tracking cumbersome.

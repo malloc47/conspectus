@@ -198,6 +198,16 @@ pub struct AgentSessionRow {
     /// non-pinned session — the alias overlay already injected the
     /// pin's `display_name` via [`crate::resolve::pins`].
     pub pin_id: Option<String>,
+    /// (H-WS-001) Cross-reference chip for sessions whose repo is a
+    /// `WorkspaceContainsRepo` member of one or more workspaces but
+    /// where the session itself has no `AssociatedWith Workspace`
+    /// edge — case B in `docs/plans/workspace-view-redesign.md`.
+    /// `None` for (A)-class sessions (already nested under the
+    /// workspace header), for sessions whose repo claims no
+    /// workspace, and for repos with > `WEAK_WORKSPACE_CHIP_MAX`
+    /// memberships (suppressed). Format: `[ws-name]` for one
+    /// membership, `[N ws]` for 2..=MAX.
+    pub workspace_chip: Option<String>,
 }
 
 impl AgentSessionRow {
