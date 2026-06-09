@@ -243,6 +243,7 @@ pub fn build_workspaces_tree_from_conn(
             });
             for agent in a_class_rows {
                 tree.rows.push(agent_row(
+                    &workspace_node_id,
                     agent,
                     2,
                     &candidate_counts,
@@ -272,6 +273,7 @@ pub fn build_workspaces_tree_from_conn(
             });
             for agent in b_class_ids {
                 tree.rows.push(agent_row(
+                    &workspace_node_id,
                     agent,
                     2,
                     &candidate_counts,
@@ -290,6 +292,7 @@ pub fn build_workspaces_tree_from_conn(
 }
 
 fn agent_row(
+    workspace: &NodeId,
     agent: &AgentSqlRow,
     depth: u8,
     candidate_counts: &HashMap<String, usize>,
@@ -300,7 +303,10 @@ fn agent_row(
     let node_id = NodeId::AgentSession(agent.id.clone());
     let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
     Row {
-        id: RowId::AgentSession(node_id.clone()),
+        id: RowId::WorkspaceAgentSession {
+            workspace: Box::new(workspace.clone()),
+            session: node_id.clone(),
+        },
         depth,
         expandable: false,
         kind: RowKind::AgentSession(AgentSessionRow {
@@ -821,6 +827,74 @@ mod tests {
             repo_row_ids[0], repo_row_ids[1],
             "duplicate-repo rows must carry distinct RowIds so selection picks exactly one",
         );
+    }
+
+    #[test]
+    fn same_session_in_two_workspaces_gets_distinct_row_ids() {
+        // Regression mirroring `same_repo_in_two_workspaces_gets_distinct_row_ids`
+        // for agent session rows: a (B)-class session in `/home/op/src/conspectus`
+        // appears under every workspace whose member repo set includes conspectus.
+        // The RowId must differ per workspace so selection tracking and the
+        // renderer can tell instances apart.
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "shared"));
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                workspace_node("/home/op/ws-a", "ws-a", "agent-deck"),
+                workspace_node("/home/op/ws-b", "ws-b", "agent-deck"),
+                repo_node("/home/op/src/conspectus/.git"),
+                checkout_node("/home/op/src/conspectus/.git", "/home/op/src/conspectus"),
+                agent_session(
+                    "codex",
+                    "/state",
+                    "shared",
+                    Some("/home/op/src/conspectus/foo"),
+                ),
+            ],
+            candidate_links: vec![
+                workspace_contains_repo(
+                    "/home/op/ws-a",
+                    "/home/op/src/conspectus/.git",
+                    "/home/op/ws-a/conspectus",
+                ),
+                workspace_contains_repo(
+                    "/home/op/ws-b",
+                    "/home/op/src/conspectus/.git",
+                    "/home/op/ws-b/conspectus",
+                ),
+                associated_with_checkout(
+                    session_id,
+                    "/home/op/src/conspectus/.git",
+                    "/home/op/src/conspectus",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(&snapshot);
+        let session_row_ids: Vec<&RowId> = tree
+            .rows
+            .iter()
+            .filter(|r| matches!(&r.kind, RowKind::AgentSession(_)))
+            .map(|r| &r.id)
+            .collect();
+        assert_eq!(
+            session_row_ids.len(),
+            2,
+            "one (B)-class row per workspace claiming the session's repo, got:\n{:#?}",
+            tree.rows,
+        );
+        assert_ne!(
+            session_row_ids[0], session_row_ids[1],
+            "duplicate-session rows must carry distinct RowIds so selection picks exactly one",
+        );
+        // Both ids should be the WorkspaceAgentSession shape — keying
+        // on the session alone would re-introduce the collision.
+        for id in &session_row_ids {
+            assert!(
+                matches!(id, RowId::WorkspaceAgentSession { .. }),
+                "workspaces-view session rows must use the scoped RowId variant, got {id:?}",
+            );
+        }
     }
 
     fn repo_node_with_source(common_dir: &str, source_path: &str) -> GraphNode {

@@ -70,6 +70,20 @@ pub enum RowId {
         workspace: Box<NodeId>,
         repo: NodeId,
     },
+    /// Agent session row appearing under a workspace in the
+    /// workspaces view's `in workspace` or `related` subgroup.
+    /// Same rationale as [`RowId::Repo`]: the same session can show
+    /// up under multiple workspaces (most commonly as (B)-class
+    /// "related" — a session in a canonical repo path that several
+    /// workspaces claim as a member), so keying on the session
+    /// alone collides. The workspace is boxed for the same enum-size
+    /// reason. Other views (Sessions/Mux/Forks/...) emit sessions
+    /// at most once per row tree and continue to use
+    /// [`RowId::AgentSession`] directly.
+    WorkspaceAgentSession {
+        workspace: Box<NodeId>,
+        session: NodeId,
+    },
     /// An unbound session pin row (ADR 0057). Keyed on the pin id
     /// so the row is stable across refreshes even as the pin's
     /// binding state changes — once a pin binds, the same logical

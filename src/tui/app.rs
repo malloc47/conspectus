@@ -1539,6 +1539,10 @@ impl App {
             // each have a unique RowId); the detail pane focuses
             // the repo node.
             RowId::Repo { repo, .. } => Some(repo.clone()),
+            // Same shape for workspace-scoped session rows: the
+            // row's detail target is the session, scoped by its
+            // parent workspace only so duplicates pick a unique row.
+            RowId::WorkspaceAgentSession { session, .. } => Some(session.clone()),
         };
         let Some(target) = target else {
             self.explorer = None;
