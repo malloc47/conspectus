@@ -1317,9 +1317,9 @@ fn selected_default_action(app: &App) -> SelectedDefault {
             MuxIndicator::Unmuxed => SelectedDefault::View,
             MuxIndicator::Attached | MuxIndicator::Ambiguous { .. } => SelectedDefault::Attach,
         },
-        // PR / Fork rows: no muxable target and no viewer; fall back
-        // to toggle so expandable parents still behave.
-        RowKind::Pr(_) | RowKind::Fork(_) => SelectedDefault::ToggleExpand,
+        // PR / Fork / Repo rows: no muxable target and no viewer;
+        // fall back to toggle so expandable parents still behave.
+        RowKind::Pr(_) | RowKind::Fork(_) | RowKind::Repo(_) => SelectedDefault::ToggleExpand,
         // Unbound / stale-mux pin rows hand off to the launch
         // primitive (H-PIN-012) via a subprocess so the launch
         // logic stays in one place.

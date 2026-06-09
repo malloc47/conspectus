@@ -269,6 +269,16 @@ pub fn items_from_rows<'a>(rows: &'a [Row]) -> Vec<SearchItem<'a>> {
                     pin.display_name, pin.harness_label, pin.cwd_display, pin.mux_label
                 )),
             },
+            RowKind::Repo(repo) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(format!("repo:{}", repo.display_name)),
+                haystack: Cow::Owned(match &repo.canonical_path {
+                    Some(path) => {
+                        format!("repo {} {} {}", repo.display_name, path, repo.common_dir)
+                    }
+                    None => format!("repo {} {}", repo.display_name, repo.common_dir),
+                }),
+            },
         })
         .collect()
 }

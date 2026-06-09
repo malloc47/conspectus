@@ -4,7 +4,9 @@
 //! three labeled subgroups, in order:
 //!
 //! 1. **members** — the workspace's resolved `WorkspaceContainsRepo`
-//!    member repos. Each row is a `GroupRow` carrying the repo as its
+//!    member repos. Each row is a `RepoRow` styled to match the
+//!    session / mux row rhythm (short id + `repo` chip + bold name +
+//!    dim canonical path) and carrying the repo as its
 //!    `primary_node` so the detail pane and left-tree navigation
 //!    follow naturally.
 //! 2. **in workspace** — (A)-class sessions whose `AssociatedWith`
@@ -34,7 +36,7 @@ use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{AgentSessionId, NodeId, RepoId, WorkspaceId};
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxIndicator, Row, RowId, RowKind, RowTree, ViewLabel,
+    AgentSessionRow, GroupRow, MuxIndicator, RepoRow, Row, RowId, RowKind, RowTree, ViewLabel,
     format_recency, harness_label, shorten_home,
 };
 
@@ -60,12 +62,19 @@ struct WorkspaceSqlRow {
 
 #[derive(Clone, Debug)]
 struct MemberSqlRow {
+    repo_node_id: String,
     repo_common_dir: String,
     /// Basename of the membership link's `logical_path` source field.
     /// Atelier emits `[[repos]].name`; agent-deck the symlink leaf;
     /// generic discovery the immediate child name. The label
     /// presented in the row.
     display_name: String,
+    /// Operator-recognizable canonical path. First non-agent-deck
+    /// `source_paths` entry on the `Repo` node, falling back to
+    /// `common_dir` when no source path is recorded. `None` means
+    /// the renderer should suppress the trailing path column rather
+    /// than print the bare `common_dir`.
+    canonical_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +112,11 @@ pub fn build_workspaces_tree_from_conn(
 
     let mut node_ids: Vec<String> = agents.iter().map(|a| a.node_id.clone()).collect();
     node_ids.extend(workspaces.iter().map(|ws| ws.node_id.clone()));
+    node_ids.extend(
+        members_by_ws
+            .values()
+            .flat_map(|members| members.iter().map(|m| m.repo_node_id.clone())),
+    );
     let full_ids: Vec<String> = node_ids
         .iter()
         .map(|id| node_short_id_from_display(id))
@@ -191,14 +205,20 @@ pub fn build_workspaces_tree_from_conn(
             });
             for member in members {
                 let repo_node_id = NodeId::Repo(RepoId::new(&member.repo_common_dir));
+                let short_id = short_ids
+                    .get(member.repo_node_id.as_str())
+                    .cloned()
+                    .unwrap_or_default();
                 tree.rows.push(Row {
-                    id: RowId::Group(repo_node_id.clone()),
+                    id: RowId::Repo(repo_node_id.clone()),
                     depth: 2,
                     expandable: false,
-                    kind: RowKind::Group(GroupRow {
-                        display_path: member.display_name.clone(),
-                        primary_node: Some(repo_node_id),
-                        is_launch_context: false,
+                    kind: RowKind::Repo(RepoRow {
+                        short_id,
+                        display_name: member.display_name.clone(),
+                        canonical_path: member.canonical_path.clone(),
+                        common_dir: member.repo_common_dir.clone(),
+                        primary_node: repo_node_id,
                     }),
                 });
             }
@@ -353,13 +373,19 @@ fn fetch_members(conn: &Connection) -> rusqlite::Result<BTreeMap<String, Vec<Mem
     // Pull resolved workspace_contains_repo selections joined to the
     // selected candidate link's source_fields so we can render the
     // member's display name from the link's `logical_path` basename.
+    // Left-joined to node_repos so we can surface the operator-visible
+    // canonical path (first non-agent-deck `source_paths` entry) on
+    // the row.
     let mut stmt = conn.prepare(
         "SELECT ('workspace:' || json_extract(r.source, '$.root')) AS workspace_node_id, \
                 ('repo:' || json_extract(r.target, '$.common_dir')) AS repo_node_id, \
                 json_extract(r.target, '$.common_dir') AS repo_common_dir, \
-                cl.source_fields \
+                cl.source_fields, \
+                nr.source_paths AS repo_source_paths \
          FROM resolved_relationships r \
          JOIN candidate_links cl ON cl.link_id = r.selected_link_id \
+         LEFT JOIN node_repos nr ON nr.node_id = \
+              ('repo:' || json_extract(r.target, '$.common_dir')) \
          WHERE r.relation = 'workspace_contains_repo' \
            AND r.source_kind = 'workspace' \
          ORDER BY workspace_node_id, repo_node_id",
@@ -369,27 +395,60 @@ fn fetch_members(conn: &Connection) -> rusqlite::Result<BTreeMap<String, Vec<Mem
         let repo_node_id: String = row.get(1)?;
         let repo_common_dir: String = row.get(2)?;
         let source_fields: String = row.get(3)?;
+        let repo_source_paths: Option<String> = row.get(4)?;
         Ok((
             workspace_node_id,
             repo_node_id,
             repo_common_dir,
             source_fields,
+            repo_source_paths,
         ))
     })?;
 
     let mut out: BTreeMap<String, Vec<MemberSqlRow>> = BTreeMap::new();
     for entry in rows {
-        let (workspace_node_id, _repo_node_id, repo_common_dir, source_fields_json) = entry?;
+        let (
+            workspace_node_id,
+            repo_node_id,
+            repo_common_dir,
+            source_fields_json,
+            source_paths_json,
+        ) = entry?;
         let display_name = display_name_from_fields(&source_fields_json)
             .unwrap_or_else(|| basename(&repo_common_dir).to_string());
+        let canonical_path = canonical_path_from_source_paths(source_paths_json.as_deref());
         out.entry(workspace_node_id)
             .or_default()
             .push(MemberSqlRow {
+                repo_node_id,
                 repo_common_dir,
                 display_name,
+                canonical_path,
             });
     }
     Ok(out)
+}
+
+/// Pick the operator-recognizable canonical path from a repo's
+/// `source_paths` JSON array. Prefers the first entry that does *not*
+/// pass through `~/.agent-deck/multi-repo-worktrees/` because those
+/// paths are symlink composites — the operator wants to see
+/// `~/src/conspectus`, not `~/.agent-deck/.../conspectus`. Returns
+/// `None` if the array is missing, empty, or all paths are
+/// agent-deck composites.
+fn canonical_path_from_source_paths(json: Option<&str>) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(json?).ok()?;
+    let array = value.as_array()?;
+    let mut fallback: Option<&str> = None;
+    for entry in array {
+        let path = entry.as_str()?;
+        if path.contains("/.agent-deck/multi-repo-worktrees/") {
+            fallback.get_or_insert(path);
+            continue;
+        }
+        return Some(path.to_string());
+    }
+    fallback.map(str::to_string)
 }
 
 fn display_name_from_fields(json: &str) -> Option<String> {
@@ -702,16 +761,63 @@ mod tests {
             }
         ));
 
-        // The two repo rows carry Repo NodeIds so detail-pane navigation works.
+        // The two repo rows are styled like sessions/muxes via the
+        // dedicated Repo row kind, carrying a Repo NodeId so the
+        // detail pane and left-tree navigation follow naturally.
         for repo_row in &tree.rows[2..4] {
             assert_eq!(repo_row.depth, 2);
             match &repo_row.kind {
-                RowKind::Group(g) => {
-                    assert!(matches!(g.primary_node, Some(NodeId::Repo(_))));
+                RowKind::Repo(r) => {
+                    assert!(matches!(r.primary_node, NodeId::Repo(_)));
+                    assert!(!r.display_name.is_empty());
+                    assert!(!r.common_dir.is_empty());
                 }
-                _ => panic!("expected Group row"),
+                _ => panic!("expected Repo row, got {:?}", repo_row.kind),
             }
+            assert!(matches!(repo_row.id, RowId::Repo(_)));
         }
+    }
+
+    fn repo_node_with_source(common_dir: &str, source_path: &str) -> GraphNode {
+        let mut repo = RepoNode::new(RepoId::new(common_dir));
+        repo.source_paths.push(source_path.to_string());
+        GraphNode::Repo(repo)
+    }
+
+    #[test]
+    fn repo_row_surfaces_canonical_source_path() {
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                workspace_node(
+                    "/home/op/.agent-deck/multi-repo-worktrees/abc",
+                    "abc",
+                    "agent-deck",
+                ),
+                repo_node_with_source("/home/op/src/conspectus/.git", "/home/op/src/conspectus"),
+            ],
+            candidate_links: vec![workspace_contains_repo(
+                "/home/op/.agent-deck/multi-repo-worktrees/abc",
+                "/home/op/src/conspectus/.git",
+                "/home/op/.agent-deck/multi-repo-worktrees/abc/conspectus",
+            )],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(&snapshot);
+        let repo_row = tree
+            .rows
+            .iter()
+            .find_map(|r| match &r.kind {
+                RowKind::Repo(repo) => Some(repo),
+                _ => None,
+            })
+            .expect("repo row");
+        assert_eq!(repo_row.display_name, "conspectus");
+        assert_eq!(
+            repo_row.canonical_path.as_deref(),
+            Some("/home/op/src/conspectus"),
+            "canonical_path should prefer the non-agent-deck source_paths entry",
+        );
     }
 
     #[test]

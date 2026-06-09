@@ -967,6 +967,9 @@ fn render_left_row(
                 Style::default().add_modifier(theme.placeholder),
             ));
         }
+        RowKind::Repo(repo) => {
+            spans.extend(render_repo_spans(repo, theme));
+        }
     }
 
     let mut line = Line::from(spans);
@@ -1085,6 +1088,47 @@ fn append_session_preview(
             .fg(theme.secondary_text)
             .add_modifier(Modifier::ITALIC),
     ));
+}
+
+/// Render a `RepoRow` so workspace members in the left pane scan as
+/// the same visual rhythm as session / mux rows: short id column +
+/// `repo` chip + bold display name + dim canonical path. Mirrors
+/// `render_session_spans`'s column shape without the recency / mux
+/// glyph columns (repos have no activity state of their own; the
+/// row's purpose is identity and navigation).
+fn render_repo_spans(repo: &crate::tui::rows::RepoRow, theme: &Theme) -> Vec<Span<'static>> {
+    const SHORT_ID_COLUMN_WIDTH: usize = 8;
+    const KIND_BADGE_WIDTH: usize = 6; // ` repo `
+    let mut spans = Vec::new();
+    let short_id = truncate_to_width_no_marker(&repo.short_id, SHORT_ID_COLUMN_WIDTH);
+    spans.push(Span::styled(
+        format!("{short_id:<SHORT_ID_COLUMN_WIDTH$}  "),
+        Style::default().fg(theme.secondary_text),
+    ));
+    spans.push(Span::styled(
+        format!("{:<KIND_BADGE_WIDTH$}", " repo "),
+        Style::default()
+            .fg(theme.secondary_text)
+            .add_modifier(theme.badge),
+    ));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        repo.display_name.clone(),
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    if let Some(path) = repo
+        .canonical_path
+        .as_deref()
+        .filter(|p| !p.is_empty() && *p != repo.display_name)
+    {
+        spans.push(Span::styled(
+            format!("  {path}"),
+            Style::default()
+                .fg(theme.secondary_text)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
+    spans
 }
 
 fn render_mux_session_spans(

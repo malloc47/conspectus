@@ -57,6 +57,8 @@ pub enum RowId {
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
+    /// Repo member row in the workspaces view (H-WS-002).
+    Repo(NodeId),
     /// An unbound session pin row (ADR 0057). Keyed on the pin id
     /// so the row is stable across refreshes even as the pin's
     /// binding state changes — once a pin binds, the same logical
@@ -145,6 +147,11 @@ pub enum RowKind {
     /// pin. Bound pins flow through the existing
     /// [`RowKind::AgentSession`] surface with `pin_id` set.
     Pin(PinRow),
+    /// Repo row emitted by the workspaces view (H-WS-002) for
+    /// member rows under each workspace. Styled like the agent /
+    /// mux rows so it scans as the same visual rhythm rather than
+    /// as a bare group header.
+    Repo(RepoRow),
 }
 
 /// A workspace / repo / worktree label row.
@@ -333,6 +340,31 @@ pub struct PinRow {
     /// renderer surfaces this so the operator can pick the right next
     /// action (launch vs relaunch in existing mux).
     pub state_label: &'static str,
+}
+
+/// A workspace member row in the workspaces view (H-WS-002). Carries
+/// the short id + display label + canonical path the renderer needs
+/// to render the row with the same visual rhythm as
+/// [`AgentSessionRow`] and [`MuxSessionRow`] rather than as a bare
+/// group header.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RepoRow {
+    pub short_id: String,
+    /// Workspace-visible name for the member — atelier's
+    /// `[[repos]].name`, agent-deck's symlink leaf, generic
+    /// discovery's child name. Same string as the membership link's
+    /// `logical_path` basename.
+    pub display_name: String,
+    /// Operator-recognizable filesystem path for the repo. Prefer the
+    /// first non-agent-deck `source_paths` entry (the canonical
+    /// checkout), falling back to the git `common_dir`. `None` only
+    /// for snapshot shapes that have neither.
+    pub canonical_path: Option<String>,
+    /// Git `common_dir` (the `.git` path). Kept on the row so the
+    /// renderer can fall back when `canonical_path` is absent and so
+    /// `node show` and the detail pane have a stable handle.
+    pub common_dir: String,
+    pub primary_node: NodeId,
 }
 
 // -----------------------------------------------------------------------------

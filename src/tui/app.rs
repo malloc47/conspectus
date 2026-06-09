@@ -1533,6 +1533,7 @@ impl App {
             // node — the user gets the workspace's detail when
             // they land on any of its subgroup headers.
             RowId::Subgroup { parent, .. } => Some(parent.clone()),
+            RowId::Repo(node) => Some(node.clone()),
         };
         let Some(target) = target else {
             self.explorer = None;
@@ -1915,6 +1916,7 @@ fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
         // Unbound pin rows have no underlying graph node — they
         // never match a follow-sync `target`.
         RowKind::Pin(_) => false,
+        RowKind::Repo(r) => &r.primary_node == target,
     }
 }
 
