@@ -23,6 +23,38 @@ data.workspace_for_session(&entry.id)               // strong: AssociatedWith
 
 The fallback conflates two semantically distinct relationships:
 
+### Subsequent discovery: the canonical-checkout-root leak
+
+After landing the initial grouping fix the operator reported that
+nothing visibly changed. Investigation traced the cause to
+`src/discovery/cross_link.rs::workspace_member_roots`, which indexed
+both `logical_path` *and* `canonical_checkout_root` from every
+`WorkspaceContainsRepo` link. For atelier/agent-deck workspaces
+whose members are symlinks pointing outside the workspace tree, the
+two paths diverge — `logical_path` is inside the workspace
+composite directory, `canonical_checkout_root` is the symlink
+target's canonical location. A session running at the canonical
+checkout matched the second index entry and gained an
+`AssociatedWith Workspace` candidate, so the strict grouping had
+nothing to filter: every such session arrived already promoted to
+(A)-class at inference time.
+
+The fix is upstream of grouping: drop `canonical_checkout_root`
+from the index. The session→workspace inference must require the
+cwd to live inside the workspace's visible tree, not just inside
+some repo the workspace happens to claim from elsewhere. The
+field stays on the membership link's `source_metadata.fields` for
+downstream lookups; it just doesn't drive AssociatedWith anymore.
+
+This means the (A)/(B) distinction is now load-bearing in *two*
+places: cross-link emits the AssociatedWith edge only for (A);
+sessions/graph nests under workspace only when AssociatedWith is
+present. The chip surfaces (B) at the row level. The user's
+intuition that "workspaces probably aren't a peer to cwd" is
+exactly right — the data model needs both halves to agree before
+the UX reads correctly.
+
+
 | Class | What it means | Edge present |
 |---|---|---|
 | **A. Workspace-rooted** | Session cwd is inside `<workspace_root>/<member>/...`; the session is doing workspace work. | `AgentSession -- AssociatedWith → Workspace` |

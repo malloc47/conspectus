@@ -3692,6 +3692,20 @@ concepts everywhere they appear.
     `docs/plans/workspace-view-redesign.md` §Axis 1 (default
     `WEAK_WORKSPACE_CHIP_MAX = 3`; revisit as a config knob if the
     cliff bites someone).
+  - Follow-up: post-landing smoke test exposed that the strict
+    grouping had nothing to filter — `cross_link.rs::workspace_member_roots`
+    was indexing `canonical_checkout_root` alongside `logical_path`,
+    so sessions running at the canonical checkout of any workspace
+    member (the symlinked-atelier / agent-deck common case) were
+    being emitted with an `AssociatedWith Workspace` candidate at
+    inference time. Dropped `canonical_checkout_root` from the
+    index so the AssociatedWith inference now requires the
+    session's cwd to live inside the workspace's visible tree
+    (`logical_path`). Regression test
+    `symlinked_workspace_member_does_not_associate_session_at_canonical_path`
+    in `discovery::cross_link::tests` pins the corrected semantics.
+    See `docs/plans/workspace-view-redesign.md` §Diagnosis
+    "Subsequent discovery" for the failure-mode write-up.
 
 - [ ] `H-WS-002` Dedicated Workspaces view.
   - Scope: new `View::Workspaces` with its own row tree

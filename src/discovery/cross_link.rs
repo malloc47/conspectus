@@ -257,6 +257,28 @@ fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
         .collect()
 }
 
+/// Index workspaces by every `logical_path` declared on a
+/// `WorkspaceContainsRepo` link. The `logical_path` is the
+/// workspace-visible location of a member — atelier's
+/// `<workspace_root>/<repo.name>`, agent-deck's
+/// `<workspace_root>/<symlink-name>`, generic discovery's
+/// immediate child entry.
+///
+/// **Crucially excludes `canonical_checkout_root`** even though
+/// that field is also present on the link: when a workspace
+/// member is a symlink pointing outside the workspace tree,
+/// the canonical path is the *target* checkout's location and a
+/// session running there is *not* doing workspace-context work —
+/// it just happens to touch a repo that is also a workspace
+/// member. Indexing the canonical root would collapse the (A)
+/// workspace-rooted and (B) repo-shared classes that
+/// `H-WS-001` / `docs/plans/workspace-view-redesign.md` are
+/// explicitly trying to keep separate.
+///
+/// `canonical_checkout_root` remains on the membership link's
+/// `source_metadata.fields` for downstream consumers that need
+/// the canonical path; it just doesn't drive the
+/// session→workspace association.
 fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
     let mut roots = HashMap::new();
 
@@ -265,17 +287,15 @@ fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
             continue;
         }
 
-        for key in ["logical_path", "canonical_checkout_root"] {
-            if let Some(path) = link
-                .source_metadata
-                .fields
-                .get(key)
-                .and_then(serde_json::Value::as_str)
-            {
-                roots
-                    .entry((link.source.clone(), normalize_path(path)))
-                    .or_insert(());
-            }
+        if let Some(path) = link
+            .source_metadata
+            .fields
+            .get("logical_path")
+            .and_then(serde_json::Value::as_str)
+        {
+            roots
+                .entry((link.source.clone(), normalize_path(path)))
+                .or_insert(());
         }
     }
 
@@ -2044,6 +2064,21 @@ mod tests {
         common_dir: &str,
         logical_path: &str,
     ) -> GraphLink {
+        workspace_contains_repo_paths(workspace_root, common_dir, logical_path, logical_path)
+    }
+
+    /// Variant that lets tests model symlinked members: `logical_path`
+    /// is the workspace-visible location (e.g. inside the workspace
+    /// composite directory) and `canonical_checkout_root` is the
+    /// canonical worktree root the symlink target resolves to — they
+    /// only differ when the member is a symlink pointing outside the
+    /// workspace tree.
+    fn workspace_contains_repo_paths(
+        workspace_root: &str,
+        common_dir: &str,
+        logical_path: &str,
+        canonical_checkout_root: &str,
+    ) -> GraphLink {
         let source = NodeId::Workspace(WorkspaceId::new(workspace_root));
         let target = NodeId::Repo(RepoId::new(common_dir));
         let mut fields = crate::model::Metadata::new();
@@ -2053,7 +2088,7 @@ mod tests {
         );
         fields.insert(
             "canonical_checkout_root".to_string(),
-            serde_json::Value::String(logical_path.to_string()),
+            serde_json::Value::String(canonical_checkout_root.to_string()),
         );
         GraphLink {
             id: format!("test:{source}:workspace_contains_repo:{target}"),
@@ -3277,6 +3312,63 @@ mod tests {
                     "/workspace/repo",
                 )))
         }));
+    }
+
+    #[test]
+    fn symlinked_workspace_member_does_not_associate_session_at_canonical_path() {
+        // H-WS-001 follow-up: an atelier/agent-deck workspace whose
+        // member is a symlink should associate sessions running
+        // *inside the workspace tree* (logical_path), not sessions
+        // running at the symlink target's canonical location. The
+        // canonical_checkout_root is recorded on the membership link
+        // for downstream lookups but must not drive the cross-link
+        // AssociatedWith Workspace inference — otherwise every
+        // session in `~/src/conspectus` gets nested under every
+        // workspace that lists conspectus as a member.
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                // Session is at the canonical checkout, not inside
+                // the workspace's composite tree.
+                session("a", Some("/home/op/src/conspectus/crates/core")),
+                workspace("/home/op/atelier-ws"),
+                repo("/home/op/src/conspectus/.git"),
+                worktree("/home/op/src/conspectus/.git", "/home/op/src/conspectus"),
+            ],
+            candidate_links: vec![workspace_contains_repo_paths(
+                "/home/op/atelier-ws",
+                "/home/op/src/conspectus/.git",
+                // Workspace-visible location (the symlink itself).
+                "/home/op/atelier-ws/conspectus",
+                // Symlink target — the canonical checkout root.
+                "/home/op/src/conspectus",
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let associated_to_workspace: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::AssociatedWith)
+            .filter(|link| matches!(link.target_node_id(), Some(NodeId::Workspace(_))))
+            .collect();
+        assert!(
+            associated_to_workspace.is_empty(),
+            "session at canonical checkout path must not gain an AssociatedWith \
+             Workspace edge through the canonical_checkout_root index entry; \
+             got {associated_to_workspace:#?}",
+        );
+
+        // The session still associates with its checkout — that path
+        // is unaffected by the workspace inference.
+        assert!(
+            snapshot.candidate_links.iter().any(|link| {
+                link.relation == RelationKind::AssociatedWith
+                    && matches!(link.target_node_id(), Some(NodeId::Checkout(_)))
+            }),
+            "session-to-checkout association should still fire",
+        );
     }
 
     #[test]
