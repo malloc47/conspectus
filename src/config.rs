@@ -226,6 +226,8 @@ struct TuiViewsFile {
     prs: Option<TuiViewFile>,
     #[serde(default)]
     forks: Option<TuiViewFile>,
+    #[serde(default)]
+    workspaces: Option<TuiViewFile>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -528,6 +530,13 @@ fn merge_tui(
             &mut config.views.forks,
             views.forks,
             View::Forks,
+            path,
+            diagnostics,
+        );
+        merge_tui_view(
+            &mut config.views.workspaces,
+            views.workspaces,
+            View::Workspaces,
             path,
             diagnostics,
         );

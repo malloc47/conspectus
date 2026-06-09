@@ -637,13 +637,7 @@ fn left_panel_title(app: &App) -> Line<'static> {
     let active = app.config().default_view;
     let mut spans = vec![Span::raw(" "), focus_marker_span(app, Focus::Left)];
     let mut first = true;
-    for view in [
-        View::Sessions,
-        View::Mux,
-        View::Union,
-        View::Prs,
-        View::Forks,
-    ] {
+    for &view in crate::tui::widgets::controls::VIEW_OPTIONS {
         if !first {
             spans.push(Span::styled(
                 " · ",
