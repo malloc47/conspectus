@@ -1,5 +1,6 @@
 ---
 source: tests/atelier_delegation_snapshots.rs
+assertion_line: 83
 expression: fixture.normalize(&graph)
 ---
 {
@@ -509,6 +510,36 @@ expression: fixture.normalize(&graph)
       }
     },
     {
+      "id": "cross_link:agent_session:codex:/fixture/.state/codex:session-alpha:associated_with:workspace:/fixture:cwd_within_workspace",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-alpha"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture"
+        }
+      },
+      "relation": "associated_with",
+      "provenance": "discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "session cwd within workspace member",
+        "fields": {
+          "workspace_member_root": "/fixture"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
       "id": "cross_link:agent_session:codex:/fixture/.state/codex:session-alpha:linked_to_mux:mux_session:tmux:alpha:exact_cwd_match",
       "source": {
         "type": "agent_session",
@@ -748,6 +779,20 @@ expression: fixture.normalize(&graph)
       },
       "relation": "workspace_contains_repo",
       "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b"
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-alpha"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "relation": "associated_with",
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/.state/codex:session-alpha:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {

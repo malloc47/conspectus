@@ -3706,6 +3706,28 @@ concepts everywhere they appear.
     in `discovery::cross_link::tests` pins the corrected semantics.
     See `docs/plans/workspace-view-redesign.md` §Diagnosis
     "Subsequent discovery" for the failure-mode write-up.
+  - Second follow-up: a real-snapshot smoke test surfaced two more
+    refinements needed for the chip to read correctly. (i) Agent-deck
+    launches the harness with cwd at the workspace root itself
+    (`<multi-repo-worktrees>/<id>`), not inside a member subdir. The
+    inference indexed only member `logical_path` values, so these
+    sessions silently became (B)-class and no workspace was ever
+    "active." Fix: `workspace_member_roots` now indexes both the
+    workspace's own `root` and every member's `logical_path`;
+    deepest-match-wins keeps member-subdir attribution preferred.
+    (ii) Even after (i), dormant workspaces (no live (A)-class
+    sessions) continued chipping every (B)-class session in member
+    repos. Fix: `weak_workspace_chip` gates on `active_workspaces()`
+    — the chip fires only for workspaces with at least one resolved
+    AssociatedWith from an agent session. Together these make the
+    chip mean "current workspace work touches this repo" rather
+    than "this repo is a theoretical member." Regression tests:
+    `session_at_workspace_root_associates_with_workspace`,
+    `session_in_member_subdir_still_picks_deepest_member_path` in
+    `discovery::cross_link::tests`;
+    `dormant_workspace_does_not_chip_repo_shared_sessions` plus
+    updated `repo_shared_session_*` and `repo_in_multiple_workspaces_*`
+    fixtures in `tui::rows::sessions::tests`.
 
 - [ ] `H-WS-002` Dedicated Workspaces view.
   - Scope: new `View::Workspaces` with its own row tree

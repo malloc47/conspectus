@@ -54,6 +54,43 @@ intuition that "workspaces probably aren't a peer to cwd" is
 exactly right — the data model needs both halves to agree before
 the UX reads correctly.
 
+### Subsequent discovery: workspace-root launch shape + activeness gate
+
+After landing the canonical-checkout fix, an operator smoke test
+showed two more issues, both surfaced by inspection of a real
+agent-deck setup with four multi-repo-worktrees:
+
+1. **Workspace-root launches were silently (B)-classed.** Agent-deck
+   launches the harness with `cwd = <multi-repo-worktree>/<id>`
+   (the composite directory itself), not inside a specific member
+   subdir. `workspace_member_roots` only indexed member
+   `logical_path` values, so sessions at the workspace root sat
+   above every member path and matched none. With zero (A)-class
+   sessions, every (B)-class session got a chip and the cross-
+   reference signal turned into a wall-of-chips on every shared
+   repo. The fix: also index the workspace's own `root` in
+   `workspace_member_roots`. The matching-workspaces logic still
+   picks the deepest path per workspace, so a session in a
+   specific member subdir still attributes via the member; a
+   session at the workspace root attributes to the root.
+
+2. **Dormant workspaces still produced chips.** Even with the
+   workspace-root indexing, a workspace that has zero (A)-class
+   sessions live in its tree is dormant — the operator isn't
+   working in it. A `[ws-name]` chip pointing at a dormant
+   workspace conveys nothing actionable. The fix: gate
+   `weak_workspace_chip` on `active_workspaces()`, the set of
+   workspaces with at least one resolved `AssociatedWith` edge
+   from an agent session. Dormant workspaces produce no chip.
+   The cross-reference becomes a "needle in haystack" signal:
+   when you do launch into a workspace, sibling sessions
+   touching the same repos light up the chip; otherwise the
+   row stays clean.
+
+Together, these two changes make the chip meaningful: it surfaces
+*current* workspace work touching a shared repo, not theoretical
+membership claims.
+
 
 | Class | What it means | Edge present |
 |---|---|---|

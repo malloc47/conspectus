@@ -17,7 +17,7 @@
 //!   "Ungrouped" bucket (one synthetic group at the top level,
 //!   regardless of `SessionsGrouping`).
 //!
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Upper bound on weak workspace memberships before the chip
@@ -615,6 +615,26 @@ impl<'a> SessionsData<'a> {
         out
     }
 
+    /// Workspaces with at least one resolved `AssociatedWith` edge
+    /// from an agent session — i.e., workspaces that have a live
+    /// (A)-class session inside their tree. The chip suppresses
+    /// dormant workspaces because the cross-reference signal is
+    /// meaningless without active workspace work to point at;
+    /// surfacing every membership claim turns into wall-of-chips
+    /// noise on shared utility repos.
+    fn active_workspaces(&self) -> BTreeSet<&WorkspaceId> {
+        self.snapshot
+            .resolved_relationships
+            .iter()
+            .filter(|rel| rel.relation == RelationKind::AssociatedWith)
+            .filter(|rel| matches!(rel.source, NodeId::AgentSession(_)))
+            .filter_map(|rel| match &rel.target {
+                NodeId::Workspace(ws) => Some(ws),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Display label for a `Workspace` by id: prefer the node's `name`
     /// field, fall back to the basename of `root`. Used by the
     /// (B)-class chip to render `[atelier-ws]` rather than the
@@ -653,7 +673,15 @@ impl<'a> SessionsData<'a> {
         if self.workspace_for_session(session_id).is_some() {
             return None;
         }
-        let workspaces = self.workspaces_for_repo(repo_node_id);
+        // Filter to workspaces that have at least one (A)-class
+        // session live in their tree — see [`Self::active_workspaces`]
+        // for the rationale.
+        let active = self.active_workspaces();
+        let workspaces: Vec<&WorkspaceId> = self
+            .workspaces_for_repo(repo_node_id)
+            .into_iter()
+            .filter(|ws| active.contains(*ws))
+            .collect();
         match workspaces.len() {
             0 => None,
             1 => Some(format!("[{}]", self.workspace_display(workspaces[0]))),
@@ -1737,6 +1765,17 @@ mod tests {
         panic!("no AgentSession row in tree:\n{:#?}", tree.rows);
     }
 
+    fn find_session_row<'a>(tree: &'a RowTree, key: &str) -> (&'a Row, &'a AgentSessionRow) {
+        for row in &tree.rows {
+            if let RowKind::AgentSession(s) = &row.kind
+                && s.session.session_key == key
+            {
+                return (row, s);
+            }
+        }
+        panic!("no AgentSession {key:?} in tree:\n{:#?}", tree.rows);
+    }
+
     #[test]
     fn workspace_rooted_session_nests_under_workspace_with_no_chip() {
         // Case A — session has AssociatedWith Workspace edge.
@@ -1793,7 +1832,11 @@ mod tests {
     fn repo_shared_session_stays_at_repo_level_with_chip() {
         // Case B — session has no AssociatedWith but its repo is a
         // workspace member. Strict grouping puts it under repo only;
-        // the chip surfaces the cross-reference.
+        // the chip surfaces the cross-reference. Activeness gate
+        // (H-WS-001 follow-up) requires the workspace to have at
+        // least one (A)-class session, so the fixture includes an
+        // active session at the workspace root in addition to the
+        // (B)-class session of interest.
         let mut snapshot = GraphSnapshot::empty();
         snapshot
             .nodes
@@ -1806,10 +1849,28 @@ mod tests {
             "/home/op/src/conspectus/.git",
             "/home/op/src/conspectus",
         ));
+        // (A)-class session at the workspace root — makes the
+        // workspace active so the chip on the (B)-class session
+        // is meaningful. The AssociatedWith candidate is added
+        // explicitly because tests bypass cross_link::infer (which
+        // would derive it from session cwd in production).
+        let active_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "active"));
         snapshot.nodes.push(agent_session(
             "codex",
             "/state",
-            "abc",
+            "active",
+            Some("/home/op/atelier"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&active_id, "/home/op/atelier"));
+        // (B)-class session at the canonical checkout path.
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "shared",
             Some("/home/op/src/conspectus/crates/core"),
             None,
             None,
@@ -1827,32 +1888,89 @@ mod tests {
             cwd: None,
             filter: RowFilter::default(),
         });
-        let (row, session) = first_session_row(&tree);
+
+        let (shared_row, shared) = find_session_row(&tree, "shared");
         assert_eq!(
-            row.depth, 1,
-            "repo-shared session should sit under repo, not workspace:\n{:#?}",
+            shared_row.depth, 1,
+            "(B)-class session should sit under repo, not workspace:\n{:#?}",
             tree.rows
         );
         assert_eq!(
-            session.workspace_chip.as_deref(),
+            shared.workspace_chip.as_deref(),
             Some("[atelier-ws]"),
             "chip should surface the single weak-membership workspace name",
         );
-        // No workspace group row should be emitted for the (B)-class
-        // session — the repo is the top-level group.
+
+        // The (A)-class session at the workspace root sits under
+        // the workspace header per strict grouping.
+        let (active_row, active) = find_session_row(&tree, "active");
         assert!(
-            !tree.rows.iter().any(|r| match &r.kind {
-                RowKind::Group(g) => matches!(g.primary_node, Some(NodeId::Workspace(_))),
-                _ => false,
-            }),
-            "no workspace group should appear in the tree:\n{:#?}",
-            tree.rows,
+            active_row.depth >= 1,
+            "(A)-class session should sit under workspace header:\n{:#?}",
+            tree.rows
+        );
+        assert_eq!(
+            active.workspace_chip, None,
+            "(A)-class session must not carry a weak-membership chip",
+        );
+    }
+
+    #[test]
+    fn dormant_workspace_does_not_chip_repo_shared_sessions() {
+        // H-WS-001 follow-up: a workspace that contains a repo but
+        // has no session rooted in its tree is dormant — the chip
+        // would be a meaningless cross-reference to inactive context.
+        // Fires only when the workspace is "live" (≥1 (A)-class
+        // session anywhere in the tree).
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/atelier", "atelier-ws"));
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/conspectus/.git",
+            "/home/op/src/conspectus",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/src/conspectus/.git",
+            "/home/op/src/conspectus",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "abc",
+            // Canonical repo path → no AssociatedWith Workspace
+            // (post cross_link fix) → (B)-class candidate.
+            Some("/home/op/src/conspectus/crates/core"),
+            None,
+            None,
+        ));
+        snapshot.candidate_links.push(workspace_contains_repo_link(
+            "/home/op/atelier",
+            "/home/op/src/conspectus/.git",
+        ));
+        // Note: no session lives inside the workspace tree, so the
+        // workspace is dormant.
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let (_, session) = first_session_row(&tree);
+        assert_eq!(
+            session.workspace_chip, None,
+            "dormant workspace must not chip a (B)-class session",
         );
     }
 
     #[test]
     fn repo_in_multiple_workspaces_renders_n_ws_chip() {
         // Case B with N=2: chip degrades from a name to `[N ws]`.
+        // Both workspaces are made active via root-rooted sessions
+        // per the H-WS-001 follow-up activeness gate.
         let mut snapshot = GraphSnapshot::empty();
         snapshot
             .nodes
@@ -1868,10 +1986,36 @@ mod tests {
             "/home/op/src/conspectus/.git",
             "/home/op/src/conspectus",
         ));
+        // Activate both workspaces.
+        let active_a_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "active-a"));
+        let active_b_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "active-b"));
         snapshot.nodes.push(agent_session(
             "codex",
             "/state",
-            "abc",
+            "active-a",
+            Some("/home/op/atelier"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&active_a_id, "/home/op/atelier"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "active-b",
+            Some("/home/op/other"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&active_b_id, "/home/op/other"));
+        // (B)-class session at the canonical checkout.
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "shared",
             Some("/home/op/src/conspectus"),
             None,
             None,
@@ -1893,7 +2037,7 @@ mod tests {
             cwd: None,
             filter: RowFilter::default(),
         });
-        let (_, session) = first_session_row(&tree);
+        let (_, session) = find_session_row(&tree, "shared");
         assert_eq!(
             session.workspace_chip.as_deref(),
             Some("[2 ws]"),

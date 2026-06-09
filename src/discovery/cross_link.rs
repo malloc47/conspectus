@@ -257,21 +257,24 @@ fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
         .collect()
 }
 
-/// Index workspaces by every `logical_path` declared on a
-/// `WorkspaceContainsRepo` link. The `logical_path` is the
-/// workspace-visible location of a member — atelier's
-/// `<workspace_root>/<repo.name>`, agent-deck's
-/// `<workspace_root>/<symlink-name>`, generic discovery's
-/// immediate child entry.
+/// Index workspaces by every path inside their visible tree —
+/// both the workspace `root` itself (so a session launched at
+/// the multi-repo composite directory attributes correctly, the
+/// agent-deck launch shape) and every member's `logical_path`
+/// (so a session inside a specific member subdir attributes via
+/// the deeper match). Used by [`matching_workspaces`] which
+/// picks the deepest match per workspace, so a session in a
+/// member subdir prefers the member; a session at the workspace
+/// root attributes to the root.
 ///
 /// **Crucially excludes `canonical_checkout_root`** even though
-/// that field is also present on the link: when a workspace
-/// member is a symlink pointing outside the workspace tree,
-/// the canonical path is the *target* checkout's location and a
-/// session running there is *not* doing workspace-context work —
-/// it just happens to touch a repo that is also a workspace
-/// member. Indexing the canonical root would collapse the (A)
-/// workspace-rooted and (B) repo-shared classes that
+/// that field is also present on the membership link: when a
+/// workspace member is a symlink pointing outside the workspace
+/// tree, the canonical path is the *target* checkout's location
+/// and a session running there is *not* doing workspace-context
+/// work — it just happens to touch a repo that is also a
+/// workspace member. Indexing the canonical root would collapse
+/// the (A) workspace-rooted and (B) repo-shared classes that
 /// `H-WS-001` / `docs/plans/workspace-view-redesign.md` are
 /// explicitly trying to keep separate.
 ///
@@ -287,6 +290,18 @@ fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
             continue;
         }
 
+        // Workspace root itself — covers `cd <workspace> && agent`
+        // (the typical agent-deck launch shape).
+        if let NodeId::Workspace(ws) = &link.source {
+            roots
+                .entry((link.source.clone(), normalize_path(&ws.root)))
+                .or_insert(());
+        }
+
+        // Member `logical_path` — covers `cd <workspace>/<member> && agent`
+        // (the typical atelier composite-tree shape). The deeper
+        // match wins via [`matching_workspaces`] so the member
+        // attribution preempts the root attribution when both fire.
         if let Some(path) = link
             .source_metadata
             .fields
@@ -3368,6 +3383,90 @@ mod tests {
                     && matches!(link.target_node_id(), Some(NodeId::Checkout(_)))
             }),
             "session-to-checkout association should still fire",
+        );
+    }
+
+    #[test]
+    fn session_at_workspace_root_associates_with_workspace() {
+        // H-WS-001 follow-up: agent-deck launches the harness with
+        // cwd = the multi-repo-worktrees `<id>` directory itself, not
+        // inside a specific member subdir. Indexing only member
+        // `logical_path` would miss this — the session sits above
+        // any member path, so no match would fire. The fix indexes
+        // the workspace's own root alongside member paths so a
+        // session at the workspace root attributes to the workspace.
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session("a", Some("/home/op/.agent-deck/multi-repo-worktrees/abc")),
+                workspace("/home/op/.agent-deck/multi-repo-worktrees/abc"),
+                repo("/home/op/src/conspectus/.git"),
+            ],
+            candidate_links: vec![workspace_contains_repo_paths(
+                "/home/op/.agent-deck/multi-repo-worktrees/abc",
+                "/home/op/src/conspectus/.git",
+                "/home/op/.agent-deck/multi-repo-worktrees/abc/conspectus",
+                "/home/op/src/conspectus",
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let associated_to_workspace: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::AssociatedWith)
+            .filter(|link| matches!(link.target_node_id(), Some(NodeId::Workspace(_))))
+            .collect();
+        assert_eq!(
+            associated_to_workspace.len(),
+            1,
+            "session at workspace root should associate with the workspace: got {associated_to_workspace:#?}",
+        );
+    }
+
+    #[test]
+    fn session_in_member_subdir_still_picks_deepest_member_path() {
+        // The workspace-root index must not regress the existing
+        // "deepest match wins" behavior — a session inside a specific
+        // member subdir attributes via that member, not via the
+        // workspace root.
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                session(
+                    "a",
+                    Some("/home/op/.agent-deck/multi-repo-worktrees/abc/conspectus/src"),
+                ),
+                workspace("/home/op/.agent-deck/multi-repo-worktrees/abc"),
+                repo("/home/op/src/conspectus/.git"),
+            ],
+            candidate_links: vec![workspace_contains_repo_paths(
+                "/home/op/.agent-deck/multi-repo-worktrees/abc",
+                "/home/op/src/conspectus/.git",
+                "/home/op/.agent-deck/multi-repo-worktrees/abc/conspectus",
+                "/home/op/src/conspectus",
+            )],
+            ..GraphSnapshot::empty()
+        };
+
+        infer(&mut snapshot);
+
+        let associated_to_workspace: Vec<_> = snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::AssociatedWith)
+            .filter(|link| matches!(link.target_node_id(), Some(NodeId::Workspace(_))))
+            .collect();
+        assert_eq!(associated_to_workspace.len(), 1);
+        let member_root = associated_to_workspace[0]
+            .source_metadata
+            .fields
+            .get("workspace_member_root")
+            .and_then(|v| v.as_str());
+        assert_eq!(
+            member_root,
+            Some("/home/op/.agent-deck/multi-repo-worktrees/abc/conspectus"),
+            "deepest-match should prefer the member's logical_path over the workspace root",
         );
     }
 
