@@ -1533,7 +1533,12 @@ impl App {
             // node — the user gets the workspace's detail when
             // they land on any of its subgroup headers.
             RowId::Subgroup { parent, .. } => Some(parent.clone()),
-            RowId::Repo(node) => Some(node.clone()),
+            // The repo row's detail target is the repo itself, not
+            // the parent workspace. The workspace is the row's
+            // *position* (so duplicated repos across workspaces
+            // each have a unique RowId); the detail pane focuses
+            // the repo node.
+            RowId::Repo { repo, .. } => Some(repo.clone()),
         };
         let Some(target) = target else {
             self.explorer = None;

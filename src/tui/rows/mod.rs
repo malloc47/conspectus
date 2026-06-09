@@ -57,8 +57,19 @@ pub enum RowId {
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
-    /// Repo member row in the workspaces view (H-WS-002).
-    Repo(NodeId),
+    /// Repo member row in the workspaces view (H-WS-002). Keyed on
+    /// both the parent workspace and the repo because the same repo
+    /// can be a member of multiple workspaces — keying on the repo
+    /// alone would collide and break selection tracking
+    /// (`app.selection()` matches against the row id, and a
+    /// duplicated id selects every match). The workspace is boxed
+    /// to keep the `RowId` variant size in line with the others
+    /// (otherwise it doubles, and `Option<RowId>` on `Msg::SetData`
+    /// trips the `large_enum_variant` lint).
+    Repo {
+        workspace: Box<NodeId>,
+        repo: NodeId,
+    },
     /// An unbound session pin row (ADR 0057). Keyed on the pin id
     /// so the row is stable across refreshes even as the pin's
     /// binding state changes — once a pin binds, the same logical

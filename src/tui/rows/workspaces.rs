@@ -210,7 +210,10 @@ pub fn build_workspaces_tree_from_conn(
                     .cloned()
                     .unwrap_or_default();
                 tree.rows.push(Row {
-                    id: RowId::Repo(repo_node_id.clone()),
+                    id: RowId::Repo {
+                        workspace: Box::new(workspace_node_id.clone()),
+                        repo: repo_node_id.clone(),
+                    },
                     depth: 2,
                     expandable: false,
                     kind: RowKind::Repo(RepoRow {
@@ -774,8 +777,50 @@ mod tests {
                 }
                 _ => panic!("expected Repo row, got {:?}", repo_row.kind),
             }
-            assert!(matches!(repo_row.id, RowId::Repo(_)));
+            assert!(matches!(repo_row.id, RowId::Repo { .. }));
         }
+    }
+
+    #[test]
+    fn same_repo_in_two_workspaces_gets_distinct_row_ids() {
+        // Regression: a single Repo NodeId can be a member of multiple
+        // workspaces. The Row id keys on (workspace, repo) so the
+        // selection state machine and renderer can tell duplicate
+        // entries apart — keying on the repo alone collides and
+        // every duplicate row highlights when one is selected.
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                workspace_node("/home/op/ws-a", "ws-a", "agent-deck"),
+                workspace_node("/home/op/ws-b", "ws-b", "agent-deck"),
+                repo_node("/home/op/src/conspectus/.git"),
+            ],
+            candidate_links: vec![
+                workspace_contains_repo(
+                    "/home/op/ws-a",
+                    "/home/op/src/conspectus/.git",
+                    "/home/op/ws-a/conspectus",
+                ),
+                workspace_contains_repo(
+                    "/home/op/ws-b",
+                    "/home/op/src/conspectus/.git",
+                    "/home/op/ws-b/conspectus",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(&snapshot);
+        let repo_row_ids: Vec<&RowId> = tree
+            .rows
+            .iter()
+            .filter(|r| matches!(&r.kind, RowKind::Repo(_)))
+            .map(|r| &r.id)
+            .collect();
+        assert_eq!(repo_row_ids.len(), 2, "one row per (workspace, repo) pair");
+        assert_ne!(
+            repo_row_ids[0], repo_row_ids[1],
+            "duplicate-repo rows must carry distinct RowIds so selection picks exactly one",
+        );
     }
 
     fn repo_node_with_source(common_dir: &str, source_path: &str) -> GraphNode {
