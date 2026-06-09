@@ -404,7 +404,9 @@ fn header_fields_inner(
         GraphNode::Fork(fork) => fork_fields(fork),
         GraphNode::Repo(repo) => repo_fields(repo, home),
         GraphNode::Checkout(worktree) => worktree_fields(worktree, home),
-        GraphNode::Workspace(workspace) => workspace_fields(workspace, home),
+        GraphNode::Workspace(workspace) => {
+            workspace_fields(snapshot, workspace, home, include_linked_details)
+        }
         GraphNode::Branch(branch) => branch_fields(branch),
     }
 }
@@ -451,6 +453,7 @@ fn agent_session_fields(
 
     fields.push(session_mux_field(snapshot, &session_id));
     fields.extend(session_process_fields(snapshot, &session_id));
+    fields.extend(session_workspace_fields(snapshot, &session_id));
     fields.push(session_pr_field(snapshot, &session_id, home));
     fields.push(session_lineage_field(snapshot, &session_id));
     if include_linked_details {
@@ -606,6 +609,56 @@ fn session_pr_field(
             pr.owner, pr.repo, pr.number
         ),
     )
+}
+
+/// One `workspace` field per resolved `AssociatedWith` workspace
+/// target on this session, label = workspace `name` falling back to
+/// the basename of `root`. Each field targets the workspace `NodeId`
+/// so the existing linked-details mechanism inlines workspace info
+/// (root / provider / name / member repos) and so the explicit
+/// left-tree navigation can focus the workspace directly.
+fn session_workspace_fields(snapshot: &GraphSnapshot, session_id: &NodeId) -> Vec<HeaderField> {
+    let mut targets: Vec<NodeId> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|rel| {
+            rel.source == *session_id
+                && rel.relation == RelationKind::AssociatedWith
+                && matches!(rel.target, NodeId::Workspace(_))
+        })
+        .map(|rel| rel.target.clone())
+        .collect();
+    targets.sort();
+    targets.dedup();
+    targets
+        .into_iter()
+        .map(|target| {
+            let display = workspace_display_for(snapshot, &target);
+            linked("workspace", display, Some(target))
+        })
+        .collect()
+}
+
+fn workspace_display_for(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> String {
+    snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Workspace(w) if NodeId::Workspace(w.id.clone()) == *workspace_id => Some(
+                w.name
+                    .clone()
+                    .unwrap_or_else(|| basename(&w.root).to_string()),
+            ),
+            _ => None,
+        })
+        .unwrap_or_else(|| format!("{workspace_id}"))
+}
+
+fn basename(path: &str) -> &str {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
 }
 
 fn session_lineage_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField {
@@ -768,7 +821,12 @@ fn worktree_fields(worktree: &CheckoutNode, home: Option<&Path>) -> Vec<HeaderFi
     fields
 }
 
-fn workspace_fields(workspace: &WorkspaceNode, home: Option<&Path>) -> Vec<HeaderField> {
+fn workspace_fields(
+    snapshot: &GraphSnapshot,
+    workspace: &WorkspaceNode,
+    home: Option<&Path>,
+    include_linked_details: bool,
+) -> Vec<HeaderField> {
     let mut fields = vec![plain("root", shorten_home(&workspace.root, home))];
     if let Some(provider) = &workspace.provider {
         fields.push(plain("provider", provider.clone()));
@@ -776,7 +834,46 @@ fn workspace_fields(workspace: &WorkspaceNode, home: Option<&Path>) -> Vec<Heade
     if let Some(name) = &workspace.name {
         fields.push(plain("name", name.clone()));
     }
+    let workspace_id = NodeId::Workspace(workspace.id.clone());
+    fields.extend(workspace_member_fields(snapshot, &workspace_id));
+    if include_linked_details {
+        attach_linked_details(snapshot, &mut fields, home);
+    }
     fields
+}
+
+/// One `member` field per resolved `WorkspaceContainsRepo` from this
+/// workspace, label = basename of the selected link's `logical_path`
+/// (atelier emits `[[repos]].name`; agent-deck and generic discovery
+/// emit the workspace-visible symlink/dir name). Targets the member
+/// `Repo` node so attach_linked_details can inline repo data and the
+/// left-tree navigation can focus the repo directly.
+fn workspace_member_fields(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> Vec<HeaderField> {
+    let mut entries: Vec<(NodeId, String)> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|rel| {
+            rel.source == *workspace_id && rel.relation == RelationKind::WorkspaceContainsRepo
+        })
+        .map(|rel| {
+            let display = snapshot
+                .candidate_links
+                .iter()
+                .find(|link| link.id == rel.selected_link_id)
+                .and_then(|link| link.source_metadata.fields.get("logical_path"))
+                .and_then(|v| v.as_str())
+                .and_then(|p| std::path::Path::new(p).file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("{}", rel.target));
+            (rel.target.clone(), display)
+        })
+        .collect();
+    entries.sort();
+    entries.dedup();
+    entries
+        .into_iter()
+        .map(|(target, display)| linked("member", display, Some(target)))
+        .collect()
 }
 
 fn branch_fields(branch: &BranchNode) -> Vec<HeaderField> {
@@ -2009,5 +2106,258 @@ mod tests {
         let mux_detail = build(&snapshot, &mux_id, None);
         assert!(mux_detail.outgoing_links.is_empty());
         assert_eq!(mux_detail.incoming_links.len(), 1);
+    }
+
+    fn workspace_node(root: &str, provider: Option<&str>, name: Option<&str>) -> GraphNode {
+        GraphNode::Workspace(crate::model::WorkspaceNode {
+            id: crate::model::WorkspaceId::new(root),
+            root: root.to_string(),
+            provider: provider.map(str::to_string),
+            name: name.map(str::to_string),
+        })
+    }
+
+    fn repo_graph_node(common_dir: &str) -> GraphNode {
+        GraphNode::Repo(RepoNode::new(RepoId::new(common_dir)))
+    }
+
+    fn workspace_contains_repo_link(
+        link_id: &str,
+        workspace_root: &str,
+        repo_common_dir: &str,
+        logical_path: &str,
+    ) -> GraphLink {
+        let mut fields = crate::model::Metadata::new();
+        fields.insert(
+            "logical_path".to_string(),
+            serde_json::Value::String(logical_path.to_string()),
+        );
+        GraphLink {
+            id: link_id.to_string(),
+            source: NodeId::Workspace(crate::model::WorkspaceId::new(workspace_root)),
+            target: LinkEndpoint::Node {
+                id: NodeId::Repo(RepoId::new(repo_common_dir)),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "test".to_string(),
+                evidence: None,
+                fields,
+            },
+            state: LinkState::Active,
+        }
+    }
+
+    fn session_associated_with_workspace(session_id: NodeId, workspace_root: &str) -> GraphLink {
+        GraphLink {
+            id: format!("assoc-{workspace_root}"),
+            source: session_id,
+            target: LinkEndpoint::Node {
+                id: NodeId::Workspace(crate::model::WorkspaceId::new(workspace_root)),
+            },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        }
+    }
+
+    #[test]
+    fn workspace_detail_lists_member_repos_as_linked_targets() {
+        let workspace_root = "/work/atelier";
+        let repo_a = "/work/atelier/atelier/.git";
+        let repo_b = "/work/atelier/conspectus/.git";
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                workspace_node(workspace_root, Some("atelier"), Some("atelier-ws")),
+                repo_graph_node(repo_a),
+                repo_graph_node(repo_b),
+            ],
+            candidate_links: vec![
+                workspace_contains_repo_link(
+                    "ws-atelier",
+                    workspace_root,
+                    repo_a,
+                    "/work/atelier/atelier",
+                ),
+                workspace_contains_repo_link(
+                    "ws-conspectus",
+                    workspace_root,
+                    repo_b,
+                    "/work/atelier/conspectus",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let target = NodeId::Workspace(crate::model::WorkspaceId::new(workspace_root));
+        let detail = build(&snapshot, &target, Some(home().as_path()));
+
+        let members: Vec<&HeaderField> = detail
+            .header_fields
+            .iter()
+            .filter(|f| f.label == "member")
+            .collect();
+        assert_eq!(members.len(), 2, "two member fields expected");
+        let displays: Vec<&str> = members.iter().map(|f| f.value.as_str()).collect();
+        assert!(displays.contains(&"atelier"));
+        assert!(displays.contains(&"conspectus"));
+        for member in &members {
+            assert!(
+                matches!(member.target, Some(NodeId::Repo(_))),
+                "member targets a Repo NodeId"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_detail_omits_member_rows_when_no_members_resolved() {
+        let workspace_root = "/work/empty";
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![workspace_node(workspace_root, None, None)],
+            ..GraphSnapshot::empty()
+        });
+
+        let target = NodeId::Workspace(crate::model::WorkspaceId::new(workspace_root));
+        let detail = build(&snapshot, &target, Some(home().as_path()));
+
+        assert!(
+            detail.header_fields.iter().all(|f| f.label != "member"),
+            "no member fields expected when the workspace has no resolved repos"
+        );
+    }
+
+    #[test]
+    fn session_detail_lists_associated_workspaces_as_linked_targets() {
+        let workspace_root = "/work/atelier";
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "alpha"));
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                agent(
+                    "codex",
+                    "alpha",
+                    Some("/work/atelier/conspectus/crates/core"),
+                    None,
+                ),
+                workspace_node(workspace_root, Some("atelier"), Some("atelier-ws")),
+            ],
+            candidate_links: vec![session_associated_with_workspace(
+                session_id.clone(),
+                workspace_root,
+            )],
+            ..GraphSnapshot::empty()
+        });
+
+        let detail = build(&snapshot, &session_id, Some(home().as_path()));
+        let workspace_field = detail
+            .header_fields
+            .iter()
+            .find(|f| f.label == "workspace")
+            .expect("workspace field present");
+        assert_eq!(workspace_field.value, "atelier-ws");
+        assert_eq!(
+            workspace_field.target,
+            Some(NodeId::Workspace(crate::model::WorkspaceId::new(
+                workspace_root
+            )))
+        );
+    }
+
+    #[test]
+    fn session_detail_emits_one_workspace_row_per_association() {
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "alpha"));
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                agent("codex", "alpha", Some("/work/a/x"), None),
+                workspace_node("/work/a", None, Some("alpha-ws")),
+                workspace_node("/work/b", None, Some("beta-ws")),
+            ],
+            candidate_links: vec![
+                session_associated_with_workspace(session_id.clone(), "/work/a"),
+                session_associated_with_workspace(session_id.clone(), "/work/b"),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let detail = build(&snapshot, &session_id, Some(home().as_path()));
+        let rows: Vec<&HeaderField> = detail
+            .header_fields
+            .iter()
+            .filter(|f| f.label == "workspace")
+            .collect();
+        assert_eq!(rows.len(), 2);
+        let displays: Vec<&str> = rows.iter().map(|f| f.value.as_str()).collect();
+        assert!(displays.contains(&"alpha-ws"));
+        assert!(displays.contains(&"beta-ws"));
+    }
+
+    #[test]
+    fn session_detail_omits_workspace_row_when_no_association() {
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "alpha"));
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![agent("codex", "alpha", Some("/work/x"), None)],
+            ..GraphSnapshot::empty()
+        });
+
+        let detail = build(&snapshot, &session_id, Some(home().as_path()));
+        assert!(
+            detail.header_fields.iter().all(|f| f.label != "workspace"),
+            "no workspace field expected when the session has no workspace association"
+        );
+    }
+
+    #[test]
+    fn workspace_member_links_expand_inline_under_linked_details() {
+        // attach_linked_details should walk the workspace's `member`
+        // fields and inline the Repo node's own header fields. This
+        // is the "navigate workspace → repo as naturally as the rest
+        // of the graph" expectation made explicit.
+        let workspace_root = "/work/atelier";
+        let repo_a = "/work/atelier/atelier/.git";
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![
+                agent("codex", "alpha", Some("/work/atelier/atelier/src"), None),
+                workspace_node(workspace_root, Some("atelier"), Some("atelier-ws")),
+                repo_graph_node(repo_a),
+                repo_graph_node("/work/atelier/conspectus/.git"),
+            ],
+            candidate_links: vec![
+                session_associated_with_workspace(
+                    NodeId::AgentSession(AgentSessionId::new("codex", "/state", "alpha")),
+                    workspace_root,
+                ),
+                workspace_contains_repo_link(
+                    "ws-atelier",
+                    workspace_root,
+                    repo_a,
+                    "/work/atelier/atelier",
+                ),
+                workspace_contains_repo_link(
+                    "ws-conspectus",
+                    workspace_root,
+                    "/work/atelier/conspectus/.git",
+                    "/work/atelier/conspectus",
+                ),
+            ],
+            ..GraphSnapshot::empty()
+        });
+
+        let target = NodeId::Workspace(crate::model::WorkspaceId::new(workspace_root));
+        let detail = build(&snapshot, &target, Some(home().as_path()));
+        let atelier_member = detail
+            .header_fields
+            .iter()
+            .find(|f| f.label == "member" && f.value == "atelier")
+            .expect("atelier member field");
+        assert_eq!(atelier_member.expanded_kind_label, Some("repo"));
+        assert!(
+            !atelier_member.expanded_fields.is_empty(),
+            "linked details should inline the repo's fields"
+        );
     }
 }
