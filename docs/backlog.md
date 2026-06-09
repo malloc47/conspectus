@@ -3651,6 +3651,102 @@ overlay rather than persistent state).
     available.
   - Blockers: `H-AGENTMUX-001`.
 
+### Workspace UX Redesign (H-WS-*)
+
+Operator-noted UX confusion in the Sessions view's `graph` grouping:
+sessions whose cwd is in a repo that happens to be a workspace member
+get nested under the workspace even when the session itself has no
+`AssociatedWith` workspace edge. Heavily-used member repos
+(`conspectus`, `config`, `atelier`) make the workspace level
+actively misleading. See `docs/plans/workspace-view-redesign.md` for
+the full diagnosis, the three axes (Sessions/Graph fix, dedicated
+Workspaces view, other-view audit), and the recommended sequence.
+
+The conflation is between two semantically distinct relationships:
+(A) the session is workspace-rooted via `AssociatedWith Workspace`,
+and (B) the session merely touches a repo that is *also* a workspace
+member with no session-level workspace edge. Today's grouping
+promotes (B) to look like (A); the fix surfaces them as different
+concepts everywhere they appear.
+
+- [ ] `H-WS-001` Strict-only + chip in Sessions/Graph workspace nesting.
+  - Scope: in `src/tui/rows/sessions.rs::resolve_group_key`, remove
+    the `.or_else(|| data.workspace_for_repo(&repo_node_id))`
+    fallback so workspaces only group sessions with a direct
+    `AssociatedWith Workspace` edge (case A). Sessions whose repo is
+    *also* a workspace member but lack the session-level edge (case
+    B) fall through to repo-level grouping. Add a small `[ws-name]`
+    chip on those (B) rows so the cross-reference signal survives
+    without the false nesting. Chip degrades to `[N ws]` when the
+    repo belongs to more than one workspace; suppressed entirely
+    above a configurable threshold (default 3). Chip is (B)-only —
+    (A)-class rows are already under their workspace header.
+  - Tests: row-tree unit tests for: workspace-rooted session nests
+    under workspace; repo-shared session (no AssociatedWith) stays
+    at repo level and carries the chip; repo in 2 workspaces shows
+    `[ws-a +1]` (or chosen format); repo in N>threshold workspaces
+    suppresses the chip; the (A)-class case has no chip even when
+    its repo is also a workspace member from elsewhere.
+  - Manual checks: launch the TUI against a fixture with one atelier
+    workspace plus an unrelated session running in
+    `~/src/conspectus` and confirm the unrelated session sits at
+    repo level with the atelier chip, not under the atelier
+    workspace header.
+  - Blockers: none. No ADR required — the change is a single
+    conditional and a chip helper, behavior captured by the row-tree
+    tests. Update `docs/plans/workspace-view-redesign.md` once the
+    chip-format question (count, format, threshold) is resolved.
+
+- [ ] `H-WS-002` Dedicated Workspaces view.
+  - Scope: new `View::Workspaces` with its own row tree
+    (`src/tui/rows/workspaces.rs`) and a new `WorkspacesGrouping`
+    enum (`Provider`, `Activity`, `Repo`, `Flat`). Each workspace
+    row expands to: `members` (its `WorkspaceContainsRepo`
+    selections), `in workspace` ((A)-class sessions:
+    `AssociatedWith Workspace` direct edge), and `related`
+    ((B)-class sessions: cwd in a member repo but no direct
+    workspace edge — collapsed by default). The view stops the
+    Sessions view from carrying workspace nesting responsibility
+    entirely; sessions remain the row-type for "what agents are
+    doing," workspaces become the row-type for "what
+    multi-repo bundles exist and who's touching them."
+  - Tests: row-tree unit tests for the four groupings; per-group
+    membership for (A) vs (B) sessions; empty workspaces; multi-
+    provider workspaces; activity ordering. Snapshot tests for the
+    rendered output across atelier + agent-deck + generic
+    workspace fixtures.
+  - Manual checks: TUI smoke against a fixture with one atelier
+    workspace, one agent-deck workspace, plus a generic-inferred
+    workspace; toggle each grouping and confirm `in workspace`
+    sessions are distinct from `related`.
+  - ADR: required. New ADR records the (A)/(B) distinction as a
+    load-bearing model decision (it shapes detail-pane, table
+    surfacing, and now the row tree), the four-grouping menu, and
+    the default-collapsed `related` subgroup.
+  - Blockers: `H-WS-001` (the chip logic in step 1 lifts the
+    `[N ws]` helper into a place the workspaces view can reuse).
+    Detail-pane integration is already in place from `4bd3829`.
+
+- [ ] `H-WS-003` Audit Mux/Prs/Forks/Union workspace grouping for the
+  same (A)/(B) conflation.
+  - Scope: walk the four other views' `Workspace` grouping paths
+    (`src/tui/rows/mux.rs`, `prs.rs`, `forks.rs`, `union.rs`) and
+    identify which ones group via repo→workspace membership rather
+    than a direct workspace edge. For each: fix to strict-only,
+    add a chip equivalent to `H-WS-001`, or document why the weak
+    grouping is intentional. Likely problem children are Mux
+    (session→workspace→mux chain) and Prs (branch→repo→workspace),
+    both of which produce false-positive workspace grouping in a
+    daily-driver setup. Forks (direct workspace→fork) and Union
+    (intentionally permissive) are lower risk and may close as
+    "no change needed."
+  - Tests: per-view row-tree tests mirroring `H-WS-001`'s strict /
+    chip / threshold pattern; the audit decides scope per view.
+  - Blockers: `H-WS-001` and `H-WS-002` — the model-level decisions
+    (strict semantics, chip helper, view separation) need to ship
+    first so this story is a per-view application rather than a
+    re-derivation.
+
 ### Process-Tree Agent↔Pane Linking
 
 Independent of any orchestrator's state file, an agent process running

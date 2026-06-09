@@ -67,3 +67,10 @@ surface and distribution policy.
 Purpose: phase-by-phase implementation plan for turning the design into
 deliverable milestones, including expected behavior, tests, manual checks, and
 assumptions for each phase.
+
+## `docs/plans/`
+
+Purpose: tentative redesign plans captured during operator review or design
+brainstorming, before they are promoted to ADRs or phase work. Each file
+anchors one or more `H-*` backlog entries and records the tradeoffs the
+later ADR will need to settle.
