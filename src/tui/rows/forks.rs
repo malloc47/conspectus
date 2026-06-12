@@ -173,8 +173,9 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             primary_node: node_id,
-            // H-WS-001: chip is Sessions-view-specific; H-WS-003
-            // will audit whether the Forks view needs an equivalent.
+            // H-WS-003 closed: Forks view does not implement workspace
+            // grouping (variant dropped from `ForksGrouping`), so the
+            // (B)-class cross-reference chip has no analog here.
             workspace_chip: None,
         }),
     }

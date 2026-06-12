@@ -174,18 +174,29 @@ Open knobs for `H-WS-002`:
 
 ### Axis 3: Other views (Mux/Prs/Forks/Union)
 
-Each of these has a `Workspace` grouping option today that likely
-suffers from the same (A)/(B) conflation:
+The original speculation was that each of these views had a
+`Workspace` grouping that probably suffered from the same (A)/(B)
+conflation. The `H-WS-003` audit found something different: the
+variants are unimplemented, not buggy.
 
-| View | Risk |
+| View | Audit finding |
 |---|---|
-| Mux/Workspace | groups muxes by session→workspace→mux chain. Probably has the weak-membership bug. |
-| Prs/Workspace | PRs grouped via branch→repo→workspace. Strongly affected: every PR on a workspace-member repo gets pulled in. |
-| Union/Workspace | union is intentionally permissive; lower priority. |
-| Forks/Workspace | direct workspace→fork edge, low risk. |
+| Mux/Workspace | `src/tui/rows/mux.rs:191` lumps `Session \| Workspace \| Host` together and calls `emit_flat`. No headers emitted. |
+| Prs/Workspace | `PrsBuildInputsFromConn` has no `grouping` field; `PrsGrouping` is unused outside `tui/mod.rs`. |
+| Forks/Workspace | `ForksBuildInputsFromConn` has no `grouping` field; `ForksGrouping` is unused outside `tui/mod.rs`. |
+| Union/Workspace | `UnionBuildInputsFromConn` has no `grouping` field; `UnionGrouping` is unused outside `tui/mod.rs`. |
 
-Tracked as `H-WS-003` (audit, deferred until `H-WS-001` / `H-WS-002`
-ship).
+A secondary finding: for Prs/Forks/Union the (A)/(B) distinction
+does not translate cleanly. PRs and forks have no cwd; the only
+edge from these node kinds to a workspace is the
+branch→repo→workspace chain, which is structurally the (B)
+"weak membership" case at the session level. There is no analog
+of "this PR is workspace-rooted."
+
+`H-WS-003` closed by dropping the `Workspace` variant from
+`MuxGrouping`, `UnionGrouping`, `PrsGrouping`, and `ForksGrouping`
+(ADR 0061). The Workspaces view from `H-WS-002` is the canonical
+workspace-first surface.
 
 ## Recommended sequence
 
@@ -197,7 +208,8 @@ ship).
    New `WorkspacesGrouping` enum, new row builder. ADR records the
    (A)/(B) distinction as a load-bearing model decision.
 3. **`H-WS-003`** — audit Mux/Prs/Forks/Union workspace groupings
-   for the same conflation; fix or defer per finding.
+   for the same conflation; fix or defer per finding. Closed by
+   dropping the unimplemented `Workspace` variants (ADR 0061).
 
 ## Open questions for design review
 
@@ -209,9 +221,11 @@ ship).
 4. Naming: is `Workspaces` the right view label, or something more
    evocative (`Composition`, `Bundles`, `Worktrees`)? The current
    nomenclature in code/ADRs uses `Workspace`; keep for now.
-5. Does the existing `MuxGrouping::Workspace` / `PrsGrouping::Workspace`
-   need fixing before this lands, or are those low-traffic enough
-   to defer (`H-WS-003`)?
+5. ~~Does the existing `MuxGrouping::Workspace` /
+   `PrsGrouping::Workspace` need fixing before this lands, or are
+   those low-traffic enough to defer (`H-WS-003`)?~~ Answered by
+   the `H-WS-003` audit: neither needs fixing because both were
+   unimplemented. Variants dropped per ADR 0061.
 
 These questions become the dispositional checklist for the
 follow-up ADR (`docs/adr/00NN-workspace-view-redesign.md`) at the

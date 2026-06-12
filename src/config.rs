@@ -1069,7 +1069,7 @@ mod tests {
         write_file(
             &project.join(PROJECT_CONFIG_FILENAME),
             "[tui.views.sessions]\ngrouping = \"repo\"\n\
-             [tui.views.mux]\ngrouping = \"workspace\"\n",
+             [tui.views.mux]\ngrouping = \"host\"\n",
         );
 
         let loader = ConfigLoader::new().with_home(temp.path());
@@ -1082,7 +1082,7 @@ mod tests {
         );
         assert_eq!(
             outcome.config.tui.views.mux.grouping,
-            Some(Grouping::Mux(crate::tui::MuxGrouping::Workspace))
+            Some(Grouping::Mux(crate::tui::MuxGrouping::Host))
         );
     }
 

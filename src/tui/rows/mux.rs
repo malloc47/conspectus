@@ -188,7 +188,7 @@ pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite:
     }
 
     match inputs.grouping {
-        MuxGrouping::Session | MuxGrouping::Workspace | MuxGrouping::Host => {
+        MuxGrouping::Session | MuxGrouping::Host => {
             emit_flat(&mut tree, groups, &inputs, &short_ids);
         }
         MuxGrouping::Repo => {
@@ -755,9 +755,9 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             primary_node: node_id,
-            // H-WS-001: chip is Sessions-view-specific evidence.
-            // H-WS-003 will audit whether the Mux view's
-            // workspace grouping needs an equivalent.
+            // H-WS-003 closed: Mux view does not implement workspace
+            // grouping (variant dropped from `MuxGrouping`), so the
+            // (B)-class cross-reference chip has no analog here.
             workspace_chip: None,
         }),
     }
@@ -1337,7 +1337,7 @@ mod tests {
 
     #[test]
     fn mux_view_skips_pins_group_under_flat_groupings() {
-        // The non-Repo groupings (Session / Workspace / Host) flow
+        // The non-Repo groupings (Session / Host) flow
         // through `emit_flat` without header rows; adding a Pins
         // group on its own would feel like an unmotivated heading.
         // Pin glyphs still appear on bound mux rows, but the
@@ -1379,7 +1379,7 @@ mod tests {
             .any(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"));
         assert!(
             !has_pins_group,
-            "session/workspace/host groupings should not emit a Pins group: {:#?}",
+            "session/host groupings should not emit a Pins group: {:#?}",
             tree.rows,
         );
     }

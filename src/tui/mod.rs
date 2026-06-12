@@ -151,7 +151,6 @@ pub enum SessionsGrouping {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MuxGrouping {
     Session,
-    Workspace,
     Host,
     Repo,
 }
@@ -160,7 +159,6 @@ pub enum MuxGrouping {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnionGrouping {
     Kind,
-    Workspace,
     Repo,
 }
 
@@ -169,14 +167,12 @@ pub enum UnionGrouping {
 pub enum PrsGrouping {
     Repo,
     State,
-    Workspace,
 }
 
 /// Top-level grouping in the forks view (per ADR 0031).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForksGrouping {
     Provider,
-    Workspace,
     Parent,
 }
 
@@ -249,10 +245,6 @@ impl Grouping {
             Self::Sessions(SessionsGrouping::ScanRoot) => "scan-root",
             Self::Sessions(SessionsGrouping::None) => "none",
             Self::Mux(MuxGrouping::Session) => "session",
-            Self::Mux(MuxGrouping::Workspace)
-            | Self::Union(UnionGrouping::Workspace)
-            | Self::Prs(PrsGrouping::Workspace)
-            | Self::Forks(ForksGrouping::Workspace) => "workspace",
             Self::Mux(MuxGrouping::Host) => "host",
             Self::Union(UnionGrouping::Kind) => "kind",
             Self::Prs(PrsGrouping::Repo) => "repo",
@@ -290,23 +282,16 @@ impl Grouping {
             ],
             View::Mux => &[
                 Self::Mux(MuxGrouping::Session),
-                Self::Mux(MuxGrouping::Workspace),
                 Self::Mux(MuxGrouping::Host),
                 Self::Mux(MuxGrouping::Repo),
             ],
             View::Union => &[
                 Self::Union(UnionGrouping::Kind),
-                Self::Union(UnionGrouping::Workspace),
                 Self::Union(UnionGrouping::Repo),
             ],
-            View::Prs => &[
-                Self::Prs(PrsGrouping::Repo),
-                Self::Prs(PrsGrouping::State),
-                Self::Prs(PrsGrouping::Workspace),
-            ],
+            View::Prs => &[Self::Prs(PrsGrouping::Repo), Self::Prs(PrsGrouping::State)],
             View::Forks => &[
                 Self::Forks(ForksGrouping::Provider),
-                Self::Forks(ForksGrouping::Workspace),
                 Self::Forks(ForksGrouping::Parent),
             ],
             View::Workspaces => &[Self::Workspaces(WorkspacesGrouping::Flat)],
