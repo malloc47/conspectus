@@ -185,10 +185,6 @@ fn agent_row(
             alias: agent.alias.clone(),
             primary_node: node_id,
             pin_id: None,
-            // H-WS-003 closed: Union view does not implement workspace
-            // grouping (variant dropped from `UnionGrouping`), so the
-            // (B)-class cross-reference chip has no analog here.
-            workspace_chip: None,
         }),
     }
 }

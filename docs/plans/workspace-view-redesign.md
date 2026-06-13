@@ -46,13 +46,15 @@ some repo the workspace happens to claim from elsewhere. The
 field stays on the membership link's `source_metadata.fields` for
 downstream lookups; it just doesn't drive AssociatedWith anymore.
 
-This means the (A)/(B) distinction is now load-bearing in *two*
-places: cross-link emits the AssociatedWith edge only for (A);
-sessions/graph nests under workspace only when AssociatedWith is
-present. The chip surfaces (B) at the row level. The user's
-intuition that "workspaces probably aren't a peer to cwd" is
-exactly right — the data model needs both halves to agree before
-the UX reads correctly.
+This means the (A)/(B) distinction is load-bearing at the
+data-model layer: cross-link emits the `AssociatedWith` edge only
+for (A); sessions/graph nests under workspace only when
+`AssociatedWith` is present. Originally the chip surfaced (B) at
+the row level too — that surface was removed by ADR 0063, so
+(B) now has no UI representation; only the model-layer
+distinction remains. The user's intuition that "workspaces
+probably aren't a peer to cwd" is exactly right — the data model
+needs both halves to agree before the UX reads correctly.
 
 ### Subsequent discovery: workspace-root launch shape + activeness gate
 
@@ -72,24 +74,18 @@ agent-deck setup with four multi-repo-worktrees:
    `workspace_member_roots`. The matching-workspaces logic still
    picks the deepest path per workspace, so a session in a
    specific member subdir still attributes via the member; a
-   session at the workspace root attributes to the root.
+   session at the workspace root attributes to the root. This
+   fix is retained beyond ADR 0063: it is required for the
+   strict-nesting outcome to identify workspace-rooted
+   agent-deck launches correctly, independent of the chip.
 
-2. **Dormant workspaces still produced chips.** Even with the
-   workspace-root indexing, a workspace that has zero (A)-class
-   sessions live in its tree is dormant — the operator isn't
-   working in it. A `[ws-name]` chip pointing at a dormant
-   workspace conveys nothing actionable. The fix: gate
-   `weak_workspace_chip` on `active_workspaces()`, the set of
-   workspaces with at least one resolved `AssociatedWith` edge
-   from an agent session. Dormant workspaces produce no chip.
-   The cross-reference becomes a "needle in haystack" signal:
-   when you do launch into a workspace, sibling sessions
-   touching the same repos light up the chip; otherwise the
-   row stays clean.
-
-Together, these two changes make the chip meaningful: it surfaces
-*current* workspace work touching a shared repo, not theoretical
-membership claims.
+2. **Dormant workspaces still produced chips.** [Resolved by
+   ADR 0063 in a more aggressive way: chip removed entirely.]
+   The historical fix here was to gate `weak_workspace_chip` on
+   `active_workspaces()`. With the chip gone, the gate, the
+   `weak_workspace_chip` helper, and `active_workspaces` itself
+   are all removed. The wall-of-chips problem this finding
+   diagnosed is now impossible by construction.
 
 
 | Class | What it means | Edge present |
@@ -110,14 +106,26 @@ for daily-driver setups where workspace members are popular repos.
 | **1b. Strict + chip** | (1a) plus a `[ws-name]` chip on (B) rows so the cross-reference is still visible without false nesting. | Preserves the signal without the conflation. | Adds chip semantics needing a legend; rows with N>1 workspace memberships need a degradation rule. |
 | **1c. Drop workspace level entirely** | Sessions/Graph nests repo → checkout → session only. Workspaces never appear here. | Cleanest separation. | Loses the affordance even for (A)-class sessions where workspace genuinely *is* the user-facing context. |
 
-**Recommendation: 1b.** Tracked as `H-WS-001`.
+**Initial recommendation: 1b.** H-WS-001 shipped 1b — strict
+nesting plus a (B)-class chip with an activeness gate and a
+3-membership cardinality threshold.
 
-Open knobs for `H-WS-001`:
-- **Chip cardinality.** A repo in N workspaces: render `[ws-a]`,
-  `[ws-a +N]`, `[N ws]`, or omit when N > some threshold.
-- **Chip on (A) too?** Strong workspace-rooted sessions already nest
+**Resolved (ADR 0063): 1a.** After running 1b, the operator
+reported the (B) cross-reference signal was not actionable — the
+useful workspace relationship is strict nesting (A); knowing a
+session's repo happens to be claimed by some workspace, without
+the session being workspace-rooted, did not change any decision.
+The chip and its supporting helpers are removed; the strict
+nesting from 1a remains. The chip cardinality and on-(A)
+sub-decisions below are mooted by the same ADR.
+
+~~Open knobs for `H-WS-001`:~~ resolved by ADR 0063 (chip
+removed):
+- ~~**Chip cardinality.** A repo in N workspaces: render `[ws-a]`,
+  `[ws-a +N]`, `[N ws]`, or omit when N > some threshold.~~
+- ~~**Chip on (A) too?** Strong workspace-rooted sessions already nest
   under the workspace header; double-marking with a chip would be
-  noise. Default: chip is (B)-only.
+  noise. Default: chip is (B)-only.~~
 
 ### Axis 2: A dedicated Workspaces view
 
@@ -138,9 +146,10 @@ as a `+`-joined span (matching the agent-table workspace column
 convention from ADR 0060) and a parenthesized provider chip.
 Below the workspace sit only its (A)-class sessions — direct
 `AssociatedWith Workspace` edges — at depth 1, with no labeled
-subgroup wrapper. (B)-class cross-references stay in the
-Sessions / Graph view's `[ws-name]` chip; they are not surfaced
-in the Workspaces view.
+subgroup wrapper. (B)-class cross-references are not surfaced
+anywhere in the UI after ADR 0063 — the Sessions / Graph chip
+that originally carried them has been removed; only the
+data-model edge remains for downstream tooling.
 
 The original H-WS-002 strawman had three labeled subgroups per
 workspace (`members` / `in workspace` / `related`). Operator
@@ -165,10 +174,9 @@ Tracked as `H-WS-002`.
 Open knobs for `H-WS-002`:
 - **Whether to include (B)-class sessions at all** in the workspaces
   view. ~~Recommendation: yes, collapsed by default.~~ Resolved by
-  the H-WS-002 polish: **only (A)**. Cross-references stay in the
-  Sessions view chip (ADR 0062). Counter (yes-collapsed) was the
-  MVP shape; operator feedback flagged the labels as unintuitive
-  and the duplicate signal as confusing.
+  the H-WS-002 polish: **only (A)** (ADR 0062). The downstream
+  ADR 0063 then removed (B) from the Sessions view chip too, so
+  (B) has no UI representation in any view today.
 - **Workspaces with no activity.** Default to "show all"; offer an
   "active in last 7d" filter. A long quiet list of dormant
   workspaces could clutter the view but excluding them by default
@@ -205,26 +213,33 @@ workspace-first surface.
 
 ## Recommended sequence
 
-1. **`H-WS-001`** — strict-only + chip in Sessions/Graph. Single-file
-   change in `rows/sessions.rs`. Immediate UX win, no new view, no
-   new ADR required.
+1. **`H-WS-001`** — strict-only + chip in Sessions/Graph. Shipped
+   1b (strict-nesting + chip); ADR 0063 later reverted the chip
+   to land at 1a. Strict nesting and the cross-link inference
+   fix are retained.
 2. **`H-WS-002`** — Workspaces view with provider/activity/repo/flat
    groupings, separate "in workspace" vs "related" subgroups.
-   New `WorkspacesGrouping` enum, new row builder. ADR records the
-   (A)/(B) distinction as a load-bearing model decision.
+   MVP shipped with three subgroups; the polish (ADR 0062)
+   folded `members` inline on the workspace row and dropped the
+   `related` (B)-class subgroup, leaving only (A)-class sessions
+   under each workspace.
 3. **`H-WS-003`** — audit Mux/Prs/Forks/Union workspace groupings
    for the same conflation; fix or defer per finding. Closed by
    dropping the unimplemented `Workspace` variants (ADR 0061).
 
 ## Open questions for design review
 
-1. Is `1b`'s chip the right surface, or does the user prefer the
+1. ~~Is `1b`'s chip the right surface, or does the user prefer the
    nuclear option (`1c`) — workspaces out of Sessions entirely,
-   handled exclusively in the Workspaces view?
+   handled exclusively in the Workspaces view?~~ Answered by
+   ADR 0063: **no** — the chip itself was reverted, landing
+   between 1a and 1c. Sessions / Graph keeps strict nesting for
+   (A) (the 1a outcome) but no chip. The Workspaces view is the
+   only place workspaces appear as primary organization.
 2. ~~Should (B)-class sessions appear in the Workspaces view at
    all?~~ Answered by the H-WS-002 polish: **no** (ADR 0062).
-   Workspaces view surfaces only (A); (B) lives only as the
-   Sessions/Graph chip.
+   ADR 0063 further removed (B) from the Sessions view chip, so
+   (B) has no UI representation in any view.
 3. Should the default Workspaces view filter to "has activity"?
 4. Naming: is `Workspaces` the right view label, or something more
    evocative (`Composition`, `Bundles`, `Worktrees`)? The current

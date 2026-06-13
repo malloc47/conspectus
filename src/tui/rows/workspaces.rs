@@ -239,10 +239,6 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             primary_node: node_id,
-            // H-WS-001: chip is Sessions-view-specific; surfacing it
-            // again under the workspaces view would be redundant
-            // (the workspace context is already the row's parent).
-            workspace_chip: None,
         }),
     }
 }

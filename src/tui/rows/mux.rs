@@ -755,10 +755,6 @@ fn agent_row(
             title: agent.title.clone(),
             alias: agent.alias.clone(),
             primary_node: node_id,
-            // H-WS-003 closed: Mux view does not implement workspace
-            // grouping (variant dropped from `MuxGrouping`), so the
-            // (B)-class cross-reference chip has no analog here.
-            workspace_chip: None,
         }),
     }
 }

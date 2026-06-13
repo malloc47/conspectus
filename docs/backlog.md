@@ -3670,64 +3670,44 @@ promotes (B) to look like (A); the fix surfaces them as different
 concepts everywhere they appear.
 
 - [x] `H-WS-001` Strict-only + chip in Sessions/Graph workspace nesting.
-  - Outcome: `resolve_group_key` now sets the workspace level only
-    when the session carries a direct `AssociatedWith Workspace`
-    edge; the previous `workspace_for_repo` fallback is removed.
-    Repo-shared (B-class) sessions fall through to repo-level
-    grouping and carry a `workspace_chip` on `AgentSessionRow` that
-    surfaces the cross-reference: `[ws-name]` for one weak
-    membership, `[N ws]` for `2..=WEAK_WORKSPACE_CHIP_MAX` (default
-    3), suppressed above. (A)-class rows never carry the chip,
-    even when their repo also reaches other workspaces. The chip
-    renders in `render_session_spans` between the display label
-    and project column, styled as dim secondary text. Helpers in
-    `SessionsData` (`workspaces_for_repo`, `workspace_display`,
-    `weak_workspace_chip`) keep the policy testable in isolation.
-    Mux/Prs/Forks/Union row builders set `workspace_chip: None`
-    pending `H-WS-003`. Five unit tests cover: workspace-rooted
-    nesting with no chip, repo-shared at repo level with `[name]`
-    chip, repo-in-2-workspaces shows `[2 ws]`, repo above threshold
-    suppresses chip, (A) row has no chip even with other workspaces
-    on the repo. Chip-format / threshold decision recorded in
-    `docs/plans/workspace-view-redesign.md` §Axis 1 (default
-    `WEAK_WORKSPACE_CHIP_MAX = 3`; revisit as a config knob if the
-    cliff bites someone).
-  - Follow-up: post-landing smoke test exposed that the strict
-    grouping had nothing to filter — `cross_link.rs::workspace_member_roots`
-    was indexing `canonical_checkout_root` alongside `logical_path`,
-    so sessions running at the canonical checkout of any workspace
-    member (the symlinked-atelier / agent-deck common case) were
-    being emitted with an `AssociatedWith Workspace` candidate at
-    inference time. Dropped `canonical_checkout_root` from the
-    index so the AssociatedWith inference now requires the
-    session's cwd to live inside the workspace's visible tree
-    (`logical_path`). Regression test
+  - Outcome (strict-nesting half — retained): `resolve_group_key`
+    sets the workspace level only when the session carries a
+    direct `AssociatedWith Workspace` edge; the previous
+    `workspace_for_repo` fallback is removed. Repo-shared
+    (B-class) sessions fall through to repo-level grouping.
+    `cross_link::workspace_member_roots` indexes both the
+    workspace's own `root` and every member's `logical_path`
+    (dropping `canonical_checkout_root` to fix the symlinked-member
+    leak), with deepest-match-wins keeping member-subdir
+    attribution preferred. Regression test
     `symlinked_workspace_member_does_not_associate_session_at_canonical_path`
-    in `discovery::cross_link::tests` pins the corrected semantics.
-    See `docs/plans/workspace-view-redesign.md` §Diagnosis
-    "Subsequent discovery" for the failure-mode write-up.
-  - Second follow-up: a real-snapshot smoke test surfaced two more
-    refinements needed for the chip to read correctly. (i) Agent-deck
-    launches the harness with cwd at the workspace root itself
-    (`<multi-repo-worktrees>/<id>`), not inside a member subdir. The
-    inference indexed only member `logical_path` values, so these
-    sessions silently became (B)-class and no workspace was ever
-    "active." Fix: `workspace_member_roots` now indexes both the
-    workspace's own `root` and every member's `logical_path`;
-    deepest-match-wins keeps member-subdir attribution preferred.
-    (ii) Even after (i), dormant workspaces (no live (A)-class
-    sessions) continued chipping every (B)-class session in member
-    repos. Fix: `weak_workspace_chip` gates on `active_workspaces()`
-    — the chip fires only for workspaces with at least one resolved
-    AssociatedWith from an agent session. Together these make the
-    chip mean "current workspace work touches this repo" rather
-    than "this repo is a theoretical member." Regression tests:
-    `session_at_workspace_root_associates_with_workspace`,
-    `session_in_member_subdir_still_picks_deepest_member_path` in
-    `discovery::cross_link::tests`;
-    `dormant_workspace_does_not_chip_repo_shared_sessions` plus
-    updated `repo_shared_session_*` and `repo_in_multiple_workspaces_*`
-    fixtures in `tui::rows::sessions::tests`.
+    in `discovery::cross_link::tests` pins the corrected
+    semantics. Strict-nesting tests
+    (`workspace_rooted_session_nests_under_workspace_at_depth_2`,
+    `repo_shared_session_stays_at_repo_level`) cover the bug-fix
+    outcome.
+  - Chip half — reverted (ADR 0063): the original ship added a
+    `[ws-name]` / `[N ws]` cross-reference chip on (B)-class rows
+    via `workspaces_for_repo`, `active_workspaces`, and
+    `weak_workspace_chip` helpers, with an activeness gate and
+    `WEAK_WORKSPACE_CHIP_MAX = 3` cardinality threshold. After
+    running the chip the operator reported it was not surfacing
+    actionable information — knowing that a session's repo
+    *happens* to be claimed by a workspace, without the session
+    being workspace-rooted, did not change any decision the
+    operator made. The chip, its helpers, the
+    `workspace_chip: Option<String>` field on `AgentSessionRow`,
+    the rendering block in `render_session_spans`, and the four
+    chip-specific tests are removed. The (B)-rendering test
+    keeps only the strict-nesting depth assertions.
+  - Net result: the H-WS-001 contribution is the strict-nesting
+    + cross-link inference fix; the cross-reference chip is gone
+    from the UI in all five views (Mux/Prs/Forks/Union were
+    already chipless per ADR 0061; Workspaces dropped the
+    equivalent `related` subgroup per ADR 0062). The (A)/(B)
+    distinction remains load-bearing at the data-model layer
+    (the AssociatedWith inference still emits it) but is no
+    longer surfaced anywhere in the TUI.
 
 - [x] `H-WS-002` Dedicated Workspaces view (MVP).
   - Outcome: new `View::Workspaces` with `WorkspacesGrouping::Flat`
