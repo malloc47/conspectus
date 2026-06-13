@@ -121,29 +121,32 @@ Open knobs for `H-WS-001`:
 
 ### Axis 2: A dedicated Workspaces view
 
-Strawman tree:
+After the H-WS-002 MVP and the H-WS-002 polish (ADR 0062), the
+shape is:
 
 ```
 Workspaces  (group-by: provider | activity | repo | flat)
-├── atelier  (provider=atelier, 3 members)
-│   ├── members
-│   │   ├── atelier-repo
-│   │   ├── conspectus
-│   │   └── config
-│   ├── in workspace  (A-class sessions)
-│   │   ├── codex:plan-revamp    (cwd=~/atelier/conspectus/...)
-│   │   └── claude:demo-fork
-│   └── related            (B-class, collapsed by default)
-│       ├── codex:bug-fix         (~/src/conspectus)
-│       └── ...
-├── multi-task  (provider=agent-deck, 2 members)
+├── atelier-ws  conspectus+config+atelier-repo  (atelier)
+│   ├── codex:plan-revamp    (cwd=~/atelier/conspectus/...)
+│   └── claude:demo-fork
+├── multi-task  conspectus+config  (agent-deck)
 │   └── ...
 ```
 
-Distinguishing the "in workspace" and "related" sections is the
-key bit. (A)-class sessions are workspace-context work; (B)-class
-sessions are cross-references. Defaulting "related" to collapsed
-keeps the strong case clean while preserving the signal on demand.
+Each workspace top-level row carries the member-repo list inline
+as a `+`-joined span (matching the agent-table workspace column
+convention from ADR 0060) and a parenthesized provider chip.
+Below the workspace sit only its (A)-class sessions — direct
+`AssociatedWith Workspace` edges — at depth 1, with no labeled
+subgroup wrapper. (B)-class cross-references stay in the
+Sessions / Graph view's `[ws-name]` chip; they are not surfaced
+in the Workspaces view.
+
+The original H-WS-002 strawman had three labeled subgroups per
+workspace (`members` / `in workspace` / `related`). Operator
+feedback flagged `members` as left-tree noise (already in the
+detail pane) and the `in workspace` / `related` vocabulary as
+unintuitive. ADR 0062 records the narrowing and the rationale.
 
 Groupings:
 
@@ -161,9 +164,11 @@ Tracked as `H-WS-002`.
 
 Open knobs for `H-WS-002`:
 - **Whether to include (B)-class sessions at all** in the workspaces
-  view. Recommendation: yes, collapsed by default. Counter: only A;
-  treat workspaces as authored context and let cross-references stay
-  in the Sessions view chip.
+  view. ~~Recommendation: yes, collapsed by default.~~ Resolved by
+  the H-WS-002 polish: **only (A)**. Cross-references stay in the
+  Sessions view chip (ADR 0062). Counter (yes-collapsed) was the
+  MVP shape; operator feedback flagged the labels as unintuitive
+  and the duplicate signal as confusing.
 - **Workspaces with no activity.** Default to "show all"; offer an
   "active in last 7d" filter. A long quiet list of dormant
   workspaces could clutter the view but excluding them by default
@@ -216,7 +221,10 @@ workspace-first surface.
 1. Is `1b`'s chip the right surface, or does the user prefer the
    nuclear option (`1c`) — workspaces out of Sessions entirely,
    handled exclusively in the Workspaces view?
-2. Should (B)-class sessions appear in the Workspaces view at all?
+2. ~~Should (B)-class sessions appear in the Workspaces view at
+   all?~~ Answered by the H-WS-002 polish: **no** (ADR 0062).
+   Workspaces view surfaces only (A); (B) lives only as the
+   Sessions/Graph chip.
 3. Should the default Workspaces view filter to "has activity"?
 4. Naming: is `Workspaces` the right view label, or something more
    evocative (`Composition`, `Bundles`, `Worktrees`)? The current

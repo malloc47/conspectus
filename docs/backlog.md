@@ -3731,35 +3731,38 @@ concepts everywhere they appear.
 
 - [x] `H-WS-002` Dedicated Workspaces view (MVP).
   - Outcome: new `View::Workspaces` with `WorkspacesGrouping::Flat`
-    as the only grouping shipped in v1. Row tree
-    (`src/tui/rows/workspaces.rs`) lists each workspace as a
-    top-level row, then up to three labeled subgroups beneath it:
-    `members (N)` (the resolved `WorkspaceContainsRepo` member
-    repos, each with a `Repo` NodeId for detail-pane / left-tree
-    navigation), `in workspace (N)` ((A)-class sessions with a
-    direct `AssociatedWith Workspace` edge), and `related (N)`
-    ((B)-class sessions whose checkout is in a member repo but
-    which carry no direct workspace edge). Sessions that are both
-    (A) and (B) for the same workspace appear only in `in
-    workspace` — the `related` set subtracts the (A) ids. Empty
-    subgroups are suppressed. `RowId::Subgroup { parent, label }`
-    added so subgroup rows have stable, unique ids per workspace
-    without colliding across workspaces. Keybinding `6` switches
-    to the view; `[`/`]` cycle now includes Workspaces;
-    `--view workspaces` works from the CLI. Five unit tests cover
-    empty snapshot, members rendering with provider chip,
-    (A)-class `in workspace`, (B)-class `related`, and the (A∩B)
-    exclusion. Default-collapse for the `related` subgroup and
-    the Provider / Activity / Repo groupings are deferred behind
-    a follow-up `H-WS-002a`; the MVP gives the operator the
-    workspace-first slice they asked for without paying the cost
-    of every grouping up front.
-  - ADR: deferred until the follow-up. The four-grouping menu was
-    the main thing the ADR would record, and shipping Flat alone
-    doesn't yet require the model decision documented.
+    as the only grouping shipped in v1. Initial row tree
+    (`src/tui/rows/workspaces.rs`) listed each workspace with up to
+    three labeled subgroups (`members` / `in workspace` /
+    `related`). Keybinding `6` switches to the view; `[`/`]` cycle
+    includes Workspaces; `--view workspaces` works from the CLI.
+    Default-collapse for the `related` subgroup and the Provider /
+    Activity / Repo groupings were deferred to `H-WS-002a`.
+  - Polish (ADR 0062): operator feedback after running the MVP
+    flagged the `members` subgroup as left-tree noise (the detail
+    pane already exposes members as navigable HeaderFields) and
+    the `in workspace` / `related` labels as unintuitive. The
+    polish pass moved the member list inline on the workspace
+    top-level row as a `+`-joined span (matching the agent-table
+    workspace column from ADR 0060) and dropped the `related`
+    (B)-class subgroup entirely. The Workspaces view now surfaces
+    only (A)-class sessions, sitting at depth 1 directly under the
+    workspace row with no labeled wrapper. The (B) cross-reference
+    signal continues to live as the `[ws-name]` chip in Sessions /
+    Graph from `H-WS-001`. `fetch_b_class_sessions` and the
+    multi-hop join it powered are removed; `MemberSqlRow` slims
+    to a single `display_name` field. Six unit tests cover empty
+    snapshot, inline member-list rendering with and without
+    provider, (A)-class direct nesting at depth 1, (B)-class
+    suppression, and logical-path-basename naming.
+  - ADR: 0062 records the polish decision and answers
+    open question 2 from
+    `docs/plans/workspace-view-redesign.md` (the (B)-in-view
+    question). The four-grouping menu decision is still
+    `H-WS-002a`'s.
 
 - [ ] `H-WS-002a` Workspaces view polish: Provider/Activity/Repo
-  groupings + default-collapsed `related` subgroup.
+  groupings.
   - Scope: extend `WorkspacesGrouping` from Flat-only to the four
     enum variants the original `H-WS-002` ticket specified
     (`Provider`, `Activity`, `Repo`, `Flat`). Provider groups
@@ -3767,18 +3770,22 @@ concepts everywhere they appear.
     Activity sorts workspaces by most-recent (A)-class session
     `last_active_epoch`. Repo flips the tree: top-level rows are
     repos, each expanding to the workspaces that include them
-    plus the sessions in each. Default-collapse the `related`
-    subgroup at row-tree emit time so the operator sees the
-    workspace-rooted shape first.
-  - Tests: per-grouping unit tests for ordering, empty bucket
-    suppression, and the same (A)/(B) split as `H-WS-002`.
-  - ADR: required. Records the four-grouping menu and the (A)/(B)
-    distinction as a load-bearing model decision (it now shapes
-    detail pane, the (B) chip in Sessions/Graph, and the row tree).
-  - Blockers: `H-WS-002` (this work depends on the row-tree shape
-    landed there). Default-collapse may want a small additive
-    surface on `RowTree` so the renderer knows which subgroup
-    rows start hidden — that's a one-line addition tracked here.
+    plus the sessions in each. The previously planned
+    default-collapse of the `related` subgroup is no longer in
+    scope — that subgroup was removed by the H-WS-002 polish
+    (ADR 0062).
+  - Tests: per-grouping unit tests for ordering and empty bucket
+    suppression. The (A)/(B) split is no longer relevant at the
+    view level (only (A) is surfaced); each grouping's tests
+    confirm sessions appear at depth 1 directly under their
+    workspace as in the post-polish Flat shape.
+  - ADR: required. Records the four-grouping menu and what (A)
+    means at each grouping's top level (workspaces under
+    Provider/Activity/Flat; sessions-under-workspaces under Repo).
+  - Blockers: `H-WS-002` (row-tree shape) — both the MVP and the
+    polish have shipped. The Repo grouping may reuse the
+    `RowKind::Repo` / `RepoRow` scaffolding the polish left in
+    place for exactly this purpose.
 
 - [x] `H-WS-003` Audit Mux/Prs/Forks/Union workspace grouping for the
   same (A)/(B) conflation.

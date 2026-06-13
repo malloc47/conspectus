@@ -1,42 +1,47 @@
-//! SQLite-backed workspaces-view row-tree builder (H-WS-002 MVP).
+//! SQLite-backed workspaces-view row-tree builder (H-WS-002 + polish).
 //!
-//! Top-level rows are `Workspace` nodes; each one expands to up to
-//! three labeled subgroups, in order:
+//! Top-level rows are `Workspace` nodes. The display string carries
+//! the workspace name, an inline `+`-joined member-repo list
+//! (mirroring the agent-table workspace column convention from
+//! ADR 0060), and a parenthesized provider chip:
 //!
-//! 1. **members** — the workspace's resolved `WorkspaceContainsRepo`
-//!    member repos. Each row is a `RepoRow` styled to match the
-//!    session / mux row rhythm (short id + `repo` chip + bold name +
-//!    dim canonical path) and carrying the repo as its
-//!    `primary_node` so the detail pane and left-tree navigation
-//!    follow naturally.
-//! 2. **in workspace** — (A)-class sessions whose `AssociatedWith`
-//!    target is this workspace directly. The session was launched
-//!    inside the workspace tree (composite directory or a member
-//!    subdir). Rows are full `AgentSessionRow`s.
-//! 3. **related** — (B)-class sessions: their cwd is inside a member
-//!    repo's checkout, but they carry no direct `AssociatedWith
-//!    Workspace` edge to *this* workspace. These are the
-//!    cross-reference rows the (B) chip in the Sessions view points
-//!    at. Rows are full `AgentSessionRow`s.
+//! ```text
+//! atelier-ws  conspectus+config+atelier  (atelier)
+//! ```
 //!
-//! Sessions that are (A)-class for this workspace are *excluded*
-//! from the related subgroup so a single workspace+session pair
-//! shows up exactly once.
+//! Below each workspace the tree lists its (A)-class agent sessions
+//! directly — sessions whose `AssociatedWith` target is this
+//! workspace, i.e. sessions launched inside the workspace tree
+//! (composite directory or a member subdir). There is no labeled
+//! `sessions` subgroup wrapper; the workspace's expanded children
+//! are the sessions themselves.
+//!
+//! (B)-class cross-references (sessions in a workspace member's
+//! checkout but not workspace-rooted) are intentionally *not*
+//! surfaced here — that signal lives only as the `[ws-name]` chip
+//! in the Sessions / Graph view (H-WS-001). Surfacing it twice
+//! risked the same (A)/(B) conflation H-WS-001 removed.
+//!
+//! The members subgroup that previously listed every member repo
+//! as a row in the left tree is gone — the detail pane's
+//! `workspace_member_fields` already emits one `member` field per
+//! resolved `WorkspaceContainsRepo`, so dropping it loses no
+//! information.
 //!
 //! v1 ships only `WorkspacesGrouping::Flat`; Provider / Activity /
 //! Repo groupings are deferred per
 //! `docs/plans/workspace-view-redesign.md` §Axis 2.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use rusqlite::Connection;
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
-use crate::model::{AgentSessionId, NodeId, RepoId, WorkspaceId};
+use crate::model::{AgentSessionId, NodeId, WorkspaceId};
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxIndicator, RepoRow, Row, RowId, RowKind, RowTree, ViewLabel,
+    AgentSessionRow, GroupRow, MuxIndicator, Row, RowId, RowKind, RowTree, ViewLabel,
     format_recency, harness_label, shorten_home,
 };
 
@@ -62,19 +67,11 @@ struct WorkspaceSqlRow {
 
 #[derive(Clone, Debug)]
 struct MemberSqlRow {
-    repo_node_id: String,
-    repo_common_dir: String,
     /// Basename of the membership link's `logical_path` source field.
     /// Atelier emits `[[repos]].name`; agent-deck the symlink leaf;
-    /// generic discovery the immediate child name. The label
-    /// presented in the row.
+    /// generic discovery the immediate child name. Joined into the
+    /// inline member list on the workspace row.
     display_name: String,
-    /// Operator-recognizable canonical path. First non-agent-deck
-    /// `source_paths` entry on the `Repo` node, falling back to
-    /// `common_dir` when no source path is recorded. `None` means
-    /// the renderer should suppress the trailing path column rather
-    /// than print the bare `common_dir`.
-    canonical_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -108,15 +105,9 @@ pub fn build_workspaces_tree_from_conn(
     let agents = fetch_agents(inputs.conn)?;
     let candidate_counts = fetch_agent_mux_candidate_counts(inputs.conn)?;
     let a_class_by_ws = fetch_a_class_sessions(inputs.conn)?;
-    let b_class_by_ws = fetch_b_class_sessions(inputs.conn)?;
 
     let mut node_ids: Vec<String> = agents.iter().map(|a| a.node_id.clone()).collect();
     node_ids.extend(workspaces.iter().map(|ws| ws.node_id.clone()));
-    node_ids.extend(
-        members_by_ws
-            .values()
-            .flat_map(|members| members.iter().map(|m| m.repo_node_id.clone())),
-    );
     let full_ids: Vec<String> = node_ids
         .iter()
         .map(|id| node_short_id_from_display(id))
@@ -145,18 +136,6 @@ pub fn build_workspaces_tree_from_conn(
             .get(&ws.node_id)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        let a_class_set: HashSet<&str> = a_class_ids.iter().map(String::as_str).collect();
-        let b_class_ids: Vec<&AgentSqlRow> = b_class_by_ws
-            .get(&ws.node_id)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
-            .iter()
-            .filter(|node_id| !a_class_set.contains(node_id.as_str()))
-            .filter_map(|node_id| agents_by_node.get(node_id.as_str()).copied())
-            .filter(|agent| {
-                session_matches_filter(agent, &candidate_counts, inputs.now, &inputs.filter)
-            })
-            .collect();
         let a_class_rows: Vec<&AgentSqlRow> = a_class_ids
             .iter()
             .filter_map(|node_id| agents_by_node.get(node_id.as_str()).copied())
@@ -170,125 +149,62 @@ pub fn build_workspaces_tree_from_conn(
             .name
             .clone()
             .unwrap_or_else(|| basename(&ws.root).to_string());
-        let provider_chip = ws
-            .provider
-            .as_deref()
-            .map(|p| format!("  ({p})"))
-            .unwrap_or_default();
+        let display_path =
+            format_workspace_display(&workspace_label, members, ws.provider.as_deref());
 
-        let has_any_children =
-            !members.is_empty() || !a_class_rows.is_empty() || !b_class_ids.is_empty();
         tree.rows.push(Row {
             id: RowId::Group(workspace_node_id.clone()),
             depth: 0,
-            expandable: has_any_children,
+            expandable: !a_class_rows.is_empty(),
             kind: RowKind::Group(GroupRow {
-                display_path: format!("{workspace_label}{provider_chip}"),
+                display_path,
                 primary_node: Some(workspace_node_id.clone()),
                 is_launch_context: false,
             }),
         });
 
-        if !members.is_empty() {
-            tree.rows.push(Row {
-                id: RowId::Subgroup {
-                    parent: workspace_node_id.clone(),
-                    label: "members",
-                },
-                depth: 1,
-                expandable: true,
-                kind: RowKind::Group(GroupRow {
-                    display_path: format!("members ({})", members.len()),
-                    primary_node: None,
-                    is_launch_context: false,
-                }),
-            });
-            for member in members {
-                let repo_node_id = NodeId::Repo(RepoId::new(&member.repo_common_dir));
-                let short_id = short_ids
-                    .get(member.repo_node_id.as_str())
+        for agent in a_class_rows {
+            tree.rows.push(agent_row(
+                &workspace_node_id,
+                agent,
+                1,
+                &candidate_counts,
+                short_ids
+                    .get(agent.node_id.as_str())
                     .cloned()
-                    .unwrap_or_default();
-                tree.rows.push(Row {
-                    id: RowId::Repo {
-                        workspace: Box::new(workspace_node_id.clone()),
-                        repo: repo_node_id.clone(),
-                    },
-                    depth: 2,
-                    expandable: false,
-                    kind: RowKind::Repo(RepoRow {
-                        short_id,
-                        display_name: member.display_name.clone(),
-                        canonical_path: member.canonical_path.clone(),
-                        common_dir: member.repo_common_dir.clone(),
-                        primary_node: repo_node_id,
-                    }),
-                });
-            }
-        }
-
-        if !a_class_rows.is_empty() {
-            tree.rows.push(Row {
-                id: RowId::Subgroup {
-                    parent: workspace_node_id.clone(),
-                    label: "in workspace",
-                },
-                depth: 1,
-                expandable: true,
-                kind: RowKind::Group(GroupRow {
-                    display_path: format!("in workspace ({})", a_class_rows.len()),
-                    primary_node: None,
-                    is_launch_context: false,
-                }),
-            });
-            for agent in a_class_rows {
-                tree.rows.push(agent_row(
-                    &workspace_node_id,
-                    agent,
-                    2,
-                    &candidate_counts,
-                    short_ids
-                        .get(agent.node_id.as_str())
-                        .cloned()
-                        .unwrap_or_default(),
-                    inputs.home,
-                    inputs.now,
-                ));
-            }
-        }
-
-        if !b_class_ids.is_empty() {
-            tree.rows.push(Row {
-                id: RowId::Subgroup {
-                    parent: workspace_node_id.clone(),
-                    label: "related",
-                },
-                depth: 1,
-                expandable: true,
-                kind: RowKind::Group(GroupRow {
-                    display_path: format!("related ({})", b_class_ids.len()),
-                    primary_node: None,
-                    is_launch_context: false,
-                }),
-            });
-            for agent in b_class_ids {
-                tree.rows.push(agent_row(
-                    &workspace_node_id,
-                    agent,
-                    2,
-                    &candidate_counts,
-                    short_ids
-                        .get(agent.node_id.as_str())
-                        .cloned()
-                        .unwrap_or_default(),
-                    inputs.home,
-                    inputs.now,
-                ));
-            }
+                    .unwrap_or_default(),
+                inputs.home,
+                inputs.now,
+            ));
         }
     }
 
     Ok(tree)
+}
+
+/// Assemble the workspace top-row display string:
+/// `<name>  <repo-a+repo-b+...>  (<provider>)`. The member list and
+/// provider chip are each prefixed with two spaces so the eye can
+/// pick out the three slots without a glyph budget. Sections are
+/// omitted when their data is missing — a workspace with no members
+/// or no provider drops the corresponding segment cleanly.
+fn format_workspace_display(
+    workspace_label: &str,
+    members: &[MemberSqlRow],
+    provider: Option<&str>,
+) -> String {
+    let mut out = workspace_label.to_string();
+    if !members.is_empty() {
+        let joined: Vec<&str> = members.iter().map(|m| m.display_name.as_str()).collect();
+        out.push_str("  ");
+        out.push_str(&joined.join("+"));
+    }
+    if let Some(provider) = provider {
+        out.push_str("  (");
+        out.push_str(provider);
+        out.push(')');
+    }
+    out
 }
 
 fn agent_row(
@@ -380,84 +296,41 @@ fn fetch_workspaces(conn: &Connection) -> rusqlite::Result<Vec<WorkspaceSqlRow>>
 
 fn fetch_members(conn: &Connection) -> rusqlite::Result<BTreeMap<String, Vec<MemberSqlRow>>> {
     // Pull resolved workspace_contains_repo selections joined to the
-    // selected candidate link's source_fields so we can render the
-    // member's display name from the link's `logical_path` basename.
-    // Left-joined to node_repos so we can surface the operator-visible
-    // canonical path (first non-agent-deck `source_paths` entry) on
-    // the row.
+    // selected candidate link's source_fields so the member's display
+    // name comes from the link's `logical_path` basename. The polish
+    // pass folded the per-member subgroup into an inline `+`-joined
+    // list on the workspace row, so the renderer only needs the
+    // display name; the `repo_common_dir` and `source_paths`
+    // columns the previous version threaded through this query are
+    // no longer needed.
     let mut stmt = conn.prepare(
         "SELECT ('workspace:' || json_extract(r.source, '$.root')) AS workspace_node_id, \
-                ('repo:' || json_extract(r.target, '$.common_dir')) AS repo_node_id, \
                 json_extract(r.target, '$.common_dir') AS repo_common_dir, \
-                cl.source_fields, \
-                nr.source_paths AS repo_source_paths \
+                cl.source_fields \
          FROM resolved_relationships r \
          JOIN candidate_links cl ON cl.link_id = r.selected_link_id \
-         LEFT JOIN node_repos nr ON nr.node_id = \
-              ('repo:' || json_extract(r.target, '$.common_dir')) \
          WHERE r.relation = 'workspace_contains_repo' \
            AND r.source_kind = 'workspace' \
-         ORDER BY workspace_node_id, repo_node_id",
+         ORDER BY workspace_node_id, repo_common_dir",
     )?;
     let rows = stmt.query_map([], |row| {
-        let workspace_node_id: String = row.get(0)?;
-        let repo_node_id: String = row.get(1)?;
-        let repo_common_dir: String = row.get(2)?;
-        let source_fields: String = row.get(3)?;
-        let repo_source_paths: Option<String> = row.get(4)?;
         Ok((
-            workspace_node_id,
-            repo_node_id,
-            repo_common_dir,
-            source_fields,
-            repo_source_paths,
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
         ))
     })?;
 
     let mut out: BTreeMap<String, Vec<MemberSqlRow>> = BTreeMap::new();
     for entry in rows {
-        let (
-            workspace_node_id,
-            repo_node_id,
-            repo_common_dir,
-            source_fields_json,
-            source_paths_json,
-        ) = entry?;
+        let (workspace_node_id, repo_common_dir, source_fields_json) = entry?;
         let display_name = display_name_from_fields(&source_fields_json)
             .unwrap_or_else(|| basename(&repo_common_dir).to_string());
-        let canonical_path = canonical_path_from_source_paths(source_paths_json.as_deref());
         out.entry(workspace_node_id)
             .or_default()
-            .push(MemberSqlRow {
-                repo_node_id,
-                repo_common_dir,
-                display_name,
-                canonical_path,
-            });
+            .push(MemberSqlRow { display_name });
     }
     Ok(out)
-}
-
-/// Pick the operator-recognizable canonical path from a repo's
-/// `source_paths` JSON array. Prefers the first entry that does *not*
-/// pass through `~/.agent-deck/multi-repo-worktrees/` because those
-/// paths are symlink composites — the operator wants to see
-/// `~/src/conspectus`, not `~/.agent-deck/.../conspectus`. Returns
-/// `None` if the array is missing, empty, or all paths are
-/// agent-deck composites.
-fn canonical_path_from_source_paths(json: Option<&str>) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(json?).ok()?;
-    let array = value.as_array()?;
-    let mut fallback: Option<&str> = None;
-    for entry in array {
-        let path = entry.as_str()?;
-        if path.contains("/.agent-deck/multi-repo-worktrees/") {
-            fallback.get_or_insert(path);
-            continue;
-        }
-        return Some(path.to_string());
-    }
-    fallback.map(str::to_string)
 }
 
 fn display_name_from_fields(json: &str) -> Option<String> {
@@ -507,51 +380,6 @@ fn fetch_a_class_sessions(conn: &Connection) -> rusqlite::Result<BTreeMap<String
          WHERE r.source_kind = 'agent_session' \
            AND r.target_kind = 'workspace' \
            AND r.relation = 'associated_with' \
-         ORDER BY workspace_node_id, agent_node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for row in rows {
-        let (ws, agent) = row?;
-        out.entry(ws).or_default().push(agent);
-    }
-    Ok(out)
-}
-
-fn fetch_b_class_sessions(conn: &Connection) -> rusqlite::Result<BTreeMap<String, Vec<String>>> {
-    // Walk agent → checkout → repo → workspace via resolved
-    // relationships. Members live on the workspace side via
-    // workspace_contains_repo; sessions live on the checkout side
-    // via associated_with. A row in this query is one
-    // (workspace, agent_session) pair where the session's checkout
-    // belongs to a member repo of the workspace.
-    //
-    // (A)-class sessions for the same workspace are not filtered out
-    // here — the caller subtracts them so this query stays a simple
-    // multi-hop join.
-    // Match the session's checkout target back to the workspace via
-    // the checkout's `repo.common_dir` (embedded directly in the
-    // Checkout NodeId JSON) compared against the workspace member's
-    // target `common_dir`. No need to round-trip through
-    // `node_checkouts` — the resolved row already carries the repo
-    // path in the target JSON.
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT \
-                ('workspace:' || json_extract(wcr.source, '$.root')) AS workspace_node_id, \
-                ('agent_session:' || json_extract(rel.source, '$.harness_key') || ':' || \
-                 json_extract(rel.source, '$.state_scope') || ':' || \
-                 json_extract(rel.source, '$.session_key')) AS agent_node_id \
-         FROM resolved_relationships rel \
-         JOIN resolved_relationships wcr \
-              ON wcr.relation = 'workspace_contains_repo' \
-              AND wcr.source_kind = 'workspace' \
-              AND json_extract(wcr.target, '$.common_dir') = \
-                  json_extract(rel.target, '$.repo.common_dir') \
-         WHERE rel.source_kind = 'agent_session' \
-           AND rel.target_kind = 'checkout' \
-           AND rel.relation = 'associated_with' \
          ORDER BY workspace_node_id, agent_node_id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -715,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_with_members_renders_workspace_and_members_subgroup() {
+    fn workspace_with_members_renders_inline_member_list() {
         let snapshot = resolve_snapshot(GraphSnapshot {
             nodes: vec![
                 workspace_node("/home/op/atelier", "atelier-ws", "atelier"),
@@ -739,208 +567,45 @@ mod tests {
 
         let tree = build(&snapshot);
 
-        // workspace row + members subgroup row + 2 repo rows
-        assert_eq!(tree.rows.len(), 4, "got:\n{:#?}", tree.rows);
+        // Just the workspace row — no members subgroup, no repo rows.
+        assert_eq!(tree.rows.len(), 1, "got:\n{:#?}", tree.rows);
 
         let ws_row = &tree.rows[0];
         assert_eq!(ws_row.depth, 0);
+        assert!(
+            !ws_row.expandable,
+            "workspace with members but no sessions has nothing to expand",
+        );
         match &ws_row.kind {
             RowKind::Group(g) => {
-                assert!(g.display_path.contains("atelier-ws"));
-                assert!(g.display_path.contains("(atelier)"));
+                // Member list is alphabetical by `repo_common_dir`
+                // (the SQL `ORDER BY`); `config` < `conspectus`.
+                assert_eq!(g.display_path, "atelier-ws  config+conspectus  (atelier)");
                 assert!(matches!(g.primary_node, Some(NodeId::Workspace(_))));
             }
             _ => panic!("expected Group row"),
         }
+    }
 
-        let members_row = &tree.rows[1];
-        assert_eq!(members_row.depth, 1);
-        match &members_row.kind {
-            RowKind::Group(g) => {
-                assert_eq!(g.display_path, "members (2)");
-                assert!(g.primary_node.is_none());
-            }
+    #[test]
+    fn workspace_without_members_omits_member_segment() {
+        let snapshot = resolve_snapshot(GraphSnapshot {
+            nodes: vec![workspace_node("/home/op/atelier", "atelier-ws", "atelier")],
+            ..GraphSnapshot::empty()
+        });
+
+        let tree = build(&snapshot);
+        assert_eq!(tree.rows.len(), 1);
+        match &tree.rows[0].kind {
+            RowKind::Group(g) => assert_eq!(g.display_path, "atelier-ws  (atelier)"),
             _ => panic!("expected Group row"),
         }
-        assert!(matches!(
-            members_row.id,
-            RowId::Subgroup {
-                label: "members",
-                ..
-            }
-        ));
-
-        // The two repo rows are styled like sessions/muxes via the
-        // dedicated Repo row kind, carrying a Repo NodeId so the
-        // detail pane and left-tree navigation follow naturally.
-        for repo_row in &tree.rows[2..4] {
-            assert_eq!(repo_row.depth, 2);
-            match &repo_row.kind {
-                RowKind::Repo(r) => {
-                    assert!(matches!(r.primary_node, NodeId::Repo(_)));
-                    assert!(!r.display_name.is_empty());
-                    assert!(!r.common_dir.is_empty());
-                }
-                _ => panic!("expected Repo row, got {:?}", repo_row.kind),
-            }
-            assert!(matches!(repo_row.id, RowId::Repo { .. }));
-        }
     }
 
     #[test]
-    fn same_repo_in_two_workspaces_gets_distinct_row_ids() {
-        // Regression: a single Repo NodeId can be a member of multiple
-        // workspaces. The Row id keys on (workspace, repo) so the
-        // selection state machine and renderer can tell duplicate
-        // entries apart — keying on the repo alone collides and
-        // every duplicate row highlights when one is selected.
-        let snapshot = resolve_snapshot(GraphSnapshot {
-            nodes: vec![
-                workspace_node("/home/op/ws-a", "ws-a", "agent-deck"),
-                workspace_node("/home/op/ws-b", "ws-b", "agent-deck"),
-                repo_node("/home/op/src/conspectus/.git"),
-            ],
-            candidate_links: vec![
-                workspace_contains_repo(
-                    "/home/op/ws-a",
-                    "/home/op/src/conspectus/.git",
-                    "/home/op/ws-a/conspectus",
-                ),
-                workspace_contains_repo(
-                    "/home/op/ws-b",
-                    "/home/op/src/conspectus/.git",
-                    "/home/op/ws-b/conspectus",
-                ),
-            ],
-            ..GraphSnapshot::empty()
-        });
-
-        let tree = build(&snapshot);
-        let repo_row_ids: Vec<&RowId> = tree
-            .rows
-            .iter()
-            .filter(|r| matches!(&r.kind, RowKind::Repo(_)))
-            .map(|r| &r.id)
-            .collect();
-        assert_eq!(repo_row_ids.len(), 2, "one row per (workspace, repo) pair");
-        assert_ne!(
-            repo_row_ids[0], repo_row_ids[1],
-            "duplicate-repo rows must carry distinct RowIds so selection picks exactly one",
-        );
-    }
-
-    #[test]
-    fn same_session_in_two_workspaces_gets_distinct_row_ids() {
-        // Regression mirroring `same_repo_in_two_workspaces_gets_distinct_row_ids`
-        // for agent session rows: a (B)-class session in `/home/op/src/conspectus`
-        // appears under every workspace whose member repo set includes conspectus.
-        // The RowId must differ per workspace so selection tracking and the
-        // renderer can tell instances apart.
-        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "shared"));
-        let snapshot = resolve_snapshot(GraphSnapshot {
-            nodes: vec![
-                workspace_node("/home/op/ws-a", "ws-a", "agent-deck"),
-                workspace_node("/home/op/ws-b", "ws-b", "agent-deck"),
-                repo_node("/home/op/src/conspectus/.git"),
-                checkout_node("/home/op/src/conspectus/.git", "/home/op/src/conspectus"),
-                agent_session(
-                    "codex",
-                    "/state",
-                    "shared",
-                    Some("/home/op/src/conspectus/foo"),
-                ),
-            ],
-            candidate_links: vec![
-                workspace_contains_repo(
-                    "/home/op/ws-a",
-                    "/home/op/src/conspectus/.git",
-                    "/home/op/ws-a/conspectus",
-                ),
-                workspace_contains_repo(
-                    "/home/op/ws-b",
-                    "/home/op/src/conspectus/.git",
-                    "/home/op/ws-b/conspectus",
-                ),
-                associated_with_checkout(
-                    session_id,
-                    "/home/op/src/conspectus/.git",
-                    "/home/op/src/conspectus",
-                ),
-            ],
-            ..GraphSnapshot::empty()
-        });
-
-        let tree = build(&snapshot);
-        let session_row_ids: Vec<&RowId> = tree
-            .rows
-            .iter()
-            .filter(|r| matches!(&r.kind, RowKind::AgentSession(_)))
-            .map(|r| &r.id)
-            .collect();
-        assert_eq!(
-            session_row_ids.len(),
-            2,
-            "one (B)-class row per workspace claiming the session's repo, got:\n{:#?}",
-            tree.rows,
-        );
-        assert_ne!(
-            session_row_ids[0], session_row_ids[1],
-            "duplicate-session rows must carry distinct RowIds so selection picks exactly one",
-        );
-        // Both ids should be the WorkspaceAgentSession shape — keying
-        // on the session alone would re-introduce the collision.
-        for id in &session_row_ids {
-            assert!(
-                matches!(id, RowId::WorkspaceAgentSession { .. }),
-                "workspaces-view session rows must use the scoped RowId variant, got {id:?}",
-            );
-        }
-    }
-
-    fn repo_node_with_source(common_dir: &str, source_path: &str) -> GraphNode {
-        let mut repo = RepoNode::new(RepoId::new(common_dir));
-        repo.source_paths.push(source_path.to_string());
-        GraphNode::Repo(repo)
-    }
-
-    #[test]
-    fn repo_row_surfaces_canonical_source_path() {
-        let snapshot = resolve_snapshot(GraphSnapshot {
-            nodes: vec![
-                workspace_node(
-                    "/home/op/.agent-deck/multi-repo-worktrees/abc",
-                    "abc",
-                    "agent-deck",
-                ),
-                repo_node_with_source("/home/op/src/conspectus/.git", "/home/op/src/conspectus"),
-            ],
-            candidate_links: vec![workspace_contains_repo(
-                "/home/op/.agent-deck/multi-repo-worktrees/abc",
-                "/home/op/src/conspectus/.git",
-                "/home/op/.agent-deck/multi-repo-worktrees/abc/conspectus",
-            )],
-            ..GraphSnapshot::empty()
-        });
-
-        let tree = build(&snapshot);
-        let repo_row = tree
-            .rows
-            .iter()
-            .find_map(|r| match &r.kind {
-                RowKind::Repo(repo) => Some(repo),
-                _ => None,
-            })
-            .expect("repo row");
-        assert_eq!(repo_row.display_name, "conspectus");
-        assert_eq!(
-            repo_row.canonical_path.as_deref(),
-            Some("/home/op/src/conspectus"),
-            "canonical_path should prefer the non-agent-deck source_paths entry",
-        );
-    }
-
-    #[test]
-    fn workspace_with_a_class_session_renders_in_workspace_subgroup() {
+    fn a_class_session_appears_directly_under_workspace() {
+        // No labeled subgroup wrapper: a workspace's A-class sessions
+        // sit at depth 1 immediately beneath the workspace row.
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "active"));
         let snapshot = resolve_snapshot(GraphSnapshot {
             nodes: vec![
@@ -952,36 +617,43 @@ mod tests {
         });
 
         let tree = build(&snapshot);
-        let in_ws_row = tree
-            .rows
-            .iter()
-            .find(|r| {
-                matches!(
-                    &r.id,
-                    RowId::Subgroup {
-                        label: "in workspace",
-                        ..
-                    }
-                )
-            })
-            .expect("in workspace subgroup row");
-        match &in_ws_row.kind {
-            RowKind::Group(g) => assert_eq!(g.display_path, "in workspace (1)"),
-            _ => panic!("expected Group row"),
-        }
-        // session row should follow the subgroup at depth 2
+
+        assert!(
+            !tree
+                .rows
+                .iter()
+                .any(|r| matches!(&r.id, RowId::Subgroup { .. })),
+            "polish dropped all subgroup wrappers from the workspaces view:\n{:#?}",
+            tree.rows,
+        );
+
+        let ws_row = &tree.rows[0];
+        assert_eq!(ws_row.depth, 0);
+        assert!(
+            ws_row.expandable,
+            "workspace with sessions must be expandable"
+        );
+
         let session_row = tree
             .rows
             .iter()
             .find(|r| matches!(&r.kind, RowKind::AgentSession(_)))
             .expect("agent session row");
-        assert_eq!(session_row.depth, 2);
+        assert_eq!(session_row.depth, 1);
+        assert!(
+            matches!(&session_row.id, RowId::WorkspaceAgentSession { .. }),
+            "workspaces-view session rows must use the scoped RowId variant",
+        );
     }
 
     #[test]
-    fn workspace_with_b_class_session_renders_related_subgroup() {
-        // Session lives at the canonical repo path (outside the workspace
-        // tree) — exactly the (B) shape the chip surfaces in Sessions/Graph.
+    fn b_class_session_is_not_surfaced_in_workspaces_view() {
+        // Session lives at the canonical repo path (outside the
+        // workspace tree) — the (B) shape the chip surfaces in
+        // Sessions/Graph. The Workspaces view intentionally does not
+        // mirror that cross-reference: only (A)-class sessions appear
+        // here. See ADR 0062 / the H-WS-002 polish notes for the
+        // narrowing rationale.
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "shared"));
         let snapshot = resolve_snapshot(GraphSnapshot {
             nodes: vec![
@@ -1012,101 +684,52 @@ mod tests {
 
         let tree = build(&snapshot);
 
-        let related_row = tree
-            .rows
-            .iter()
-            .find(|r| {
-                matches!(
-                    &r.id,
-                    RowId::Subgroup {
-                        label: "related",
-                        ..
-                    }
-                )
-            })
-            .expect("related subgroup row");
-        match &related_row.kind {
-            RowKind::Group(g) => assert_eq!(g.display_path, "related (1)"),
-            _ => panic!("expected Group row"),
-        }
-        let session_row = tree
-            .rows
-            .iter()
-            .find(|r| matches!(&r.kind, RowKind::AgentSession(_)))
-            .expect("agent session row");
-        assert_eq!(session_row.depth, 2);
+        assert!(
+            !tree
+                .rows
+                .iter()
+                .any(|r| matches!(&r.kind, RowKind::AgentSession(_))),
+            "(B)-class session must not appear in the Workspaces view:\n{:#?}",
+            tree.rows,
+        );
+        let ws_row = tree.rows.first().expect("workspace row");
+        assert!(
+            !ws_row.expandable,
+            "workspace with only a (B)-class session has nothing to expand",
+        );
     }
 
     #[test]
-    fn a_class_session_excluded_from_related_subgroup() {
-        // Session is BOTH (A)-class (AssociatedWith workspace) AND
-        // happens to have an AssociatedWith checkout in a workspace
-        // member repo. It must show up in "in workspace" only —
-        // appearing twice would be confusing.
-        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "active"));
+    fn member_display_name_uses_logical_path_basename() {
+        // The inline member list reads names from the
+        // WorkspaceContainsRepo link's `logical_path` source field
+        // (basename) — that's the workspace-visible directory name
+        // (atelier `[[repos]].name`, agent-deck symlink leaf), not
+        // the repo's common_dir basename. Verifies the polish's
+        // `display_name_from_fields` path still feeds the row.
         let snapshot = resolve_snapshot(GraphSnapshot {
             nodes: vec![
                 workspace_node("/home/op/atelier", "atelier-ws", "atelier"),
-                repo_node("/home/op/atelier/conspectus/.git"),
-                checkout_node(
-                    "/home/op/atelier/conspectus/.git",
-                    "/home/op/atelier/conspectus",
-                ),
-                agent_session(
-                    "codex",
-                    "/state",
-                    "active",
-                    Some("/home/op/atelier/conspectus"),
-                ),
+                repo_node("/home/op/repo/conspectus.git"),
             ],
-            candidate_links: vec![
-                workspace_contains_repo(
-                    "/home/op/atelier",
-                    "/home/op/atelier/conspectus/.git",
-                    "/home/op/atelier/conspectus",
-                ),
-                associated_with_workspace(session_id.clone(), "/home/op/atelier"),
-                associated_with_checkout(
-                    session_id,
-                    "/home/op/atelier/conspectus/.git",
-                    "/home/op/atelier/conspectus",
-                ),
-            ],
+            candidate_links: vec![workspace_contains_repo(
+                "/home/op/atelier",
+                "/home/op/repo/conspectus.git",
+                "/home/op/atelier/conspectus-pinned",
+            )],
             ..GraphSnapshot::empty()
         });
 
         let tree = build(&snapshot);
-
-        assert!(
-            tree.rows.iter().any(|r| matches!(
-                &r.id,
-                RowId::Subgroup {
-                    label: "in workspace",
-                    ..
-                }
-            )),
-            "in workspace subgroup expected:\n{:#?}",
-            tree.rows
-        );
-        assert!(
-            !tree.rows.iter().any(|r| matches!(
-                &r.id,
-                RowId::Subgroup {
-                    label: "related",
-                    ..
-                }
-            )),
-            "related subgroup should be suppressed when the (A)-class session also touches the member's checkout:\n{:#?}",
-            tree.rows
-        );
-        let session_rows = tree
-            .rows
-            .iter()
-            .filter(|r| matches!(&r.kind, RowKind::AgentSession(_)))
-            .count();
-        assert_eq!(
-            session_rows, 1,
-            "the same session must not appear twice in one workspace block",
-        );
+        match &tree.rows[0].kind {
+            RowKind::Group(g) => {
+                assert!(
+                    g.display_path.contains("conspectus-pinned"),
+                    "member display should use logical_path basename, got `{}`",
+                    g.display_path,
+                );
+            }
+            _ => panic!("expected Group row"),
+        }
     }
 }
