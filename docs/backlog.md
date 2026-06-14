@@ -3743,29 +3743,21 @@ concepts everywhere they appear.
 
 - [ ] `H-WS-002a` Workspaces view polish: Provider/Activity/Repo
   groupings.
-  - Scope: extend `WorkspacesGrouping` from Flat-only to the four
-    enum variants the original `H-WS-002` ticket specified
-    (`Provider`, `Activity`, `Repo`, `Flat`). Provider groups
-    workspaces by `provider_name` (atelier / agent-deck / generic).
-    Activity sorts workspaces by most-recent (A)-class session
-    `last_active_epoch`. Repo flips the tree: top-level rows are
-    repos, each expanding to the workspaces that include them
-    plus the sessions in each. The previously planned
-    default-collapse of the `related` subgroup is no longer in
-    scope — that subgroup was removed by the H-WS-002 polish
-    (ADR 0062).
-  - Tests: per-grouping unit tests for ordering and empty bucket
-    suppression. The (A)/(B) split is no longer relevant at the
-    view level (only (A) is surfaced); each grouping's tests
-    confirm sessions appear at depth 1 directly under their
-    workspace as in the post-polish Flat shape.
-  - ADR: required. Records the four-grouping menu and what (A)
-    means at each grouping's top level (workspaces under
-    Provider/Activity/Flat; sessions-under-workspaces under Repo).
-  - Blockers: `H-WS-002` (row-tree shape) — both the MVP and the
-    polish have shipped. The Repo grouping may reuse the
-    `RowKind::Repo` / `RepoRow` scaffolding the polish left in
-    place for exactly this purpose.
+  - Status: deprioritized after `H-WS-004` (ADR 0064) folded the
+    Workspaces view's `workspace → sessions` shape into the
+    Sessions / Graph view as a top-level bucket. A future
+    `SessionsGrouping::Workspace` may obsolete `View::Workspaces`
+    entirely; revisit this story after that decision.
+  - Scope (if revisited): extend `WorkspacesGrouping` from
+    Flat-only to the four enum variants the original `H-WS-002`
+    ticket specified (`Provider`, `Activity`, `Repo`, `Flat`).
+    Provider groups workspaces by `provider_name` (atelier /
+    agent-deck / generic). Activity sorts workspaces by
+    most-recent (A)-class session `last_active_epoch`. Repo flips
+    the tree: top-level rows are repos, each expanding to the
+    workspaces that include them plus the sessions in each.
+  - Blockers: depends on the `View::Workspaces` deprecation
+    decision flagged in ADR 0064's open questions.
 
 - [x] `H-WS-003` Audit Mux/Prs/Forks/Union workspace grouping for the
   same (A)/(B) conflation.
@@ -3794,6 +3786,47 @@ concepts everywhere they appear.
     the existing `parse_and_as_str_round_trip_per_view` test
     iterates `values_for(view)` and continues to pass over the
     shrunken menus.
+
+- [x] `H-WS-004` Hybrid workspace+repo grouping in Sessions / Graph.
+  - Outcome (ADR 0064): Sessions / Graph view reshaped to put
+    workspaces and repos at the same top level as peer parents,
+    each with sessions directly underneath at depth 1 (no repo
+    intermediate beneath workspaces, no checkout intermediate
+    when the repo has a single worktree). The (A)/(B)
+    distinction stops driving any UI marker beyond a top-level
+    routing decision in `resolve_group_key`: A-class sessions
+    route to a workspace bucket, B-class and unaffiliated route
+    to a repo bucket. Two long-standing operator pain points
+    fixed: (i) the repo level beneath workspace headers was
+    noise that duplicated the workspace's project context, and
+    (ii) agent-deck A-class sessions whose cwd is the workspace
+    composite directory (no checkout) dropped silently into the
+    "ungrouped" bucket because the legacy
+    `checkout_for_path(cwd)?` early return ran before the
+    workspace lookup. `GroupKey` now carries either a
+    workspace-only shape (workspace = Some, repo = None) or a
+    repo shape (workspace = None, repo = Some(RepoBucket));
+    custom `Ord` puts workspace buckets first. Workspace
+    headers in Graph use the shared
+    `format_workspace_display` helper from `rows/mod.rs` so
+    they read identically to the dedicated Workspaces view's
+    headers. `workspace_member_names` lookup uses the same
+    resolver-selected `WorkspaceContainsRepo` candidate links'
+    `logical_path` source field the Workspaces view's
+    `fetch_members` SQL uses, so the two surfaces stay aligned
+    automatically. Tests updated: `graph_grouping_uses_session_workspace_context`
+    expects depth 1 and 2-row tree (no repo intermediate);
+    renamed test `workspace_rooted_session_nests_directly_under_workspace`
+    checks both depth and the new workspace header format. Two
+    new tests cover the agent-deck workspace-root cwd case and
+    the hybrid peer-parents shape.
+  - Forward direction (not in scope, recorded in ADR): a future
+    `SessionsGrouping::Workspace` mode that filters Graph down
+    to only the workspace buckets would obsolete
+    `View::Workspaces` and its `6` keybinding. Whether to
+    deprecate the dedicated view after such a mode lands is a
+    separate decision; `H-WS-002a` is deprioritized pending
+    that call.
 
 ### Process-Tree Agent↔Pane Linking
 

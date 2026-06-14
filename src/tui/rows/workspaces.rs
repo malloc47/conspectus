@@ -42,7 +42,7 @@ use crate::model::{AgentSessionId, NodeId, WorkspaceId};
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency, harness_label, shorten_home,
+    format_recency, format_workspace_display, harness_label, shorten_home,
 };
 
 pub struct WorkspacesBuildInputs<'a> {
@@ -149,8 +149,9 @@ pub fn build_workspaces_tree_from_conn(
             .name
             .clone()
             .unwrap_or_else(|| basename(&ws.root).to_string());
+        let member_names: Vec<String> = members.iter().map(|m| m.display_name.clone()).collect();
         let display_path =
-            format_workspace_display(&workspace_label, members, ws.provider.as_deref());
+            format_workspace_display(&workspace_label, &member_names, ws.provider.as_deref());
 
         tree.rows.push(Row {
             id: RowId::Group(workspace_node_id.clone()),
@@ -180,31 +181,6 @@ pub fn build_workspaces_tree_from_conn(
     }
 
     Ok(tree)
-}
-
-/// Assemble the workspace top-row display string:
-/// `<name>  <repo-a+repo-b+...>  (<provider>)`. The member list and
-/// provider chip are each prefixed with two spaces so the eye can
-/// pick out the three slots without a glyph budget. Sections are
-/// omitted when their data is missing — a workspace with no members
-/// or no provider drops the corresponding segment cleanly.
-fn format_workspace_display(
-    workspace_label: &str,
-    members: &[MemberSqlRow],
-    provider: Option<&str>,
-) -> String {
-    let mut out = workspace_label.to_string();
-    if !members.is_empty() {
-        let joined: Vec<&str> = members.iter().map(|m| m.display_name.as_str()).collect();
-        out.push_str("  ");
-        out.push_str(&joined.join("+"));
-    }
-    if let Some(provider) = provider {
-        out.push_str("  (");
-        out.push_str(provider);
-        out.push(')');
-    }
-    out
 }
 
 fn agent_row(

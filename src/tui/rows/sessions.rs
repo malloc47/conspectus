@@ -575,6 +575,50 @@ impl<'a> SessionsData<'a> {
             })
     }
 
+    /// Look up a workspace node by root path. Used by the hybrid
+    /// Graph header (ADR 0064) to pull the workspace's `name` and
+    /// `provider` for the shared `format_workspace_display` helper.
+    fn workspace_node(&self, workspace_root: &str) -> Option<&'a crate::model::WorkspaceNode> {
+        self.snapshot.nodes.iter().find_map(|node| match node {
+            GraphNode::Workspace(w) if w.id.root == workspace_root => Some(w),
+            _ => None,
+        })
+    }
+
+    /// Member display names for a workspace, derived from the
+    /// resolver-selected `WorkspaceContainsRepo` candidate links'
+    /// `logical_path` source field — same source the Workspaces view
+    /// (`H-WS-002`) uses, so the two view headers read identically.
+    /// Sorted alphabetically and deduped.
+    fn workspace_member_names(&self, workspace_root: &str) -> Vec<String> {
+        let workspace_id = NodeId::Workspace(WorkspaceId {
+            root: workspace_root.to_string(),
+        });
+        let mut names: Vec<String> = self
+            .snapshot
+            .resolved_relationships
+            .iter()
+            .filter(|rel| {
+                rel.relation == RelationKind::WorkspaceContainsRepo && rel.source == workspace_id
+            })
+            .filter_map(|rel| {
+                let link = self
+                    .snapshot
+                    .candidate_links
+                    .iter()
+                    .find(|cl| cl.id == rel.selected_link_id)?;
+                let logical_path = link.source_metadata.fields.get("logical_path")?.as_str()?;
+                Path::new(logical_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     fn repo_display_path(&self, repo: &RepoId) -> String {
         let node_id = NodeId::Repo(repo.clone());
         let common_dir = repo_display_path_from_common_dir(&repo.common_dir).to_string();
@@ -594,22 +638,56 @@ impl<'a> SessionsData<'a> {
 // Grouping
 // -----------------------------------------------------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+/// Hybrid Graph bucket key per ADR 0064. A bucket is either:
+/// - **Workspace-only** (`workspace = Some`, `repo = None`,
+///   `worktree = None`): the session has a direct
+///   `AssociatedWith Workspace` edge. Renders under the workspace
+///   header with no repo level beneath. Workspace buckets sort
+///   ahead of repo buckets at top level.
+/// - **Repo** (`workspace = None`, `repo = Some`): the session has
+///   no workspace edge and falls through to the existing repo
+///   grouping. `worktree` is set when the grouping mode includes
+///   a worktree level.
+///
+/// The custom `Ord` impl puts workspace buckets first within a
+/// build so workspace headers render at the top of the Graph
+/// view; repo buckets follow alphabetically by repo path.
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct GroupKey {
-    /// Optional workspace root (only populated under `Graph`
-    /// grouping when a workspace is present).
     workspace: Option<String>,
-    /// Repo common-dir.
-    repo: String,
-    /// Human-oriented repo path. Prefer a checkout/source path over
-    /// the git common-dir identity so group labels do not show `/.git`.
-    repo_display_path: String,
-    /// Repo id (kept alongside `repo` for the `RowId::Group(repo)`
-    /// stable identity).
-    repo_id: RepoId,
-    /// Worktree key. `None` when the grouping mode doesn't include
-    /// a worktree level.
+    repo: Option<RepoBucket>,
     worktree: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+struct RepoBucket {
+    common_dir: String,
+    /// Human-oriented repo path. Prefer a checkout/source path
+    /// over the git common-dir identity so group labels don't
+    /// show `/.git`.
+    repo_display_path: String,
+    repo_id: RepoId,
+}
+
+impl Ord for GroupKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (&self.workspace, &other.workspace) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => self
+                .repo
+                .cmp(&other.repo)
+                .then_with(|| self.worktree.cmp(&other.worktree)),
+        }
+    }
+}
+
+impl PartialOrd for GroupKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -630,53 +708,60 @@ fn resolve_group_key(
     grouping: SessionsGrouping,
 ) -> Option<GroupKey> {
     let cwd = entry.node.cwd.as_deref()?;
+
+    // Hybrid Graph (ADR 0064): an (A)-class session — one with a
+    // direct `AssociatedWith Workspace` edge — groups under its
+    // workspace with no repo or worktree level beneath. This
+    // includes agent-deck-shaped launches whose cwd is the
+    // workspace composite directory itself; those have no
+    // checkout, so the legacy repo-required path would have
+    // dropped them into the ungrouped bucket.
+    if matches!(grouping, SessionsGrouping::Graph)
+        && let Some(workspace) = data.workspace_for_session(&entry.id)
+    {
+        return Some(GroupKey {
+            workspace: Some(workspace.root.clone()),
+            repo: None,
+            worktree: None,
+        });
+    }
+
+    // Repo path. Every non-Graph grouping and every Graph
+    // (B)-class (no workspace edge) session needs a checkout to
+    // derive its repo bucket. ScanRoot falls back to repo
+    // grouping until the runtime wires scan roots into the
+    // builder.
     let (worktree_id, _worktree) = data.checkout_for_path(cwd)?;
     let repo_id = worktree_id.repo.clone();
-    let workspace = match grouping {
-        // Strict per H-WS-001 / docs/plans/workspace-view-redesign.md:
-        // only nest under a workspace when the session itself carries a
-        // direct `AssociatedWith Workspace` edge (case A — the session
-        // is workspace-rooted). Case B (the session's repo happens to
-        // be a workspace member but the session has no workspace edge)
-        // falls through to repo-level grouping. Weak membership is
-        // surfaced via the `[ws-name]` chip on the session row instead.
-        SessionsGrouping::Graph => data
-            .workspace_for_session(&entry.id)
-            .map(|ws| ws.root.clone()),
-        // Repo/Worktree/ScanRoot collapse the workspace level.
-        // ScanRoot fallback to repo grouping until the runtime
-        // wires scan roots into the builder.
-        SessionsGrouping::Repo
-        | SessionsGrouping::Checkout
-        | SessionsGrouping::ScanRoot
-        | SessionsGrouping::None => None,
-    };
-
-    let worktree = match grouping {
-        SessionsGrouping::Checkout => Some(worktree_id.root.clone()),
-        // For graph/repo grouping, the worktree level is decided by
-        // the builder's repo-fan-out rule (≥ 2 worktrees) later.
-        // We always include the worktree key here so the grouping
-        // is stable; the rendering pass collapses it as needed.
-        SessionsGrouping::Graph
-        | SessionsGrouping::Repo
-        | SessionsGrouping::ScanRoot
-        | SessionsGrouping::None => Some(worktree_id.root.clone()),
-    };
-
-    Some(GroupKey {
-        workspace,
-        repo: repo_id.common_dir.clone(),
+    let repo = Some(RepoBucket {
+        common_dir: repo_id.common_dir.clone(),
         repo_display_path: data.repo_display_path(&repo_id),
         repo_id,
+    });
+
+    // For Graph/Repo/ScanRoot/None/Checkout the worktree key is
+    // always included so the bucket ordering is stable; the
+    // rendering pass collapses the worktree level for Graph and
+    // Repo when the repo has a single worktree.
+    let worktree = Some(worktree_id.root.clone());
+
+    Some(GroupKey {
+        workspace: None,
+        repo,
         worktree,
     })
 }
 
-/// Emit one worktree-keyed bucket while reusing the workspace and
-/// repo group rows from prior buckets when those keys haven't
-/// changed. Mutates `last_workspace` / `last_repo` to track the
-/// most recent header emitted.
+/// Emit one bucket while reusing prior workspace / repo group
+/// rows when those keys haven't changed. Mutates `last_workspace`
+/// and `last_repo` to track the most recent header emitted.
+///
+/// Two bucket shapes per ADR 0064:
+/// - Workspace-only (`key.workspace = Some`, `key.repo = None`):
+///   one workspace header at depth 0, sessions directly under it
+///   at depth 1.
+/// - Repo (`key.repo = Some`, `key.workspace = None`): existing
+///   repo (+ optional checkout) emission at depth 0/1/2.
 fn emit_checkout_bucket(
     ctx: &mut EmitCtx<'_, '_>,
     key: GroupKey,
@@ -687,34 +772,45 @@ fn emit_checkout_bucket(
     sessions.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
 
     let workspace_changed = last_workspace.as_ref() != Some(&key.workspace);
-    let repo_changed = workspace_changed || last_repo.as_ref() != Some(&key.repo_id);
 
-    let mut depth: u8 = 0;
-    if key.workspace.is_some() {
-        if workspace_changed && let Some(workspace_root) = &key.workspace {
-            push_workspace_row(ctx.tree, depth, workspace_root, ctx.home);
+    if let Some(workspace_root) = &key.workspace {
+        if workspace_changed {
+            push_workspace_row(ctx.tree, 0, workspace_root, ctx.data, ctx.home);
         }
-        depth = depth.saturating_add(1);
+        for entry in sessions {
+            emit_session(ctx, 1, entry);
+        }
+        *last_workspace = Some(key.workspace);
+        *last_repo = None;
+        return;
     }
 
+    // Repo path. `key.repo` is `Some` here by construction
+    // (`resolve_group_key` builds either a workspace-only or a
+    // repo bucket, never neither).
+    let Some(repo_bucket) = key.repo else {
+        return;
+    };
+    let repo_changed = workspace_changed || last_repo.as_ref() != Some(&repo_bucket.repo_id);
+
+    let depth: u8 = 0;
     if repo_changed {
-        push_repo_row(ctx.tree, depth, &key, ctx.home);
+        push_repo_row(ctx.tree, depth, &repo_bucket, ctx.home);
     }
-    let repo_depth = depth;
 
     let checkout_should_render = matches!(ctx.grouping, SessionsGrouping::Checkout)
-        || ctx.data.checkout_count_for_repo(&key.repo_id) >= 2;
+        || ctx.data.checkout_count_for_repo(&repo_bucket.repo_id) >= 2;
     let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {
         push_checkout_row(
             ctx.tree,
-            repo_depth.saturating_add(1),
-            &key.repo_id,
+            depth.saturating_add(1),
+            &repo_bucket.repo_id,
             wt_root,
             ctx.home,
         );
-        repo_depth.saturating_add(2)
+        depth.saturating_add(2)
     } else {
-        repo_depth.saturating_add(1)
+        depth.saturating_add(1)
     };
 
     for entry in sessions {
@@ -722,33 +818,54 @@ fn emit_checkout_bucket(
     }
 
     *last_workspace = Some(key.workspace);
-    *last_repo = Some(key.repo_id);
+    *last_repo = Some(repo_bucket.repo_id);
 }
 
-fn push_workspace_row(tree: &mut RowTree, depth: u8, workspace_root: &str, home: Option<&Path>) {
+fn push_workspace_row(
+    tree: &mut RowTree,
+    depth: u8,
+    workspace_root: &str,
+    data: &SessionsData<'_>,
+    home: Option<&Path>,
+) {
     let node_id = NodeId::Workspace(WorkspaceId {
         root: workspace_root.to_string(),
     });
+
+    let workspace = data.workspace_node(workspace_root);
+    let label = workspace
+        .and_then(|w| w.name.clone())
+        .or_else(|| {
+            Path::new(workspace_root)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| shorten_home(workspace_root, home));
+    let provider = workspace.and_then(|w| w.provider.as_deref());
+    let members = data.workspace_member_names(workspace_root);
+    let display_path = crate::tui::rows::format_workspace_display(&label, &members, provider);
+
     tree.rows.push(Row {
         id: RowId::Group(node_id.clone()),
         depth,
         expandable: true,
         kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(workspace_root, home),
+            display_path,
             primary_node: Some(node_id),
             is_launch_context: false,
         }),
     });
 }
 
-fn push_repo_row(tree: &mut RowTree, depth: u8, key: &GroupKey, home: Option<&Path>) {
-    let node_id = NodeId::Repo(key.repo_id.clone());
+fn push_repo_row(tree: &mut RowTree, depth: u8, repo: &RepoBucket, home: Option<&Path>) {
+    let node_id = NodeId::Repo(repo.repo_id.clone());
     tree.rows.push(Row {
         id: RowId::Group(node_id.clone()),
         depth,
         expandable: true,
         kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(&key.repo_display_path, home),
+            display_path: shorten_home(&repo.repo_display_path, home),
             primary_node: Some(node_id),
             is_launch_context: false,
         }),
@@ -1536,6 +1653,12 @@ mod tests {
 
     #[test]
     fn graph_grouping_uses_session_workspace_context() {
+        // Hybrid Graph (ADR 0064): A-class sessions sit directly
+        // beneath their workspace at depth 1 — no intermediate repo
+        // level. The repo is still implicit (a session always lives
+        // in a checkout), but the workspace is the dominant
+        // top-level entity for any session carrying an
+        // `AssociatedWith Workspace` edge.
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
         let mut snapshot = GraphSnapshot::empty();
         snapshot.nodes.push(workspace("/home/op/ws"));
@@ -1567,18 +1690,20 @@ mod tests {
             filter: RowFilter::default(),
         });
 
-        assert_eq!(tree.rows.len(), 3, "{:#?}", tree.rows);
+        assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
         let workspace_group = match &tree.rows[0].kind {
             RowKind::Group(g) => g,
             _ => unreachable!(),
         };
-        assert_eq!(workspace_group.display_path, "~/ws");
         assert!(matches!(
             workspace_group.primary_node,
             Some(NodeId::Workspace(_))
         ));
-        assert_eq!(tree.rows[1].depth, 1, "repo should sit under workspace");
-        assert_eq!(tree.rows[2].depth, 2, "session should sit under repo");
+        assert_eq!(tree.rows[0].depth, 0);
+        assert_eq!(
+            tree.rows[1].depth, 1,
+            "session sits directly under workspace — no repo intermediate",
+        );
     }
 
     #[test]
@@ -1653,8 +1778,9 @@ mod tests {
     }
 
     #[test]
-    fn workspace_rooted_session_nests_under_workspace_with_no_chip() {
-        // Case A — session has AssociatedWith Workspace edge.
+    fn workspace_rooted_session_nests_directly_under_workspace() {
+        // Hybrid Graph (ADR 0064): A-class session sits at depth 1
+        // directly under the workspace, no repo intermediate.
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
         let mut snapshot = GraphSnapshot::empty();
         snapshot
@@ -1694,9 +1820,20 @@ mod tests {
         });
         let (row, _) = first_session_row(&tree);
         assert_eq!(
-            row.depth, 2,
-            "workspace-rooted session should sit two levels deep (under workspace → repo):\n{:#?}",
+            row.depth, 1,
+            "workspace-rooted session sits directly under workspace at depth 1:\n{:#?}",
             tree.rows
+        );
+        // Workspace header uses the shared format_workspace_display
+        // helper: name + member list + provider chip.
+        let ws_group = match &tree.rows[0].kind {
+            RowKind::Group(g) => g,
+            _ => panic!("expected workspace group row at index 0:\n{:#?}", tree.rows),
+        };
+        assert!(
+            ws_group.display_path.contains("atelier-ws"),
+            "workspace header should include the workspace name `atelier-ws`, got `{}`",
+            ws_group.display_path,
         );
     }
 
@@ -1766,6 +1903,162 @@ mod tests {
             "(A)-class session should sit under workspace header:\n{:#?}",
             tree.rows
         );
+    }
+
+    #[test]
+    fn workspace_root_cwd_groups_under_workspace_without_checkout() {
+        // ADR 0064 motivation: agent-deck launches the harness with
+        // cwd at the workspace composite directory itself, not
+        // inside a member subdir. That cwd has no checkout, so the
+        // legacy resolve_group_key (which required a checkout)
+        // dropped these sessions into the ungrouped bucket. The
+        // hybrid path looks up the workspace edge first and groups
+        // the session directly under the workspace.
+        let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "wsroot"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(workspace_with_name(
+            "/home/op/.agent-deck/multi-repo-worktrees/abc",
+            "abc",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "wsroot",
+            Some("/home/op/.agent-deck/multi-repo-worktrees/abc"),
+            None,
+            None,
+        ));
+        snapshot.candidate_links.push(associated_with_workspace(
+            &session_id,
+            "/home/op/.agent-deck/multi-repo-worktrees/abc",
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        assert_eq!(
+            tree.rows.len(),
+            2,
+            "workspace header + session, no ungrouped bucket:\n{:#?}",
+            tree.rows
+        );
+        assert!(
+            matches!(&tree.rows[0].kind, RowKind::Group(g)
+                if matches!(g.primary_node, Some(NodeId::Workspace(_)))),
+            "row 0 must be a workspace group, got:\n{:#?}",
+            tree.rows[0],
+        );
+        assert_eq!(tree.rows[0].depth, 0);
+        assert!(matches!(&tree.rows[1].kind, RowKind::AgentSession(_)));
+        assert_eq!(tree.rows[1].depth, 1);
+    }
+
+    #[test]
+    fn hybrid_emits_workspace_and_repo_buckets_as_peer_top_level_parents() {
+        // ADR 0064 shape: one A-class session whose workspace edge
+        // determines a workspace bucket, plus one B-class session in
+        // an unrelated repo. The Graph view should emit both at
+        // depth 0, with sessions at depth 1 under each, and the
+        // workspace bucket sorted before the repo bucket.
+        let a_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "a"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/atelier", "atelier-ws"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "a",
+            Some("/home/op/atelier"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&a_id, "/home/op/atelier"));
+
+        snapshot.nodes.push(repo_with_source(
+            "/home/op/src/standalone/.git",
+            "/home/op/src/standalone",
+        ));
+        snapshot.nodes.push(worktree(
+            "/home/op/src/standalone/.git",
+            "/home/op/src/standalone",
+        ));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "b",
+            Some("/home/op/src/standalone"),
+            None,
+            None,
+        ));
+
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        // Workspace bucket first, repo bucket second. Each bucket
+        // contributes one header row at depth 0 plus one session
+        // row at depth 1.
+        let top_level: Vec<_> = tree.rows.iter().filter(|r| r.depth == 0).collect();
+        assert_eq!(
+            top_level.len(),
+            2,
+            "expected 2 top-level parent rows:\n{:#?}",
+            tree.rows
+        );
+
+        let first = match &top_level[0].kind {
+            RowKind::Group(g) => g,
+            _ => panic!("expected Group row at top of tree:\n{:#?}", tree.rows),
+        };
+        assert!(
+            matches!(first.primary_node, Some(NodeId::Workspace(_))),
+            "workspace bucket should sort before repo bucket, got:\n{:#?}",
+            tree.rows,
+        );
+
+        let second = match &top_level[1].kind {
+            RowKind::Group(g) => g,
+            _ => panic!("expected Group row for repo bucket:\n{:#?}", tree.rows),
+        };
+        assert!(
+            matches!(second.primary_node, Some(NodeId::Repo(_))),
+            "repo bucket follows workspace bucket:\n{:#?}",
+            tree.rows,
+        );
+
+        let session_rows: Vec<_> = tree
+            .rows
+            .iter()
+            .filter(|r| matches!(&r.kind, RowKind::AgentSession(_)))
+            .collect();
+        assert_eq!(
+            session_rows.len(),
+            2,
+            "two sessions, one under each parent:\n{:#?}",
+            tree.rows
+        );
+        for row in &session_rows {
+            assert_eq!(
+                row.depth, 1,
+                "session sits one level under its parent (no repo intermediate under workspace, no checkout-fanout for single-worktree repo):\n{:#?}",
+                tree.rows
+            );
+        }
     }
 
     #[test]

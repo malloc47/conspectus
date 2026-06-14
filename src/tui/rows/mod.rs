@@ -409,6 +409,33 @@ pub fn shorten_home(path: &str, home: Option<&Path>) -> String {
     path.to_string()
 }
 
+/// Assemble the canonical workspace top-row display string used by
+/// the Workspaces view (`H-WS-002` polish, ADR 0062) and by the
+/// hybrid Sessions/Graph workspace headers (ADR 0064):
+/// `<name>  <repo-a+repo-b+...>  (<provider>)`. The member list and
+/// provider segment are each prefixed with two spaces so the eye
+/// can pick out the three slots without a glyph budget. Sections
+/// are omitted cleanly when their data is missing — a workspace
+/// with no members drops the join segment, with no provider drops
+/// the parens, and with neither degrades to its bare label.
+pub fn format_workspace_display(
+    workspace_label: &str,
+    member_display_names: &[String],
+    provider: Option<&str>,
+) -> String {
+    let mut out = workspace_label.to_string();
+    if !member_display_names.is_empty() {
+        out.push_str("  ");
+        out.push_str(&member_display_names.join("+"));
+    }
+    if let Some(provider) = provider {
+        out.push_str("  (");
+        out.push_str(provider);
+        out.push(')');
+    }
+    out
+}
+
 /// Translate a harness key to the short label rendered in the row.
 /// Today's discovery emits `claude-code`, `codex`, and `opencode`;
 /// the operator-facing label collapses `claude-code` to `claude` so

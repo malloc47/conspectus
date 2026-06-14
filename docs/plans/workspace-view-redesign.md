@@ -119,6 +119,22 @@ The chip and its supporting helpers are removed; the strict
 nesting from 1a remains. The chip cardinality and on-(A)
 sub-decisions below are mooted by the same ADR.
 
+**Further reshape (ADR 0064 / `H-WS-004`): hybrid.** After 0063
+landed, the operator surfaced two further problems with 1a's
+shape: the repo level beneath a workspace duplicated the
+project context, and agent-deck A-class sessions (cwd at
+workspace composite root, no checkout) silently dropped into
+"ungrouped" because `resolve_group_key`'s
+`checkout_for_path(cwd)?` early return ran before the
+workspace lookup. ADR 0064 reshapes Graph so workspaces and
+repos are peer top-level parents, each with sessions directly
+underneath at depth 1. The workspace level no longer requires
+the session to be in a member checkout; the routing is
+purely "does this session carry an `AssociatedWith Workspace`
+edge." Workspace headers use the shared
+`format_workspace_display` helper from `rows/mod.rs` so they
+read identically to the Workspaces view.
+
 ~~Open knobs for `H-WS-001`:~~ resolved by ADR 0063 (chip
 removed):
 - ~~**Chip cardinality.** A repo in N workspaces: render `[ws-a]`,
