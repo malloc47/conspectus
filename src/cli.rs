@@ -1732,6 +1732,71 @@ struct TuiArgs {
     /// color on; `never` forces it off.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
+
+    /// Dev-only: render one TUI frame to stdout with ANSI styling
+    /// preserved and exit, instead of starting the interactive event
+    /// loop. Lets agents iterate on renderer changes without a
+    /// manual screenshot loop (ADR 0067). Combine with
+    /// `--snapshot-width/--snapshot-height` to size the frame,
+    /// `--snapshot-keys` to drive the UI into a non-default state
+    /// before the snapshot, and `--snapshot-pane` to slice the
+    /// output.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot")]
+    snapshot: bool,
+
+    /// Frame width for `--snapshot`. Defaults to 160 columns —
+    /// roughly a wide terminal — so the right pane has room to
+    /// render.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-width", value_name = "COLS", default_value_t = 160)]
+    snapshot_width: u16,
+
+    /// Frame height for `--snapshot`. Defaults to 40 rows.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-height", value_name = "ROWS", default_value_t = 40)]
+    snapshot_height: u16,
+
+    /// Vim-style key script to dispatch before the snapshot.
+    /// Literal characters pass through; `<Name>` brackets map to
+    /// non-printable keys (`<Enter> <Tab> <Down> <C-r>` …). See
+    /// `src/tui/snapshot.rs` for the full name set.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-keys", value_name = "SCRIPT", default_value = "")]
+    snapshot_keys: String,
+
+    /// Region of the rendered frame to emit. `all` (default) emits
+    /// the entire buffer; `header`, `left`, `right`, and `status`
+    /// slice to the matching pane using the same layout the renderer
+    /// applies.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-pane", value_enum, default_value_t = SnapshotPaneFlag::All)]
+    snapshot_pane: SnapshotPaneFlag,
+}
+
+#[cfg(feature = "snapshot")]
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum SnapshotPaneFlag {
+    #[default]
+    All,
+    Header,
+    Left,
+    Right,
+    Status,
+}
+
+#[cfg(feature = "snapshot")]
+impl SnapshotPaneFlag {
+    fn to_pane(self) -> conspectus::tui::snapshot::SnapshotPane {
+        use conspectus::tui::snapshot::SnapshotPane;
+        match self {
+            SnapshotPaneFlag::All => SnapshotPane::All,
+            SnapshotPaneFlag::Header => SnapshotPane::Header,
+            SnapshotPaneFlag::Left => SnapshotPane::Left,
+            SnapshotPaneFlag::Right => SnapshotPane::Right,
+            SnapshotPaneFlag::Status => SnapshotPane::Status,
+        }
+    }
 }
 
 impl Default for TuiArgs {
@@ -1746,6 +1811,16 @@ impl Default for TuiArgs {
             mux_preview_interval: "2s".to_string(),
             no_live_preview: false,
             color: ColorFlag::Auto,
+            #[cfg(feature = "snapshot")]
+            snapshot: false,
+            #[cfg(feature = "snapshot")]
+            snapshot_width: 160,
+            #[cfg(feature = "snapshot")]
+            snapshot_height: 40,
+            #[cfg(feature = "snapshot")]
+            snapshot_keys: String::new(),
+            #[cfg(feature = "snapshot")]
+            snapshot_pane: SnapshotPaneFlag::All,
         }
     }
 }
@@ -2045,6 +2120,19 @@ impl TuiArgs {
             theme: outcome.config.tui.theme.clone(),
             show_edge_meta: outcome.config.tui.detail.show_edge_meta,
         };
+
+        #[cfg(feature = "snapshot")]
+        if self.snapshot {
+            return conspectus::tui::snapshot::run(
+                config,
+                conspectus::tui::snapshot::SnapshotConfig {
+                    width: self.snapshot_width,
+                    height: self.snapshot_height,
+                    keys: self.snapshot_keys,
+                    pane: self.snapshot_pane.to_pane(),
+                },
+            );
+        }
 
         conspectus::tui::run(config)
     }

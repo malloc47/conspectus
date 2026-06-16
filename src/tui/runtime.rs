@@ -1042,7 +1042,7 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 /// changes applied via the controls overlay take effect on the
 /// next rebuild. The runtime's startup `config` is the seed but is
 /// no longer the source of truth after the first user action.
-fn refresh(app: &mut App, _seed: &RunConfig) {
+pub(super) fn refresh(app: &mut App, _seed: &RunConfig) {
     let config = app.config().clone();
     populate_provider_status(app, &config);
     match discover_and_build(&config) {
@@ -1181,7 +1181,8 @@ fn current_unix_epoch() -> Option<i64> {
 // twisted to satisfy the lint.
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
-enum Action {
+#[cfg_attr(feature = "snapshot", allow(dead_code))]
+pub(super) enum Action {
     Msg(Box<Msg>),
     Refresh,
     Attach,
@@ -1321,7 +1322,7 @@ fn selected_default_action(app: &App) -> SelectedDefault {
 
 /// Dispatch a key into the open help overlay and close it on
 /// HelpOutcome::Close.
-fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+pub(super) fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
     use crate::tui::widgets::help::HelpOutcome;
     let outcome = match app.help_overlay_mut() {
         Some(state) => state.handle_key(key),
@@ -1348,7 +1349,7 @@ fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEven
 /// Dispatch a key into the open search overlay, refresh its match
 /// list from the visible row tree using the configured backend,
 /// and act on its outcome (Confirm picks a row, Cancel closes).
-fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
+pub(super) fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
     use crate::tui::search::{SubstringBackend, items_from_rows};
     use crate::tui::widgets::search::SearchOutcome;
     // The backend choice lives behind the SearchBackend trait so a
@@ -1381,7 +1382,7 @@ fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyE
 
 /// Handle the controls overlay's key event and apply the resulting
 /// action to the app, refreshing the row tree when needed.
-fn handle_controls_overlay_key(
+pub(super) fn handle_controls_overlay_key(
     app: &mut App,
     config: &RunConfig,
     key: ratatui::crossterm::event::KeyEvent,
@@ -1510,7 +1511,7 @@ fn static_handle_pins_overlay_key(
 /// is visible immediately. Side-effecting in two places (App state
 /// plus discovery refresh) but kept in one helper so the call
 /// sites can't accidentally apply without refreshing.
-fn apply_controls_action_and_refresh(
+pub(super) fn apply_controls_action_and_refresh(
     app: &mut App,
     config: &RunConfig,
     action: crate::tui::widgets::controls::ControlsAction,
@@ -1820,7 +1821,7 @@ fn write_pin_remove(
 
 /// Switch view and refresh. Shared between the `1`–`5` direct keys
 /// and `]` / `[` cycling.
-fn apply_view_switch(app: &mut App, config: &RunConfig, view: View) {
+pub(super) fn apply_view_switch(app: &mut App, config: &RunConfig, view: View) {
     apply_controls_action_and_refresh(
         app,
         config,
@@ -1830,7 +1831,7 @@ fn apply_view_switch(app: &mut App, config: &RunConfig, view: View) {
 
 /// Step the view enum forward (delta > 0) or back (delta < 0),
 /// wrapping. Used by the `]` / `[` accelerator pair.
-fn cycle_view(view: View, delta: i32) -> View {
+pub(super) fn cycle_view(view: View, delta: i32) -> View {
     use crate::tui::widgets::controls::VIEW_OPTIONS;
     let idx = VIEW_OPTIONS.iter().position(|v| *v == view).unwrap_or(0) as i32;
     let len = VIEW_OPTIONS.len() as i32;
@@ -2246,7 +2247,7 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
 ///
 /// `viewport_height` is the rendered height of the row tree in
 /// rows, used to size PageUp/PageDown jumps. Pass 1 if unknown.
-fn translate(event: Event, viewport_height: u16) -> Option<Action> {
+pub(super) fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Msg(Box::new(Msg::Quit))),

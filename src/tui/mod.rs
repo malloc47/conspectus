@@ -33,6 +33,8 @@ pub mod resume;
 pub mod rows;
 mod runtime;
 pub mod search;
+#[cfg(feature = "snapshot")]
+pub mod snapshot;
 pub mod theme;
 mod ui;
 pub mod viewer;

@@ -15,6 +15,12 @@ description = "AI work graph status tool"
 # feature gate covers only the new query-engine code in src/query/.
 default = ["query"]
 query = []
+# Dev-only `conspectus tui --snapshot` mode (ADR 0067). Renders one
+# TUI frame to stdout with ANSI styling preserved so agents can
+# iterate on renderer changes without a manual screenshot loop.
+# Off by default; the nix dev shell and CI build with the feature
+# on, while release/downstream builds leave it off.
+snapshot = []
 
 [dependencies]
 ansi-to-tui = { version = "8.0.1", default-features = false }

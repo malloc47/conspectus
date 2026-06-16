@@ -48,7 +48,7 @@ use crate::tui::rows::{
 /// Terminal width threshold below which the body switches from a
 /// side-by-side split to a vertical stack (left-on-top per the
 /// phase-08 layout note).
-const NARROW_LAYOUT_THRESHOLD: u16 = 100;
+pub(super) const NARROW_LAYOUT_THRESHOLD: u16 = 100;
 
 /// Render one frame. Pure with respect to `app`; the runtime calls
 /// this on every loop iteration.
