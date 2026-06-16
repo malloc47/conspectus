@@ -231,3 +231,45 @@ Common checks:
 just check
 cargo doc --no-deps
 ```
+
+### TUI snapshot and fixture mode
+
+A dev-only `snapshot` cargo feature exposes a one-shot render path and
+fixture I/O on the `tui` subcommand. The flags do not appear in
+production builds (no `--features snapshot`); the nix dev shell and
+`just check` build with the feature on.
+
+```sh
+# Render one frame to stdout with ANSI styling preserved and exit
+conspectus tui --snapshot
+
+# Slice to a single pane (header | left | right | status)
+conspectus tui --snapshot --snapshot-pane left --snapshot-width 160 --snapshot-height 40
+
+# Drive the UI to a non-default state before snapshotting (vim-style:
+# literals + `<Name>` for non-printables, `<C-x>` / `<A-x>` modifiers).
+conspectus tui --snapshot --snapshot-keys '2'           # switch to mux view
+conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
+
+# Capture the live world to a fixture JSON for later iteration
+conspectus tui --snapshot --snapshot-export-fixture world.json
+
+# Re-render from a fixture (skips live discovery, deterministic)
+conspectus tui --snapshot --snapshot-fixture world.json --snapshot-pane left
+
+# Explore a fixture interactively in the full TUI. `r` re-reads the
+# JSON from disk so you can edit the fixture in another buffer and
+# cycle in the new state without leaving the session.
+conspectus tui --fixture world.json
+```
+
+Snapshot output uses the same row builders and renderer as the
+interactive TUI, so what you see is byte-for-byte what an operator
+sees. Lift a dialed-in fixture into a regression test with
+`serde_json::from_str(include_str!(...))` plus the existing
+`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`.
+
+Design recorded in ADRs
+[0067](docs/adr/0067-tui-snapshot-mode-for-agent-iteration.md),
+[0068](docs/adr/0068-snapshot-fixture-mode.md), and
+[0069](docs/adr/0069-interactive-fixture-mode-for-tui.md).
