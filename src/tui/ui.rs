@@ -606,20 +606,32 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let now = current_unix_epoch_for_render();
     let summaries = compute_group_summaries(app.tree());
 
-    // Pre-pass: compute the widest group-row body in the visible
-    // set so we can pad each row's body before appending the
-    // summary chips. Only rows that will *get* a chip block (agents
-    // > 0) participate — workspace headers with no sessions don't
-    // need to push every neighbor's chips rightward.
-    let mut target_group_body_width = 0_usize;
+    // Pre-pass over visible group rows. We compute two column
+    // anchors so adjacent group rows read like a table:
+    //   1. `label_width` — the widest label across every visible
+    //      group row. Pads between the label and the secondary
+    //      segment so the secondary column starts at the same
+    //      column on every row.
+    //   2. `body_width` — the widest body (with #1's padding
+    //      already applied) across the rows that will get a
+    //      summary chip block. Rows without a chip block don't
+    //      participate so an idle workspace header doesn't push
+    //      everyone else's chips right.
+    let mut align = GroupAlign::default();
+    for row in &visible {
+        let label_width = group_row_label_width(row);
+        if label_width > align.label_width {
+            align.label_width = label_width;
+        }
+    }
     for row in &visible {
         let summary = summaries.get(&row.id).copied();
         if summary.is_none_or(|s| s.agents == 0) {
             continue;
         }
-        let body_width = group_row_body_width(row, app);
-        if body_width > target_group_body_width {
-            target_group_body_width = body_width;
+        let body_width = group_row_body_width(row, app, align.label_width);
+        if body_width > align.body_width {
+            align.body_width = body_width;
         }
     }
 
@@ -635,7 +647,7 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
             inner.width as usize,
             now,
             summary,
-            target_group_body_width,
+            align,
         );
         if is_selected {
             selected_primary_line = Some(lines.len());
@@ -838,8 +850,20 @@ fn append_group_body_spans(
     spans: &mut Vec<Span<'static>>,
     group: &crate::tui::rows::GroupRow,
     theme: &Theme,
+    target_label_width: usize,
 ) {
-    spans.push(Span::raw(compact_path_label(&group.display_path)));
+    let label = compact_path_label(&group.display_path);
+    let label_width = UnicodeWidthStr::width(label.as_str());
+    spans.push(Span::styled(
+        label,
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    // Pad the label cell so the secondary content starts at the
+    // same column across every visible group row. Skipped when the
+    // label is already at or past the target.
+    if label_width < target_label_width {
+        spans.push(Span::raw(" ".repeat(target_label_width - label_width)));
+    }
     let secondary = compact_path_secondary(&group.display_path);
     if !secondary.is_empty() {
         spans.push(Span::styled(
@@ -858,11 +882,16 @@ fn append_group_body_spans(
 }
 
 /// Width of the group row body (indent + disclosure + label +
-/// secondary + cwd marker). Used by the left-pane renderer to align
-/// the summary-chip column across visible group rows. Returns 0 for
-/// non-group rows so callers can fold every visible row through the
-/// same width-max.
-fn group_row_body_width(row: &crate::tui::rows::Row, app: &App) -> usize {
+/// secondary + cwd marker), padded to `target_label_width` between
+/// the label and the secondary segment. Used by the left-pane
+/// renderer to align the summary-chip column across visible group
+/// rows. Returns 0 for non-group rows so callers can fold every
+/// visible row through the same width-max.
+fn group_row_body_width(
+    row: &crate::tui::rows::Row,
+    app: &App,
+    target_label_width: usize,
+) -> usize {
     let RowKind::Group(group) = &row.kind else {
         return 0;
     };
@@ -872,8 +901,19 @@ fn group_row_body_width(row: &crate::tui::rows::Row, app: &App) -> usize {
         spans.push(Span::raw(row_indent(row.depth)));
     }
     spans.push(disclosure_span(row, app));
-    append_group_body_spans(&mut spans, group, app.theme());
+    append_group_body_spans(&mut spans, group, app.theme(), target_label_width);
     spans_width(&spans)
+}
+
+/// Width of just the label cell for a group row (excluding indent,
+/// disclosure, secondary, and cwd marker). Used by the left-pane
+/// pre-pass to compute the label column's max width before bodies
+/// are rendered.
+fn group_row_label_width(row: &crate::tui::rows::Row) -> usize {
+    let RowKind::Group(group) = &row.kind else {
+        return 0;
+    };
+    UnicodeWidthStr::width(compact_path_label(&group.display_path).as_str())
 }
 
 /// Append the right-aligned summary chips to a group row's span
@@ -903,14 +943,22 @@ fn append_group_summary_spans(
     spans.push(Span::raw(format!(" {}", summary.unmuxed)));
 }
 
+/// Column anchors for group-row alignment computed once per render
+/// pass. Padding keys the secondary segment and summary chip block
+/// onto consistent columns so adjacent group rows read like a
+/// table; non-group rows ignore these widths.
+#[derive(Clone, Copy, Default)]
+struct GroupAlign {
+    /// Max label width across visible group rows. Pads between the
+    /// label and the secondary segment.
+    label_width: usize,
+    /// Max body width (label-padded) across visible group rows that
+    /// will get a summary chip block. Pads between the body and the
+    /// `(N)  ◉ … ◐ … ◯ …` tail.
+    body_width: usize,
+}
+
 /// Build the rendered line for a single visible row.
-///
-/// `target_group_body_width` is the column the renderer should pad
-/// group-row bodies out to before appending the summary chips, so
-/// `(N)  ◉ … ◐ … ◯ …` starts at the same column on every group row
-/// with a summary. The caller computes the max body width across
-/// visible group rows in a pre-pass; non-group rows ignore this
-/// argument.
 fn render_left_row(
     row: &crate::tui::rows::Row,
     app: &App,
@@ -918,7 +966,7 @@ fn render_left_row(
     width: usize,
     now: i64,
     group_summary: Option<GroupSummary>,
-    target_group_body_width: usize,
+    align: GroupAlign,
 ) -> Line<'static> {
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -932,13 +980,11 @@ fn render_left_row(
 
     match &row.kind {
         RowKind::Group(group) => {
-            append_group_body_spans(&mut spans, group, theme);
+            append_group_body_spans(&mut spans, group, theme, align.label_width);
             if let Some(summary) = group_summary {
                 let current_width = spans_width(&spans);
-                if current_width < target_group_body_width {
-                    spans.push(Span::raw(
-                        " ".repeat(target_group_body_width - current_width),
-                    ));
+                if current_width < align.body_width {
+                    spans.push(Span::raw(" ".repeat(align.body_width - current_width)));
                 }
                 append_group_summary_spans(&mut spans, summary, theme);
             }
@@ -3335,6 +3381,37 @@ mod tests {
         assert_eq!(
             short_col, long_col,
             "(N) chips should start at the same column across group rows:\n  short: {short_line}\n  long:  {long_line}",
+        );
+    }
+
+    #[test]
+    fn group_row_secondary_column_starts_at_same_column_across_groups() {
+        // Label column anchor: the secondary segment (path or
+        // `+`-delimited member list) must start at the same column
+        // on every visible group row, even when the labels have
+        // very different widths.
+        let app = two_repo_app();
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+
+        let short_line = text
+            .lines()
+            .find(|l| l.contains("~/src/x") && !l.contains("very-long"))
+            .expect("short-named group row present");
+        let long_line = text
+            .lines()
+            .find(|l| l.contains("~/src/very-long-project-name"))
+            .expect("long-named group row present");
+        let short_col = short_line
+            .find("~/src/x")
+            .expect("short row secondary segment present");
+        let long_col = long_line
+            .find("~/src/very-long-project-name")
+            .expect("long row secondary segment present");
+        assert_eq!(
+            short_col, long_col,
+            "secondary segment should start at the same column across group rows:\n  short: {short_line}\n  long:  {long_line}",
         );
     }
 
