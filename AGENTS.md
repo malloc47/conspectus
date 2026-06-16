@@ -60,6 +60,14 @@ standard checks.
 - Preserve user changes and avoid rewriting unrelated files.
 - For docs-only changes, run `git diff --check`. For code changes, add or run
   the most relevant checks once the project has executable code.
+- For TUI / renderer changes with visible output (column alignment, styling,
+  layout, color choices, chip placement, overlay shape), validate with
+  `conspectus tui --snapshot` (dev-only, ADR 0067) instead of asking the
+  operator for a screenshot. The flag renders one frame to stdout with ANSI
+  styling preserved; pair it with `--snapshot-pane left|right|header|status` to
+  target a region and `--snapshot-keys "..."` (vim-style) to drive the UI into
+  a non-default state before the snapshot. Requires `--features snapshot`,
+  already on in the nix dev shell and `just check`.
 
 ## Git And Review Conventions
 
