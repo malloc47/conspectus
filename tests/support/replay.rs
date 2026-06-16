@@ -134,6 +134,20 @@ impl ReplayWorld {
             .replace(&path_string(&self.hook_root), "/fixture/hooks")
     }
 
+    /// Run discovery + resolve, then write the resolved
+    /// `GraphSnapshot` as a JSON fixture that
+    /// `conspectus tui --fixture` and `conspectus tui --snapshot
+    /// --snapshot-fixture` can consume (ADRs 0068 / 0069).
+    /// Temp-directory paths are rewritten to `/fixture` via
+    /// [`ReplayWorld::normalize`] so the JSON is stable across
+    /// machines and safe to check into `tests/fixtures/`.
+    pub fn write_snapshot_fixture(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let result = self.run();
+        let raw = serde_json::to_string_pretty(&result.resolved)
+            .expect("serialize replay snapshot to JSON");
+        fs::write(path.as_ref(), self.normalize(raw))
+    }
+
     fn tmux_stdout(&self) -> String {
         self.tmux_rows
             .iter()

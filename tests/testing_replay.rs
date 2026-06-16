@@ -21,6 +21,39 @@ fn replay_empty_world_has_empty_graph_and_sessions_tree() {
 }
 
 #[test]
+fn replay_write_snapshot_fixture_round_trips_through_snapshot_tool_format() {
+    // ReplayWorld can drop a normalized JSON the snapshot tool's
+    // `--snapshot-fixture` / `--fixture` paths accept — bridges
+    // discovery-test scaffolding to renderer iteration.
+    let mut world = ReplayWorld::new();
+    let work = world.mkdir("work");
+    world.write_codex_session("session-x", &work);
+    world.add_tmux_row(TmuxReplayRow::new("editor").with_cwd(&work));
+
+    let temp = tempfile::tempdir().expect("temp dir");
+    let fixture_path = temp.path().join("replay.json");
+    world
+        .write_snapshot_fixture(&fixture_path)
+        .expect("write fixture");
+
+    let raw = std::fs::read_to_string(&fixture_path).expect("read fixture");
+    assert!(
+        !raw.contains(&world.root().display().to_string()),
+        "fixture must not leak the replay temp path; got:\n{raw}",
+    );
+    assert!(
+        raw.contains("/fixture"),
+        "normalize should rewrite the temp root to `/fixture`; got:\n{raw}",
+    );
+    let snapshot: GraphSnapshot =
+        serde_json::from_str(&raw).expect("fixture parses as GraphSnapshot");
+    assert!(
+        !snapshot.nodes.is_empty(),
+        "exported snapshot should carry replay nodes",
+    );
+}
+
+#[test]
 fn replay_links_harness_session_to_fake_tmux_and_projects_rows() {
     let mut world = ReplayWorld::new();
     let work = world.mkdir("work");

@@ -269,6 +269,39 @@ sees. Lift a dialed-in fixture into a regression test with
 `serde_json::from_str(include_str!(...))` plus the existing
 `render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`.
 
+A fixture is the *resolved* graph fed into the renderer, so it
+validates UI behavior but does not exercise the discovery →
+resolver pipeline. To test graph building itself, the test corpus
+offers three complementary surfaces:
+
+- **`ReplayWorld` (`tests/support/replay.rs`)** — the day-to-day
+  surface for programmatic test worlds. Fluently writes harness
+  session JSON, hook sidecar records, fake `tmux list-sessions`
+  rows, and `/proc` fd evidence into a temp tree, then runs the
+  real `discover_local_with` + `resolve_snapshot` pipeline. Use
+  `world.write_snapshot_fixture("path.json")` to drop a
+  normalized JSON the snapshot tool's `--fixture` /
+  `--snapshot-fixture` flags can consume — discovery tests and
+  renderer tests share one fixture format.
+- **Captured-fixture corpus (`tests/fixtures/`,
+  `tests/fixture_corpus.rs`)** — sanitized real-provider
+  artifacts (codex transcripts, claude sidecars, opencode
+  sessions, tmux output, `/proc` snapshots, hook DBs) run through
+  the same adapter/parser paths discovery uses. Reach for this
+  when a parser bug shows up on real data and you want a
+  regression test against that real shape; the file header
+  documents the sanitization workflow.
+- **`dev_scenarios` (`src/dev_scenarios.rs`)** — named curated
+  worlds (empty, orphan-session, ambiguous-mux, hook-supersession,
+  …). Reachable interactively through `conspectus dev-scenario
+  tui --name <X>` for visual inspection of recurring edge cases.
+
+Together they cover programmatic, real-data, and curated paths.
+A new graph-build bug typically starts as a `ReplayWorld` test,
+gets a captured artifact under `tests/fixtures/` if a real
+provider's data triggered it, and becomes a `dev_scenarios` entry
+if it's recurring enough to deserve a name.
+
 Design recorded in ADRs
 [0067](docs/adr/0067-tui-snapshot-mode-for-agent-iteration.md),
 [0068](docs/adr/0068-snapshot-fixture-mode.md), and
