@@ -1410,6 +1410,15 @@ fn compact_path_label(path: &str) -> String {
     if path == "Ungrouped" {
         return path.to_string();
     }
+    // Workspace group rows render via `format_workspace_display`,
+    // which joins `<label>  <members>  (<provider>)` with double-
+    // space separators. Treat the first segment as the bold label
+    // so workspace headers don't bold the member list or provider
+    // chip (which the eye reads as metadata, parallel to a repo's
+    // CWD path).
+    if let Some((label, _)) = path.split_once("  ") {
+        return label.to_string();
+    }
     let trimmed = path.trim_end_matches('/');
     if trimmed == "~" {
         return "~".to_string();
@@ -1425,6 +1434,13 @@ fn compact_path_label(path: &str) -> String {
 fn compact_path_secondary(path: &str) -> String {
     if path == "Ungrouped" {
         return String::new();
+    }
+    // Workspace-shape: everything after the first `  ` is the
+    // non-bold member-list / provider segment. Render it as-is so
+    // the eye still picks out the segment separators
+    // `format_workspace_display` inserted.
+    if let Some((_, rest)) = path.split_once("  ") {
+        return rest.to_string();
     }
     let label = compact_path_label(path);
     if label == path {
@@ -4351,6 +4367,30 @@ mod tests {
         );
         assert_eq!(compact_path_label("Ungrouped"), "Ungrouped");
         assert_eq!(compact_path_secondary("Ungrouped"), "");
+    }
+
+    #[test]
+    fn compact_path_helpers_split_workspace_display_at_double_space() {
+        // `format_workspace_display` joins label, members, and
+        // provider with `  ` separators. The renderer bolds the
+        // label and renders the rest with `theme.placeholder`, so
+        // the helpers must split there to keep the member list and
+        // provider chip out of the bold span — parallel to how a
+        // repo header bolds the basename and leaves the CWD path
+        // non-bold.
+        let display = "nix-config  config+personal+work-config  (agent-deck)";
+        assert_eq!(compact_path_label(display), "nix-config");
+        assert_eq!(
+            compact_path_secondary(display),
+            "config+personal+work-config  (agent-deck)"
+        );
+
+        // Workspace with no members still splits cleanly because
+        // `format_workspace_display` keeps the `  (<provider>)`
+        // separator.
+        let display = "nix-config  (agent-deck)";
+        assert_eq!(compact_path_label(display), "nix-config");
+        assert_eq!(compact_path_secondary(display), "(agent-deck)");
     }
 
     #[test]
