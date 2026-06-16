@@ -625,13 +625,19 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         }
     }
     for row in &visible {
-        let summary = summaries.get(&row.id).copied();
-        if summary.is_none_or(|s| s.agents == 0) {
+        let Some(summary) = summaries.get(&row.id).copied() else {
+            continue;
+        };
+        if summary.agents == 0 {
             continue;
         }
         let body_width = group_row_body_width(row, app, align.label_width);
         if body_width > align.body_width {
             align.body_width = body_width;
+        }
+        let count_width = format!("({})", summary.agents).chars().count();
+        if count_width > align.count_width {
+            align.count_width = count_width;
         }
     }
 
@@ -919,16 +925,22 @@ fn group_row_label_width(row: &crate::tui::rows::Row) -> usize {
 /// Append the right-aligned summary chips to a group row's span
 /// list. Renders nothing when the group contains no sessions so
 /// workspace-only ancestors stay quiet.
+///
+/// `count_width` right-pads the `(N)` count chip so single- and
+/// double-digit counts (`(2)` vs `(72)`) anchor on the same column,
+/// keeping the mux glyphs that follow aligned.
 fn append_group_summary_spans(
     spans: &mut Vec<Span<'static>>,
     summary: GroupSummary,
     theme: &Theme,
+    count_width: usize,
 ) {
     if summary.agents == 0 {
         return;
     }
+    let count = format!("({})", summary.agents);
     spans.push(Span::styled(
-        format!("  ({})", summary.agents),
+        format!("  {count:>count_width$}"),
         Style::default().add_modifier(theme.placeholder),
     ));
     spans.push(Span::raw("  "));
@@ -956,6 +968,11 @@ struct GroupAlign {
     /// will get a summary chip block. Pads between the body and the
     /// `(N)  ◉ … ◐ … ◯ …` tail.
     body_width: usize,
+    /// Max `(N)` count chip width (including parens) across visible
+    /// group rows with sessions. Right-pads the count chip so the
+    /// mux glyphs that follow it anchor on the same column whether
+    /// the count is `(2)` or `(72)`.
+    count_width: usize,
 }
 
 /// Build the rendered line for a single visible row.
@@ -986,7 +1003,7 @@ fn render_left_row(
                 if current_width < align.body_width {
                     spans.push(Span::raw(" ".repeat(align.body_width - current_width)));
                 }
-                append_group_summary_spans(&mut spans, summary, theme);
+                append_group_summary_spans(&mut spans, summary, theme, align.count_width);
             }
         }
         RowKind::AgentSession(session) => {
