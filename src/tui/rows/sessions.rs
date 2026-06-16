@@ -187,6 +187,25 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         }
     }
 
+    // Workspace grouping (ADR 0065): every discovered workspace
+    // gets a header at top level, even with zero (A)-class sessions
+    // associated. Pre-seed an empty bucket per workspace so the
+    // emission loop renders the header alongside the session-bearing
+    // buckets. `entry().or_default()` preserves any sessions already
+    // bucketed under the same workspace key.
+    if matches!(inputs.grouping, SessionsGrouping::Workspace) {
+        for node in &inputs.snapshot.nodes {
+            if let GraphNode::Workspace(ws) = node {
+                let key = GroupKey {
+                    workspace: Some(ws.id.root.clone()),
+                    repo: None,
+                    worktree: None,
+                };
+                buckets.entry(key).or_default();
+            }
+        }
+    }
+
     let mut session_short_ids =
         ShortIds::from_sessions(buckets.values().flatten().chain(&ungrouped));
 
@@ -733,15 +752,17 @@ fn resolve_group_key(
 ) -> Option<GroupKey> {
     let cwd = entry.node.cwd.as_deref()?;
 
-    // Hybrid Graph (ADR 0064): an (A)-class session — one with a
-    // direct `AssociatedWith Workspace` edge — groups under its
-    // workspace with no repo or worktree level beneath. This
-    // includes agent-deck-shaped launches whose cwd is the
-    // workspace composite directory itself; those have no
-    // checkout, so the legacy repo-required path would have
-    // dropped them into the ungrouped bucket.
-    if matches!(grouping, SessionsGrouping::Graph)
-        && let Some(workspace) = data.workspace_for_session(&entry.id)
+    // Hybrid Graph (ADR 0064) and Workspace grouping (ADR 0065):
+    // an (A)-class session — one with a direct `AssociatedWith
+    // Workspace` edge — groups under its workspace with no repo or
+    // worktree level beneath. This includes agent-deck-shaped
+    // launches whose cwd is the workspace composite directory
+    // itself; those have no checkout, so the legacy repo-required
+    // path would have dropped them into the ungrouped bucket.
+    if matches!(
+        grouping,
+        SessionsGrouping::Graph | SessionsGrouping::Workspace
+    ) && let Some(workspace) = data.workspace_for_session(&entry.id)
     {
         return Some(GroupKey {
             workspace: Some(workspace.root.clone()),
@@ -750,7 +771,14 @@ fn resolve_group_key(
         });
     }
 
-    // Repo path. Every non-Graph grouping and every Graph
+    // Workspace grouping (ADR 0065) shows only workspace buckets;
+    // (B)-class and unaffiliated sessions land in the ungrouped
+    // bucket at the bottom of the tree.
+    if matches!(grouping, SessionsGrouping::Workspace) {
+        return None;
+    }
+
+    // Repo path. Every non-Graph/Workspace grouping and every Graph
     // (B)-class (no workspace edge) session needs a checkout to
     // derive its repo bucket. ScanRoot falls back to repo
     // grouping until the runtime wires scan roots into the
@@ -2275,6 +2303,179 @@ mod tests {
         assert_eq!(
             ws_row.depth, 1,
             "(A)-class session sits directly under its workspace:\n{:#?}",
+            tree.rows
+        );
+    }
+
+    #[test]
+    fn workspace_grouping_emits_header_for_every_workspace_even_without_sessions() {
+        // ADR 0065: Sessions/Workspace must surface idle workspaces
+        // the same way the dropped View::Workspaces did. A workspace
+        // node with no (A)-class sessions still gets a header at
+        // top level so operators see what workspaces exist on the
+        // machine without flipping views.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/ws/idle", "idle-ws"));
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/ws/busy", "busy-ws"));
+        let busy_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "busy"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "busy",
+            Some("/home/op/ws/busy"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&busy_id, "/home/op/ws/busy"));
+
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Workspace,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let workspace_headers: Vec<&Row> = tree
+            .rows
+            .iter()
+            .filter(|r| {
+                matches!(
+                    &r.kind,
+                    RowKind::Group(GroupRow {
+                        primary_node: Some(NodeId::Workspace(_)),
+                        ..
+                    })
+                )
+            })
+            .collect();
+        assert_eq!(
+            workspace_headers.len(),
+            2,
+            "expected one header per workspace node:\n{:#?}",
+            tree.rows
+        );
+        assert_eq!(workspace_headers[0].depth, 0);
+        assert_eq!(workspace_headers[1].depth, 0);
+    }
+
+    #[test]
+    fn workspace_grouping_drops_b_class_session_into_ungrouped() {
+        // ADR 0065: a session whose cwd is inside a workspace
+        // member's checkout but not associated with the workspace
+        // (no AssociatedWith link) is (B)-class. In Workspace mode
+        // there are no repo buckets, so it goes to Ungrouped.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/ws/abc", "abc"));
+        snapshot.nodes.push(repo("/home/op/src/proj"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/proj", "/home/op/src/proj"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "b",
+            Some("/home/op/src/proj"),
+            None,
+            None,
+        ));
+
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Workspace,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let ungrouped_header = tree.rows.iter().find(|r| {
+            matches!(
+                &r.kind,
+                RowKind::Group(GroupRow { display_path, primary_node: None, .. })
+                if display_path == "Ungrouped"
+            )
+        });
+        assert!(
+            ungrouped_header.is_some(),
+            "B-class session must land under an Ungrouped header in Workspace mode:\n{:#?}",
+            tree.rows
+        );
+
+        let repo_rows = tree
+            .rows
+            .iter()
+            .filter(|r| {
+                matches!(
+                    &r.kind,
+                    RowKind::Group(GroupRow {
+                        primary_node: Some(NodeId::Repo(_)),
+                        ..
+                    })
+                )
+            })
+            .count();
+        assert_eq!(
+            repo_rows, 0,
+            "no repo buckets render in Workspace grouping:\n{:#?}",
+            tree.rows
+        );
+
+        let (b_row, _) = find_session_row(&tree, "b");
+        assert_eq!(
+            b_row.depth, 1,
+            "B-class session sits under the Ungrouped header at depth 1:\n{:#?}",
+            tree.rows
+        );
+    }
+
+    #[test]
+    fn workspace_grouping_groups_a_class_session_under_workspace_header() {
+        // ADR 0065 happy path: (A)-class session with an
+        // AssociatedWith Workspace edge nests directly under its
+        // workspace header at depth 1, mirroring Sessions/Graph.
+        let ws_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "ws"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/ws/abc", "abc"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "ws",
+            Some("/home/op/ws/abc"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&ws_id, "/home/op/ws/abc"));
+
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Workspace,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let (ws_row, _) = find_session_row(&tree, "ws");
+        assert_eq!(
+            ws_row.depth, 1,
+            "(A)-class session sits at depth 1 under its workspace:\n{:#?}",
             tree.rows
         );
     }

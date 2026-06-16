@@ -138,6 +138,7 @@ pub enum Sort {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionsGrouping {
     Graph,
+    Workspace,
     Repo,
     Checkout,
     ScanRoot,
@@ -238,6 +239,7 @@ impl Grouping {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sessions(SessionsGrouping::Graph) => "graph",
+            Self::Sessions(SessionsGrouping::Workspace) => "workspace",
             Self::Sessions(SessionsGrouping::Repo)
             | Self::Mux(MuxGrouping::Repo)
             | Self::Union(UnionGrouping::Repo) => "repo",
@@ -275,6 +277,7 @@ impl Grouping {
         match view {
             View::Sessions => &[
                 Self::Sessions(SessionsGrouping::Graph),
+                Self::Sessions(SessionsGrouping::Workspace),
                 Self::Sessions(SessionsGrouping::Repo),
                 Self::Sessions(SessionsGrouping::Checkout),
                 Self::Sessions(SessionsGrouping::ScanRoot),

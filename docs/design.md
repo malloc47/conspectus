@@ -684,12 +684,16 @@ backs config, CLI flags, and TUI controls.
 The sessions view defaults to `grouping = "graph"` so the primary switcher
 shows the richer topology: it includes workspace containment when known and
 nests resolved `parent_session` lineage under parent sessions across harnesses.
-`grouping = "repo"` remains available for a location-first view. The sessions
-view also supports
-`grouping = "none"`. This renders a flat, table-like session list rather than
-workspace/repo/checkout group rows. The flat list carries an inline project-name
-column before the preview text and uses recency order; hierarchy sorting is not
-applicable without group rows.
+`grouping = "workspace"` (ADR 0065) renders a workspace-first slice — every
+discovered workspace gets a header (even with no active sessions) and (A)-class
+sessions group under it; (B)-class and unaffiliated sessions fall into the
+synthetic Ungrouped bucket. This grouping replaced the dedicated
+`View::Workspaces` from ADR 0062. `grouping = "repo"` remains available for a
+location-first view. The sessions view also supports `grouping = "none"`. This
+renders a flat, table-like session list rather than workspace/repo/checkout
+group rows. The flat list carries an inline project-name column before the
+preview text and uses recency order; hierarchy sorting is not applicable
+without group rows.
 
 Every capability in this surface is reachable through a navigable
 **Controls overlay** (sections for view, grouping, filters, sort).

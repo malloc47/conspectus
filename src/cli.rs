@@ -1772,6 +1772,7 @@ enum SortFlag {
 enum SessionsGroupingFlag {
     #[default]
     Graph,
+    Workspace,
     Repo,
     Checkout,
     ScanRoot,
@@ -1783,6 +1784,7 @@ impl SessionsGroupingFlag {
         use conspectus::tui::{Grouping, SessionsGrouping};
         match self {
             SessionsGroupingFlag::Graph => Grouping::Sessions(SessionsGrouping::Graph),
+            SessionsGroupingFlag::Workspace => Grouping::Sessions(SessionsGrouping::Workspace),
             SessionsGroupingFlag::Repo => Grouping::Sessions(SessionsGrouping::Repo),
             SessionsGroupingFlag::Checkout => Grouping::Sessions(SessionsGrouping::Checkout),
             SessionsGroupingFlag::ScanRoot => Grouping::Sessions(SessionsGrouping::ScanRoot),
@@ -2573,7 +2575,7 @@ mod tests {
         let args = filter_args_with(vec![], None, vec![], Some("host"));
         let err = args.to_grouping(View::Sessions).unwrap_err().to_string();
         assert!(err.contains("invalid --grouping `host` for --view sessions"));
-        assert!(err.contains("graph, repo, checkout, scan-root"));
+        assert!(err.contains("graph, workspace, repo, checkout, scan-root"));
     }
 
     #[test]
