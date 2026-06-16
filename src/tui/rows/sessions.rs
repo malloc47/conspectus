@@ -17,7 +17,7 @@
 //!   "Ungrouped" bucket (one synthetic group at the top level,
 //!   regardless of `SessionsGrouping`).
 //!
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
@@ -136,6 +136,10 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         sessions.sort_by(|a, b| compare_sessions(a, b, filter.float_muxed_sessions_top));
 
         let mut session_short_ids = ShortIds::from_sessions(sessions.iter());
+        // SessionsGrouping::None never emits repo/worktree headers, so
+        // the per-repo worktree-fanout decision isn't consulted on this
+        // path. Pass an empty map to satisfy the field.
+        let session_bearing_worktrees: BTreeMap<RepoId, BTreeSet<String>> = BTreeMap::new();
         let mut ctx = EmitCtx {
             tree: &mut tree,
             data: &data,
@@ -147,6 +151,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             float_muxed_top: filter.float_muxed_sessions_top,
             nest_lineage,
             lineage_stack: HashSet::new(),
+            session_bearing_worktrees: &session_bearing_worktrees,
         };
         for entry in sessions {
             emit_session(&mut ctx, 0, entry);
@@ -185,6 +190,30 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut session_short_ids =
         ShortIds::from_sessions(buckets.values().flatten().chain(&ungrouped));
 
+    // For each repo, the set of worktrees that contribute a (B)-class
+    // (non-workspace) bucket in this build. Used by
+    // `emit_checkout_bucket` to decide whether to render a worktree
+    // level beneath the repo: collapse for 1, fan out for >= 2.
+    //
+    // Worktrees with no sessions never appear as a bucket key, so they
+    // don't count. Worktrees whose sessions are all (A)-class — routed
+    // under their workspace via `AssociatedWith Workspace` — produce
+    // workspace-bucket keys with `repo: None`, so they don't count
+    // here either. The Sessions view is session-relative; checkouts
+    // that aren't backed by sessions in this view don't drive nesting.
+    let mut session_bearing_worktrees: BTreeMap<RepoId, BTreeSet<String>> = BTreeMap::new();
+    for key in buckets.keys() {
+        if key.workspace.is_some() {
+            continue;
+        }
+        if let (Some(repo_bucket), Some(worktree)) = (&key.repo, &key.worktree) {
+            session_bearing_worktrees
+                .entry(repo_bucket.repo_id.clone())
+                .or_default()
+                .insert(worktree.clone());
+        }
+    }
+
     // Pins group lives at the top of the grouped sessions view so
     // operators see the deck's pinned work before scrolling through
     // the broader session list. Bound pins also stay in their
@@ -204,6 +233,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
         float_muxed_top: filter.float_muxed_sessions_top,
         nest_lineage,
         lineage_stack: HashSet::new(),
+        session_bearing_worktrees: &session_bearing_worktrees,
     };
 
     // Iterate worktree-keyed buckets while deduplicating their
@@ -363,6 +393,10 @@ struct EmitCtx<'a, 'snap> {
     float_muxed_top: bool,
     nest_lineage: bool,
     lineage_stack: HashSet<NodeId>,
+    /// Per-repo set of worktrees that contribute a (B)-class bucket
+    /// to the current build. Drives the "collapse vs. fan out the
+    /// worktree level" decision in `emit_checkout_bucket`.
+    session_bearing_worktrees: &'a BTreeMap<RepoId, BTreeSet<String>>,
 }
 
 struct SessionsData<'a> {
@@ -552,16 +586,6 @@ impl<'a> SessionsData<'a> {
                 _ => None,
             })
             .max_by_key(|(wt_id, _)| Path::new(&wt_id.root).components().count())
-    }
-
-    fn checkout_count_for_repo(&self, repo: &RepoId) -> usize {
-        self.checkouts
-            .keys()
-            .filter(|id| match id {
-                NodeId::Checkout(wt_id) => &wt_id.repo == repo,
-                _ => false,
-            })
-            .count()
     }
 
     fn workspace_for_session(&self, session: &NodeId) -> Option<&WorkspaceId> {
@@ -798,8 +822,13 @@ fn emit_checkout_bucket(
         push_repo_row(ctx.tree, depth, &repo_bucket, ctx.home);
     }
 
-    let checkout_should_render = matches!(ctx.grouping, SessionsGrouping::Checkout)
-        || ctx.data.checkout_count_for_repo(&repo_bucket.repo_id) >= 2;
+    let session_bearing_count = ctx
+        .session_bearing_worktrees
+        .get(&repo_bucket.repo_id)
+        .map(BTreeSet::len)
+        .unwrap_or(0);
+    let checkout_should_render =
+        matches!(ctx.grouping, SessionsGrouping::Checkout) || session_bearing_count >= 2;
     let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {
         push_checkout_row(
             ctx.tree,
@@ -2162,6 +2191,92 @@ mod tests {
             })
             .unwrap();
         assert!(repo_pos < first_worktree_pos);
+    }
+
+    #[test]
+    fn workspace_attributed_worktree_does_not_force_repo_checkout_fanout() {
+        // Mirror the snapshot that surfaced this bug: a repo with two
+        // discovered checkouts — its canonical checkout and a worktree
+        // that lives inside an agent-deck workspace — where only the
+        // canonical checkout has a (B)-class session. Sessions whose
+        // cwd is the workspace root are (A)-class and group under the
+        // workspace, not under the repo. The worktree fanout decision
+        // must look at session-bearing repo buckets only, so the repo
+        // collapses its single contributing worktree the same way a
+        // repo with one discovered checkout does.
+        let ws_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "ws"));
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo("/home/op/src/config"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/config", "/home/op/src/config"));
+        snapshot
+            .nodes
+            .push(worktree("/home/op/src/config", "/home/op/ws/abc/config"));
+        snapshot
+            .nodes
+            .push(workspace_with_name("/home/op/ws/abc", "abc"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "ws",
+            Some("/home/op/ws/abc"),
+            None,
+            None,
+        ));
+        snapshot
+            .candidate_links
+            .push(associated_with_workspace(&ws_id, "/home/op/ws/abc"));
+        snapshot.nodes.push(agent_session(
+            "codex",
+            "/state",
+            "canon",
+            Some("/home/op/src/config"),
+            None,
+            None,
+        ));
+
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let kinds: Vec<&RowKind> = tree.rows.iter().map(|r| &r.kind).collect();
+        let checkout_rows = kinds
+            .iter()
+            .filter(|k| {
+                matches!(
+                    k,
+                    RowKind::Group(GroupRow {
+                        primary_node: Some(NodeId::Checkout(_)),
+                        ..
+                    })
+                )
+            })
+            .count();
+        assert_eq!(
+            checkout_rows, 0,
+            "single session-bearing worktree must collapse its checkout level even when a second worktree exists under a workspace:\n{:#?}",
+            tree.rows
+        );
+
+        let (canon_row, _) = find_session_row(&tree, "canon");
+        assert_eq!(
+            canon_row.depth, 1,
+            "(B)-class session sits directly under its repo:\n{:#?}",
+            tree.rows
+        );
+        let (ws_row, _) = find_session_row(&tree, "ws");
+        assert_eq!(
+            ws_row.depth, 1,
+            "(A)-class session sits directly under its workspace:\n{:#?}",
+            tree.rows
+        );
     }
 
     #[test]
