@@ -31,7 +31,6 @@ pub mod mux;
 pub mod prs;
 pub mod sessions;
 pub mod union;
-pub mod workspaces;
 
 pub use sessions::{SessionsBuildInputs, build_sessions_tree};
 
@@ -57,33 +56,6 @@ pub enum RowId {
     MuxSession(NodeId),
     Pr(NodeId),
     Fork(NodeId),
-    /// Repo member row in the workspaces view (H-WS-002). Keyed on
-    /// both the parent workspace and the repo because the same repo
-    /// can be a member of multiple workspaces — keying on the repo
-    /// alone would collide and break selection tracking
-    /// (`app.selection()` matches against the row id, and a
-    /// duplicated id selects every match). The workspace is boxed
-    /// to keep the `RowId` variant size in line with the others
-    /// (otherwise it doubles, and `Option<RowId>` on `Msg::SetData`
-    /// trips the `large_enum_variant` lint).
-    Repo {
-        workspace: Box<NodeId>,
-        repo: NodeId,
-    },
-    /// Agent session row appearing under a workspace in the
-    /// workspaces view's `in workspace` or `related` subgroup.
-    /// Same rationale as [`RowId::Repo`]: the same session can show
-    /// up under multiple workspaces (most commonly as (B)-class
-    /// "related" — a session in a canonical repo path that several
-    /// workspaces claim as a member), so keying on the session
-    /// alone collides. The workspace is boxed for the same enum-size
-    /// reason. Other views (Sessions/Mux/Forks/...) emit sessions
-    /// at most once per row tree and continue to use
-    /// [`RowId::AgentSession`] directly.
-    WorkspaceAgentSession {
-        workspace: Box<NodeId>,
-        session: NodeId,
-    },
     /// An unbound session pin row (ADR 0057). Keyed on the pin id
     /// so the row is stable across refreshes even as the pin's
     /// binding state changes — once a pin binds, the same logical
@@ -96,14 +68,6 @@ pub enum RowId {
     /// Synthetic row not backed by a single node — used for the
     /// "Ungrouped" bucket and any other rendered-only structure.
     Synthetic(&'static str),
-    /// A labeled subgroup row hanging beneath a parent node. Used by
-    /// the workspaces view (`members` / `in workspace` / `related`
-    /// subgroups under each workspace, H-WS-002) so the row id is
-    /// stable across rebuilds without colliding across workspaces.
-    Subgroup {
-        parent: NodeId,
-        label: &'static str,
-    },
 }
 
 /// Built view-model the renderer consumes. Always rendered top-to-
@@ -125,7 +89,6 @@ pub enum ViewLabel {
     Union,
     Prs,
     Forks,
-    Workspaces,
 }
 
 impl From<View> for ViewLabel {
@@ -136,7 +99,6 @@ impl From<View> for ViewLabel {
             View::Union => Self::Union,
             View::Prs => Self::Prs,
             View::Forks => Self::Forks,
-            View::Workspaces => Self::Workspaces,
         }
     }
 }

@@ -1758,7 +1758,6 @@ enum ViewFlag {
     Union,
     Prs,
     Forks,
-    Workspaces,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -1898,7 +1897,6 @@ fn view_flag_label(view: conspectus::tui::View) -> &'static str {
         conspectus::tui::View::Union => "union",
         conspectus::tui::View::Prs => "prs",
         conspectus::tui::View::Forks => "forks",
-        conspectus::tui::View::Workspaces => "workspaces",
     }
 }
 
@@ -1909,7 +1907,6 @@ fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
         ViewFlag::Union => conspectus::tui::View::Union,
         ViewFlag::Prs => conspectus::tui::View::Prs,
         ViewFlag::Forks => conspectus::tui::View::Forks,
-        ViewFlag::Workspaces => conspectus::tui::View::Workspaces,
     }
 }
 
@@ -1926,8 +1923,7 @@ fn apply_grouping_to_tui_config(
         }
         conspectus::tui::Grouping::Union(_)
         | conspectus::tui::Grouping::Prs(_)
-        | conspectus::tui::Grouping::Forks(_)
-        | conspectus::tui::Grouping::Workspaces(_) => {}
+        | conspectus::tui::Grouping::Forks(_) => {}
     }
 }
 

@@ -57,7 +57,6 @@ pub const VIEW_OPTIONS: &[View] = &[
     View::Union,
     View::Prs,
     View::Forks,
-    View::Workspaces,
 ];
 
 /// Sort options surfaced in the Sort section, in stable order.
@@ -717,7 +716,6 @@ fn view_label(view: View) -> &'static str {
         View::Union => "Union",
         View::Prs => "PRs",
         View::Forks => "Forks",
-        View::Workspaces => "Workspaces",
     }
 }
 

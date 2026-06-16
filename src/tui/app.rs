@@ -1064,8 +1064,7 @@ impl App {
                     }
                     super::Grouping::Union(_)
                     | super::Grouping::Prs(_)
-                    | super::Grouping::Forks(_)
-                    | super::Grouping::Workspaces(_) => {}
+                    | super::Grouping::Forks(_) => {}
                 }
             }
             ControlsAction::SetFilter(filter) => {
@@ -1528,21 +1527,6 @@ impl App {
             // status bar surface the binding hint.
             RowId::Pin { .. } => None,
             RowId::Synthetic(_) => None,
-            // Subgroup rows (workspaces view "members" / "in
-            // workspace" / "related" labels) focus their parent
-            // node — the user gets the workspace's detail when
-            // they land on any of its subgroup headers.
-            RowId::Subgroup { parent, .. } => Some(parent.clone()),
-            // The repo row's detail target is the repo itself, not
-            // the parent workspace. The workspace is the row's
-            // *position* (so duplicated repos across workspaces
-            // each have a unique RowId); the detail pane focuses
-            // the repo node.
-            RowId::Repo { repo, .. } => Some(repo.clone()),
-            // Same shape for workspace-scoped session rows: the
-            // row's detail target is the session, scoped by its
-            // parent workspace only so duplicates pick a unique row.
-            RowId::WorkspaceAgentSession { session, .. } => Some(session.clone()),
         };
         let Some(target) = target else {
             self.explorer = None;

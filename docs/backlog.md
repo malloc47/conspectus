@@ -3741,23 +3741,15 @@ concepts everywhere they appear.
     question). The four-grouping menu decision is still
     `H-WS-002a`'s.
 
-- [ ] `H-WS-002a` Workspaces view polish: Provider/Activity/Repo
+- [-] `H-WS-002a` Workspaces view polish: Provider/Activity/Repo
   groupings.
-  - Status: deprioritized after `H-WS-004` (ADR 0064) folded the
-    Workspaces view's `workspace → sessions` shape into the
-    Sessions / Graph view as a top-level bucket. A future
-    `SessionsGrouping::Workspace` may obsolete `View::Workspaces`
-    entirely; revisit this story after that decision.
-  - Scope (if revisited): extend `WorkspacesGrouping` from
-    Flat-only to the four enum variants the original `H-WS-002`
-    ticket specified (`Provider`, `Activity`, `Repo`, `Flat`).
-    Provider groups workspaces by `provider_name` (atelier /
-    agent-deck / generic). Activity sorts workspaces by
-    most-recent (A)-class session `last_active_epoch`. Repo flips
-    the tree: top-level rows are repos, each expanding to the
-    workspaces that include them plus the sessions in each.
-  - Blockers: depends on the `View::Workspaces` deprecation
-    decision flagged in ADR 0064's open questions.
+  - Obsolete (ADR 0065): the dedicated `View::Workspaces` was
+    removed in favor of `SessionsGrouping::Workspace`, so there
+    is no longer a `WorkspacesGrouping` enum to extend. The
+    Provider / Activity / Repo grouping axes from the original
+    `H-WS-002` ticket would now ship as Sessions-view variants
+    (or a separate cross-cut) if they're revisited; tracked as a
+    new story when needed.
 
 - [x] `H-WS-003` Audit Mux/Prs/Forks/Union workspace grouping for the
   same (A)/(B) conflation.
@@ -3820,13 +3812,11 @@ concepts everywhere they appear.
     checks both depth and the new workspace header format. Two
     new tests cover the agent-deck workspace-root cwd case and
     the hybrid peer-parents shape.
-  - Forward direction (not in scope, recorded in ADR): a future
-    `SessionsGrouping::Workspace` mode that filters Graph down
-    to only the workspace buckets would obsolete
-    `View::Workspaces` and its `6` keybinding. Whether to
-    deprecate the dedicated view after such a mode lands is a
-    separate decision; `H-WS-002a` is deprioritized pending
-    that call.
+  - Follow-up (ADR 0065): `SessionsGrouping::Workspace` shipped
+    and `View::Workspaces` / the `6` keybinding were removed. The
+    Workspaces view's idle-workspace visibility is preserved by
+    enumerating workspace nodes in the new grouping, and (B)-class
+    sessions land in the Ungrouped bucket in this mode.
 
 ### Process-Tree Agent↔Pane Linking
 

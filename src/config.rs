@@ -80,7 +80,6 @@ pub struct TuiViewsConfig {
     pub union: TuiViewConfig,
     pub prs: TuiViewConfig,
     pub forks: TuiViewConfig,
-    pub workspaces: TuiViewConfig,
 }
 
 impl TuiViewsConfig {
@@ -92,7 +91,6 @@ impl TuiViewsConfig {
             View::Union => &self.union,
             View::Prs => &self.prs,
             View::Forks => &self.forks,
-            View::Workspaces => &self.workspaces,
         }
     }
 }
@@ -226,8 +224,6 @@ struct TuiViewsFile {
     prs: Option<TuiViewFile>,
     #[serde(default)]
     forks: Option<TuiViewFile>,
-    #[serde(default)]
-    workspaces: Option<TuiViewFile>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -533,13 +529,6 @@ fn merge_tui(
             path,
             diagnostics,
         );
-        merge_tui_view(
-            &mut config.views.workspaces,
-            views.workspaces,
-            View::Workspaces,
-            path,
-            diagnostics,
-        );
     }
 
     // Seed the sessions grouping from the legacy alias only when the
@@ -722,7 +711,6 @@ fn view_config_key(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
-        View::Workspaces => "workspaces",
     }
 }
 

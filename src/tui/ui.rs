@@ -542,7 +542,6 @@ fn view_label(view: View) -> &'static str {
         View::Union => "union",
         View::Prs => "prs",
         View::Forks => "forks",
-        View::Workspaces => "workspaces",
     }
 }
 
