@@ -605,12 +605,38 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let now = current_unix_epoch_for_render();
     let summaries = compute_group_summaries(app.tree());
+
+    // Pre-pass: compute the widest group-row body in the visible
+    // set so we can pad each row's body before appending the
+    // summary chips. Only rows that will *get* a chip block (agents
+    // > 0) participate — workspace headers with no sessions don't
+    // need to push every neighbor's chips rightward.
+    let mut target_group_body_width = 0_usize;
+    for row in &visible {
+        let summary = summaries.get(&row.id).copied();
+        if summary.is_none_or(|s| s.agents == 0) {
+            continue;
+        }
+        let body_width = group_row_body_width(row, app);
+        if body_width > target_group_body_width {
+            target_group_body_width = body_width;
+        }
+    }
+
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible.len());
     let mut selected_primary_line: Option<usize> = None;
     for row in &visible {
         let is_selected = app.selection() == Some(&row.id);
         let summary = summaries.get(&row.id).copied();
-        let primary = render_left_row(row, app, is_selected, inner.width as usize, now, summary);
+        let primary = render_left_row(
+            row,
+            app,
+            is_selected,
+            inner.width as usize,
+            now,
+            summary,
+            target_group_body_width,
+        );
         if is_selected {
             selected_primary_line = Some(lines.len());
         }
@@ -804,6 +830,55 @@ fn compute_group_summaries(
     out
 }
 
+/// Append the body (label + secondary + cwd marker) spans for a
+/// group row to `spans`. Extracted so the pre-pass that aligns
+/// summary chips across group rows can measure body widths without
+/// rebuilding the spans inside `render_left_row`.
+fn append_group_body_spans(
+    spans: &mut Vec<Span<'static>>,
+    group: &crate::tui::rows::GroupRow,
+    theme: &Theme,
+) {
+    spans.push(Span::styled(
+        compact_path_label(&group.display_path),
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    let secondary = compact_path_secondary(&group.display_path);
+    if !secondary.is_empty() {
+        spans.push(Span::styled(
+            format!("  {secondary}"),
+            Style::default().add_modifier(theme.placeholder),
+        ));
+    }
+    if group.is_launch_context {
+        spans.push(Span::styled(
+            "  (cwd)".to_string(),
+            Style::default()
+                .fg(theme.cwd_mark)
+                .add_modifier(theme.placeholder),
+        ));
+    }
+}
+
+/// Width of the group row body (indent + disclosure + label +
+/// secondary + cwd marker). Used by the left-pane renderer to align
+/// the summary-chip column across visible group rows. Returns 0 for
+/// non-group rows so callers can fold every visible row through the
+/// same width-max.
+fn group_row_body_width(row: &crate::tui::rows::Row, app: &App) -> usize {
+    let RowKind::Group(group) = &row.kind else {
+        return 0;
+    };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let flat_sessions = matches!(app.config().sessions_grouping, SessionsGrouping::None);
+    if !(flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
+        spans.push(Span::raw(row_indent(row.depth)));
+    }
+    spans.push(disclosure_span(row, app));
+    append_group_body_spans(&mut spans, group, app.theme());
+    spans_width(&spans)
+}
+
 /// Append the right-aligned summary chips to a group row's span
 /// list. Renders nothing when the group contains no sessions so
 /// workspace-only ancestors stay quiet.
@@ -832,6 +907,13 @@ fn append_group_summary_spans(
 }
 
 /// Build the rendered line for a single visible row.
+///
+/// `target_group_body_width` is the column the renderer should pad
+/// group-row bodies out to before appending the summary chips, so
+/// `(N)  ◉ … ◐ … ◯ …` starts at the same column on every group row
+/// with a summary. The caller computes the max body width across
+/// visible group rows in a pre-pass; non-group rows ignore this
+/// argument.
 fn render_left_row(
     row: &crate::tui::rows::Row,
     app: &App,
@@ -839,6 +921,7 @@ fn render_left_row(
     width: usize,
     now: i64,
     group_summary: Option<GroupSummary>,
+    target_group_body_width: usize,
 ) -> Line<'static> {
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -852,26 +935,14 @@ fn render_left_row(
 
     match &row.kind {
         RowKind::Group(group) => {
-            spans.push(Span::styled(
-                compact_path_label(&group.display_path),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
-            let secondary = compact_path_secondary(&group.display_path);
-            if !secondary.is_empty() {
-                spans.push(Span::styled(
-                    format!("  {secondary}"),
-                    Style::default().add_modifier(theme.placeholder),
-                ));
-            }
-            if group.is_launch_context {
-                spans.push(Span::styled(
-                    "  (cwd)".to_string(),
-                    Style::default()
-                        .fg(theme.cwd_mark)
-                        .add_modifier(theme.placeholder),
-                ));
-            }
+            append_group_body_spans(&mut spans, group, theme);
             if let Some(summary) = group_summary {
+                let current_width = spans_width(&spans);
+                if current_width < target_group_body_width {
+                    spans.push(Span::raw(
+                        " ".repeat(target_group_body_width - current_width),
+                    ));
+                }
                 append_group_summary_spans(&mut spans, summary, theme);
             }
         }
@@ -3191,6 +3262,82 @@ mod tests {
         assert!(
             marker_col > 60,
             "marker should sit in the right pane after CycleFocus (col={marker_col}): {header_line}",
+        );
+    }
+
+    fn two_repo_app() -> App {
+        // Build two repos with very different name lengths so the
+        // group-row body widths diverge. Each carries one session
+        // so both rows participate in summary-chip rendering.
+        let mut snapshot = GraphSnapshot::empty();
+        for name in ["x", "very-long-project-name"] {
+            let common = format!("/home/op/src/{name}");
+            let repo_id = RepoId::new(common.clone());
+            snapshot
+                .nodes
+                .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+            snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+                id: CheckoutId::new(repo_id, common.clone()),
+                root: common.clone(),
+                git_dir: None,
+                current_branch: None,
+            }));
+            snapshot
+                .nodes
+                .push(GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("codex", "/state", name),
+                    harness_key: "codex".to_string(),
+                    cwd: Some(common),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                    session_kind: None,
+                }));
+        }
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app
+    }
+
+    #[test]
+    fn group_row_summary_chips_align_across_visible_groups() {
+        // Two group rows with very different body widths must have
+        // their `(N)` chips start at the same column so the eye can
+        // scan summary state without zig-zagging across rows.
+        let app = two_repo_app();
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+
+        let short_line = text
+            .lines()
+            .find(|l| l.contains("~/src/x") && !l.contains("very-long"))
+            .expect("short-named group row present");
+        let long_line = text
+            .lines()
+            .find(|l| l.contains("~/src/very-long-project-name"))
+            .expect("long-named group row present");
+        let short_col = short_line.find("(1)").expect("short row has count chip");
+        let long_col = long_line.find("(1)").expect("long row has count chip");
+        assert_eq!(
+            short_col, long_col,
+            "(N) chips should start at the same column across group rows:\n  short: {short_line}\n  long:  {long_line}",
         );
     }
 
