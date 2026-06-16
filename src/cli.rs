@@ -1788,6 +1788,16 @@ struct TuiArgs {
     #[cfg(feature = "snapshot")]
     #[arg(long = "snapshot-export-fixture", value_name = "PATH")]
     snapshot_export_fixture: Option<PathBuf>,
+
+    /// Launch the interactive TUI against a fixture JSON instead
+    /// of running live discovery (ADR 0069). Bypasses scan-root
+    /// discovery entirely; the `r` accelerator re-reads the
+    /// fixture from disk so the operator can edit the file and
+    /// cycle in the new state. Mutually exclusive with
+    /// `--snapshot`.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "fixture", value_name = "PATH", conflicts_with = "snapshot")]
+    fixture: Option<PathBuf>,
 }
 
 #[cfg(feature = "snapshot")]
@@ -1841,6 +1851,8 @@ impl Default for TuiArgs {
             snapshot_fixture: None,
             #[cfg(feature = "snapshot")]
             snapshot_export_fixture: None,
+            #[cfg(feature = "snapshot")]
+            fixture: None,
         }
     }
 }
@@ -2154,6 +2166,11 @@ impl TuiArgs {
                     export_fixture: self.snapshot_export_fixture,
                 },
             );
+        }
+
+        #[cfg(feature = "snapshot")]
+        if let Some(path) = self.fixture {
+            return conspectus::tui::run_from_fixture(config, path);
         }
 
         conspectus::tui::run(config)

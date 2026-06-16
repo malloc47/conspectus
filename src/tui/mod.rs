@@ -42,7 +42,9 @@ pub mod viewer_bridge;
 pub mod widgets;
 
 pub use app::{App, Msg};
-#[cfg(any(test, debug_assertions))]
+#[cfg(feature = "snapshot")]
+pub use runtime::run_from_fixture;
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub use runtime::run_static;
 pub use theme::Theme;
 

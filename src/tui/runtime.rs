@@ -67,13 +67,37 @@ pub fn run(config: RunConfig) -> Result<()> {
 /// debug-only replay scenarios: it lets developers inspect edge-case
 /// worlds through the real renderer and reducer without teaching
 /// production discovery about fixtures.
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 pub fn run_static(config: RunConfig, snapshot: crate::model::GraphSnapshot) -> Result<()> {
     let mut terminal = ratatui::init();
     let _ = terminal.clear();
-    let result = static_event_loop(&mut terminal, config, snapshot);
+    let result = static_event_loop(&mut terminal, config, snapshot, None);
     ratatui::restore();
     result
+}
+
+/// Run an interactive TUI session against a fixture file on disk
+/// (ADR 0069). Same code path as [`run_static`] but the `r`
+/// (Refresh) accelerator re-reads the JSON from disk so the
+/// operator can edit the fixture in another buffer and cycle in
+/// the new state without leaving the session.
+#[cfg(feature = "snapshot")]
+pub fn run_from_fixture(config: RunConfig, fixture_path: std::path::PathBuf) -> Result<()> {
+    use anyhow::Context as _;
+    let snapshot = read_fixture(&fixture_path)
+        .with_context(|| format!("load fixture `{}`", fixture_path.display()))?;
+    let mut terminal = ratatui::init();
+    let _ = terminal.clear();
+    let result = static_event_loop(&mut terminal, config, snapshot, Some(fixture_path));
+    ratatui::restore();
+    result
+}
+
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
+    let raw = std::fs::read_to_string(path)?;
+    let snapshot: crate::model::GraphSnapshot = serde_json::from_str(&raw)?;
+    Ok(resolve_snapshot(snapshot))
 }
 
 /// Block on terminal input, dispatching crossterm events to the
@@ -313,12 +337,14 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_event_loop(
     terminal: &mut DefaultTerminal,
     config: RunConfig,
-    snapshot: crate::model::GraphSnapshot,
+    initial_snapshot: crate::model::GraphSnapshot,
+    fixture_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
+    let mut snapshot = initial_snapshot;
     let mut app = App::new(config.clone());
     set_static_data(&mut app, &config, &snapshot)?;
     let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
@@ -388,10 +414,35 @@ fn static_event_loop(
                     set_static_data(&mut app, &config, &snapshot)?;
                 }
                 Some(Action::Refresh) => {
-                    set_static_data(&mut app, &config, &snapshot)?;
-                    app.update(Msg::SetStatus(Some(
-                        "scenario snapshot reloaded".to_string(),
-                    )));
+                    if let Some(path) = fixture_path.as_deref() {
+                        // ADR 0069: in fixture mode, `r` re-reads the
+                        // file on disk so the operator can edit the
+                        // JSON and cycle in the new state without
+                        // leaving the session. Parse errors land in
+                        // the status bar; the previously loaded
+                        // fixture stays active.
+                        match read_fixture(path) {
+                            Ok(fresh) => {
+                                snapshot = fresh;
+                                set_static_data(&mut app, &config, &snapshot)?;
+                                app.update(Msg::SetStatus(Some(format!(
+                                    "fixture reloaded from {}",
+                                    path.display()
+                                ))));
+                            }
+                            Err(err) => {
+                                app.update(Msg::SetStatus(Some(format!(
+                                    "fixture reload failed ({}): {err}",
+                                    path.display()
+                                ))));
+                            }
+                        }
+                    } else {
+                        set_static_data(&mut app, &config, &snapshot)?;
+                        app.update(Msg::SetStatus(Some(
+                            "scenario snapshot reloaded".to_string(),
+                        )));
+                    }
                 }
                 Some(Action::Attach) => {
                     app.update(Msg::SetStatus(Some(
@@ -474,7 +525,7 @@ fn static_event_loop(
     Ok(())
 }
 
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_handle_controls_overlay_key(
     app: &mut App,
     config: &RunConfig,
@@ -512,7 +563,7 @@ fn static_handle_controls_overlay_key(
     Ok(())
 }
 
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_apply_controls_action_and_refresh(
     app: &mut App,
     config: &RunConfig,
@@ -523,7 +574,7 @@ fn static_apply_controls_action_and_refresh(
     set_static_data(app, config, snapshot)
 }
 
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_apply_pins_action_and_refresh(
     app: &mut App,
     _config: &RunConfig,
@@ -548,7 +599,7 @@ fn static_apply_pins_action_and_refresh(
     Ok(())
 }
 
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn set_static_data(
     app: &mut App,
     config: &RunConfig,
@@ -568,7 +619,7 @@ fn set_static_data(
     Ok(())
 }
 
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
     if app.viewer_modal().is_some() {
         return match event {
@@ -1496,7 +1547,7 @@ fn apply_pins_action_and_refresh(
 }
 
 /// Scenario-mode counterpart to [`handle_pins_overlay_key`].
-#[cfg(any(test, debug_assertions))]
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_handle_pins_overlay_key(
     app: &mut App,
     config: &RunConfig,
