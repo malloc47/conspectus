@@ -839,10 +839,7 @@ fn append_group_body_spans(
     group: &crate::tui::rows::GroupRow,
     theme: &Theme,
 ) {
-    spans.push(Span::styled(
-        compact_path_label(&group.display_path),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    spans.push(Span::raw(compact_path_label(&group.display_path)));
     let secondary = compact_path_secondary(&group.display_path);
     if !secondary.is_empty() {
         spans.push(Span::styled(
