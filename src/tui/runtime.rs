@@ -637,7 +637,7 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 
 /// Run discovery and resolver on the calling thread, returning the
 /// resolved snapshot (no SQLite materialization).
-fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
+pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
     let roots: Vec<PathBuf> = if config.scan_roots.is_empty() {
         vec![std::env::current_dir()?]
     } else {
@@ -1093,17 +1093,35 @@ fn launch_context_row_id(tree: &RowTree) -> Option<crate::tui::rows::RowId> {
 }
 
 fn discover_and_build(config: &RunConfig) -> Result<(GraphDb, RowTree)> {
-    let snapshot = if config.scan_roots.is_empty() {
-        let cwd = std::env::current_dir()?;
-        discover_local_at_roots([cwd])?
-    } else {
-        discover_local_at_roots(config.scan_roots.clone())?
-    };
-    let snapshot = resolve_snapshot(snapshot);
+    let snapshot = discover_and_resolve(config)?;
     let database = GraphDb::new(crate::query::materialize_snapshot(&snapshot)?);
-
     let tree = build_tree_for_view(database.conn(), config)?;
     Ok((database, tree))
+}
+
+/// Populate an `App` from a given snapshot rather than running live
+/// discovery. Used by the snapshot tool's `--snapshot-fixture` path
+/// (ADR 0068). The snapshot is run through `resolve_snapshot` so
+/// fixtures missing resolved relationships still render correctly;
+/// the resolver is idempotent for snapshots that already carry
+/// them.
+pub(super) fn refresh_from_snapshot(
+    app: &mut App,
+    config: &RunConfig,
+    snapshot: crate::model::GraphSnapshot,
+) -> Result<()> {
+    populate_provider_status(app, config);
+    let resolved = resolve_snapshot(snapshot);
+    let database = GraphDb::new(crate::query::materialize_snapshot(&resolved)?);
+    let tree = build_tree_for_view(database.conn(), config)?;
+    let initial_selection_hint = launch_context_row_id(&tree);
+    app.update(Msg::SetData {
+        snapshot: database,
+        tree,
+        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+        initial_selection_hint,
+    });
+    Ok(())
 }
 
 fn build_tree_for_view(conn: &rusqlite::Connection, config: &RunConfig) -> Result<RowTree> {

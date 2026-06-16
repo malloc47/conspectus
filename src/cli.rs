@@ -1772,6 +1772,22 @@ struct TuiArgs {
     #[cfg(feature = "snapshot")]
     #[arg(long = "snapshot-pane", value_enum, default_value_t = SnapshotPaneFlag::All)]
     snapshot_pane: SnapshotPaneFlag,
+
+    /// Read the input `GraphSnapshot` from this JSON file instead
+    /// of running live discovery (ADR 0068). Useful when iterating
+    /// on a renderer fix against a stable world.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-fixture", value_name = "PATH")]
+    snapshot_fixture: Option<PathBuf>,
+
+    /// After the input snapshot is produced (live or fixture-
+    /// loaded) and resolved, write it to this JSON file (ADR
+    /// 0068). Pair with `--snapshot-fixture` for a round-trip, or
+    /// use alone to capture the current operator's world into a
+    /// reusable fixture.
+    #[cfg(feature = "snapshot")]
+    #[arg(long = "snapshot-export-fixture", value_name = "PATH")]
+    snapshot_export_fixture: Option<PathBuf>,
 }
 
 #[cfg(feature = "snapshot")]
@@ -1821,6 +1837,10 @@ impl Default for TuiArgs {
             snapshot_keys: String::new(),
             #[cfg(feature = "snapshot")]
             snapshot_pane: SnapshotPaneFlag::All,
+            #[cfg(feature = "snapshot")]
+            snapshot_fixture: None,
+            #[cfg(feature = "snapshot")]
+            snapshot_export_fixture: None,
         }
     }
 }
@@ -2130,6 +2150,8 @@ impl TuiArgs {
                     height: self.snapshot_height,
                     keys: self.snapshot_keys,
                     pane: self.snapshot_pane.to_pane(),
+                    fixture: self.snapshot_fixture,
+                    export_fixture: self.snapshot_export_fixture,
                 },
             );
         }

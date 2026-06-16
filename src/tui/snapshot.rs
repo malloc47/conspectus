@@ -27,9 +27,11 @@
 //! disk is skipped with a one-line stderr warning. The agent's
 //! keystroke is recorded as a no-op rather than silently dropped.
 
+use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -37,11 +39,12 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModif
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::model::GraphSnapshot;
 use crate::tui::app::App;
 use crate::tui::runtime::{
     self, Action, apply_controls_action_and_refresh, apply_view_switch, cycle_view,
     handle_controls_overlay_key, handle_help_overlay_key, handle_search_overlay_key, refresh,
-    translate,
+    refresh_from_snapshot, translate,
 };
 use crate::tui::widgets::controls::ControlsAction;
 use crate::tui::{RunConfig, ui};
@@ -58,6 +61,15 @@ pub struct SnapshotConfig {
     pub keys: String,
     /// Which region of the rendered frame to emit.
     pub pane: SnapshotPane,
+    /// Read the input `GraphSnapshot` from this JSON file instead
+    /// of running live discovery (ADR 0068). Resolves the loaded
+    /// snapshot through `resolve_snapshot` so hand-crafted fixtures
+    /// missing `resolved_relationships` still render.
+    pub fixture: Option<PathBuf>,
+    /// After the input snapshot is produced (live discovery or
+    /// fixture load) and resolved, serialize it to this JSON file
+    /// (ADR 0068). Renders proceed normally afterward.
+    pub export_fixture: Option<PathBuf>,
 }
 
 /// Targets the `--snapshot-pane` flag can select. `All` returns the
@@ -86,7 +98,25 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     }
 
     let mut app = App::new(config.clone());
-    refresh(&mut app, &config);
+
+    // Resolve the input snapshot. Fixture path bypasses live
+    // discovery (ADR 0068); without a fixture, we run the same
+    // discover-and-resolve pipeline the production runtime uses,
+    // returning the snapshot so `--snapshot-export-fixture` can
+    // capture it.
+    if let Some(fixture_path) = snap.fixture.as_deref() {
+        let snapshot = load_fixture(fixture_path)?;
+        if let Some(export_path) = snap.export_fixture.as_deref() {
+            write_fixture(export_path, &snapshot)?;
+        }
+        refresh_from_snapshot(&mut app, &config, snapshot)?;
+    } else if let Some(export_path) = snap.export_fixture.as_deref() {
+        let snapshot = runtime::discover_and_resolve(&config)?;
+        write_fixture(export_path, &snapshot)?;
+        refresh_from_snapshot(&mut app, &config, snapshot)?;
+    } else {
+        refresh(&mut app, &config);
+    }
 
     let keys = parse_key_script(&snap.keys)?;
     let viewport_height = snap.height.saturating_sub(2);
@@ -111,6 +141,27 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     stdout.write_all(out.as_bytes())?;
     stdout.write_all(b"\n")?;
     stdout.flush()?;
+    Ok(())
+}
+
+/// Read and deserialize a `GraphSnapshot` from a JSON fixture.
+/// Errors carry the path in the context so the agent can see which
+/// file failed at a glance.
+fn load_fixture(path: &std::path::Path) -> Result<GraphSnapshot> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("read snapshot fixture `{}`", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("parse snapshot fixture `{}`", path.display()))
+}
+
+/// Serialize a `GraphSnapshot` to a JSON fixture file. Pretty-
+/// printed for hand-editing and diff-friendliness, matching the
+/// shape `output::render_graph_json` emits.
+fn write_fixture(path: &std::path::Path, snapshot: &GraphSnapshot) -> Result<()> {
+    let json = serde_json::to_string_pretty(snapshot)
+        .with_context(|| format!("serialize snapshot fixture `{}`", path.display()))?;
+    fs::write(path, json)
+        .with_context(|| format!("write snapshot fixture `{}`", path.display()))?;
     Ok(())
 }
 
@@ -533,6 +584,29 @@ mod tests {
         assert!(right.x >= left.width);
         assert_eq!(left.y, 1);
         assert_eq!(left.height, 38);
+    }
+
+    #[test]
+    fn fixture_round_trip_preserves_empty_snapshot() {
+        // Empty graph serializes to a minimal JSON and deserializes
+        // back to the same value; covers the simplest fixture shape
+        // an agent might hand-craft.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("empty.json");
+        let snapshot = GraphSnapshot::empty();
+        write_fixture(&path, &snapshot).expect("write");
+        let loaded = load_fixture(&path).expect("load");
+        assert_eq!(loaded, snapshot);
+    }
+
+    #[test]
+    fn fixture_load_error_reports_path() {
+        let err = load_fixture(std::path::Path::new("/no/such/file.json"))
+            .expect_err("missing file errors");
+        assert!(
+            err.to_string().contains("/no/such/file.json"),
+            "error should mention the failing path: {err}",
+        );
     }
 
     #[test]
