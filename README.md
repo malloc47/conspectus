@@ -293,8 +293,17 @@ offers three complementary surfaces:
   documents the sanitization workflow.
 - **`dev_scenarios` (`src/dev_scenarios.rs`)** — named curated
   worlds (empty, orphan-session, ambiguous-mux, hook-supersession,
-  …). Reachable interactively through `conspectus dev-scenario
-  tui --name <X>` for visual inspection of recurring edge cases.
+  …). Reachable interactively through `conspectus dev scenario
+  tui <name>` for visual inspection of recurring edge cases. The
+  `showcase` entry (ADR 0070) is the umbrella world that lights
+  up most surfaces at once (atelier + agent-deck workspaces,
+  three+ agent harnesses, codex parent → child fork lineage,
+  bare repo with a linked worktree, ambiguous mux, hook
+  supersession, two PRs). A corresponding
+  `tests/fixtures/showcase.json` is checked in so
+  `conspectus tui --fixture tests/fixtures/showcase.json` works
+  without a debug build; regenerate it with `just
+  regen-showcase-fixture` after any showcase change.
 
 Together they cover programmatic, real-data, and curated paths.
 A new graph-build bug typically starts as a `ReplayWorld` test,

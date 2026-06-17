@@ -15,11 +15,13 @@ use anyhow::{Context, Result, bail};
 use crate::config::Projection;
 use crate::discovery::cross_link;
 use crate::discovery::forge::FakeGh;
+use crate::discovery::harness::aider::HARNESS_KEY as AIDER_HARNESS_KEY;
 use crate::discovery::harness::claude_code::HARNESS_KEY as CLAUDE_CODE_HARNESS_KEY;
 use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use crate::discovery::harness::fixtures::{
-    ClaudeCodeSessionRecord, CodexSessionRecord, HarnessFixture,
+    ClaudeCodeSessionRecord, CodexSessionRecord, HarnessFixture, OpenCodeSessionRecord,
 };
+use crate::discovery::harness::opencode::HARNESS_KEY as OPENCODE_HARNESS_KEY;
 use crate::discovery::tmux::FakeTmux;
 use crate::discovery::{LocalDiscoveryConfig, discover_local_with};
 use crate::filter::RowFilter;
@@ -84,6 +86,11 @@ pub const SCENARIOS: &[ScenarioDef] = &[
         description: "Atelier fork lineage with unresolved harness lineage",
         build: build_fork_lineage,
     },
+    ScenarioDef {
+        name: "showcase",
+        description: "comprehensive world exercising most conspectus surfaces (ADR 0070)",
+        build: build_showcase,
+    },
 ];
 
 pub fn scenario_names() -> impl Iterator<Item = &'static str> {
@@ -116,6 +123,10 @@ pub struct ScenarioWorld {
     tmux_rows: Vec<TmuxReplayRow>,
     fd_paths_by_pid: BTreeMap<i64, Vec<String>>,
     gh_pull_requests: Option<String>,
+    /// Agent-deck root path. When `Some`, discovery uses it for the
+    /// agent-deck adapter (`multi-repo-worktrees/` subdir +
+    /// `profiles/<name>/state.db` for titles, ADR 0066).
+    agent_deck_root: Option<PathBuf>,
 }
 
 impl ScenarioWorld {
@@ -133,6 +144,7 @@ impl ScenarioWorld {
             tmux_rows: Vec::new(),
             fd_paths_by_pid: BTreeMap::new(),
             gh_pull_requests: None,
+            agent_deck_root: None,
         })
     }
 
@@ -152,6 +164,15 @@ impl ScenarioWorld {
         let mut snapshot = discover_local_with(self.scan_roots.clone(), self.discovery_config())?;
         if !self.fd_paths_by_pid.is_empty() {
             cross_link::infer_with_fd_paths(&mut snapshot, &self.fd_paths_by_pid);
+            // `discover_local_with` already ran `cross_link::infer*`, and
+            // `infer_with_fd_paths` re-runs the cwd-based pass. The
+            // re-emitted links are byte-identical to the first pass; dedupe
+            // by link id so SQLite materialization doesn't trip on the
+            // `candidate_links.link_id` UNIQUE constraint.
+            let mut seen = std::collections::BTreeSet::new();
+            snapshot
+                .candidate_links
+                .retain(|link| seen.insert(link.id.clone()));
         }
         Ok(resolve_snapshot(snapshot))
     }
@@ -226,6 +247,8 @@ impl ScenarioWorld {
                 CLAUDE_CODE_HARNESS_KEY,
                 self.harness.claude_code_state_root(),
             )
+            .with_harness_state_root(OPENCODE_HARNESS_KEY, self.harness.opencode_state_root())
+            .with_harness_state_root(AIDER_HARNESS_KEY, self.root.clone())
             .with_hook_sidecar_root(&self.hook_root)
             .without_codex_log();
         if !self.tmux_rows.is_empty() {
@@ -233,6 +256,9 @@ impl ScenarioWorld {
         }
         if let Some(body) = &self.gh_pull_requests {
             config = config.with_forge_runner(FakeGh::with_pull_requests(body.clone()));
+        }
+        if let Some(root) = &self.agent_deck_root {
+            config = config.with_agent_deck_root(root.clone());
         }
         config
     }
@@ -291,6 +317,128 @@ impl ScenarioWorld {
         git(&root, &["add", "README.md"])?;
         git(&root, &["commit", "-m", "initial"])?;
         Ok(root)
+    }
+
+    /// Create a bare repository plus a linked worktree on disk so
+    /// the git discoverer sees a non-canonical checkout shape (the
+    /// `.git/worktrees/<name>` form). The bare repo lives at
+    /// `<relative>.git`; the worktree at `<worktree_relative>`.
+    fn init_bare_repo_with_worktree(
+        &self,
+        bare_relative: &str,
+        worktree_relative: &str,
+        branch: &str,
+    ) -> Result<(PathBuf, PathBuf)> {
+        let bare = self.root.join(bare_relative);
+        fs::create_dir_all(&bare).with_context(|| format!("create {}", bare.display()))?;
+        git(&bare, &["init", "--bare", "--initial-branch", "main"])?;
+        // Seed the bare repo with a commit by working through a
+        // temporary clone — `git --bare commit` is not a thing.
+        let seed = self.root.join("__bare_seed__");
+        fs::create_dir_all(&seed)?;
+        git(&seed, &["init", "--initial-branch", "main"])?;
+        git(&seed, &["config", "user.name", "Conspectus Scenario"])?;
+        git(
+            &seed,
+            &["config", "user.email", "conspectus@example.invalid"],
+        )?;
+        fs::write(seed.join("README.md"), "showcase bare\n")?;
+        git(&seed, &["add", "README.md"])?;
+        git(&seed, &["commit", "-m", "initial"])?;
+        git(&seed, &["remote", "add", "bare", &path_string(&bare)])?;
+        git(&seed, &["push", "bare", "main"])?;
+        fs::remove_dir_all(&seed)?;
+
+        let worktree = self.root.join(worktree_relative);
+        fs::create_dir_all(worktree.parent().expect("worktree parent"))?;
+        git(
+            &bare,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                &path_string(&worktree),
+                "main",
+            ],
+        )?;
+        Ok((bare, worktree))
+    }
+
+    /// Materialize an agent-deck workspace per ADR 0060/0066. Writes
+    /// the `<agent_deck_root>/multi-repo-worktrees/<folder>/`
+    /// directory with one symlink per `(name, target_checkout)`
+    /// pair, plus a `profiles/<profile>/state.db` SQLite database
+    /// carrying the operator-chosen title for the workspace so
+    /// discovery's title lookup (ADR 0066) emits a meaningful
+    /// `WorkspaceNode.name`. Sets `agent_deck_root` on the world so
+    /// `discovery_config` wires the adapter.
+    fn add_agent_deck_workspace(
+        &mut self,
+        folder: &str,
+        title: &str,
+        members: &[(&str, &Path)],
+    ) -> Result<PathBuf> {
+        let deck_root = self.root.join(".agent-deck");
+        let worktrees_root = deck_root.join("multi-repo-worktrees");
+        let workspace_dir = worktrees_root.join(folder);
+        fs::create_dir_all(&workspace_dir).with_context(|| {
+            format!("create agent-deck workspace at {}", workspace_dir.display())
+        })?;
+        for (name, target) in members {
+            let link = workspace_dir.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, &link)
+                .with_context(|| format!("symlink {} -> {}", link.display(), target.display()))?;
+        }
+
+        // Extract the 8-hex conductor id agent-deck shares with the
+        // instance row's `id` prefix. Same rule as the title-lookup
+        // path in `src/discovery/agent_deck.rs`.
+        let id_prefix = folder.rsplit('-').next().unwrap_or(folder);
+        let profile_dir = deck_root.join("profiles").join("default");
+        fs::create_dir_all(&profile_dir)
+            .with_context(|| format!("create profile dir at {}", profile_dir.display()))?;
+        let db_path = profile_dir.join("state.db");
+        let conn = rusqlite::Connection::open(&db_path)
+            .with_context(|| format!("open agent-deck state.db at {}", db_path.display()))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS instances (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT ''
+            );",
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO instances (id, title) VALUES (?1, ?2)",
+            rusqlite::params![format!("{id_prefix}-1700000000"), title],
+        )?;
+
+        // Adapter expects the `multi-repo-worktrees` directory as its
+        // root; profiles root is derived as `<root>/../profiles`.
+        self.agent_deck_root = Some(worktrees_root);
+        Ok(workspace_dir)
+    }
+
+    fn write_opencode_session(
+        &self,
+        session_id: &str,
+        cwd: &Path,
+        title: &str,
+        epoch_ms: i64,
+    ) -> Result<()> {
+        self.harness
+            .write_opencode_session(
+                &OpenCodeSessionRecord::new(session_id)
+                    .with_directory(path_string(cwd))
+                    .with_title(title)
+                    .with_created(epoch_ms)
+                    .with_updated(epoch_ms + 1000),
+            )
+            .map(|_| ())
+    }
+
+    fn write_aider_state(&self, repo: &Path) -> Result<()> {
+        self.harness.write_aider_state(repo).map(|_| ())
     }
 
     fn write_atelier_config(&self, text: &str) -> Result<()> {
@@ -608,6 +756,243 @@ root = ".atelier/forks/beta"
             .with_cwd(&fork_cwd)
             .with_activity(1_700_000_530),
     );
+    Ok(())
+}
+
+/// Comprehensive showcase scenario (ADR 0070). Built from modular
+/// `add_*_to_showcase` helpers so a future edge case is one new
+/// helper plus one call here.
+fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
+    let project = add_normal_repo_to_showcase(world)?;
+    let worktree = add_bare_repo_with_worktree_to_showcase(world)?;
+    let atelier = add_atelier_workspace_to_showcase(world)?;
+    add_agent_deck_workspace_to_showcase(world, &project, &atelier.member_repo_a)?;
+    add_agent_sessions_to_showcase(world, &project, &worktree, &atelier)?;
+    add_mux_layout_to_showcase(world, &project, &worktree)?;
+    add_forge_prs_to_showcase(world, &project)?;
+    add_hook_supersession_to_showcase(world, &project)?;
+    Ok(())
+}
+
+struct AtelierLayout {
+    member_repo_a: PathBuf,
+    member_repo_b: PathBuf,
+    fork_worktree: PathBuf,
+}
+
+fn add_normal_repo_to_showcase(world: &mut ScenarioWorld) -> Result<PathBuf> {
+    let repo = world.init_repo(
+        "repos/project",
+        Some("git@github.com:conspectus/project.git"),
+    )?;
+    git(&repo, &["checkout", "-b", "feature/extra"])?;
+    fs::write(repo.join("notes.md"), "feature work\n")?;
+    git(&repo, &["add", "notes.md"])?;
+    git(&repo, &["commit", "-m", "feature notes"])?;
+    git(&repo, &["checkout", "main"])?;
+    // The forge adapter scans each `DiscoveryContext` root for a git
+    // repo with a remote, so add the project repo directly as a
+    // scan-root sibling so PRs resolve while the scenario root still
+    // catches the other workspaces.
+    world.scan_roots.push(repo.clone());
+    Ok(repo)
+}
+
+fn add_bare_repo_with_worktree_to_showcase(world: &mut ScenarioWorld) -> Result<PathBuf> {
+    let (_bare, worktree) = world.init_bare_repo_with_worktree(
+        "repos/bare-project.git",
+        "checkouts/bare-project",
+        "feature/bare",
+    )?;
+    Ok(worktree)
+}
+
+fn add_atelier_workspace_to_showcase(world: &mut ScenarioWorld) -> Result<AtelierLayout> {
+    // Atelier discovery looks for `atelier.toml` at the scan-root and
+    // resolves `repo.name` as `<workspace_root>/<name>`; place the
+    // member repos at top level under the scenario root so the
+    // join works.
+    let repo_a = world.init_repo("repo-a", None)?;
+    let repo_b = world.init_repo("repo-b", None)?;
+    world.write_atelier_config(&format!(
+        r#"
+[workspace]
+name = "atelier-demo"
+
+[[repos]]
+name = "repo-a"
+path = "{}"
+
+[[repos]]
+name = "repo-b"
+path = "{}"
+"#,
+        path_string(&repo_a),
+        path_string(&repo_b),
+    ))?;
+    world.write_fork_index(
+        r#"
+[[forks]]
+name = "alpha"
+created-epoch = 1
+mode = "worktree"
+root = ".atelier/forks/alpha"
+state = "isolated"
+
+[[forks.repos]]
+name = "repo-a"
+source = "repo-a"
+parent-worktree = "repo-a"
+fork-worktree = ".atelier/forks/alpha/repo-a"
+branch = "fork/alpha/repo-a"
+forked = true
+
+[[forks.harness]]
+key = "codex"
+source-session = "showcase-codex-parent"
+fork-session = "showcase-codex-child"
+capability = "native"
+"#,
+    )?;
+    let fork_worktree = world.mkdir(".atelier/forks/alpha/repo-a")?;
+    Ok(AtelierLayout {
+        member_repo_a: repo_a,
+        member_repo_b: repo_b,
+        fork_worktree,
+    })
+}
+
+fn add_agent_deck_workspace_to_showcase(
+    world: &mut ScenarioWorld,
+    project: &Path,
+    atelier_repo: &Path,
+) -> Result<()> {
+    world.add_agent_deck_workspace(
+        "showcase-deck-c0debeef",
+        "showcase-deck",
+        &[("project", project), ("atelier-repo-a", atelier_repo)],
+    )?;
+    Ok(())
+}
+
+fn add_agent_sessions_to_showcase(
+    world: &mut ScenarioWorld,
+    project: &Path,
+    bare_worktree: &Path,
+    atelier: &AtelierLayout,
+) -> Result<()> {
+    // claude-code session in the normal project repo.
+    world.write_claude_code_session("showcase-claude", project)?;
+    // codex parent → child lineage chain (ADR 0018). Parent lives
+    // in the atelier member repo, child is the fork worktree per
+    // the fork index above.
+    world.harness.write_codex_session(
+        &CodexSessionRecord::new("showcase-codex-parent")
+            .with_cwd(path_string(&atelier.member_repo_a))
+            .with_timestamp("2026-01-02T03:04:05Z"),
+    )?;
+    world.harness.write_codex_session(
+        &CodexSessionRecord::new("showcase-codex-child")
+            .with_cwd(path_string(&atelier.fork_worktree))
+            .with_timestamp("2026-01-02T04:05:06Z")
+            .with_forked_from("showcase-codex-parent"),
+    )?;
+    // codex session in the bare repo's worktree.
+    world.write_codex_session("showcase-bare-codex", bare_worktree)?;
+    // opencode session inside the second atelier member.
+    world.write_opencode_session(
+        "showcase-opencode",
+        &atelier.member_repo_b,
+        "Showcase opencode",
+        1_700_000_000_000,
+    )?;
+    // aider state in the same member repo.
+    world.write_aider_state(&atelier.member_repo_b)?;
+    // Orphan session: cwd resolves to no checkout.
+    let orphan_dir = world.mkdir("orphan")?;
+    world.write_codex_session("showcase-orphan", &orphan_dir)?;
+    Ok(())
+}
+
+fn add_mux_layout_to_showcase(
+    world: &mut ScenarioWorld,
+    project: &Path,
+    bare_worktree: &Path,
+) -> Result<()> {
+    // Attached mux for the claude-code session in `project`.
+    world.add_tmux_row(
+        TmuxReplayRow::new("project")
+            .with_cwd(project)
+            .with_activity(1_700_000_600)
+            .with_active_pane("claude", 1101, project, "claude --resume showcase-claude"),
+    );
+    // Mux that two harness sessions could plausibly attach to —
+    // ambiguous candidate set.
+    world.add_tmux_row(
+        TmuxReplayRow::new("ambiguous")
+            .with_cwd(project)
+            .with_activity(1_700_000_550)
+            .with_active_pane("claude", 1102, project, "claude"),
+    );
+    world.write_claude_code_session("showcase-claude-ambig-a", project)?;
+    world.write_claude_code_session("showcase-claude-ambig-b", project)?;
+    // Mux for the bare-repo worktree with fd evidence so the
+    // resolver picks the fresh session over the stale launch
+    // argv (mirrors the codex-fd-current scenario).
+    let bare_transcript = world
+        .harness
+        .codex_state_root()
+        .join("sessions")
+        .join("rollout-showcase-bare-codex.jsonl");
+    world.add_tmux_row(
+        TmuxReplayRow::new("bare-work")
+            .with_cwd(bare_worktree)
+            .with_activity(1_700_000_580)
+            .with_active_pane(
+                "codex",
+                1103,
+                bare_worktree,
+                "codex resume an-older-session-id",
+            ),
+    );
+    world.add_fd_paths(1103, [path_string(&bare_transcript)]);
+    Ok(())
+}
+
+fn add_forge_prs_to_showcase(world: &mut ScenarioWorld, _project: &Path) -> Result<()> {
+    world.gh_pull_requests = Some(
+        r#"[
+{"number":7,"state":"OPEN","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-03-05T12:34:56Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":false},
+{"number":8,"state":"OPEN","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-03-06T12:34:56Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
+]"#
+        .to_string(),
+    );
+    Ok(())
+}
+
+fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) -> Result<()> {
+    // Hook record showing the fresh "current" session winning over
+    // any stale launch-time argv pointing at an older session id —
+    // mirrors the hook-supersession scenario shape.
+    world.write_claude_code_session("showcase-hook-current", project)?;
+    world.write_hook_record(HookRecord {
+        schema_version: SCHEMA_VERSION,
+        harness_key: "claude-code".to_string(),
+        session_key: "showcase-hook-current".to_string(),
+        cwd: Some(path_string(project)),
+        pid: Some(1101),
+        ppid: Some(1100),
+        tmux: Some(HookTmuxRecord {
+            session_name: Some("project".to_string()),
+            native_id: None,
+            pane_id: Some("%1".to_string()),
+            socket_path: None,
+        }),
+        transcript_path: None,
+        hook_event_name: Some("SessionStart".to_string()),
+        observed_epoch: 1_700_000_620,
+        harness_version: Some("1.0.0".to_string()),
+    })?;
     Ok(())
 }
 
