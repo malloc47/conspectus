@@ -161,7 +161,7 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781607600
     },
     {
       "type": "agent_session",
@@ -172,7 +172,7 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781611140
     },
     {
       "type": "agent_session",
@@ -183,7 +183,18 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781611140
+    },
+    {
+      "type": "agent_session",
+      "id": {
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "harness_key": "claude-code",
+      "cwd": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef",
+      "last_active_epoch": 1781611140
     },
     {
       "type": "agent_session",
@@ -194,7 +205,7 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781611140
     },
     {
       "type": "agent_session",
@@ -205,7 +216,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/checkouts/bare-project",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781568000
     },
     {
       "type": "agent_session",
@@ -216,7 +227,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/.atelier/forks/alpha/repo-a",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781438400
     },
     {
       "type": "agent_session",
@@ -227,7 +238,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/repo-a",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781352000
     },
     {
       "type": "agent_session",
@@ -238,7 +249,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/orphan",
-      "last_active_epoch": 1781656185
+      "last_active_epoch": 1781006400
     },
     {
       "type": "agent_session",
@@ -250,7 +261,7 @@
       "harness_key": "opencode",
       "cwd": "/fixture/repo-b",
       "title": "Showcase opencode",
-      "last_active_epoch": 1700000001
+      "last_active_epoch": 1781600400
     },
     {
       "type": "mux_session",
@@ -264,7 +275,7 @@
       "active_pane_pid": 1102,
       "active_pane_current_path": "/fixture/repos/project",
       "active_pane_start_command": "claude",
-      "activity_epoch": 1700000550
+      "activity_epoch": 1781610300
     },
     {
       "type": "mux_session",
@@ -278,7 +289,7 @@
       "active_pane_pid": 1103,
       "active_pane_current_path": "/fixture/checkouts/bare-project",
       "active_pane_start_command": "codex resume an-older-session-id",
-      "activity_epoch": 1700000580
+      "activity_epoch": 1781604000
     },
     {
       "type": "mux_session",
@@ -292,7 +303,21 @@
       "active_pane_pid": 1101,
       "active_pane_current_path": "/fixture/repos/project",
       "active_pane_start_command": "claude --resume showcase-claude",
-      "activity_epoch": 1700000600
+      "activity_epoch": 1781610900
+    },
+    {
+      "type": "mux_session",
+      "id": {
+        "native_id": "tmux:showcase-deck"
+      },
+      "backend": "tmux",
+      "native_id": "showcase-deck",
+      "cwd": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef",
+      "active_pane_command": "claude",
+      "active_pane_pid": 1104,
+      "active_pane_current_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef",
+      "active_pane_start_command": "claude --resume showcase-deck-launcher",
+      "activity_epoch": 1781609400
     },
     {
       "type": "branch",
@@ -394,7 +419,7 @@
       "number": 7,
       "state": "open",
       "url": "https://github.com/conspectus/project/pull/7",
-      "updated_epoch": 1772714096
+      "updated_epoch": 1781362800
     },
     {
       "type": "forge_pr",
@@ -412,13 +437,13 @@
       "number": 8,
       "state": "open",
       "url": "https://github.com/conspectus/project/pull/8",
-      "updated_epoch": 1772800496,
+      "updated_epoch": 1781436600,
       "is_draft": true
     }
   ],
   "candidate_links": [
     {
-      "id": "agent_deck:workspace:/fixture/repo-a/.git",
+      "id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repo-a/.git",
       "source": {
         "type": "workspace",
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
@@ -448,7 +473,7 @@
       }
     },
     {
-      "id": "agent_deck:workspace:/fixture/repos/project/.git",
+      "id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repos/project/.git",
       "source": {
         "type": "workspace",
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
@@ -734,7 +759,7 @@
       }
     },
     {
-      "id": "atelier:workspace:/fixture/repo-a/.git:repo-a",
+      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
       "source": {
         "type": "workspace",
         "root": "/fixture"
@@ -766,7 +791,7 @@
       }
     },
     {
-      "id": "atelier:workspace:/fixture/repo-b/.git:repo-b",
+      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b",
       "source": {
         "type": "workspace",
         "root": "/fixture"
@@ -832,7 +857,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -865,7 +890,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -918,7 +943,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000550
+          "mux_activity_epoch": 1781610300
         }
       },
       "state": {
@@ -949,7 +974,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000600
+          "mux_activity_epoch": 1781610900
         }
       },
       "state": {
@@ -957,7 +982,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -990,7 +1015,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -1043,7 +1068,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000550
+          "mux_activity_epoch": 1781610300
         }
       },
       "state": {
@@ -1074,7 +1099,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000600
+          "mux_activity_epoch": 1781610900
         }
       },
       "state": {
@@ -1082,7 +1107,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -1115,7 +1140,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -1168,7 +1193,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000550
+          "mux_activity_epoch": 1781610300
         }
       },
       "state": {
@@ -1199,7 +1224,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000600
+          "mux_activity_epoch": 1781610900
         }
       },
       "state": {
@@ -1207,7 +1232,98 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:associated_with:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:cwd_within_workspace",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
+        }
+      },
+      "relation": "associated_with",
+      "provenance": "discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "session cwd within workspace member",
+        "fields": {
+          "workspace_member_root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:associated_with:workspace:/fixture:cwd_within_workspace",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "workspace",
+          "root": "/fixture"
+        }
+      },
+      "relation": "associated_with",
+      "provenance": "discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "session cwd within workspace member",
+        "fields": {
+          "workspace_member_root": "/fixture"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:linked_to_mux:mux_session:tmux:showcase-deck:exact_cwd_match",
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:showcase-deck"
+        }
+      },
+      "relation": "linked_to_mux",
+      "provenance": "strong_discovered",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "cross_link",
+        "evidence": "exact_cwd_match",
+        "fields": {
+          "match_kind": "exact_cwd_match",
+          "mux_activity_epoch": 1781609400
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -1240,7 +1356,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -1293,7 +1409,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000550
+          "mux_activity_epoch": 1781610300
         }
       },
       "state": {
@@ -1324,7 +1440,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000600
+          "mux_activity_epoch": 1781610900
         }
       },
       "state": {
@@ -1332,7 +1448,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/checkouts/bare-project:cwd_within_checkout",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1365,7 +1481,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1418,7 +1534,7 @@
         "evidence": "exact_cwd_match",
         "fields": {
           "match_kind": "exact_cwd_match",
-          "mux_activity_epoch": 1700000580
+          "mux_activity_epoch": 1781604000
         }
       },
       "state": {
@@ -1456,7 +1572,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-child:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1486,7 +1602,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/repo-a:cwd_within_checkout",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1519,7 +1635,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1549,7 +1665,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-orphan:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1579,7 +1695,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:opencode:/fixture/repo-b:cwd_within_checkout",
+      "id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "opencode",
@@ -1612,7 +1728,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:opencode:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:workspace:/fixture:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "opencode",
@@ -1642,7 +1758,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-a/.git",
+      "id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1670,7 +1786,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-a/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1701,7 +1817,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-b/.git",
+      "id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:belongs_to_repo:repo:/fixture/repo-b/.git",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1729,7 +1845,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-b/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:checked_out_branch:branch:repo:/fixture/repo-b/.git@refs/heads/main",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1760,7 +1876,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repos/bare-project.git",
+      "id": "git:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:belongs_to_repo:repo:/fixture/repos/bare-project.git",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1788,7 +1904,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repos/bare-project.git@refs/heads/feature/bare",
+      "id": "git:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:checked_out_branch:branch:repo:/fixture/repos/bare-project.git@refs/heads/feature/bare",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1819,7 +1935,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repos/project/.git",
+      "id": "git:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:belongs_to_repo:repo:/fixture/repos/project/.git",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1847,7 +1963,7 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repos/project/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:checked_out_branch:branch:repo:/fixture/repos/project/.git@refs/heads/main",
       "source": {
         "type": "checkout",
         "repo": {
@@ -1908,7 +2024,7 @@
           "head_ref": "feature/extra",
           "is_draft": false,
           "state": "open",
-          "updated_epoch": 1772714096
+          "updated_epoch": 1781362800
         }
       },
       "state": {
@@ -1946,7 +2062,7 @@
           "head_ref": "main",
           "is_draft": true,
           "state": "open",
-          "updated_epoch": 1772800496
+          "updated_epoch": 1781436600
         }
       },
       "state": {
@@ -1954,7 +2070,7 @@
       }
     },
     {
-      "id": "hook_sidecar:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:linked_to_mux:mux_session:tmux:project:1700000620",
+      "id": "hook_sidecar:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:linked_to_mux:mux_session:tmux:project:1781611080",
       "source": {
         "type": "agent_session",
         "harness_key": "claude-code",
@@ -1979,7 +2095,7 @@
           "harness_version": "1.0.0",
           "hook_event_name": "SessionStart",
           "match_kind": "hook_session_match",
-          "observed_epoch": 1700000620,
+          "observed_epoch": 1781611080,
           "tmux": {
             "pane_id": "%1",
             "session_name": "project"
@@ -2006,7 +2122,7 @@
         "common_dir": "/fixture/repo-a/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git"
     },
     {
       "source": {
@@ -2024,7 +2140,7 @@
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main"
     },
     {
       "source": {
@@ -2039,7 +2155,7 @@
         "common_dir": "/fixture/repo-b/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-b/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:belongs_to_repo:repo:/fixture/repo-b/.git"
     },
     {
       "source": {
@@ -2057,7 +2173,7 @@
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-b/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:checked_out_branch:branch:repo:/fixture/repo-b/.git@refs/heads/main"
     },
     {
       "source": {
@@ -2072,7 +2188,7 @@
         "common_dir": "/fixture/repos/bare-project.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:checkout:repo:/fixture/repos/bare-project.git"
+      "selected_link_id": "git:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:belongs_to_repo:repo:/fixture/repos/bare-project.git"
     },
     {
       "source": {
@@ -2090,7 +2206,7 @@
         "refname": "refs/heads/feature/bare"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:checkout:repo:/fixture/repos/bare-project.git@refs/heads/feature/bare"
+      "selected_link_id": "git:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:checked_out_branch:branch:repo:/fixture/repos/bare-project.git@refs/heads/feature/bare"
     },
     {
       "source": {
@@ -2105,7 +2221,7 @@
         "common_dir": "/fixture/repos/project/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:checkout:repo:/fixture/repos/project/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:belongs_to_repo:repo:/fixture/repos/project/.git"
     },
     {
       "source": {
@@ -2123,7 +2239,7 @@
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:checkout:repo:/fixture/repos/project/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:checked_out_branch:branch:repo:/fixture/repos/project/.git@refs/heads/main"
     },
     {
       "source": {
@@ -2135,7 +2251,7 @@
         "common_dir": "/fixture/repo-a/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "atelier:workspace:/fixture/repo-a/.git:repo-a"
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a"
     },
     {
       "source": {
@@ -2147,7 +2263,7 @@
         "common_dir": "/fixture/repo-b/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "atelier:workspace:/fixture/repo-b/.git:repo-b"
+      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b"
     },
     {
       "source": {
@@ -2159,7 +2275,7 @@
         "common_dir": "/fixture/repo-a/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "agent_deck:workspace:/fixture/repo-a/.git"
+      "selected_link_id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repo-a/.git"
     },
     {
       "source": {
@@ -2171,7 +2287,7 @@
         "common_dir": "/fixture/repos/project/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "agent_deck:workspace:/fixture/repos/project/.git"
+      "selected_link_id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repos/project/.git"
     },
     {
       "source": {
@@ -2188,7 +2304,7 @@
         "root": "/fixture/repos/project"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
     },
     {
       "source": {
@@ -2202,7 +2318,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2219,7 +2335,7 @@
         "root": "/fixture/repos/project"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
     },
     {
       "source": {
@@ -2233,7 +2349,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2250,7 +2366,7 @@
         "root": "/fixture/repos/project"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
     },
     {
       "source": {
@@ -2264,7 +2380,49 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:workspace:/fixture:cwd_within_workspace"
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "relation": "associated_with",
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:associated_with:workspace:/fixture:cwd_within_workspace"
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "target": {
+        "type": "workspace",
+        "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
+      },
+      "relation": "associated_with",
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:associated_with:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:cwd_within_workspace"
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-deck-launcher"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:showcase-deck"
+      },
+      "relation": "linked_to_mux",
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:linked_to_mux:mux_session:tmux:showcase-deck:exact_cwd_match"
     },
     {
       "source": {
@@ -2281,7 +2439,7 @@
         "root": "/fixture/repos/project"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/repos/project:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
     },
     {
       "source": {
@@ -2295,7 +2453,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2312,7 +2470,7 @@
         "root": "/fixture/checkouts/bare-project"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/checkouts/bare-project:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:cwd_within_checkout"
     },
     {
       "source": {
@@ -2326,7 +2484,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2354,7 +2512,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-child:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2401,7 +2559,7 @@
         "root": "/fixture/repo-a"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/repo-a:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:cwd_within_checkout"
     },
     {
       "source": {
@@ -2415,7 +2573,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2429,7 +2587,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-orphan:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2446,7 +2604,7 @@
         "root": "/fixture/repo-b"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:opencode:/fixture/repo-b:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:cwd_within_checkout"
     },
     {
       "source": {
@@ -2460,7 +2618,7 @@
         "root": "/fixture"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:opencode:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {

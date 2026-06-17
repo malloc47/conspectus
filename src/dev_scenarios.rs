@@ -759,6 +759,15 @@ root = ".atelier/forks/beta"
     Ok(())
 }
 
+/// Reference "now" the showcase's session/mux/PR timestamps are
+/// anchored against (ADR 0070). Picked close to the showcase's
+/// authoring date so sessions look recent when the checked-in
+/// fixture is opened. When the showcase starts feeling stale (e.g.
+/// every PR is "6 months ago"), bump this constant and re-run
+/// `just regen-showcase-fixture` so the fresh JSON lands in one
+/// commit.
+const SHOWCASE_NOW_EPOCH: i64 = 1_781_611_200; // 2026-06-16T13:00:00Z (approx)
+
 /// Comprehensive showcase scenario (ADR 0070). Built from modular
 /// `add_*_to_showcase` helpers so a future edge case is one new
 /// helper plus one call here.
@@ -766,9 +775,9 @@ fn build_showcase(world: &mut ScenarioWorld) -> Result<()> {
     let project = add_normal_repo_to_showcase(world)?;
     let worktree = add_bare_repo_with_worktree_to_showcase(world)?;
     let atelier = add_atelier_workspace_to_showcase(world)?;
-    add_agent_deck_workspace_to_showcase(world, &project, &atelier.member_repo_a)?;
-    add_agent_sessions_to_showcase(world, &project, &worktree, &atelier)?;
-    add_mux_layout_to_showcase(world, &project, &worktree)?;
+    let deck_dir = add_agent_deck_workspace_to_showcase(world, &project, &atelier.member_repo_a)?;
+    add_agent_sessions_to_showcase(world, &project, &worktree, &atelier, &deck_dir)?;
+    add_mux_layout_to_showcase(world, &project, &worktree, &deck_dir)?;
     add_forge_prs_to_showcase(world, &project)?;
     add_hook_supersession_to_showcase(world, &project)?;
     Ok(())
@@ -866,13 +875,12 @@ fn add_agent_deck_workspace_to_showcase(
     world: &mut ScenarioWorld,
     project: &Path,
     atelier_repo: &Path,
-) -> Result<()> {
+) -> Result<PathBuf> {
     world.add_agent_deck_workspace(
         "showcase-deck-c0debeef",
         "showcase-deck",
         &[("project", project), ("atelier-repo-a", atelier_repo)],
-    )?;
-    Ok(())
+    )
 }
 
 fn add_agent_sessions_to_showcase(
@@ -880,37 +888,59 @@ fn add_agent_sessions_to_showcase(
     project: &Path,
     bare_worktree: &Path,
     atelier: &AtelierLayout,
+    deck_dir: &Path,
 ) -> Result<()> {
-    // claude-code session in the normal project repo.
-    world.write_claude_code_session("showcase-claude", project)?;
+    // claude-code session in the normal project repo (1 hour ago).
+    world.harness.write_claude_code_session(
+        &ClaudeCodeSessionRecord::new("showcase-claude", path_string(project))
+            .with_timestamp("2026-06-14T15:00:00Z"),
+    )?;
+    // claude-code session whose cwd is the agent-deck composite
+    // directory itself — same shape as agent-deck's
+    // multi-repo-worktrees launch (cwd at the composite dir, no
+    // checkout) so the agent-deck workspace appears in the
+    // Sessions / Graph view alongside atelier.
+    world.harness.write_claude_code_session(
+        &ClaudeCodeSessionRecord::new("showcase-deck-launcher", path_string(deck_dir))
+            .with_timestamp("2026-06-14T15:30:00Z"),
+    )?;
     // codex parent → child lineage chain (ADR 0018). Parent lives
     // in the atelier member repo, child is the fork worktree per
-    // the fork index above.
+    // the fork index above. Spread across two days.
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-codex-parent")
             .with_cwd(path_string(&atelier.member_repo_a))
-            .with_timestamp("2026-01-02T03:04:05Z"),
+            .with_timestamp("2026-06-12T10:00:00Z"),
     )?;
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-codex-child")
             .with_cwd(path_string(&atelier.fork_worktree))
-            .with_timestamp("2026-01-02T04:05:06Z")
+            .with_timestamp("2026-06-13T11:00:00Z")
             .with_forked_from("showcase-codex-parent"),
     )?;
-    // codex session in the bare repo's worktree.
-    world.write_codex_session("showcase-bare-codex", bare_worktree)?;
-    // opencode session inside the second atelier member.
+    // codex session in the bare repo's worktree (yesterday).
+    world.harness.write_codex_session(
+        &CodexSessionRecord::new("showcase-bare-codex")
+            .with_cwd(path_string(bare_worktree))
+            .with_timestamp("2026-06-13T14:30:00Z"),
+    )?;
+    // opencode session inside the second atelier member (3 hours
+    // ago). epoch_ms is the field opencode's adapter consumes.
     world.write_opencode_session(
         "showcase-opencode",
         &atelier.member_repo_b,
         "Showcase opencode",
-        1_700_000_000_000,
+        (SHOWCASE_NOW_EPOCH - 3 * 3600) * 1_000,
     )?;
     // aider state in the same member repo.
     world.write_aider_state(&atelier.member_repo_b)?;
-    // Orphan session: cwd resolves to no checkout.
+    // Orphan session: cwd resolves to no checkout (a week ago).
     let orphan_dir = world.mkdir("orphan")?;
-    world.write_codex_session("showcase-orphan", &orphan_dir)?;
+    world.harness.write_codex_session(
+        &CodexSessionRecord::new("showcase-orphan")
+            .with_cwd(path_string(&orphan_dir))
+            .with_timestamp("2026-06-08T09:00:00Z"),
+    )?;
     Ok(())
 }
 
@@ -918,27 +948,34 @@ fn add_mux_layout_to_showcase(
     world: &mut ScenarioWorld,
     project: &Path,
     bare_worktree: &Path,
+    deck_dir: &Path,
 ) -> Result<()> {
-    // Attached mux for the claude-code session in `project`.
+    // Attached mux for the claude-code session in `project` (5 min ago).
     world.add_tmux_row(
         TmuxReplayRow::new("project")
             .with_cwd(project)
-            .with_activity(1_700_000_600)
+            .with_activity(SHOWCASE_NOW_EPOCH - 5 * 60)
             .with_active_pane("claude", 1101, project, "claude --resume showcase-claude"),
     );
     // Mux that two harness sessions could plausibly attach to —
-    // ambiguous candidate set.
+    // ambiguous candidate set (15 min ago).
     world.add_tmux_row(
         TmuxReplayRow::new("ambiguous")
             .with_cwd(project)
-            .with_activity(1_700_000_550)
+            .with_activity(SHOWCASE_NOW_EPOCH - 15 * 60)
             .with_active_pane("claude", 1102, project, "claude"),
     );
-    world.write_claude_code_session("showcase-claude-ambig-a", project)?;
-    world.write_claude_code_session("showcase-claude-ambig-b", project)?;
+    world.harness.write_claude_code_session(
+        &ClaudeCodeSessionRecord::new("showcase-claude-ambig-a", path_string(project))
+            .with_timestamp("2026-06-14T15:40:00Z"),
+    )?;
+    world.harness.write_claude_code_session(
+        &ClaudeCodeSessionRecord::new("showcase-claude-ambig-b", path_string(project))
+            .with_timestamp("2026-06-14T15:42:00Z"),
+    )?;
     // Mux for the bare-repo worktree with fd evidence so the
     // resolver picks the fresh session over the stale launch
-    // argv (mirrors the codex-fd-current scenario).
+    // argv (mirrors the codex-fd-current scenario, 2 hours ago).
     let bare_transcript = world
         .harness
         .codex_state_root()
@@ -947,7 +984,7 @@ fn add_mux_layout_to_showcase(
     world.add_tmux_row(
         TmuxReplayRow::new("bare-work")
             .with_cwd(bare_worktree)
-            .with_activity(1_700_000_580)
+            .with_activity(SHOWCASE_NOW_EPOCH - 2 * 3600)
             .with_active_pane(
                 "codex",
                 1103,
@@ -956,14 +993,29 @@ fn add_mux_layout_to_showcase(
             ),
     );
     world.add_fd_paths(1103, [path_string(&bare_transcript)]);
+    // Agent-deck-style mux launched from the workspace composite
+    // dir (30 min ago).
+    world.add_tmux_row(
+        TmuxReplayRow::new("showcase-deck")
+            .with_cwd(deck_dir)
+            .with_activity(SHOWCASE_NOW_EPOCH - 30 * 60)
+            .with_active_pane(
+                "claude",
+                1104,
+                deck_dir,
+                "claude --resume showcase-deck-launcher",
+            ),
+    );
     Ok(())
 }
 
 fn add_forge_prs_to_showcase(world: &mut ScenarioWorld, _project: &Path) -> Result<()> {
+    // Two PRs anchored a few days before SHOWCASE_NOW_EPOCH so they
+    // read as recent activity in the rendered TUI.
     world.gh_pull_requests = Some(
         r#"[
-{"number":7,"state":"OPEN","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-03-05T12:34:56Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":false},
-{"number":8,"state":"OPEN","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-03-06T12:34:56Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
+{"number":7,"state":"OPEN","url":"https://github.com/conspectus/project/pull/7","headRefName":"feature/extra","baseRefName":"main","updatedAt":"2026-06-13T15:00:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":false},
+{"number":8,"state":"OPEN","url":"https://github.com/conspectus/project/pull/8","headRefName":"main","baseRefName":"main","updatedAt":"2026-06-14T11:30:00Z","headRepositoryOwner":{"login":"conspectus"},"headRepository":{"name":"project"},"isDraft":true}
 ]"#
         .to_string(),
     );
@@ -973,8 +1025,12 @@ fn add_forge_prs_to_showcase(world: &mut ScenarioWorld, _project: &Path) -> Resu
 fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) -> Result<()> {
     // Hook record showing the fresh "current" session winning over
     // any stale launch-time argv pointing at an older session id —
-    // mirrors the hook-supersession scenario shape.
-    world.write_claude_code_session("showcase-hook-current", project)?;
+    // mirrors the hook-supersession scenario shape, anchored a few
+    // minutes ago.
+    world.harness.write_claude_code_session(
+        &ClaudeCodeSessionRecord::new("showcase-hook-current", path_string(project))
+            .with_timestamp("2026-06-14T15:55:00Z"),
+    )?;
     world.write_hook_record(HookRecord {
         schema_version: SCHEMA_VERSION,
         harness_key: "claude-code".to_string(),
@@ -990,7 +1046,7 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
         }),
         transcript_path: None,
         hook_event_name: Some("SessionStart".to_string()),
-        observed_epoch: 1_700_000_620,
+        observed_epoch: SHOWCASE_NOW_EPOCH - 2 * 60,
         harness_version: Some("1.0.0".to_string()),
     })?;
     Ok(())
