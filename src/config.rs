@@ -18,6 +18,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+use crate::tui::icons::parse_icon_override;
 use crate::tui::theme::{Theme, ThemeKeyKind, parse_color, parse_modifier, parse_style_spec};
 use crate::tui::{Grouping, View};
 
@@ -566,6 +567,10 @@ fn merge_tui_theme(
         .collect();
 
     for (key, value) in overrides {
+        if key == "icons" {
+            merge_tui_theme_icons(theme, value, path, diagnostics);
+            continue;
+        }
         let Some(&kind) = known.get(key.as_str()) else {
             diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
@@ -614,6 +619,49 @@ fn merge_tui_theme(
                     message: format!("`[tui.theme].{key}`: {err}"),
                 }),
             },
+        }
+    }
+}
+
+/// Apply `[tui.theme.icons]` overrides to `theme.icons` (ADR 0073).
+/// Non-table values, unknown keys, non-string values, and glyphs
+/// whose display width is not 1 each produce a `ConfigDiagnostic`
+/// and leave the corresponding kind on its default glyph.
+fn merge_tui_theme_icons(
+    theme: &mut Theme,
+    value: toml::Value,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(table) = value.as_table() else {
+        diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: format!(
+                "`[tui.theme.icons]` must be a table (got `{}`)",
+                value.type_str()
+            ),
+        });
+        return;
+    };
+    for (key, value) in table {
+        let Some(raw) = value.as_str() else {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "`[tui.theme.icons].{key}` must be a string (got `{}`)",
+                    value.type_str()
+                ),
+            });
+            continue;
+        };
+        match parse_icon_override(key, raw) {
+            Ok((kind, glyph)) => {
+                theme.icons.insert(kind, glyph);
+            }
+            Err(err) => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: err,
+            }),
         }
     }
 }
@@ -1429,6 +1477,91 @@ mod tests {
 
         assert_eq!(outcome.diagnostics.len(), 1);
         assert!(outcome.diagnostics[0].message.contains("must be a string"));
+    }
+
+    #[test]
+    fn tui_theme_icons_overrides_glyph_per_node_kind() {
+        use crate::tui::icons::NodeKind;
+
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme.icons]\nnode_fork = \"Y\"\nnode_repo = \"R\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "no diagnostics expected, got {:?}",
+            outcome.diagnostics
+        );
+        let icons = &outcome.config.tui.theme.icons;
+        assert_eq!(icons.glyph(NodeKind::Fork).as_deref(), Some("Y"));
+        assert_eq!(icons.glyph(NodeKind::Repo).as_deref(), Some("R"));
+        assert!(
+            icons.glyph(NodeKind::Workspace).is_none(),
+            "untouched kinds fall through to the default slate"
+        );
+    }
+
+    #[test]
+    fn tui_theme_icons_rejects_wide_glyph_with_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        // CJK ideograph is unambiguously East Asian Wide (2 cells).
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme.icons]\nnode_workspace = \"中\"\nnode_fork = \"Y\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0].message.contains("display width"),
+            "expected width diagnostic, got: {}",
+            outcome.diagnostics[0].message
+        );
+        // Sibling valid override still applies.
+        assert_eq!(
+            outcome
+                .config
+                .tui
+                .theme
+                .icons
+                .glyph(crate::tui::icons::NodeKind::Fork)
+                .as_deref(),
+            Some("Y"),
+        );
+    }
+
+    #[test]
+    fn tui_theme_icons_unknown_key_emits_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme.icons]\nworkspace_glyph = \"▦\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert!(
+            outcome.diagnostics[0]
+                .message
+                .contains("unknown `[tui.theme.icons]` key `workspace_glyph`"),
+            "got: {}",
+            outcome.diagnostics[0].message,
+        );
     }
 
     #[test]

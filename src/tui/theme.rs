@@ -15,6 +15,8 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+use crate::tui::icons::IconOverrides;
+
 /// Palette + modifier set for every styled surface in the TUI.
 ///
 /// Fields are grouped by purpose with a `Color` for foreground-only
@@ -79,6 +81,25 @@ pub struct Theme {
     /// Default is `REVERSED | BOLD` so the badge reads as a filled
     /// pill against any terminal theme.
     pub badge: Modifier,
+
+    // ---- per-node-kind identity (ADR 0073) ----------------------------------
+    /// Foreground color for the per-row node-kind glyph. One field
+    /// per `NodeKind` variant that owns a color; `ForgePr` does not
+    /// own one (its hue comes from `pr_*` based on PR state, see
+    /// ADR 0073 §2).
+    pub node_workspace: Color,
+    pub node_repo: Color,
+    pub node_checkout: Color,
+    pub node_agent_session: Color,
+    pub node_mux_session: Color,
+    pub node_runtime_process: Color,
+    pub node_branch: Color,
+    pub node_fork: Color,
+    /// Operator overrides for individual node-kind glyphs, parsed
+    /// from `[tui.theme.icons]`. Empty by default; lookups in
+    /// [`crate::tui::icons::node_kind_style`] fall through to the
+    /// ADR 0073 default slate when no override is present.
+    pub icons: IconOverrides,
 }
 
 /// Color + modifier pair. Used for theme fields where the operator
@@ -170,6 +191,16 @@ impl Default for Theme {
             pr_draft: Color::Yellow,
 
             badge: Modifier::REVERSED.union(Modifier::BOLD),
+
+            node_workspace: Color::LightBlue,
+            node_repo: Color::Blue,
+            node_checkout: Color::Cyan,
+            node_agent_session: Color::LightGreen,
+            node_mux_session: Color::Magenta,
+            node_runtime_process: Color::DarkGray,
+            node_branch: Color::Green,
+            node_fork: Color::LightMagenta,
+            icons: IconOverrides::default(),
         }
     }
 }
@@ -337,6 +368,38 @@ impl Theme {
                 name: "badge",
                 kind: Modifier,
             },
+            ThemeKey {
+                name: "node_workspace",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_repo",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_checkout",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_agent_session",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_mux_session",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_runtime_process",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_branch",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "node_fork",
+                kind: Color,
+            },
         ]
     }
 
@@ -364,6 +427,14 @@ impl Theme {
             "pr_closed" => self.pr_closed = color,
             "pr_merged" => self.pr_merged = color,
             "pr_draft" => self.pr_draft = color,
+            "node_workspace" => self.node_workspace = color,
+            "node_repo" => self.node_repo = color,
+            "node_checkout" => self.node_checkout = color,
+            "node_agent_session" => self.node_agent_session = color,
+            "node_mux_session" => self.node_mux_session = color,
+            "node_runtime_process" => self.node_runtime_process = color,
+            "node_branch" => self.node_branch = color,
+            "node_fork" => self.node_fork = color,
             _ => return false,
         }
         true
@@ -528,6 +599,23 @@ pub fn parse_style_spec(raw: &str) -> Result<StyleSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_node_kind_colors_match_adr_0073_slate() {
+        let theme = Theme::default();
+        assert_eq!(theme.node_workspace, Color::LightBlue);
+        assert_eq!(theme.node_repo, Color::Blue);
+        assert_eq!(theme.node_checkout, Color::Cyan);
+        assert_eq!(theme.node_agent_session, Color::LightGreen);
+        assert_eq!(theme.node_mux_session, Color::Magenta);
+        assert_eq!(theme.node_runtime_process, Color::DarkGray);
+        assert_eq!(theme.node_branch, Color::Green);
+        assert_eq!(theme.node_fork, Color::LightMagenta);
+        assert!(
+            theme.icons.is_empty(),
+            "default icon overrides should be empty so the geometric slate ships unchanged",
+        );
+    }
 
     #[test]
     fn default_preserves_inline_literals() {

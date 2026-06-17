@@ -9387,33 +9387,21 @@ surfaces all read from one definition.
     glyph-only legibility under `NO_COLOR`). `AgentSession` keeps
     an independent kind-color layered with the harness pill.
     Subsequent stories (`H-VIS-002..006`) implement the slate.
-- [ ] `H-VIS-002` Define the per-node-type glyph and color assignments.
-  - Scope: add `src/tui/icons.rs` (or extend `src/tui/theme.rs`) with
-    a public constant or `NodeKindStyle` struct per `GraphNode`
-    variant — a `&'static str` glyph and a color field — and a
-    `fn node_kind_style(kind: NodeKind) -> NodeKindStyle` lookup.
-    Extend `Theme` with per-node-type color fields (`node_repo`,
-    `node_checkout`, `node_workspace`, `node_branch`,
-    `node_runtime_process`, `node_fork`, `node_forge_pr`). Keep
-    harness colors on `AgentSession` for harness distinction and mux
-    colors on `MuxSession` for state; the new *node-kind* glyph and
-    color are *additional* identity markers (a prefix glyph at the row
-    start), not replacements for existing badges. Add a `NodeKind`
-    enum (or `from` conversion) so callers do not match on the full
-    `GraphNode` / `NodeId` enum everywhere. Design guidance
-    (assignments finalized by the ADR and locked in by snapshot
-    tests): prefer Unicode geometric shapes or Nerd Font symbols that
-    render at 1 cell wide on common terminals; avoid symbols that
-    collide with existing TUI glyphs (mux `◉` / `◐` / `◯`,
-    disclosure `▶` / `▼`, pin `📌`); when a node kind maps to an
-    emoji, keep the glyph to 1-2 cells and provide an ASCII fallback
-    glyph behind the theme icon key.
-  - Tests: unit tests for the complete `NodeKind` → glyph → color
-    lookup, `GraphNode` → `NodeKind` conversion, fallback for future
-    node variants, and `Theme::default()` coverage for the new color
-    fields. A catalog snapshot test that renders every kind + glyph +
-    color for visual review.
-  - Blockers: `H-VIS-001`.
+- [x] `H-VIS-002` Define the per-node-type glyph and color assignments.
+  - Outcome: `src/tui/icons.rs` ships the `NodeKind` enum with
+    `From<&GraphNode>` / `From<&NodeId>` conversions, the
+    `NodeKindStyle { glyph, color, width }` struct, and the
+    `node_kind_style(kind, theme)` lookup. `Theme` gains eight
+    `node_*` color fields (defaults from ADR 0073) plus an
+    `icons: IconOverrides` field for `[tui.theme.icons]` operator
+    overrides validated to 1-cell width by `parse_icon_override`.
+    `ForgePr` returns the documented `Color::Reset` sentinel — PR
+    rows pick from `theme.pr_*` based on state. Unit tests cover
+    the slate catalog, default-glyph widths, `NodeId` conversion,
+    operator overrides, and the config-loader path
+    (`[tui.theme.icons]` parsing + diagnostics for unknown keys,
+    non-string values, wide glyphs). `H-VIS-003` consumes these
+    primitives to apply the glyph prefix to row rendering.
 - [ ] `H-VIS-003` Apply node-kind glyphs and colors to the TUI row
   tree.
   - Scope: prepend the node-kind glyph (styled with the node-kind

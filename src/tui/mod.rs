@@ -28,6 +28,7 @@ mod app;
 pub mod clipboard;
 pub mod detail;
 pub mod explorer;
+pub mod icons;
 pub mod preview;
 pub mod resume;
 pub mod rows;
