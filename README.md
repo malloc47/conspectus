@@ -320,6 +320,20 @@ offers three complementary surfaces:
   just regen-showcase-fixture
   ```
 
+  Coverage at a glance:
+
+  | Layer | Count / contents |
+  |---|---|
+  | Workspaces | 2 (atelier + agent-deck, latter named via `state.db`) |
+  | Repos | 5 |
+  | Checkouts | 5 (incl. bare-repo linked worktree) |
+  | Branches | 7 (`main`, `feature/extra`, `feature/bare`, atelier branches…) |
+  | Agent sessions | 10 — claude-code × 5, codex × 4, opencode × 1 + aider state on disk |
+  | Mux sessions | 4 (project, ambiguous, bare-work with fd evidence, agent-deck composite) |
+  | Forks | 1 (atelier alpha) |
+  | Forge PRs | 2 (open + draft) |
+  | Resolved relationships | 40 across 13 distinct relation kinds incl. `parent_session` lineage |
+
 Together they cover programmatic, real-data, and curated paths.
 A new graph-build bug typically starts as a `ReplayWorld` test,
 gets a captured artifact under `tests/fixtures/` if a real
