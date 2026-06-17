@@ -1848,16 +1848,19 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     draw_detail_preview(app, detail, frame, split[2]);
 }
 
-/// Render the new graph-explorer Node + Upstream + Downstream
-/// layout for `state`. Cursor highlight uses REVERSED on the
-/// currently-selected flat row.
+/// Render the related-entities layout (ADR 0074). Validated rows
+/// (resolver winners) sit in a flat list under one `Related` chip
+/// divider; alternates, conflicts, and unresolved stubs collapse
+/// under a single `Other` header below the fold. Each row reads as
+/// `<verb-column 22w> <kind-glyph> <neighbor_label>`; direction
+/// flows from the verb, not from section placement.
 fn render_explorer_lines(
     state: &crate::tui::app::ExplorerState,
     width: usize,
     theme: &Theme,
     show_edge_meta: bool,
 ) -> Vec<Line<'static>> {
-    use crate::tui::explorer::{Direction as ExpDir, ExplorerRow};
+    use crate::tui::explorer::ExplorerRow;
     let mut lines: Vec<Line<'static>> = Vec::new();
     let rows = state.rows();
     let cursor = state.cursor;
@@ -1871,128 +1874,89 @@ fn render_explorer_lines(
         lines.push(render_node_field_line(field, highlight, theme));
     }
 
-    // ADR 0074 pass 1: groups now live in a single
-    // `view.relationships` list with per-group direction. The
-    // renderer still emits two sections (Upstream then Downstream)
-    // for snapshot stability; pass 3 collapses these into the
-    // validated / Other two-zone layout. The closure walks the
-    // combined list with stable `group_index` so cursor lookups
-    // remain accurate.
-    let groups = &view.relationships.groups;
-    let render_explorer_section = |lines: &mut Vec<Line<'static>>, direction: ExpDir| {
-        let section_indices: Vec<usize> = groups
-            .iter()
-            .enumerate()
-            .filter(|(_, g)| g.direction == direction)
-            .map(|(i, _)| i)
-            .collect();
-        if section_indices.is_empty() {
-            return;
+    if view.relationships.groups.is_empty() {
+        return lines;
+    }
+
+    let counts = view.relationship_counts();
+    let mut summary = format!("{} validated", counts.validated);
+    if counts.other > 0 {
+        summary.push_str(&format!(" · {} other", counts.other));
+        if counts.ambiguous > 0 {
+            summary.push_str(&format!(" · {} ⚠", counts.ambiguous));
         }
-        let section_groups: Vec<&crate::tui::explorer::RelationshipGroup> =
-            section_indices.iter().map(|&i| &groups[i]).collect();
-        let link_count: usize = section_groups.iter().map(|g| g.link_count()).sum();
-        let ambiguous_groups = section_groups.iter().filter(|g| g.ambiguous).count();
-        let unresolved_groups = section_groups
-            .iter()
-            .filter(|g| g.unresolved_count > 0)
-            .count();
-        let summary = format!(
-            "{} groups · {} links{}{}",
-            section_indices.len(),
-            link_count,
-            if ambiguous_groups > 0 {
-                format!(" · {} ⚠", ambiguous_groups)
-            } else {
-                String::new()
-            },
-            if unresolved_groups > 0 {
-                format!(" · {} —", unresolved_groups)
-            } else {
-                String::new()
-            },
-        );
-        lines.push(chip_divider_line(
-            direction.label(),
-            Some(&summary),
-            width,
-            theme,
-            ChipAnchor::Right,
-        ));
-        for &group_index in &section_indices {
-            let group = &groups[group_index];
-            let is_single = group.is_single();
-            if is_single {
-                if let Some(link) = group.links.first() {
-                    let flat = rows.iter().position(|row| {
-                        matches!(
-                            row,
-                            ExplorerRow::Link { direction: d, group_index: g, link_index: 0 }
-                                if *d == direction && *g == group_index,
-                        )
-                    });
-                    let highlight = flat == Some(cursor);
-                    lines.extend(render_single_link_composite(
+        if counts.unresolved > 0 {
+            summary.push_str(&format!(" · {} —", counts.unresolved));
+        }
+    }
+    lines.push(chip_divider_line(
+        "Related",
+        Some(&summary),
+        width,
+        theme,
+        ChipAnchor::Right,
+    ));
+
+    for (row_index, row) in rows.iter().enumerate() {
+        let highlight = row_index == cursor;
+        match row {
+            ExplorerRow::NodeField { .. } => {}
+            ExplorerRow::ValidatedLink {
+                group_index,
+                link_index,
+            } => {
+                if let Some(group) = view.relationships.groups.get(*group_index)
+                    && let Some(link) = group.links.get(*link_index)
+                {
+                    lines.push(render_validated_link_line(
                         group,
                         link,
                         highlight,
                         theme,
                         show_edge_meta,
                     ));
-                } else if let Some(row) = group.unresolved.first() {
-                    let flat = rows.iter().position(|r| matches!(
-                            r,
-                            ExplorerRow::Unresolved { direction: d, group_index: g, unresolved_index: 0 }
-                                if *d == direction && *g == group_index,
-                        ));
-                    let highlight = flat == Some(cursor);
-                    lines.extend(render_unresolved_composite(group, row, highlight, theme));
                 }
-            } else {
-                let header_flat = rows.iter().position(|row| {
-                    matches!(
-                        row,
-                        ExplorerRow::GroupHeader { direction: d, group_index: g, .. }
-                            if *d == direction && *g == group_index,
-                    )
-                });
-                let highlight = header_flat == Some(cursor);
-                let key = crate::tui::explorer::GroupKey::for_group(group);
-                let expanded = state.expanded_groups.contains(&key);
-                lines.push(render_group_header_line(group, expanded, highlight, theme));
-                if expanded {
-                    for (link_index, link) in group.links.iter().enumerate() {
-                        let flat = rows.iter().position(|r| {
-                            matches!(
-                                r,
-                                ExplorerRow::Link { direction: d, group_index: g, link_index: l }
-                                    if *d == direction && *g == group_index && *l == link_index,
-                            )
-                        });
-                        let highlight = flat == Some(cursor);
-                        lines.push(render_group_child_line(
-                            link,
-                            highlight,
-                            theme,
-                            show_edge_meta,
-                        ));
-                    }
-                    for (unresolved_index, row) in group.unresolved.iter().enumerate() {
-                        let flat = rows.iter().position(|r| matches!(
-                                r,
-                                ExplorerRow::Unresolved { direction: d, group_index: g, unresolved_index: u }
-                                    if *d == direction && *g == group_index && *u == unresolved_index,
-                            ));
-                        let highlight = flat == Some(cursor);
-                        lines.push(render_unresolved_child_line(row, highlight, theme));
-                    }
+            }
+            ExplorerRow::OtherHeader { expanded } => {
+                lines.push(render_other_header_line(
+                    *expanded,
+                    counts.other,
+                    counts.ambiguous,
+                    counts.unresolved,
+                    highlight,
+                    theme,
+                ));
+            }
+            ExplorerRow::OtherLink {
+                group_index,
+                link_index,
+            } => {
+                if let Some(group) = view.relationships.groups.get(*group_index)
+                    && let Some(link) = group.links.get(*link_index)
+                {
+                    lines.push(render_other_link_line(
+                        group,
+                        link,
+                        highlight,
+                        theme,
+                        show_edge_meta,
+                    ));
+                }
+            }
+            ExplorerRow::OtherUnresolved {
+                group_index,
+                unresolved_index,
+            } => {
+                if let Some(group) = view.relationships.groups.get(*group_index)
+                    && let Some(unresolved) = group.unresolved.get(*unresolved_index)
+                {
+                    lines.push(render_other_unresolved_line(
+                        group, unresolved, highlight, theme,
+                    ));
                 }
             }
         }
-    };
-
-    render_explorer_section(&mut lines, ExpDir::Upstream);
-    render_explorer_section(&mut lines, ExpDir::Downstream);
+    }
     lines
 }
 
@@ -2061,159 +2025,149 @@ fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
     Span::styled(style.glyph, Style::default().fg(color))
 }
 
-fn render_group_header_line(
+/// Width of the verb column in row lines (ADR 0074 §3 mockup). The
+/// verb takes the place section labels (`Upstream`, `Downstream`)
+/// used to hold; direction reads off the verb itself.
+const VERB_COLUMN_WIDTH: usize = 22;
+
+/// Render a validated zone row: `<verb 22w> <glyph> <neighbor_label>`
+/// (ADR 0074 §3). Per §6 the prior `★` resolver-winner marker is
+/// dropped here because every validated row is by definition a
+/// resolver winner.
+fn render_validated_link_line(
     group: &crate::tui::explorer::RelationshipGroup,
+    link: &crate::tui::explorer::RelationshipLink,
+    highlight: bool,
+    theme: &Theme,
+    show_edge_meta: bool,
+) -> Line<'static> {
+    render_related_row(
+        group,
+        link,
+        highlight,
+        theme,
+        show_edge_meta,
+        "  ",
+        Style::default()
+            .fg(theme.link_id)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+/// Render an Other-zone link row. Same shape as the validated row
+/// with a deeper indent so the operator can see the row belongs to
+/// the collapsed zone; the `★` marker survives here per ADR §6 so a
+/// would-be resolver-winner candidate stays visible while H-UI-005
+/// designs the long-term resolved-vs-candidate visual language.
+fn render_other_link_line(
+    group: &crate::tui::explorer::RelationshipGroup,
+    link: &crate::tui::explorer::RelationshipLink,
+    highlight: bool,
+    theme: &Theme,
+    show_edge_meta: bool,
+) -> Line<'static> {
+    let mut style = Style::default().fg(theme.link_id);
+    if link.resolved_winner {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    render_related_row(
+        group,
+        link,
+        highlight,
+        theme,
+        show_edge_meta,
+        "      ",
+        style,
+    )
+}
+
+fn render_related_row(
+    group: &crate::tui::explorer::RelationshipGroup,
+    link: &crate::tui::explorer::RelationshipLink,
+    highlight: bool,
+    theme: &Theme,
+    show_edge_meta: bool,
+    indent: &str,
+    label_style_base: Style,
+) -> Line<'static> {
+    let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
+    let verb_text = format!("{indent}{verb:<VERB_COLUMN_WIDTH$} ");
+    let mut row_style = Style::default();
+    let mut label_style = label_style_base;
+    if highlight {
+        row_style = row_style.add_modifier(Modifier::REVERSED);
+        label_style = label_style.add_modifier(Modifier::REVERSED);
+    }
+    let mut kind_chip = kind_chip_span(link.neighbor_kind, theme);
+    if highlight {
+        kind_chip.style = kind_chip.style.add_modifier(Modifier::REVERSED);
+    }
+    let star = if link.resolved_winner && indent.len() > 2 {
+        "  ★".to_string()
+    } else {
+        String::new()
+    };
+    let mut spans = vec![
+        Span::styled(verb_text, row_style),
+        kind_chip,
+        Span::raw(" "),
+        Span::styled(link.neighbor_label.clone(), label_style),
+    ];
+    if show_edge_meta {
+        let trailing = format!(
+            "  · {} · {} · {}{star}",
+            link.provenance.snake_case(),
+            link.confidence.snake_case(),
+            link.state.snake_case(),
+        );
+        spans.push(Span::styled(trailing, label_style));
+    } else if !star.is_empty() {
+        spans.push(Span::styled(star, label_style));
+    }
+    Line::from(spans)
+}
+
+/// `▶ Other (N · K ⚠ · L —)` / `▼ Other (N · K ⚠ · L —)` row that
+/// gates the alternates / conflicts / unresolved zone (ADR 0074 §3).
+fn render_other_header_line(
     expanded: bool,
+    other_count: usize,
+    ambiguous_count: usize,
+    unresolved_count: usize,
     highlight: bool,
     theme: &Theme,
 ) -> Line<'static> {
     let glyph = if expanded { "▼" } else { "▶" };
-    let count = group.link_count();
-    let warn_suffix = if group.ambiguous { " ⚠" } else { "" };
-    let mut style = Style::default();
+    let mut suffix = format!("({other_count}");
+    if ambiguous_count > 0 {
+        suffix.push_str(&format!(" · {ambiguous_count} ⚠"));
+    }
+    if unresolved_count > 0 {
+        suffix.push_str(&format!(" · {unresolved_count} —"));
+    }
+    suffix.push(')');
+    let text = format!("  {glyph} Other  {suffix}");
+    let mut style = Style::default()
+        .fg(theme.secondary_text)
+        .add_modifier(Modifier::BOLD);
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    let prefix = format!("  {glyph} {:<24} ", group.relation.snake_case());
-    let mut kind_chip = kind_chip_span(group.neighbor_kind.as_str(), theme);
-    // The prior text column was `{:<18}`; one cell of glyph + 17
-    // spaces preserves the count anchor so adjacent group rows stay
-    // column-aligned regardless of relation-name length.
-    let kind_pad = " ".repeat(17);
-    let suffix = format!("{kind_pad}{count}{warn_suffix}");
-    if highlight {
-        kind_chip.style = kind_chip.style.add_modifier(Modifier::REVERSED);
-    }
-    let mut spans = vec![
-        Span::styled(prefix, style),
-        kind_chip,
-        Span::styled(suffix, style),
-    ];
-    if group.ambiguous {
-        // Spacer; warn glyph already inline in the suffix.
-        spans.push(Span::styled(
-            String::new(),
-            Style::default().fg(theme.warning),
-        ));
-    }
-    Line::from(spans)
+    Line::from(Span::styled(text, style))
 }
 
-fn render_group_child_line(
-    link: &crate::tui::explorer::RelationshipLink,
-    highlight: bool,
-    theme: &Theme,
-    show_edge_meta: bool,
-) -> Line<'static> {
-    let star = if link.resolved_winner { "  ★" } else { "" };
-    let mut id_style = Style::default().fg(theme.link_id);
-    if highlight {
-        id_style = id_style.add_modifier(Modifier::REVERSED);
-    }
-    if link.resolved_winner {
-        id_style = id_style.add_modifier(Modifier::BOLD);
-    }
-    // T8-042: when edge meta is hidden, keep the resolver-winner
-    // `★` marker but drop the `· prov · conf · state` segment.
-    let trailing_text = if show_edge_meta {
-        format!(
-            "  ·  {} · {} · {}{star}",
-            link.provenance.snake_case(),
-            link.confidence.snake_case(),
-            link.state.snake_case(),
-        )
-    } else {
-        star.to_string()
-    };
-    let spans = vec![
-        Span::styled("      ".to_string(), Style::default()),
-        kind_chip_span(link.neighbor_kind, theme),
-        Span::raw(" "),
-        Span::styled(link.neighbor_label.clone(), id_style),
-        Span::styled(trailing_text, id_style),
-    ];
-    Line::from(spans)
-}
-
-fn render_single_link_composite(
-    group: &crate::tui::explorer::RelationshipGroup,
-    link: &crate::tui::explorer::RelationshipLink,
-    highlight: bool,
-    theme: &Theme,
-    show_edge_meta: bool,
-) -> Vec<Line<'static>> {
-    // Always render the neighbor label on a new indented row below
-    // the `relation [kind]` header. Paragraph wrapping would
-    // otherwise put short labels inline and long ones below, making
-    // the same composite visually inconsistent across rows.
-    let star = if link.resolved_winner { "  ★" } else { "" };
-    let mut label_style = Style::default().fg(theme.link_id);
-    if link.resolved_winner {
-        label_style = label_style.add_modifier(Modifier::BOLD);
-    }
-    if highlight {
-        label_style = label_style.add_modifier(Modifier::REVERSED);
-    }
-    let relation_text = format!("    {:<24} ", group.relation.snake_case());
-    let relation_spans = vec![
-        Span::styled(relation_text, Style::default()),
-        kind_chip_span(link.neighbor_kind, theme),
-    ];
-    let label_text = format!("        {}{star}", link.neighbor_label);
-    let label_line = Line::from(Span::styled(label_text, label_style));
-    if !show_edge_meta {
-        return vec![Line::from(relation_spans), label_line];
-    }
-    let trailing = format!(
-        "        {} · {} · {}",
-        link.provenance.snake_case(),
-        link.confidence.snake_case(),
-        link.state.snake_case(),
-    );
-    let mut trailing_style = Style::default().add_modifier(theme.placeholder);
-    if highlight {
-        trailing_style = trailing_style.add_modifier(Modifier::REVERSED);
-    }
-    vec![
-        Line::from(relation_spans),
-        label_line,
-        Line::from(Span::styled(trailing, trailing_style)),
-    ]
-}
-
-fn render_unresolved_composite(
+/// Render an Other-zone unresolved-evidence row. Shape mirrors
+/// [`render_other_link_line`] but the right side carries the
+/// evidence summary instead of a neighbor id.
+fn render_other_unresolved_line(
     group: &crate::tui::explorer::RelationshipGroup,
     row: &crate::tui::explorer::UnresolvedRow,
     highlight: bool,
     theme: &Theme,
-) -> Vec<Line<'static>> {
-    let header_text = format!(
-        "    {:<24} — unresolved (1 evidence)",
-        group.relation.snake_case(),
-    );
-    let mut header_style = Style::default().add_modifier(theme.placeholder);
-    if highlight {
-        header_style = header_style.add_modifier(Modifier::REVERSED);
-    }
-    let detail = unresolved_evidence_summary(row);
-    let trailing = format!("        {detail}");
-    let mut trailing_style = Style::default().add_modifier(theme.placeholder);
-    if highlight {
-        trailing_style = trailing_style.add_modifier(Modifier::REVERSED);
-    }
-    vec![
-        Line::from(Span::styled(header_text, header_style)),
-        Line::from(Span::styled(trailing, trailing_style)),
-    ]
-}
-
-fn render_unresolved_child_line(
-    row: &crate::tui::explorer::UnresolvedRow,
-    highlight: bool,
-    theme: &Theme,
 ) -> Line<'static> {
+    let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
     let detail = unresolved_evidence_summary(row);
-    let text = format!("      — unresolved · {detail}");
+    let text = format!("      {verb:<VERB_COLUMN_WIDTH$} — {detail}",);
     let mut style = Style::default().add_modifier(theme.placeholder);
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
@@ -3670,7 +3624,9 @@ mod tests {
     fn detail_pane_omits_initial_node_divider() {
         // The right pane starts directly with the selected node's
         // fields. Later zones still render labeled dividers; empty
-        // sections are suppressed entirely.
+        // sections are suppressed entirely. ADR 0074 collapsed the
+        // prior `Upstream` / `Downstream` chip dividers into one
+        // `Related` chip; this test pins the new label.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
@@ -3680,8 +3636,8 @@ mod tests {
             "unexpected Node section divider label: {text}",
         );
         assert!(
-            text.contains(" Downstream "),
-            "expected Downstream section divider label: {text}",
+            text.contains(" Related "),
+            "expected Related section divider label: {text}",
         );
         assert!(
             text.contains(" Preview "),
@@ -3690,36 +3646,25 @@ mod tests {
     }
 
     #[test]
-    fn single_link_composite_always_breaks_label_to_a_new_line() {
-        // T8-042b: the single-link composite should always render
-        // the neighbor label on its own indented row beneath the
-        // `relation [kind]` row, regardless of label length. Short
-        // labels used to flow inline and long labels wrapped — the
-        // visual result was inconsistent across rows in the same
-        // pane. Pin the always-newline behavior here.
+    fn related_row_keeps_verb_and_neighbor_label_on_one_line() {
+        // ADR 0074 §3: the prior two-line composite (`relation
+        // [kind]` row + indented neighbor-label row) collapses to a
+        // single `<verb> <glyph> <neighbor_label>` line. The verb
+        // carries the relation, the glyph carries the neighbor
+        // kind, and the row is selectable as one cursor stop.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
-        let relation_line_idx = text
+        let line = text
             .lines()
-            .position(|line| line.contains("linked_to_mux"))
-            .expect("relation row in buffer");
-        let relation_line = text
-            .lines()
-            .nth(relation_line_idx)
-            .expect("relation line by index");
+            .find(|line| line.contains("attached to") && line.contains("tmux:editor"))
+            .expect("validated `attached to … tmux:editor` row");
+        let verb_idx = line.find("attached to").expect("verb on row");
+        let label_idx = line.find("tmux:editor").expect("neighbor label on row");
         assert!(
-            !relation_line.contains("tmux:editor"),
-            "relation row must not also carry the neighbor label inline: {relation_line}",
-        );
-        let label_line = text
-            .lines()
-            .nth(relation_line_idx + 1)
-            .expect("row immediately after relation row");
-        assert!(
-            label_line.contains("tmux:editor"),
-            "label should land on the row immediately after the relation row: {label_line}",
+            verb_idx < label_idx,
+            "verb should sit left of the neighbor label: {line}",
         );
     }
 
@@ -3801,72 +3746,51 @@ mod tests {
     }
 
     #[test]
-    fn link_rows_carry_leading_kind_chip_for_neighbor_kind() {
-        // T8-039: link rows in the explorer surface the neighbor's
-        // graph kind as a leading chip so the operator can tell mux
-        // from session from process at a glance without parsing the
-        // harness prefix out of the id label. T8-042b: the chip lives
-        // on the relation-name row, with the neighbor label on the
-        // row beneath. ADR 0073 §3 swapped the prior dim `[kind]`
-        // text for the per-kind glyph (`▣` for `mux_session`); this
-        // test pins the glyph + the relation-before-chip ordering.
+    fn related_row_orders_verb_glyph_then_neighbor_label() {
+        // ADR 0073 §3 + ADR 0074 §3: each related-entities row reads
+        // as `<verb 22w> <glyph> <neighbor_label>`. The glyph sits
+        // between the verb column and the neighbor label so the
+        // operator can scan kinds without reading the label first.
+        // Pin glyph + ordering on the validated `attached to … ▣
+        // tmux:editor` row that the muxed fixture produces.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         let mux_glyph = crate::tui::icons::NodeKind::MuxSession.default_glyph();
-        let chip_line_idx = text
+        let line = text
             .lines()
-            .position(|line| line.contains("linked_to_mux") && line.contains(mux_glyph))
-            .expect("relation row carrying the mux-kind glyph");
-        let label_line_idx = text
-            .lines()
-            .position(|line| line.contains("tmux:editor"))
-            .expect("neighbor label row carrying tmux:editor");
+            .find(|line| line.contains("attached to") && line.contains(mux_glyph))
+            .expect("validated row carrying the mux-kind glyph");
+        let verb_idx = line.find("attached to").expect("verb on row");
+        let glyph_idx = line.find(mux_glyph).expect("kind glyph on row");
+        let label_idx = line.find("tmux:editor").expect("neighbor label on row");
         assert!(
-            chip_line_idx < label_line_idx,
-            "kind chip row should precede the neighbor label row; got chip at {chip_line_idx}, label at {label_line_idx}",
-        );
-        // And the chip row should carry the relation name to its
-        // left of the glyph, confirming the layout is
-        // `relation <glyph>` rather than just a bare glyph.
-        let chip_line = text
-            .lines()
-            .nth(chip_line_idx)
-            .expect("chip line in buffer");
-        let chip_idx = chip_line
-            .find(mux_glyph)
-            .expect("kind glyph on the chip line");
-        let relation_idx = chip_line
-            .find("linked_to_mux")
-            .expect("relation name on the chip line");
-        assert!(
-            relation_idx < chip_idx,
-            "relation name should render before the kind glyph: {chip_line}",
+            verb_idx < glyph_idx && glyph_idx < label_idx,
+            "row order should be verb → glyph → label: {line}",
         );
     }
 
     #[test]
-    fn downstream_zone_header_renders_aggregate_left_of_label() {
-        // T8-041: the bold zone label should anchor flush right, so
-        // the aggregate summary ("N groups · M links · …") appears
-        // to the left of the chip on the same divider line. This
-        // keeps the highlighted label easy to scan vertically.
+    fn related_zone_header_renders_aggregate_left_of_label() {
+        // T8-041 (carried through ADR 0074 §5): the bold zone label
+        // anchors flush right and the summary segment (`N validated
+        // · M other …`) sits to the left of the chip on the same
+        // divider line. Pin the relative ordering plus the new
+        // summary vocabulary.
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         let line = text
             .lines()
-            .find(|line| line.contains(" Downstream "))
-            .expect("downstream divider line");
-        let groups_idx = line.find("groups").expect("aggregate summary on the line");
-        let label_idx = line
-            .find(" Downstream ")
-            .expect("downstream chip on the line");
+            .find(|line| line.contains(" Related "))
+            .expect("Related divider line");
+        let validated_idx = line.find("validated").expect("`validated` segment on line");
+        let label_idx = line.find(" Related ").expect("Related chip on line");
         assert!(
-            groups_idx < label_idx,
-            "aggregate `groups …` should render to the left of the Downstream chip; got: {line}",
+            validated_idx < label_idx,
+            "summary `validated …` should render left of the Related chip; got: {line}",
         );
     }
 
@@ -3882,8 +3806,8 @@ mod tests {
         let area = Rect::new(0, 0, 120, 24);
         let initial = buffer_to_string(&render_to_buffer(&app, area));
         assert!(
-            initial.contains("linked_to_mux"),
-            "session detail should expose the linked_to_mux relationship row: {initial}"
+            initial.contains("attached to"),
+            "session detail should expose the `attached to` row (ADR 0074 verb catalog): {initial}"
         );
         app.update(Msg::CycleFocus);
         // Walk the cursor onto the link row, then activate.
@@ -3893,7 +3817,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);
@@ -4116,18 +4045,21 @@ mod tests {
         // section-content path, not from vertical clamping.
         let area = Rect::new(0, 0, 120, 40);
         let collapsed = buffer_to_string(&render_to_buffer(&app, area));
-        // T8-029: the linked session now surfaces upstream of the
-        // selected mux as an `linked_to_mux` relationship row (the
-        // session is the link's source, the mux its target). The
-        // header carries an `Upstream` chip divider; the row itself
-        // mentions the session by harness:key.
+        // T8-029 + ADR 0074: the linked session now surfaces in the
+        // mux's `Related` zone via the inbound `attached session`
+        // verb (the session is the link's source, the mux its
+        // target). The row carries the session id by `harness:key`.
         assert!(
-            collapsed.contains(" Upstream "),
-            "Upstream section divider should render for the mux: {collapsed}"
+            collapsed.contains(" Related "),
+            "Related section divider should render for the mux: {collapsed}"
+        );
+        assert!(
+            collapsed.contains("attached session"),
+            "inbound `attached session` verb should label the row: {collapsed}"
         );
         assert!(
             collapsed.contains("codex:abc"),
-            "Upstream relationship row should expose the session id: {collapsed}"
+            "the related row should expose the session id: {collapsed}"
         );
     }
 
@@ -4221,7 +4153,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);

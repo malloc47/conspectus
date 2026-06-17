@@ -22,7 +22,7 @@ use std::rc::Rc;
 use crate::model::{MuxSessionId, NodeId};
 use crate::tui::detail::{NodeDetail, build_node_detail_from_conn};
 use crate::tui::explorer::{
-    BreadcrumbHop, ExplorerRow, ExplorerRowKey, GroupKey, NodeView, build_node_view_from_conn,
+    BreadcrumbHop, ExplorerRow, ExplorerRowKey, NodeView, build_node_view_from_conn,
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
@@ -258,11 +258,13 @@ pub struct ExplorerState {
     /// View model for the currently-focused node.
     pub view: NodeView,
     /// Index into [`NodeView::flat_rows`] when materialized with the
-    /// current `expanded_groups`. Clamped on every update so the
+    /// current `other_expanded` flag. Clamped on every update so the
     /// renderer can read it unchecked.
     pub cursor: usize,
-    /// Set of multi-link groups whose children are currently visible.
-    pub expanded_groups: BTreeSet<GroupKey>,
+    /// Whether the `Other` zone (alternates, conflicts, unresolved
+    /// stubs) is currently expanded (ADR 0074 §3). Replaces the
+    /// per-`GroupKey` expansion set from the prior layout.
+    pub other_expanded: bool,
     /// Drill history. Empty when the focused node is the same one
     /// the left tree points at.
     pub breadcrumb: Vec<BreadcrumbHop>,
@@ -283,11 +285,10 @@ impl ExplorerState {
     /// `j` walks into relationship rows, at which point the Preview
     /// switches to neighbor + edge content.
     pub fn new(view: NodeView) -> Self {
-        let expanded_groups = BTreeSet::new();
         Self {
             view,
             cursor: 0,
-            expanded_groups,
+            other_expanded: false,
             breadcrumb: Vec::new(),
             full_detail_expanded: false,
         }
@@ -298,7 +299,7 @@ impl ExplorerState {
     /// view model stays the source of truth.
     pub fn rows(&self) -> Vec<ExplorerRow> {
         self.view
-            .flat_rows(&self.expanded_groups, self.full_detail_expanded)
+            .flat_rows(self.other_expanded, self.full_detail_expanded)
     }
 
     /// Selected row, if any.
@@ -318,13 +319,18 @@ impl ExplorerState {
         let target =
             previous_key.and_then(|key| rows.iter().position(|row| row.key(&self.view) == key));
         self.cursor = target.unwrap_or_else(|| {
-            // Fall back to the first link or group header so the
-            // cursor lands on something actionable.
+            // Fall back to the first actionable row — a validated
+            // link, then the Other header, then any Other link
+            // (when expanded) — so the cursor never sits on the
+            // node-field zone after a rebuild that previously had
+            // it on a relationship row.
             rows.iter()
                 .position(|row| {
                     matches!(
                         row,
-                        ExplorerRow::Link { .. } | ExplorerRow::GroupHeader { .. }
+                        ExplorerRow::ValidatedLink { .. }
+                            | ExplorerRow::OtherHeader { .. }
+                            | ExplorerRow::OtherLink { .. }
                     )
                 })
                 .unwrap_or(0)
@@ -1566,18 +1572,15 @@ impl App {
                     Some(mut state) => {
                         let prev_key = state.selected_row().map(|row| row.key(&state.view));
                         // Replace the view while keeping cursor /
-                        // expansion / breadcrumb identity.
+                        // Other-zone expansion / breadcrumb
+                        // identity. ADR 0074 §6: the Other zone is
+                        // either open or closed; there is no
+                        // per-group expansion state to invalidate
+                        // when the view rebuilds.
                         state.view = view;
-                        // Drop any expanded-group entries whose
-                        // group no longer exists.
-                        let valid: BTreeSet<GroupKey> = state
-                            .view
-                            .relationships
-                            .groups
-                            .iter()
-                            .map(GroupKey::for_group)
-                            .collect();
-                        state.expanded_groups.retain(|key| valid.contains(key));
+                        if !state.view.has_other_rows() {
+                            state.other_expanded = false;
+                        }
                         state.reseat_cursor(prev_key);
                         self.explorer = Some(state);
                     }
@@ -1605,6 +1608,12 @@ impl App {
     }
 
     fn explorer_toggle_group(&mut self) {
+        // ADR 0074 renamed the surface from "toggle group" to
+        // "toggle Other zone." The reducer message identifier
+        // (`Msg::ExplorerToggleGroup`) is kept as-is so keybindings
+        // and external callers do not churn; the behavior is
+        // adjusted to flip the Other-zone visibility when the
+        // cursor sits on the `Other` header.
         let Some(state) = self.explorer.as_mut() else {
             return;
         };
@@ -1612,22 +1621,15 @@ impl App {
         let Some(row) = rows.get(state.cursor).cloned() else {
             return;
         };
-        let ExplorerRow::GroupHeader { group_index, .. } = row else {
+        if !row.is_other_header() {
             self.status_message = Some(
-                "explorer: nothing to expand here — only multi-link groups expand".to_string(),
+                "explorer: nothing to expand here — select the `Other` header to toggle alternates"
+                    .to_string(),
             );
             return;
-        };
-        let Some(group) = state.view.relationships.groups.get(group_index) else {
-            return;
-        };
-        let key = GroupKey::for_group(group);
-        let prev_key = state.selected_row().map(|row| row.key(&state.view));
-        if state.expanded_groups.contains(&key) {
-            state.expanded_groups.remove(&key);
-        } else {
-            state.expanded_groups.insert(key);
         }
+        let prev_key = state.selected_row().map(|row| row.key(&state.view));
+        state.other_expanded = !state.other_expanded;
         state.reseat_cursor(prev_key);
         self.status_message = None;
     }
@@ -1674,15 +1676,15 @@ impl App {
             return;
         };
         match row {
-            ExplorerRow::GroupHeader { .. } => {
+            ExplorerRow::OtherHeader { .. } => {
                 self.explorer_toggle_group();
             }
-            ExplorerRow::Link { .. } => {
+            ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. } => {
                 if let Some(target) = state.view.drill_target(&row) {
                     self.explorer_drill_into(target);
                 }
             }
-            ExplorerRow::Unresolved { .. } => {
+            ExplorerRow::OtherUnresolved { .. } => {
                 self.status_message =
                     Some("explorer: unresolved evidence — `o` opens detail (T8-032)".to_string());
             }
@@ -1699,14 +1701,14 @@ impl App {
         let prev_focused = state.view.focused.clone();
         let prev_short_label = state.view.short_label.clone();
         let prev_cursor_key = state.selected_row().map(|row| row.key(&state.view));
-        let prev_expanded = state.expanded_groups.clone();
+        let prev_other_expanded = state.other_expanded;
         let prev_full_detail_expanded = state.full_detail_expanded;
         let prev_left_pane_selection = self.selection.clone();
         let hop = BreadcrumbHop {
             focused: prev_focused,
             short_label: prev_short_label,
             cursor_key: prev_cursor_key,
-            expanded_groups: prev_expanded,
+            other_expanded: prev_other_expanded,
             full_detail_expanded: prev_full_detail_expanded,
             left_pane_selection: prev_left_pane_selection,
         };
@@ -1828,7 +1830,7 @@ impl App {
         };
         let breadcrumb_remaining = state.breadcrumb.clone();
         let mut restored = ExplorerState::new(view);
-        restored.expanded_groups = hop.expanded_groups;
+        restored.other_expanded = hop.other_expanded;
         restored.breadcrumb = breadcrumb_remaining;
         restored.full_detail_expanded = hop.full_detail_expanded;
         restored.reseat_cursor(hop.cursor_key);
@@ -2881,7 +2883,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..target_idx {
             app.update(Msg::ExplorerNavDown);
@@ -2912,7 +2919,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..target_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3007,7 +3019,7 @@ mod tests {
             .iter()
             .enumerate()
             .find_map(|(idx, row)| match row {
-                ExplorerRow::Link { .. }
+                ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
                     if app.explorer().expect("state").view.drill_target(row)
                         == Some(child_id.clone()) =>
                 {
@@ -3059,7 +3071,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..target_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3088,7 +3105,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3191,7 +3213,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3305,7 +3332,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3322,15 +3354,24 @@ mod tests {
     }
 
     #[test]
-    fn explorer_toggle_group_only_acts_on_headers() {
+    fn explorer_toggle_group_only_acts_on_other_header() {
+        // ADR 0074: toggling expansion only makes sense on the
+        // `Other` zone header now that the per-relation sub-headers
+        // are gone. Triggering the toggle from a validated link row
+        // (or any other row kind) surfaces a status hint instead of
+        // silently doing nothing.
         let mut app = app_for_explorer();
-        // Walk past Node fields to the (single-link) composite row.
         let link_idx = app
             .explorer()
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3447,9 +3488,10 @@ mod tests {
         let state = app.explorer().expect("explorer for session");
         let labels: Vec<&str> = state
             .view
-            .upstream()
+            .relationships
             .groups
             .iter()
+            .filter(|g| g.direction == crate::tui::explorer::Direction::Upstream)
             .map(|g| g.relation.snake_case())
             .collect();
         assert!(
@@ -3476,10 +3518,12 @@ mod tests {
             .expect("an agent session row in the scenario");
         app.set_selection(target);
         let state = app.explorer().expect("explorer for session");
-        let downstream = state.view.downstream();
-        let downstream_kinds: Vec<&str> = downstream
+        let downstream_kinds: Vec<&str> = state
+            .view
+            .relationships
             .groups
             .iter()
+            .filter(|g| g.direction == crate::tui::explorer::Direction::Downstream)
             .map(|g| g.neighbor_kind.as_str())
             .collect();
         assert!(
@@ -3507,10 +3551,13 @@ mod tests {
         let state = app.explorer().expect("explorer for session");
         let total_mux_links: usize = state
             .view
-            .downstream()
+            .relationships
             .groups
             .iter()
-            .filter(|g| g.neighbor_kind == "mux_session")
+            .filter(|g| {
+                g.direction == crate::tui::explorer::Direction::Downstream
+                    && g.neighbor_kind == "mux_session"
+            })
             .map(|g| g.link_count())
             .sum();
         assert!(
@@ -3528,7 +3575,12 @@ mod tests {
             .expect("state")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);
@@ -3603,7 +3655,12 @@ mod tests {
             .expect("explorer state present")
             .rows()
             .iter()
-            .position(|row| matches!(row, ExplorerRow::Link { .. }))
+            .position(|row| {
+                matches!(
+                    row,
+                    ExplorerRow::ValidatedLink { .. } | ExplorerRow::OtherLink { .. }
+                )
+            })
             .expect("link row");
         for _ in 0..link_idx {
             app.update(Msg::ExplorerNavDown);

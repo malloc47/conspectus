@@ -82,14 +82,9 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
     let all_fields = all_fields(inputs.snapshot, node, inputs.home);
     let upstream = build_explorer(inputs.snapshot, &id, Direction::Upstream, inputs.home);
     let downstream = build_explorer(inputs.snapshot, &id, Direction::Downstream, inputs.home);
-    // ADR 0074 pass 1: combine both directions into one explorer.
-    // For now, preserve the prior render order (Upstream first, then
-    // Downstream, each in build order) so passes 2 and 3 can layer
-    // the renderer + reducer changes without snapshot churn beyond
-    // the data-shape collapse. The kind→verb→label sort lands in
-    // pass 3 alongside the renderer rewrite.
     let mut groups = upstream.groups;
     groups.extend(downstream.groups);
+    sort_relationship_groups(&mut groups);
     let relationships = RelationshipExplorer { groups };
 
     let short_label = short_node_label(node);
@@ -214,6 +209,39 @@ impl Direction {
             Self::Downstream => "Downstream",
         }
     }
+}
+
+/// Sort the merged relationship-group list by ADR 0074 §4 order:
+/// `(NodeKind ordinal, verb, neighbor_label)`. The neighbor label
+/// comes from the first link (resolver winner sorts first within
+/// the group by `finalize_group`'s preferred-link ordering, so this
+/// is stable). Groups with no concrete links fall back to the empty
+/// string; with no neighbor label they sort under the kind's other
+/// groups but after labelled ones.
+fn sort_relationship_groups(groups: &mut [RelationshipGroup]) {
+    groups.sort_by(|a, b| {
+        let ord_a = crate::tui::icons::NodeKind::from_snake_case(&a.neighbor_kind)
+            .map(|k| k.ordinal())
+            .unwrap_or(usize::MAX);
+        let ord_b = crate::tui::icons::NodeKind::from_snake_case(&b.neighbor_kind)
+            .map(|k| k.ordinal())
+            .unwrap_or(usize::MAX);
+        ord_a
+            .cmp(&ord_b)
+            .then_with(|| {
+                directional_verb(&a.relation, a.direction)
+                    .cmp(directional_verb(&b.relation, b.direction))
+            })
+            .then_with(|| group_neighbor_label(a).cmp(group_neighbor_label(b)))
+    });
+}
+
+fn group_neighbor_label(group: &RelationshipGroup) -> &str {
+    group
+        .links
+        .first()
+        .map(|l| l.neighbor_label.as_str())
+        .unwrap_or("")
 }
 
 /// Surface-language verb for a `(RelationKind, Direction)` pair
@@ -419,9 +447,11 @@ impl LinkStateLabel {
 // Navigation cursor + breadcrumb
 // -----------------------------------------------------------------------------
 
-/// Stable identity for a flat selectable row in the explorer. Used by
-/// the reducer to preserve cursor position across rebuilds (snapshot
-/// refresh, group toggle, drilldown).
+/// Stable identity for a flat selectable row in the explorer (ADR
+/// 0074 §6). Used by the reducer to preserve cursor position across
+/// rebuilds (snapshot refresh, drilldown). The two-zone layout
+/// (validated / Other) collapses direction out of the key — the
+/// row's verb carries it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExplorerRowKey {
     /// Title bar acts as the "go back to the inherent identity"
@@ -430,28 +460,20 @@ pub enum ExplorerRowKey {
     /// One of the [`NodeView::core_fields`] rows (by label, so the
     /// key stays stable across renames).
     NodeField { label: String },
-    /// A multi-link group's header row.
-    GroupHeader {
-        direction: Direction,
-        relation: RelationKind,
-        neighbor_kind: String,
-    },
-    /// A concrete link child row inside an expanded multi-link
-    /// group, or the composite row for a single-link group.
-    Link {
-        direction: Direction,
-        link_id: String,
-    },
-    /// An unresolved-evidence placeholder row inside a group.
-    Unresolved {
-        direction: Direction,
-        link_id: String,
-    },
+    /// A resolver-winner row in the validated zone.
+    ValidatedLink { link_id: String },
+    /// The collapsible `Other` header row.
+    OtherHeader,
+    /// A non-winner link row inside the `Other` zone
+    /// (`EdgeStateLabel::AltOf` or `Conflict`).
+    OtherLink { link_id: String },
+    /// An unresolved-evidence placeholder inside the `Other` zone.
+    OtherUnresolved { link_id: String },
 }
 
 /// Flat selectable row in the explorer. The reducer builds this
 /// list from the [`NodeView`] plus the per-frame
-/// `expanded_groups` set. The order matches what the renderer
+/// `other_expanded` flag. The order matches what the renderer
 /// draws top-to-bottom so cursor index and rendered row index
 /// agree.
 #[derive(Clone, Debug, PartialEq)]
@@ -464,24 +486,23 @@ pub enum ExplorerRow {
         label: &'static str,
         long_value: Option<String>,
     },
-    /// Multi-link group header (≥ 2 selectable rows). Selecting it
-    /// and hitting `Enter` or `e` toggles the group's expansion.
-    GroupHeader {
-        direction: Direction,
-        group_index: usize,
-        expanded: bool,
-    },
-    /// One link inside an expanded multi-link group, or the
-    /// composite row for a single-link group. `Enter` drills.
-    Link {
-        direction: Direction,
+    /// A resolver-winner row in the validated zone. `Enter` drills.
+    ValidatedLink {
         group_index: usize,
         link_index: usize,
     },
-    /// Unresolved-evidence placeholder. `Enter` is inert in v1; `o`
-    /// opens the evidence (see T8-032).
-    Unresolved {
-        direction: Direction,
+    /// The collapsible `Other` header row. `Enter`/`e` toggles
+    /// expansion.
+    OtherHeader { expanded: bool },
+    /// A non-winner link row inside the expanded `Other` zone.
+    OtherLink {
+        group_index: usize,
+        link_index: usize,
+    },
+    /// An unresolved-evidence placeholder inside the expanded
+    /// `Other` zone. `Enter` is inert in v1; `o` opens the
+    /// evidence (see T8-032).
+    OtherUnresolved {
         group_index: usize,
         unresolved_index: usize,
     },
@@ -494,22 +515,7 @@ impl ExplorerRow {
             Self::NodeField { label, .. } => ExplorerRowKey::NodeField {
                 label: (*label).to_string(),
             },
-            Self::GroupHeader {
-                direction,
-                group_index,
-                ..
-            } => {
-                let group = view.relationships.groups.get(*group_index);
-                ExplorerRowKey::GroupHeader {
-                    direction: *direction,
-                    relation: group
-                        .map(|g| g.relation.clone())
-                        .unwrap_or(RelationKind::AssociatedWith),
-                    neighbor_kind: group.map(|g| g.neighbor_kind.clone()).unwrap_or_default(),
-                }
-            }
-            Self::Link {
-                direction,
+            Self::ValidatedLink {
                 group_index,
                 link_index,
             } => {
@@ -520,13 +526,23 @@ impl ExplorerRow {
                     .and_then(|g| g.links.get(*link_index))
                     .map(|l| l.link_id.clone())
                     .unwrap_or_default();
-                ExplorerRowKey::Link {
-                    direction: *direction,
-                    link_id,
-                }
+                ExplorerRowKey::ValidatedLink { link_id }
             }
-            Self::Unresolved {
-                direction,
+            Self::OtherHeader { .. } => ExplorerRowKey::OtherHeader,
+            Self::OtherLink {
+                group_index,
+                link_index,
+            } => {
+                let link_id = view
+                    .relationships
+                    .groups
+                    .get(*group_index)
+                    .and_then(|g| g.links.get(*link_index))
+                    .map(|l| l.link_id.clone())
+                    .unwrap_or_default();
+                ExplorerRowKey::OtherLink { link_id }
+            }
+            Self::OtherUnresolved {
                 group_index,
                 unresolved_index,
             } => {
@@ -537,10 +553,7 @@ impl ExplorerRow {
                     .and_then(|g| g.unresolved.get(*unresolved_index))
                     .map(|u| u.link_id.clone())
                     .unwrap_or_default();
-                ExplorerRowKey::Unresolved {
-                    direction: *direction,
-                    link_id,
-                }
+                ExplorerRowKey::OtherUnresolved { link_id }
             }
         }
     }
@@ -553,26 +566,12 @@ impl ExplorerRow {
             _ => None,
         }
     }
-}
 
-/// Per-group expansion identity. Multi-link groups stay collapsed by
-/// default; `e` or `Enter` on the header inserts the key. ADR 0074
-/// pass 2 will collapse this further once the sub-headers go away;
-/// pass 1 just reads the direction off the group.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct GroupKey {
-    pub direction: Direction,
-    pub relation: RelationKind,
-    pub neighbor_kind: String,
-}
-
-impl GroupKey {
-    pub fn for_group(group: &RelationshipGroup) -> Self {
-        Self {
-            direction: group.direction,
-            relation: group.relation.clone(),
-            neighbor_kind: group.neighbor_kind.clone(),
-        }
+    /// True for rows that participate in the Other-zone toggle
+    /// (header + its children). Used by the reducer to decide which
+    /// row identifies the toggle target.
+    pub fn is_other_header(&self) -> bool {
+        matches!(self, Self::OtherHeader { .. })
     }
 }
 
@@ -589,11 +588,7 @@ impl NodeView {
     /// for the full per-kind field set when the operator has toggled
     /// the Expanded Node Detail view on. The relationship rows are
     /// unaffected.
-    pub fn flat_rows(
-        &self,
-        expanded: &std::collections::BTreeSet<GroupKey>,
-        expanded_detail: bool,
-    ) -> Vec<ExplorerRow> {
+    pub fn flat_rows(&self, other_expanded: bool, expanded_detail: bool) -> Vec<ExplorerRow> {
         let mut rows = Vec::new();
         for (index, field) in self.fields(expanded_detail).iter().enumerate() {
             rows.push(ExplorerRow::NodeField {
@@ -602,8 +597,80 @@ impl NodeView {
                 long_value: field.long_value.clone(),
             });
         }
-        push_explorer_rows(&mut rows, &self.relationships, expanded);
+        // Validated zone: every link whose resolver state is
+        // `Resolves` becomes a flat selectable row. The groups are
+        // pre-sorted (ADR 0074 §4) so the rows inherit a stable
+        // kind → verb → label scan order.
+        for (group_index, group) in self.relationships.groups.iter().enumerate() {
+            for (link_index, link) in group.links.iter().enumerate() {
+                if matches!(link.edge_state, EdgeStateLabel::Resolves) {
+                    rows.push(ExplorerRow::ValidatedLink {
+                        group_index,
+                        link_index,
+                    });
+                }
+            }
+        }
+        // Other zone: alts, conflicts, and unresolved stubs under a
+        // single collapsible header. Skip the header entirely when
+        // the zone is empty so a fully-validated node doesn't carry
+        // a dangling control row.
+        let has_other = self.has_other_rows();
+        if has_other {
+            rows.push(ExplorerRow::OtherHeader {
+                expanded: other_expanded,
+            });
+            if other_expanded {
+                for (group_index, group) in self.relationships.groups.iter().enumerate() {
+                    for (link_index, link) in group.links.iter().enumerate() {
+                        if !matches!(link.edge_state, EdgeStateLabel::Resolves) {
+                            rows.push(ExplorerRow::OtherLink {
+                                group_index,
+                                link_index,
+                            });
+                        }
+                    }
+                    for (unresolved_index, _) in group.unresolved.iter().enumerate() {
+                        rows.push(ExplorerRow::OtherUnresolved {
+                            group_index,
+                            unresolved_index,
+                        });
+                    }
+                }
+            }
+        }
         rows
+    }
+
+    /// Whether the focused node has any rows that belong in the
+    /// `Other` zone — non-`Resolves` links or unresolved stubs.
+    pub fn has_other_rows(&self) -> bool {
+        self.relationships.groups.iter().any(|g| {
+            g.unresolved_count > 0
+                || g.links
+                    .iter()
+                    .any(|l| !matches!(l.edge_state, EdgeStateLabel::Resolves))
+        })
+    }
+
+    /// Counts for the `Related` divider summary (ADR 0074 §5).
+    pub fn relationship_counts(&self) -> RelationshipCounts {
+        let mut counts = RelationshipCounts::default();
+        for group in &self.relationships.groups {
+            for link in &group.links {
+                if matches!(link.edge_state, EdgeStateLabel::Resolves) {
+                    counts.validated += 1;
+                } else {
+                    counts.other += 1;
+                    if matches!(link.edge_state, EdgeStateLabel::Conflict) {
+                        counts.ambiguous += 1;
+                    }
+                }
+            }
+            counts.other += group.unresolved.len();
+            counts.unresolved += group.unresolved.len();
+        }
+        counts
     }
 
     /// Node-zone fields to render given the Expanded Node Detail
@@ -617,85 +684,17 @@ impl NodeView {
             &self.core_fields
         }
     }
-
-    /// Transitional projection (ADR 0074 pass 1): clone the combined
-    /// list filtered to the direction the prior `NodeView.upstream`
-    /// field held. Returns an owned `RelationshipExplorer` so the
-    /// existing `.groups`, `.link_count()`, `.ambiguous_groups()`,
-    /// and `.unresolved_groups()` method surface keeps working at
-    /// every call site. Passes 2 and 3 remove the callers; until
-    /// then this is the migration boundary.
-    pub fn upstream(&self) -> RelationshipExplorer {
-        self.filtered_explorer(Direction::Upstream)
-    }
-
-    /// Transitional projection (ADR 0074 pass 1): see
-    /// [`Self::upstream`].
-    pub fn downstream(&self) -> RelationshipExplorer {
-        self.filtered_explorer(Direction::Downstream)
-    }
-
-    fn filtered_explorer(&self, direction: Direction) -> RelationshipExplorer {
-        RelationshipExplorer {
-            groups: self
-                .relationships
-                .groups
-                .iter()
-                .filter(|g| g.direction == direction)
-                .cloned()
-                .collect(),
-        }
-    }
 }
 
-fn push_explorer_rows(
-    rows: &mut Vec<ExplorerRow>,
-    explorer: &RelationshipExplorer,
-    expanded: &std::collections::BTreeSet<GroupKey>,
-) {
-    for (group_index, group) in explorer.groups.iter().enumerate() {
-        let key = GroupKey::for_group(group);
-        let direction = group.direction;
-        let is_single = group.is_single();
-        if is_single {
-            if !group.links.is_empty() {
-                rows.push(ExplorerRow::Link {
-                    direction,
-                    group_index,
-                    link_index: 0,
-                });
-            } else if !group.unresolved.is_empty() {
-                rows.push(ExplorerRow::Unresolved {
-                    direction,
-                    group_index,
-                    unresolved_index: 0,
-                });
-            }
-        } else {
-            let expanded = expanded.contains(&key);
-            rows.push(ExplorerRow::GroupHeader {
-                direction,
-                group_index,
-                expanded,
-            });
-            if expanded {
-                for link_index in 0..group.links.len() {
-                    rows.push(ExplorerRow::Link {
-                        direction,
-                        group_index,
-                        link_index,
-                    });
-                }
-                for unresolved_index in 0..group.unresolved.len() {
-                    rows.push(ExplorerRow::Unresolved {
-                        direction,
-                        group_index,
-                        unresolved_index,
-                    });
-                }
-            }
-        }
-    }
+/// Counts for the `Related` divider summary (ADR 0074 §5). Carried
+/// by [`NodeView::relationship_counts`] so the renderer reads one
+/// value rather than recomputing the loops.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RelationshipCounts {
+    pub validated: usize,
+    pub other: usize,
+    pub ambiguous: usize,
+    pub unresolved: usize,
 }
 
 /// One frame of drill history. The reducer pushes a hop when the
@@ -715,8 +714,10 @@ pub struct BreadcrumbHop {
     /// Cursor row identity at the time of the drill, so Backspace
     /// can re-find it.
     pub cursor_key: Option<ExplorerRowKey>,
-    /// Expanded-group set at the time of the drill.
-    pub expanded_groups: std::collections::BTreeSet<GroupKey>,
+    /// Whether the `Other` zone was expanded at the time of the
+    /// drill, so Backspace can restore it (ADR 0074 §6 — replaces
+    /// the prior per-group expansion set).
+    pub other_expanded: bool,
     /// Whether the Node zone had its Expanded Detail toggle on at
     /// the time of the drill (T8-034), so Backspace can restore it.
     pub full_detail_expanded: bool,
@@ -742,17 +743,20 @@ impl NodeView {
     /// `None` for non-drillable rows (node fields, group headers,
     /// unresolved evidence).
     pub fn drill_target(&self, row: &ExplorerRow) -> Option<NodeId> {
-        if let ExplorerRow::Link {
-            group_index,
-            link_index,
-            ..
-        } = row
-        {
-            let group = self.relationships.groups.get(*group_index)?;
-            let link = group.links.get(*link_index)?;
-            return Some(link.neighbor_id.clone());
-        }
-        None
+        let (group_index, link_index) = match row {
+            ExplorerRow::ValidatedLink {
+                group_index,
+                link_index,
+            }
+            | ExplorerRow::OtherLink {
+                group_index,
+                link_index,
+            } => (*group_index, *link_index),
+            _ => return None,
+        };
+        let group = self.relationships.groups.get(group_index)?;
+        let link = group.links.get(link_index)?;
+        Some(link.neighbor_id.clone())
     }
 
     /// The preview content for a given cursor row — the neighbor's
@@ -760,29 +764,14 @@ impl NodeView {
     /// that don't carry a neighbor (node fields).
     pub fn row_preview(&self, row: &ExplorerRow) -> Option<RowPreview<'_>> {
         match row {
-            ExplorerRow::NodeField { .. } => None,
-            ExplorerRow::GroupHeader { group_index, .. } => {
-                let group = self.relationships.groups.get(*group_index)?;
-                // Header preview targets the resolver winner if any,
-                // else the first link.
-                let link = group
-                    .links
-                    .iter()
-                    .find(|l| l.resolved_winner)
-                    .or_else(|| group.links.first())?;
-                Some(RowPreview::Link {
-                    neighbor_label: &link.neighbor_label,
-                    fields: &link.preview,
-                    provenance: link.provenance,
-                    confidence: link.confidence,
-                    state: link.state,
-                    edge_state: &link.edge_state,
-                })
-            }
-            ExplorerRow::Link {
+            ExplorerRow::NodeField { .. } | ExplorerRow::OtherHeader { .. } => None,
+            ExplorerRow::ValidatedLink {
                 group_index,
                 link_index,
-                ..
+            }
+            | ExplorerRow::OtherLink {
+                group_index,
+                link_index,
             } => {
                 let group = self.relationships.groups.get(*group_index)?;
                 let link = group.links.get(*link_index)?;
@@ -795,10 +784,9 @@ impl NodeView {
                     edge_state: &link.edge_state,
                 })
             }
-            ExplorerRow::Unresolved {
+            ExplorerRow::OtherUnresolved {
                 group_index,
                 unresolved_index,
-                ..
             } => {
                 let group = self.relationships.groups.get(*group_index)?;
                 let row = group.unresolved.get(*unresolved_index)?;
@@ -1853,6 +1841,169 @@ mod tests {
     }
 
     #[test]
+    fn flat_rows_splits_validated_and_other_zones() {
+        // ADR 0074 §3: the validated zone holds every `Resolves` row
+        // in a flat list; alternates, conflicts, and unresolved
+        // stubs sit under one collapsible `Other` header below.
+        // This test exercises the split via a multi-candidate
+        // LinkedToMux setup: the resolver picks one winner, the
+        // other candidate becomes an Other row.
+        let mut snapshot = GraphSnapshot::empty();
+        let session_id = NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc"));
+        snapshot
+            .nodes
+            .push(agent("claude", "abc", Some("/x"), None));
+        snapshot.nodes.push(mux("tmux", "primary", Some("/x")));
+        snapshot.nodes.push(mux("tmux", "secondary", Some("/x")));
+        let cwd_link = |id: &str, target: NodeId| {
+            let mut l = link(id, session_id.clone(), target, RelationKind::LinkedToMux);
+            l.confidence = Confidence::High;
+            l.source_metadata.evidence = Some("exact_cwd_match".to_string());
+            l
+        };
+        snapshot.candidate_links.push(cwd_link(
+            "to-primary",
+            NodeId::MuxSession(MuxSessionId::new("primary")),
+        ));
+        snapshot.candidate_links.push(cwd_link(
+            "to-secondary",
+            NodeId::MuxSession(MuxSessionId::new("secondary")),
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+
+        let view = build(&snapshot, &session_id, Some(home().as_path()));
+        let counts = view.relationship_counts();
+        assert!(
+            counts.validated >= 1,
+            "at least one resolver winner expected: {counts:?}"
+        );
+        assert!(
+            counts.other >= 1,
+            "non-winning candidate should land in the Other zone: {counts:?}"
+        );
+
+        // Collapsed Other: only the validated rows + the header
+        // appear; expanding adds the Other children.
+        let collapsed = view.flat_rows(false, false);
+        let validated_in_collapsed = collapsed
+            .iter()
+            .filter(|r| matches!(r, ExplorerRow::ValidatedLink { .. }))
+            .count();
+        let other_header_in_collapsed = collapsed
+            .iter()
+            .filter(|r| matches!(r, ExplorerRow::OtherHeader { .. }))
+            .count();
+        let other_children_in_collapsed = collapsed
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r,
+                    ExplorerRow::OtherLink { .. } | ExplorerRow::OtherUnresolved { .. }
+                )
+            })
+            .count();
+        assert_eq!(validated_in_collapsed, counts.validated);
+        assert_eq!(other_header_in_collapsed, 1);
+        assert_eq!(
+            other_children_in_collapsed, 0,
+            "Other children should not appear while the zone is collapsed"
+        );
+
+        let expanded = view.flat_rows(true, false);
+        let other_children_in_expanded = expanded
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r,
+                    ExplorerRow::OtherLink { .. } | ExplorerRow::OtherUnresolved { .. }
+                )
+            })
+            .count();
+        assert_eq!(other_children_in_expanded, counts.other);
+    }
+
+    #[test]
+    fn relationship_groups_sort_by_kind_then_verb_then_label() {
+        // ADR 0074 §4: rows in the Related zone scan top-to-bottom
+        // as kind → verb → neighbor label. The merged-group sort in
+        // `sort_relationship_groups` is the source of truth; this
+        // test pins the contract by checking the kind ordinals are
+        // monotonically non-decreasing across the merged list.
+        let mut snapshot = GraphSnapshot::empty();
+        let session_id = NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc"));
+        let workspace_id = NodeId::Workspace(WorkspaceId::new("/ws"));
+        let repo_id = NodeId::Repo(RepoId::new("/r/.git"));
+        let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+        snapshot
+            .nodes
+            .push(agent("claude", "abc", Some("/r"), None));
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new("/ws"),
+            root: "/ws".to_string(),
+            provider: None,
+            name: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new("/r/.git"))));
+        snapshot.nodes.push(mux("tmux", "editor", Some("/r")));
+        snapshot.candidate_links.push(link(
+            "to-workspace",
+            session_id.clone(),
+            workspace_id.clone(),
+            RelationKind::AssociatedWith,
+        ));
+        snapshot.candidate_links.push(link(
+            "to-repo",
+            session_id.clone(),
+            repo_id.clone(),
+            RelationKind::AssociatedWith,
+        ));
+        snapshot.candidate_links.push(link(
+            "to-mux",
+            session_id.clone(),
+            mux_id.clone(),
+            RelationKind::LinkedToMux,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+
+        let view = build(&snapshot, &session_id, Some(home().as_path()));
+        let ordinals: Vec<usize> = view
+            .relationships
+            .groups
+            .iter()
+            .map(|g| {
+                crate::tui::icons::NodeKind::from_snake_case(&g.neighbor_kind)
+                    .map(|k| k.ordinal())
+                    .unwrap_or(usize::MAX)
+            })
+            .collect();
+        for pair in ordinals.windows(2) {
+            assert!(
+                pair[0] <= pair[1],
+                "kind ordinals should not decrease across the sorted group list: {ordinals:?}"
+            );
+        }
+        // Workspace (ordinal 0) sorts before Repo (1) sorts before
+        // MuxSession (4).
+        let kinds: Vec<&str> = view
+            .relationships
+            .groups
+            .iter()
+            .map(|g| g.neighbor_kind.as_str())
+            .collect();
+        let ws = kinds.iter().position(|k| *k == "workspace");
+        let repo = kinds.iter().position(|k| *k == "repo");
+        let mux = kinds.iter().position(|k| *k == "mux_session");
+        if let (Some(ws), Some(repo)) = (ws, repo) {
+            assert!(ws < repo, "workspace should sort before repo: {kinds:?}");
+        }
+        if let (Some(repo), Some(mux)) = (repo, mux) {
+            assert!(repo < mux, "repo should sort before mux: {kinds:?}");
+        }
+    }
+
+    #[test]
     fn build_node_view_merges_directions_into_single_relationships() {
         // ADR 0074 pass 1: the data shape collapses to one
         // `relationships` field on NodeView, with each group
@@ -1888,13 +2039,42 @@ mod tests {
             RelationKind::LinkedToMux
         );
 
-        // Projections pick the matching subset.
-        assert!(view.upstream().groups.is_empty());
-        assert_eq!(view.downstream().groups.len(), 1);
+        // Direction filtering on the combined list still works.
+        let upstream_count = view
+            .relationships
+            .groups
+            .iter()
+            .filter(|g| g.direction == Direction::Upstream)
+            .count();
+        let downstream_count = view
+            .relationships
+            .groups
+            .iter()
+            .filter(|g| g.direction == Direction::Downstream)
+            .count();
+        assert_eq!(upstream_count, 0);
+        assert_eq!(downstream_count, 1);
     }
 
     fn home() -> PathBuf {
         PathBuf::from("/home/op")
+    }
+
+    /// Test helper that re-projects the combined `relationships`
+    /// list back to a single-direction `RelationshipExplorer` so
+    /// the legacy upstream/downstream assertions in this file keep
+    /// reading naturally without recomputing the filter at every
+    /// call site.
+    fn filter_direction(view: &NodeView, direction: Direction) -> RelationshipExplorer {
+        RelationshipExplorer {
+            groups: view
+                .relationships
+                .groups
+                .iter()
+                .filter(|g| g.direction == direction)
+                .cloned()
+                .collect(),
+        }
     }
 
     fn agent(harness: &str, key: &str, cwd: Option<&str>, title: Option<&str>) -> GraphNode {
@@ -2017,9 +2197,7 @@ mod tests {
             .find(|f| f.label == "id")
             .expect("id field");
         assert_eq!(id.value, "abc");
-        assert_eq!(view.upstream().groups.len(), 0);
-        assert_eq!(view.downstream().groups.len(), 0);
-        assert_eq!(view.upstream().link_count(), 0);
+        assert!(view.relationships.groups.is_empty());
     }
 
     #[test]
@@ -2083,7 +2261,7 @@ mod tests {
         ));
         let snapshot = resolve_snapshot(snapshot);
         let view = build(&snapshot, &session_id, Some(home().as_path()));
-        let downstream = view.downstream();
+        let downstream = filter_direction(&view, Direction::Downstream);
         assert_eq!(downstream.groups.len(), 1);
         let group = &downstream.groups[0];
         assert_eq!(group.relation, RelationKind::LinkedToMux);
@@ -2179,8 +2357,7 @@ mod tests {
         );
 
         let view = build(&snapshot, &focused_id, Some(home().as_path()));
-        let group = view
-            .downstream()
+        let group = filter_direction(&view, Direction::Downstream)
             .groups
             .iter()
             .find(|g| g.relation == RelationKind::LinkedToMux)
@@ -2233,7 +2410,7 @@ mod tests {
 
         let view = build(&snapshot, &session_id, Some(home().as_path()));
         // Both groups are upstream because processes point at sessions.
-        let upstream = view.upstream();
+        let upstream = filter_direction(&view, Direction::Upstream);
         assert_eq!(upstream.groups.len(), 2);
         let identifies = upstream
             .groups
@@ -2291,7 +2468,7 @@ mod tests {
         let snapshot = resolve_snapshot(snapshot);
 
         let view = build(&snapshot, &parent, Some(home().as_path()));
-        let upstream = view.upstream();
+        let upstream = filter_direction(&view, Direction::Upstream);
         let group = upstream
             .groups
             .iter()
@@ -2325,7 +2502,7 @@ mod tests {
         let snapshot = resolve_snapshot(snapshot);
 
         let view = build(&snapshot, &child, Some(home().as_path()));
-        let downstream = view.downstream();
+        let downstream = filter_direction(&view, Direction::Downstream);
         let group = downstream
             .groups
             .iter()
@@ -2553,7 +2730,7 @@ mod tests {
             focused: NodeId::MuxSession(MuxSessionId::new(focused_display)),
             short_label: short_label.to_string(),
             cursor_key: None,
-            expanded_groups: std::collections::BTreeSet::new(),
+            other_expanded: false,
             full_detail_expanded: false,
             left_pane_selection: None,
         }
