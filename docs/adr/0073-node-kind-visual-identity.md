@@ -98,9 +98,12 @@ Selection rationale:
 - **Color independence.** `AgentSession`'s `●` glyph carries an
   *independent* kind color (`node_agent_session`, default
   LightGreen), separate from the harness pill's harness color.
-  Two signals stack: "this is an agent session" (kind glyph) and
-  "the harness is claude" (pill color). Collapsing them onto the
-  pill was considered and rejected (see Alternative A).
+  The two signals stay decoupled in the slate so contexts without
+  a pill (detail-pane neighbor chips, the future graph-explorer
+  mixed-kind list, machine-readable surfaces) still have a
+  per-kind hue. **In row contexts the prefix glyph is suppressed**
+  — see the placement amendment in §3 — because the colored pill
+  alone already carries the identity signal there.
 - **`ForgePr` reuses `pr_*`.** The four existing PR-state colors
   (`pr_open`, `pr_closed`, `pr_merged`, `pr_draft`) already carry
   the state distinction the operator cares about; the `⇄` glyph
@@ -120,9 +123,13 @@ Concretely:
 
 - **Group rows** (`Workspace`, `Repo`, `Checkout`):
   `  ▼ ▦ /path/to/workspace` (disclosure, glyph, label).
-- **`AgentSession` row**:
-  `    ● [claude] showcase-claude   1h ago   /path` (glyph in
-  node-kind color, pill in harness color, label).
+- **`AgentSession` row** (amendment 2026-06): the prefix glyph is
+  **suppressed** — the colored harness pill already names the row
+  as an agent session, and stacking `●` next to `[claude]` doubled
+  the signal in showcase rendering without adding information. The
+  row reads `    [claude] showcase-claude   1h ago   /path`.
+  `NodeKind::AgentSession`'s glyph + color remain defined for
+  pill-less surfaces (detail pane, explorer, JSON / DOT).
 - **`MuxSession` row**:
   `    ▣ ◉ project   project:0   tmux` (kind glyph, then the
   ADR 0072 binary chip, then native id).
@@ -266,11 +273,14 @@ construction:
   pane's `kind_chip_span` (`src/tui/ui.rs:1905`) becomes a
   colored glyph plus a dim label rather than a bracketed text
   tag.
-- **AgentSession rows carry two independent signals** (kind glyph
-  color + harness pill color). Operators reading "claude session"
-  by the magenta pill keep that signal; new operators have the
-  uniform `●` to anchor "this is an agent session" before
-  learning the harness vocabulary.
+- **AgentSession rows lean on the harness pill alone in row
+  contexts** (§3 amendment). The colored pill is a strong enough
+  identity signal that a stacked `●` only repeated information;
+  H-VIS-003 verified the redundancy against the showcase fixture
+  before the prefix was removed. `NodeKind::AgentSession`'s glyph
+  + color are still defined for surfaces without a pill (detail
+  pane, explorer, JSON / DOT) so the kind keeps a uniform identity
+  outside the row tree.
 - **`[tui.theme.icons]` is the first nested table** under
   `[tui.theme]`. ADR 0032's flat-schema decision is preserved for
   the color keys; the icons block is a deliberate exception
@@ -305,8 +315,9 @@ Replace the harness pill with a `●` glyph colored by harness
 (magenta `●` for claude, cyan `●` for codex, etc.) and drop the
 pill text. Rejected: the pill text is a learning aid — new
 operators read `[claude]` before they have memorized that magenta
-means claude. The two-signal layout costs one cell per row but
-keeps the readable label.
+means claude. The §3 amendment instead keeps the readable pill and
+drops the redundant prefix glyph for agent rows specifically; it
+does not collapse the two into one.
 
 ### B. Nerd Font as the default
 
@@ -377,9 +388,11 @@ matrix. `Y` remains the documented ASCII override in
 
 - The glyph slate is Unicode geometric by default; Nerd Font
   users opt in through `[tui.theme.icons]`. No font detection.
-- `AgentSession` keeps an independent kind glyph color
-  (`node_agent_session`) layered with the existing harness pill;
-  the two signals are not merged.
+- `AgentSession`'s row-context prefix glyph is **suppressed** in
+  the row tree because the harness pill already carries the
+  identity signal (§3 amendment). `node_agent_session` stays in
+  the theme and slate so pill-less surfaces (detail pane,
+  explorer, JSON / DOT) still render the kind.
 - `ForgePr` reuses the existing `pr_*` color fields rather than
   introducing a new `node_forge_pr` color.
 - The icon override table is the one nested block under

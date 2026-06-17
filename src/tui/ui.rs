@@ -1486,15 +1486,23 @@ fn group_node_kind(group: &GroupRow) -> Option<NodeKind> {
 }
 
 /// Compute the per-row node-kind glyph span for any [`RowKind`], or
-/// `None` when the row carries no graph node kind (synthetic group
-/// buckets, sentinel `Pin` rows). Folds the per-row dispatch the
-/// `render_left_row` body and the `group_row_body_width` pre-pass
-/// both rely on through a single helper so the two paths agree on
-/// row widths.
+/// `None` when the row already carries an identity signal (the
+/// colored harness pill on `AgentSession`) or when no graph node
+/// kind backs it (synthetic group buckets, sentinel `Pin` rows).
+/// Folds the per-row dispatch the `render_left_row` body and the
+/// `group_row_body_width` pre-pass both rely on through a single
+/// helper so the two paths agree on row widths.
 fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<'static>> {
     let node_kind = match kind {
         RowKind::Group(group) => group_node_kind(group)?,
-        RowKind::AgentSession(_) => NodeKind::AgentSession,
+        // ADR 0073 amendment (2026-06): AgentSession rows already
+        // carry the colored harness pill as their identity. Stacking
+        // a separate `●` glyph next to it doubled the signal in
+        // practice without adding information. The pill stands alone
+        // in row contexts. `NodeKind::AgentSession`'s glyph + color
+        // remain defined for detail-pane and explorer surfaces
+        // (H-VIS-004) where no pill is rendered.
+        RowKind::AgentSession(_) => return None,
         RowKind::AgentSessionMuxCandidate(_) => NodeKind::MuxSession,
         RowKind::MuxSession(_) => NodeKind::MuxSession,
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
@@ -4280,7 +4288,10 @@ mod tests {
         });
         assert!(row_kind_glyph_span(&pin, &theme).is_none());
 
-        // AgentSession rows get the `●` glyph in `node_agent_session`.
+        // AgentSession rows skip the kind glyph in row contexts —
+        // the colored harness pill already carries the identity
+        // signal, so a stacked `●` would only repeat what the pill
+        // already says (ADR 0073 amendment).
         let agent = RowKind::AgentSession(crate::tui::rows::AgentSessionRow {
             session: AgentSessionId::new("claude", "/state", "abc"),
             short_id: "abc".into(),
@@ -4296,9 +4307,10 @@ mod tests {
             primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
             pin_id: None,
         });
-        let agent_glyph = row_kind_glyph_span(&agent, &theme).unwrap();
-        assert_eq!(agent_glyph.content, "● ");
-        assert_eq!(agent_glyph.style.fg, Some(theme.node_agent_session));
+        assert!(
+            row_kind_glyph_span(&agent, &theme).is_none(),
+            "row-context AgentSession should defer to the harness pill",
+        );
 
         // MuxSession and AgentSessionMuxCandidate both get `▣` since
         // a candidate row points at a mux.
