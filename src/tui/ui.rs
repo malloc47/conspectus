@@ -928,7 +928,13 @@ fn group_row_label_width(row: &crate::tui::rows::Row) -> usize {
 ///
 /// `count_width` right-pads the `(N)` count chip so single- and
 /// double-digit counts (`(2)` vs `(72)`) anchor on the same column,
-/// keeping the mux glyphs that follow aligned.
+/// keeping any trailing ambiguity glyph aligned across rows.
+///
+/// ADR 0072: per-bucket muxed/unmuxed counts at the group level are
+/// gone — the only secondary signal is a single `⚠` (theme `warning`)
+/// when at least one descendant session is in the `Ambiguous`
+/// candidate-set state. The ambiguity catalog lives on the group's
+/// detail pane (ADR 0071).
 fn append_group_summary_spans(
     spans: &mut Vec<Span<'static>>,
     summary: GroupSummary,
@@ -943,16 +949,15 @@ fn append_group_summary_spans(
         format!("  {count:>count_width$}"),
         Style::default().add_modifier(theme.placeholder),
     ));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled("◉", Style::default().fg(theme.mux_attached)));
-    spans.push(Span::raw(format!(" {} ", summary.attached)));
-    spans.push(Span::styled("◐", Style::default().fg(theme.mux_ambiguous)));
-    spans.push(Span::raw(format!(" {} ", summary.ambiguous)));
-    spans.push(Span::styled(
-        "◯",
-        Style::default().add_modifier(theme.mux_unmuxed),
-    ));
-    spans.push(Span::raw(format!(" {}", summary.unmuxed)));
+    if summary.ambiguous > 0 {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "⚠",
+            Style::default()
+                .fg(theme.warning)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 }
 
 /// Column anchors for group-row alignment computed once per render
@@ -966,11 +971,11 @@ struct GroupAlign {
     label_width: usize,
     /// Max body width (label-padded) across visible group rows that
     /// will get a summary chip block. Pads between the body and the
-    /// `(N)  ◉ … ◐ … ◯ …` tail.
+    /// `(N)` count plus optional `⚠` ambiguity glyph (ADR 0072).
     body_width: usize,
     /// Max `(N)` count chip width (including parens) across visible
-    /// group rows with sessions. Right-pads the count chip so the
-    /// mux glyphs that follow it anchor on the same column whether
+    /// group rows with sessions. Right-pads the count chip so any
+    /// trailing ambiguity glyph anchors on the same column whether
     /// the count is `(2)` or `(72)`.
     count_width: usize,
 }
@@ -1420,12 +1425,13 @@ fn render_candidate_spans(candidate: &MuxCandidateRow, theme: &Theme) -> Vec<Spa
 }
 
 fn mux_indicator_span(state: MuxIndicator, theme: &Theme) -> Span<'static> {
+    // ADR 0072: the row chip is attachable-binary. `◉` answers "yes,
+    // there is a definitive mux here that `Enter`/`a` will attach to."
+    // Both `Ambiguous` and `Unmuxed` fail that test and share the `◯`
+    // glyph — ambiguity surfaces only on the enclosing group row.
     match state {
         MuxIndicator::Attached => Span::styled("◉", Style::default().fg(theme.mux_attached)),
-        MuxIndicator::Ambiguous { .. } => {
-            Span::styled("◐", Style::default().fg(theme.mux_ambiguous))
-        }
-        MuxIndicator::Unmuxed => {
+        MuxIndicator::Ambiguous { .. } | MuxIndicator::Unmuxed => {
             Span::styled("◯", Style::default().add_modifier(theme.mux_unmuxed))
         }
     }
@@ -3433,18 +3439,17 @@ mod tests {
     }
 
     #[test]
-    fn group_rows_carry_mux_state_summary_chips() {
-        // Phase 7: each group row aggregates the mux-state breakdown
-        // of its sessions and surfaces it as a right-aligned chip
-        // strip. seeded_app's project group contains one unmuxed
-        // codex session, so the workspace/repo group row should
-        // show `(1)` plus a mux-state breakdown with ◯ 1 set.
+    fn group_rows_carry_session_count_chip_only_when_no_ambiguity() {
+        // ADR 0072: group rows show `(N)` total agents and nothing
+        // else when none of their descendants are in the ambiguous
+        // candidate-set state. The per-bucket muxed/unmuxed counts
+        // from the original Phase 7 chip strip are gone; ambiguity
+        // is surfaced only by the trailing `⚠` glyph (asserted in
+        // `group_rows_show_warning_glyph_when_descendant_is_ambiguous`).
         let app = seeded_app();
         let area = Rect::new(0, 0, 160, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
-        // The group row appears on the line that contains
-        // `~/src/proj` (the seeded project path).
         let group_line = text
             .lines()
             .find(|l| l.contains("~/src/proj"))
@@ -3454,8 +3459,49 @@ mod tests {
             "group should advertise its agent count: {group_line}",
         );
         assert!(
-            group_line.contains('◉') && group_line.contains('◐') && group_line.contains('◯'),
-            "group should carry all three mux-state glyphs: {group_line}",
+            !group_line.contains('◉') && !group_line.contains('◐') && !group_line.contains('⚠'),
+            "non-ambiguous group should carry no per-bucket glyphs and no warning: {group_line}",
+        );
+    }
+
+    #[test]
+    fn group_rows_show_warning_glyph_when_descendant_is_ambiguous() {
+        // ADR 0072: when any descendant session is in the
+        // `Ambiguous` candidate-set state, the group row gains a
+        // single `⚠` after the `(N)` count chip. The catalog of
+        // ambiguous muxes lives on the group's detail pane
+        // (ADR 0071); the row glyph is just the flag.
+        let theme = Theme::default();
+        let summary = GroupSummary {
+            agents: 2,
+            attached: 0,
+            ambiguous: 2,
+            unmuxed: 0,
+        };
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        append_group_summary_spans(&mut spans, summary, &theme, 3);
+        let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+
+        assert!(rendered.contains("(2)"), "count chip missing: {rendered}");
+        assert!(rendered.contains('⚠'), "warning glyph missing: {rendered}");
+        assert!(
+            !rendered.contains('◉') && !rendered.contains('◐') && !rendered.contains('◯'),
+            "per-bucket mux glyphs should not appear on the group summary: {rendered}",
+        );
+
+        // The unambiguous case omits the warning glyph entirely.
+        let clean_summary = GroupSummary {
+            agents: 2,
+            attached: 2,
+            ambiguous: 0,
+            unmuxed: 0,
+        };
+        let mut clean_spans: Vec<Span<'static>> = Vec::new();
+        append_group_summary_spans(&mut clean_spans, clean_summary, &theme, 3);
+        let clean_rendered: String = clean_spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            !clean_rendered.contains('⚠'),
+            "warning should be hidden when no descendant is ambiguous: {clean_rendered}",
         );
     }
 

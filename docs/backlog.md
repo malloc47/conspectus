@@ -6219,6 +6219,118 @@ H-SUBAGENT-001 ──→ H-SUBAGENT-002 ──→ H-SUBAGENT-003
     the parent has a stronger non-CWD link (parent still preferred).
   - Blockers: `H-SUBAGENT-002`, existing `LinkedToMux` resolver tests.
 
+### TUI Pass-2 Revisions (H-UI-*)
+
+A fresh pass over the rendered showcase (ADR 0070) surfaced three
+revisions to existing TUI work. Tracking them here so the followups
+do not get lost inside their originating workstreams.
+
+- [x] `H-UI-001` Collapse per-session mux chip to an
+  attachable-binary; let group rows own the ambiguity signal.
+  - Outcome: landed under ADR 0072
+    (`docs/adr/0072-mux-indicator-attachable-binary.md`). The
+    row chip now reads `◉` only when a single definitive
+    `LinkedToMux` candidate exists; `Ambiguous { .. }` and
+    `Unmuxed` both render as `◯`. Group rows drop the
+    per-bucket `◉ a ◐ b ◯ c` summary in favor of `(N total)`
+    plus a single `⚠` (theme `warning`) when any descendant
+    session is in the `Ambiguous` state. Filter modal keeps
+    three buckets; `MuxIndicator::Ambiguous { candidate_count }`
+    stays on the model so status-bar hints, header counts, and
+    the ADR 0071 group-detail catalog continue to work.
+
+- [ ] `H-UI-002` Weave per-node-kind glyph identity through every
+  TUI surface (tree, detail, filter, help).
+  - Scope: re-affirm and finish the existing
+    `Per-Node-Type Visual Identity` workstream
+    (`H-VIS-001..006`) — there are enough unique graph entity
+    types (Workspace, Repo, Checkout, AgentSession, MuxSession,
+    Branch, Fork, ForgePr, RuntimeProcess) that operators need a
+    shorthand glyph per kind, not just a textual label. Beyond
+    the row-tree + detail-panel scope already captured in
+    `H-VIS-003..004`, extend the glyph usage to the help modal
+    keybinding tables (where the modal references a node kind),
+    the filter modal (kind-bucket headers and chip pills), the
+    search results overlay, the breadcrumb chain in the detail
+    explorer, and any non-TUI surface that names node kinds
+    (CLI table rows, JSON `node_kind` tag per `H-VIS-005`).
+    Acceptance under the existing `H-VIS-*` IDs; this story
+    promotes the workstream from "candidate" to "scheduled."
+  - Blockers: see `H-VIS-001`.
+
+- [ ] `H-UI-003` Roll back the detail-pane upstream/downstream
+  split; render a single related-entities list with descriptive
+  edge labels.
+  - Scope: revisit the relationship-explorer view added in
+    `T8-027` / `T8-028` / `T8-029` (`Detail Pane Graph Explorer
+    Revamp`) and collapse the upstream-vs-downstream grouping
+    into one flat "related entities" group per detail pane. Each
+    row shows the neighbor's node-kind glyph (per `H-UI-002`),
+    the neighbor label, and a descriptive edge label whose
+    wording carries directionality on its own — `forked from`,
+    `forks`, `spawned by`, `spawns`, `contains`, `member of`,
+    `attached to`, `linked to PR`, etc. The reader gets
+    direction from the verb, not from which column the row sits
+    in. Preserve drilldown + breadcrumb navigation and the
+    selected-edge preview from `T8-028` / `T8-029`. This is a
+    *flatten*, not a model rewrite — relationship-row data
+    already carries direction and relation kind.
+  - Tests: replace existing upstream/downstream snapshot pairs
+    with a single related-entities snapshot per node kind;
+    reducer tests that confirm `Enter` still drills into the
+    selected neighbor and `Backspace` still walks the breadcrumb
+    stack; coverage for an edge kind whose verb alone has to
+    disambiguate direction (workspace `contains` repo vs repo
+    `member of` workspace) so the label catalog stays
+    unambiguous.
+  - Open questions: whether a residual category of edges remains
+    direction-ambiguous after relabel and warrants a small
+    arrow/glyph suffix (`→` / `←`); whether to keep relation-
+    kind sub-headers from `T8-027` or flatten them away
+    entirely.
+  - Blockers: `T8-029`; ideally lands after `H-UI-002` so the
+    glyph language is in place for the related-entities rows.
+
+- [ ] `H-UI-004` Audit the sessions-pane header content
+  holistically.
+  - Scope: review every span the left-pane header
+    (`src/tui/ui.rs:left_panel_title` + `append_header_chips`)
+    renders today — the freshness chip, view-tab strip,
+    `N agents · M mux` counter, per-harness chips, and the
+    three-bucket `◉ / ◐ / ◯` mux-state chip section — and
+    decide what each one is actually paying for. The motivating
+    questions:
+      - Does the global three-bucket mux chip section still
+        carry weight now that the per-row chip is binary
+        (ADR 0072) and group rows own ambiguity? If "find an
+        ambiguous session" is the use case, is a filter affordance
+        the better answer?
+      - Are per-harness counts duplicating signal the harness
+        badges + group summaries already provide?
+      - Does the view-tab strip stay in the header or move to a
+        dedicated row so the header can shrink to one line on
+        narrow terminals?
+      - Should the freshness / refresh state move into the
+        status bar so the header carries identity + counts only?
+    The deliverable is a short design note (or ADR if the
+    decisions reach across surfaces) plus the implementation
+    that drops or relocates whatever the audit decides is
+    redundant. Pre-commit to nothing — the audit might choose
+    "keep everything, just tidy the placement."
+  - Tests: header snapshot coverage at wide / mid / narrow
+    widths after each chip removal or relocation; coverage for
+    the chip-section drop / re-introduce path under filter and
+    no-filter states.
+  - Open questions: whether the header redesign should also
+    cover the `mux` / `union` / `prs` / `forks` views (their
+    headers re-use the same composition) or scope strictly to
+    sessions; whether the per-harness chips become an opt-in
+    `--show-harness-chips` flag instead of always-on.
+  - Blockers: `H-UI-001` landed (the binary chip is the trigger
+    for re-evaluating the header chips); coordinate with
+    `H-UI-002` so any new glyph language doesn't get rewritten
+    twice.
+
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
 Source plan: pending; this section is the workstream skeleton. See
