@@ -95,6 +95,11 @@ pub enum AttachDisabled {
     /// Conspectus TUI. Attaching it would nest the TUI inside
     /// itself.
     CurrentTmuxSession(String),
+    /// The selected group row (workspace / repo / checkout) has
+    /// more than one ambiguous mux scoped to it (ADR 0071), so `a`
+    /// doesn't have a sensible default pick. The renderer surfaces
+    /// the count as a status hint pointing at the detail section.
+    AmbiguousGroupMuxes(usize),
 }
 
 /// Decide whether the current selection is attachable. Pure: works
@@ -134,6 +139,25 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         (RowKind::MuxSession(mux), RowId::MuxSession(NodeId::MuxSession(id))) => {
             let _ = mux;
             id.clone()
+        }
+        // ADR 0071: `a` on a workspace/repo/checkout row attaches
+        // to the single ambiguous mux scoped to that group, if any.
+        // Zero → UnmuxedSession (no attach possible). Multiple →
+        // AmbiguousGroupMuxes so the status bar points the operator
+        // at the detail section.
+        (
+            RowKind::Group(_),
+            RowId::Group(node @ (NodeId::Workspace(_) | NodeId::Repo(_) | NodeId::Checkout(_))),
+        ) => {
+            let muxes = crate::tui::detail::ambiguous_muxes_for_group(&snapshot, node);
+            match muxes.len() {
+                0 => return Err(AttachDisabled::UnmuxedSession),
+                1 => match &muxes[0] {
+                    NodeId::MuxSession(id) => id.clone(),
+                    _ => return Err(AttachDisabled::UnsupportedRow),
+                },
+                n => return Err(AttachDisabled::AmbiguousGroupMuxes(n)),
+            }
         }
         _ => return Err(AttachDisabled::UnsupportedRow),
     };
@@ -424,6 +448,9 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
         AttachDisabled::CurrentTmuxSession(name) => {
             format!("attach: refusing to attach current tmux session `{name}`")
         }
+        AttachDisabled::AmbiguousGroupMuxes(n) => {
+            format!("attach: {n} ambiguous muxes here — pick one in detail, or `b` to bind",)
+        }
     }
 }
 
@@ -570,17 +597,21 @@ mod tests {
     }
 
     #[test]
-    fn group_row_reports_unsupported_row() {
+    fn group_row_with_no_ambiguous_mux_reports_unmuxed() {
+        // ADR 0071: a workspace/repo/checkout row with no ambiguous
+        // mux in scope falls through to the same UnmuxedSession
+        // reason an unmuxed session row would. The earlier
+        // UnsupportedRow result is gone because group rows now have
+        // a meaningful attach semantic.
         let mut snapshot = GraphSnapshot::empty();
         add_repo_and_worktree(&mut snapshot, "/p/proj");
         snapshot
             .nodes
             .push(session_node("codex", "/state", "abc", "/p/proj"));
         let app = build_app(snapshot);
-        // Auto-selection lands on the repo group row first.
         assert_eq!(
             resolve_attach_target(&app),
-            Err(AttachDisabled::UnsupportedRow)
+            Err(AttachDisabled::UnmuxedSession)
         );
     }
 
@@ -696,7 +727,10 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_candidate_child_row_attaches_to_that_candidate() {
+    fn group_row_with_multiple_ambiguous_muxes_reports_ambiguous() {
+        // ADR 0071: with two muxes ambiguously claimed by the same
+        // session, `a` on the parent repo no longer has a unique
+        // default pick. The renderer surfaces the count as a hint.
         let mut snapshot = GraphSnapshot::empty();
         add_repo_and_worktree(&mut snapshot, "/p/proj");
         snapshot
@@ -705,12 +739,29 @@ mod tests {
         snapshot.nodes.push(mux_node("tmux", "editor"));
         snapshot.nodes.push(mux_node("tmux", "scratch"));
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
+        let checkout_id = NodeId::Checkout(crate::model::CheckoutId::new(
+            RepoId::new("/p/proj"),
+            "/p/proj",
+        ));
+        snapshot.candidate_links.push(GraphLink {
+            id: "assoc".to_string(),
+            source: session_id.clone(),
+            target: crate::model::LinkEndpoint::Node {
+                id: checkout_id.clone(),
+            },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: crate::model::Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: crate::model::SourceMetadata::default(),
+            state: crate::model::LinkState::Active,
+        });
         let editor = mux_node_id("tmux", "editor");
         let scratch = mux_node_id("tmux", "scratch");
         snapshot.candidate_links.push(linked_to_mux(
             &session_id,
             &editor,
-            Provenance::StrongDiscovered,
+            Provenance::Discovered,
             "1",
         ));
         snapshot.candidate_links.push(linked_to_mux(
@@ -719,18 +770,13 @@ mod tests {
             Provenance::Discovered,
             "2",
         ));
-        let mut app = build_app(snapshot);
-        // Step from repo → session, expand its ambiguous children,
-        // then step to the second candidate (scratch).
-        app.update(Msg::NavDown);
-        app.update(Msg::ToggleExpand);
-        app.update(Msg::NavDown); // editor candidate
-        app.update(Msg::NavDown); // scratch candidate
-        let target = resolve_attach_target(&app).expect("candidate row attachable");
-        assert_eq!(
-            target.native_id, "scratch",
-            "attach respects the candidate row override"
-        );
+        let app = build_app(snapshot);
+        // Auto-selection lands on the repo group row. Two ambiguous
+        // muxes in scope → the new variant fires with the count.
+        match resolve_attach_target(&app) {
+            Err(AttachDisabled::AmbiguousGroupMuxes(n)) => assert_eq!(n, 2),
+            other => panic!("expected AmbiguousGroupMuxes(2), got {other:?}"),
+        }
     }
 
     #[test]

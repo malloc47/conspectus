@@ -22,13 +22,13 @@ use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
-    AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, MuxSessionNode,
-    NodeId, PinBinding, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
+    AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, NodeId,
+    PinBinding, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxCandidateRow, MuxIndicator, PinRow, Row, RowId, RowKind, RowTree,
-    ViewLabel, format_recency, harness_label, shorten_home,
+    AgentSessionRow, GroupRow, MuxIndicator, PinRow, Row, RowId, RowKind, RowTree, ViewLabel,
+    format_recency, harness_label, shorten_home,
 };
 
 /// Inputs to the sessions builder. Tests construct these directly;
@@ -421,7 +421,6 @@ struct EmitCtx<'a, 'snap> {
 struct SessionsData<'a> {
     snapshot: &'a GraphSnapshot,
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
-    mux_sessions: BTreeMap<NodeId, &'a MuxSessionNode>,
     repos: BTreeMap<NodeId, &'a crate::model::RepoNode>,
     checkouts: BTreeMap<NodeId, &'a crate::model::CheckoutNode>,
     by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
@@ -481,7 +480,6 @@ impl<'a> SessionsData<'a> {
 impl<'a> SessionsData<'a> {
     fn new(snapshot: &'a GraphSnapshot) -> Self {
         let mut agent_sessions = BTreeMap::new();
-        let mut mux_sessions = BTreeMap::new();
         let mut repos = BTreeMap::new();
         let mut checkouts = BTreeMap::new();
 
@@ -490,9 +488,6 @@ impl<'a> SessionsData<'a> {
             match node {
                 GraphNode::AgentSession(n) => {
                     agent_sessions.insert(id, n);
-                }
-                GraphNode::MuxSession(n) => {
-                    mux_sessions.insert(id, n);
                 }
                 GraphNode::Repo(n) => {
                     repos.insert(id, n);
@@ -559,7 +554,6 @@ impl<'a> SessionsData<'a> {
         Self {
             snapshot,
             agent_sessions,
-            mux_sessions,
             repos,
             checkouts,
             by_source_relation,
@@ -973,7 +967,6 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
 
 fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
     let candidates = ctx.data.mux_candidates_for_session(&entry.id);
-    let preferred = pick_preferred(&candidates);
     let mux_state = match candidates.len() {
         0 => MuxIndicator::Unmuxed,
         1 => MuxIndicator::Attached,
@@ -982,7 +975,11 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
     let mut lineage_children = visible_lineage_children(ctx, &entry.id);
     lineage_children.sort_by(|a, b| compare_sessions(a, b, ctx.float_muxed_top));
     let has_lineage_children = !lineage_children.is_empty();
-    let expandable = candidates.len() >= 2 || has_lineage_children;
+    // ADR 0071: ambiguous mux candidates no longer expand a
+    // per-session subtree; they surface as a section on the
+    // shared-ancestor group's detail pane instead. Sessions stay
+    // expandable only when lineage children exist.
+    let expandable = has_lineage_children;
     let short_id = ctx.short_ids.short_id(&entry.id);
     let cwd_display = entry
         .node
@@ -1021,37 +1018,10 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
         }
     }
 
-    if candidates.len() >= 2 {
-        let preferred_target = preferred.and_then(|link| link.target_node_id().cloned());
-        for link in candidates {
-            let Some(target) = link.target_node_id() else {
-                continue;
-            };
-            let mux_id = match target {
-                NodeId::MuxSession(id) => id.clone(),
-                _ => continue,
-            };
-            let mux_node = ctx.data.mux_sessions.get(target).copied();
-            let mux_label = mux_node
-                .map(mux_session_label)
-                .unwrap_or_else(|| format!("{}:{}", mux_id.native_id, mux_id.native_id));
-            let is_preferred = preferred_target.as_ref() == Some(target);
-            ctx.tree.rows.push(Row {
-                id: RowId::AgentSessionMuxCandidate {
-                    agent: entry.id.clone(),
-                    mux: target.clone(),
-                },
-                depth: depth.saturating_add(1),
-                expandable: false,
-                kind: RowKind::AgentSessionMuxCandidate(MuxCandidateRow {
-                    mux: mux_id,
-                    mux_label,
-                    is_preferred,
-                    primary_node: target.clone(),
-                }),
-            });
-        }
-    }
+    // ADR 0071 retired the per-session candidate subtree. The
+    // `MuxIndicator::Ambiguous` chip on the session row above
+    // still signals the conflict; the detail pane for the
+    // session's shared-ancestor group lists the actual muxes.
 }
 
 fn visible_lineage_children<'snap>(
@@ -1109,25 +1079,6 @@ fn project_name_from_path(path: &str) -> Option<String> {
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .map(str::to_string)
-}
-
-fn mux_session_label(node: &MuxSessionNode) -> String {
-    let native = if node.native_id.chars().count() > 36 {
-        let head: String = node.native_id.chars().take(28).collect();
-        let tail: String = node
-            .native_id
-            .chars()
-            .rev()
-            .take(6)
-            .collect::<String>()
-            .chars()
-            .rev()
-            .collect();
-        format!("{head}…{tail}")
-    } else {
-        node.native_id.clone()
-    };
-    format!("{}:{native}", node.backend)
 }
 
 /// Sessions within a group sort by recency desc (None last), then
@@ -2798,27 +2749,17 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert!(session_row.expandable);
-
-        let candidate_rows: Vec<&MuxCandidateRow> = tree
-            .rows
-            .iter()
-            .filter_map(|r| match &r.kind {
-                RowKind::AgentSessionMuxCandidate(row) => Some(row),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(candidate_rows.len(), 2, "two candidate child rows");
-        let preferred = candidate_rows
-            .iter()
-            .find(|c| c.is_preferred)
-            .expect("a preferred candidate is marked");
-        assert_eq!(preferred.mux_label, "tmux:editor");
-        let alt = candidate_rows
-            .iter()
-            .find(|c| !c.is_preferred)
-            .expect("an alternate candidate is present");
-        assert_eq!(alt.mux_label, "tmux:scratch");
+        // ADR 0071: ambiguity no longer expands a candidate subtree
+        // on the session row; the chip stays, but the row collapses
+        // to a leaf unless lineage children would expand it.
+        assert!(!session_row.expandable);
+        assert!(
+            !tree
+                .rows
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::AgentSessionMuxCandidate(_))),
+            "no candidate child rows after ADR 0071",
+        );
     }
 
     #[test]

@@ -375,7 +375,12 @@ fn invariant_ignored_mux_candidates_remain_evidence_but_never_resolve() {
 }
 
 #[test]
-fn invariant_ambiguous_tui_rows_dedupe_mux_candidates_by_target() {
+fn invariant_ambiguous_mux_session_renders_as_leaf_after_adr_0071() {
+    // ADR 0071 retired the per-session candidate subtree. The
+    // ambiguous session still flashes its `◐` chip with the
+    // correct candidate count, but the row no longer expands and
+    // no `AgentSessionMuxCandidate` rows are emitted — the muxes
+    // surface on the shared-ancestor group detail instead.
     let mut world = ReplayWorld::new();
     let work = world.mkdir("work");
     world.write_codex_session("ambiguous", &work);
@@ -413,7 +418,7 @@ fn invariant_ambiguous_tui_rows_dedupe_mux_candidates_by_target() {
         MuxIndicator::Ambiguous { candidate_count: 2 }
     );
 
-    let candidate_targets: BTreeSet<NodeId> = result
+    let candidate_rows: BTreeSet<NodeId> = result
         .sessions
         .rows
         .iter()
@@ -426,10 +431,9 @@ fn invariant_ambiguous_tui_rows_dedupe_mux_candidates_by_target() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        candidate_targets.len(),
-        2,
-        "candidate rows should be unique per mux target: {:#?}",
+    assert!(
+        candidate_rows.is_empty(),
+        "no candidate child rows after ADR 0071: {:#?}",
         result.sessions.rows
     );
 }

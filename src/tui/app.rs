@@ -2527,34 +2527,30 @@ mod tests {
     }
 
     #[test]
-    fn scenario_ambiguous_mux_candidates_remain_navigable_after_expansion() {
+    fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
+        // ADR 0071: ambiguous mux candidates no longer expand a
+        // per-session subtree; the chip stays but the row is a
+        // leaf. The catalog of muxes lives on the shared-ancestor
+        // group's detail pane via `ambiguous_muxes_for_group`.
         let (mut app, _) = scenario_app("ambiguous-mux");
         select_session(&mut app, "ambiguous");
 
-        app.update(Msg::ToggleExpand);
-        let candidate_rows: Vec<_> = app
+        let session_row_id = app.selection().cloned().expect("session selected");
+        let session_row = app
             .visible_rows()
             .iter()
-            .filter(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_)))
-            .map(|row| row.id.clone())
-            .collect();
-        assert_eq!(
-            candidate_rows.len(),
-            2,
-            "expanded ambiguous session should expose both mux candidates"
+            .find(|row| row.id == session_row_id)
+            .cloned()
+            .expect("session row visible");
+        assert!(
+            !session_row.expandable,
+            "ambiguous session row stops being expandable after ADR 0071",
         );
-
-        app.update(Msg::NavDown);
-        assert_eq!(
-            app.selection().cloned(),
-            candidate_rows.first().cloned(),
-            "cursor should move into candidate rows after expansion"
-        );
-        app.update(Msg::NavDown);
-        assert_eq!(
-            app.selection().cloned(),
-            candidate_rows.get(1).cloned(),
-            "cursor should move past the first candidate row"
+        assert!(
+            !app.visible_rows()
+                .iter()
+                .any(|row| matches!(row.kind, RowKind::AgentSessionMuxCandidate(_))),
+            "no candidate child rows after ADR 0071",
         );
     }
 

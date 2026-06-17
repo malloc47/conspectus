@@ -229,6 +229,10 @@ pub enum SectionKind {
     Mux,
     Pr,
     Lineage,
+    /// Per ADR 0071: on Workspace/Repo/Checkout details, the list of
+    /// muxes that are ambiguously claimed by sessions in the group's
+    /// scope. Empty section is suppressed by the standard rule.
+    AmbiguousMux,
 }
 
 impl SectionKind {
@@ -241,6 +245,7 @@ impl SectionKind {
             Self::Mux => "Mux",
             Self::Pr => "PR",
             Self::Lineage => "Lineage",
+            Self::AmbiguousMux => "Ambiguous muxes",
         }
     }
 }
@@ -275,6 +280,8 @@ fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
         ("runtime_process", _) => Process,
         ("forge_pr", _) => Pr,
         ("fork", _) => Lineage,
+        // ADR 0071: scoped ambiguous-mux roll-up on group details.
+        ("workspace" | "repo" | "checkout", "ambiguous_mux") => AmbiguousMux,
         _ => Session,
     }
 }
@@ -284,6 +291,7 @@ fn section_order(kind_label: &str) -> &'static [SectionKind] {
     match kind_label {
         "mux_session" => &[Mux, Process, Session, Pr, Lineage],
         "runtime_process" => &[Process, Mux, Session, Pr, Lineage],
+        "workspace" | "repo" | "checkout" => &[Session, AmbiguousMux, Process, Mux, Pr, Lineage],
         _ => &[Session, Process, Mux, Pr, Lineage],
     }
 }
@@ -402,8 +410,8 @@ fn header_fields_inner(
         GraphNode::RuntimeProcess(process) => runtime_process_fields(snapshot, process, home),
         GraphNode::ForgePr(pr) => forge_pr_fields(pr),
         GraphNode::Fork(fork) => fork_fields(fork),
-        GraphNode::Repo(repo) => repo_fields(repo, home),
-        GraphNode::Checkout(worktree) => worktree_fields(worktree, home),
+        GraphNode::Repo(repo) => repo_fields(snapshot, repo, home),
+        GraphNode::Checkout(worktree) => worktree_fields(snapshot, worktree, home),
         GraphNode::Workspace(workspace) => {
             workspace_fields(snapshot, workspace, home, include_linked_details)
         }
@@ -806,11 +814,18 @@ fn runtime_process_fields(
     fields
 }
 
-fn repo_fields(repo: &RepoNode, home: Option<&Path>) -> Vec<HeaderField> {
-    vec![plain("common_dir", shorten_home(&repo.common_dir, home))]
+fn repo_fields(snapshot: &GraphSnapshot, repo: &RepoNode, home: Option<&Path>) -> Vec<HeaderField> {
+    let mut fields = vec![plain("common_dir", shorten_home(&repo.common_dir, home))];
+    let repo_id = NodeId::Repo(repo.id.clone());
+    fields.extend(ambiguous_mux_fields(snapshot, &repo_id));
+    fields
 }
 
-fn worktree_fields(worktree: &CheckoutNode, home: Option<&Path>) -> Vec<HeaderField> {
+fn worktree_fields(
+    snapshot: &GraphSnapshot,
+    worktree: &CheckoutNode,
+    home: Option<&Path>,
+) -> Vec<HeaderField> {
     let mut fields = vec![plain("root", shorten_home(&worktree.root, home))];
     if let Some(git_dir) = &worktree.git_dir {
         fields.push(plain("git_dir", shorten_home(git_dir, home)));
@@ -818,7 +833,34 @@ fn worktree_fields(worktree: &CheckoutNode, home: Option<&Path>) -> Vec<HeaderFi
     if let Some(branch) = &worktree.current_branch {
         fields.push(plain("branch", branch.refname.clone()));
     }
+    let checkout_id = NodeId::Checkout(worktree.id.clone());
+    fields.extend(ambiguous_mux_fields(snapshot, &checkout_id));
     fields
+}
+
+/// Build the `ambiguous_mux` field rows for a group node detail
+/// (ADR 0071). Each mux gets one row labeled by the mux's
+/// `backend:native_id`; the renderer routes them to the "Ambiguous
+/// muxes" section via `section_for`. Returns an empty `Vec` when no
+/// session in scope has ambiguous candidates — `section_order`'s
+/// no-content suppression then hides the section header entirely.
+fn ambiguous_mux_fields(snapshot: &GraphSnapshot, group: &NodeId) -> Vec<HeaderField> {
+    ambiguous_muxes_for_group(snapshot, group)
+        .into_iter()
+        .map(|mux| {
+            let label = snapshot
+                .nodes
+                .iter()
+                .find_map(|node| match node {
+                    GraphNode::MuxSession(m) if NodeId::MuxSession(m.id.clone()) == mux => {
+                        Some(format!("{}:{}", m.backend, m.native_id))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| format!("{mux}"));
+            linked("ambiguous_mux", label, Some(mux))
+        })
+        .collect()
 }
 
 fn workspace_fields(
@@ -836,6 +878,7 @@ fn workspace_fields(
     }
     let workspace_id = NodeId::Workspace(workspace.id.clone());
     fields.extend(workspace_member_fields(snapshot, &workspace_id));
+    fields.extend(ambiguous_mux_fields(snapshot, &workspace_id));
     if include_linked_details {
         attach_linked_details(snapshot, &mut fields, home);
     }
@@ -968,6 +1011,110 @@ fn active_links_from<'a>(
                 && link.relation == relation
         })
         .collect()
+}
+
+/// Per ADR 0071: the set of mux NodeIds that are ambiguous mux
+/// candidates from sessions whose natural parent is `group`.
+/// "Ambiguous" means a session with ≥2 active `LinkedToMux`
+/// candidates; the resolver hasn't picked a single winner so the
+/// operator's eye lands on this section to decide.
+///
+/// The natural parent is the same shape the Sessions/Graph view
+/// uses (ADR 0064):
+///
+/// - `Workspace` group → sessions with an active `AssociatedWith
+///   Workspace` link to this workspace (A-class).
+/// - `Checkout` group → sessions with an active `AssociatedWith
+///   Checkout` link to this checkout AND no workspace association
+///   (B-class scoped narrowly).
+/// - `Repo` group → B-class sessions in any checkout that
+///   `BelongsToRepo` this repo.
+///
+/// Anything else returns empty.
+pub fn ambiguous_muxes_for_group(snapshot: &GraphSnapshot, group: &NodeId) -> Vec<NodeId> {
+    let sessions = sessions_scoped_to_group(snapshot, group);
+    let mut muxes: std::collections::BTreeSet<NodeId> = std::collections::BTreeSet::new();
+    for session in &sessions {
+        let candidates = active_links_from(snapshot, session, RelationKind::LinkedToMux);
+        let mut unique_targets: std::collections::BTreeSet<NodeId> =
+            std::collections::BTreeSet::new();
+        for link in candidates {
+            if let Some(target) = link.target_node_id() {
+                unique_targets.insert(target.clone());
+            }
+        }
+        if unique_targets.len() < 2 {
+            continue;
+        }
+        for target in unique_targets {
+            muxes.insert(target);
+        }
+    }
+    muxes.into_iter().collect()
+}
+
+fn sessions_scoped_to_group(snapshot: &GraphSnapshot, group: &NodeId) -> Vec<NodeId> {
+    match group {
+        NodeId::Workspace(_) => sessions_associated_with(snapshot, group),
+        NodeId::Checkout(_) => sessions_associated_with(snapshot, group)
+            .into_iter()
+            .filter(|session| !session_has_workspace_association(snapshot, session))
+            .collect(),
+        NodeId::Repo(repo_id) => {
+            // `CheckoutId` carries the owning repo id directly on
+            // the node, so walk nodes rather than relying on a
+            // resolver-produced `BelongsToRepo` link. Works for
+            // synthetic fixtures that bypass the git discovery
+            // adapter.
+            let mut checkouts: Vec<NodeId> = snapshot
+                .nodes
+                .iter()
+                .filter_map(|node| match node {
+                    GraphNode::Checkout(co) if &co.id.repo == repo_id => {
+                        Some(NodeId::Checkout(co.id.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            checkouts.sort();
+            checkouts.dedup();
+            let mut out: Vec<NodeId> = checkouts
+                .iter()
+                .flat_map(|checkout| {
+                    sessions_associated_with(snapshot, checkout)
+                        .into_iter()
+                        .filter(|session| !session_has_workspace_association(snapshot, session))
+                })
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn sessions_associated_with(snapshot: &GraphSnapshot, target: &NodeId) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| {
+            matches!(link.state, LinkState::Active)
+                && link.relation == RelationKind::AssociatedWith
+                && matches!(&link.source, NodeId::AgentSession(_))
+                && link.target_node_id() == Some(target)
+        })
+        .map(|link| link.source.clone())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn session_has_workspace_association(snapshot: &GraphSnapshot, session: &NodeId) -> bool {
+    active_links_from(snapshot, session, RelationKind::AssociatedWith)
+        .iter()
+        .any(|link| matches!(link.target_node_id(), Some(NodeId::Workspace(_))))
 }
 
 fn preferred_link<'a>(links: &[&'a GraphLink]) -> Option<&'a GraphLink> {
@@ -1286,7 +1433,8 @@ mod tests {
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, Confidence, Diagnostic,
         ForgePrId, ForgePrNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId,
         MuxSessionNode, PinBinding, PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode,
-        RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
+        RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata, WorkspaceId,
+        WorkspaceNode,
     };
     use crate::resolve::resolve_snapshot;
     use std::path::PathBuf;
@@ -2358,6 +2506,169 @@ mod tests {
         assert!(
             !atelier_member.expanded_fields.is_empty(),
             "linked details should inline the repo's fields"
+        );
+    }
+
+    #[test]
+    fn ambiguous_mux_section_aggregates_workspace_scoped_sessions() {
+        // ADR 0071: when multiple A-class sessions in the same
+        // workspace are each ambiguously linked to ≥2 muxes, the
+        // workspace detail's `AmbiguousMux` section surfaces those
+        // muxes once at the shared parent, not duplicated per
+        // session.
+        let workspace_id = WorkspaceId::new("/home/op/ws");
+        let workspace = NodeId::Workspace(workspace_id.clone());
+        let session_a = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "a"));
+        let session_b = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "b"));
+        let mux_x = NodeId::MuxSession(MuxSessionId::new("editor"));
+        let mux_y = NodeId::MuxSession(MuxSessionId::new("scratch"));
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: workspace_id,
+            root: "/home/op/ws".to_string(),
+            provider: Some("atelier".to_string()),
+            name: Some("ws".to_string()),
+        }));
+        for key in ["a", "b"] {
+            snapshot
+                .nodes
+                .push(agent("claude-code", key, Some("/home/op/ws"), None));
+        }
+        for native in ["editor", "scratch"] {
+            snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+                id: MuxSessionId::new(native),
+                backend: "tmux".to_string(),
+                native_id: native.to_string(),
+                cwd: None,
+                active_pane_command: None,
+                active_pane_pid: None,
+                active_pane_current_path: None,
+                active_pane_start_command: None,
+                client_attached: None,
+                activity_epoch: None,
+                created_epoch: None,
+            }));
+        }
+        let mut next_link = 0_usize;
+        let mut link = |source: &NodeId, target: &NodeId, relation: RelationKind| -> GraphLink {
+            next_link += 1;
+            GraphLink {
+                id: format!("test-{next_link}"),
+                source: source.clone(),
+                target: LinkEndpoint::Node { id: target.clone() },
+                relation,
+                provenance: Provenance::Discovered,
+                confidence: Confidence::Medium,
+                freshness: crate::model::Freshness::Fresh,
+                source_metadata: SourceMetadata::default(),
+                state: LinkState::Active,
+            }
+        };
+        for session in [&session_a, &session_b] {
+            snapshot
+                .candidate_links
+                .push(link(session, &workspace, RelationKind::AssociatedWith));
+            for mux in [&mux_x, &mux_y] {
+                snapshot
+                    .candidate_links
+                    .push(link(session, mux, RelationKind::LinkedToMux));
+            }
+        }
+        let snapshot = resolve_snapshot(snapshot);
+
+        let muxes = ambiguous_muxes_for_group(&snapshot, &workspace);
+        assert_eq!(
+            muxes.len(),
+            2,
+            "two distinct muxes surface once on the workspace, not per session: {muxes:?}",
+        );
+        assert!(muxes.contains(&mux_x));
+        assert!(muxes.contains(&mux_y));
+
+        let detail = build(&snapshot, &workspace, Some(home().as_path()));
+        let amb_section = detail
+            .sections()
+            .into_iter()
+            .find(|s| s.kind == SectionKind::AmbiguousMux)
+            .expect("AmbiguousMux section emitted");
+        assert_eq!(amb_section.fields.len(), 2);
+        let labels: Vec<&str> = amb_section
+            .fields
+            .iter()
+            .map(|f| f.value.as_str())
+            .collect();
+        assert!(labels.iter().any(|l| l.contains("editor")));
+        assert!(labels.iter().any(|l| l.contains("scratch")));
+    }
+
+    #[test]
+    fn ambiguous_mux_section_suppressed_when_no_session_in_scope_is_ambiguous() {
+        let workspace_id = WorkspaceId::new("/home/op/ws");
+        let workspace = NodeId::Workspace(workspace_id.clone());
+        let session = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "a"));
+        let mux = NodeId::MuxSession(MuxSessionId::new("only"));
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: workspace_id,
+            root: "/home/op/ws".to_string(),
+            provider: None,
+            name: None,
+        }));
+        snapshot
+            .nodes
+            .push(agent("codex", "a", Some("/home/op/ws"), None));
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new("only"),
+            backend: "tmux".to_string(),
+            native_id: "only".to_string(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        snapshot.candidate_links.push(GraphLink {
+            id: "assoc".to_string(),
+            source: session.clone(),
+            target: LinkEndpoint::Node {
+                id: workspace.clone(),
+            },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        snapshot.candidate_links.push(GraphLink {
+            id: "mux".to_string(),
+            source: session,
+            target: LinkEndpoint::Node { id: mux },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: crate::model::Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        let snapshot = resolve_snapshot(snapshot);
+
+        assert!(
+            ambiguous_muxes_for_group(&snapshot, &workspace).is_empty(),
+            "single mux per session is not ambiguous",
+        );
+        let detail = build(&snapshot, &workspace, Some(home().as_path()));
+        assert!(
+            detail
+                .sections()
+                .iter()
+                .all(|s| s.kind != SectionKind::AmbiguousMux),
+            "section is suppressed when scope has no ambiguity",
         );
     }
 }
