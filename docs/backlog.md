@@ -6402,6 +6402,75 @@ do not get lost inside their originating workstreams.
     signal the live TUI shows. Tracked properly at the resolver
     layer by `H-UI-006`.
 
+- [ ] `H-UI-008` Left-pane tree views consume resolved
+  relationships only.
+  - Scope: today the row builders for the sessions, mux, prs,
+    and forks views pull from `candidate_links` directly with no
+    filter to the resolver's chosen winners. ADR 0074 + ADR 0075
+    set up the detail-pane invariant that the validated zone is
+    the resolver-pick zone and the Other zone is everything else;
+    the tree views violate the symmetric invariant — a row in the
+    tree can be derived from a link the detail pane would route
+    to Other. Drive the row builders through
+    `resolved_relationships` (joining back to `candidate_links`
+    on `selected_link_id` for the link payload) so what shows up
+    in the tree matches what the detail pane calls validated.
+    Specific call sites to touch:
+      - `src/tui/rows/sessions.rs:566` `mux_candidates_for_session`
+        — currently picks the highest-provenance candidate per
+        mux target via `pick_preferred`; switch to "use the
+        resolver's winner for the `LinkedToMux` slot, fall back
+        to nothing." The `AgentSessionMuxCandidate` row type
+        loses its fan-out semantics on resolver-blessed slots
+        and only fires when the resolver explicitly couldn't
+        pick (`suppress_ambiguous_cwd_mux_links`, H-UI-006).
+      - `src/tui/rows/sessions.rs:604` `workspace_for_session` —
+        first-wins over candidate links today; switch to the
+        resolver's `AssociatedWith` winner.
+      - `src/tui/rows/mux.rs:657` SQL — `FROM candidate_links cl`
+        with no resolved-only filter; add a join to
+        `resolved_relationships` so the "attached agents" list
+        only shows resolver-blessed attachments.
+      - `src/tui/rows/prs.rs`, `src/tui/rows/forks.rs` — similar
+        SQL pattern; review and switch.
+    Keep one explicit candidate-aware surface for the resolver's
+    legitimately-can't-pick cases (the detail-pane Other zone
+    plus the `AgentSessionMuxCandidate` row when
+    `suppress_ambiguous_cwd_mux_links` fires) so operators
+    investigating ambiguity still have a path.
+  - Impact assessment (scanned `~/src` 2026-06-17 against the
+    H-UI-005 commit): 305 active candidate links total, only 8
+    are non-winners (2.6%). Breakdown:
+      - `linked_to_mux`: 3 non-winners (2 real competitors +
+        1 unresolved-endpoint variant) — these are the most
+        operator-visible (false-positive "attached agents" on
+        mux rows).
+      - `parent_session`: 4 non-winners (all four claim the
+        same parent — duplicate child rows under one parent).
+      - `process_candidates_session`: 1 non-winner (unresolved-
+        endpoint variant).
+    Most of the change is *removals* (cleaning up false-positive
+    rows) rather than hiding useful evidence; the impact at the
+    operator's typical scale is small and lopsided toward
+    clarity.
+  - Tests: row-builder unit tests that pin "non-winner candidate
+    links are not surfaced in the tree" across the
+    `mux_candidates_for_session` / mux-view SQL / PR / fork paths.
+    Snapshot updates for the showcase scenario where the
+    `AgentSessionMuxCandidate` fan-out was previously emitted
+    from non-conflict candidates. Resolver-side coverage that
+    `suppress_ambiguous_cwd_mux_links` still produces the
+    candidate fan-out in the tree (preserves H-UI-007's signal).
+  - Open questions: whether the mux view's "attached agents"
+    column should fall back to candidate links when the resolver
+    didn't pick (preserves the historical UI signal) or simply
+    hide attachments (matches the detail-pane invariant exactly).
+    Recommend the latter for consistency.
+  - Blockers: H-UI-005 (so the detail-pane half of the invariant
+    is in place); ideally lands alongside H-UI-006 so the
+    resolver-side and renderer-side stories agree on what
+    "candidate fan-out" means.
+
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
 Source plan: pending; this section is the workstream skeleton. See
