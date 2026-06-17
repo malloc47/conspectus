@@ -96,6 +96,15 @@ impl NodeKind {
         }
     }
 
+    /// Inverse of [`Self::snake_case`]: parse a stable kind tag back
+    /// into a `NodeKind`. Used by render sites whose state carries
+    /// the kind as a `&'static str` (the detail-pane field
+    /// `kind_chip`, the explorer's `neighbor_kind`) so they can look
+    /// up the slate glyph without round-tripping through `GraphNode`.
+    pub fn from_snake_case(tag: &str) -> Option<NodeKind> {
+        NodeKind::ALL.into_iter().find(|k| k.snake_case() == tag)
+    }
+
     /// Default glyph from the ADR 0073 slate. Operators override
     /// this via `[tui.theme.icons]`; the override flow runs through
     /// [`node_kind_style`].
@@ -295,6 +304,16 @@ mod tests {
         assert_eq!(NodeKind::Branch.snake_case(), "branch");
         assert_eq!(NodeKind::Fork.snake_case(), "fork");
         assert_eq!(NodeKind::ForgePr.snake_case(), "forge_pr");
+    }
+
+    #[test]
+    fn from_snake_case_round_trips_every_variant() {
+        for kind in NodeKind::ALL {
+            let tag = kind.snake_case();
+            assert_eq!(NodeKind::from_snake_case(tag), Some(kind));
+        }
+        assert_eq!(NodeKind::from_snake_case("not_a_kind"), None);
+        assert_eq!(NodeKind::from_snake_case(""), None);
     }
 
     #[test]

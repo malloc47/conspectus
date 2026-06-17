@@ -9425,21 +9425,27 @@ surfaces all read from one definition.
     `row_kind_glyph_span` dispatch) including the PR
     state→color mapping and the Pin / synthetic-group skip cases.
     Detail-pane glyph application lands under H-VIS-004.
-- [ ] `H-VIS-004` Apply node-kind glyphs and colors to the detail
+- [x] `H-VIS-004` Apply node-kind glyphs and colors to the detail
   panel and graph explorer.
-  - Scope: replace the current dim `[kind]` chip in the right-panel
-    `kind_chip_span()` and `kind_label()` functions with the
-    node-kind glyph + color from the icon registry. The node-header
-    line should render as `<glyph> <kind_label>` with the glyph in
-    the node-kind color and the label bold. Extend `NodeDetail` field
-    builders so the `type` / `kind` line uses the new style. In the
-    graph explorer view (`ui.rs:1714`), the dim `[kind]` chip becomes
-    a colored glyph + dim label, matching the row-tree convention.
-  - Tests: insta snapshots for detail-panel output across all nine
-    node types; graph-explorer snapshots for each node kind.
-  - Manual checks: navigate `conspectus tui` to each node type in the
-    detail panel and confirm the glyph and color match the row tree.
-  - Blockers: `H-VIS-002`.
+  - Outcome: `kind_chip_span` (`src/tui/ui.rs`) now emits the per-
+    kind slate glyph in the node-kind color rather than dim
+    `[kind]` text; `ForgePr` reuses `theme.pr_open` at chip
+    surfaces because that layer does not carry PR state. The
+    right-panel title (`right_panel_title`) prepends the kind
+    glyph before the bold kind label and folds the extra cells
+    into the breadcrumb-chain budget. `render_group_header_line`
+    in the relationship explorer swaps the prior textual
+    neighbor-kind column for the glyph, keeping the count anchor
+    via fixed padding. `NodeKind::from_snake_case` round-trips the
+    stable kind tag so call sites that carry the kind as
+    `&'static str` (field `kind_chip`, explorer `neighbor_kind`)
+    look up the slate without going through `GraphNode`. Showcase
+    fixture verified: agent-session detail pane reads
+    `● session` in the title, `◇` next to the cwd field, and
+    `◇`/`▦`/`▣` on relationship-explorer rows. Unit tests cover
+    the chip glyph + color per kind, the unknown-tag fallback,
+    the right-panel title prefix, and the explorer link-row
+    glyph ordering. Non-TUI surfaces stay under H-VIS-005.
 - [ ] `H-VIS-005` Surface node-kind identity in non-TUI outputs
   (cross-surface consistency).
   - Scope: extend `NodeId` / `GraphNode` with a `node_kind()` method

@@ -714,11 +714,30 @@ fn left_panel_title(app: &App) -> Line<'static> {
 /// Falls back to `detail` while no selection is resolved.
 fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     let label = right_panel_kind_label(app);
-    let mut spans = vec![
-        Span::raw(" "),
-        focus_marker_span(app, Focus::Right),
-        Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
-    ];
+    let mut spans = vec![Span::raw(" "), focus_marker_span(app, Focus::Right)];
+    // ADR 0073 §3: the right-panel node header is `<glyph> <label>`
+    // with the glyph in the node-kind color and the label bold. The
+    // glyph is suppressed when there is no resolved selection
+    // (fallback "detail" label) so a placeholder pane does not stamp
+    // a misleading kind cue.
+    if let Some(detail) = app.detail()
+        && let Some(node_kind) = NodeKind::from_snake_case(detail.kind_label)
+    {
+        let style = node_kind_style(node_kind, app.theme());
+        let color = if matches!(node_kind, NodeKind::ForgePr) {
+            app.theme().pr_open
+        } else {
+            style.color
+        };
+        spans.push(Span::styled(
+            format!("{} ", style.glyph),
+            Style::default().fg(color),
+        ));
+    }
+    spans.push(Span::styled(
+        label,
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
     // T8-038: render the full drilldown chain in short `kind:tag`
     // form so the operator can see depth at a glance, with elision
     // (`first … last`) when the chain exceeds the title's available
@@ -733,8 +752,17 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         // " ◀ " prefix + " · depth N" suffix + the leading/trailing
         // padding spaces).
         let depth_suffix = format!(" · depth {}", state.breadcrumb.len());
+        // ADR 0073 §3 prefix glyph: `<glyph> ` between the focus
+        // marker and the bold label takes 2 cells when the detail
+        // pane resolves to a known node kind.
+        let kind_glyph_width = app
+            .detail()
+            .and_then(|d| NodeKind::from_snake_case(d.kind_label))
+            .map(|_| 2)
+            .unwrap_or(0);
         let fixed_width = 1
             + focus_marker_width(app, Focus::Right)
+            + kind_glyph_width
             + label.chars().count()
             + " ◀ ".chars().count()
             + depth_suffix.chars().count()
@@ -1988,14 +2016,31 @@ fn render_node_field_line(
     Line::from(spans)
 }
 
-/// Dim leading `[kind]` chip used to surface the graph node kind
-/// next to a value (T8-039). Rendered with `theme.placeholder` so it
-/// reads as metadata rather than primary content.
+/// Per-kind glyph chip used to surface the graph node kind next to a
+/// value (T8-039) or beside a relationship-explorer neighbor. ADR
+/// 0073 §3 replaces the prior dim `[kind]` text with a 1-cell glyph
+/// in the node-kind color so the chip carries identity at a glance.
+/// Unknown kind strings (none in the slate) fall back to a dim `?`
+/// so the chip slot stays visible without misleading the operator.
+///
+/// `ForgePr`'s glyph color reuses `theme.pr_open` here because the
+/// chip-rendering surfaces do not carry PR state down — the row
+/// tree's [`forge_pr_glyph_span`] handles state-aware coloring
+/// directly off the row.
 fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
-    Span::styled(
-        format!("[{kind}]"),
-        Style::default().add_modifier(theme.placeholder),
-    )
+    let Some(node_kind) = NodeKind::from_snake_case(kind) else {
+        return Span::styled(
+            "?".to_string(),
+            Style::default().add_modifier(theme.placeholder),
+        );
+    };
+    let style = node_kind_style(node_kind, theme);
+    let color = if matches!(node_kind, NodeKind::ForgePr) {
+        theme.pr_open
+    } else {
+        style.color
+    };
+    Span::styled(style.glyph, Style::default().fg(color))
 }
 
 fn render_group_header_line(
@@ -2007,18 +2052,27 @@ fn render_group_header_line(
     let glyph = if expanded { "▼" } else { "▶" };
     let count = group.link_count();
     let warn_suffix = if group.ambiguous { " ⚠" } else { "" };
-    let text = format!(
-        "  {glyph} {:<24} {:<18} {count}{warn_suffix}",
-        group.relation.snake_case(),
-        group.neighbor_kind,
-    );
     let mut style = Style::default();
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    let mut spans = vec![Span::styled(text, style)];
+    let prefix = format!("  {glyph} {:<24} ", group.relation.snake_case());
+    let mut kind_chip = kind_chip_span(group.neighbor_kind.as_str(), theme);
+    // The prior text column was `{:<18}`; one cell of glyph + 17
+    // spaces preserves the count anchor so adjacent group rows stay
+    // column-aligned regardless of relation-name length.
+    let kind_pad = " ".repeat(17);
+    let suffix = format!("{kind_pad}{count}{warn_suffix}");
+    if highlight {
+        kind_chip.style = kind_chip.style.add_modifier(Modifier::REVERSED);
+    }
+    let mut spans = vec![
+        Span::styled(prefix, style),
+        kind_chip,
+        Span::styled(suffix, style),
+    ];
     if group.ambiguous {
-        // Spacer; warn glyph already inline in the text.
+        // Spacer; warn glyph already inline in the suffix.
         spans.push(Span::styled(
             String::new(),
             Style::default().fg(theme.warning),
@@ -3674,22 +3728,79 @@ mod tests {
     }
 
     #[test]
-    fn link_rows_carry_leading_kind_chip_for_neighbor_kind() {
-        // T8-039: link rows in the explorer should surface the
-        // neighbor's graph kind as a leading `[kind]` chip so the
-        // operator can tell mux from session from process at a glance
-        // without parsing the harness prefix out of the id label.
-        // T8-042b: the chip lives on the relation-name row, with the
-        // neighbor label on the row beneath. Check both pieces and
-        // that the chip line precedes the label line.
+    fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
+        // ADR 0073 §3: the dim `[kind]` text chip is replaced by the
+        // per-kind slate glyph in the node-kind color. Every known
+        // tag round-trips through `NodeKind::from_snake_case` and
+        // resolves to the corresponding glyph; unknown tags fall
+        // back to a dim `?` so the chip slot stays visible without
+        // misleading the operator.
+        let theme = Theme::default();
+        let cases: [(&str, &str, ratatui::style::Color); 4] = [
+            ("workspace", "▦", theme.node_workspace),
+            ("mux_session", "▣", theme.node_mux_session),
+            ("fork", "⑂", theme.node_fork),
+            ("checkout", "◇", theme.node_checkout),
+        ];
+        for (tag, glyph, expected_color) in cases {
+            let span = kind_chip_span(tag, &theme);
+            assert_eq!(span.content.as_ref(), glyph, "wrong glyph for `{tag}`");
+            assert_eq!(
+                span.style.fg,
+                Some(expected_color),
+                "wrong color for `{tag}`"
+            );
+        }
+        // ForgePr's kind glyph reuses `pr_open` at chip surfaces
+        // because the chip layer doesn't carry PR state.
+        let pr = kind_chip_span("forge_pr", &theme);
+        assert_eq!(pr.content.as_ref(), "⇄");
+        assert_eq!(pr.style.fg, Some(theme.pr_open));
+        // Unknown tag → dim `?` fallback.
+        let unknown = kind_chip_span("not_a_kind", &theme);
+        assert_eq!(unknown.content.as_ref(), "?");
+        assert!(unknown.style.add_modifier.contains(theme.placeholder));
+    }
+
+    #[test]
+    fn right_panel_title_prefixes_kind_glyph_when_detail_resolves() {
+        // ADR 0073 §3: `<glyph> <label>` in the right-panel title.
+        // The glyph appears in the node-kind color; the label stays
+        // bold. The muxed fixture selects an agent-session row on
+        // the left, so the right-panel title reads
+        // `▸ ● session ◀ …` (`AgentSession` glyph is preserved at
+        // pill-less surfaces per the §3 amendment).
         let app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
+        let agent_glyph = crate::tui::icons::NodeKind::AgentSession.default_glyph();
+        let pattern = format!("{agent_glyph} session");
+        assert!(
+            text.lines().any(|line| line.contains(&pattern)),
+            "expected `{pattern}` in right-panel title; rendered:\n{text}",
+        );
+    }
+
+    #[test]
+    fn link_rows_carry_leading_kind_chip_for_neighbor_kind() {
+        // T8-039: link rows in the explorer surface the neighbor's
+        // graph kind as a leading chip so the operator can tell mux
+        // from session from process at a glance without parsing the
+        // harness prefix out of the id label. T8-042b: the chip lives
+        // on the relation-name row, with the neighbor label on the
+        // row beneath. ADR 0073 §3 swapped the prior dim `[kind]`
+        // text for the per-kind glyph (`▣` for `mux_session`); this
+        // test pins the glyph + the relation-before-chip ordering.
+        let app = muxed_app("editor", None);
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        let mux_glyph = crate::tui::icons::NodeKind::MuxSession.default_glyph();
         let chip_line_idx = text
             .lines()
-            .position(|line| line.contains("[mux_session]"))
-            .expect("relation row carrying [mux_session] chip");
+            .position(|line| line.contains("linked_to_mux") && line.contains(mux_glyph))
+            .expect("relation row carrying the mux-kind glyph");
         let label_line_idx = text
             .lines()
             .position(|line| line.contains("tmux:editor"))
@@ -3699,21 +3810,21 @@ mod tests {
             "kind chip row should precede the neighbor label row; got chip at {chip_line_idx}, label at {label_line_idx}",
         );
         // And the chip row should carry the relation name to its
-        // left of the chip, confirming the layout is
-        // `relation [kind]` rather than just a bare chip.
+        // left of the glyph, confirming the layout is
+        // `relation <glyph>` rather than just a bare glyph.
         let chip_line = text
             .lines()
             .nth(chip_line_idx)
             .expect("chip line in buffer");
         let chip_idx = chip_line
-            .find("[mux_session]")
-            .expect("chip on the chip line");
+            .find(mux_glyph)
+            .expect("kind glyph on the chip line");
         let relation_idx = chip_line
             .find("linked_to_mux")
             .expect("relation name on the chip line");
         assert!(
             relation_idx < chip_idx,
-            "relation name should render before the kind chip: {chip_line}",
+            "relation name should render before the kind glyph: {chip_line}",
         );
     }
 
