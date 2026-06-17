@@ -425,16 +425,17 @@ impl ScenarioWorld {
         cwd: &Path,
         title: &str,
         epoch_ms: i64,
+        assistant_message: Option<&str>,
     ) -> Result<()> {
-        self.harness
-            .write_opencode_session(
-                &OpenCodeSessionRecord::new(session_id)
-                    .with_directory(path_string(cwd))
-                    .with_title(title)
-                    .with_created(epoch_ms)
-                    .with_updated(epoch_ms + 1000),
-            )
-            .map(|_| ())
+        let mut record = OpenCodeSessionRecord::new(session_id)
+            .with_directory(path_string(cwd))
+            .with_title(title)
+            .with_created(epoch_ms)
+            .with_updated(epoch_ms + 1000);
+        if let Some(text) = assistant_message {
+            record = record.with_assistant_message(text);
+        }
+        self.harness.write_opencode_session(&record).map(|_| ())
     }
 
     fn write_aider_state(&self, repo: &Path) -> Result<()> {
@@ -890,9 +891,17 @@ fn add_agent_sessions_to_showcase(
     atelier: &AtelierLayout,
     deck_dir: &Path,
 ) -> Result<()> {
+    // Each session below sets a title (claude-code `summary`,
+    // opencode `title`) and a last-message preview (transcript
+    // assistant text for claude-code/codex, sqlite `part` row for
+    // opencode) so the rendered showcase rows aren't blank — the
+    // placeholder text names the example each session is meant to
+    // illustrate (ADR 0070).
     // claude-code session in the normal project repo (1 hour ago).
     world.harness.write_claude_code_session(
         &ClaudeCodeSessionRecord::new("showcase-claude", path_string(project))
+            .with_summary("claude-code in project repo")
+            .with_assistant_message("Showcase: claude-code in project repo")
             .with_timestamp("2026-06-14T15:00:00Z"),
     )?;
     // claude-code session whose cwd is the agent-deck composite
@@ -902,6 +911,8 @@ fn add_agent_sessions_to_showcase(
     // Sessions / Graph view alongside atelier.
     world.harness.write_claude_code_session(
         &ClaudeCodeSessionRecord::new("showcase-deck-launcher", path_string(deck_dir))
+            .with_summary("agent-deck composite launcher")
+            .with_assistant_message("Showcase: agent-deck composite launcher")
             .with_timestamp("2026-06-14T15:30:00Z"),
     )?;
     // codex parent → child lineage chain (ADR 0018). Parent lives
@@ -910,11 +921,13 @@ fn add_agent_sessions_to_showcase(
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-codex-parent")
             .with_cwd(path_string(&atelier.member_repo_a))
+            .with_assistant_message("Showcase: codex parent in atelier fork lineage")
             .with_timestamp("2026-06-12T10:00:00Z"),
     )?;
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-codex-child")
             .with_cwd(path_string(&atelier.fork_worktree))
+            .with_assistant_message("Showcase: codex child forked from parent")
             .with_timestamp("2026-06-13T11:00:00Z")
             .with_forked_from("showcase-codex-parent"),
     )?;
@@ -922,6 +935,7 @@ fn add_agent_sessions_to_showcase(
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-bare-codex")
             .with_cwd(path_string(bare_worktree))
+            .with_assistant_message("Showcase: codex resume via /proc fd evidence")
             .with_timestamp("2026-06-13T14:30:00Z"),
     )?;
     // opencode session inside the second atelier member (3 hours
@@ -929,8 +943,9 @@ fn add_agent_sessions_to_showcase(
     world.write_opencode_session(
         "showcase-opencode",
         &atelier.member_repo_b,
-        "Showcase opencode",
+        "opencode in atelier member repo",
         (SHOWCASE_NOW_EPOCH - 3 * 3600) * 1_000,
+        Some("Showcase: opencode in atelier member repo"),
     )?;
     // aider state in the same member repo.
     world.write_aider_state(&atelier.member_repo_b)?;
@@ -939,6 +954,7 @@ fn add_agent_sessions_to_showcase(
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-orphan")
             .with_cwd(path_string(&orphan_dir))
+            .with_assistant_message("Showcase: orphan session with no checkout")
             .with_timestamp("2026-06-08T09:00:00Z"),
     )?;
     Ok(())
@@ -967,10 +983,14 @@ fn add_mux_layout_to_showcase(
     );
     world.harness.write_claude_code_session(
         &ClaudeCodeSessionRecord::new("showcase-claude-ambig-a", path_string(project))
+            .with_summary("ambiguous mux candidate A")
+            .with_assistant_message("Showcase: ambiguous mux candidate A")
             .with_timestamp("2026-06-14T15:40:00Z"),
     )?;
     world.harness.write_claude_code_session(
         &ClaudeCodeSessionRecord::new("showcase-claude-ambig-b", path_string(project))
+            .with_summary("ambiguous mux candidate B")
+            .with_assistant_message("Showcase: ambiguous mux candidate B")
             .with_timestamp("2026-06-14T15:42:00Z"),
     )?;
     // Mux for the bare-repo worktree with fd evidence so the
@@ -1029,6 +1049,8 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
     // minutes ago.
     world.harness.write_claude_code_session(
         &ClaudeCodeSessionRecord::new("showcase-hook-current", path_string(project))
+            .with_summary("hook-supersession current session")
+            .with_assistant_message("Showcase: hook-supersession current session")
             .with_timestamp("2026-06-14T15:55:00Z"),
     )?;
     world.write_hook_record(HookRecord {

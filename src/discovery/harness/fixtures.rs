@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use rusqlite::Connection;
 use serde_json::json;
 
 pub const CODEX_STATE_DIR: &str = "codex";
@@ -69,6 +70,10 @@ pub struct CodexSessionRecord {
     pub instructions: Option<String>,
     pub timestamp_rfc3339: Option<String>,
     pub forked_from_id: Option<String>,
+    /// Trailing assistant `output_text` appended after `session_meta` so the
+    /// rollout's `last_message_preview` reader (ADR 0023) has something to
+    /// return. Fixtures that omit it produce sessions with no preview text.
+    pub assistant_message: Option<String>,
 }
 
 impl CodexSessionRecord {
@@ -98,6 +103,11 @@ impl CodexSessionRecord {
         self.forked_from_id = Some(parent_session_id.into());
         self
     }
+
+    pub fn with_assistant_message(mut self, text: impl Into<String>) -> Self {
+        self.assistant_message = Some(text.into());
+        self
+    }
 }
 
 pub fn write_codex_session(state_root: &Path, record: &CodexSessionRecord) -> Result<PathBuf> {
@@ -125,7 +135,21 @@ pub fn write_codex_session(state_root: &Path, record: &CodexSessionRecord) -> Re
     }
 
     let entry = json!({ "type": "session_meta", "payload": payload });
-    fs::write(&path, format!("{entry}\n"))
+    let mut body = format!("{entry}\n");
+
+    if let Some(text) = &record.assistant_message {
+        let message = json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": text }],
+            },
+        });
+        body.push_str(&format!("{message}\n"));
+    }
+
+    fs::write(&path, body)
         .with_context(|| format!("writing codex session at {}", path.display()))?;
     Ok(path)
 }
@@ -139,6 +163,11 @@ pub struct ClaudeCodeSessionRecord {
     pub cwd: String,
     pub summary: Option<String>,
     pub timestamp_rfc3339: Option<String>,
+    /// Trailing assistant text message appended after the session header so
+    /// the JSONL reader's `last_message_preview` extractor (ADR 0023) has
+    /// content to return. Fixtures that omit it produce sessions with no
+    /// preview text.
+    pub assistant_message: Option<String>,
 }
 
 impl ClaudeCodeSessionRecord {
@@ -157,6 +186,11 @@ impl ClaudeCodeSessionRecord {
 
     pub fn with_timestamp(mut self, timestamp: impl Into<String>) -> Self {
         self.timestamp_rfc3339 = Some(timestamp.into());
+        self
+    }
+
+    pub fn with_assistant_message(mut self, text: impl Into<String>) -> Self {
+        self.assistant_message = Some(text.into());
         self
     }
 }
@@ -186,7 +220,22 @@ pub fn write_claude_code_session(
         entry.insert("timestamp".into(), json!(timestamp));
     }
 
-    fs::write(&path, format!("{}\n", serde_json::Value::Object(entry)))
+    let mut body = format!("{}\n", serde_json::Value::Object(entry));
+
+    if let Some(text) = &record.assistant_message {
+        let message = json!({
+            "type": "assistant",
+            "sessionId": record.session_id,
+            "uuid": format!("{}-assistant-msg", record.session_id),
+            "message": {
+                "role": "assistant",
+                "content": [{ "type": "text", "text": text }],
+            },
+        });
+        body.push_str(&format!("{message}\n"));
+    }
+
+    fs::write(&path, body)
         .with_context(|| format!("writing claude-code session at {}", path.display()))?;
     Ok(path)
 }
@@ -205,6 +254,10 @@ pub struct OpenCodeSessionRecord {
     pub title: Option<String>,
     pub created_epoch_ms: Option<i64>,
     pub updated_epoch_ms: Option<i64>,
+    /// When set, the writer also lays down a modern `opencode.db` with a
+    /// matching `session` row and a single `text` part so the sqlite-backed
+    /// last-message-preview reader has content to surface.
+    pub assistant_message: Option<String>,
 }
 
 impl OpenCodeSessionRecord {
@@ -232,6 +285,11 @@ impl OpenCodeSessionRecord {
 
     pub fn with_updated(mut self, epoch_ms: i64) -> Self {
         self.updated_epoch_ms = Some(epoch_ms);
+        self
+    }
+
+    pub fn with_assistant_message(mut self, text: impl Into<String>) -> Self {
+        self.assistant_message = Some(text.into());
         self
     }
 }
@@ -275,7 +333,84 @@ pub fn write_opencode_session(
 
     fs::write(&path, serde_json::to_string_pretty(&info)?)
         .with_context(|| format!("writing opencode session at {}", path.display()))?;
+
+    if record.assistant_message.is_some() {
+        append_opencode_db_entry(state_root, record)?;
+    }
+
     Ok(path)
+}
+
+/// Append (or initialize) `state_root/opencode.db` with a `session` row and a
+/// single text `part` for the supplied record. Mirrors the schema the
+/// production adapter probes for and the `part` shape its preview reader
+/// expects (a `text` part whose `data.text` is non-empty). Best-effort
+/// idempotent: tables are created on first call and reused thereafter.
+fn append_opencode_db_entry(state_root: &Path, record: &OpenCodeSessionRecord) -> Result<()> {
+    fs::create_dir_all(state_root)
+        .with_context(|| format!("creating opencode state root at {}", state_root.display()))?;
+    let db_path = state_root.join("opencode.db");
+    let connection = Connection::open(&db_path)
+        .with_context(|| format!("opening opencode sqlite at {}", db_path.display()))?;
+
+    connection
+        .execute(
+            "CREATE TABLE IF NOT EXISTS session (\
+                 id TEXT PRIMARY KEY, \
+                 directory TEXT, \
+                 title TEXT, \
+                 parent_id TEXT, \
+                 time_created INTEGER, \
+                 time_updated INTEGER \
+             )",
+            [],
+        )
+        .context("creating opencode session table")?;
+    connection
+        .execute(
+            "CREATE TABLE IF NOT EXISTS part (\
+                 id TEXT, \
+                 message_id TEXT, \
+                 session_id TEXT, \
+                 time_created INTEGER, \
+                 time_updated INTEGER, \
+                 data TEXT \
+             )",
+            [],
+        )
+        .context("creating opencode part table")?;
+
+    connection
+        .execute(
+            "INSERT OR REPLACE INTO session \
+             (id, directory, title, parent_id, time_created, time_updated) \
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5)",
+            rusqlite::params![
+                record.session_id,
+                record.directory,
+                record.title,
+                record.created_epoch_ms,
+                record.updated_epoch_ms,
+            ],
+        )
+        .context("inserting opencode session row")?;
+
+    if let Some(text) = &record.assistant_message {
+        let data = json!({ "type": "text", "text": text }).to_string();
+        let part_id = format!("{}-text-part", record.session_id);
+        let message_id = format!("{}-text-message", record.session_id);
+        let time_created = record.updated_epoch_ms.or(record.created_epoch_ms);
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO part \
+                 (id, message_id, session_id, time_created, time_updated, data) \
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+                rusqlite::params![part_id, message_id, record.session_id, time_created, data],
+            )
+            .context("inserting opencode part row")?;
+    }
+
+    Ok(())
 }
 
 /// Drops the marker files aider leaves inside a repo worktree. Aider does not

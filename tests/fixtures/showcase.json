@@ -161,6 +161,8 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
+      "title": "claude-code in project repo",
+      "last_message_preview": "Showcase: claude-code in project repo",
       "last_active_epoch": 1781607600
     },
     {
@@ -172,6 +174,8 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
+      "title": "ambiguous mux candidate A",
+      "last_message_preview": "Showcase: ambiguous mux candidate A",
       "last_active_epoch": 1781611140
     },
     {
@@ -183,6 +187,8 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
+      "title": "ambiguous mux candidate B",
+      "last_message_preview": "Showcase: ambiguous mux candidate B",
       "last_active_epoch": 1781611140
     },
     {
@@ -194,6 +200,8 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef",
+      "title": "agent-deck composite launcher",
+      "last_message_preview": "Showcase: agent-deck composite launcher",
       "last_active_epoch": 1781611140
     },
     {
@@ -205,6 +213,8 @@
       },
       "harness_key": "claude-code",
       "cwd": "/fixture/repos/project",
+      "title": "hook-supersession current session",
+      "last_message_preview": "Showcase: hook-supersession current session",
       "last_active_epoch": 1781611140
     },
     {
@@ -216,6 +226,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/checkouts/bare-project",
+      "last_message_preview": "Showcase: codex resume via /proc fd evidence",
       "last_active_epoch": 1781568000
     },
     {
@@ -227,6 +238,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/.atelier/forks/alpha/repo-a",
+      "last_message_preview": "Showcase: codex child forked from parent",
       "last_active_epoch": 1781438400
     },
     {
@@ -238,6 +250,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/repo-a",
+      "last_message_preview": "Showcase: codex parent in atelier fork lineage",
       "last_active_epoch": 1781352000
     },
     {
@@ -249,6 +262,7 @@
       },
       "harness_key": "codex",
       "cwd": "/fixture/orphan",
+      "last_message_preview": "Showcase: orphan session with no checkout",
       "last_active_epoch": 1781006400
     },
     {
@@ -260,7 +274,8 @@
       },
       "harness_key": "opencode",
       "cwd": "/fixture/repo-b",
-      "title": "Showcase opencode",
+      "title": "opencode in atelier member repo",
+      "last_message_preview": "Showcase: opencode in atelier member repo",
       "last_active_epoch": 1781600400
     },
     {
