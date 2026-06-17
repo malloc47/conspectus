@@ -9377,30 +9377,16 @@ live in `src/tui/icons.rs` (or a similar single-source-of-truth module)
 so the row renderer, detail panel, graph explorer, and any future
 surfaces all read from one definition.
 
-- [ ] `H-VIS-001` ADR: node-type visual identity system.
-  - Scope: decide the glyph strategy (Nerd Font / Unicode geometric
-    shapes / limited emoji / mixed), the per-type assignment for
-    `Repo`, `Checkout`, `Workspace`, `AgentSession`, `MuxSession`,
-    `RuntimeProcess`, `Branch`, `Fork`, `ForgePr`, the color strategy
-    (per-type foreground vs badge-fill vs both), and the placement
-    rule (prefix glyph before the node label, consistent indent
-    accounting so column alignment survives). Settle whether
-    `AgentSession` rows keep their harness-badge color override or add
-    a separate node-kind glyph with harness-badge color applied via a
-    different channel (e.g. badge-background for harness, foreground
-    glyph for node-kind). Record the accessibility concerns (color-
-    blind-safe palette, glyphs distinguishable without color,
-    `NO_COLOR` fallback). Decide whether the glyph set lives behind a
-    theme key (`[tui.theme.icons]`) so a future operator can swap
-    Nerd Font symbols for plain-ASCII equivalents without patching the
-    source. Does not introduce new crate dependencies.
-  - Tests: docs-only; `git diff --check`.
-  - Manual checks: review the proposed glyph/color assignments against
-    the existing `Theme` fields (no conflicting meanings), the
-    `Theme::default()` palette (no adjacent hues that blend under
-    common color-blindness profiles), and a representative sessions
-    tree mockup.
-  - Blockers: none.
+- [x] `H-VIS-001` ADR: node-type visual identity system.
+  - Outcome: ADR 0073 records the strategy (geometric default,
+    Nerd-Font opt-in via `[tui.theme.icons]`), the per-kind slate
+    (`▦ ◆ ◇ ● ▣ ⚙ ⎇ ⑂ ⇄`), the placement rule (one-cell prefix
+    between disclosure and existing badges), the color schema
+    (eight new `node_*` color keys, `ForgePr` reuses `pr_*`), and
+    the accessibility stance (1-cell-only override validation,
+    glyph-only legibility under `NO_COLOR`). `AgentSession` keeps
+    an independent kind-color layered with the harness pill.
+    Subsequent stories (`H-VIS-002..006`) implement the slate.
 - [ ] `H-VIS-002` Define the per-node-type glyph and color assignments.
   - Scope: add `src/tui/icons.rs` (or extend `src/tui/theme.rs`) with
     a public constant or `NodeKindStyle` struct per `GraphNode`
