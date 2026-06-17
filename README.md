@@ -300,10 +300,25 @@ offers three complementary surfaces:
   three+ agent harnesses, codex parent → child fork lineage,
   bare repo with a linked worktree, ambiguous mux, hook
   supersession, two PRs). A corresponding
-  `tests/fixtures/showcase.json` is checked in so
-  `conspectus tui --fixture tests/fixtures/showcase.json` works
-  without a debug build; regenerate it with `just
-  regen-showcase-fixture` after any showcase change.
+  `tests/fixtures/showcase.json` is checked in so the fixture
+  path works without a debug build:
+
+  ```sh
+  # Interactive (rebuilds the world from scratch; debug builds only)
+  conspectus dev scenario tui showcase
+
+  # Interactive, against the checked-in fixture (any build with
+  # --features snapshot; press `r` to reload after editing the JSON)
+  conspectus tui --fixture tests/fixtures/showcase.json
+
+  # One-shot ANSI snapshot of a single pane against the fixture
+  conspectus tui --snapshot \
+    --snapshot-fixture tests/fixtures/showcase.json \
+    --snapshot-pane left
+
+  # Regenerate the checked-in fixture after a showcase change
+  just regen-showcase-fixture
+  ```
 
 Together they cover programmatic, real-data, and curated paths.
 A new graph-build bug typically starts as a `ReplayWorld` test,
