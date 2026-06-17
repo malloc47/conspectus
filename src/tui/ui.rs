@@ -39,10 +39,11 @@ use crate::tui::View;
 use crate::tui::actions::{attach_disabled_reason, resolve_attach_target, target_label};
 use crate::tui::app::{App, Focus, GraphDb};
 use crate::tui::detail::{HeaderField, NodeDetail, SectionKind};
+use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::preview::PreviewContent;
 use crate::tui::rows::{
-    AgentSessionRow, MuxCandidateRow, MuxIndicator, MuxSessionRow, RowId, RowKind, format_recency,
-    recency_bucket,
+    AgentSessionRow, GroupRow, MuxCandidateRow, MuxIndicator, MuxSessionRow, PrRow, RowId, RowKind,
+    format_recency, recency_bucket,
 };
 
 /// Terminal width threshold below which the body switches from a
@@ -907,6 +908,12 @@ fn group_row_body_width(
         spans.push(Span::raw(row_indent(row.depth)));
     }
     spans.push(disclosure_span(row, app));
+    // Mirror `render_left_row`'s ADR 0073 prefix glyph so the body
+    // width the pre-pass measures matches the body width the row
+    // renderer actually produces.
+    if let Some(glyph) = row_kind_glyph_span(&row.kind, app.theme()) {
+        spans.push(glyph);
+    }
     append_group_body_spans(&mut spans, group, app.theme(), target_label_width);
     spans_width(&spans)
 }
@@ -998,6 +1005,14 @@ fn render_left_row(
     } else {
         spans.push(Span::raw(row_indent(row.depth)));
         spans.push(disclosure_span(row, app));
+    }
+
+    // ADR 0073: per-row node-kind glyph between the disclosure and
+    // the row body. Skipped for `Pin` rows (no graph NodeKind — the
+    // 📌 sentinel is the identity) and for synthetic group buckets
+    // without a backing node.
+    if let Some(glyph) = row_kind_glyph_span(&row.kind, theme) {
+        spans.push(glyph);
     }
 
     match &row.kind {
@@ -1422,6 +1437,72 @@ fn render_candidate_spans(candidate: &MuxCandidateRow, theme: &Theme) -> Vec<Spa
         ));
     }
     spans
+}
+
+/// Per-row node-kind glyph span (ADR 0073). Renders the slate glyph
+/// styled with the matching `theme.node_*` color, followed by a
+/// trailing space so the next span sits at a predictable offset. The
+/// span occupies `glyph_width + 1` cells; callers that compute
+/// column budgets fold the result through [`spans_width`] and the
+/// downstream width math automatically subtracts the new cells.
+///
+/// `ForgePr` is the one kind whose color depends on PR state; callers
+/// render PR rows through [`forge_pr_glyph_span`] instead so the hue
+/// follows `theme.pr_*`.
+fn node_kind_glyph_span(kind: NodeKind, theme: &Theme) -> Span<'static> {
+    let style = node_kind_style(kind, theme);
+    Span::styled(
+        format!("{} ", style.glyph),
+        Style::default().fg(style.color),
+    )
+}
+
+/// Variant of [`node_kind_glyph_span`] for PR rows: emits the
+/// `NodeKind::ForgePr` glyph styled with the appropriate `theme.pr_*`
+/// color based on PR state. `is_draft` overrides the state-based hue
+/// because the draft flag is independent of the open/closed/merged
+/// label in our model.
+fn forge_pr_glyph_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
+    let style = node_kind_style(NodeKind::ForgePr, theme);
+    let color = if pr.is_draft {
+        theme.pr_draft
+    } else {
+        match pr.state.as_deref() {
+            Some("open") => theme.pr_open,
+            Some("closed") => theme.pr_closed,
+            Some("merged") => theme.pr_merged,
+            _ => theme.pr_open,
+        }
+    };
+    Span::styled(format!("{} ", style.glyph), Style::default().fg(color))
+}
+
+/// Map a [`GroupRow`] to its node kind so the renderer can stamp the
+/// row with the glyph slate (ADR 0073). Synthetic group buckets
+/// without a backing node return `None` and the renderer skips the
+/// glyph prefix for that row.
+fn group_node_kind(group: &GroupRow) -> Option<NodeKind> {
+    group.primary_node.as_ref().map(NodeKind::from)
+}
+
+/// Compute the per-row node-kind glyph span for any [`RowKind`], or
+/// `None` when the row carries no graph node kind (synthetic group
+/// buckets, sentinel `Pin` rows). Folds the per-row dispatch the
+/// `render_left_row` body and the `group_row_body_width` pre-pass
+/// both rely on through a single helper so the two paths agree on
+/// row widths.
+fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<'static>> {
+    let node_kind = match kind {
+        RowKind::Group(group) => group_node_kind(group)?,
+        RowKind::AgentSession(_) => NodeKind::AgentSession,
+        RowKind::AgentSessionMuxCandidate(_) => NodeKind::MuxSession,
+        RowKind::MuxSession(_) => NodeKind::MuxSession,
+        RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
+        RowKind::Fork(_) => NodeKind::Fork,
+        RowKind::Pin(_) => return None,
+        RowKind::Repo(_) => NodeKind::Repo,
+    };
+    Some(node_kind_glyph_span(node_kind, theme))
 }
 
 fn mux_indicator_span(state: MuxIndicator, theme: &Theme) -> Span<'static> {
@@ -4078,6 +4159,210 @@ mod tests {
         assert_eq!(badge.style.fg, Some(theme.harness_color("codex")));
         assert!(badge.style.add_modifier.contains(Modifier::REVERSED));
         assert!(badge.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn node_kind_glyph_span_uses_slate_glyph_and_theme_color() {
+        // ADR 0073 §3: each row carries a prefix glyph in the kind
+        // color. The helper returns `<glyph> ` (glyph + trailing
+        // space) so callers can splice it before the row body
+        // without per-call padding.
+        let theme = Theme::default();
+        let span = node_kind_glyph_span(NodeKind::Repo, &theme);
+        assert_eq!(span.content, "◆ ");
+        assert_eq!(span.style.fg, Some(theme.node_repo));
+        let workspace = node_kind_glyph_span(NodeKind::Workspace, &theme);
+        assert_eq!(workspace.content, "▦ ");
+        assert_eq!(workspace.style.fg, Some(theme.node_workspace));
+    }
+
+    #[test]
+    fn forge_pr_glyph_span_picks_color_from_pr_state() {
+        // The PR glyph color follows `theme.pr_*` based on PR state
+        // (ADR 0073 §2). Draft overrides state.
+        use crate::tui::rows::PrRow;
+        let theme = Theme::default();
+        let base = PrRow {
+            pr_number: 1,
+            repo_display: "owner/repo".into(),
+            state: Some("open".into()),
+            is_draft: false,
+            branch_name: None,
+            updated_recency: None,
+            attached_count: 0,
+            url: None,
+            primary_node: NodeId::ForgePr(crate::model::ForgePrId::new(
+                "github",
+                "github.com",
+                "owner",
+                "repo",
+                1,
+            )),
+        };
+        assert_eq!(
+            forge_pr_glyph_span(&base, &theme).style.fg,
+            Some(theme.pr_open)
+        );
+        let closed = PrRow {
+            state: Some("closed".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            forge_pr_glyph_span(&closed, &theme).style.fg,
+            Some(theme.pr_closed)
+        );
+        let merged = PrRow {
+            state: Some("merged".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            forge_pr_glyph_span(&merged, &theme).style.fg,
+            Some(theme.pr_merged)
+        );
+        let draft = PrRow {
+            is_draft: true,
+            state: Some("open".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            forge_pr_glyph_span(&draft, &theme).style.fg,
+            Some(theme.pr_draft),
+            "draft overrides state-based color",
+        );
+        // Glyph itself stays the `NodeKind::ForgePr` slate glyph
+        // regardless of color.
+        assert_eq!(forge_pr_glyph_span(&base, &theme).content, "⇄ ");
+    }
+
+    #[test]
+    fn row_kind_glyph_span_dispatches_per_row_kind() {
+        use crate::tui::rows::{ForkRow, GroupRow, MuxCandidateRow, PinRow, RepoRow};
+        let theme = Theme::default();
+
+        // Group rows derive their kind from `primary_node`; synthetic
+        // group buckets without a backing node skip the glyph.
+        let workspace_group = RowKind::Group(GroupRow {
+            display_path: "/ws".into(),
+            primary_node: Some(NodeId::Workspace(crate::model::WorkspaceId::new("/ws"))),
+            is_launch_context: false,
+        });
+        assert_eq!(
+            row_kind_glyph_span(&workspace_group, &theme)
+                .map(|s| s.content.to_string())
+                .as_deref(),
+            Some("▦ "),
+        );
+
+        let synthetic_group = RowKind::Group(GroupRow {
+            display_path: "(ungrouped)".into(),
+            primary_node: None,
+            is_launch_context: false,
+        });
+        assert!(
+            row_kind_glyph_span(&synthetic_group, &theme).is_none(),
+            "synthetic group buckets have no NodeKind",
+        );
+
+        // Pin rows are sentinels (📌 in the row body); no kind glyph.
+        let pin = RowKind::Pin(PinRow {
+            pin_id: "p".into(),
+            display_name: "Pinned".into(),
+            harness: "claude".into(),
+            cwd: "/x".into(),
+            mux_name: "m".into(),
+            mux_socket: None,
+            launch_argv: Vec::new(),
+            store_path: "/store".into(),
+            harness_label: "claude".into(),
+            cwd_display: "/x".into(),
+            mux_label: "m".into(),
+            state_label: "unbound",
+        });
+        assert!(row_kind_glyph_span(&pin, &theme).is_none());
+
+        // AgentSession rows get the `●` glyph in `node_agent_session`.
+        let agent = RowKind::AgentSession(crate::tui::rows::AgentSessionRow {
+            session: AgentSessionId::new("claude", "/state", "abc"),
+            short_id: "abc".into(),
+            harness_label: "claude".into(),
+            cwd_display: None,
+            project_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state: crate::tui::rows::MuxIndicator::Unmuxed,
+            preview: None,
+            title: None,
+            alias: None,
+            primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
+            pin_id: None,
+        });
+        let agent_glyph = row_kind_glyph_span(&agent, &theme).unwrap();
+        assert_eq!(agent_glyph.content, "● ");
+        assert_eq!(agent_glyph.style.fg, Some(theme.node_agent_session));
+
+        // MuxSession and AgentSessionMuxCandidate both get `▣` since
+        // a candidate row points at a mux.
+        let mux = RowKind::MuxSession(crate::tui::rows::MuxSessionRow {
+            mux: MuxSessionId::new("project"),
+            backend: "tmux".into(),
+            native_id: "project".into(),
+            client_attached: Some(true),
+            cwd_display: None,
+            attached_count: 1,
+            ambiguous_count: 0,
+            recency: None,
+            activity_epoch: None,
+            agent_labels: Vec::new(),
+            single_session_preview: None,
+            pin_id: None,
+            primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
+        });
+        assert_eq!(
+            row_kind_glyph_span(&mux, &theme)
+                .map(|s| s.content.to_string())
+                .as_deref(),
+            Some("▣ "),
+        );
+        let candidate = RowKind::AgentSessionMuxCandidate(MuxCandidateRow {
+            mux: MuxSessionId::new("project"),
+            mux_label: "tmux:project".into(),
+            is_preferred: true,
+            primary_node: NodeId::MuxSession(MuxSessionId::new("project")),
+        });
+        assert_eq!(
+            row_kind_glyph_span(&candidate, &theme)
+                .map(|s| s.content.to_string())
+                .as_deref(),
+            Some("▣ "),
+        );
+
+        // Fork rows get `⑂`.
+        let fork = RowKind::Fork(ForkRow {
+            fork_label: "alpha".into(),
+            provider: "github".into(),
+            scope: None,
+            parent_label: None,
+            child_count: 0,
+            primary_node: NodeId::Fork(crate::model::ForkId::new("alpha")),
+        });
+        let fork_glyph = row_kind_glyph_span(&fork, &theme).unwrap();
+        assert_eq!(fork_glyph.content, "⑂ ");
+        assert_eq!(fork_glyph.style.fg, Some(theme.node_fork));
+
+        // Repo rows get `◆`.
+        let repo = RowKind::Repo(RepoRow {
+            short_id: "abc".into(),
+            display_name: "repo-a".into(),
+            canonical_path: None,
+            common_dir: "/x/.git".into(),
+            primary_node: NodeId::Repo(RepoId::new("/x/.git")),
+        });
+        assert_eq!(
+            row_kind_glyph_span(&repo, &theme)
+                .map(|s| s.content.to_string())
+                .as_deref(),
+            Some("◆ "),
+        );
     }
 
     #[test]
