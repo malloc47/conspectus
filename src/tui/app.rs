@@ -1572,15 +1572,10 @@ impl App {
                         // group no longer exists.
                         let valid: BTreeSet<GroupKey> = state
                             .view
-                            .upstream
+                            .relationships
                             .groups
                             .iter()
-                            .map(|g| {
-                                GroupKey::for_group(crate::tui::explorer::Direction::Upstream, g)
-                            })
-                            .chain(state.view.downstream.groups.iter().map(|g| {
-                                GroupKey::for_group(crate::tui::explorer::Direction::Downstream, g)
-                            }))
+                            .map(GroupKey::for_group)
                             .collect();
                         state.expanded_groups.retain(|key| valid.contains(key));
                         state.reseat_cursor(prev_key);
@@ -1617,25 +1612,16 @@ impl App {
         let Some(row) = rows.get(state.cursor).cloned() else {
             return;
         };
-        let ExplorerRow::GroupHeader {
-            direction,
-            group_index,
-            ..
-        } = row
-        else {
+        let ExplorerRow::GroupHeader { group_index, .. } = row else {
             self.status_message = Some(
                 "explorer: nothing to expand here — only multi-link groups expand".to_string(),
             );
             return;
         };
-        let explorer = match direction {
-            crate::tui::explorer::Direction::Upstream => &state.view.upstream,
-            crate::tui::explorer::Direction::Downstream => &state.view.downstream,
-        };
-        let Some(group) = explorer.groups.get(group_index) else {
+        let Some(group) = state.view.relationships.groups.get(group_index) else {
             return;
         };
-        let key = GroupKey::for_group(direction, group);
+        let key = GroupKey::for_group(group);
         let prev_key = state.selected_row().map(|row| row.key(&state.view));
         if state.expanded_groups.contains(&key) {
             state.expanded_groups.remove(&key);
@@ -3461,7 +3447,7 @@ mod tests {
         let state = app.explorer().expect("explorer for session");
         let labels: Vec<&str> = state
             .view
-            .upstream
+            .upstream()
             .groups
             .iter()
             .map(|g| g.relation.snake_case())
@@ -3490,9 +3476,8 @@ mod tests {
             .expect("an agent session row in the scenario");
         app.set_selection(target);
         let state = app.explorer().expect("explorer for session");
-        let downstream_kinds: Vec<&str> = state
-            .view
-            .downstream
+        let downstream = state.view.downstream();
+        let downstream_kinds: Vec<&str> = downstream
             .groups
             .iter()
             .map(|g| g.neighbor_kind.as_str())
@@ -3522,7 +3507,7 @@ mod tests {
         let state = app.explorer().expect("explorer for session");
         let total_mux_links: usize = state
             .view
-            .downstream
+            .downstream()
             .groups
             .iter()
             .filter(|g| g.neighbor_kind == "mux_session")

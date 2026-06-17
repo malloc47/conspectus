@@ -1871,26 +1871,43 @@ fn render_explorer_lines(
         lines.push(render_node_field_line(field, highlight, theme));
     }
 
-    // Helper to render one explorer's groups.
+    // ADR 0074 pass 1: groups now live in a single
+    // `view.relationships` list with per-group direction. The
+    // renderer still emits two sections (Upstream then Downstream)
+    // for snapshot stability; pass 3 collapses these into the
+    // validated / Other two-zone layout. The closure walks the
+    // combined list with stable `group_index` so cursor lookups
+    // remain accurate.
+    let groups = &view.relationships.groups;
     let render_explorer_section = |lines: &mut Vec<Line<'static>>, direction: ExpDir| {
-        let explorer = match direction {
-            ExpDir::Upstream => &view.upstream,
-            ExpDir::Downstream => &view.downstream,
-        };
-        if explorer.groups.is_empty() {
+        let section_indices: Vec<usize> = groups
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.direction == direction)
+            .map(|(i, _)| i)
+            .collect();
+        if section_indices.is_empty() {
             return;
         }
+        let section_groups: Vec<&crate::tui::explorer::RelationshipGroup> =
+            section_indices.iter().map(|&i| &groups[i]).collect();
+        let link_count: usize = section_groups.iter().map(|g| g.link_count()).sum();
+        let ambiguous_groups = section_groups.iter().filter(|g| g.ambiguous).count();
+        let unresolved_groups = section_groups
+            .iter()
+            .filter(|g| g.unresolved_count > 0)
+            .count();
         let summary = format!(
             "{} groups · {} links{}{}",
-            explorer.groups.len(),
-            explorer.link_count(),
-            if explorer.ambiguous_groups() > 0 {
-                format!(" · {} ⚠", explorer.ambiguous_groups())
+            section_indices.len(),
+            link_count,
+            if ambiguous_groups > 0 {
+                format!(" · {} ⚠", ambiguous_groups)
             } else {
                 String::new()
             },
-            if explorer.unresolved_groups() > 0 {
-                format!(" · {} —", explorer.unresolved_groups())
+            if unresolved_groups > 0 {
+                format!(" · {} —", unresolved_groups)
             } else {
                 String::new()
             },
@@ -1902,7 +1919,8 @@ fn render_explorer_lines(
             theme,
             ChipAnchor::Right,
         ));
-        for (group_index, group) in explorer.groups.iter().enumerate() {
+        for &group_index in &section_indices {
+            let group = &groups[group_index];
             let is_single = group.is_single();
             if is_single {
                 if let Some(link) = group.links.first() {
@@ -1939,7 +1957,7 @@ fn render_explorer_lines(
                     )
                 });
                 let highlight = header_flat == Some(cursor);
-                let key = crate::tui::explorer::GroupKey::for_group(direction, group);
+                let key = crate::tui::explorer::GroupKey::for_group(group);
                 let expanded = state.expanded_groups.contains(&key);
                 lines.push(render_group_header_line(group, expanded, highlight, theme));
                 if expanded {
