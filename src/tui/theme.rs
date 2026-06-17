@@ -95,6 +95,18 @@ pub struct Theme {
     pub node_runtime_process: Color,
     pub node_branch: Color,
     pub node_fork: Color,
+
+    // ---- detail-pane edge state (ADR 0075) ----------------------------------
+    /// Color for non-winning `EdgeStateLabel::AltOf(_)` rows in the
+    /// detail-pane Other zone. Defaults to the `secondary_text`
+    /// hue; operators can shift it independently of the broader
+    /// secondary palette via `[tui.theme] edge_alt_of`.
+    pub edge_alt_of: Color,
+    /// Color for `EdgeStateLabel::Conflict` rows in the detail-pane
+    /// Other zone. Defaults to the `warning` hue; operators can
+    /// shift it independently of the broader warning palette via
+    /// `[tui.theme] edge_conflict`.
+    pub edge_conflict: Color,
     /// Operator overrides for individual node-kind glyphs, parsed
     /// from `[tui.theme.icons]`. Empty by default; lookups in
     /// [`crate::tui::icons::node_kind_style`] fall through to the
@@ -200,6 +212,9 @@ impl Default for Theme {
             node_runtime_process: Color::DarkGray,
             node_branch: Color::Green,
             node_fork: Color::LightMagenta,
+
+            edge_alt_of: Color::DarkGray,
+            edge_conflict: Color::Yellow,
             icons: IconOverrides::default(),
         }
     }
@@ -400,6 +415,14 @@ impl Theme {
                 name: "node_fork",
                 kind: Color,
             },
+            ThemeKey {
+                name: "edge_alt_of",
+                kind: Color,
+            },
+            ThemeKey {
+                name: "edge_conflict",
+                kind: Color,
+            },
         ]
     }
 
@@ -435,6 +458,8 @@ impl Theme {
             "node_runtime_process" => self.node_runtime_process = color,
             "node_branch" => self.node_branch = color,
             "node_fork" => self.node_fork = color,
+            "edge_alt_of" => self.edge_alt_of = color,
+            "edge_conflict" => self.edge_conflict = color,
             _ => return false,
         }
         true
@@ -599,6 +624,18 @@ pub fn parse_style_spec(raw: &str) -> Result<StyleSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_edge_state_colors_match_adr_0075() {
+        let theme = Theme::default();
+        // AltOf defaults to the secondary-text hue; Conflict
+        // defaults to the warning hue. The pair is independently
+        // themable so operators can paint conflict in a louder
+        // color than the global warning palette without touching
+        // group-level chip styling.
+        assert_eq!(theme.edge_alt_of, Color::DarkGray);
+        assert_eq!(theme.edge_conflict, Color::Yellow);
+    }
 
     #[test]
     fn default_node_kind_colors_match_adr_0073_slate() {

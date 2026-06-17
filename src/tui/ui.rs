@@ -2031,9 +2031,9 @@ fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
 const VERB_COLUMN_WIDTH: usize = 22;
 
 /// Render a validated zone row: `<verb 22w> <glyph> <neighbor_label>`
-/// (ADR 0074 §3). Per §6 the prior `★` resolver-winner marker is
-/// dropped here because every validated row is by definition a
-/// resolver winner.
+/// (ADR 0074 §3, ADR 0075). The prior `★` resolver-winner marker
+/// is dropped — every validated row is a resolver winner by
+/// construction, so the marker no longer earns its column.
 fn render_validated_link_line(
     group: &crate::tui::explorer::RelationshipGroup,
     link: &crate::tui::explorer::RelationshipLink,
@@ -2048,17 +2048,28 @@ fn render_validated_link_line(
         theme,
         show_edge_meta,
         "  ",
+        None,
         Style::default()
             .fg(theme.link_id)
             .add_modifier(Modifier::BOLD),
     )
 }
 
-/// Render an Other-zone link row. Same shape as the validated row
-/// with a deeper indent so the operator can see the row belongs to
-/// the collapsed zone; the `★` marker survives here per ADR §6 so a
-/// would-be resolver-winner candidate stays visible while H-UI-005
-/// designs the long-term resolved-vs-candidate visual language.
+/// Render an Other-zone link row (ADR 0075). The row prefix +
+/// label color encode the `EdgeStateLabel` so an operator skimming
+/// the zone can tell at a glance which rows are alternates and
+/// which are conflicts:
+///
+/// - `AltOf(_)` → 6-space indent, no prefix glyph, label in
+///   `theme.edge_alt_of`. Quiet — these are candidates the
+///   resolver considered but didn't pick.
+/// - `Conflict` → `⚠ ` prefix in `theme.edge_conflict`, label in
+///   `theme.edge_conflict` + BOLD. The `⚠` is the cross-mode
+///   anchor (survives `NO_COLOR`); it also lines up vocabulary
+///   with the Other header's `K ⚠` summary count.
+/// - `Resolves` is unreachable here — Resolves rows live in the
+///   validated zone — but the renderer falls back to AltOf styling
+///   defensively in case a future change routes one through.
 fn render_other_link_line(
     group: &crate::tui::explorer::RelationshipGroup,
     link: &crate::tui::explorer::RelationshipLink,
@@ -2066,21 +2077,40 @@ fn render_other_link_line(
     theme: &Theme,
     show_edge_meta: bool,
 ) -> Line<'static> {
-    let mut style = Style::default().fg(theme.link_id);
-    if link.resolved_winner {
-        style = style.add_modifier(Modifier::BOLD);
-    }
+    use crate::tui::explorer::EdgeStateLabel;
+    let (indent, prefix_span, label_style) = match link.edge_state {
+        EdgeStateLabel::Conflict => {
+            let prefix = Span::styled(
+                "⚠ ".to_string(),
+                Style::default()
+                    .fg(theme.edge_conflict)
+                    .add_modifier(Modifier::BOLD),
+            );
+            (
+                "    ",
+                Some(prefix),
+                Style::default()
+                    .fg(theme.edge_conflict)
+                    .add_modifier(Modifier::BOLD),
+            )
+        }
+        EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
+            ("      ", None, Style::default().fg(theme.edge_alt_of))
+        }
+    };
     render_related_row(
         group,
         link,
         highlight,
         theme,
         show_edge_meta,
-        "      ",
-        style,
+        indent,
+        prefix_span,
+        label_style,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_related_row(
     group: &crate::tui::explorer::RelationshipGroup,
     link: &crate::tui::explorer::RelationshipLink,
@@ -2088,6 +2118,7 @@ fn render_related_row(
     theme: &Theme,
     show_edge_meta: bool,
     indent: &str,
+    prefix: Option<Span<'static>>,
     label_style_base: Style,
 ) -> Line<'static> {
     let verb = crate::tui::explorer::directional_verb(&group.relation, group.direction);
@@ -2102,27 +2133,25 @@ fn render_related_row(
     if highlight {
         kind_chip.style = kind_chip.style.add_modifier(Modifier::REVERSED);
     }
-    let star = if link.resolved_winner && indent.len() > 2 {
-        "  ★".to_string()
-    } else {
-        String::new()
-    };
-    let mut spans = vec![
-        Span::styled(verb_text, row_style),
-        kind_chip,
-        Span::raw(" "),
-        Span::styled(link.neighbor_label.clone(), label_style),
-    ];
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if let Some(mut prefix) = prefix {
+        if highlight {
+            prefix.style = prefix.style.add_modifier(Modifier::REVERSED);
+        }
+        spans.push(prefix);
+    }
+    spans.push(Span::styled(verb_text, row_style));
+    spans.push(kind_chip);
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(link.neighbor_label.clone(), label_style));
     if show_edge_meta {
         let trailing = format!(
-            "  · {} · {} · {}{star}",
+            "  · {} · {} · {}",
             link.provenance.snake_case(),
             link.confidence.snake_case(),
             link.state.snake_case(),
         );
         spans.push(Span::styled(trailing, label_style));
-    } else if !star.is_empty() {
-        spans.push(Span::styled(star, label_style));
     }
     Line::from(spans)
 }
@@ -3768,6 +3797,145 @@ mod tests {
         assert!(
             verb_idx < glyph_idx && glyph_idx < label_idx,
             "row order should be verb → glyph → label: {line}",
+        );
+    }
+
+    #[test]
+    fn other_link_line_dispatches_per_edge_state() {
+        // ADR 0075: Other-zone rows visually distinguish AltOf
+        // (quiet) from Conflict (loud + `⚠`) so an operator
+        // skimming the zone reads the resolver state at a glance.
+        // Test the three shapes by constructing fake links and
+        // rendering directly through `render_other_link_line` — no
+        // App needed.
+        use crate::model::{Confidence, NodeId, Provenance, RelationKind};
+        use crate::tui::explorer::{
+            CoreField, Direction, EdgeStateLabel, LinkStateLabel, RelationshipGroup,
+            RelationshipLink,
+        };
+        let theme = Theme::default();
+        let group = RelationshipGroup {
+            direction: Direction::Downstream,
+            relation: RelationKind::LinkedToMux,
+            neighbor_kind: "mux_session".into(),
+            links: Vec::new(),
+            unresolved: Vec::new(),
+            ambiguous: false,
+            unresolved_count: 0,
+        };
+        let link = |edge_state: EdgeStateLabel| RelationshipLink {
+            link_id: "l".into(),
+            neighbor_id: NodeId::MuxSession(crate::model::MuxSessionId::new("x")),
+            neighbor_kind: "mux_session",
+            neighbor_label: "tmux:x".into(),
+            neighbor_short_id: "x".into(),
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
+            state: LinkStateLabel::Active,
+            resolved_winner: false,
+            edge_state,
+            preview: Vec::<CoreField>::new(),
+        };
+
+        // Conflict: prefix `⚠`, label color = edge_conflict, BOLD.
+        let conflict_line = render_other_link_line(
+            &group,
+            &link(EdgeStateLabel::Conflict),
+            false,
+            &theme,
+            false,
+        );
+        let text: String = conflict_line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text.starts_with("⚠ "),
+            "Conflict rows must lead with the `⚠ ` prefix (NO_COLOR-safe signal): `{text}`",
+        );
+        let label_span = conflict_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("tmux:x"))
+            .expect("neighbor-label span present on conflict row");
+        assert_eq!(label_span.style.fg, Some(theme.edge_conflict));
+        assert!(label_span.style.add_modifier.contains(Modifier::BOLD));
+
+        // AltOf: no prefix, label color = edge_alt_of, no BOLD.
+        let alt_line = render_other_link_line(
+            &group,
+            &link(EdgeStateLabel::AltOf(RelationKind::LinkedToMux)),
+            false,
+            &theme,
+            false,
+        );
+        let alt_text: String = alt_line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            !alt_text.starts_with("⚠ "),
+            "AltOf rows should not carry the conflict prefix: `{alt_text}`",
+        );
+        let alt_label = alt_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains("tmux:x"))
+            .expect("neighbor-label span present on alt row");
+        assert_eq!(alt_label.style.fg, Some(theme.edge_alt_of));
+        assert!(!alt_label.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn validated_link_line_drops_the_legacy_winner_star() {
+        // ADR 0075: the validated zone never carries `★` — every
+        // row there is a resolver winner, so the marker no longer
+        // earns its column. The same fact also gets enforced
+        // structurally by `render_related_row`'s removal of the
+        // `resolved_winner` branch, but the buffer-level assertion
+        // pins it from the operator-visible angle.
+        use crate::model::{Confidence, NodeId, Provenance, RelationKind};
+        use crate::tui::explorer::{
+            CoreField, Direction, EdgeStateLabel, LinkStateLabel, RelationshipGroup,
+            RelationshipLink,
+        };
+        let theme = Theme::default();
+        let group = RelationshipGroup {
+            direction: Direction::Downstream,
+            relation: RelationKind::LinkedToMux,
+            neighbor_kind: "mux_session".into(),
+            links: Vec::new(),
+            unresolved: Vec::new(),
+            ambiguous: false,
+            unresolved_count: 0,
+        };
+        let link = RelationshipLink {
+            link_id: "l".into(),
+            neighbor_id: NodeId::MuxSession(crate::model::MuxSessionId::new("x")),
+            neighbor_kind: "mux_session",
+            neighbor_label: "tmux:x".into(),
+            neighbor_short_id: "x".into(),
+            provenance: Provenance::Discovered,
+            confidence: Confidence::High,
+            state: LinkStateLabel::Active,
+            resolved_winner: true,
+            edge_state: EdgeStateLabel::Resolves,
+            preview: Vec::<CoreField>::new(),
+        };
+        let line = render_validated_link_line(&group, &link, false, &theme, true);
+        let text: String = line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            !text.contains("★"),
+            "validated row should no longer carry the `★` marker: `{text}`",
         );
     }
 

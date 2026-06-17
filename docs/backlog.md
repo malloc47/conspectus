@@ -6330,41 +6330,30 @@ do not get lost inside their originating workstreams.
     `H-UI-002` so any new glyph language doesn't get rewritten
     twice.
 
-- [ ] `H-UI-005` Resolved-vs-candidate visual separation in the
+- [x] `H-UI-005` Resolved-vs-candidate visual separation in the
   detail-pane explorer.
-  - Scope: the model already carries the distinction in
-    `EdgeStateLabel::{Resolves, AltOf(rel), Conflict}` (`src/tui/
-    explorer.rs:804`), but the renderer surfaces it weakly: the
-    resolver-winner gets a `★` marker, edge state appears as a
-    text suffix when `show_edge_meta` is on, and competing /
-    candidate-only links look identical to resolved ones at a
-    glance. Strengthen the visual language so an operator
-    skimming a relationship group can immediately tell:
-      - which row is the resolver's pick (`Resolves`);
-      - which rows are non-winning competitors for the same
-        slot (`AltOf(rel)`) — these are still live evidence;
-      - which rows are the resolver-flagged conflict set
-        (`Conflict`);
-      - which groups have no resolver winner at all (candidate-
-        only fan-out — currently invisible at the row level).
-    Likely deliverables: a per-row glyph or chip per
-    `EdgeStateLabel` variant, color hooks on the theme, and a
-    candidate-only group chip ("no winner") for fan-outs the
-    resolver didn't pick from. Coordinate with `H-UI-002` so
-    the chips align with the per-node-kind glyph language.
-  - Tests: explorer snapshot coverage per `EdgeStateLabel`
-    variant (resolves / alt-of / conflict / candidate-only);
-    `show_edge_meta` on/off coverage so the new glyphs stay
-    visible without depending on the verbose mode; theme
-    snapshot for the new color keys.
-  - Open questions: whether candidate-only groups need a
-    distinct group header chip vs reusing the `⚠` glyph from
-    ADR 0072; whether `★` stays as the winner marker or moves
-    to a colored glyph from the new vocabulary.
-  - Blockers: depends on `H-UI-006` for the candidate-only
-    fan-out signal to even reach the renderer; coordinate with
-    `H-UI-002` (glyph identity) and `H-UI-003` (detail-pane
-    flatten) so the visual language lands once.
+  - Outcome: ADR 0075 records the edge-state visual language and
+    the renderer ships it. H-UI-003's validated / Other zone
+    split already separated Resolves from the rest; this story
+    closes the per-row distinction inside Other. `AltOf(_)` rows
+    render in `theme.edge_alt_of` (default DarkGray, quiet —
+    candidates the resolver considered but didn't pick).
+    `Conflict` rows render with a leading `⚠ ` prefix in
+    `theme.edge_conflict` (default Yellow) + BOLD; the `⚠`
+    reuses ADR 0071 / 0072's ambiguity vocabulary and survives
+    `NO_COLOR`. Unresolved stubs keep their `— ` prefix + DIM
+    treatment. The legacy `★` resolver-winner marker exits the
+    renderer entirely (validated zone is the winner zone by
+    construction). Two new flat `[tui.theme]` color keys
+    (`edge_alt_of`, `edge_conflict`) ship in `Theme::known_keys`
+    so operators theme edge states independently of the broader
+    secondary / warning palette. Candidate-only group fan-outs
+    do not get a dedicated chip — the per-row treatment + the
+    Other header's `K ⚠` summary cover the use case. Unit tests
+    pin the per-edge-state row dispatch (`⚠` prefix on Conflict,
+    color match on AltOf, no `★` on validated). H-UI-006 stays
+    open as the resolver-side preservation work; this story is
+    purely renderer.
 
 - [ ] `H-UI-006` Resolver-side preservation for suppressed
   ambiguous `LinkedToMux` resolutions.
