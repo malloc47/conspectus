@@ -1551,7 +1551,25 @@ fn finalize_group(
         .map(|r| r.competing_link_ids.clone())
         .unwrap_or_default();
 
-    let ambiguous = !competing.is_empty();
+    // H-UI-007: when the resolver dropped this relation entirely
+    // (e.g. `suppress_ambiguous_cwd_mux_links` on a shared-cwd
+    // `LinkedToMux` set) the explorer still has the raw candidate
+    // fan-out — flag the group as ambiguous when ≥2 distinct
+    // neighbor targets are present without a resolver winner so
+    // the operator gets the same `⚠` signal they'd see if the
+    // resolved entry had survived. Tracked properly at the
+    // resolver layer by `H-UI-006`.
+    let candidate_only_fan_out = resolved.is_none() && {
+        let mut distinct_targets = std::collections::BTreeSet::new();
+        for (_, neighbor) in &links {
+            distinct_targets.insert(neighbor);
+            if distinct_targets.len() > 1 {
+                break;
+            }
+        }
+        distinct_targets.len() > 1
+    };
+    let ambiguous = !competing.is_empty() || candidate_only_fan_out;
 
     links.sort_by(|(left, _), (right, _)| {
         let left_winner = winner_link_id.as_deref() == Some(&left.id);
@@ -1914,6 +1932,88 @@ mod tests {
             .expect("backend field");
         assert_eq!(id_field.value, "work-claude");
         assert_eq!(backend_field.value, "tmux");
+    }
+
+    #[test]
+    fn linked_to_mux_candidate_fanout_flags_ambiguity_when_resolver_suppressed() {
+        // H-UI-007: when `suppress_ambiguous_cwd_mux_links` drops
+        // the resolved `LinkedToMux` entry (multiple sessions share
+        // the same cwd and the resolver refuses to fabricate a
+        // winner), the explorer should still flag the group as
+        // ambiguous so the operator sees the `⚠` glyph. Long-term
+        // resolver-side fix tracked under `H-UI-006`.
+        let mut snapshot = GraphSnapshot::empty();
+        let cwd = Some("/home/op/src/x");
+        snapshot
+            .nodes
+            .push(agent("claude-code", "focused", cwd, None));
+        snapshot
+            .nodes
+            .push(agent("claude-code", "other", cwd, None));
+        snapshot.nodes.push(mux("tmux", "project", cwd));
+        snapshot.nodes.push(mux("tmux", "ambiguous", cwd));
+
+        let focused_id =
+            NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "focused"));
+        let other_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "other"));
+        let mux_a = NodeId::MuxSession(MuxSessionId::new("project"));
+        let mux_b = NodeId::MuxSession(MuxSessionId::new("ambiguous"));
+
+        let cwd_link = |id: &str, source: NodeId, target: NodeId| {
+            let mut l = link(id, source, target, RelationKind::LinkedToMux);
+            // `suppress_ambiguous_cwd_mux_links` keys off
+            // `match_kind == exact_cwd_match` to recognize cwd
+            // evidence; both `fields` and `evidence` are checked.
+            l.source_metadata.evidence = Some("exact_cwd_match".to_string());
+            l
+        };
+
+        snapshot
+            .candidate_links
+            .push(cwd_link("focused-a", focused_id.clone(), mux_a.clone()));
+        snapshot
+            .candidate_links
+            .push(cwd_link("focused-b", focused_id.clone(), mux_b.clone()));
+        snapshot
+            .candidate_links
+            .push(cwd_link("other-a", other_id.clone(), mux_a.clone()));
+        snapshot
+            .candidate_links
+            .push(cwd_link("other-b", other_id.clone(), mux_b.clone()));
+
+        let snapshot = resolve_snapshot(snapshot);
+
+        // Precondition: the resolver dropped the `LinkedToMux`
+        // resolved entry for the focused session entirely. If this
+        // ever changes (e.g. the resolver stops suppressing), the
+        // fallback path is no longer the only signal source —
+        // revisit `H-UI-006` and update or retire this test.
+        let no_resolved_mux = snapshot
+            .resolved_relationships
+            .iter()
+            .all(|r| !(r.source == focused_id && r.relation == RelationKind::LinkedToMux));
+        assert!(
+            no_resolved_mux,
+            "resolver should have suppressed the LinkedToMux resolved entry; \
+             update H-UI-006/007 if that behavior changes",
+        );
+
+        let view = build(&snapshot, &focused_id, Some(home().as_path()));
+        let group = view
+            .downstream
+            .groups
+            .iter()
+            .find(|g| g.relation == RelationKind::LinkedToMux)
+            .expect("LinkedToMux group should still render from candidate links");
+        assert!(
+            group.ambiguous,
+            "candidate fan-out without a resolved winner should mark the group ambiguous",
+        );
+        assert!(
+            group.links.len() >= 2,
+            "both candidate targets should still appear as rows: {:?}",
+            group.links,
+        );
     }
 
     #[test]

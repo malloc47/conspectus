@@ -6331,6 +6331,89 @@ do not get lost inside their originating workstreams.
     `H-UI-002` so any new glyph language doesn't get rewritten
     twice.
 
+- [ ] `H-UI-005` Resolved-vs-candidate visual separation in the
+  detail-pane explorer.
+  - Scope: the model already carries the distinction in
+    `EdgeStateLabel::{Resolves, AltOf(rel), Conflict}` (`src/tui/
+    explorer.rs:804`), but the renderer surfaces it weakly: the
+    resolver-winner gets a `★` marker, edge state appears as a
+    text suffix when `show_edge_meta` is on, and competing /
+    candidate-only links look identical to resolved ones at a
+    glance. Strengthen the visual language so an operator
+    skimming a relationship group can immediately tell:
+      - which row is the resolver's pick (`Resolves`);
+      - which rows are non-winning competitors for the same
+        slot (`AltOf(rel)`) — these are still live evidence;
+      - which rows are the resolver-flagged conflict set
+        (`Conflict`);
+      - which groups have no resolver winner at all (candidate-
+        only fan-out — currently invisible at the row level).
+    Likely deliverables: a per-row glyph or chip per
+    `EdgeStateLabel` variant, color hooks on the theme, and a
+    candidate-only group chip ("no winner") for fan-outs the
+    resolver didn't pick from. Coordinate with `H-UI-002` so
+    the chips align with the per-node-kind glyph language.
+  - Tests: explorer snapshot coverage per `EdgeStateLabel`
+    variant (resolves / alt-of / conflict / candidate-only);
+    `show_edge_meta` on/off coverage so the new glyphs stay
+    visible without depending on the verbose mode; theme
+    snapshot for the new color keys.
+  - Open questions: whether candidate-only groups need a
+    distinct group header chip vs reusing the `⚠` glyph from
+    ADR 0072; whether `★` stays as the winner marker or moves
+    to a colored glyph from the new vocabulary.
+  - Blockers: depends on `H-UI-006` for the candidate-only
+    fan-out signal to even reach the renderer; coordinate with
+    `H-UI-002` (glyph identity) and `H-UI-003` (detail-pane
+    flatten) so the visual language lands once.
+
+- [ ] `H-UI-006` Resolver-side preservation for suppressed
+  ambiguous `LinkedToMux` resolutions.
+  - Scope: `suppress_ambiguous_cwd_mux_links`
+    (`src/resolve/mod.rs:500`) currently drops the
+    `ResolvedRelationship` entry entirely when the cwd evidence
+    for a `LinkedToMux` is shared across multiple distinct
+    sessions claiming the same mux. The diagnostic still fires
+    but the resolved entry is gone, so downstream consumers
+    that read `resolved_relationships` (the detail-pane
+    explorer's `resolved_for`, anything that joins via the
+    typed view) lose the ambiguity signal. The interim
+    renderer-side fallback from `H-UI-007` papers over this in
+    the explorer view, but the right long-term fix is to keep
+    the resolved entry with an explicit "no winner" marker —
+    either an empty `selected_link_id` or a new
+    `ambiguous_only: true` flag — so every consumer sees the
+    same answer. Touches `ResolvedRelationship` shape, the
+    resolver pass, SQLite projections (Phase 10), and any
+    `competing_link_ids` reader.
+  - Tests: resolver tests for the multi-session shared-cwd
+    case (resolved entry survives, marked ambiguous); SQLite
+    view tests (`v_session_mux`, …) confirming the
+    no-winner row joins correctly; renderer tests that the
+    fallback from `H-UI-007` and this resolver-side fix agree
+    on the same group.
+  - Open questions: whether `selected_link_id` becomes
+    `Option<String>` (model break) or a new field is added; how
+    the change interacts with the `Diagnostic::Conflict` entry
+    the suppression pass already emits.
+  - Blockers: `H-UI-007` lands first so the renderer side
+    keeps working in the interim; ideally coordinate with the
+    Phase 10 SQLite projection work since the resolved-relation
+    shape is the schema boundary.
+
+- [x] `H-UI-007` Renderer-side fallback so candidate fan-out
+  flags the explorer group as ambiguous even when no
+  `ResolvedRelationship` exists.
+  - Outcome: `build_relationship_group`
+    (`src/tui/explorer.rs`) now derives `ambiguous` from the
+    candidate set's distinct target count when
+    `resolved_for` returns `None`, so the suppressed-LinkedToMux
+    case (the showcase ambig sessions) renders a `⚠` glyph on
+    the group header instead of looking like a clean fan-out.
+    Lets the showcase reproduce the same explorer ambiguity
+    signal the live TUI shows. Tracked properly at the resolver
+    layer by `H-UI-006`.
+
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
 Source plan: pending; this section is the workstream skeleton. See
