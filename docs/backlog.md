@@ -6402,8 +6402,35 @@ do not get lost inside their originating workstreams.
     signal the live TUI shows. Tracked properly at the resolver
     layer by `H-UI-006`.
 
-- [ ] `H-UI-008` Left-pane tree views consume resolved
+- [x] `H-UI-008` Left-pane tree views consume resolved
   relationships only.
+  - Outcome: `mux_candidates_for_session` and `workspace_for_session`
+    in `src/tui/rows/sessions.rs` now read winners from
+    `snapshot.resolved_relationships` instead of grouping raw
+    candidates. The mux view's `fetch_attached_agents` SQL gains
+    a `JOIN resolved_relationships rr ON rr.selected_link_id =
+    cl.link_id AND rr.relation = 'linked_to_mux'`, dropping the
+    false-positive attachments under non-winning cwd evidence.
+    Same pattern lands in `src/tui/rows/prs.rs` for
+    `BranchHasForgePr` and in `src/tui/rows/forks.rs` for
+    `ChildSession` (INNER JOIN) and `ParentSession` (LEFT JOIN +
+    `OR target_kind = 'unresolved'` so unresolved-endpoint labels
+    survive — the explicit candidate-aware surface H-UI-008 calls
+    out for resolver-can't-pick cases). The
+    `mux_candidates_for_session` body retains an H-UI-007-style
+    candidate fan-out fallback (no resolver entries + ≥2 distinct
+    candidate targets) so `suppress_ambiguous_cwd_mux_links` keeps
+    surfacing genuine ambiguity until H-UI-006 lands the resolver-
+    side preservation. Tests: per-call-site regression that a
+    non-winner candidate no longer surfaces in the tree
+    (`mux_view_drops_non_winner_linked_to_mux_candidate`); the
+    existing `invariant_ambiguous_mux_session_renders_as_leaf_after_adr_0071`
+    scenario updated to use 2+ sessions so it exercises the real
+    suppression path; the false-positive
+    `two_mux_links_yield_ambiguous_and_expandable_with_candidate_children`
+    rewritten as
+    `two_mux_links_with_distinct_provenance_resolve_to_one_attached_mux`
+    pinning the cleaned-up behavior.
   - Scope: today the row builders for the sessions, mux, prs,
     and forks views pull from `candidate_links` directly with no
     filter to the resolver's chosen winners. ADR 0074 + ADR 0075

@@ -381,9 +381,20 @@ fn invariant_ambiguous_mux_session_renders_as_leaf_after_adr_0071() {
     // correct candidate count, but the row no longer expands and
     // no `AgentSessionMuxCandidate` rows are emitted — the muxes
     // surface on the shared-ancestor group detail instead.
+    //
+    // H-UI-008: the tree row builder now consumes resolver winners
+    // only, so the "two cwd-equal candidates for a single session"
+    // case resolves to a single Attached row (the resolver
+    // tie-breaks alphabetically). Genuine ambiguity in the tree
+    // comes from `suppress_ambiguous_cwd_mux_links`, which fires
+    // when ≥2 distinct sessions share the same cwd evidence for
+    // the same mux. Build that scenario here so the test exercises
+    // ADR 0071's leaf-row behavior on a session that's *actually*
+    // ambiguous from the resolver's perspective.
     let mut world = ReplayWorld::new();
     let work = world.mkdir("work");
     world.write_codex_session("ambiguous", &work);
+    world.write_codex_session("companion", &work);
     world.add_tmux_row(
         TmuxReplayRow::new("editor-a")
             .with_cwd(&work)

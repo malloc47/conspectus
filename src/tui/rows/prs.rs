@@ -10,9 +10,7 @@ use rusqlite::Connection;
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{AgentSessionId, ForgePrId, NodeId, path_is_ancestor_of};
-use crate::output::render::{
-    node_short_id_from_display, pick_strongest, strip_branch_prefix, unique_prefix_len,
-};
+use crate::output::render::{node_short_id_from_display, strip_branch_prefix, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, MuxIndicator, PrRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
     harness_label, shorten_home,
@@ -289,6 +287,13 @@ fn fetch_agents(conn: &Connection) -> rusqlite::Result<Vec<AgentSqlRow>> {
 fn fetch_preferred_branch_per_pr(
     conn: &Connection,
 ) -> rusqlite::Result<HashMap<String, BranchLink>> {
+    // H-UI-008: the PR view's "preferred branch per PR" column
+    // now consumes the resolver's `BranchHasForgePr` winner via a
+    // join on `resolved_relationships.selected_link_id`. Pre-
+    // H-UI-008 we ranked candidates with `pick_strongest`, which
+    // is equivalent for principled cases but could disagree at
+    // tie-break boundaries. Filtering through the resolver keeps
+    // the tree row in sync with the detail pane's validated zone.
     let mut stmt = conn.prepare(
         "SELECT ('forge_pr:' || \
                  json_extract(cl.source, '$.provider') || ':' || \
@@ -298,54 +303,32 @@ fn fetch_preferred_branch_per_pr(
                  json_extract(cl.source, '$.number')) AS pr_node_id, \
                 ('branch:repo:' || json_extract(cl.target_node, '$.repo.common_dir') || '@' || \
                  json_extract(cl.target_node, '$.refname')) AS branch_node_id, \
-                json_extract(cl.target_node, '$.refname') AS refname, \
-                cl.link_id, cl.provenance, cl.confidence \
+                json_extract(cl.target_node, '$.refname') AS refname \
          FROM candidate_links cl \
+         JOIN resolved_relationships rr \
+           ON rr.selected_link_id = cl.link_id \
+          AND rr.relation = 'branch_has_forge_pr' \
          WHERE cl.source_kind = 'forge_pr' \
            AND cl.target_node_kind = 'branch' \
            AND cl.relation = 'branch_has_forge_pr' \
            AND cl.state = 'active'",
     )?;
-    #[derive(Clone)]
-    #[allow(dead_code)]
-    struct Raw {
-        pr_node_id: String,
-        branch_node_id: String,
-        refname: String,
-        link_id: String,
-        provenance: String,
-        confidence: String,
-    }
     let rows = stmt.query_map([], |row| {
-        Ok(Raw {
-            pr_node_id: row.get(0)?,
-            branch_node_id: row.get(1)?,
-            refname: row.get(2)?,
-            link_id: row.get(3)?,
-            provenance: row.get(4)?,
-            confidence: row.get(5)?,
-        })
-    })?;
-    let mut per_pr: HashMap<String, Vec<Raw>> = HashMap::new();
-    for row in rows {
-        let raw = row?;
-        per_pr.entry(raw.pr_node_id.clone()).or_default().push(raw);
-    }
-
-    let mut out = HashMap::new();
-    for (pr_node_id, candidates) in per_pr {
-        let Some(best) = pick_strongest(candidates, |raw: &Raw| {
-            (&raw.provenance, &raw.confidence, &raw.link_id)
-        }) else {
-            continue;
-        };
-        out.insert(
-            pr_node_id,
+        Ok((
+            row.get::<_, String>(0)?,
             BranchLink {
-                branch_node_id: best.branch_node_id,
-                refname: best.refname,
+                branch_node_id: row.get(1)?,
+                refname: row.get(2)?,
             },
-        );
+        ))
+    })?;
+    let mut out = HashMap::new();
+    for row in rows {
+        let (pr_node_id, branch) = row?;
+        // Resolver writes at most one winner per (source, relation)
+        // for `BranchHasForgePr` (it's not in `multi_target_relation`),
+        // so the first hit per pr_node_id is canonical.
+        out.entry(pr_node_id).or_insert(branch);
     }
     Ok(out)
 }

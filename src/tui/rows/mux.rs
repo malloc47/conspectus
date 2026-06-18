@@ -654,12 +654,21 @@ fn fetch_attached_agents(
     conn: &Connection,
 ) -> rusqlite::Result<HashMap<String, Vec<AttachedAgent>>> {
     let candidate_counts = fetch_agent_mux_candidate_counts(conn)?;
+    // H-UI-008: the mux view's "attached agents" list filters to
+    // resolver-blessed `LinkedToMux` links so what shows up in the
+    // tree matches the detail pane's validated zone. Joining
+    // `resolved_relationships` on `selected_link_id` drops the
+    // candidates the resolver did not pick (false-positive
+    // attachments under non-winning cwd evidence).
     let mut stmt = conn.prepare(
         "SELECT DISTINCT \
                 ('mux_session:' || json_extract(cl.target_node, '$.native_id')) AS mux_node_id, \
                 a.node_id, a.harness_key, a.state_scope, a.session_key, a.cwd, a.title, \
                 al.display_name, a.last_message_preview, a.last_active_epoch \
          FROM candidate_links cl \
+         JOIN resolved_relationships rr \
+           ON rr.selected_link_id = cl.link_id \
+          AND rr.relation = 'linked_to_mux' \
          JOIN node_agent_sessions a \
            ON cl.source_kind = 'agent_session' \
           AND ('agent_session:' || json_extract(cl.source, '$.harness_key') || ':' || \
@@ -955,6 +964,83 @@ mod tests {
         assert_eq!(tree.rows[2].depth, 1);
         assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
         assert!(matches!(tree.rows[2].kind, RowKind::AgentSession(_)));
+    }
+
+    #[test]
+    fn mux_view_drops_non_winner_linked_to_mux_candidate() {
+        // H-UI-008: the mux view's attached-agents list filters
+        // through `resolved_relationships`. A `LinkedToMux`
+        // candidate that the resolver did not pick (e.g. a weaker
+        // cwd evidence pointing at a different mux) must not
+        // surface as an attached agent under either mux.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("editor"));
+        snapshot.nodes.push(mux_node("scratch"));
+        snapshot.nodes.push(session_node("session-x", "/p/editor"));
+        let session =
+            crate::model::NodeId::AgentSession(AgentSessionId::new("codex", "/state", "session-x"));
+        let editor = crate::model::NodeId::MuxSession(MuxSessionId::new("tmux:editor"));
+        let scratch = crate::model::NodeId::MuxSession(MuxSessionId::new("tmux:scratch"));
+        // Editor link is StrongDiscovered (winner); scratch link
+        // is Discovered (loses the LinkedToMux slot).
+        snapshot.candidate_links.push(GraphLink {
+            id: "session-mux-editor".to_string(),
+            source: session.clone(),
+            target: LinkEndpoint::Node { id: editor },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::StrongDiscovered,
+            confidence: Confidence::High,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        snapshot.candidate_links.push(GraphLink {
+            id: "session-mux-scratch".to_string(),
+            source: session,
+            target: LinkEndpoint::Node { id: scratch },
+            relation: RelationKind::LinkedToMux,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+
+        let snapshot = resolve_snapshot(snapshot);
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
+            conn: &conn,
+            home: None,
+            now: Some(1_700_000_160),
+            filter: RowFilter::default(),
+            grouping: MuxGrouping::Session,
+        })
+        .expect("mux tree");
+
+        let mux_rows: Vec<_> = tree
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::MuxSession(mux) => Some(mux),
+                _ => None,
+            })
+            .collect();
+        let editor_row = mux_rows
+            .iter()
+            .find(|mux| mux.native_id == "editor")
+            .expect("editor row");
+        let scratch_row = mux_rows
+            .iter()
+            .find(|mux| mux.native_id == "scratch")
+            .expect("scratch row");
+        assert_eq!(
+            editor_row.attached_count, 1,
+            "editor (resolver winner) keeps the attachment",
+        );
+        assert_eq!(
+            scratch_row.attached_count, 0,
+            "scratch (non-winner) must not surface a false-positive attachment",
+        );
     }
 
     #[test]

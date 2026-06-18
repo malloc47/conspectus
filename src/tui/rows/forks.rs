@@ -279,16 +279,26 @@ fn fetch_child_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usi
 fn fetch_resolved_child_links(
     conn: &Connection,
 ) -> rusqlite::Result<BTreeMap<String, Vec<String>>> {
+    // H-UI-008: filter `child_session` candidates through
+    // `resolved_relationships` so the fork tree only surfaces
+    // resolver-blessed children. `ChildSession` is not a
+    // `multi_target_relation`, but the only producer (atelier
+    // adapter, `src/discovery/atelier.rs:450`) emits at most one
+    // candidate per fork, so the slot key collapses to a single
+    // winner per fork — exactly the cardinality the tree expects.
     let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(source, '$.provider_source_key')) AS fork_node_id, \
-                ('agent_session:' || json_extract(target_node, '$.harness_key') || ':' || \
-                 json_extract(target_node, '$.state_scope') || ':' || \
-                 json_extract(target_node, '$.session_key')) AS agent_node_id \
-         FROM candidate_links \
-         WHERE source_kind = 'fork' \
-           AND relation = 'child_session' \
-           AND state = 'active' \
-           AND target_node_kind = 'agent_session' \
+        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
+                ('agent_session:' || json_extract(cl.target_node, '$.harness_key') || ':' || \
+                 json_extract(cl.target_node, '$.state_scope') || ':' || \
+                 json_extract(cl.target_node, '$.session_key')) AS agent_node_id \
+         FROM candidate_links cl \
+         JOIN resolved_relationships rr \
+           ON rr.selected_link_id = cl.link_id \
+          AND rr.relation = 'child_session' \
+         WHERE cl.source_kind = 'fork' \
+           AND cl.relation = 'child_session' \
+           AND cl.state = 'active' \
+           AND cl.target_node_kind = 'agent_session' \
          ORDER BY fork_node_id, agent_node_id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -303,14 +313,33 @@ fn fetch_resolved_child_links(
 }
 
 fn fetch_parent_labels(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
+    // H-UI-008: filter `parent_session` candidates through the
+    // resolver. The atelier adapter emits at most one
+    // ParentSession candidate per fork, so the per-source slot
+    // resolves to the same winner the previous "first-wins" pass
+    // would have produced; the join keeps the row in sync with
+    // the detail pane's validated zone.
+    //
+    // LEFT JOIN + `OR cl.target_kind = 'unresolved'` keeps the
+    // unresolved-endpoint variant alive: the resolver never emits
+    // a `ResolvedRelationship` for unresolved targets (it emits a
+    // `Diagnostic::UnresolvedEndpoint` instead), but the operator
+    // still needs to see "we observed this lineage reference but
+    // the target session is missing" rendered as `?{native_id}`.
+    // This is the explicit candidate-aware surface the H-UI-008
+    // story carves out for resolver-can't-pick cases.
     let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(source, '$.provider_source_key')) AS fork_node_id, \
-                target_kind, target_node_kind, target_node, target_native_id \
-         FROM candidate_links \
-         WHERE source_kind = 'fork' \
-           AND relation = 'parent_session' \
-           AND state = 'active' \
-         ORDER BY fork_node_id, link_id",
+        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
+                cl.target_kind, cl.target_node_kind, cl.target_node, cl.target_native_id \
+         FROM candidate_links cl \
+         LEFT JOIN resolved_relationships rr \
+           ON rr.selected_link_id = cl.link_id \
+          AND rr.relation = 'parent_session' \
+         WHERE cl.source_kind = 'fork' \
+           AND cl.relation = 'parent_session' \
+           AND cl.state = 'active' \
+           AND (cl.target_kind = 'unresolved' OR rr.selected_link_id IS NOT NULL) \
+         ORDER BY fork_node_id, cl.link_id",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((

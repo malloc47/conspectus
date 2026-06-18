@@ -564,7 +564,35 @@ impl<'a> SessionsData<'a> {
     }
 
     fn mux_candidates_for_session(&self, session: &NodeId) -> Vec<&'a GraphLink> {
-        let Some(links) = self
+        // H-UI-008: tree-view rows consume resolver winners so the
+        // sessions tree matches the detail pane's validated zone.
+        // For `LinkedToMux` the resolver writes at most one winner
+        // per session (it isn't in the `multi_target_relation` set),
+        // so the normal output is 0 or 1 link.
+        //
+        // Suppression fallback: `suppress_ambiguous_cwd_mux_links`
+        // strips the resolved entry when multiple distinct sessions
+        // share the same cwd evidence for the same mux. The H-UI-007
+        // detail-pane backstop preserves the ambiguity signal there;
+        // here we keep the corresponding tree-side signal alive by
+        // returning the full candidate fan-out when no resolver
+        // entry exists *and* there are ≥2 distinct candidate
+        // targets. That keeps the session in the Ambiguous bucket
+        // and lets the row builder emit `AgentSessionMuxCandidate`
+        // children. Resolver-side preservation (H-UI-006) will let
+        // this fallback retire.
+        let winners: Vec<&'a GraphLink> = self
+            .snapshot
+            .resolved_relationships
+            .iter()
+            .filter(|rel| rel.relation == RelationKind::LinkedToMux && rel.source == *session)
+            .filter_map(|rel| self.link_by_id(&rel.selected_link_id))
+            .collect();
+        if !winners.is_empty() {
+            return winners;
+        }
+
+        let Some(candidates) = self
             .by_source_relation
             .get(&(session.clone(), RelationKind::LinkedToMux))
         else {
@@ -572,17 +600,26 @@ impl<'a> SessionsData<'a> {
         };
 
         let mut by_target: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
-        for link in links {
+        for link in candidates {
             let Some(target) = link.target_node_id() else {
                 continue;
             };
             by_target.entry(target.clone()).or_default().push(*link);
         }
-
+        if by_target.len() < 2 {
+            return Vec::new();
+        }
         by_target
             .into_values()
             .filter_map(|links| pick_preferred(&links))
             .collect()
+    }
+
+    fn link_by_id(&self, link_id: &str) -> Option<&'a GraphLink> {
+        self.snapshot
+            .candidate_links
+            .iter()
+            .find(|link| link.id == link_id)
     }
 
     fn checkout_for_path(
@@ -602,13 +639,20 @@ impl<'a> SessionsData<'a> {
     }
 
     fn workspace_for_session(&self, session: &NodeId) -> Option<&WorkspaceId> {
-        self.by_source_relation
-            .get(&(session.clone(), RelationKind::AssociatedWith))
-            .and_then(|links| {
-                links.iter().find_map(|link| match link.target_node_id()? {
-                    NodeId::Workspace(ws) => Some(ws),
-                    _ => None,
-                })
+        // H-UI-008: read resolver winners only so the tree row's
+        // workspace matches the detail pane's validated zone. The
+        // resolver keys `AssociatedWith` by `(source, relation,
+        // target)`, so a session could theoretically own multiple
+        // workspace winners — return the first one in iteration
+        // order (resolved_relationships is sorted), which matches
+        // the prior single-pick semantics.
+        self.snapshot
+            .resolved_relationships
+            .iter()
+            .find(|rel| rel.relation == RelationKind::AssociatedWith && rel.source == *session)
+            .and_then(|rel| match &rel.target {
+                NodeId::Workspace(ws) => Some(ws),
+                _ => None,
             })
     }
 
@@ -2695,7 +2739,15 @@ mod tests {
     }
 
     #[test]
-    fn two_mux_links_yield_ambiguous_and_expandable_with_candidate_children() {
+    fn two_mux_links_with_distinct_provenance_resolve_to_one_attached_mux() {
+        // H-UI-008: the sessions tree consumes resolver winners,
+        // not raw candidate links. With two `LinkedToMux` candidates
+        // pointing at different muxes, the resolver picks the
+        // higher-provenance candidate; the tree should reflect that
+        // single winner as `Attached` rather than presenting both
+        // candidates as an ambiguity. Pre-H-UI-008 the tree raised
+        // a false-positive `Ambiguous` here because it grouped by
+        // candidate target instead of consulting the resolver.
         let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
         let editor = NodeId::MuxSession(MuxSessionId::new("editor"));
         let scratch = NodeId::MuxSession(MuxSessionId::new("scratch"));
@@ -2714,8 +2766,8 @@ mod tests {
         ));
         snapshot.nodes.push(mux_node("tmux", "editor"));
         snapshot.nodes.push(mux_node("tmux", "scratch"));
-        // editor is StrongDiscovered, so it should be the preferred
-        // candidate; scratch is Discovered.
+        // editor is StrongDiscovered (winner); scratch is
+        // Discovered (loses the LinkedToMux slot).
         snapshot.candidate_links.push(linked_to_mux(
             &session_id,
             &editor,
@@ -2744,21 +2796,16 @@ mod tests {
             .find(|r| matches!(r.kind, RowKind::AgentSession(_)))
             .expect("session row");
         match &session_row.kind {
-            RowKind::AgentSession(s) => {
-                assert_eq!(s.mux_state, MuxIndicator::Ambiguous { candidate_count: 2 });
-            }
+            RowKind::AgentSession(s) => assert_eq!(s.mux_state, MuxIndicator::Attached),
             _ => unreachable!(),
         }
-        // ADR 0071: ambiguity no longer expands a candidate subtree
-        // on the session row; the chip stays, but the row collapses
-        // to a leaf unless lineage children would expand it.
         assert!(!session_row.expandable);
         assert!(
             !tree
                 .rows
                 .iter()
                 .any(|r| matches!(r.kind, RowKind::AgentSessionMuxCandidate(_))),
-            "no candidate child rows after ADR 0071",
+            "no candidate child rows when the resolver has a single winner",
         );
     }
 
