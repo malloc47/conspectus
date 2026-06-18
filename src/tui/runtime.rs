@@ -2296,6 +2296,15 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Option<Acti
             // analogous binding in v1; `Enter` drills, `Backspace`
             // pops a hop.
             Msg::ExpandRow | Msg::CollapseRow => None,
+            // H-OBS-007: `g`/`Home` and `G`/`End` should snap the
+            // explorer cursor to its first / last row on right-
+            // pane focus, the right-pane-equivalent of how those
+            // keys jump the left-tree selection. `Tab` /
+            // `Msg::CycleFocus` is intentionally left alone — that
+            // key is the focus toggle itself and stays useful
+            // regardless of which pane currently has focus.
+            Msg::Home => Some(Action::Msg(Box::new(Msg::ExplorerHome))),
+            Msg::End => Some(Action::Msg(Box::new(Msg::ExplorerEnd))),
             other => Some(Action::Msg(Box::new(other))),
         },
         // T8-040 / T8-043: Enter on the explorer cursor either
@@ -3225,6 +3234,44 @@ mod tests {
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Left),
             Some(Action::Msg(Box::new(Msg::CollapseRow)))
+        );
+    }
+
+    #[test]
+    fn remap_for_focus_right_routes_home_and_end_into_the_explorer() {
+        // H-OBS-007 (paired with the h/l/Left/Right suppression
+        // above): `g`/`Home` and `G`/`End` snap the explorer
+        // cursor to its first / last row on right-pane focus
+        // instead of bleeding into the left tree's Home/End
+        // jumps. `Tab`/`CycleFocus` is intentionally left alone —
+        // it is the focus toggle and must stay useful regardless
+        // of which pane has focus.
+        use crate::tui::app::Focus;
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Right),
+            Some(Action::Msg(Box::new(Msg::ExplorerHome))),
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Right),
+            Some(Action::Msg(Box::new(Msg::ExplorerEnd))),
+        );
+        // Left focus still drives the left tree.
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::Home)), Focus::Left),
+            Some(Action::Msg(Box::new(Msg::Home))),
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::End)), Focus::Left),
+            Some(Action::Msg(Box::new(Msg::End))),
+        );
+        // Tab cycles focus on either side — never remapped.
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
+            Some(Action::Msg(Box::new(Msg::CycleFocus))),
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Left),
+            Some(Action::Msg(Box::new(Msg::CycleFocus))),
         );
     }
 

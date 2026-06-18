@@ -1537,24 +1537,29 @@ area is already being touched. Group prefixes:
     timestamps.
   - Blockers: `H-REF-008` (typed source-metadata fields makes recency
     extraction safer).
-- [ ] `H-OBS-007` Gate left-pane tree navigation keys on left-pane focus.
-  - Scope: `h` / `l` and `←` / `→` (plus `g`/`G`/Tab) in the TUI always
-    operate on the left-pane tree (`Msg::ExpandRow`, `Msg::CollapseRow`,
-    `Msg::Home`, `Msg::End`, `Msg::CycleFocus`) regardless of which pane
-    has focus. `remap_for_focus()` in `src/tui/runtime.rs:1517`
-    remaps `NavDown`/`NavUp`/`PageDown`/`PageUp`/`ToggleLinkedDetails`/
-    `DefaultAction` when focus is `Right` but passes `ExpandRow`,
-    `CollapseRow`, `Home`, `End`, and `CycleFocus` through unchanged
-    via the `other => other` arm (line 1534). The left-pane reducer
-    handlers (`expand_selected`, `collapse_selected`, `move_selection`,
-    `move_selection_to`) never check `self.focus`, so they always
-    mutate the left-pane selection. Fix: add a no-op or right-pane-
-    equivalent remapping in `remap_for_focus()` for each affected
-    message when focus is `Right`, or gate the reducer handlers on
-    `self.focus == Focus::Left`.
-  - Tests: TUI key-dispatch unit tests for each affected key with focus
-    on both panes.
-  - Blockers: none.
+- [x] `H-OBS-007` Gate left-pane tree navigation keys on left-pane focus.
+  - Outcome: `remap_for_focus()` in `src/tui/runtime.rs` now drops
+    `Msg::ExpandRow` / `Msg::CollapseRow` (h/l/Left/Right) on
+    right-pane focus so they no longer mutate the left tree the
+    operator isn't driving, and remaps `Msg::Home` / `Msg::End`
+    (g/G/Home/End) to new `Msg::ExplorerHome` / `Msg::ExplorerEnd`
+    variants that snap the explorer cursor to its first / last
+    row — the right-pane-equivalent the operator expects. The
+    reducer dispatches the new variants through a small
+    `explorer_jump_cursor_to(usize)` helper that clamps to the
+    current row count and mirrors `move_selection_to` for the
+    left tree. `Msg::CycleFocus` (Tab) is intentionally left
+    alone since it's the focus toggle itself. Tests:
+    `remap_for_focus_right_suppresses_left_tree_expand_collapse_keys`
+    pins the h/l drop;
+    `remap_for_focus_right_routes_home_and_end_into_the_explorer`
+    pins the g/G remap and that Tab stays the focus toggle;
+    `explorer_home_and_end_snap_cursor_to_first_and_last_row`
+    pins the reducer dispatch. Followups (out of scope): PageDown
+    / PageUp currently remap to a single-row explorer step
+    rather than a true page — the per-frame viewport height
+    isn't threaded through, and that's worth its own story if
+    operators ask for it.
 
 ### Table Output Modernization
 

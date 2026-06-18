@@ -408,6 +408,15 @@ pub enum Msg {
     ExplorerNavDown,
     /// Right panel (graph explorer): move the cursor up one row.
     ExplorerNavUp,
+    /// Right panel (graph explorer): snap the cursor to the first
+    /// row in the flat list. Bound to `g` / `Home` on right-pane
+    /// focus per H-OBS-007 so the operator gets the right-pane-
+    /// equivalent behavior they get on the left tree.
+    ExplorerHome,
+    /// Right panel (graph explorer): snap the cursor to the last
+    /// row in the flat list. Bound to `G` / `End` on right-pane
+    /// focus per H-OBS-007.
+    ExplorerEnd,
     /// Right panel (graph explorer): activate the highlighted row.
     /// On a group header this toggles the group's expansion; on a
     /// link row it drills into the neighbor and pushes a breadcrumb
@@ -1419,6 +1428,8 @@ impl App {
             Msg::ToggleLinkedDetails => self.toggle_linked_details(),
             Msg::ExplorerNavDown => self.explorer_move_cursor(1),
             Msg::ExplorerNavUp => self.explorer_move_cursor(-1),
+            Msg::ExplorerHome => self.explorer_jump_cursor_to(0),
+            Msg::ExplorerEnd => self.explorer_jump_cursor_to(usize::MAX),
             Msg::ExplorerActivate => self.explorer_activate(),
             Msg::ExplorerToggleGroup => self.explorer_toggle_group(),
             Msg::ExplorerToggleFullDetail => self.explorer_toggle_full_detail(),
@@ -1749,6 +1760,24 @@ impl App {
         let len = rows.len() as i32;
         let next = (state.cursor as i32 + delta).clamp(0, len - 1);
         state.cursor = next as usize;
+        self.status_message = None;
+    }
+
+    /// Snap the explorer cursor to `index`, clamped to the current
+    /// row count. `usize::MAX` is the convention for "last row" so
+    /// callers can ask for End without needing to recompute row
+    /// counts themselves; this mirrors how `move_selection_to` on
+    /// the left-pane tree handles `Msg::End` (H-OBS-007).
+    fn explorer_jump_cursor_to(&mut self, index: usize) {
+        let Some(state) = self.explorer.as_mut() else {
+            return;
+        };
+        let rows = state.rows();
+        if rows.is_empty() {
+            state.cursor = 0;
+            return;
+        }
+        state.cursor = index.min(rows.len() - 1);
         self.status_message = None;
     }
 
@@ -3108,6 +3137,36 @@ mod tests {
             .expect("agent session row in tree");
         app.set_selection(row_id);
         app
+    }
+
+    #[test]
+    fn explorer_home_and_end_snap_cursor_to_first_and_last_row() {
+        // H-OBS-007: `g`/`Home` and `G`/`End` snap the explorer
+        // cursor to its first / last row when the right pane has
+        // focus. Reducer-level test: dispatching the messages
+        // directly drives the cursor regardless of which pane has
+        // focus (the focus check happens in `remap_for_focus`).
+        let mut app = app_for_explorer();
+        let row_count = app.explorer().expect("state").rows().len();
+        assert!(row_count > 1, "fixture should expose multiple rows");
+
+        // Walk the cursor down a couple of rows, then End it.
+        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::ExplorerNavDown);
+        app.update(Msg::ExplorerEnd);
+        assert_eq!(
+            app.explorer().expect("state").cursor,
+            row_count - 1,
+            "ExplorerEnd should snap cursor to the last row",
+        );
+
+        // Home brings it back to the top.
+        app.update(Msg::ExplorerHome);
+        assert_eq!(
+            app.explorer().expect("state").cursor,
+            0,
+            "ExplorerHome should snap cursor to the first row",
+        );
     }
 
     #[test]
