@@ -26,10 +26,12 @@
 
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::{MuxSessionId, NodeId};
@@ -668,8 +670,41 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         0
     };
 
+    let total_lines = lines.len();
     let widget = Paragraph::new(lines).scroll((scroll, 0));
     frame.render_widget(widget, inner);
+    render_vertical_scrollbar(frame, inner, total_lines, scroll as usize);
+}
+
+/// Render an inside-the-border vertical scrollbar on the right edge
+/// of `area` when `content_length > area.height` (ADR 0076). The
+/// fade-on-fit guard keeps short lists from burning a column on a
+/// redundant indicator; the `Margin { vertical: 1, horizontal: 0 }`
+/// keeps the bar from overpainting the border on the row above /
+/// below the inner area. `position` is the scroll offset in lines,
+/// matching the `Paragraph::scroll((offset, 0))` already applied to
+/// the body.
+fn render_vertical_scrollbar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    content_length: usize,
+    position: usize,
+) {
+    if content_length == 0 || content_length <= area.height as usize {
+        return;
+    }
+    let mut state = ScrollbarState::new(content_length)
+        .position(position)
+        .viewport_content_length(area.height as usize);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+    frame.render_stateful_widget(
+        scrollbar,
+        area.inner(Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        &mut state,
+    );
 }
 
 /// Render the left pane title as a lazydocker-style tab strip
@@ -1823,6 +1858,7 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
                 .scroll((scroll, 0)),
             split[0],
         );
+        render_vertical_scrollbar(frame, split[0], wrapped_rows, scroll as usize);
         frame.render_widget(
             Paragraph::new(preview_divider_line(
                 app,
@@ -2380,10 +2416,32 @@ fn draw_explorer_preview(
             ]));
         }
     }
+    let total_rows = wrapped_line_count(&lines, area.width);
     let widget = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((app.preview_scroll(), 0));
     frame.render_widget(widget, area);
+    render_vertical_scrollbar(frame, area, total_rows, app.preview_scroll() as usize);
+}
+
+/// Sum of post-wrap terminal rows the given lines occupy when
+/// rendered into a paragraph `width` wide. Mirrors the per-line
+/// count used by the explorer header budget — used here to drive
+/// scrollbar `content_length` (ADR 0076).
+fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
+    let pane_width = width.max(1) as usize;
+    lines
+        .iter()
+        .map(|line| {
+            let line_width = line
+                .spans
+                .iter()
+                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .sum::<usize>()
+                .max(1);
+            line_width.div_ceil(pane_width).max(1)
+        })
+        .sum()
 }
 
 fn empty_right_panel_text(app: &App) -> &'static str {
@@ -2767,10 +2825,12 @@ fn pr_value_style(value: &str, theme: &Theme) -> Style {
 
 fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
     let preview = preview_text_for_selection(app, area.height as usize);
+    let total_rows = wrapped_line_count(&preview.lines, area.width);
     let widget = Paragraph::new(preview)
         .wrap(Wrap { trim: false })
         .scroll((app.preview_scroll(), 0));
     frame.render_widget(widget, area);
+    render_vertical_scrollbar(frame, area, total_rows, app.preview_scroll() as usize);
 }
 
 /// Source the preview body from whatever the selection points at.
@@ -5583,5 +5643,166 @@ mod tests {
             "preview zone should keep at least 6 body rows even when Related is full; got {preview_body_rows} (divider at row {divider_row})\n{}",
             buffer_to_string(&buffer)
         );
+    }
+
+    /// Set of glyphs `ratatui::widgets::Scrollbar` paints by default
+    /// for `ScrollbarOrientation::VerticalRight`. The exact symbol
+    /// set sits in `ratatui_core::symbols::scrollbar::DOUBLE_VERTICAL`.
+    /// Tests look for *any* of these in the rendered buffer so we
+    /// don't pin the precise glyph (ratatui may swap them later) but
+    /// can still assert "a scrollbar is present" robustly.
+    const SCROLLBAR_GLYPHS: &[&str] = &["█", "║", "▲", "▼"];
+
+    fn buffer_column(buffer: &ratatui::buffer::Buffer, x: u16) -> String {
+        (0..buffer.area.height)
+            .map(|y| buffer[(x, y)].symbol())
+            .collect()
+    }
+
+    fn rightmost_inner_column(area: Rect) -> u16 {
+        area.x + area.width - 2
+    }
+
+    #[test]
+    fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
+        // Build the same overflowing tree the
+        // `left_panel_scrolls_to_keep_selected_row_visible_past_viewport`
+        // test uses, then assert that ADR 0076's scrollbar glyphs
+        // appear in the rightmost column of the left pane's inner
+        // area.
+        let repo_root =
+            "/home/op/src/proj-with-a-very-long-display-path-that-would-wrap-before-clipping";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo_root))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_root), repo_root),
+            root: repo_root.to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        for i in 0..20 {
+            snapshot
+                .nodes
+                .push(GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                    harness_key: "codex".to_string(),
+                    cwd: Some(repo_root.to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                    session_kind: None,
+                }));
+        }
+        let snapshot = crate::resolve::resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        // 120x24 — left pane spans roughly x=0..60. The inner area
+        // (post-border) sits at x=1..59; the scrollbar rides the
+        // rightmost inner column.
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        let left_pane = split[0];
+        let bar_col = rightmost_inner_column(left_pane);
+        let column = buffer_column(&buffer, bar_col);
+        assert!(
+            SCROLLBAR_GLYPHS.iter().any(|g| column.contains(g)),
+            "expected a scrollbar glyph in left-pane column {bar_col}; got {column:?}\n{}",
+            buffer_to_string(&buffer)
+        );
+    }
+
+    #[test]
+    fn left_pane_hides_scrollbar_when_content_fits() {
+        // The default seeded app holds one repo + one checkout + one
+        // session — three rows total. With a 24-row terminal there
+        // is nothing to scroll, so the bar must stay hidden
+        // (fade-on-fit, ADR 0076).
+        let app = seeded_app();
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        let left_pane = split[0];
+        let bar_col = rightmost_inner_column(left_pane);
+        let column = buffer_column(&buffer, bar_col);
+        for glyph in SCROLLBAR_GLYPHS {
+            assert!(
+                !column.contains(glyph),
+                "left-pane column {bar_col} should not carry the `{glyph}` scrollbar glyph when content fits; got {column:?}\n{}",
+                buffer_to_string(&buffer)
+            );
+        }
+    }
+
+    #[test]
+    fn right_pane_explorer_renders_scrollbar_when_related_list_overflows() {
+        // Workspace with 20 repos focused → the validated zone is
+        // taller than the right-pane header at this terminal size,
+        // so the explorer scrollbar should be drawn on the
+        // rightmost inner column of the right pane.
+        let mut app = workspace_app_with_repos(20);
+        app.update(Msg::CycleFocus);
+        let area = Rect::new(0, 0, 120, 20);
+        let buffer = render_to_buffer(&app, area);
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        let right_pane = split[1];
+        let bar_col = rightmost_inner_column(right_pane);
+        let column = buffer_column(&buffer, bar_col);
+        assert!(
+            SCROLLBAR_GLYPHS.iter().any(|g| column.contains(g)),
+            "expected a scrollbar glyph in right-pane column {bar_col} when the related list overflows; got {column:?}\n{}",
+            buffer_to_string(&buffer)
+        );
+    }
+
+    #[test]
+    fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
+        // A workspace with two repos has only two validated rows;
+        // the explorer header comfortably fits in any non-tiny
+        // terminal so no scrollbar should render.
+        let app = workspace_app_with_repos(2);
+        let area = Rect::new(0, 0, 120, 30);
+        let buffer = render_to_buffer(&app, area);
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        let right_pane = split[1];
+        let bar_col = rightmost_inner_column(right_pane);
+        let column = buffer_column(&buffer, bar_col);
+        for glyph in SCROLLBAR_GLYPHS {
+            assert!(
+                !column.contains(glyph),
+                "right-pane column {bar_col} should not carry the `{glyph}` glyph when content fits; got {column:?}\n{}",
+                buffer_to_string(&buffer)
+            );
+        }
     }
 }
