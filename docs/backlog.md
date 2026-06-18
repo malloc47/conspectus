@@ -8326,6 +8326,76 @@ settles.
     `F8-005` so the new view-switch accelerators all funnel through
     the same persistence seam.
 
+- [ ] `T8-044` Spike: evaluate `tui-pantry` as a widget-iteration
+  harness.
+  - Motivation: the TUI carries ~5.2k LOC of in-house widgets across
+    `src/tui/widgets/` and visual judgement calls (column widths,
+    chip placement, glyph spacing, narrow-pane truncation) currently
+    iterate through `conspectus tui --snapshot` (ADR 0067) plus
+    fixture diffs. That loop is excellent for regression coverage
+    but slow for the "does this look right at 80 cols?" question
+    the recent H-UI-001..008 series kept asking. `tui-pantry` is a
+    Storybook-style preview harness for ratatui widgets — boot one
+    widget with chosen prop variants, no reducer, no fixture. The
+    spike tests whether it shortens the visual-iteration loop
+    enough to justify keeping.
+  - Scope (time-boxed, ~1 sprint):
+      - Add `tui-pantry = "0.4"` to `[dev-dependencies]` and a
+        `pantry.toml` config at the repo root.
+      - Stand up a single binary target (`src/bin/pantry.rs` or
+        `examples/pantry.rs` — decide during impl based on
+        `cargo run --example` ergonomics vs `cargo run --bin`
+        discoverability).
+      - Port exactly one widget as the smoke test —
+        `widgets/multi_select.rs` is the cleanest pure state
+        machine and the lowest-risk port. Three prop variants:
+        empty list, mid-selection, large list with scroll.
+      - Spike outcome at the end: a one-paragraph note in the
+        backlog entry recording (a) whether the visual loop felt
+        materially faster than `--snapshot`, (b) how much glue per
+        widget, (c) whether the pantry API's `pantry.toml` +
+        ingredient model survives Conspectus's widget shapes
+        without contortion, and (d) the go/no-go call.
+      - If go: file follow-up stories per widget port (controls,
+        pins-form, value modal, help legend, search, toast — six
+        candidates) and a theme-harness ingredient that exercises
+        every `[tui.theme]` key against the dark/light presets.
+      - If no-go: rip out the dev-dep + binary + `pantry.toml`,
+        record the lesson, close the story.
+  - Tests: none beyond the spike's own compile check —
+    `cargo check --examples` (or `cargo check --bin pantry`) must
+    pass and the existing `cargo nextest run --all-targets
+    --all-features` must remain green with the new dev-dep present.
+    The pantry binary itself is dev-time and is not gated by CI
+    correctness tests.
+  - Risks / cons recorded up front:
+      - `tui-pantry` is pre-1.0 (v0.4.0, ~53% docs coverage,
+        single-org upstream taho-inc). Expect API churn; mitigated
+        by the dev-dep posture — failure mode is `cargo update`
+        breakage, not runtime regression.
+      - Maintenance tax on the ingredient set: every ported widget
+        is one more thing to keep in sync. Spike sizes that tax
+        for one widget so the go-decision is informed.
+      - Pantry's `Pane` primitive is a preview-cell frame, not an
+        app-layout pane — does not address focus-chain or modal-
+        routing pain. Those remain Tier 1 candidates from the
+        prior ratatui-widget-library audit (`tui-textarea` on
+        demand, `tui-popup` if framing duplicates).
+  - Open questions:
+      - Binary vs example target: example is the canonical
+        Cargo pattern for development harnesses; binary keeps the
+        pantry close to the `src/` tree and reuses the workspace's
+        clippy/fmt config without `--examples`. Decide during
+        impl.
+      - Whether the spike should run *before* a major widget audit
+        (so the audit benefits from the loop) or *after* (so the
+        audit informs which widgets are worth porting). Recommend
+        before — the next H-UI-* and T8-* widget passes are the
+        immediate beneficiaries.
+  - Blockers: none. Adopt during a quiet sprint before the next
+    widget-heavy story (H-UI-004 audit is the natural next
+    customer if the spike lands go).
+
 - [ ] `T8-022` Detect session live status (running / waiting / idle /
   error) and surface it as a row glyph and per-status header chip.
   - Scope: this is the agent-deck signal the styling overhaul
