@@ -29,6 +29,14 @@ Purpose: user-facing runtime reference covering the environment variables
 that gate discovery providers, the harness state-root overrides, the
 config-file precedence, and the current CLI surface.
 
+## `docs/pins-walkthrough.md`
+
+Purpose: teaching-style walkthrough for session pins covering the "why"
+behind pinning, the four binding states, the TUI controls for each pin
+operation (create, launch, rename, remove, bind, rebind, adopt), the
+mux-death continuity flow, and a dry-run script. Pairs with the
+reference-style §"Session pins" in `docs/operations.md`.
+
 ## `docs/graph-visualization.md`
 
 Purpose: operator guide for `conspectus graph --format {dot,html}`,
