@@ -76,10 +76,13 @@ pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<St
     //    Both share the same edge representation; the resolved set
     //    just controls styling.
     // ---------------------------------------------------------------
+    // ADR 0077: `selected_link_id` is `Option<String>` —
+    // `filter_map` skips no-winner slots so the dot styling stays
+    // restricted to actually-resolved edges.
     let selected_link_ids: BTreeSet<&str> = snapshot
         .resolved_relationships
         .iter()
-        .map(|r: &ResolvedRelationship| r.selected_link_id.as_str())
+        .filter_map(|r: &ResolvedRelationship| r.selected_link_id.as_deref())
         .collect();
 
     // ---------------------------------------------------------------

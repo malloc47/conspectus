@@ -424,7 +424,10 @@ fn read_resolved(conn: &Connection) -> rusqlite::Result<Vec<ResolvedRelationship
         let source: String = row.get(0)?;
         let target: String = row.get(1)?;
         let relation: String = row.get(2)?;
-        let selected: String = row.get(3)?;
+        // ADR 0077: selected_link_id is nullable in the resolved
+        // table — `None` marks slots the resolver could not pick
+        // (e.g. `suppress_ambiguous_cwd_mux_links`).
+        let selected: Option<String> = row.get(3)?;
         let competing: String = row.get(4)?;
         Ok(ResolvedRelationship {
             source: parse_node_id_json(&source, 0)?,
@@ -698,7 +701,7 @@ mod tests {
             source: NodeId::Branch(branch_id),
             target: NodeId::ForgePr(pr_id),
             relation: crate::model::RelationKind::BranchHasForgePr,
-            selected_link_id: "winner".into(),
+            selected_link_id: Some("winner".into()),
             competing_link_ids: vec![],
         });
 
@@ -892,7 +895,7 @@ mod tests {
             source: source.clone(),
             target: target.clone(),
             relation: RelationKind::LinkedToMux,
-            selected_link_id: "link-1".into(),
+            selected_link_id: Some("link-1".into()),
             competing_link_ids: vec!["link-ignored".into(), "link-overridden".into()],
         });
 

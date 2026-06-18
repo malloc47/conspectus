@@ -1735,9 +1735,14 @@ fn finalize_group(
     // first one.
     let resolved_slots = resolved_slots_for(snapshot, focused, direction, &relation);
 
+    // ADR 0077: `selected_link_id` is now `Option<String>`.
+    // `filter_map` skips no-winner slots when collecting winners
+    // so the validated-zone set stays empty for ambiguous slots —
+    // every candidate in such a slot drops into the Other zone
+    // below.
     let winner_ids: BTreeSet<String> = resolved_slots
         .iter()
-        .map(|r| r.selected_link_id.clone())
+        .filter_map(|r| r.selected_link_id.clone())
         .collect();
     let competing_ids: BTreeSet<String> = resolved_slots
         .iter()
@@ -1746,26 +1751,15 @@ fn finalize_group(
     let any_slot_has_conflict = resolved_slots
         .iter()
         .any(|r| !r.competing_link_ids.is_empty());
-
-    // H-UI-007: when the resolver dropped this relation entirely
-    // (e.g. `suppress_ambiguous_cwd_mux_links` on a shared-cwd
-    // `LinkedToMux` set) the explorer still has the raw candidate
-    // fan-out — flag the group as ambiguous when ≥2 distinct
-    // neighbor targets are present without a resolver winner so
-    // the operator gets the same `⚠` signal they'd see if the
-    // resolved entry had survived. Tracked properly at the
-    // resolver layer by `H-UI-006`.
-    let candidate_only_fan_out = resolved_slots.is_empty() && {
-        let mut distinct_targets = std::collections::BTreeSet::new();
-        for (_, neighbor) in &links {
-            distinct_targets.insert(neighbor);
-            if distinct_targets.len() > 1 {
-                break;
-            }
-        }
-        distinct_targets.len() > 1
-    };
-    let ambiguous = any_slot_has_conflict || candidate_only_fan_out;
+    // H-UI-006 retired the H-UI-007 candidate-fan-out fallback:
+    // the resolver now keeps the slot alive with
+    // `selected_link_id = None` for `suppress_ambiguous_cwd_mux_links`,
+    // so "has any slot in this group been ambiguously resolved"
+    // is the direct read. A no-winner slot signals ambiguity even
+    // if its `competing_link_ids` happens to be empty (the slot
+    // itself is the signal).
+    let any_slot_unresolved = resolved_slots.iter().any(|r| r.selected_link_id.is_none());
+    let ambiguous = any_slot_has_conflict || any_slot_unresolved;
 
     links.sort_by(|(left, _), (right, _)| {
         let left_winner = winner_ids.contains(&left.id);
@@ -2413,13 +2407,14 @@ mod tests {
     }
 
     #[test]
-    fn linked_to_mux_candidate_fanout_flags_ambiguity_when_resolver_suppressed() {
-        // H-UI-007: when `suppress_ambiguous_cwd_mux_links` drops
-        // the resolved `LinkedToMux` entry (multiple sessions share
-        // the same cwd and the resolver refuses to fabricate a
-        // winner), the explorer should still flag the group as
-        // ambiguous so the operator sees the `⚠` glyph. Long-term
-        // resolver-side fix tracked under `H-UI-006`.
+    fn linked_to_mux_suppressed_slot_surfaces_as_no_winner_ambiguous_group() {
+        // H-UI-006 (ADR 0077) retires the H-UI-007 candidate-fan-out
+        // fallback: the resolver now preserves the suppressed
+        // `LinkedToMux` slot with `selected_link_id = None` and the
+        // candidate set rolled into `competing_link_ids`. The
+        // explorer reads ambiguity directly off the slot now —
+        // every candidate row drops into the Other zone, the group
+        // is marked ambiguous, and no validated row exists.
         let mut snapshot = GraphSnapshot::empty();
         let cwd = Some("/home/op/src/x");
         snapshot
@@ -2461,19 +2456,22 @@ mod tests {
 
         let snapshot = resolve_snapshot(snapshot);
 
-        // Precondition: the resolver dropped the `LinkedToMux`
-        // resolved entry for the focused session entirely. If this
-        // ever changes (e.g. the resolver stops suppressing), the
-        // fallback path is no longer the only signal source —
-        // revisit `H-UI-006` and update or retire this test.
-        let no_resolved_mux = snapshot
+        // Precondition (ADR 0077): the resolver preserves the
+        // `LinkedToMux` slot for the focused session but flips
+        // `selected_link_id` to `None`. The slot survives so
+        // downstream consumers can read ambiguity off the model.
+        let focused_mux_slot = snapshot
             .resolved_relationships
             .iter()
-            .all(|r| !(r.source == focused_id && r.relation == RelationKind::LinkedToMux));
+            .find(|r| r.source == focused_id && r.relation == RelationKind::LinkedToMux)
+            .expect("suppression preserves the LinkedToMux slot for the focused session");
         assert!(
-            no_resolved_mux,
-            "resolver should have suppressed the LinkedToMux resolved entry; \
-             update H-UI-006/007 if that behavior changes",
+            focused_mux_slot.selected_link_id.is_none(),
+            "suppressed slot must carry no winner: {focused_mux_slot:?}",
+        );
+        assert!(
+            focused_mux_slot.competing_link_ids.len() >= 2,
+            "the candidate set rolls into competing_link_ids: {focused_mux_slot:?}",
         );
 
         let view = build(&snapshot, &focused_id, Some(home().as_path()));
@@ -2481,15 +2479,23 @@ mod tests {
             .groups
             .iter()
             .find(|g| g.relation == RelationKind::LinkedToMux)
-            .expect("LinkedToMux group should still render from candidate links")
+            .expect("LinkedToMux group should render against the preserved slot")
             .clone();
         assert!(
             group.ambiguous,
-            "candidate fan-out without a resolved winner should mark the group ambiguous",
+            "no-winner slot must mark the group ambiguous",
         );
         assert!(
             group.links.len() >= 2,
             "both candidate targets should still appear as rows: {:?}",
+            group.links,
+        );
+        assert!(
+            group
+                .links
+                .iter()
+                .all(|l| !matches!(l.edge_state, EdgeStateLabel::Resolves)),
+            "no candidate is a winner inside a no-winner slot: {:?}",
             group.links,
         );
     }

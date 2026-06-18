@@ -1118,7 +1118,7 @@ mod tests {
             source: source.clone(),
             target: target.clone(),
             relation: RelationKind::LinkedToMux,
-            selected_link_id: "winner".into(),
+            selected_link_id: Some("winner".into()),
             competing_link_ids: vec!["a".into(), "b".into()],
         });
         load(&snap, &mut conn).unwrap();

@@ -698,9 +698,34 @@ pub struct SourceMetadata {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct ResolvedRelationship {
     pub source: NodeId,
+    /// Placeholder target that carries the would-have-been winner's
+    /// neighbor for "no-winner" slots (ADR 0077). When
+    /// `selected_link_id` is `Some`, this is the resolved target.
+    /// When `selected_link_id` is `None`, the resolver could not
+    /// pick — consumers MUST gate downstream use of `target` on
+    /// `selected_link_id.is_some()` and treat it as a placeholder
+    /// otherwise.
     pub target: NodeId,
     pub relation: RelationKind,
-    pub selected_link_id: String,
+    /// The link id of the resolver's chosen winner, when there is
+    /// one. `None` when the resolver explicitly cannot pick — at
+    /// time of writing the only producer is
+    /// `suppress_ambiguous_cwd_mux_links`, which fires when a mux
+    /// is claimed by multiple sessions via cwd evidence alone.
+    /// SQL joins on `selected_link_id = candidate_links.link_id`
+    /// naturally exclude these rows (NULL doesn't equal anything),
+    /// which is the H-UI-008 tree-view invariant. Rust consumers
+    /// pattern-match on `Option` before reading the slot as "the
+    /// answer." See ADR 0077.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_link_id: Option<String>,
+    /// Candidates that competed for this slot. When
+    /// `selected_link_id` is `Some`, this is the rejected losers.
+    /// When `selected_link_id` is `None`, this is *every*
+    /// candidate that was considered — including what would have
+    /// been the arbitrary tiebreak winner — so the Other-zone
+    /// renderer and the H-UI-007 ambiguity signal can both walk
+    /// the full candidate set without a parallel inference path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub competing_link_ids: Vec<String>,
 }

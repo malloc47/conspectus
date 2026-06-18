@@ -2116,6 +2116,23 @@
         "type": "agent_session",
         "harness_key": "claude-code",
         "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "relation": "linked_to_mux",
+      "competing_link_ids": [
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:linked_to_mux:mux_session:tmux:ambiguous:exact_cwd_match",
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:linked_to_mux:mux_session:tmux:project:exact_cwd_match"
+      ]
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
         "session_key": "showcase-claude-ambig-a"
       },
       "target": {
@@ -2133,6 +2150,23 @@
         "type": "agent_session",
         "harness_key": "claude-code",
         "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude-ambig-a"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "relation": "linked_to_mux",
+      "competing_link_ids": [
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:linked_to_mux:mux_session:tmux:ambiguous:exact_cwd_match",
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:linked_to_mux:mux_session:tmux:project:exact_cwd_match"
+      ]
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
         "session_key": "showcase-claude-ambig-b"
       },
       "target": {
@@ -2144,6 +2178,23 @@
       },
       "relation": "associated_with",
       "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-claude-ambig-b"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "relation": "linked_to_mux",
+      "competing_link_ids": [
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:linked_to_mux:mux_session:tmux:ambiguous:exact_cwd_match",
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:linked_to_mux:mux_session:tmux:project:exact_cwd_match"
+      ]
     },
     {
       "source": {
@@ -2189,6 +2240,23 @@
       },
       "relation": "associated_with",
       "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
+    },
+    {
+      "source": {
+        "type": "agent_session",
+        "harness_key": "claude-code",
+        "state_scope": "/fixture/harness/claude",
+        "session_key": "showcase-hook-current"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:project"
+      },
+      "relation": "linked_to_mux",
+      "competing_link_ids": [
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:linked_to_mux:mux_session:tmux:ambiguous:exact_cwd_match",
+        "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:linked_to_mux:mux_session:tmux:project:exact_cwd_match"
+      ]
     },
     {
       "source": {

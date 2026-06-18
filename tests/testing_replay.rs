@@ -153,7 +153,8 @@ fn replay_injects_active_pane_fd_evidence_without_real_proc() {
 
     assert!(
         result.resolved.resolved_relationships.iter().any(|rel| {
-            rel.relation == RelationKind::LinkedToMux && rel.selected_link_id == fd_link.id
+            rel.relation == RelationKind::LinkedToMux
+                && rel.selected_link_id.as_deref() == Some(fd_link.id.as_str())
         }),
         "fd evidence should win resolution: {:#?}",
         result.resolved.resolved_relationships
@@ -311,7 +312,8 @@ fn codex_fd_evidence_beats_stale_argv_and_tui_follows_current_rollout() {
 
     assert!(
         result.resolved.resolved_relationships.iter().any(|rel| {
-            rel.relation == RelationKind::LinkedToMux && rel.selected_link_id == fd_link.id
+            rel.relation == RelationKind::LinkedToMux
+                && rel.selected_link_id.as_deref() == Some(fd_link.id.as_str())
         }),
         "fd evidence should win resolution: {:#?}",
         result.resolved.resolved_relationships
@@ -368,7 +370,7 @@ fn invariant_ignored_mux_candidates_remain_evidence_but_never_resolve() {
         !resolved
             .resolved_relationships
             .iter()
-            .any(|rel| rel.selected_link_id == ignored_link_id),
+            .any(|rel| rel.selected_link_id.as_deref() == Some(ignored_link_id.as_str())),
         "ignored candidate must not be selected: {:#?}",
         resolved.resolved_relationships
     );
@@ -472,7 +474,8 @@ fn invariant_stronger_current_session_evidence_beats_launch_history() {
 
     assert!(
         result.resolved.resolved_relationships.iter().any(|rel| {
-            rel.relation == RelationKind::LinkedToMux && rel.selected_link_id == fd_link.id
+            rel.relation == RelationKind::LinkedToMux
+                && rel.selected_link_id.as_deref() == Some(fd_link.id.as_str())
         }),
         "stronger fd evidence should be the preferred current-session link: {:#?}",
         result.resolved.resolved_relationships

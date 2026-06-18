@@ -235,7 +235,12 @@ fn build_payload(snapshot: &GraphSnapshot, opts: HtmlOptions) -> Payload {
     let mut selected: std::collections::BTreeMap<&str, &[String]> =
         std::collections::BTreeMap::new();
     for r in &snapshot.resolved_relationships {
-        selected.insert(r.selected_link_id.as_str(), r.competing_link_ids.as_slice());
+        // ADR 0077: skip no-winner slots — `selected_link_id` is
+        // `None` when the resolver couldn't pick, and there's no
+        // winner edge to anchor the competing list against.
+        if let Some(id) = r.selected_link_id.as_deref() {
+            selected.insert(id, r.competing_link_ids.as_slice());
+        }
     }
 
     // 3. Edges + unresolved stubs.

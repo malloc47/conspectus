@@ -1518,7 +1518,7 @@ mod tests {
                 source: agent_id.clone(),
                 target: mux_id.clone(),
                 relation: RelationKind::LinkedToMux,
-                selected_link_id: "link-1".to_string(),
+                selected_link_id: Some("link-1".to_string()),
                 competing_link_ids: vec![],
             }],
             ..GraphSnapshot::empty()

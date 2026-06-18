@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS resolved_relationships (
     target_kind        TEXT NOT NULL GENERATED ALWAYS AS
                            (json_extract(target, '$.type')) STORED,
     relation           TEXT NOT NULL,
-    selected_link_id   TEXT NOT NULL,
+    selected_link_id   TEXT,                                -- nullable: `NULL` marks resolver-can't-pick slots (ADR 0077)
     competing_link_ids TEXT NOT NULL DEFAULT '[]',          -- JSON array of link ids
     PRIMARY KEY (source, relation, target)
 );

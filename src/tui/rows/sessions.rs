@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState, NodeId,
-    PinBinding, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of, pick_preferred,
+    PinBinding, RelationKind, RepoId, WorkspaceId, path_is_ancestor_of,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -423,7 +423,6 @@ struct SessionsData<'a> {
     agent_sessions: BTreeMap<NodeId, &'a AgentSessionNode>,
     repos: BTreeMap<NodeId, &'a crate::model::RepoNode>,
     checkouts: BTreeMap<NodeId, &'a crate::model::CheckoutNode>,
-    by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
     /// Parent `NodeId` → child sessions `(NodeId, &AgentSessionNode)`.
     /// Populated from resolved active `ParentSession` links.
     lineage_children: BTreeMap<NodeId, Vec<(NodeId, &'a AgentSessionNode)>>,
@@ -499,18 +498,6 @@ impl<'a> SessionsData<'a> {
             }
         }
 
-        let mut by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&GraphLink>> =
-            BTreeMap::new();
-        for link in &snapshot.candidate_links {
-            if !matches!(link.state, LinkState::Active) {
-                continue;
-            }
-            by_source_relation
-                .entry((link.source.clone(), link.relation.clone()))
-                .or_default()
-                .push(link);
-        }
-
         let mut lineage_children: BTreeMap<NodeId, Vec<(NodeId, &AgentSessionNode)>> =
             BTreeMap::new();
         let mut lineage_parent = BTreeMap::new();
@@ -556,7 +543,6 @@ impl<'a> SessionsData<'a> {
             agent_sessions,
             repos,
             checkouts,
-            by_source_relation,
             lineage_children,
             lineage_parent,
             pin_id_by_bound_session,
@@ -564,55 +550,43 @@ impl<'a> SessionsData<'a> {
     }
 
     fn mux_candidates_for_session(&self, session: &NodeId) -> Vec<&'a GraphLink> {
-        // H-UI-008: tree-view rows consume resolver winners so the
-        // sessions tree matches the detail pane's validated zone.
-        // For `LinkedToMux` the resolver writes at most one winner
-        // per session (it isn't in the `multi_target_relation` set),
-        // so the normal output is 0 or 1 link.
-        //
-        // Suppression fallback: `suppress_ambiguous_cwd_mux_links`
-        // strips the resolved entry when multiple distinct sessions
-        // share the same cwd evidence for the same mux. The H-UI-007
-        // detail-pane backstop preserves the ambiguity signal there;
-        // here we keep the corresponding tree-side signal alive by
-        // returning the full candidate fan-out when no resolver
-        // entry exists *and* there are ≥2 distinct candidate
-        // targets. That keeps the session in the Ambiguous bucket
-        // and lets the row builder emit `AgentSessionMuxCandidate`
-        // children. Resolver-side preservation (H-UI-006) will let
-        // this fallback retire.
-        let winners: Vec<&'a GraphLink> = self
+        // H-UI-008 routed the sessions tree through resolver
+        // winners; H-UI-006 (ADR 0077) makes that route honest in
+        // the suppression case: the resolver now keeps the
+        // `LinkedToMux` slot alive with `selected_link_id = None`
+        // and the candidate set rolled into `competing_link_ids`.
+        // Walk each matching slot once:
+        // - `Some(winner)`: the resolver picked. Return the
+        //   winning link so the row reports `Attached`.
+        // - `None`: the resolver explicitly cannot pick. Return
+        //   every candidate the slot lists so the row reports
+        //   `Ambiguous { candidate_count }` and the operator sees
+        //   the fan-out.
+        // The candidate-fan-out fallback from H-UI-008 retires
+        // because the slot now carries the signal directly.
+        let mut out: Vec<&'a GraphLink> = Vec::new();
+        for rel in self
             .snapshot
             .resolved_relationships
             .iter()
             .filter(|rel| rel.relation == RelationKind::LinkedToMux && rel.source == *session)
-            .filter_map(|rel| self.link_by_id(&rel.selected_link_id))
-            .collect();
-        if !winners.is_empty() {
-            return winners;
+        {
+            match rel.selected_link_id.as_deref() {
+                Some(winner_id) => {
+                    if let Some(link) = self.link_by_id(winner_id) {
+                        out.push(link);
+                    }
+                }
+                None => {
+                    for candidate_id in &rel.competing_link_ids {
+                        if let Some(link) = self.link_by_id(candidate_id) {
+                            out.push(link);
+                        }
+                    }
+                }
+            }
         }
-
-        let Some(candidates) = self
-            .by_source_relation
-            .get(&(session.clone(), RelationKind::LinkedToMux))
-        else {
-            return Vec::new();
-        };
-
-        let mut by_target: BTreeMap<NodeId, Vec<&GraphLink>> = BTreeMap::new();
-        for link in candidates {
-            let Some(target) = link.target_node_id() else {
-                continue;
-            };
-            by_target.entry(target.clone()).or_default().push(*link);
-        }
-        if by_target.len() < 2 {
-            return Vec::new();
-        }
-        by_target
-            .into_values()
-            .filter_map(|links| pick_preferred(&links))
-            .collect()
+        out
     }
 
     fn link_by_id(&self, link_id: &str) -> Option<&'a GraphLink> {
@@ -683,11 +657,15 @@ impl<'a> SessionsData<'a> {
                 rel.relation == RelationKind::WorkspaceContainsRepo && rel.source == workspace_id
             })
             .filter_map(|rel| {
+                // ADR 0077: only resolved slots feed the
+                // member-name lookup; no-winner slots have no
+                // link to anchor a `logical_path` field on.
+                let winner_id = rel.selected_link_id.as_deref()?;
                 let link = self
                     .snapshot
                     .candidate_links
                     .iter()
-                    .find(|cl| cl.id == rel.selected_link_id)?;
+                    .find(|cl| cl.id == winner_id)?;
                 let logical_path = link.source_metadata.fields.get("logical_path")?.as_str()?;
                 Path::new(logical_path)
                     .file_name()

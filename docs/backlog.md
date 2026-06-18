@@ -6410,39 +6410,42 @@ do not get lost inside their originating workstreams.
     open as the resolver-side preservation work; this story is
     purely renderer.
 
-- [ ] `H-UI-006` Resolver-side preservation for suppressed
+- [x] `H-UI-006` Resolver-side preservation for suppressed
   ambiguous `LinkedToMux` resolutions.
-  - Scope: `suppress_ambiguous_cwd_mux_links`
-    (`src/resolve/mod.rs:500`) currently drops the
-    `ResolvedRelationship` entry entirely when the cwd evidence
-    for a `LinkedToMux` is shared across multiple distinct
-    sessions claiming the same mux. The diagnostic still fires
-    but the resolved entry is gone, so downstream consumers
-    that read `resolved_relationships` (the detail-pane
-    explorer's `resolved_for`, anything that joins via the
-    typed view) lose the ambiguity signal. The interim
-    renderer-side fallback from `H-UI-007` papers over this in
-    the explorer view, but the right long-term fix is to keep
-    the resolved entry with an explicit "no winner" marker —
-    either an empty `selected_link_id` or a new
-    `ambiguous_only: true` flag — so every consumer sees the
-    same answer. Touches `ResolvedRelationship` shape, the
-    resolver pass, SQLite projections (Phase 10), and any
-    `competing_link_ids` reader.
-  - Tests: resolver tests for the multi-session shared-cwd
-    case (resolved entry survives, marked ambiguous); SQLite
-    view tests (`v_session_mux`, …) confirming the
-    no-winner row joins correctly; renderer tests that the
-    fallback from `H-UI-007` and this resolver-side fix agree
-    on the same group.
-  - Open questions: whether `selected_link_id` becomes
-    `Option<String>` (model break) or a new field is added; how
-    the change interacts with the `Diagnostic::Conflict` entry
-    the suppression pass already emits.
-  - Blockers: `H-UI-007` lands first so the renderer side
-    keeps working in the interim; ideally coordinate with the
-    Phase 10 SQLite projection work since the resolved-relation
-    shape is the schema boundary.
+  - Outcome: ADR 0077 records the shape decision —
+    `ResolvedRelationship.selected_link_id` becomes
+    `Option<String>`; `None` marks the resolver-can't-pick case.
+    `suppress_ambiguous_cwd_mux_links` mutates the matched slot
+    in place: it clears `selected_link_id` and pushes the
+    would-have-been winner id into `competing_link_ids` so the
+    candidate set stays complete. The SQLite schema drops the
+    NOT NULL on `resolved_relationships.selected_link_id`; the
+    serde derive picks up `skip_serializing_if = "Option::is_none"`
+    so existing winners serialize unchanged.
+    Both ad-hoc fallbacks retire: `build_relationship_group` in
+    `src/tui/explorer.rs` drops the H-UI-007 candidate-fan-out
+    inference and reads `selected_link_id.is_none()` directly to
+    mark a slot ambiguous; `mux_candidates_for_session` in
+    `src/tui/rows/sessions.rs` drops the H-UI-008 candidate
+    fallback and walks the slot — `Some` returns the winner,
+    `None` returns every link in `competing_link_ids` so
+    `MuxStateKey::Ambiguous` still fires. The
+    `by_source_relation` index and `pick_preferred` import are
+    no longer needed; both deleted.
+    Tests: the resolver suppression suite (three tests) now
+    asserts the slot survives with `selected_link_id = None`
+    and the candidate set rolls into `competing_link_ids`. The
+    explorer regression
+    `linked_to_mux_suppressed_slot_surfaces_as_no_winner_ambiguous_group`
+    replaces the prior H-UI-007 fallback test, asserting the
+    group is marked ambiguous, every row drops into the Other
+    zone, and no `Resolves` row exists. `testing_replay.rs`
+    asserts compare `selected_link_id.as_deref()` against
+    `Some(...)`. The showcase fixture regenerated to include
+    the preserved suppressed slots.
+    Followup: `Diagnostic::Conflict.competing_link_ids` is still
+    `vec![]` for suppression diagnostics — see the ADR's open
+    question; out of scope here.
 
 - [x] `H-UI-007` Renderer-side fallback so candidate fan-out
   flags the explorer group as ambiguous even when no

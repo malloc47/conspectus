@@ -485,7 +485,7 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
             source,
             target,
             relation,
-            selected_link_id: selected.id.clone(),
+            selected_link_id: Some(selected.id.clone()),
             competing_link_ids,
         });
     }
@@ -519,13 +519,22 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
         }
     }
 
-    let mut suppressed: BTreeSet<String> = BTreeSet::new();
-
-    for rel in &output.resolved_relationships {
+    // ADR 0077: rather than removing the matched `ResolvedRelationship`
+    // (which left downstream consumers inferring ambiguity from the
+    // raw candidate set, hence the H-UI-007 + H-UI-008 fallbacks),
+    // mutate the slot in place. `selected_link_id` becomes `None`
+    // — the resolver's honest "I cannot pick" — and the original
+    // winner id joins `competing_link_ids` so the candidate
+    // accounting still totals every link that was considered.
+    let mut indices_to_suppress: Vec<usize> = Vec::new();
+    for (idx, rel) in output.resolved_relationships.iter().enumerate() {
         if rel.relation != RelationKind::LinkedToMux {
             continue;
         }
-        let Some(link) = link_by_id.get(rel.selected_link_id.as_str()) else {
+        let Some(selected_id) = rel.selected_link_id.as_deref() else {
+            continue;
+        };
+        let Some(link) = link_by_id.get(selected_id) else {
             continue;
         };
         if !is_cwd_evidence(link) {
@@ -536,19 +545,28 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
             .map(|keys| keys.len())
             .unwrap_or(0);
         if distinct_session_count > 1 {
-            suppressed.insert(rel.selected_link_id.clone());
-            output.diagnostics.push(Diagnostic::Conflict {
-                source: rel.source.clone(),
-                relation: rel.relation.clone(),
-                selected_link_id: rel.selected_link_id.clone(),
-                competing_link_ids: vec![],
-            });
+            indices_to_suppress.push(idx);
         }
     }
 
-    output.resolved_relationships.retain(|rel| {
-        rel.relation != RelationKind::LinkedToMux || !suppressed.contains(&rel.selected_link_id)
-    });
+    for idx in indices_to_suppress {
+        let rel = &mut output.resolved_relationships[idx];
+        if let Some(prior_winner) = rel.selected_link_id.take() {
+            output.diagnostics.push(Diagnostic::Conflict {
+                source: rel.source.clone(),
+                relation: rel.relation.clone(),
+                selected_link_id: prior_winner.clone(),
+                competing_link_ids: vec![],
+            });
+            // Add the prior winner to the competing set so the
+            // candidate accounting stays complete: when consumers
+            // walk `competing_link_ids` for an ambiguous slot, the
+            // tiebreak winner is one of the competitors.
+            rel.competing_link_ids.push(prior_winner);
+            rel.competing_link_ids.sort();
+            rel.competing_link_ids.dedup();
+        }
+    }
 }
 
 fn session_logical_key(source: &NodeId) -> Option<String> {
@@ -934,8 +952,8 @@ mod tests {
         let output = resolve_links(&[discovered, declared]);
 
         assert_eq!(
-            output.resolved_relationships[0].selected_link_id,
-            "declared"
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("declared")
         );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
@@ -963,7 +981,10 @@ mod tests {
 
         let output = resolve_links(&[cached, strong]);
 
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "strong");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("strong")
+        );
     }
 
     #[test]
@@ -1031,7 +1052,10 @@ mod tests {
         let output = resolve_links(&[lower, higher]);
 
         assert_eq!(output.resolved_relationships.len(), 1);
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "higher");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("higher")
+        );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
             vec!["lower".to_string()]
@@ -1160,8 +1184,8 @@ mod tests {
         let output = resolve_links(&[convention, strong, declared]);
 
         assert_eq!(
-            output.resolved_relationships[0].selected_link_id,
-            "declared"
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("declared")
         );
     }
 
@@ -1188,7 +1212,10 @@ mod tests {
 
         let output = resolve_links(&[convention, discovered_exact]);
 
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "exact");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("exact")
+        );
     }
 
     #[test]
@@ -1214,7 +1241,10 @@ mod tests {
 
         let output = resolve_links(&[older, newer]);
 
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "newer");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("newer")
+        );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
             vec!["older".to_string()]
@@ -1245,8 +1275,8 @@ mod tests {
         let output = resolve_links(&[launch_argv, current_session]);
 
         assert_eq!(
-            output.resolved_relationships[0].selected_link_id,
-            "current-session"
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("current-session")
         );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
@@ -1278,8 +1308,8 @@ mod tests {
         let output = resolve_links(&[cwd, launch_argv]);
 
         assert_eq!(
-            output.resolved_relationships[0].selected_link_id,
-            "launch-argv"
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("launch-argv")
         );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
@@ -1310,7 +1340,10 @@ mod tests {
 
         let output = resolve_links(&[launch_argv, process]);
 
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "process");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("process")
+        );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
             vec!["launch-argv".to_string()]
@@ -1345,13 +1378,13 @@ mod tests {
             .expect("derived session mux relationship");
         assert_eq!(relation.source, session);
         assert_eq!(relation.target, mux);
-        assert!(
-            relation
-                .selected_link_id
-                .starts_with("resolve:agent_session:codex:global:a:linked_to_mux:")
-        );
+        let winner_id = relation
+            .selected_link_id
+            .as_deref()
+            .expect("winner is set on a successfully-resolved slot");
+        assert!(winner_id.starts_with("resolve:agent_session:codex:global:a:linked_to_mux:"));
         assert!(resolved.candidate_links.iter().any(|link| {
-            link.id == relation.selected_link_id
+            link.id == winner_id
                 && link.source_metadata.evidence.as_deref()
                     == Some("runtime_process_identifies_session")
                 && link
@@ -1572,7 +1605,10 @@ mod tests {
             .collect();
         assert_eq!(linked.len(), 1);
         assert_eq!(linked[0].source, current_session);
-        assert_eq!(linked[0].selected_link_id, "current-fd-link");
+        assert_eq!(
+            linked[0].selected_link_id.as_deref(),
+            Some("current-fd-link")
+        );
     }
 
     #[test]
@@ -1628,7 +1664,10 @@ mod tests {
             .collect();
         assert_eq!(linked.len(), 1);
         assert_eq!(linked[0].source, current_session);
-        assert_eq!(linked[0].selected_link_id, "current-activity-link");
+        assert_eq!(
+            linked[0].selected_link_id.as_deref(),
+            Some("current-activity-link")
+        );
     }
 
     #[test]
@@ -1655,8 +1694,8 @@ mod tests {
         let output = resolve_links(&[process, activity]);
 
         assert_eq!(
-            output.resolved_relationships[0].selected_link_id,
-            "activity"
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("activity")
         );
         assert_eq!(
             output.resolved_relationships[0].competing_link_ids,
@@ -1743,7 +1782,10 @@ mod tests {
         let output = resolve_links(&[ignored, overridden, active]);
 
         assert_eq!(output.resolved_relationships.len(), 1);
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "active");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("active")
+        );
     }
 
     fn forge_pr(number: u64) -> NodeId {
@@ -1858,7 +1900,7 @@ mod tests {
             .iter()
             .find(|r| r.source == forge_pr(1))
             .expect("relationship");
-        assert_eq!(selected.selected_link_id, "ready");
+        assert_eq!(selected.selected_link_id.as_deref(), Some("ready"));
         assert_eq!(selected.competing_link_ids, vec!["draft".to_string()]);
     }
 
@@ -1886,7 +1928,7 @@ mod tests {
         let output = resolve_links(&[older, newer]);
 
         let selected = &output.resolved_relationships[0];
-        assert_eq!(selected.selected_link_id, "newer");
+        assert_eq!(selected.selected_link_id.as_deref(), Some("newer"));
         assert_eq!(selected.competing_link_ids, vec!["older".to_string()]);
     }
 
@@ -1914,7 +1956,7 @@ mod tests {
         let output = resolve_links(&[merged_recent, open_old]);
 
         let selected = &output.resolved_relationships[0];
-        assert_eq!(selected.selected_link_id, "open-old");
+        assert_eq!(selected.selected_link_id.as_deref(), Some("open-old"));
         assert!(
             selected
                 .competing_link_ids
@@ -1946,8 +1988,8 @@ mod tests {
         let output = resolve_links(&[closed_recent, open_old]);
 
         assert_eq!(
-            output.resolved_relationships[0].selected_link_id,
-            "open-old"
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("open-old")
         );
     }
 
@@ -1975,7 +2017,10 @@ mod tests {
         let output = resolve_links(&[recent_open, declared_closed]);
 
         let selected = &output.resolved_relationships[0];
-        assert_eq!(selected.selected_link_id, "declared-closed");
+        assert_eq!(
+            selected.selected_link_id.as_deref(),
+            Some("declared-closed")
+        );
     }
 
     #[test]
@@ -2055,7 +2100,10 @@ mod tests {
         let output = resolve_links(&[ignored, overridden, active]);
 
         assert_eq!(output.resolved_relationships.len(), 1);
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "active");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("active")
+        );
     }
 
     #[test]
@@ -2115,7 +2163,24 @@ mod tests {
 
         let output = resolve_links(&[cwd_a, cwd_b]);
 
-        assert!(output.resolved_relationships.is_empty());
+        // ADR 0077: the suppression pass preserves the slots
+        // instead of removing them; both sessions now own a
+        // `LinkedToMux` slot whose `selected_link_id` is `None`
+        // and whose `competing_link_ids` lists the candidate that
+        // would have been the arbitrary tiebreak winner. The
+        // diagnostic counts stay the same (one Conflict per
+        // suppressed slot).
+        assert_eq!(output.resolved_relationships.len(), 2);
+        for rel in &output.resolved_relationships {
+            assert!(
+                rel.selected_link_id.is_none(),
+                "suppressed slot must surface as no-winner: {rel:?}",
+            );
+            assert!(
+                !rel.competing_link_ids.is_empty(),
+                "suppressed slot must carry the candidate set: {rel:?}",
+            );
+        }
         assert_eq!(output.diagnostics.len(), 2);
     }
 
@@ -2134,7 +2199,10 @@ mod tests {
         let output = resolve_links(&[cwd]);
 
         assert_eq!(output.resolved_relationships.len(), 1);
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "cwd");
+        assert_eq!(
+            output.resolved_relationships[0].selected_link_id.as_deref(),
+            Some("cwd")
+        );
         assert!(output.diagnostics.is_empty());
     }
 
@@ -2161,8 +2229,22 @@ mod tests {
 
         let output = resolve_links(&[cwd_b, fd_a]);
 
-        assert_eq!(output.resolved_relationships.len(), 1);
-        assert_eq!(output.resolved_relationships[0].selected_link_id, "fd-a");
+        // The cwd-bound slot for session `b` is suppressed (ADR
+        // 0077) but its slot is preserved with `selected_link_id =
+        // None`. The fd-bound slot for session `a` is unaffected.
+        assert_eq!(output.resolved_relationships.len(), 2);
+        let cwd_slot = output
+            .resolved_relationships
+            .iter()
+            .find(|r| r.selected_link_id.is_none())
+            .expect("suppressed slot survives as no-winner");
+        assert_eq!(cwd_slot.competing_link_ids, vec!["cwd-b".to_string()]);
+        let fd_slot = output
+            .resolved_relationships
+            .iter()
+            .find(|r| r.selected_link_id.is_some())
+            .expect("fd-bound slot resolves");
+        assert_eq!(fd_slot.selected_link_id.as_deref(), Some("fd-a"));
         assert_eq!(output.diagnostics.len(), 1);
     }
 
@@ -2216,7 +2298,12 @@ mod tests {
 
         let output = resolve_links(&[prefix_a, prefix_b]);
 
-        assert!(output.resolved_relationships.is_empty());
+        // ADR 0077: the prefix-match suppression also preserves
+        // the slots with `selected_link_id = None`.
+        assert_eq!(output.resolved_relationships.len(), 2);
+        for rel in &output.resolved_relationships {
+            assert!(rel.selected_link_id.is_none());
+        }
         assert_eq!(output.diagnostics.len(), 2);
     }
 

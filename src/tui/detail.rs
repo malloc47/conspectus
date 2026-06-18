@@ -330,7 +330,10 @@ pub struct ResolvedSummary {
     pub relation: RelationKind,
     pub source: NodeId,
     pub target: NodeId,
-    pub selected_link_id: String,
+    /// `None` when the underlying `ResolvedRelationship` is a
+    /// no-winner slot (ADR 0077). Mirrors the model shape so the
+    /// detail summary keeps the resolver's honest answer.
+    pub selected_link_id: Option<String>,
     pub competing_link_ids: Vec<String>,
 }
 
@@ -899,10 +902,12 @@ fn workspace_member_fields(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> V
             rel.source == *workspace_id && rel.relation == RelationKind::WorkspaceContainsRepo
         })
         .map(|rel| {
-            let display = snapshot
-                .candidate_links
-                .iter()
-                .find(|link| link.id == rel.selected_link_id)
+            // ADR 0077: only resolved slots feed the logical-path
+            // chain — no-winner slots have nothing to anchor on.
+            let display = rel
+                .selected_link_id
+                .as_deref()
+                .and_then(|id| snapshot.candidate_links.iter().find(|link| link.id == id))
                 .and_then(|link| link.source_metadata.fields.get("logical_path"))
                 .and_then(|v| v.as_str())
                 .and_then(|p| std::path::Path::new(p).file_name())
