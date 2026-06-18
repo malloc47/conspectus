@@ -24,7 +24,7 @@
 //!
 //! [Node Core-Summary Fields Reference]: ../docs/tui-detail-mockup.md
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::model::{
@@ -1630,12 +1630,26 @@ fn finalize_group(
         mut unresolved,
     } = builder;
 
-    let resolved = resolved_for(snapshot, focused, direction, &relation);
-    let winner_link_id = resolved.as_ref().map(|r| r.selected_link_id.clone());
-    let competing: Vec<String> = resolved
-        .as_ref()
-        .map(|r| r.competing_link_ids.clone())
-        .unwrap_or_default();
+    // The resolver keys multi-target relations (`AssociatedWith`,
+    // `WorkspaceContainsRepo`, `MuxContainsProcess`, …) by
+    // `(source, relation, target)` so each neighbor target gets its
+    // own `ResolvedRelationship` with its own winner. Collect every
+    // slot for `(focused, relation)` matching this direction so all
+    // per-target winners land in the validated zone, not just the
+    // first one.
+    let resolved_slots = resolved_slots_for(snapshot, focused, direction, &relation);
+
+    let winner_ids: BTreeSet<String> = resolved_slots
+        .iter()
+        .map(|r| r.selected_link_id.clone())
+        .collect();
+    let competing_ids: BTreeSet<String> = resolved_slots
+        .iter()
+        .flat_map(|r| r.competing_link_ids.iter().cloned())
+        .collect();
+    let any_slot_has_conflict = resolved_slots
+        .iter()
+        .any(|r| !r.competing_link_ids.is_empty());
 
     // H-UI-007: when the resolver dropped this relation entirely
     // (e.g. `suppress_ambiguous_cwd_mux_links` on a shared-cwd
@@ -1645,7 +1659,7 @@ fn finalize_group(
     // the operator gets the same `⚠` signal they'd see if the
     // resolved entry had survived. Tracked properly at the
     // resolver layer by `H-UI-006`.
-    let candidate_only_fan_out = resolved.is_none() && {
+    let candidate_only_fan_out = resolved_slots.is_empty() && {
         let mut distinct_targets = std::collections::BTreeSet::new();
         for (_, neighbor) in &links {
             distinct_targets.insert(neighbor);
@@ -1655,11 +1669,11 @@ fn finalize_group(
         }
         distinct_targets.len() > 1
     };
-    let ambiguous = !competing.is_empty() || candidate_only_fan_out;
+    let ambiguous = any_slot_has_conflict || candidate_only_fan_out;
 
     links.sort_by(|(left, _), (right, _)| {
-        let left_winner = winner_link_id.as_deref() == Some(&left.id);
-        let right_winner = winner_link_id.as_deref() == Some(&right.id);
+        let left_winner = winner_ids.contains(&left.id);
+        let right_winner = winner_ids.contains(&right.id);
         right_winner
             .cmp(&left_winner)
             .then_with(|| {
@@ -1676,10 +1690,10 @@ fn finalize_group(
     let link_rows = links
         .into_iter()
         .map(|(link, neighbor_id)| {
-            let resolved_winner = winner_link_id.as_deref() == Some(&link.id);
+            let resolved_winner = winner_ids.contains(&link.id);
             let edge_state = if resolved_winner {
                 EdgeStateLabel::Resolves
-            } else if ambiguous && competing.contains(&link.id) {
+            } else if competing_ids.contains(&link.id) {
                 EdgeStateLabel::Conflict
             } else {
                 EdgeStateLabel::AltOf(relation.clone())
@@ -1745,19 +1759,29 @@ fn finalize_group(
     }
 }
 
-fn resolved_for<'a>(
+/// Every `ResolvedRelationship` slot the focused node owns for this
+/// `(relation, direction)` pair. The resolver keys multi-target
+/// relations (`AssociatedWith`, `WorkspaceContainsRepo`,
+/// `MuxContainsProcess`, `ProcessIdentifiesSession`,
+/// `ProcessCandidatesSession`) by `(source, relation, target)`, so a
+/// workspace with three `WorkspaceContainsRepo` repos yields three
+/// slots — each its own winner. Returning the full set lets the
+/// detail-pane mark every per-target winner as `Resolves` instead of
+/// privileging whichever slot happens to come first in iteration order.
+fn resolved_slots_for<'a>(
     snapshot: &'a GraphSnapshot,
     focused: &NodeId,
     direction: Direction,
     relation: &RelationKind,
-) -> Option<&'a ResolvedRelationship> {
+) -> Vec<&'a ResolvedRelationship> {
     snapshot
         .resolved_relationships
         .iter()
-        .find(|rel| match direction {
+        .filter(|rel| match direction {
             Direction::Upstream => &rel.target == focused && &rel.relation == relation,
             Direction::Downstream => &rel.source == focused && &rel.relation == relation,
         })
+        .collect()
 }
 
 fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
@@ -2430,6 +2454,190 @@ mod tests {
         // `process_candidates` shows a runner-up — its slot is its own
         // resolved relationship since nothing else competes for it.
         assert_eq!(candidates.links[0].edge_state, EdgeStateLabel::Resolves);
+    }
+
+    #[test]
+    fn workspace_contains_multiple_repos_all_validated() {
+        // Regression: the resolver keys `WorkspaceContainsRepo` by
+        // `(source, relation, target)` so a workspace with three
+        // distinct repo edges yields three independent winners.
+        // The detail-pane explorer used to collapse them under a
+        // single `resolved_for` lookup, leaving only one repo in the
+        // validated zone and demoting the other two to the `Other`
+        // chevron. Every per-target winner must land in the
+        // validated zone with `EdgeStateLabel::Resolves`.
+        let mut snapshot = GraphSnapshot::empty();
+        let workspace_id = WorkspaceId::new("/home/op/work/multi");
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: workspace_id.clone(),
+            root: "/home/op/work/multi".to_string(),
+            provider: None,
+            name: Some("multi".to_string()),
+        }));
+        let repos = ["/srv/git/a.git", "/srv/git/b.git", "/srv/git/c.git"];
+        for common_dir in repos {
+            snapshot.nodes.push(GraphNode::Repo(RepoNode {
+                id: RepoId::new(common_dir),
+                common_dir: common_dir.to_string(),
+                source_paths: Vec::new(),
+                remotes: Vec::new(),
+            }));
+        }
+        let workspace = NodeId::Workspace(workspace_id);
+        for (idx, common_dir) in repos.iter().enumerate() {
+            snapshot.candidate_links.push(link(
+                &format!("l{idx}"),
+                workspace.clone(),
+                NodeId::Repo(RepoId::new(*common_dir)),
+                RelationKind::WorkspaceContainsRepo,
+            ));
+        }
+        let snapshot = resolve_snapshot(snapshot);
+
+        // Sanity: the resolver emitted one slot per repo.
+        let workspace_slots = snapshot
+            .resolved_relationships
+            .iter()
+            .filter(|r| r.source == workspace && r.relation == RelationKind::WorkspaceContainsRepo)
+            .count();
+        assert_eq!(
+            workspace_slots, 3,
+            "resolver should emit one WorkspaceContainsRepo slot per target repo",
+        );
+
+        let view = build(&snapshot, &workspace, Some(home().as_path()));
+        let downstream = filter_direction(&view, Direction::Downstream);
+        let group = downstream
+            .groups
+            .iter()
+            .find(|g| g.relation == RelationKind::WorkspaceContainsRepo)
+            .expect("WorkspaceContainsRepo group");
+        assert_eq!(group.links.len(), 3);
+        for row in &group.links {
+            assert!(
+                row.resolved_winner,
+                "every per-target winner must surface as resolved: {row:?}"
+            );
+            assert_eq!(row.edge_state, EdgeStateLabel::Resolves);
+        }
+        assert!(
+            !view.has_other_rows(),
+            "no candidate should fall into the Other zone when every slot has a winner",
+        );
+        assert!(
+            !group.ambiguous,
+            "distinct per-target winners are not ambiguous",
+        );
+        let counts = view.relationship_counts();
+        assert_eq!(counts.validated, 3);
+        assert_eq!(counts.other, 0);
+    }
+
+    #[test]
+    fn workspace_associated_with_multiple_repos_all_validated() {
+        // Symmetric coverage for `AssociatedWith`: a workspace that
+        // declares an association with several repos should show
+        // every repo as validated rather than demoting all but one
+        // to `Other`. `AssociatedWith` is also part of the
+        // `multi_target_relation` set on the resolver side.
+        let mut snapshot = GraphSnapshot::empty();
+        let workspace_id = WorkspaceId::new("/home/op/work/assoc");
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: workspace_id.clone(),
+            root: "/home/op/work/assoc".to_string(),
+            provider: None,
+            name: Some("assoc".to_string()),
+        }));
+        let repos = ["/srv/git/x.git", "/srv/git/y.git"];
+        for common_dir in repos {
+            snapshot.nodes.push(GraphNode::Repo(RepoNode {
+                id: RepoId::new(common_dir),
+                common_dir: common_dir.to_string(),
+                source_paths: Vec::new(),
+                remotes: Vec::new(),
+            }));
+        }
+        let workspace = NodeId::Workspace(workspace_id);
+        for (idx, common_dir) in repos.iter().enumerate() {
+            snapshot.candidate_links.push(link(
+                &format!("a{idx}"),
+                workspace.clone(),
+                NodeId::Repo(RepoId::new(*common_dir)),
+                RelationKind::AssociatedWith,
+            ));
+        }
+        let snapshot = resolve_snapshot(snapshot);
+
+        let view = build(&snapshot, &workspace, Some(home().as_path()));
+        let downstream = filter_direction(&view, Direction::Downstream);
+        let group = downstream
+            .groups
+            .iter()
+            .find(|g| g.relation == RelationKind::AssociatedWith)
+            .expect("AssociatedWith downstream group");
+        assert_eq!(group.links.len(), 2);
+        for row in &group.links {
+            assert!(row.resolved_winner);
+            assert_eq!(row.edge_state, EdgeStateLabel::Resolves);
+        }
+        assert!(!view.has_other_rows());
+    }
+
+    #[test]
+    fn repo_associated_with_multiple_workspaces_all_validated() {
+        // Mirror of the bug report from the workspace's vantage:
+        // when a single repo participates in several workspaces via
+        // `AssociatedWith`, focusing the *repo* should surface every
+        // workspace as validated (upstream direction). Each
+        // `(workspace, AssociatedWith, repo)` slot is owned by its
+        // workspace, so resolved_relationships contain three
+        // independent winners, all of which the repo's detail pane
+        // observes upstream.
+        let mut snapshot = GraphSnapshot::empty();
+        let repo_id = RepoId::new("/srv/git/shared.git");
+        snapshot.nodes.push(GraphNode::Repo(RepoNode {
+            id: repo_id.clone(),
+            common_dir: "/srv/git/shared.git".to_string(),
+            source_paths: Vec::new(),
+            remotes: Vec::new(),
+        }));
+        let workspace_roots = [
+            "/home/op/work/one",
+            "/home/op/work/two",
+            "/home/op/work/three",
+        ];
+        for root in workspace_roots {
+            snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+                id: WorkspaceId::new(root),
+                root: root.to_string(),
+                provider: None,
+                name: None,
+            }));
+        }
+        let repo = NodeId::Repo(repo_id);
+        for (idx, root) in workspace_roots.iter().enumerate() {
+            snapshot.candidate_links.push(link(
+                &format!("w{idx}"),
+                NodeId::Workspace(WorkspaceId::new(*root)),
+                repo.clone(),
+                RelationKind::AssociatedWith,
+            ));
+        }
+        let snapshot = resolve_snapshot(snapshot);
+
+        let view = build(&snapshot, &repo, Some(home().as_path()));
+        let upstream = filter_direction(&view, Direction::Upstream);
+        let group = upstream
+            .groups
+            .iter()
+            .find(|g| g.relation == RelationKind::AssociatedWith)
+            .expect("AssociatedWith upstream group on the repo");
+        assert_eq!(group.links.len(), 3);
+        for row in &group.links {
+            assert!(row.resolved_winner);
+            assert_eq!(row.edge_state, EdgeStateLabel::Resolves);
+        }
+        assert!(!view.has_other_rows());
     }
 
     #[test]
