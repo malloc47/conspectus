@@ -974,6 +974,7 @@ fn append_group_body_spans(
     group: &crate::tui::rows::GroupRow,
     theme: &Theme,
     target_label_width: usize,
+    secondary_max_width: Option<usize>,
 ) {
     let label = compact_path_label(&group.display_path);
     let label_width = UnicodeWidthStr::width(label.as_str());
@@ -989,8 +990,18 @@ fn append_group_body_spans(
     }
     let secondary = compact_path_secondary(&group.display_path);
     if !secondary.is_empty() {
+        // Truncate the dim canonical path with a mid-string ellipsis
+        // when a width budget is supplied and the natural width would
+        // push the trailing summary chip block (count + ambiguity
+        // glyph) past the right edge of the pane.
+        let rendered = match secondary_max_width {
+            Some(budget) if budget < UnicodeWidthStr::width(secondary.as_str()) => {
+                truncate_to_width_middle(&secondary, budget)
+            }
+            _ => secondary,
+        };
         spans.push(Span::styled(
-            format!("  {secondary}"),
+            format!("  {rendered}"),
             Style::default().add_modifier(theme.placeholder),
         ));
     }
@@ -1030,7 +1041,7 @@ fn group_row_body_width(
     if let Some(glyph) = row_kind_glyph_span(&row.kind, app.theme()) {
         spans.push(glyph);
     }
-    append_group_body_spans(&mut spans, group, app.theme(), target_label_width);
+    append_group_body_spans(&mut spans, group, app.theme(), target_label_width, None);
     spans_width(&spans)
 }
 
@@ -1133,11 +1144,36 @@ fn render_left_row(
 
     match &row.kind {
         RowKind::Group(group) => {
-            append_group_body_spans(&mut spans, group, theme, align.label_width);
+            // Reserve fixed space on the right for the summary chip
+            // block (`  (N)` plus optional `  ⚠`) so the count and
+            // ambiguity glyph stay visible at narrow widths. The dim
+            // canonical path absorbs the slack via mid-string
+            // truncation in `append_group_body_spans`.
+            let summary_reservation = group_summary
+                .filter(|s| s.agents > 0)
+                .map(|_| align.count_width + 5)
+                .unwrap_or(0);
+            let head_width = spans_width(&spans);
+            let label_cell_width = align.label_width.max(group_row_label_width(row));
+            let secondary_budget = width
+                .saturating_sub(head_width)
+                .saturating_sub(label_cell_width)
+                .saturating_sub(2) // "  " separator before the secondary path
+                .saturating_sub(summary_reservation);
+            append_group_body_spans(
+                &mut spans,
+                group,
+                theme,
+                align.label_width,
+                Some(secondary_budget),
+            );
             if let Some(summary) = group_summary {
+                let body_target = align
+                    .body_width
+                    .min(width.saturating_sub(summary_reservation));
                 let current_width = spans_width(&spans);
-                if current_width < align.body_width {
-                    spans.push(Span::raw(" ".repeat(align.body_width - current_width)));
+                if current_width < body_target {
+                    spans.push(Span::raw(" ".repeat(body_target - current_width)));
                 }
                 append_group_summary_spans(&mut spans, summary, theme, align.count_width);
             }
@@ -1700,6 +1736,58 @@ fn truncate_to_width_strict(text: &str, width: usize) -> String {
     out
 }
 
+/// Truncate `text` to `width` cells by replacing a middle slice with
+/// `…` when the natural width overflows. Keeps the leading and
+/// trailing context visible so a path like
+/// `/fixture/atelier-demo/repo-a` collapses to
+/// `/fixture/…/repo-a` rather than dropping the basename. The left
+/// half is preferred when the budget is odd.
+fn truncate_to_width_middle(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let text_width = UnicodeWidthStr::width(text);
+    if text_width <= width {
+        return text.to_string();
+    }
+    if width == 1 {
+        return "…".to_string();
+    }
+    let usable = width - 1;
+    let left_budget = usable.div_ceil(2);
+    let right_budget = usable - left_budget;
+    let chars: Vec<char> = text.chars().collect();
+
+    let mut left = String::new();
+    let mut left_used = 0usize;
+    for ch in &chars {
+        let cw = unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
+        if left_used + cw > left_budget {
+            break;
+        }
+        left.push(*ch);
+        left_used += cw;
+    }
+
+    let mut right_chars: Vec<char> = Vec::new();
+    let mut right_used = 0usize;
+    for ch in chars.iter().rev() {
+        let cw = unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
+        if right_used + cw > right_budget {
+            break;
+        }
+        right_chars.push(*ch);
+        right_used += cw;
+    }
+    let right: String = right_chars.into_iter().rev().collect();
+
+    let mut out = String::with_capacity(width);
+    out.push_str(&left);
+    out.push('…');
+    out.push_str(&right);
+    out
+}
+
 fn truncate_to_width_no_marker(text: &str, width: usize) -> String {
     if UnicodeWidthStr::width(text) <= width {
         return text.to_string();
@@ -2149,11 +2237,16 @@ fn render_node_field_line(
         format!("  {:<14}", field.label),
         Style::default().add_modifier(Modifier::BOLD),
     );
-    let mut spans = vec![label, Span::styled(field.value.clone(), style)];
+    let mut spans = vec![label];
+    // ADR 0073 §3: render the kind-chip glyph before the value so the
+    // chip stays anchored beside the label even when the value wraps
+    // onto a new line in a narrow pane (otherwise the chip strands at
+    // the wrap tail and reads as a stray symbol).
     if let Some(kind) = field.kind_chip {
-        spans.push(Span::raw(" "));
         spans.push(kind_chip_span(kind, theme));
+        spans.push(Span::raw(" "));
     }
+    spans.push(Span::styled(field.value.clone(), style));
     if field.long_value.is_some() {
         spans.push(Span::styled(
             "  (truncated · o)".to_string(),
@@ -3808,6 +3901,79 @@ mod tests {
             !group_line.contains('◉') && !group_line.contains('◐') && !group_line.contains('⚠'),
             "non-ambiguous group should carry no per-bucket glyphs and no warning: {group_line}",
         );
+    }
+
+    #[test]
+    fn truncate_to_width_middle_collapses_to_inline_ellipsis() {
+        // Fits unchanged.
+        assert_eq!(
+            truncate_to_width_middle("/fixture/repos/project", 30),
+            "/fixture/repos/project"
+        );
+        // Drops the middle and keeps both ends visible.
+        let collapsed = truncate_to_width_middle("/fixture/atelier-demo/repo-a", 15);
+        assert!(collapsed.contains('…'), "{collapsed}");
+        assert!(collapsed.starts_with('/'), "{collapsed}");
+        assert!(collapsed.ends_with("repo-a"), "{collapsed}");
+        assert_eq!(UnicodeWidthStr::width(collapsed.as_str()), 15);
+        // Degenerate widths render the ellipsis alone or nothing.
+        assert_eq!(truncate_to_width_middle("abc", 1), "…");
+        assert_eq!(truncate_to_width_middle("abc", 0), "");
+    }
+
+    #[test]
+    fn render_node_field_line_places_kind_chip_before_value() {
+        // ADR 0073 §3 amendment: the cwd kind-chip glyph should sit
+        // beside the label so the chip stays attached when the value
+        // wraps onto a new terminal row. The pre-fix render emitted
+        // `cwd  <path>  ▦`, which orphaned the chip past the wrap
+        // boundary on the showcase fixture's deck-launcher session.
+        let theme = Theme::default();
+        let field = crate::tui::explorer::CoreField {
+            label: "cwd",
+            value: "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef".to_string(),
+            placeholder: false,
+            annotation: None,
+            long_value: None,
+            kind_chip: Some("workspace"),
+        };
+        let line = render_node_field_line(&field, false, &theme);
+        let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let label_idx = rendered.find("cwd").expect("label present");
+        let chip_idx = rendered.find('▦').expect("workspace chip present");
+        let value_idx = rendered.find("/fixture/").expect("value present");
+        assert!(label_idx < chip_idx, "label before chip: {rendered}");
+        assert!(chip_idx < value_idx, "chip before value: {rendered}");
+    }
+
+    #[test]
+    fn group_body_secondary_truncates_mid_string_to_preserve_summary() {
+        // The dim canonical path collapses with an inline `…` so the
+        // right-anchored `(N)` count and `⚠` ambiguity glyph stay
+        // visible in narrow panes. Before this, long fixture paths
+        // pushed the summary chip off the right edge.
+        let theme = Theme::default();
+        let group = crate::tui::rows::GroupRow {
+            display_path: "/fixture/atelier-demo/repo-a".to_string(),
+            primary_node: None,
+            is_launch_context: false,
+        };
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        append_group_body_spans(&mut spans, &group, &theme, 12, Some(14));
+        let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(rendered.contains('…'), "{rendered}");
+        assert!(rendered.contains("repo-a"), "tail preserved: {rendered}");
+        assert!(rendered.contains("/fixtur"), "head preserved: {rendered}");
+
+        // Wide budget leaves the path untouched.
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        append_group_body_spans(&mut spans, &group, &theme, 12, Some(200));
+        let rendered: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            rendered.contains("/fixture/atelier-demo/repo-a"),
+            "wide budget keeps full path: {rendered}"
+        );
+        assert!(!rendered.contains('…'), "{rendered}");
     }
 
     #[test]
