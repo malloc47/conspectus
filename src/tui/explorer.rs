@@ -260,7 +260,7 @@ pub fn directional_verb(relation: &RelationKind, direction: Direction) -> &'stat
     match (relation, direction) {
         (AssociatedWith, _) => "associated with",
         (BelongsToRepo, Downstream) => "belongs to",
-        (BelongsToRepo, Upstream) => "member session",
+        (BelongsToRepo, Upstream) => "checked out at",
         (CheckedOutBranch, Downstream) => "on branch",
         (CheckedOutBranch, Upstream) => "checked out by",
         (WorkspaceContainsRepo, Downstream) => "contains",

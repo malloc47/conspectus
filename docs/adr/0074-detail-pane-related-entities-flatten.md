@@ -87,7 +87,7 @@ pass; the catalog lives in one place so updates are local):
 | RelationKind | Outgoing (focus = source) | Incoming (focus = target) |
 |--------------|---------------------------|----------------------------|
 | `AssociatedWith` | `associated with` | `associated with` |
-| `BelongsToRepo` | `belongs to` | `member session` |
+| `BelongsToRepo` | `belongs to` | `checked out at` |
 | `CheckedOutBranch` | `on branch` | `checked out by` |
 | `WorkspaceContainsRepo` | `contains` | `member of` |
 | `BranchHasForgePr` | `has PR` | `for branch` |
