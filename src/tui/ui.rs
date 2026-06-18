@@ -1754,18 +1754,20 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // section-grouped detail when the explorer state isn't ready
     // yet (race during the first SetData).
     if let Some(state) = app.explorer() {
-        let lines = render_explorer_lines(
+        let rendered = render_explorer_lines(
             state,
             inner.width as usize,
             app.theme(),
             app.edge_meta_visible(),
         );
+        let ExplorerRender { lines, cursor_line } = rendered;
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
-        // terminal rows. Without the wrap-aware estimate the
-        // Upstream / Downstream sections get clipped when the Node
-        // zone carries a long path or native id.
-        let wrapped_rows: usize = lines
+        // terminal rows. Without the wrap-aware row count, the
+        // header sizing and the cursor-position math both
+        // misread how much vertical space each line consumes.
+        let pane_width = inner.width.max(1) as usize;
+        let per_line_rows: Vec<usize> = lines
             .iter()
             .map(|line| {
                 let width = line
@@ -1774,9 +1776,26 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
                     .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
                     .sum::<usize>()
                     .max(1);
-                width.div_ceil(inner.width.max(1) as usize).max(1)
+                width.div_ceil(pane_width).max(1)
             })
-            .sum();
+            .collect();
+        let wrapped_rows: usize = per_line_rows.iter().sum();
+        // Post-wrap row index of the cursor in `lines`. Sum of
+        // wrap rows for everything above the cursor's line.
+        let cursor_render_row = cursor_line
+            .map(|idx| per_line_rows.iter().take(idx).sum::<usize>())
+            .unwrap_or(0);
+        // Reserve a usable minimum for the preview zone so a full
+        // Related list cannot collapse the preview to 1–2 lines.
+        // Below this floor on very small terminals the layout
+        // falls back to the prior behavior (preview keeps at least
+        // two rows after the divider).
+        const MIN_PREVIEW_HEIGHT: u16 = 6;
+        let preview_floor = MIN_PREVIEW_HEIGHT.min(inner.height.saturating_sub(4));
+        let max_header_height = inner
+            .height
+            .saturating_sub(preview_floor.saturating_add(1))
+            .max(3);
         // +1 safety margin: the per-line `div_ceil` count assumes
         // the renderer packs each line tight to the right edge, but
         // Paragraph wraps on word boundaries and a long unbroken
@@ -1787,7 +1806,7 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         // very long value.
         let header_height = (wrapped_rows as u16)
             .saturating_add(1)
-            .min(inner.height.saturating_sub(3))
+            .min(max_header_height)
             .max(3);
         let split = Layout::default()
             .direction(Direction::Vertical)
@@ -1797,7 +1816,13 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
                 Constraint::Min(0),
             ])
             .split(inner);
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), split[0]);
+        let scroll = app.adjust_explorer_scroll(cursor_render_row, split[0].height);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((scroll, 0)),
+            split[0],
+        );
         frame.render_widget(
             Paragraph::new(preview_divider_line(
                 app,
@@ -1848,6 +1873,15 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     draw_detail_preview(app, detail, frame, split[2]);
 }
 
+/// Output of [`render_explorer_lines`]: the rendered lines plus the
+/// index in `lines` of the cursor's row (when one of the rendered
+/// rows is selected). Used by [`draw_right_panel`] to compute the
+/// post-wrap scroll offset that keeps the cursor in view.
+struct ExplorerRender {
+    lines: Vec<Line<'static>>,
+    cursor_line: Option<usize>,
+}
+
 /// Render the related-entities layout (ADR 0074). Validated rows
 /// (resolver winners) sit in a flat list under one `Related` chip
 /// divider; alternates, conflicts, and unresolved stubs collapse
@@ -1859,9 +1893,10 @@ fn render_explorer_lines(
     width: usize,
     theme: &Theme,
     show_edge_meta: bool,
-) -> Vec<Line<'static>> {
+) -> ExplorerRender {
     use crate::tui::explorer::ExplorerRow;
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut cursor_line: Option<usize> = None;
     let rows = state.rows();
     let cursor = state.cursor;
     let view = &state.view;
@@ -1871,11 +1906,14 @@ fn render_explorer_lines(
             .iter()
             .position(|row| matches!(row, ExplorerRow::NodeField { index, .. } if *index == idx));
         let highlight = flat_index == Some(cursor);
+        if highlight {
+            cursor_line = Some(lines.len());
+        }
         lines.push(render_node_field_line(field, highlight, theme));
     }
 
     if view.relationships.groups.is_empty() {
-        return lines;
+        return ExplorerRender { lines, cursor_line };
     }
 
     let counts = view.relationship_counts();
@@ -1899,8 +1937,8 @@ fn render_explorer_lines(
 
     for (row_index, row) in rows.iter().enumerate() {
         let highlight = row_index == cursor;
-        match row {
-            ExplorerRow::NodeField { .. } => {}
+        let pushed = match row {
+            ExplorerRow::NodeField { .. } => false,
             ExplorerRow::ValidatedLink {
                 group_index,
                 link_index,
@@ -1915,6 +1953,9 @@ fn render_explorer_lines(
                         theme,
                         show_edge_meta,
                     ));
+                    true
+                } else {
+                    false
                 }
             }
             ExplorerRow::OtherHeader { expanded } => {
@@ -1926,6 +1967,7 @@ fn render_explorer_lines(
                     highlight,
                     theme,
                 ));
+                true
             }
             ExplorerRow::OtherLink {
                 group_index,
@@ -1941,6 +1983,9 @@ fn render_explorer_lines(
                         theme,
                         show_edge_meta,
                     ));
+                    true
+                } else {
+                    false
                 }
             }
             ExplorerRow::OtherUnresolved {
@@ -1953,11 +1998,17 @@ fn render_explorer_lines(
                     lines.push(render_other_unresolved_line(
                         group, unresolved, highlight, theme,
                     ));
+                    true
+                } else {
+                    false
                 }
             }
+        };
+        if highlight && pushed {
+            cursor_line = Some(lines.len() - 1);
         }
     }
-    lines
+    ExplorerRender { lines, cursor_line }
 }
 
 fn render_node_field_line(
@@ -5358,6 +5409,179 @@ mod tests {
         assert!(
             !top_left_line.contains("proj-with-a-very-long"),
             "top-of-tree group should be scrolled away when selection is at End; got top line {top_left_line:?}\n{text}"
+        );
+    }
+
+    /// Build an app focused on a workspace whose detail pane has
+    /// `repo_count` validated `WorkspaceContainsRepo` rows. Used to
+    /// exercise the right-pane scroll + preview-floor invariants
+    /// when the Related list is taller than the available header.
+    fn workspace_app_with_repos(repo_count: usize) -> App {
+        use crate::model::{
+            Confidence, GraphLink, LinkEndpoint, LinkState, NodeId, Provenance, RelationKind,
+            WorkspaceId, WorkspaceNode,
+        };
+
+        let mut snapshot = GraphSnapshot::empty();
+        let workspace_root = "/home/op/work/multi";
+        snapshot.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: WorkspaceId::new(workspace_root),
+            root: workspace_root.to_string(),
+            provider: None,
+            name: Some("multi".to_string()),
+        }));
+        let workspace_id = NodeId::Workspace(WorkspaceId::new(workspace_root));
+        for idx in 0..repo_count {
+            let common_dir = format!("/srv/git/repo-{idx:02}.git");
+            let repo_id = RepoId::new(&common_dir);
+            snapshot.nodes.push(GraphNode::Repo(RepoNode {
+                id: repo_id.clone(),
+                common_dir: common_dir.clone(),
+                source_paths: Vec::new(),
+                remotes: Vec::new(),
+            }));
+            snapshot.candidate_links.push(GraphLink {
+                id: format!("ws-repo-{idx:02}"),
+                source: workspace_id.clone(),
+                target: LinkEndpoint::Node {
+                    id: NodeId::Repo(repo_id),
+                },
+                relation: RelationKind::WorkspaceContainsRepo,
+                provenance: Provenance::StrongDiscovered,
+                confidence: Confidence::High,
+                freshness: crate::model::Freshness::Fresh,
+                source_metadata: crate::model::SourceMetadata::default(),
+                state: LinkState::Active,
+            });
+        }
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Workspace,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        config.sessions_grouping = SessionsGrouping::Workspace;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let workspace_row = app
+            .tree()
+            .rows
+            .iter()
+            .find_map(|r| match &r.id {
+                crate::tui::rows::RowId::Group(NodeId::Workspace(_)) => Some(r.id.clone()),
+                _ => None,
+            })
+            .expect("workspace row");
+        app.set_selection(workspace_row);
+        app
+    }
+
+    #[test]
+    fn right_pane_scrolls_to_keep_explorer_cursor_visible() {
+        // When the workspace detail pane has more Related rows than
+        // the header zone can hold at a small terminal height, the
+        // cursor must stay in the viewport as the operator navigates
+        // down. Mirrors the left pane's `End`-scroll behavior.
+        let mut app = workspace_app_with_repos(20);
+        app.update(Msg::CycleFocus);
+
+        // Small terminal: 100 columns wide, 20 rows tall. The right
+        // pane is roughly half (~50 cols) and the explorer header is
+        // capped to leave room for the preview, so 20 repo rows
+        // cannot all fit at once.
+        let area = Rect::new(0, 0, 100, 20);
+
+        // Walk down a few rows from the top of the explorer. The
+        // top validated rows should remain in view.
+        for _ in 0..3 {
+            app.update(Msg::ExplorerNavDown);
+        }
+        let initial = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            initial.contains("repo-00.git"),
+            "early rows should be visible before scrolling: {initial}"
+        );
+
+        // Walk the cursor onto the last validated link row.
+        use crate::tui::explorer::ExplorerRow;
+        let last_link_idx = app
+            .explorer()
+            .expect("state")
+            .rows()
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, row)| match row {
+                ExplorerRow::ValidatedLink { .. } => Some(idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("at least one validated link row");
+        let current = app.explorer().expect("state").cursor;
+        for _ in current..last_link_idx {
+            app.update(Msg::ExplorerNavDown);
+        }
+
+        let scrolled = buffer_to_string(&render_to_buffer(&app, area));
+        assert!(
+            scrolled.contains("repo-19.git"),
+            "last validated row must stay in the viewport after navigating to it: {scrolled}"
+        );
+        assert!(
+            !scrolled.contains("repo-00.git"),
+            "early rows should have scrolled off the top once the cursor reaches the end: {scrolled}"
+        );
+        assert!(
+            app.explorer_scroll() > 0,
+            "scroll offset should have advanced past zero; got {}",
+            app.explorer_scroll(),
+        );
+    }
+
+    #[test]
+    fn right_pane_preview_keeps_minimum_height_when_related_full() {
+        // Regression: when the Related list is taller than the
+        // right pane, the explorer header used to grow until the
+        // preview zone collapsed to 2 rows. The renderer now caps
+        // the header so the preview zone keeps a usable minimum.
+        let app = workspace_app_with_repos(40);
+        let area = Rect::new(0, 0, 100, 30);
+        let buffer = render_to_buffer(&app, area);
+
+        // Locate the 1-row Preview divider that separates the
+        // explorer header from the preview body. It's the line that
+        // carries the `Preview` chip; find it by scanning right-pane
+        // columns for the divider chip text.
+        let right_start = 50u16;
+        let mut divider_row: Option<u16> = None;
+        for y in 0..area.height {
+            let line: String = (right_start..area.width.saturating_sub(1))
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            if line.contains("Preview") {
+                divider_row = Some(y);
+                break;
+            }
+        }
+        let divider_row = divider_row.expect("preview divider should be visible");
+        // The preview body sits between the divider and the bottom
+        // border. Assert it has at least MIN_PREVIEW_HEIGHT rows so
+        // a full Related list cannot crowd it out.
+        let bottom_border = area.height.saturating_sub(1);
+        let preview_body_rows = bottom_border.saturating_sub(divider_row + 1);
+        assert!(
+            preview_body_rows >= 6,
+            "preview zone should keep at least 6 body rows even when Related is full; got {preview_body_rows} (divider at row {divider_row})\n{}",
+            buffer_to_string(&buffer)
         );
     }
 }

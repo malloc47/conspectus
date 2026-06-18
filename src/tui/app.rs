@@ -156,6 +156,14 @@ pub struct App {
     /// each frame so the selected row stays visible without the
     /// renderer needing `&mut self`.
     left_scroll: Cell<u16>,
+    /// Right-panel explorer scroll offset, in rendered lines. Used
+    /// to keep the explorer cursor visible inside the header section
+    /// when the Related list grows past the section's height (the
+    /// preview zone below reserves a minimum). Renderer-managed via
+    /// [`App::adjust_explorer_scroll`] each frame, mirroring the
+    /// left pane's pattern. Does not affect [`Self::preview_scroll`],
+    /// which scrolls the preview body independently.
+    explorer_scroll: Cell<u16>,
     /// Active rename overlay state per ADR 0029 / ADR 0030. `None`
     /// when no overlay is open; `Some` suspends the surrounding
     /// keymap and routes input through the modal.
@@ -477,6 +485,7 @@ impl App {
             refresh_failure: None,
             preview_store: PreviewStore::new(),
             left_scroll: Cell::new(0),
+            explorer_scroll: Cell::new(0),
             rename_overlay: None,
             pending_pin_remove: None,
             controls_overlay: None,
@@ -1270,6 +1279,35 @@ impl App {
     #[cfg(test)]
     pub fn left_scroll(&self) -> u16 {
         self.left_scroll.get()
+    }
+
+    /// Reconcile the explorer (right-pane) scroll offset against the
+    /// cursor's rendered (post-wrap) row index and the header
+    /// viewport height, returning the new offset to apply to
+    /// `Paragraph::scroll`. Mirrors [`Self::adjust_left_scroll`].
+    ///
+    /// Triggered every frame so an out-of-date offset self-corrects
+    /// without explicit invalidation on focus changes or rebuilds.
+    pub fn adjust_explorer_scroll(&self, cursor_render_row: usize, viewport_height: u16) -> u16 {
+        let vh = viewport_height as usize;
+        if vh == 0 {
+            return self.explorer_scroll.get();
+        }
+        let mut offset = self.explorer_scroll.get() as usize;
+        if cursor_render_row < offset {
+            offset = cursor_render_row;
+        } else if cursor_render_row >= offset + vh {
+            offset = cursor_render_row + 1 - vh;
+        }
+        let clamped = offset.min(u16::MAX as usize) as u16;
+        self.explorer_scroll.set(clamped);
+        clamped
+    }
+
+    /// Test-only accessor for the current explorer scroll offset.
+    #[cfg(test)]
+    pub fn explorer_scroll(&self) -> u16 {
+        self.explorer_scroll.get()
     }
 
     /// Iterate the row tree, skipping rows whose ancestors are
@@ -2512,6 +2550,34 @@ mod tests {
         let returned = app.adjust_left_scroll(99, 0);
         assert_eq!(returned, before);
         assert_eq!(app.left_scroll(), before);
+    }
+
+    #[test]
+    fn adjust_explorer_scroll_keeps_cursor_in_viewport() {
+        let app = App::new(RunConfig::defaults());
+        assert_eq!(app.adjust_explorer_scroll(0, 5), 0);
+        assert_eq!(app.adjust_explorer_scroll(10, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(4, 5), 4);
+    }
+
+    #[test]
+    fn adjust_explorer_scroll_holds_when_cursor_inside_viewport() {
+        let app = App::new(RunConfig::defaults());
+        app.adjust_explorer_scroll(10, 5);
+        assert_eq!(app.explorer_scroll(), 6);
+        assert_eq!(app.adjust_explorer_scroll(8, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(7, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(10, 5), 6);
+    }
+
+    #[test]
+    fn adjust_explorer_scroll_with_zero_viewport_does_nothing() {
+        let app = App::new(RunConfig::defaults());
+        app.adjust_explorer_scroll(10, 5);
+        let before = app.explorer_scroll();
+        let returned = app.adjust_explorer_scroll(99, 0);
+        assert_eq!(returned, before);
+        assert_eq!(app.explorer_scroll(), before);
     }
 
     #[test]
