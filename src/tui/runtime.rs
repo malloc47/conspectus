@@ -232,7 +232,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     _ => None,
                 }
             } else {
-                translate(event, viewport).map(|a| remap_for_focus(a, app.focus()))
+                translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus()))
             };
             match action {
                 Some(Action::Msg(msg)) => app.update(*msg),
@@ -671,7 +671,7 @@ fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Act
             _ => None,
         };
     }
-    translate(event, viewport).map(|action| remap_for_focus(action, app.focus()))
+    translate(event, viewport).and_then(|action| remap_for_focus(action, app.focus()))
 }
 
 /// Spawn a background thread that runs discovery and sends the resolved
@@ -2272,25 +2272,32 @@ fn run_viewer_launch(terminal: &mut DefaultTerminal, plan: &LaunchPlan) -> Viewe
 /// the preview regardless of focus, so operators with the left
 /// panel focused can still poke the preview without switching
 /// panes.
-fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
+fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Option<Action> {
     use crate::tui::app::Focus;
     if focus != Focus::Right {
-        return action;
+        return Some(action);
     }
     match action {
-        Action::Msg(boxed) => Action::Msg(Box::new(match *boxed {
+        Action::Msg(boxed) => match *boxed {
             // T8-028: j/k drive the explorer cursor when the right
             // pane has focus, replacing the prior raw preview-scroll
             // remap. Uppercase J/K still scroll the preview.
-            Msg::NavDown => Msg::ExplorerNavDown,
-            Msg::NavUp => Msg::ExplorerNavUp,
-            Msg::PageDown(_) => Msg::ExplorerNavDown,
-            Msg::PageUp(_) => Msg::ExplorerNavUp,
+            Msg::NavDown => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
+            Msg::NavUp => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
+            Msg::PageDown(_) => Some(Action::Msg(Box::new(Msg::ExplorerNavDown))),
+            Msg::PageUp(_) => Some(Action::Msg(Box::new(Msg::ExplorerNavUp))),
             // `e` toggles group expansion; on a non-header row the
             // reducer surfaces a status hint.
-            Msg::ToggleLinkedDetails => Msg::ExplorerToggleGroup,
-            other => other,
-        })),
+            Msg::ToggleLinkedDetails => Some(Action::Msg(Box::new(Msg::ExplorerToggleGroup))),
+            // `h`/`l`/`←`/`→` are left-tree expand/collapse keys.
+            // When the right pane has focus, drop them so they
+            // don't reach across panes and mutate the tree the
+            // operator is no longer driving. The explorer has no
+            // analogous binding in v1; `Enter` drills, `Backspace`
+            // pops a hop.
+            Msg::ExpandRow | Msg::CollapseRow => None,
+            other => Some(Action::Msg(Box::new(other))),
+        },
         // T8-040 / T8-043: Enter on the explorer cursor either
         // copies a Node-zone field value (T8-040) or expands a
         // group header / drills into a link row (T8-043). The
@@ -2299,12 +2306,12 @@ fn remap_for_focus(action: Action, focus: crate::tui::app::Focus) -> Action {
         // loop branch with App state in hand. Left-pane Enter
         // (DefaultAction) is dispatched against the selected
         // row's kind separately.
-        Action::DefaultAction => Action::ExplorerEnter,
+        Action::DefaultAction => Some(Action::ExplorerEnter),
         // T8-034: `F` toggles the Expanded Node Detail view when the
         // right pane is focused. The same key still clears filters
         // when the left tree has focus (ADR 0031).
-        Action::ClearFilters => Action::Msg(Box::new(Msg::ExplorerToggleFullDetail)),
-        other => other,
+        Action::ClearFilters => Some(Action::Msg(Box::new(Msg::ExplorerToggleFullDetail))),
+        other => Some(other),
     }
 }
 
@@ -3114,9 +3121,9 @@ mod tests {
     fn remap_for_focus_left_is_identity() {
         use crate::tui::app::Focus;
         let action = Action::Msg(Box::new(Msg::NavDown));
-        assert_eq!(remap_for_focus(action.clone(), Focus::Left), action);
+        assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
         let action = Action::Msg(Box::new(Msg::PageDown(20)));
-        assert_eq!(remap_for_focus(action.clone(), Focus::Left), action);
+        assert_eq!(remap_for_focus(action.clone(), Focus::Left), Some(action));
     }
 
     #[test]
@@ -3128,19 +3135,19 @@ mod tests {
         // standalone bindings in `translate`.
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::NavDown)), Focus::Right),
-            Action::Msg(Box::new(Msg::ExplorerNavDown))
+            Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::NavUp)), Focus::Right),
-            Action::Msg(Box::new(Msg::ExplorerNavUp))
+            Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::PageDown(20))), Focus::Right),
-            Action::Msg(Box::new(Msg::ExplorerNavDown))
+            Some(Action::Msg(Box::new(Msg::ExplorerNavDown)))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::PageUp(20))), Focus::Right),
-            Action::Msg(Box::new(Msg::ExplorerNavUp))
+            Some(Action::Msg(Box::new(Msg::ExplorerNavUp)))
         );
     }
 
@@ -3149,7 +3156,7 @@ mod tests {
         use crate::tui::app::Focus;
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::CycleFocus)), Focus::Right),
-            Action::Msg(Box::new(Msg::CycleFocus))
+            Some(Action::Msg(Box::new(Msg::CycleFocus)))
         );
         // Locked decision 8: Enter is the universal "do the obvious
         // thing" key on the explorer cursor. T8-040 made the
@@ -3159,13 +3166,13 @@ mod tests {
         // resolves against [`App::explorer_copy_target`].
         assert_eq!(
             remap_for_focus(Action::DefaultAction, Focus::Right),
-            Action::ExplorerEnter
+            Some(Action::ExplorerEnter)
         );
         // Left-pane DefaultAction is left untouched here so the main
         // loop can resolve it against the selected row.
         assert_eq!(
             remap_for_focus(Action::DefaultAction, Focus::Left),
-            Action::DefaultAction
+            Some(Action::DefaultAction)
         );
         // `e` is the explicit expand/collapse accelerator.
         assert_eq!(
@@ -3173,25 +3180,51 @@ mod tests {
                 Action::Msg(Box::new(Msg::ToggleLinkedDetails)),
                 Focus::Right
             ),
-            Action::Msg(Box::new(Msg::ExplorerToggleGroup))
+            Some(Action::Msg(Box::new(Msg::ExplorerToggleGroup)))
         );
         assert_eq!(
             remap_for_focus(Action::Msg(Box::new(Msg::Quit)), Focus::Right),
-            Action::Msg(Box::new(Msg::Quit))
+            Some(Action::Msg(Box::new(Msg::Quit)))
         );
         assert_eq!(
             remap_for_focus(Action::Refresh, Focus::Right),
-            Action::Refresh
+            Some(Action::Refresh)
         );
         // T8-034: F clears filters on the left tree but toggles the
         // Expanded Node Detail view on the right pane.
         assert_eq!(
             remap_for_focus(Action::ClearFilters, Focus::Left),
-            Action::ClearFilters
+            Some(Action::ClearFilters)
         );
         assert_eq!(
             remap_for_focus(Action::ClearFilters, Focus::Right),
-            Action::Msg(Box::new(Msg::ExplorerToggleFullDetail))
+            Some(Action::Msg(Box::new(Msg::ExplorerToggleFullDetail)))
+        );
+    }
+
+    #[test]
+    fn remap_for_focus_right_suppresses_left_tree_expand_collapse_keys() {
+        // Regression: `h` / `l` / `←` / `→` are left-tree
+        // expand/collapse keys. When the right pane is focused they
+        // used to leak through and mutate the tree the operator
+        // wasn't driving. The focus remap drops them.
+        use crate::tui::app::Focus;
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::ExpandRow)), Focus::Right),
+            None
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Right),
+            None
+        );
+        // Left focus still routes them through unchanged.
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::ExpandRow)), Focus::Left),
+            Some(Action::Msg(Box::new(Msg::ExpandRow)))
+        );
+        assert_eq!(
+            remap_for_focus(Action::Msg(Box::new(Msg::CollapseRow)), Focus::Left),
+            Some(Action::Msg(Box::new(Msg::CollapseRow)))
         );
     }
 
