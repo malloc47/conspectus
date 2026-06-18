@@ -6244,7 +6244,7 @@ do not get lost inside their originating workstreams.
     stays on the model so status-bar hints, header counts, and
     the ADR 0071 group-detail catalog continue to work.
 
-- [ ] `H-UI-002` Weave per-node-kind glyph identity through every
+- [x] `H-UI-002` Weave per-node-kind glyph identity through every
   TUI surface (tree, detail, filter, help).
   - Scope: re-affirm and finish the existing
     `Per-Node-Type Visual Identity` workstream
@@ -6304,8 +6304,13 @@ do not get lost inside their originating workstreams.
     that already mention kinds in prose are left alone — the
     legend covers the at-a-glance "what does this glyph mean"
     question without a more invasive refactor of help-text strings.
-  - Remaining surfaces (filter modal kind-bucket headers,
-    non-TUI outputs per H-VIS-005) stay open.
+  - Closed for the TUI scope. The filter modal does not actually
+    carry NodeKind-bucket headers — its dimensions are harnesses,
+    mux states, views, groupings, and sort, none of which map to
+    NodeKinds — so the "filter modal kind-bucket headers and chip
+    pills" item in the original scope had no real target. Non-TUI
+    output surfaces (CLI table rows, JSON `node_kind` tag, DOT /
+    HTML payloads) stay under `H-VIS-005`, which already owns them.
   - Blockers: see `H-VIS-001`.
 
 - [x] `H-UI-003` Roll back the detail-pane upstream/downstream
