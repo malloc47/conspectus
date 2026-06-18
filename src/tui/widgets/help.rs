@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::tui::Theme;
+use crate::tui::icons::{NodeKind, node_kind_style};
 
 /// Pure state for the help overlay. Carries vertical scroll
 /// position so long keymaps stay reachable on short terminals.
@@ -312,11 +313,78 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     );
     blank(&mut lines);
 
+    section(&mut lines, "Node kind icons (ADR 0073)");
+    push_icon_legend(&mut lines, theme);
+    blank(&mut lines);
+
     lines.push(Line::from(Span::styled(
         "Press Esc, q, or ? to close.",
         Style::default().add_modifier(theme.placeholder),
     )));
     lines
+}
+
+/// Built-in legend mapping each `NodeKind` glyph to its
+/// human-readable name. Operators learn the symbol vocabulary by
+/// pressing `?` instead of reading the docs. Mirrors ADR 0073's
+/// canonical display order (`NodeKind::ALL`) so the icon column
+/// down-reads the same sequence the row tree and detail pane use.
+fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
+    for kind in NodeKind::ALL {
+        let style = node_kind_style(kind, theme);
+        // ForgePr's slate color is `Color::Reset`; mirror the
+        // dodge used in `kind_chip_span` / the breadcrumb /
+        // search-result renderers — fall back to `theme.pr_open`
+        // since the legend doesn't carry PR state.
+        let color = if matches!(kind, NodeKind::ForgePr) {
+            theme.pr_open
+        } else {
+            style.color
+        };
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!("{} ", style.glyph), Style::default().fg(color)),
+            Span::styled(
+                format!("{:<14}", node_kind_display_name(kind)),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(node_kind_help_blurb(kind).to_string()),
+        ]));
+    }
+}
+
+/// Operator-facing display name for a `NodeKind`. Distinct from
+/// `theme_key` (the config-loader handle) and `snake_case` (the
+/// stable string tag in non-TUI outputs) so the legend reads
+/// naturally — `Agent session`, not `agent_session`.
+fn node_kind_display_name(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Workspace => "Workspace",
+        NodeKind::Repo => "Repo",
+        NodeKind::Checkout => "Checkout",
+        NodeKind::AgentSession => "Agent session",
+        NodeKind::MuxSession => "Mux session",
+        NodeKind::RuntimeProcess => "Runtime process",
+        NodeKind::Branch => "Branch",
+        NodeKind::Fork => "Fork",
+        NodeKind::ForgePr => "Forge PR",
+    }
+}
+
+/// One-line context for each kind so the legend is self-explanatory
+/// without forcing the operator to cross-reference the design docs.
+fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Workspace => "logical bundle of repos (atelier, agent-deck)",
+        NodeKind::Repo => "discovered git repository",
+        NodeKind::Checkout => "working-tree checkout of a repo",
+        NodeKind::AgentSession => "harness session (claude, codex, opencode, …)",
+        NodeKind::MuxSession => "tmux / mux backend session",
+        NodeKind::RuntimeProcess => "live process attached to a mux pane",
+        NodeKind::Branch => "git branch reference",
+        NodeKind::Fork => "atelier fork (worktree-backed branch family)",
+        NodeKind::ForgePr => "forge pull request (GitHub, …)",
+    }
 }
 
 fn section(lines: &mut Vec<Line<'static>>, title: &str) {
@@ -358,6 +426,42 @@ mod tests {
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn help_body_includes_node_kind_icon_legend() {
+        // H-UI-002 slice: pressing `?` should surface a built-in
+        // legend for the ADR 0073 glyph slate so operators learn
+        // the symbol vocabulary without cross-referencing the
+        // docs. Every NodeKind in canonical display order must
+        // appear with its glyph, its operator-facing display
+        // name, and a short blurb.
+        let theme = Theme::default();
+        let lines = body_lines(&theme);
+        let plain_lines: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+        let body_text = plain_lines.join("\n");
+        assert!(
+            body_text.contains("Node kind icons"),
+            "expected section header in:\n{body_text}",
+        );
+        for kind in NodeKind::ALL {
+            let glyph = node_kind_style(kind, &theme).glyph;
+            let name = node_kind_display_name(kind);
+            assert!(
+                plain_lines
+                    .iter()
+                    .any(|line| line.contains(&glyph) && line.contains(name)),
+                "expected legend row for {kind:?} ({glyph} {name}) in:\n{body_text}",
+            );
         }
     }
 

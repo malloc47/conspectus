@@ -6292,8 +6292,20 @@ do not get lost inside their originating workstreams.
     and Synthetic, and an end-to-end `build_match_line`
     assertion that the agent-session glyph appears in the
     correct color before the label.
-  - Remaining surfaces (help modal, filter modal, non-TUI
-    outputs) stay open.
+  - Slice landed (help modal icon legend): `body_lines` in
+    `src/tui/widgets/help.rs` gains a `Node kind icons (ADR 0073)`
+    section that walks `NodeKind::ALL` and renders each entry as
+    `<glyph> <display name> <one-line blurb>` so operators learn
+    the symbol vocabulary by pressing `?` instead of cross-
+    referencing the design docs. `node_kind_display_name`
+    (operator-facing labels: `Agent session`, `Forge PR`, …) is
+    kept distinct from the existing `theme_key` / `snake_case`
+    accessors so the legend reads naturally. The keybinding rows
+    that already mention kinds in prose are left alone — the
+    legend covers the at-a-glance "what does this glyph mean"
+    question without a more invasive refactor of help-text strings.
+  - Remaining surfaces (filter modal kind-bucket headers,
+    non-TUI outputs per H-VIS-005) stay open.
   - Blockers: see `H-VIS-001`.
 
 - [x] `H-UI-003` Roll back the detail-pane upstream/downstream
