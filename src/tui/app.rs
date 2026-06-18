@@ -164,6 +164,15 @@ pub struct App {
     /// left pane's pattern. Does not affect [`Self::preview_scroll`],
     /// which scrolls the preview body independently.
     explorer_scroll: Cell<u16>,
+    /// Last visible-row index the selection landed on, used as a
+    /// tiebreaker when the same `RowId` appears in multiple visible
+    /// positions (e.g. the mux view lists the same ambiguously-
+    /// attached session under every candidate mux). Without this,
+    /// navigation looks up "current position" with `.position(...)`
+    /// which always returns the first occurrence, and `j` from a
+    /// later duplicate snaps the cursor back to the row after the
+    /// first one.
+    last_visible_index: Cell<Option<usize>>,
     /// Active rename overlay state per ADR 0029 / ADR 0030. `None`
     /// when no overlay is open; `Some` suspends the surrounding
     /// keymap and routes input through the modal.
@@ -486,6 +495,7 @@ impl App {
             preview_store: PreviewStore::new(),
             left_scroll: Cell::new(0),
             explorer_scroll: Cell::new(0),
+            last_visible_index: Cell::new(None),
             rename_overlay: None,
             pending_pin_remove: None,
             controls_overlay: None,
@@ -839,6 +849,12 @@ impl App {
         if !self.tree.rows.iter().any(|row| row.id == id) {
             return;
         }
+        // Caller-driven jumps (search overlay commit, etc.) target a
+        // specific RowId without a meaningful "current position", so
+        // reset the duplicate-RowId tiebreaker. The next NavDown
+        // falls back to the first occurrence in `visible_rows`, then
+        // the cache repopulates from there.
+        self.last_visible_index.set(None);
         self.selection = Some(id);
         self.status_message = None;
         self.recompute_detail();
@@ -1438,16 +1454,19 @@ impl App {
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
+            self.last_visible_index.set(None);
         } else if let Some(prev) = prev_selection.as_ref()
-            && let Some(pos) = visible.iter().position(|id| id == prev)
+            && let Some(pos) = self.position_closest_to(&visible, prev, prev_visible_index)
         {
             self.selection = Some(visible[pos].clone());
+            self.last_visible_index.set(Some(pos));
         } else if let Some(prev_index) = prev_visible_index {
             let clamped = prev_index.min(visible.len() - 1);
             self.selection = Some(visible[clamped].clone());
+            self.last_visible_index.set(Some(clamped));
         } else if is_first_load
             && let Some(hint) = initial_selection_hint
-            && visible.iter().any(|id| id == &hint)
+            && let Some(pos) = visible.iter().position(|id| id == &hint)
         {
             // First-load launch-context hint: pre-select the row
             // the operator's cwd points at instead of the leading
@@ -1455,10 +1474,43 @@ impl App {
             // refreshes don't fight the operator's manual
             // selection.
             self.selection = Some(hint);
+            self.last_visible_index.set(Some(pos));
         } else {
             self.selection = Some(visible[0].clone());
+            self.last_visible_index.set(Some(0));
         }
         self.recompute_detail();
+    }
+
+    /// Find `selection` in `visible`, preferring the occurrence
+    /// closest to `hint` when the id appears more than once.
+    /// Returns `None` when the id is gone (the refresh dropped the
+    /// row). Used by [`Self::set_data`] so refreshes don't snap a
+    /// stable cursor to the first copy of a duplicated row.
+    fn position_closest_to(
+        &self,
+        visible: &[RowId],
+        selection: &RowId,
+        hint: Option<usize>,
+    ) -> Option<usize> {
+        let mut matches = visible
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, id)| (id == selection).then_some(idx));
+        let first = matches.next()?;
+        let Some(hint) = hint else {
+            return Some(first);
+        };
+        let mut best = first;
+        let mut best_distance = first.abs_diff(hint);
+        for idx in matches {
+            let distance = idx.abs_diff(hint);
+            if distance < best_distance {
+                best = idx;
+                best_distance = distance;
+            }
+        }
+        Some(best)
     }
 
     fn move_selection(&mut self, delta: i32) {
@@ -1468,16 +1520,18 @@ impl App {
         if visible.is_empty() {
             self.selection = None;
             self.detail = None;
+            self.last_visible_index.set(None);
             return;
         }
         let current = self
             .selection
             .as_ref()
-            .and_then(|id| visible.iter().position(|v| v == id))
+            .map(|id| self.current_visible_index(&visible, id))
             .unwrap_or(0);
         let len = visible.len() as i32;
         let target = (current as i32 + delta).clamp(0, len - 1) as usize;
         self.selection = Some(visible[target].clone());
+        self.last_visible_index.set(Some(target));
         self.recompute_detail();
     }
 
@@ -1488,11 +1542,44 @@ impl App {
         if visible.is_empty() {
             self.selection = None;
             self.detail = None;
+            self.last_visible_index.set(None);
             return;
         }
         let clamped = index.min(visible.len() - 1);
         self.selection = Some(visible[clamped].clone());
+        self.last_visible_index.set(Some(clamped));
         self.recompute_detail();
+    }
+
+    /// Resolve the visible-row index of the currently-selected
+    /// `RowId`. When the id appears more than once (mux view: same
+    /// session under multiple candidate muxes), return the
+    /// occurrence closest to `last_visible_index` so navigation
+    /// reads as "step away from where I am", not "step away from
+    /// the first copy in the tree". Falls back to the first
+    /// occurrence (or zero if the id is gone) when no cached index
+    /// exists.
+    fn current_visible_index(&self, visible: &[RowId], selection: &RowId) -> usize {
+        let mut matches = visible
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, id)| (id == selection).then_some(idx));
+        let Some(first) = matches.next() else {
+            return 0;
+        };
+        let Some(cached) = self.last_visible_index.get() else {
+            return first;
+        };
+        let mut best = first;
+        let mut best_distance = first.abs_diff(cached);
+        for idx in matches {
+            let distance = idx.abs_diff(cached);
+            if distance < best_distance {
+                best = idx;
+                best_distance = distance;
+            }
+        }
+        best
     }
 
     fn toggle_expand_selected(&mut self) {
@@ -2005,7 +2092,7 @@ mod tests {
     use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
-        PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode,
+        PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode, WorkspaceId,
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::SessionsGrouping;
@@ -2399,6 +2486,68 @@ mod tests {
         assert_ne!(start, after_down);
         app.update(Msg::NavUp);
         assert_eq!(app.selection().cloned().unwrap(), start);
+    }
+
+    #[test]
+    fn nav_down_past_duplicate_row_id_advances_to_the_following_row() {
+        // Regression: the mux view emits the same agent-session
+        // RowId under every candidate mux when the resolver hasn't
+        // picked. Before the duplicate-RowId tiebreaker, `NavDown`
+        // from the second copy snapped back to the row after the
+        // first copy because `move_selection` looked up the current
+        // position with `.position(...)`, which returned the first
+        // occurrence. With the tiebreaker, the cursor advances to
+        // the row *immediately following* the second copy as
+        // expected. Use a hand-built RowTree so the test does not
+        // depend on the mux SQL view.
+        use crate::tui::rows::{GroupRow, Row, RowId, RowKind};
+
+        let group_row = |id: NodeId, label: &str| Row {
+            id: RowId::Group(id.clone()),
+            depth: 0,
+            expandable: false,
+            kind: RowKind::Group(GroupRow {
+                display_path: label.to_string(),
+                primary_node: Some(id),
+                is_launch_context: false,
+            }),
+        };
+        let workspace = |key: &str| NodeId::Workspace(WorkspaceId::new(key));
+        let dup_id = workspace("dup");
+        let tree = crate::tui::rows::RowTree {
+            view: crate::tui::rows::ViewLabel::Mux,
+            rows: vec![
+                group_row(workspace("a"), "a"),
+                group_row(dup_id.clone(), "dup-first"),
+                group_row(dup_id.clone(), "dup-second"),
+                group_row(workspace("c"), "c"),
+            ],
+        };
+
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&GraphSnapshot::empty()),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        // Step onto the first duplicate, then the second.
+        app.update(Msg::NavDown);
+        app.update(Msg::NavDown);
+        assert_eq!(app.last_visible_index.get(), Some(2));
+        assert_eq!(app.selection.as_ref(), Some(&RowId::Group(dup_id.clone())));
+
+        // From the second duplicate, NavDown must advance to the
+        // row *after* it, not snap back to the row after the first
+        // copy.
+        app.update(Msg::NavDown);
+        assert_eq!(app.last_visible_index.get(), Some(3));
+        assert_eq!(
+            app.selection.as_ref(),
+            Some(&RowId::Group(workspace("c"))),
+            "NavDown from the second duplicate must land on the next row, not snap to the row after the first copy",
+        );
     }
 
     #[test]
