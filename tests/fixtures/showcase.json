@@ -3,21 +3,21 @@
     {
       "type": "repo",
       "id": {
-        "common_dir": "/fixture/repo-a/.git"
+        "common_dir": "/fixture/atelier-demo/repo-a/.git"
       },
-      "common_dir": "/fixture/repo-a/.git",
+      "common_dir": "/fixture/atelier-demo/repo-a/.git",
       "source_paths": [
-        "/fixture/repo-a"
+        "/fixture/atelier-demo/repo-a"
       ]
     },
     {
       "type": "repo",
       "id": {
-        "common_dir": "/fixture/repo-b/.git"
+        "common_dir": "/fixture/atelier-demo/repo-b/.git"
       },
-      "common_dir": "/fixture/repo-b/.git",
+      "common_dir": "/fixture/atelier-demo/repo-b/.git",
       "source_paths": [
-        "/fixture/repo-b"
+        "/fixture/atelier-demo/repo-b"
       ]
     },
     {
@@ -54,15 +54,15 @@
       "type": "checkout",
       "id": {
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
-        "root": "/fixture/repo-a"
+        "root": "/fixture/atelier-demo/repo-a"
       },
-      "root": "/fixture/repo-a",
-      "git_dir": "/fixture/repo-a/.git",
+      "root": "/fixture/atelier-demo/repo-a",
+      "git_dir": "/fixture/atelier-demo/repo-a/.git",
       "current_branch": {
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
         "refname": "refs/heads/main"
       }
@@ -71,15 +71,15 @@
       "type": "checkout",
       "id": {
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
-        "root": "/fixture/repo-b"
+        "root": "/fixture/atelier-demo/repo-b"
       },
-      "root": "/fixture/repo-b",
-      "git_dir": "/fixture/repo-b/.git",
+      "root": "/fixture/atelier-demo/repo-b",
+      "git_dir": "/fixture/atelier-demo/repo-b/.git",
       "current_branch": {
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
         "refname": "refs/heads/main"
       }
@@ -137,20 +137,20 @@
     {
       "type": "workspace",
       "id": {
-        "root": "/fixture"
-      },
-      "root": "/fixture",
-      "provider": "atelier",
-      "name": "atelier-demo"
-    },
-    {
-      "type": "workspace",
-      "id": {
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
       },
       "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef",
       "provider": "agent-deck",
       "name": "showcase-deck"
+    },
+    {
+      "type": "workspace",
+      "id": {
+        "root": "/fixture/atelier-demo"
+      },
+      "root": "/fixture/atelier-demo",
+      "provider": "atelier",
+      "name": "atelier-demo"
     },
     {
       "type": "agent_session",
@@ -237,7 +237,7 @@
         "session_key": "showcase-codex-child"
       },
       "harness_key": "codex",
-      "cwd": "/fixture/.atelier/forks/alpha/repo-a",
+      "cwd": "/fixture/atelier-demo/.atelier/forks/alpha/repo-a",
       "last_message_preview": "Showcase: codex child forked from parent",
       "last_active_epoch": 1781438400
     },
@@ -249,7 +249,7 @@
         "session_key": "showcase-codex-parent"
       },
       "harness_key": "codex",
-      "cwd": "/fixture/repo-a",
+      "cwd": "/fixture/atelier-demo/repo-a",
       "last_message_preview": "Showcase: codex parent in atelier fork lineage",
       "last_active_epoch": 1781352000
     },
@@ -273,7 +273,7 @@
         "session_key": "showcase-opencode"
       },
       "harness_key": "opencode",
-      "cwd": "/fixture/repo-b",
+      "cwd": "/fixture/atelier-demo/repo-b",
       "title": "opencode in atelier member repo",
       "last_message_preview": "Showcase: opencode in atelier member repo",
       "last_active_epoch": 1781600400
@@ -338,7 +338,7 @@
       "type": "branch",
       "id": {
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
         "refname": "refs/heads/main"
       },
@@ -348,7 +348,7 @@
       "type": "branch",
       "id": {
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
         "refname": "refs/heads/main"
       },
@@ -458,7 +458,7 @@
   ],
   "candidate_links": [
     {
-      "id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repo-a/.git",
+      "id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/atelier-demo/repo-a/.git",
       "source": {
         "type": "workspace",
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
@@ -467,7 +467,7 @@
         "kind": "node",
         "id": {
           "type": "repo",
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         }
       },
       "relation": "workspace_contains_repo",
@@ -478,7 +478,7 @@
         "adapter": "agent_deck",
         "evidence": "agent-deck multi-repo-worktrees symlink",
         "fields": {
-          "canonical_checkout_root": "/fixture/repo-a",
+          "canonical_checkout_root": "/fixture/atelier-demo/repo-a",
           "logical_path": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef/atelier-repo-a",
           "member_path_kind": "symlink"
         }
@@ -529,7 +529,7 @@
           "node_type": "agent_session",
           "harness_key": "codex",
           "native_id": "showcase-codex-child",
-          "path": "/fixture/.atelier/forks/alpha",
+          "path": "/fixture/atelier-demo/.atelier/forks/alpha",
           "metadata": {
             "created_epoch": 1,
             "fork_mode": "worktree",
@@ -666,7 +666,7 @@
       }
     },
     {
-      "id": "atelier:fork:atelier:alpha:forks_workspace:workspace:/fixture",
+      "id": "atelier:fork:atelier:alpha:forks_workspace:workspace:/fixture/atelier-demo",
       "source": {
         "type": "fork",
         "provider_source_key": "atelier:alpha"
@@ -675,7 +675,7 @@
         "kind": "node",
         "id": {
           "type": "workspace",
-          "root": "/fixture"
+          "root": "/fixture/atelier-demo"
         }
       },
       "relation": "forks_workspace",
@@ -707,7 +707,7 @@
           "node_type": "agent_session",
           "harness_key": "codex",
           "native_id": "showcase-codex-parent",
-          "path": "/fixture/.atelier/forks/alpha",
+          "path": "/fixture/atelier-demo/.atelier/forks/alpha",
           "metadata": {
             "created_epoch": 1,
             "fork_mode": "worktree",
@@ -739,7 +739,7 @@
       }
     },
     {
-      "id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/.atelier/forks/alpha",
+      "id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/atelier-demo/.atelier/forks/alpha",
       "source": {
         "type": "fork",
         "provider_source_key": "atelier:alpha"
@@ -748,7 +748,7 @@
         "kind": "unresolved",
         "evidence": {
           "node_type": "path",
-          "path": "/fixture/.atelier/forks/alpha",
+          "path": "/fixture/atelier-demo/.atelier/forks/alpha",
           "metadata": {
             "created_epoch": 1,
             "fork_mode": "worktree",
@@ -774,16 +774,16 @@
       }
     },
     {
-      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a",
+      "id": "atelier:workspace:/fixture/atelier-demo:workspace_contains_repo:repo:/fixture/atelier-demo/repo-a/.git:repo-a",
       "source": {
         "type": "workspace",
-        "root": "/fixture"
+        "root": "/fixture/atelier-demo"
       },
       "target": {
         "kind": "node",
         "id": {
           "type": "repo",
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         }
       },
       "relation": "workspace_contains_repo",
@@ -794,10 +794,10 @@
         "adapter": "atelier",
         "evidence": "atelier.toml repo entry",
         "fields": {
-          "canonical_checkout_root": "/fixture/repo-a",
-          "logical_path": "/fixture/repo-a",
+          "canonical_checkout_root": "/fixture/atelier-demo/repo-a",
+          "logical_path": "/fixture/atelier-demo/repo-a",
           "member_path_kind": "directory",
-          "provider_source_path": "/fixture/repo-a",
+          "provider_source_path": "/fixture/atelier-demo/repo-a",
           "repo_name": "repo-a"
         }
       },
@@ -806,16 +806,16 @@
       }
     },
     {
-      "id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b",
+      "id": "atelier:workspace:/fixture/atelier-demo:workspace_contains_repo:repo:/fixture/atelier-demo/repo-b/.git:repo-b",
       "source": {
         "type": "workspace",
-        "root": "/fixture"
+        "root": "/fixture/atelier-demo"
       },
       "target": {
         "kind": "node",
         "id": {
           "type": "repo",
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         }
       },
       "relation": "workspace_contains_repo",
@@ -826,10 +826,10 @@
         "adapter": "atelier",
         "evidence": "atelier.toml repo entry",
         "fields": {
-          "canonical_checkout_root": "/fixture/repo-b",
-          "logical_path": "/fixture/repo-b",
+          "canonical_checkout_root": "/fixture/atelier-demo/repo-b",
+          "logical_path": "/fixture/atelier-demo/repo-b",
           "member_path_kind": "directory",
-          "provider_source_path": "/fixture/repo-b",
+          "provider_source_path": "/fixture/atelier-demo/repo-b",
           "repo_name": "repo-b"
         }
       },
@@ -898,36 +898,6 @@
         "evidence": "session cwd within checkout root",
         "fields": {
           "checkout_root": "/fixture/repos/project"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
-      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-claude-ambig-a"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
         }
       },
       "state": {
@@ -1030,36 +1000,6 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-claude-ambig-b"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
       "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:linked_to_mux:mux_session:tmux:ambiguous:exact_cwd_match",
       "source": {
         "type": "agent_session",
@@ -1148,36 +1088,6 @@
         "evidence": "session cwd within checkout root",
         "fields": {
           "checkout_root": "/fixture/repos/project"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
-      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-claude"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
         }
       },
       "state": {
@@ -1277,36 +1187,6 @@
       }
     },
     {
-      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-deck-launcher"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
       "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:linked_to_mux:mux_session:tmux:showcase-deck:exact_cwd_match",
       "source": {
         "type": "agent_session",
@@ -1364,36 +1244,6 @@
         "evidence": "session cwd within checkout root",
         "fields": {
           "checkout_root": "/fixture/repos/project"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
-      "id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-hook-current"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
         }
       },
       "state": {
@@ -1496,36 +1346,6 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/fixture/harness/codex",
-        "session_key": "showcase-bare-codex"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
       "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:linked_to_mux:mux_session:tmux:bare-work:exact_cwd_match",
       "source": {
         "type": "agent_session",
@@ -1579,7 +1399,7 @@
         "adapter": "cross_link",
         "evidence": "session cwd within fork root",
         "fields": {
-          "fork_root": "/fixture/.atelier/forks/alpha"
+          "fork_root": "/fixture/atelier-demo/.atelier/forks/alpha"
         }
       },
       "state": {
@@ -1587,7 +1407,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-child:associated_with:workspace:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-child:associated_with:workspace:/fixture/atelier-demo:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1598,7 +1418,7 @@
         "kind": "node",
         "id": {
           "type": "workspace",
-          "root": "/fixture"
+          "root": "/fixture/atelier-demo"
         }
       },
       "relation": "associated_with",
@@ -1609,7 +1429,7 @@
         "adapter": "cross_link",
         "evidence": "session cwd within workspace member",
         "fields": {
-          "workspace_member_root": "/fixture"
+          "workspace_member_root": "/fixture/atelier-demo"
         }
       },
       "state": {
@@ -1617,7 +1437,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:cwd_within_checkout",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:checkout:repo:/fixture/atelier-demo/repo-a/.git@/fixture/atelier-demo/repo-a:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1629,9 +1449,9 @@
         "id": {
           "type": "checkout",
           "repo": {
-            "common_dir": "/fixture/repo-a/.git"
+            "common_dir": "/fixture/atelier-demo/repo-a/.git"
           },
-          "root": "/fixture/repo-a"
+          "root": "/fixture/atelier-demo/repo-a"
         }
       },
       "relation": "associated_with",
@@ -1642,7 +1462,7 @@
         "adapter": "cross_link",
         "evidence": "session cwd within checkout root",
         "fields": {
-          "checkout_root": "/fixture/repo-a"
+          "checkout_root": "/fixture/atelier-demo/repo-a"
         }
       },
       "state": {
@@ -1650,7 +1470,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:workspace:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:workspace:/fixture/atelier-demo:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "codex",
@@ -1661,7 +1481,7 @@
         "kind": "node",
         "id": {
           "type": "workspace",
-          "root": "/fixture"
+          "root": "/fixture/atelier-demo"
         }
       },
       "relation": "associated_with",
@@ -1672,7 +1492,7 @@
         "adapter": "cross_link",
         "evidence": "session cwd within workspace member",
         "fields": {
-          "workspace_member_root": "/fixture/repo-a"
+          "workspace_member_root": "/fixture/atelier-demo/repo-a"
         }
       },
       "state": {
@@ -1680,37 +1500,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-orphan:associated_with:workspace:/fixture:cwd_within_workspace",
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/fixture/harness/codex",
-        "session_key": "showcase-orphan"
-      },
-      "target": {
-        "kind": "node",
-        "id": {
-          "type": "workspace",
-          "root": "/fixture"
-        }
-      },
-      "relation": "associated_with",
-      "provenance": "discovered",
-      "confidence": "high",
-      "freshness": "fresh",
-      "source_metadata": {
-        "adapter": "cross_link",
-        "evidence": "session cwd within workspace member",
-        "fields": {
-          "workspace_member_root": "/fixture"
-        }
-      },
-      "state": {
-        "state": "active"
-      }
-    },
-    {
-      "id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:cwd_within_checkout",
+      "id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:checkout:repo:/fixture/atelier-demo/repo-b/.git@/fixture/atelier-demo/repo-b:cwd_within_checkout",
       "source": {
         "type": "agent_session",
         "harness_key": "opencode",
@@ -1722,9 +1512,9 @@
         "id": {
           "type": "checkout",
           "repo": {
-            "common_dir": "/fixture/repo-b/.git"
+            "common_dir": "/fixture/atelier-demo/repo-b/.git"
           },
-          "root": "/fixture/repo-b"
+          "root": "/fixture/atelier-demo/repo-b"
         }
       },
       "relation": "associated_with",
@@ -1735,7 +1525,7 @@
         "adapter": "cross_link",
         "evidence": "session cwd within checkout root",
         "fields": {
-          "checkout_root": "/fixture/repo-b"
+          "checkout_root": "/fixture/atelier-demo/repo-b"
         }
       },
       "state": {
@@ -1743,7 +1533,7 @@
       }
     },
     {
-      "id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:workspace:/fixture:cwd_within_workspace",
+      "id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:workspace:/fixture/atelier-demo:cwd_within_workspace",
       "source": {
         "type": "agent_session",
         "harness_key": "opencode",
@@ -1754,7 +1544,7 @@
         "kind": "node",
         "id": {
           "type": "workspace",
-          "root": "/fixture"
+          "root": "/fixture/atelier-demo"
         }
       },
       "relation": "associated_with",
@@ -1765,7 +1555,7 @@
         "adapter": "cross_link",
         "evidence": "session cwd within workspace member",
         "fields": {
-          "workspace_member_root": "/fixture/repo-b"
+          "workspace_member_root": "/fixture/atelier-demo/repo-b"
         }
       },
       "state": {
@@ -1773,19 +1563,19 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git",
+      "id": "git:checkout:repo:/fixture/atelier-demo/repo-a/.git@/fixture/atelier-demo/repo-a:belongs_to_repo:repo:/fixture/atelier-demo/repo-a/.git",
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
-        "root": "/fixture/repo-a"
+        "root": "/fixture/atelier-demo/repo-a"
       },
       "target": {
         "kind": "node",
         "id": {
           "type": "repo",
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         }
       },
       "relation": "belongs_to_repo",
@@ -1801,20 +1591,20 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/atelier-demo/repo-a/.git@/fixture/atelier-demo/repo-a:checked_out_branch:branch:repo:/fixture/atelier-demo/repo-a/.git@refs/heads/main",
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
-        "root": "/fixture/repo-a"
+        "root": "/fixture/atelier-demo/repo-a"
       },
       "target": {
         "kind": "node",
         "id": {
           "type": "branch",
           "repo": {
-            "common_dir": "/fixture/repo-a/.git"
+            "common_dir": "/fixture/atelier-demo/repo-a/.git"
           },
           "refname": "refs/heads/main"
         }
@@ -1832,19 +1622,19 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:belongs_to_repo:repo:/fixture/repo-b/.git",
+      "id": "git:checkout:repo:/fixture/atelier-demo/repo-b/.git@/fixture/atelier-demo/repo-b:belongs_to_repo:repo:/fixture/atelier-demo/repo-b/.git",
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
-        "root": "/fixture/repo-b"
+        "root": "/fixture/atelier-demo/repo-b"
       },
       "target": {
         "kind": "node",
         "id": {
           "type": "repo",
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         }
       },
       "relation": "belongs_to_repo",
@@ -1860,20 +1650,20 @@
       }
     },
     {
-      "id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:checked_out_branch:branch:repo:/fixture/repo-b/.git@refs/heads/main",
+      "id": "git:checkout:repo:/fixture/atelier-demo/repo-b/.git@/fixture/atelier-demo/repo-b:checked_out_branch:branch:repo:/fixture/atelier-demo/repo-b/.git@refs/heads/main",
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
-        "root": "/fixture/repo-b"
+        "root": "/fixture/atelier-demo/repo-b"
       },
       "target": {
         "kind": "node",
         "id": {
           "type": "branch",
           "repo": {
-            "common_dir": "/fixture/repo-b/.git"
+            "common_dir": "/fixture/atelier-demo/repo-b/.git"
           },
           "refname": "refs/heads/main"
         }
@@ -2128,67 +1918,67 @@
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
-        "root": "/fixture/repo-a"
+        "root": "/fixture/atelier-demo/repo-a"
       },
       "target": {
         "type": "repo",
-        "common_dir": "/fixture/repo-a/.git"
+        "common_dir": "/fixture/atelier-demo/repo-a/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:belongs_to_repo:repo:/fixture/repo-a/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/atelier-demo/repo-a/.git@/fixture/atelier-demo/repo-a:belongs_to_repo:repo:/fixture/atelier-demo/repo-a/.git"
     },
     {
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
-        "root": "/fixture/repo-a"
+        "root": "/fixture/atelier-demo/repo-a"
       },
       "target": {
         "type": "branch",
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:checked_out_branch:branch:repo:/fixture/repo-a/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/atelier-demo/repo-a/.git@/fixture/atelier-demo/repo-a:checked_out_branch:branch:repo:/fixture/atelier-demo/repo-a/.git@refs/heads/main"
     },
     {
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
-        "root": "/fixture/repo-b"
+        "root": "/fixture/atelier-demo/repo-b"
       },
       "target": {
         "type": "repo",
-        "common_dir": "/fixture/repo-b/.git"
+        "common_dir": "/fixture/atelier-demo/repo-b/.git"
       },
       "relation": "belongs_to_repo",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:belongs_to_repo:repo:/fixture/repo-b/.git"
+      "selected_link_id": "git:checkout:repo:/fixture/atelier-demo/repo-b/.git@/fixture/atelier-demo/repo-b:belongs_to_repo:repo:/fixture/atelier-demo/repo-b/.git"
     },
     {
       "source": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
-        "root": "/fixture/repo-b"
+        "root": "/fixture/atelier-demo/repo-b"
       },
       "target": {
         "type": "branch",
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
         "refname": "refs/heads/main"
       },
       "relation": "checked_out_branch",
-      "selected_link_id": "git:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:checked_out_branch:branch:repo:/fixture/repo-b/.git@refs/heads/main"
+      "selected_link_id": "git:checkout:repo:/fixture/atelier-demo/repo-b/.git@/fixture/atelier-demo/repo-b:checked_out_branch:branch:repo:/fixture/atelier-demo/repo-b/.git@refs/heads/main"
     },
     {
       "source": {
@@ -2259,38 +2049,14 @@
     {
       "source": {
         "type": "workspace",
-        "root": "/fixture"
-      },
-      "target": {
-        "type": "repo",
-        "common_dir": "/fixture/repo-a/.git"
-      },
-      "relation": "workspace_contains_repo",
-      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a"
-    },
-    {
-      "source": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "target": {
-        "type": "repo",
-        "common_dir": "/fixture/repo-b/.git"
-      },
-      "relation": "workspace_contains_repo",
-      "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-b/.git:repo-b"
-    },
-    {
-      "source": {
-        "type": "workspace",
         "root": "/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef"
       },
       "target": {
         "type": "repo",
-        "common_dir": "/fixture/repo-a/.git"
+        "common_dir": "/fixture/atelier-demo/repo-a/.git"
       },
       "relation": "workspace_contains_repo",
-      "selected_link_id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repo-a/.git"
+      "selected_link_id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/atelier-demo/repo-a/.git"
     },
     {
       "source": {
@@ -2303,6 +2069,30 @@
       },
       "relation": "workspace_contains_repo",
       "selected_link_id": "agent_deck:workspace:/fixture/.agent-deck/multi-repo-worktrees/showcase-deck-c0debeef:workspace_contains_repo:repo:/fixture/repos/project/.git"
+    },
+    {
+      "source": {
+        "type": "workspace",
+        "root": "/fixture/atelier-demo"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/atelier-demo/repo-a/.git"
+      },
+      "relation": "workspace_contains_repo",
+      "selected_link_id": "atelier:workspace:/fixture/atelier-demo:workspace_contains_repo:repo:/fixture/atelier-demo/repo-a/.git:repo-a"
+    },
+    {
+      "source": {
+        "type": "workspace",
+        "root": "/fixture/atelier-demo"
+      },
+      "target": {
+        "type": "repo",
+        "common_dir": "/fixture/atelier-demo/repo-b/.git"
+      },
+      "relation": "workspace_contains_repo",
+      "selected_link_id": "atelier:workspace:/fixture/atelier-demo:workspace_contains_repo:repo:/fixture/atelier-demo/repo-b/.git:repo-b"
     },
     {
       "source": {
@@ -2326,20 +2116,6 @@
         "type": "agent_session",
         "harness_key": "claude-code",
         "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-claude"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude:associated_with:workspace:/fixture:cwd_within_workspace"
-    },
-    {
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
         "session_key": "showcase-claude-ambig-a"
       },
       "target": {
@@ -2357,20 +2133,6 @@
         "type": "agent_session",
         "harness_key": "claude-code",
         "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-claude-ambig-a"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-a:associated_with:workspace:/fixture:cwd_within_workspace"
-    },
-    {
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
         "session_key": "showcase-claude-ambig-b"
       },
       "target": {
@@ -2382,34 +2144,6 @@
       },
       "relation": "associated_with",
       "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:checkout:repo:/fixture/repos/project/.git@/fixture/repos/project:cwd_within_checkout"
-    },
-    {
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-claude-ambig-b"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-claude-ambig-b:associated_with:workspace:/fixture:cwd_within_workspace"
-    },
-    {
-      "source": {
-        "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-deck-launcher"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-deck-launcher:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2459,20 +2193,6 @@
     {
       "source": {
         "type": "agent_session",
-        "harness_key": "claude-code",
-        "state_scope": "/fixture/harness/claude",
-        "session_key": "showcase-hook-current"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:claude-code:/fixture/harness/claude:showcase-hook-current:associated_with:workspace:/fixture:cwd_within_workspace"
-    },
-    {
-      "source": {
-        "type": "agent_session",
         "harness_key": "codex",
         "state_scope": "/fixture/harness/codex",
         "session_key": "showcase-bare-codex"
@@ -2486,20 +2206,6 @@
       },
       "relation": "associated_with",
       "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:checkout:repo:/fixture/repos/bare-project.git@/fixture/checkouts/bare-project:cwd_within_checkout"
-    },
-    {
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/fixture/harness/codex",
-        "session_key": "showcase-bare-codex"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-bare-codex:associated_with:workspace:/fixture:cwd_within_workspace"
     },
     {
       "source": {
@@ -2524,10 +2230,10 @@
       },
       "target": {
         "type": "workspace",
-        "root": "/fixture"
+        "root": "/fixture/atelier-demo"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-child:associated_with:workspace:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-child:associated_with:workspace:/fixture/atelier-demo:cwd_within_workspace"
     },
     {
       "source": {
@@ -2569,12 +2275,12 @@
       "target": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-a/.git"
+          "common_dir": "/fixture/atelier-demo/repo-a/.git"
         },
-        "root": "/fixture/repo-a"
+        "root": "/fixture/atelier-demo/repo-a"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:checkout:repo:/fixture/repo-a/.git@/fixture/repo-a:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:checkout:repo:/fixture/atelier-demo/repo-a/.git@/fixture/atelier-demo/repo-a:cwd_within_checkout"
     },
     {
       "source": {
@@ -2585,24 +2291,10 @@
       },
       "target": {
         "type": "workspace",
-        "root": "/fixture"
+        "root": "/fixture/atelier-demo"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:workspace:/fixture:cwd_within_workspace"
-    },
-    {
-      "source": {
-        "type": "agent_session",
-        "harness_key": "codex",
-        "state_scope": "/fixture/harness/codex",
-        "session_key": "showcase-orphan"
-      },
-      "target": {
-        "type": "workspace",
-        "root": "/fixture"
-      },
-      "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-orphan:associated_with:workspace:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:codex:/fixture/harness/codex:showcase-codex-parent:associated_with:workspace:/fixture/atelier-demo:cwd_within_workspace"
     },
     {
       "source": {
@@ -2614,12 +2306,12 @@
       "target": {
         "type": "checkout",
         "repo": {
-          "common_dir": "/fixture/repo-b/.git"
+          "common_dir": "/fixture/atelier-demo/repo-b/.git"
         },
-        "root": "/fixture/repo-b"
+        "root": "/fixture/atelier-demo/repo-b"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:checkout:repo:/fixture/repo-b/.git@/fixture/repo-b:cwd_within_checkout"
+      "selected_link_id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:checkout:repo:/fixture/atelier-demo/repo-b/.git@/fixture/atelier-demo/repo-b:cwd_within_checkout"
     },
     {
       "source": {
@@ -2630,10 +2322,10 @@
       },
       "target": {
         "type": "workspace",
-        "root": "/fixture"
+        "root": "/fixture/atelier-demo"
       },
       "relation": "associated_with",
-      "selected_link_id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:workspace:/fixture:cwd_within_workspace"
+      "selected_link_id": "cross_link:agent_session:opencode:/fixture/harness/opencode:showcase-opencode:associated_with:workspace:/fixture/atelier-demo:cwd_within_workspace"
     },
     {
       "source": {
@@ -2669,10 +2361,10 @@
       },
       "target": {
         "type": "workspace",
-        "root": "/fixture"
+        "root": "/fixture/atelier-demo"
       },
       "relation": "forks_workspace",
-      "selected_link_id": "atelier:fork:atelier:alpha:forks_workspace:workspace:/fixture"
+      "selected_link_id": "atelier:fork:atelier:alpha:forks_workspace:workspace:/fixture/atelier-demo"
     },
     {
       "source": {
@@ -2741,7 +2433,7 @@
     },
     {
       "kind": "unresolved_endpoint",
-      "link_id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/.atelier/forks/alpha",
+      "link_id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/atelier-demo/.atelier/forks/alpha",
       "relation": "rooted_at_path"
     },
     {

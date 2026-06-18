@@ -443,11 +443,19 @@ impl ScenarioWorld {
     }
 
     fn write_atelier_config(&self, text: &str) -> Result<()> {
-        fs::write(self.root.join("atelier.toml"), text).map_err(Into::into)
+        self.write_atelier_config_at(&self.root, text)
+    }
+
+    fn write_atelier_config_at(&self, dir: &Path, text: &str) -> Result<()> {
+        fs::write(dir.join("atelier.toml"), text).map_err(Into::into)
     }
 
     fn write_fork_index(&self, text: &str) -> Result<()> {
-        let path = self.root.join(".atelier/forks/index.toml");
+        self.write_fork_index_at(&self.root, text)
+    }
+
+    fn write_fork_index_at(&self, dir: &Path, text: &str) -> Result<()> {
+        let path = dir.join(".atelier/forks/index.toml");
         fs::create_dir_all(path.parent().expect("fork index parent"))?;
         fs::write(path, text).map_err(Into::into)
     }
@@ -819,13 +827,21 @@ fn add_bare_repo_with_worktree_to_showcase(world: &mut ScenarioWorld) -> Result<
 
 fn add_atelier_workspace_to_showcase(world: &mut ScenarioWorld) -> Result<AtelierLayout> {
     // Atelier discovery looks for `atelier.toml` at the scan-root and
-    // resolves `repo.name` as `<workspace_root>/<name>`; place the
-    // member repos at top level under the scenario root so the
-    // join works.
-    let repo_a = world.init_repo("repo-a", None)?;
-    let repo_b = world.init_repo("repo-b", None)?;
-    world.write_atelier_config(&format!(
-        r#"
+    // resolves `repo.name` as `<workspace_root>/<name>`. House the
+    // workspace under its own `atelier-demo/` subdirectory so the
+    // `AssociatedWith` inference (`session cwd within workspace
+    // root or member`) doesn't catch every unrelated session in the
+    // scenario — without this, atelier-demo would claim every
+    // showcase session because the workspace root would equal the
+    // scenario root.
+    let workspace_dir = world.mkdir("atelier-demo")?;
+    world.scan_roots.push(workspace_dir.clone());
+    let repo_a = world.init_repo("atelier-demo/repo-a", None)?;
+    let repo_b = world.init_repo("atelier-demo/repo-b", None)?;
+    world.write_atelier_config_at(
+        &workspace_dir,
+        &format!(
+            r#"
 [workspace]
 name = "atelier-demo"
 
@@ -837,10 +853,12 @@ path = "{}"
 name = "repo-b"
 path = "{}"
 "#,
-        path_string(&repo_a),
-        path_string(&repo_b),
-    ))?;
-    world.write_fork_index(
+            path_string(&repo_a),
+            path_string(&repo_b),
+        ),
+    )?;
+    world.write_fork_index_at(
+        &workspace_dir,
         r#"
 [[forks]]
 name = "alpha"
@@ -864,7 +882,7 @@ fork-session = "showcase-codex-child"
 capability = "native"
 "#,
     )?;
-    let fork_worktree = world.mkdir(".atelier/forks/alpha/repo-a")?;
+    let fork_worktree = world.mkdir("atelier-demo/.atelier/forks/alpha/repo-a")?;
     Ok(AtelierLayout {
         member_repo_a: repo_a,
         member_repo_b: repo_b,
