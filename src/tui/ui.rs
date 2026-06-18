@@ -1861,11 +1861,21 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
             })
             .collect();
         let wrapped_rows: usize = per_line_rows.iter().sum();
-        // Post-wrap row index of the cursor in `lines`. Sum of
-        // wrap rows for everything above the cursor's line.
-        let cursor_render_row = cursor_line
-            .map(|idx| per_line_rows.iter().take(idx).sum::<usize>())
-            .unwrap_or(0);
+        // Post-wrap row span of the cursor in `lines`. The first
+        // row is the sum of wrap rows for everything above the
+        // cursor's logical line; the last row is the first row
+        // plus the cursor line's own wrap count minus one. Using
+        // both keeps a wrapped cursor line fully visible — the
+        // first row drives "scroll up if cursor moves above the
+        // top," the last row drives "scroll down if cursor moves
+        // past the bottom."
+        let (cursor_first_row, cursor_last_row) = cursor_line
+            .map(|idx| {
+                let first = per_line_rows.iter().take(idx).sum::<usize>();
+                let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
+                (first, first + height - 1)
+            })
+            .unwrap_or((0, 0));
         // Reserve a usable minimum for the preview zone so a full
         // Related list cannot collapse the preview to 1–2 lines.
         // Below this floor on very small terminals the layout
@@ -1897,7 +1907,7 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
                 Constraint::Min(0),
             ])
             .split(inner);
-        let scroll = app.adjust_explorer_scroll(cursor_render_row, split[0].height);
+        let scroll = app.adjust_explorer_scroll(cursor_first_row, cursor_last_row, split[0].height);
         let (explorer_content_area, explorer_scrollbar_area) =
             scrollbar_layout(split[0], wrapped_rows);
         frame.render_widget(

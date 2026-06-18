@@ -1298,22 +1298,42 @@ impl App {
     }
 
     /// Reconcile the explorer (right-pane) scroll offset against the
-    /// cursor's rendered (post-wrap) row index and the header
+    /// cursor's rendered (post-wrap) row span and the header
     /// viewport height, returning the new offset to apply to
     /// `Paragraph::scroll`. Mirrors [`Self::adjust_left_scroll`].
     ///
+    /// `cursor_first_row` and `cursor_last_row` bracket the rendered
+    /// rows the cursor's logical line occupies. Equal values describe
+    /// a single-row line; when the line wraps, `cursor_last_row` is
+    /// the row index of its final terminal row. The right pane uses
+    /// `Paragraph::wrap`, so a long value (path, native_id) routinely
+    /// spans 2+ rows; without the span the offset only guaranteed
+    /// the cursor's *start* row was visible and the trailing wrapped
+    /// rows fell off the bottom by one.
+    ///
     /// Triggered every frame so an out-of-date offset self-corrects
     /// without explicit invalidation on focus changes or rebuilds.
-    pub fn adjust_explorer_scroll(&self, cursor_render_row: usize, viewport_height: u16) -> u16 {
+    pub fn adjust_explorer_scroll(
+        &self,
+        cursor_first_row: usize,
+        cursor_last_row: usize,
+        viewport_height: u16,
+    ) -> u16 {
         let vh = viewport_height as usize;
         if vh == 0 {
             return self.explorer_scroll.get();
         }
         let mut offset = self.explorer_scroll.get() as usize;
-        if cursor_render_row < offset {
-            offset = cursor_render_row;
-        } else if cursor_render_row >= offset + vh {
-            offset = cursor_render_row + 1 - vh;
+        // Scroll up if the cursor's first row is above the top of
+        // the viewport.
+        if cursor_first_row < offset {
+            offset = cursor_first_row;
+        }
+        // Scroll down if the cursor's last row is at or past the
+        // bottom of the viewport. Using the cursor span's last row
+        // (not its first) keeps wrapped cursor lines fully visible.
+        if cursor_last_row >= offset + vh {
+            offset = cursor_last_row + 1 - vh;
         }
         let clamped = offset.min(u16::MAX as usize) as u16;
         self.explorer_scroll.set(clamped);
@@ -2704,29 +2724,50 @@ mod tests {
     #[test]
     fn adjust_explorer_scroll_keeps_cursor_in_viewport() {
         let app = App::new(RunConfig::defaults());
-        assert_eq!(app.adjust_explorer_scroll(0, 5), 0);
-        assert_eq!(app.adjust_explorer_scroll(10, 5), 6);
-        assert_eq!(app.adjust_explorer_scroll(4, 5), 4);
+        assert_eq!(app.adjust_explorer_scroll(0, 0, 5), 0);
+        assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(4, 4, 5), 4);
     }
 
     #[test]
     fn adjust_explorer_scroll_holds_when_cursor_inside_viewport() {
         let app = App::new(RunConfig::defaults());
-        app.adjust_explorer_scroll(10, 5);
+        app.adjust_explorer_scroll(10, 10, 5);
         assert_eq!(app.explorer_scroll(), 6);
-        assert_eq!(app.adjust_explorer_scroll(8, 5), 6);
-        assert_eq!(app.adjust_explorer_scroll(7, 5), 6);
-        assert_eq!(app.adjust_explorer_scroll(10, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(8, 8, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(7, 7, 5), 6);
+        assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
     }
 
     #[test]
     fn adjust_explorer_scroll_with_zero_viewport_does_nothing() {
         let app = App::new(RunConfig::defaults());
-        app.adjust_explorer_scroll(10, 5);
+        app.adjust_explorer_scroll(10, 10, 5);
         let before = app.explorer_scroll();
-        let returned = app.adjust_explorer_scroll(99, 0);
+        let returned = app.adjust_explorer_scroll(99, 99, 0);
         assert_eq!(returned, before);
         assert_eq!(app.explorer_scroll(), before);
+    }
+
+    #[test]
+    fn adjust_explorer_scroll_keeps_wrapped_cursor_line_fully_visible() {
+        // Regression: when the cursor's logical line wraps to 2+
+        // rendered rows, only feeding the line's start row left
+        // the trailing wrap rows below the viewport bottom. The
+        // span-aware API uses the cursor's last row to drive the
+        // "scroll down" branch so a 2-row wrapped cursor line at
+        // the bottom of the content advances the offset enough
+        // for both rows to fit.
+        let app = App::new(RunConfig::defaults());
+        // Viewport 5 rows. Cursor's line starts at row 9 and
+        // wraps to 2 rows (occupies 9 and 10). The offset must
+        // advance to 6 so both 9 and 10 fit in [6, 10].
+        assert_eq!(app.adjust_explorer_scroll(9, 10, 5), 6);
+        assert_eq!(app.explorer_scroll(), 6);
+        // Single-row cursor at the same row keeps the older
+        // tighter behavior (offset = 5).
+        let app = App::new(RunConfig::defaults());
+        assert_eq!(app.adjust_explorer_scroll(9, 9, 5), 5);
     }
 
     #[test]
