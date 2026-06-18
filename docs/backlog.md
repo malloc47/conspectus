@@ -6445,14 +6445,41 @@ do not get lost inside their originating workstreams.
         1 unresolved-endpoint variant) — these are the most
         operator-visible (false-positive "attached agents" on
         mux rows).
-      - `parent_session`: 4 non-winners (all four claim the
-        same parent — duplicate child rows under one parent).
+      - `parent_session`: 4 non-winners (4 distinct children
+        each with a duplicate candidate pointing at the same
+        parent; resolver tie-broke). Not legitimate siblings —
+        the resolver already emits each
+        `(child, parent_session)` slot independently because
+        the slot key is per-source, so distinct children all
+        win their own slots.
       - `process_candidates_session`: 1 non-winner (unresolved-
         endpoint variant).
     Most of the change is *removals* (cleaning up false-positive
     rows) rather than hiding useful evidence; the impact at the
     operator's typical scale is small and lopsided toward
     clarity.
+  - Cardinality note (preserve in implementation): the resolver
+    keys slots by `(source, relation, target_key)` with
+    `target_key = Some(target)` for the `multi_target_relation`
+    set (`src/resolve/mod.rs:571`:
+    `AssociatedWith | WorkspaceContainsRepo |
+    MuxContainsProcess | ProcessIdentifiesSession |
+    ProcessCandidatesSession`). For everything else, candidates
+    with the same source compete for one slot. **1:N
+    relationships from the target's perspective still work
+    correctly** under this filter because each row on the "many"
+    side is the *source* of its own slot — a mux with three
+    attached agent sessions has three independent
+    `(session, linked_to_mux)` slots, each with its own winner;
+    filtering the mux view through `resolved_relationships`
+    surfaces all three. Same logic for "parent has many
+    children": each child is the source of its own
+    `parent_session` slot. The filter only hides candidates that
+    *lost their own per-source slot*, which are by definition
+    duplicates or ambiguity cases. A separate audit may revisit
+    `multi_target_relation` completeness (e.g. should
+    `BranchHasForgePr` move into the set?) but it does not block
+    this story.
   - Tests: row-builder unit tests that pin "non-winner candidate
     links are not surfaced in the tree" across the
     `mux_candidates_for_session` / mux-view SQL / PR / fork paths.
