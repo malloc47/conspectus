@@ -671,32 +671,78 @@ fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     };
 
     let total_lines = lines.len();
+    let (content_area, scrollbar_area) = scrollbar_layout(inner, total_lines);
     let widget = Paragraph::new(lines).scroll((scroll, 0));
-    frame.render_widget(widget, inner);
-    render_vertical_scrollbar(frame, inner, total_lines, scroll as usize);
+    frame.render_widget(widget, content_area);
+    if let Some(area) = scrollbar_area {
+        render_vertical_scrollbar(frame, area, total_lines, scroll as usize);
+    }
 }
 
-/// Render an inside-the-border vertical scrollbar on the right edge
-/// of `area` when `content_length > area.height` (ADR 0076). The
-/// fade-on-fit guard keeps short lists from burning a column on a
-/// redundant indicator; the `Margin { vertical: 1, horizontal: 0 }`
-/// keeps the bar from overpainting the border on the row above /
-/// below the inner area. `position` is the scroll offset in lines,
-/// matching the `Paragraph::scroll((offset, 0))` already applied to
-/// the body.
+/// Reserve a 1-column gutter on the right edge of `area` for the
+/// vertical scrollbar when `content_length > area.height` (ADR 0076).
+/// Returns `(content_area, Some(scrollbar_area))` for the scrolled
+/// case so the paragraph body and scrollbar widget render into
+/// disjoint regions — no overpaint, no inherited selection-row
+/// `REVERSED` modifier bleeding through the scrollbar glyphs.
+/// Returns `(area, None)` when content fits in the viewport
+/// (fade-on-fit).
+fn scrollbar_layout(area: Rect, content_length: usize) -> (Rect, Option<Rect>) {
+    if content_length == 0 || content_length <= area.height as usize || area.width < 2 {
+        return (area, None);
+    }
+    let content = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width - 1,
+        height: area.height,
+    };
+    let scrollbar = Rect {
+        x: area.x + area.width - 1,
+        y: area.y,
+        width: 1,
+        height: area.height,
+    };
+    (content, Some(scrollbar))
+}
+
+/// Render a vertical scrollbar into the gutter `area` returned by
+/// [`scrollbar_layout`]. `content_length` is the total wrapped-line
+/// count of the buffered content; `position` is the renderer's
+/// scroll offset (top of the visible window).
+///
+/// The ratatui `Scrollbar` widget treats `position` as the index
+/// of the topmost visible item in a model where you can keep
+/// scrolling until only one item is at the top — so its max
+/// position is `content_length - 1`. Our scroll offset only goes
+/// up to `content_length - viewport_height` (last item flush with
+/// the viewport bottom), which mapped to a thumb that stopped at
+/// the middle of the track even when the operator had scrolled all
+/// the way down. Pass an effective `content_length = content -
+/// viewport + 1` so the widget's max-position matches our max
+/// scroll offset and "scrolled to the bottom" reads as
+/// "thumb at the bottom."
+///
+/// `.remove_modifier(Modifier::REVERSED)` patches each scrollbar
+/// cell with `sub_modifier = REVERSED` so the bar does not inherit
+/// the selection highlight from whatever was painted there before.
 fn render_vertical_scrollbar(
     frame: &mut Frame<'_>,
     area: Rect,
     content_length: usize,
     position: usize,
 ) {
-    if content_length == 0 || content_length <= area.height as usize {
+    let viewport = area.height as usize;
+    if viewport == 0 || content_length <= viewport {
         return;
     }
-    let mut state = ScrollbarState::new(content_length)
+    let effective_content = content_length - viewport + 1;
+    let position = position.min(effective_content - 1);
+    let mut state = ScrollbarState::new(effective_content)
         .position(position)
-        .viewport_content_length(area.height as usize);
-    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        .viewport_content_length(viewport);
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .style(Style::default().remove_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(
         scrollbar,
         area.inner(Margin {
@@ -1852,13 +1898,17 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
             ])
             .split(inner);
         let scroll = app.adjust_explorer_scroll(cursor_render_row, split[0].height);
+        let (explorer_content_area, explorer_scrollbar_area) =
+            scrollbar_layout(split[0], wrapped_rows);
         frame.render_widget(
             Paragraph::new(lines)
                 .wrap(Wrap { trim: false })
                 .scroll((scroll, 0)),
-            split[0],
+            explorer_content_area,
         );
-        render_vertical_scrollbar(frame, split[0], wrapped_rows, scroll as usize);
+        if let Some(area) = explorer_scrollbar_area {
+            render_vertical_scrollbar(frame, area, wrapped_rows, scroll as usize);
+        }
         frame.render_widget(
             Paragraph::new(preview_divider_line(
                 app,
@@ -2417,11 +2467,14 @@ fn draw_explorer_preview(
         }
     }
     let total_rows = wrapped_line_count(&lines, area.width);
+    let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
     let widget = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
         .scroll((app.preview_scroll(), 0));
-    frame.render_widget(widget, area);
-    render_vertical_scrollbar(frame, area, total_rows, app.preview_scroll() as usize);
+    frame.render_widget(widget, content_area);
+    if let Some(sb_area) = scrollbar_area {
+        render_vertical_scrollbar(frame, sb_area, total_rows, app.preview_scroll() as usize);
+    }
 }
 
 /// Sum of post-wrap terminal rows the given lines occupy when
@@ -2826,11 +2879,14 @@ fn pr_value_style(value: &str, theme: &Theme) -> Style {
 fn draw_detail_preview(app: &App, _detail: &NodeDetail, frame: &mut Frame<'_>, area: Rect) {
     let preview = preview_text_for_selection(app, area.height as usize);
     let total_rows = wrapped_line_count(&preview.lines, area.width);
+    let (content_area, scrollbar_area) = scrollbar_layout(area, total_rows);
     let widget = Paragraph::new(preview)
         .wrap(Wrap { trim: false })
         .scroll((app.preview_scroll(), 0));
-    frame.render_widget(widget, area);
-    render_vertical_scrollbar(frame, area, total_rows, app.preview_scroll() as usize);
+    frame.render_widget(widget, content_area);
+    if let Some(sb_area) = scrollbar_area {
+        render_vertical_scrollbar(frame, sb_area, total_rows, app.preview_scroll() as usize);
+    }
 }
 
 /// Source the preview body from whatever the selection points at.
@@ -5779,6 +5835,188 @@ mod tests {
             SCROLLBAR_GLYPHS.iter().any(|g| column.contains(g)),
             "expected a scrollbar glyph in right-pane column {bar_col} when the related list overflows; got {column:?}\n{}",
             buffer_to_string(&buffer)
+        );
+    }
+
+    #[test]
+    fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
+        // Regression: feeding `position = scroll_offset` to
+        // `ScrollbarState` left the thumb stranded mid-track at
+        // max scroll because ratatui's `Scrollbar` treats
+        // `position` as an index `0..content_length-1`. Once the
+        // operator scrolls to the bottom, the thumb glyph (`█`)
+        // must land on or below the track midpoint, *and* in a
+        // row visibly past the midpoint of the inner area.
+        let repo_root =
+            "/home/op/src/proj-with-a-very-long-display-path-that-would-wrap-before-clipping";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo_root))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_root), repo_root),
+            root: repo_root.to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        for i in 0..40 {
+            snapshot
+                .nodes
+                .push(GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                    harness_key: "codex".to_string(),
+                    cwd: Some(repo_root.to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                    session_kind: None,
+                }));
+        }
+        let snapshot = crate::resolve::resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.update(Msg::End);
+
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        let left_pane = split[0];
+        let bar_col = rightmost_inner_column(left_pane);
+
+        // Find the rows occupied by the thumb glyph (the solid
+        // `█`). Track glyphs (`║`) and arrow glyphs (`▲`/`▼`) live
+        // above and below the thumb on the same column.
+        let thumb_rows: Vec<u16> = (0..buffer.area.height)
+            .filter(|&y| buffer[(bar_col, y)].symbol() == "█")
+            .collect();
+        assert!(
+            !thumb_rows.is_empty(),
+            "scrollbar thumb should be rendered at the rightmost left-pane column ({bar_col}); got column:\n{}\nbuffer:\n{}",
+            buffer_column(&buffer, bar_col),
+            buffer_to_string(&buffer),
+        );
+        // The thumb's bottom must extend past the vertical midpoint
+        // of the inner area. The inner area for the left pane spans
+        // y=1..(height-1)=23, so the midpoint is around y=11. At
+        // max scroll the thumb must reach below it.
+        let last_thumb_row = *thumb_rows.iter().max().unwrap();
+        let inner_midpoint = left_pane.y + left_pane.height / 2;
+        assert!(
+            last_thumb_row > inner_midpoint,
+            "thumb's bottom row ({last_thumb_row}) must extend past inner midpoint ({inner_midpoint}) at max scroll; got rows {thumb_rows:?}",
+        );
+    }
+
+    #[test]
+    fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
+        // Regression: pre-fix, the paragraph painted the entire
+        // inner area and the scrollbar overpainted the rightmost
+        // column. `Buffer::set_string` patches styles, so the
+        // selection's `REVERSED` modifier on the underlying cell
+        // bled through onto the scrollbar glyph. Reserving a
+        // dedicated gutter column means scrollbar cells never
+        // carry text from the paragraph.
+        //
+        // Walk the scrollbar column row by row and skip border /
+        // empty cells (the framework draws the pane border around
+        // the inner area). Every *non-blank, non-border* cell in
+        // the scrollbar column must be one of the scrollbar
+        // glyphs — never a borrowed paragraph character.
+        let repo_root =
+            "/home/op/src/proj-with-a-very-long-display-path-that-would-wrap-before-clipping";
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(repo_root))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new(repo_root), repo_root),
+            root: repo_root.to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        for i in 0..30 {
+            snapshot
+                .nodes
+                .push(GraphNode::AgentSession(AgentSessionNode {
+                    id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                    harness_key: "codex".to_string(),
+                    cwd: Some(repo_root.to_string()),
+                    title: None,
+                    last_message_preview: None,
+                    last_active_epoch: None,
+                    session_kind: None,
+                }));
+        }
+        let snapshot = crate::resolve::resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+        let left_pane = split[0];
+        let bar_col = rightmost_inner_column(left_pane);
+        // Borders use box-drawing characters. Allow them through.
+        let border_glyphs = ["─", "│", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"];
+
+        let mut scrollbar_glyph_rows = 0;
+        for y in 0..buffer.area.height {
+            let symbol = buffer[(bar_col, y)].symbol();
+            if symbol.is_empty()
+                || symbol == " "
+                || border_glyphs.contains(&symbol)
+                || SCROLLBAR_GLYPHS.contains(&symbol)
+            {
+                if SCROLLBAR_GLYPHS.contains(&symbol) {
+                    scrollbar_glyph_rows += 1;
+                }
+                continue;
+            }
+            panic!(
+                "scrollbar column {bar_col} row {y} must not contain paragraph text; got {symbol:?}\n{}",
+                buffer_to_string(&buffer)
+            );
+        }
+        assert!(
+            scrollbar_glyph_rows > 0,
+            "expected at least one scrollbar glyph row in column {bar_col}\n{}",
+            buffer_to_string(&buffer),
         );
     }
 
