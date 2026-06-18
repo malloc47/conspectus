@@ -1835,19 +1835,37 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // section-grouped detail when the explorer state isn't ready
     // yet (race during the first SetData).
     if let Some(state) = app.explorer() {
-        let rendered = render_explorer_lines(
-            state,
-            inner.width as usize,
-            app.theme(),
-            app.edge_meta_visible(),
-        );
+        // Render the chip dividers (`Related`, `Other`) at the
+        // narrower content width that `scrollbar_layout` will give
+        // the paragraph once it reserves a gutter for the
+        // scrollbar. Sizing the chip line to `inner.width` instead
+        // would force the divider to overflow by one character at
+        // the gutter boundary — it wraps to the next row and every
+        // cursor row below it lands one line lower than the
+        // per_line_rows math expects, leaving the cursor visible
+        // off the bottom of the viewport.
+        let content_width = inner.width.saturating_sub(1).max(1) as usize;
+        let rendered =
+            render_explorer_lines(state, content_width, app.theme(), app.edge_meta_visible());
         let ExplorerRender { lines, cursor_line } = rendered;
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
         // terminal rows. Without the wrap-aware row count, the
         // header sizing and the cursor-position math both
         // misread how much vertical space each line consumes.
-        let pane_width = inner.width.max(1) as usize;
+        //
+        // The paragraph renders at `content_area.width = inner.width
+        // - 1` once `scrollbar_layout` reserves a gutter for the
+        // scrollbar (it does for any overflowing content). Compute
+        // wrap counts at that narrower width so a line that fits at
+        // the full inner width but spills at the content width —
+        // the `Related` chip divider is the canonical case, sized
+        // to fit "exactly" the pane — gets the row count the
+        // paragraph actually paints. When content fits in the
+        // viewport and the gutter isn't reserved, this overcounts
+        // by at most one row per long line; the worst case is a
+        // tiny bit of slack in `header_height`, which is harmless.
+        let pane_width = inner.width.saturating_sub(1).max(1) as usize;
         let per_line_rows: Vec<usize> = lines
             .iter()
             .map(|line| {
@@ -5657,7 +5675,8 @@ mod tests {
             app.update(Msg::ExplorerNavDown);
         }
 
-        let scrolled = buffer_to_string(&render_to_buffer(&app, area));
+        let buffer = render_to_buffer(&app, area);
+        let scrolled = buffer_to_string(&buffer);
         assert!(
             scrolled.contains("repo-19.git"),
             "last validated row must stay in the viewport after navigating to it: {scrolled}"
@@ -5670,6 +5689,42 @@ mod tests {
             app.explorer_scroll() > 0,
             "scroll offset should have advanced past zero; got {}",
             app.explorer_scroll(),
+        );
+
+        // Regression: the chip divider above the validated rows
+        // (`Related N validated · M other`) is sized to the
+        // paragraph's render width. Pre-fix, the divider's width
+        // was computed against the full inner width; once
+        // `scrollbar_layout` reserved a gutter, the paragraph
+        // rendered at one less column and the divider wrapped a
+        // few characters onto a second row. Every cursor row
+        // below the divider then landed one row lower than the
+        // wrap math predicted, leaving the cursor visible off
+        // the bottom of the viewport. The cursor row (`repo-19`)
+        // must appear *strictly above* the Preview divider, never
+        // at or past its row.
+        let right_pane_x = 50u16..area.width.saturating_sub(1);
+        let cursor_row_y = (0..area.height)
+            .find(|&y| {
+                let line: String = right_pane_x
+                    .clone()
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                line.contains("repo-19.git")
+            })
+            .expect("cursor row visible");
+        let preview_row_y = (0..area.height)
+            .find(|&y| {
+                let line: String = right_pane_x
+                    .clone()
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect();
+                line.contains("Preview")
+            })
+            .expect("preview divider visible");
+        assert!(
+            cursor_row_y < preview_row_y,
+            "cursor row (y={cursor_row_y}) must sit above the Preview divider (y={preview_row_y}); the off-by-one bug from the divider wrap would let it sit at or past the divider\n{scrolled}",
         );
     }
 
