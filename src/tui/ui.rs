@@ -849,13 +849,20 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             + depth_suffix.chars().count()
             + 1;
         let available = width.saturating_sub(fixed_width);
-        if let Some(chain) =
-            crate::tui::explorer::render_breadcrumb_chain(&state.breadcrumb, available.max(8))
-        {
+        if let Some(chain) = crate::tui::explorer::render_breadcrumb_chain(
+            &state.breadcrumb,
+            app.theme(),
+            available.max(8),
+        ) {
+            // The leading ` ◀ ` and trailing `depth N` chrome stays
+            // in `secondary_text`; the chain itself carries its own
+            // per-hop styling (kind glyph in kind color, tag in
+            // secondary_text) so the spans are pushed verbatim.
             spans.push(Span::styled(
-                format!(" ◀ {chain}"),
+                " ◀ ",
                 Style::default().fg(app.theme().secondary_text),
             ));
+            spans.extend(chain.spans);
             spans.push(Span::styled(
                 depth_suffix,
                 Style::default().fg(app.theme().secondary_text),
@@ -4200,13 +4207,16 @@ mod tests {
             drilled.contains("◀"),
             "breadcrumb back-hint should surface in the right-pane title: {drilled}"
         );
-        // T8-038: the breadcrumb chain should surface in compact
-        // `kind:short_tag` form so the operator can see depth at a
-        // glance, with a `depth N` marker so even an elided chain
-        // tells the operator where they are.
+        // T8-038 / H-UI-002: the breadcrumb chain renders each
+        // hop as `<kind glyph> <tag>`, replacing the prior
+        // `kind:short_tag` text form. The previous session hop
+        // should render with the `AgentSession` glyph (●) so the
+        // operator scans depth by symbol rather than reading
+        // verbose kind prefixes.
+        let agent_session_glyph = crate::tui::icons::NodeKind::AgentSession.default_glyph();
         assert!(
-            drilled.contains("session:"),
-            "breadcrumb chain should carry the previous session in short form: {drilled}"
+            drilled.contains(agent_session_glyph),
+            "breadcrumb chain should carry the previous session's kind glyph ({agent_session_glyph}): {drilled}"
         );
         assert!(
             drilled.contains("depth 1"),

@@ -6261,6 +6261,21 @@ do not get lost inside their originating workstreams.
     (CLI table rows, JSON `node_kind` tag per `H-VIS-005`).
     Acceptance under the existing `H-VIS-*` IDs; this story
     promotes the workstream from "candidate" to "scheduled."
+  - Slice landed (breadcrumb chain): `render_breadcrumb_chain`
+    in `src/tui/explorer.rs` now returns a styled `Line` with
+    one `<kind-glyph> <tag>` segment per hop instead of
+    `kind:short_tag` text. The kind comes from `NodeKind::from(
+    &hop.focused)` so the correct glyph + per-kind color land
+    on every segment; the tag is the part after the `kind:` prefix
+    in `BreadcrumbHop::short_label`, with the existing `·xxxx`
+    disambiguation suffix preserved. Elision (full / first …
+    last / only last / fallback) now measures display width across
+    spans. The caller in `right_panel_title` pushes the chain's
+    spans verbatim so the kind color survives. Tests cover the
+    flat plain-text shape, the per-glyph kind color, the
+    elision ladder, and the disambiguation tail. Remaining
+    surfaces (help modal, filter modal, search results,
+    non-TUI) stay open.
   - Blockers: see `H-VIS-001`.
 
 - [x] `H-UI-003` Roll back the detail-pane upstream/downstream
