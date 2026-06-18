@@ -6273,9 +6273,27 @@ do not get lost inside their originating workstreams.
     spans. The caller in `right_panel_title` pushes the chain's
     spans verbatim so the kind color survives. Tests cover the
     flat plain-text shape, the per-glyph kind color, the
-    elision ladder, and the disambiguation tail. Remaining
-    surfaces (help modal, filter modal, search results,
-    non-TUI) stay open.
+    elision ladder, and the disambiguation tail.
+  - Slice landed (search results overlay): `build_match_line` in
+    `src/tui/widgets/search.rs` now inserts a 2-cell kind glyph
+    span (`<glyph> `) between the cursor prefix and the label,
+    so operators scan results by symbol instead of relying on
+    the textual `kind:` prefix some labels carry. The kind is
+    derived from `RowId` via a small `search_row_node_kind`
+    helper that covers Group (via NodeId), AgentSession,
+    AgentSessionMuxCandidate (mux glyph), MuxSession, Pr, and
+    Fork. Pin and Synthetic rows return `None` and the glyph
+    span renders as two blank cells so the label column stays
+    aligned across the result list. ForgePr's glyph falls back
+    to `theme.pr_open` (same dodge as `kind_chip_span` and the
+    breadcrumb renderer, since search results don't carry PR
+    state). Tests cover the kind-color span shape for
+    AgentSession + MuxSession, the two-space fallback for Pin
+    and Synthetic, and an end-to-end `build_match_line`
+    assertion that the agent-session glyph appears in the
+    correct color before the label.
+  - Remaining surfaces (help modal, filter modal, non-TUI
+    outputs) stay open.
   - Blockers: see `H-VIS-001`.
 
 - [x] `H-UI-003` Roll back the detail-pane upstream/downstream

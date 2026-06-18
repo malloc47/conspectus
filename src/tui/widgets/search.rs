@@ -20,6 +20,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::tui::Theme;
 
+use crate::tui::icons::{NodeKind, node_kind_style};
 use crate::tui::rows::RowId;
 use crate::tui::search::{SearchBackend, SearchItem, SearchMatch, snippet_around};
 use crate::tui::widgets::input::TextInputState;
@@ -303,6 +304,13 @@ fn build_match_line(
         prefix.to_string(),
         span_style(false, Style::default()),
     ));
+    // H-UI-002 slice: prepend a kind glyph so operators scan
+    // results by symbol (`● session`, `▣ mux`, `⇄ pr`, …) instead
+    // of relying on the textual `kind:` prefix some labels carry.
+    // RowIds without a NodeKind mapping (Pin, Synthetic) get two
+    // spaces so the label column stays aligned across the result
+    // list — operators don't see the label jiggle row by row.
+    spans.push(search_kind_glyph_span(&m.id, theme, is_cursor));
     spans.push(Span::styled(
         label.clone(),
         span_style(false, Style::default()),
@@ -346,6 +354,56 @@ fn build_match_line(
     }
 
     Line::from(spans)
+}
+
+/// Resolve the NodeKind a search result row represents, when there
+/// is one. `RowId::Pin` and `RowId::Synthetic` are not graph nodes
+/// and return `None`; callers render two spaces in the glyph slot
+/// to keep label-column alignment across the result list.
+fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
+    match id {
+        RowId::Group(node_id) | RowId::AgentSession(node_id) | RowId::MuxSession(node_id) => {
+            Some(NodeKind::from(node_id))
+        }
+        RowId::AgentSessionMuxCandidate { .. } => Some(NodeKind::MuxSession),
+        RowId::Pr(_) => Some(NodeKind::ForgePr),
+        RowId::Fork(_) => Some(NodeKind::Fork),
+        RowId::Pin { .. } | RowId::Synthetic(_) => None,
+    }
+}
+
+/// Build the leading glyph span for a search result row. Two cells
+/// wide: `<glyph> ` for graph-backed rows; `  ` for Pin / Synthetic
+/// rows that don't carry a NodeKind. The glyph keeps its kind color
+/// even on the cursor row — the surrounding `REVERSED` modifier on
+/// the prefix and label already separates the highlighted row from
+/// its neighbors, so leaving the color intact keeps the symbol's
+/// identity legible.
+fn search_kind_glyph_span(id: &RowId, theme: &Theme, is_cursor: bool) -> Span<'static> {
+    let Some(kind) = search_row_node_kind(id) else {
+        return Span::styled(
+            "  ".to_string(),
+            if is_cursor {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            },
+        );
+    };
+    let style = node_kind_style(kind, theme);
+    // ForgePr's slate color is `Color::Reset`; mirror the dodge
+    // `kind_chip_span` and the breadcrumb renderer use — fall back
+    // to `theme.pr_open` since search results don't carry PR state.
+    let color = if matches!(kind, NodeKind::ForgePr) {
+        theme.pr_open
+    } else {
+        style.color
+    };
+    let mut span_style = Style::default().fg(color);
+    if is_cursor {
+        span_style = span_style.add_modifier(Modifier::REVERSED);
+    }
+    Span::styled(format!("{} ", style.glyph), span_style)
 }
 
 fn centered_modal_rect(area: Rect) -> Rect {
@@ -591,6 +649,87 @@ mod tests {
         assert!(!rendered.contains("  · "), "rendered: {rendered}");
         // Label still appears.
         assert!(rendered.contains("puffin/dir"));
+    }
+
+    #[test]
+    fn search_glyph_span_uses_kind_color_for_graph_rows() {
+        // H-UI-002 slice: each result row carries a kind glyph in
+        // its NodeKind color (ADR 0073). An AgentSession row picks
+        // up the AgentSession glyph + `theme.node_agent_session`
+        // color; a MuxSession row picks up the mux glyph + color.
+        use crate::model::MuxSessionId;
+        let theme = Theme::default();
+
+        let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
+        let session_span = search_kind_glyph_span(&RowId::AgentSession(session_id), &theme, false);
+        let session_glyph = NodeKind::AgentSession.default_glyph();
+        assert!(
+            session_span.content.starts_with(session_glyph),
+            "session glyph span content: {:?}",
+            session_span.content,
+        );
+        assert_eq!(session_span.style.fg, Some(theme.node_agent_session));
+
+        let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+        let mux_span = search_kind_glyph_span(&RowId::MuxSession(mux_id), &theme, false);
+        let mux_glyph = NodeKind::MuxSession.default_glyph();
+        assert!(mux_span.content.starts_with(mux_glyph));
+        assert_eq!(mux_span.style.fg, Some(theme.node_mux_session));
+    }
+
+    #[test]
+    fn search_glyph_span_falls_back_to_two_spaces_for_kindless_rows() {
+        // Pin and Synthetic ids aren't graph nodes — they get two
+        // blank cells so the label column lines up with the rows
+        // that do carry a glyph. Without this the operator would
+        // see the label column jiggle by one cell as the cursor
+        // moved between glyph-bearing and kindless rows.
+        let theme = Theme::default();
+        let pin_span = search_kind_glyph_span(
+            &RowId::Pin {
+                pin_id: "ingest".to_string(),
+            },
+            &theme,
+            false,
+        );
+        assert_eq!(pin_span.content, "  ");
+        assert_eq!(pin_span.style.fg, None);
+
+        let synthetic_span = search_kind_glyph_span(&RowId::Synthetic("ungrouped"), &theme, false);
+        assert_eq!(synthetic_span.content, "  ");
+        assert_eq!(synthetic_span.style.fg, None);
+    }
+
+    #[test]
+    fn match_line_includes_kind_glyph_before_label() {
+        // End-to-end on `build_match_line`: the rendered line
+        // should carry the kind glyph between the cursor prefix
+        // and the label so operators scan by symbol.
+        let row = agent_row("abcdef", Some("puffin"));
+        let items = items_from_rows(std::slice::from_ref(&row));
+        let mut state = SearchOverlayState::new();
+        let backend = SubstringBackend;
+        for c in "puf".chars() {
+            state.handle_key(key(KeyCode::Char(c)));
+            state.refresh_matches(&backend, &items);
+        }
+        let m = &state.matches()[0];
+        let theme = Theme::default();
+        let line = build_match_line(
+            items[0].label.to_string(),
+            Some(&items[0]),
+            m,
+            false,
+            40,
+            &theme,
+        );
+        let agent_glyph = NodeKind::AgentSession.default_glyph();
+        let glyph_span = line
+            .spans
+            .iter()
+            .find(|s| s.content == format!("{agent_glyph} "))
+            .expect("kind glyph span present in match line");
+        assert_eq!(glyph_span.style.fg, Some(theme.node_agent_session));
     }
 
     #[test]
