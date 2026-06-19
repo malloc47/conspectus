@@ -6889,6 +6889,56 @@ Cross-cutting expectations across every Tier A swap:
     the tree state machine specifically.
   - Blockers: explorer re-think on the agenda.
 
+- [ ] `H-WIDG-012` Opportunistic `ratatui-macros` sweep across
+  the remaining small widgets and the layout helpers.
+  - Motivation: `H-WIDG-001` closed the five files in the critical
+    path (help / controls / search / pins / ui — `−204 LOC` net),
+    but left two opportunistic remainders parked: the five small
+    widgets that carry a handful of `Span`/`Line`/`Style` sites
+    each, and the layout helpers that build `Layout::default()
+    .constraints(...)` arrays imperatively. Filing them as a
+    bundled follow-on so the workstream does not lose track of
+    them while H-WIDG-002..009 progress.
+  - Scope:
+      - Small widget sweep (target: 1 commit, ~15 LOC delta):
+        - `src/tui/widgets/badge.rs` (2 sites)
+        - `src/tui/widgets/toast.rs` (2 sites — but this file
+          retires entirely if `H-WIDG-003`'s `ratatui-toaster`
+          swap lands first; skip if so)
+        - `src/tui/widgets/multi_select.rs` (3 sites — same
+          retirement caveat under `H-WIDG-002`'s `ratatui-cheese`
+          swap)
+        - `src/tui/widgets/value_modal.rs` (5 sites — same
+          retirement caveat under `H-WIDG-004`'s `tui-popup`
+          swap)
+        - `src/tui/widgets/input.rs` (3 sites)
+      - Layout-macro sweep (target: 1 commit):
+        - Apply `vertical!` / `horizontal!` / `constraints!` to
+          the obvious hot spots: `ui.rs`'s outer header / left /
+          right / status split (the `Layout::default()
+          .direction(...).constraints(...)` chains around the
+          frame), and `src/tui/detail.rs`'s detail-pane vertical
+          stack. Skip layouts that build their constraint arrays
+          conditionally; the macros only help when the slice is
+          literal.
+  - Tests: existing `cargo nextest run --all-targets
+    --all-features` corpus stays green per slice; snapshot
+    regeneration as needed.
+  - Open questions:
+      - Should the workstream wait for the Tier A swap stories
+        (`H-WIDG-002` / `003` / `004`) to land before sweeping the
+        small widgets whose file might retire? Recommend yes for
+        `toast.rs`, `multi_select.rs`, `value_modal.rs` — the
+        retirement absorbs the macro work. `badge.rs` and
+        `input.rs` are safe to sweep anytime.
+      - Whether the layout macros warrant a separate prelude
+        re-export alongside `span!` / `line!`. Decide alongside
+        the prelude question still open on `H-WIDG-001`.
+  - Blockers: ideally lands *after* Tier A swap decisions on
+    `H-WIDG-002` / `003` / `004` so the file-retirement caveats
+    resolve cleanly. `badge.rs` and `input.rs` slices unblocked
+    today.
+
 #### TUI Widget Ecosystem — explicit pass list (Tier D)
 
 Recorded so future audits do not re-relitigate.
