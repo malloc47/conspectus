@@ -6690,23 +6690,23 @@ Cross-cutting expectations across every Tier A swap:
       - Whether `row!` (Table rows) is worth adopting; Conspectus
         builds tables programmatically via `comfy-table`, not
         ratatui Tables, so probably not.
-  - Progress (2026-06-19): five slices have landed across
-    `Cargo.toml` (`"macros"` feature enabled) and four widget files
-    plus a first pass on `ui.rs`. `widgets/help.rs` (−9 LOC),
+  - Progress (2026-06-19): the five target files in scope are
+    fully converted. `widgets/help.rs` (−9 LOC),
     `widgets/controls.rs` (−8 LOC), `widgets/search.rs` (−18 LOC),
-    and `widgets/pins.rs` (−21 LOC) are fully converted at every
-    dense site. `src/tui/ui.rs` is partially converted (−52 LOC):
-    the header / status bar / breadcrumb / focus-marker / group-
-    body-builder helpers all use the macros; the row renderer's
-    selection / disclosure / chip-state branches (~100 remaining
-    `Span::styled` sites) deserve their own focused pass and are
-    left for a follow-up. All 1670 tests stay green per slice;
-    snapshots regenerated where rendering changed. Remaining work
-    for full story closure: complete the ui.rs row renderer pass,
-    sweep the four small widget files marked opportunistic
-    (badge.rs, toast.rs, multi_select.rs, value_modal.rs,
-    input.rs), and apply `vertical!` / `horizontal!` /
-    `constraints!` to the obvious layout hot spots (`detail.rs`
+    `widgets/pins.rs` (−21 LOC), and `src/tui/ui.rs` (−148 LOC
+    across two slices — header / status / breadcrumb first, then
+    row renderers + explorer link rows + detail-pane preview
+    builders) all use `span!` at every dense site. The 33
+    remaining `Span::raw(CONST)` calls in `ui.rs` stay as-is —
+    they accept `&'static str` directly while `span!("...")`
+    would allocate via `format!`. All 1670 tests stay green per
+    slice; snapshots regenerated where rendering changed. Net
+    workstream-wide LOC reduction: **−312** across the six
+    commits. Remaining opportunistic work for full story closure:
+    sweep the small widget files (`badge.rs` 2 sites, `toast.rs`
+    2 sites, `multi_select.rs` 3 sites, `value_modal.rs` 5 sites,
+    `input.rs` 3 sites) and apply `vertical!` / `horizontal!` /
+    `constraints!` to the layout hot spots (`detail.rs`
     detail-pane split, `ui.rs` outer panel split).
   - Blockers: none. Land before the other tiers so the new code
     written for swaps lands in the macro idiom from day one.
