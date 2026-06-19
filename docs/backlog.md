@@ -6630,8 +6630,13 @@ Cross-cutting expectations across every Tier A swap:
 
 - One focused PR per swap; snapshot fixtures regenerate in the
   same commit so the review reads the visual delta directly.
-- ADR 0032 `[tui.theme]` keys keep working; estimate 50–100 LOC of
-  glue per swap.
+- **ADR 0032 `[tui.theme]` glue lands in-scope of the swap, not as
+  a follow-up.** Estimate 50–100 LOC of bridge code per swap
+  (typically a `*_styles_from_theme(&Theme)` helper plus a
+  `.theme(&Theme)` builder on the widget surface, threaded to the
+  call site). H-WIDG-002's two-commit sequence (functional swap →
+  theme glue) was the calibration; subsequent swaps land both in
+  one PR with the visual-verification snapshot in the commit.
 - License posture preserved (MIT or MIT/Apache-2.0 only — no
   copyleft adoptions without an ADR).
 - Snapshot-replayable reducer (ADR 0067) stays the source of truth;
@@ -6711,7 +6716,7 @@ Cross-cutting expectations across every Tier A swap:
   - Blockers: none. Land before the other tiers so the new code
     written for swaps lands in the macro idiom from day one.
 
-- [ ] `H-WIDG-002` Swap `widgets/multi_select.rs` for
+- [x] `H-WIDG-002` Swap `widgets/multi_select.rs` for
   `ratatui-cheese.multi_select`.
   - Motivation: F8-006 shipped the in-tree multi-select as a pure
     state machine — 406 LOC of generic list-with-checkbox logic.
@@ -6721,27 +6726,41 @@ Cross-cutting expectations across every Tier A swap:
     cleanest seam, smallest snapshot blast radius, strongest
     signal on whether the theme/snapshot integration cost is what
     the audit predicted.
-  - Scope:
-      - Add `ratatui-cheese = "0.7"` to `[dependencies]` (MIT,
-        ratatui 0.30, ~96% docs coverage).
-      - Replace `MultiSelectState` / `MultiSelectOutcome` /
-        `MultiSelectItem` with `ratatui-cheese` equivalents.
-        Map item-by-index storage so the App state container does
-        not need to know item types.
-      - Bridge `[tui.theme]` keys to the upstream theme primitive
-        (estimate 50–100 LOC of glue in `src/tui/theme.rs`).
-      - Update controls-overlay harness and mux-state sub-editors
-        (the two current call sites) to dispatch through the new
-        widget's event API.
-      - Regenerate every Ratatui buffer snapshot covering a
-        multi-select panel.
-  - Tests: reducer tests for confirm / cancel / clear / toggle
-    semantics keep their shape; snapshot tests regenerate.
-  - Open questions: whether the upstream widget's keymap matches
-    Conspectus's (Space toggle, Enter confirm, Esc cancel) without
-    a remap shim. Verify during impl; flag if a remap is needed.
+  - Outcome (2026-06-19): landed across two commits — the
+    functional swap (`5389c2d`) and the theme-glue follow-up
+    (`5ae8abe`). `widgets/multi_select.rs` is now a thin shim
+    that wraps the upstream `MultiSelectState` for cursor +
+    selection and `MultiSelect` for per-row rendering;
+    `MultiSelectOutcome` and `MultiSelectItem` stay at the
+    call-site API boundary so `widgets/controls.rs`'s
+    `SubEditor::Harness` / `SubEditor::MuxState` paths needed no
+    change beyond a `theme: &Theme` threading.
+    `cheese_styles_from_theme(&Theme)` bridges
+    `panel_focus_accent` / `placeholder` / `error` / `success`
+    onto upstream `MultiSelectStyles`; `.theme(&Theme)` is the
+    builder hook on `MultiSelectWidget`. Net source delta:
+    `+99 / −120` (the −21 in source includes the
+    `compute_scroll` helper retirement; total upstream surface
+    moved is wider since cursor/select/render are now upstream's
+    responsibility). Honest workstream calibration: the predicted
+    "~400 LOC retires" overestimated the win because the in-tree
+    bordered modal + buffer-clear + handle_key/outcome contract
+    +tests still ship from the shim. Real value: cursor/select
+    state machine + per-row rendering move upstream; future
+    capabilities (limit, validation, disabled options) are free.
+    1669 tests pass byte-identical; visual verification via
+    `--snapshot --snapshot-keys 'f...j..<Enter>'` confirmed the
+    themed `>` cursor and label colors render in project palette
+    instead of upstream defaults.
+  - Followups: keymap matched without a remap shim — upstream
+    `next` / `prev` / `toggle_current` semantics are identical to
+    the in-tree dispatch (Space toggle, Enter confirm, Esc cancel
+    routed by the shim's `handle_key`). `Clone` is hand-written
+    because the upstream state's `Box<dyn Fn>` validator blocks
+    derive; the shim does not use validators so cloning rebuilds
+    cursor + selections + focus.
   - Blockers: `H-WIDG-001` (so the new bridge code lands in the
-    macro idiom).
+    macro idiom). [met]
 
 - [ ] `H-WIDG-003` Swap `widgets/toast.rs` for `ratatui-toaster`.
   - Motivation: in-tree toast surface is 235 LOC carrying
@@ -6905,9 +6924,9 @@ Cross-cutting expectations across every Tier A swap:
         - `src/tui/widgets/toast.rs` (2 sites — but this file
           retires entirely if `H-WIDG-003`'s `ratatui-toaster`
           swap lands first; skip if so)
-        - `src/tui/widgets/multi_select.rs` (3 sites — same
-          retirement caveat under `H-WIDG-002`'s `ratatui-cheese`
-          swap)
+        - `src/tui/widgets/multi_select.rs` (the shim from
+          `H-WIDG-002` already uses the macros in its bordered
+          modal frame — no remaining sites)
         - `src/tui/widgets/value_modal.rs` (5 sites — same
           retirement caveat under `H-WIDG-004`'s `tui-popup`
           swap)
