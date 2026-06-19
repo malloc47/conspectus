@@ -134,7 +134,7 @@ fn draw_controls_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     use crate::tui::widgets::controls::ControlsOverlayWidget;
-    let widget = ControlsOverlayWidget::new(state, app.controls_context());
+    let widget = ControlsOverlayWidget::new(state, app.controls_context(), app.theme());
     frame.render_widget(widget, area);
 }
 

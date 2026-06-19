@@ -9,19 +9,55 @@
 //! centered modal + buffer-clear remain in this module because
 //! they're UI integration code, not widget rendering.
 //!
-//! Theme glue is deliberately omitted in this slice — the upstream
-//! widget renders with its default dark palette. Bridging the
-//! `[tui.theme]` keys (ADR 0032) to `MultiSelectStyles` is a
-//! follow-up; the modal reads correctly without it for now.
+//! Theme bridge: [`cheese_styles_from_theme`] maps the `[tui.theme]`
+//! keys (ADR 0032) onto the upstream
+//! [`ratatui_cheese::multi_select::MultiSelectStyles`] surface so the
+//! sub-editor honors operator overrides. Callers pass a `&Theme` to
+//! [`MultiSelectWidget::theme`] at construction; with no theme the
+//! widget falls back to the upstream dark palette.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::macros::line;
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, StatefulWidget, Widget};
 use ratatui_cheese::multi_select::{
-    MultiSelect as CheeseMultiSelect, MultiSelectOption, MultiSelectState as CheeseMultiSelectState,
+    MultiSelect as CheeseMultiSelect, MultiSelectOption,
+    MultiSelectState as CheeseMultiSelectState, MultiSelectStyles as CheeseMultiSelectStyles,
 };
+
+use crate::tui::Theme;
+
+/// Bridge the project's [`Theme`] (ADR 0032) onto upstream
+/// [`CheeseMultiSelectStyles`]. The bordered modal title is rendered
+/// by this module's [`MultiSelectWidget`], not by the upstream
+/// widget, so the `title` and `description` slots stay defaulted —
+/// they are unreachable in our composition. The remaining slots map:
+///
+/// - `cursor` → `panel_focus_accent` so the `>` indicator pops.
+/// - `checked` → `panel_focus_accent` + BOLD so checked items read
+///   as the operator's selection.
+/// - `unchecked` → unset so labels render as regular text.
+/// - `disabled` → `placeholder` modifier so disabled rows dim
+///   uniformly (no disabled options today; future-proofs the swap).
+/// - `validation_error` / `validation_success` → `error` / `success`
+///   colors so future limit/required validators inherit the project
+///   palette.
+fn cheese_styles_from_theme(theme: &Theme) -> CheeseMultiSelectStyles {
+    CheeseMultiSelectStyles {
+        title: Style::default(),
+        description: Style::default(),
+        cursor: Style::default().fg(theme.panel_focus_accent),
+        checked: Style::default()
+            .fg(theme.panel_focus_accent)
+            .add_modifier(Modifier::BOLD),
+        unchecked: Style::default(),
+        disabled: Style::default().add_modifier(theme.placeholder),
+        validation_error: Style::default().fg(theme.error),
+        validation_success: Style::default().fg(theme.success),
+    }
+}
 
 /// Anything that can label itself in the multi-select list. Two
 /// implementations are provided out of the box — for `&'static str`
@@ -171,11 +207,23 @@ impl MultiSelectState {
 pub struct MultiSelectWidget<'a, T: MultiSelectItem> {
     state: &'a MultiSelectState,
     items: &'a [T],
+    theme: Option<&'a Theme>,
 }
 
 impl<'a, T: MultiSelectItem> MultiSelectWidget<'a, T> {
     pub fn new(state: &'a MultiSelectState, items: &'a [T]) -> Self {
-        Self { state, items }
+        Self {
+            state,
+            items,
+            theme: None,
+        }
+    }
+
+    /// Honor operator `[tui.theme]` overrides (ADR 0032). Without
+    /// this the widget renders with the upstream dark palette.
+    pub fn theme(mut self, theme: &'a Theme) -> Self {
+        self.theme = Some(theme);
+        self
     }
 }
 
@@ -222,7 +270,10 @@ impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
         // Title is rendered by the bordered Block above; pass an
         // empty title to the upstream widget so it doesn't re-stamp
         // a second one inside the inner area.
-        let widget = CheeseMultiSelect::new("", &options);
+        let mut widget = CheeseMultiSelect::new("", &options);
+        if let Some(theme) = self.theme {
+            widget = widget.styles(cheese_styles_from_theme(theme));
+        }
         StatefulWidget::render(&widget, inner_area, buf, &mut mirror);
     }
 }

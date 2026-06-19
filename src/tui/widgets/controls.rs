@@ -35,6 +35,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
+use crate::tui::Theme;
 use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
 use crate::tui::{Grouping, Sort, View};
@@ -491,11 +492,16 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
 pub struct ControlsOverlayWidget<'a> {
     state: &'a ControlsOverlayState,
     ctx: ControlsContext<'a>,
+    theme: &'a Theme,
 }
 
 impl<'a> ControlsOverlayWidget<'a> {
-    pub fn new(state: &'a ControlsOverlayState, ctx: ControlsContext<'a>) -> Self {
-        Self { state, ctx }
+    pub fn new(
+        state: &'a ControlsOverlayState,
+        ctx: ControlsContext<'a>,
+        theme: &'a Theme,
+    ) -> Self {
+        Self { state, ctx, theme }
     }
 }
 
@@ -528,16 +534,18 @@ impl Widget for ControlsOverlayWidget<'_> {
 
         // If a sub-editor is open, render it on top of the overlay.
         if let Some(editor) = self.state.sub_editor() {
-            render_sub_editor(editor, area, buf);
+            render_sub_editor(editor, area, buf, self.theme);
         }
     }
 }
 
-fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer) {
+fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &Theme) {
     match editor {
         SubEditor::Harness(state) => {
             use crate::tui::widgets::multi_select::MultiSelectWidget;
-            MultiSelectWidget::new(state, HARNESS_OPTIONS).render(area, buf);
+            MultiSelectWidget::new(state, HARNESS_OPTIONS)
+                .theme(theme)
+                .render(area, buf);
         }
         SubEditor::MuxState(state) => {
             use crate::tui::widgets::multi_select::MultiSelectWidget;
@@ -545,7 +553,9 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer) {
             // The MultiSelectWidget requires a slice that owns the
             // items by reference; since `as_str` returns &'static
             // str the temporary Vec is fine.
-            MultiSelectWidget::new(state, &labels).render(area, buf);
+            MultiSelectWidget::new(state, &labels)
+                .theme(theme)
+                .render(area, buf);
         }
         SubEditor::MaxAge(state) => {
             use crate::tui::widgets::input::TextInputWidget;
