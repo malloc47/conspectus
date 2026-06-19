@@ -130,6 +130,11 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
 
     let backend = TestBackend::new(snap.width, snap.height);
     let mut terminal = Terminal::new(backend)?;
+    // Mirror the interactive runtime's pre-draw setup so the toast
+    // engine knows where to render. Without this, set_area stays
+    // Rect::default() and any toast queued by `--snapshot-keys`
+    // never paints.
+    app.prepare_toast_for_render(Rect::new(0, 0, snap.width, snap.height));
     terminal.draw(|frame| ui::draw(&app, frame))?;
     let buffer = terminal.backend().buffer();
 

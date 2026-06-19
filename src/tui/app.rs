@@ -205,12 +205,17 @@ pub struct App {
     /// the entire two-panel layout with the native viewer widget
     /// and routes input through its reducer.
     viewer_modal: Option<crate::viewer::state::ViewerState>,
-    /// Active transient toast (T8-040). Non-blocking: input continues
-    /// to flow to the underlying view. The renderer reads `posted_at`
-    /// against the toast's auto-dismiss window; expired toasts simply
-    /// don't paint. Set from the runtime at the `Cmd` boundary so the
-    /// reducer doesn't observe `Instant`.
-    toast: Option<crate::tui::widgets::toast::ToastState>,
+    /// Active transient toast (T8-040, H-WIDG-003). The
+    /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
+    /// lifetime + bordered rendering; the runtime calls
+    /// [`Self::prepare_toast_for_render`] before each draw so
+    /// `tick` retires expired entries and `set_area` follows the
+    /// frame on resize. Wrapped in [`ToastEngineHolder`] because
+    /// the upstream engine does not derive `Debug` — the holder
+    /// satisfies the App-wide `#[derive(Debug)]` with a placeholder
+    /// while transparently delegating via `Deref`/`DerefMut`.
+    /// Non-blocking: input continues to flow to the underlying view.
+    toast: crate::tui::widgets::toast::ToastEngineHolder,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -513,7 +518,9 @@ impl App {
             help_overlay: None,
             value_modal: None,
             viewer_modal: None,
-            toast: None,
+            toast: crate::tui::widgets::toast::ToastEngineHolder(
+                crate::tui::widgets::toast::engine(),
+            ),
             sort,
             filter,
             grouping,
@@ -744,20 +751,33 @@ impl App {
         self.viewer_modal = None;
     }
 
-    /// Active transient toast (T8-040), if any. Expired toasts may
-    /// still be `Some` between frames; the renderer treats expired
-    /// state as no-op via `ToastState::is_expired`.
-    pub fn toast(&self) -> Option<&crate::tui::widgets::toast::ToastState> {
-        self.toast.as_ref()
+    /// Read accessor for the toast engine (T8-040 / H-WIDG-003).
+    /// Returns the engine itself so the renderer can call
+    /// `(&engine).render_ref(...)` directly; `has_toast()` reports
+    /// whether anything is queued.
+    pub fn toast(&self) -> &ratatui_comfy_toaster::ToastEngine<()> {
+        &self.toast
     }
 
     /// Post a transient toast that auto-dismisses after the widget's
     /// `TOAST_DURATION` window. Called from the runtime side (the
-    /// `Cmd` boundary per ADR 0024) so the reducer never observes
-    /// `Instant::now()`. A second call replaces the prior toast and
-    /// resets the timer — newer feedback supersedes older.
+    /// `Cmd` boundary per ADR 0024). Drains any prior queued toast
+    /// first so the newer feedback supersedes — matches the in-tree
+    /// "replacement" contract the reducer test pins.
     pub fn post_toast(&mut self, label: impl Into<String>) {
-        self.toast = Some(crate::tui::widgets::toast::ToastState::new(label));
+        let label = label.into();
+        crate::tui::widgets::toast::engine_dismiss_all(&mut self.toast);
+        self.toast
+            .show_toast(crate::tui::widgets::toast::builder_for(label));
+    }
+
+    /// Update the engine's frame area and retire expired toasts.
+    /// Called by the runtime once per draw — handles terminal
+    /// resize and drives the polled expiry that replaces the prior
+    /// in-tree `is_expired()` check.
+    pub fn prepare_toast_for_render(&mut self, area: ratatui::layout::Rect) {
+        self.toast.set_area(area);
+        self.toast.tick();
     }
 
     /// Resolve whatever copyable value the explorer cursor points at.
@@ -4010,17 +4030,22 @@ mod tests {
 
     #[test]
     fn post_toast_supersedes_prior_toast() {
+        // H-WIDG-003 contract: posting a new toast drains any prior
+        // queued toast so the newer feedback is the one rendered.
+        // Under the upstream engine the queue length stays at 1
+        // after a second post even though the engine itself supports
+        // queueing — `engine_dismiss_all` runs before each show.
         let mut app = app_for_explorer();
+        assert!(!app.toast().has_toast());
         app.post_toast("copied: cwd");
-        let first_at = app.toast().expect("first toast posted").posted_at;
-        // Spin a tiny gap so the second timer is observably newer.
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        assert!(app.toast().has_toast());
+        assert_eq!(app.toast().queue_len(), 1);
         app.post_toast("copied: id");
-        let second = app.toast().expect("second toast posted");
-        assert_eq!(second.label, "copied: id");
-        assert!(
-            second.posted_at > first_at,
-            "newer toast must reset the timer"
+        assert_eq!(
+            app.toast().queue_len(),
+            1,
+            "newer toast must drain the queue"
         );
+        assert_eq!(app.toast().current_message(), Some("copied: id"));
     }
 }

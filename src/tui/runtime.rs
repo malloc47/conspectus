@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::layout::Rect;
 
 use crate::discovery::discover_local_at_roots;
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
@@ -117,6 +118,13 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let poll_timeout = Duration::from_millis(100);
 
     while !app.should_quit() {
+        // H-WIDG-003: refresh the toast engine's area + tick the
+        // expiry timer before each render. set_area handles
+        // terminal resize; tick retires any toast past its
+        // duration so the next render reflects the polled state
+        // the prior in-tree `is_expired()` provided.
+        let size = terminal.size()?;
+        app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
         terminal.draw(|frame| {
             let area = frame.area();
             if app.viewer_modal().is_some() {
@@ -352,6 +360,13 @@ fn static_event_loop(
     let poll_timeout = Duration::from_millis(100);
 
     while !app.should_quit() {
+        // H-WIDG-003: refresh the toast engine's area + tick the
+        // expiry timer before each render. set_area handles
+        // terminal resize; tick retires any toast past its
+        // duration so the next render reflects the polled state
+        // the prior in-tree `is_expired()` provided.
+        let size = terminal.size()?;
+        app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
         terminal.draw(|frame| {
             let area = frame.area();
             if app.viewer_modal().is_some() {

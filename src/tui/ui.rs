@@ -80,11 +80,14 @@ pub fn draw(app: &App, frame: &mut Frame<'_>) {
 }
 
 fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {
-    let Some(state) = app.toast() else {
+    if !app.toast().has_toast() {
         return;
-    };
-    use crate::tui::widgets::toast::ToastWidget;
-    frame.render_widget(ToastWidget::new(state, app.theme()), area);
+    }
+    // The upstream engine impls `Widget for &ToastEngine`, so we
+    // render through the shared borrow without any wrapper widget.
+    // `set_area` + `tick` already ran via `prepare_toast_for_render`
+    // before `terminal.draw` was called.
+    frame.render_widget(app.toast(), area);
 }
 
 fn draw_value_modal(app: &App, frame: &mut Frame<'_>, area: Rect) {
