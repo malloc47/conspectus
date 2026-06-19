@@ -29,8 +29,9 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
@@ -513,17 +514,14 @@ impl Widget for ControlsOverlayWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Controls "));
+            .title(line![" Controls "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
         let lines = self.body_lines();
-        let footer = Line::from(Span::styled(
-            "↑/↓ move · Enter pick · Esc close",
-            Style::default().add_modifier(Modifier::DIM),
-        ));
+        let footer = line![span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")];
         let mut all_lines = lines;
-        all_lines.push(Line::from(""));
+        all_lines.push(line![""]);
         all_lines.push(footer);
         let para = Paragraph::new(all_lines);
         para.render(inner, buf);
@@ -568,7 +566,7 @@ impl ControlsOverlayWidget<'_> {
             let label = format!("{} [{}]", view_label(*view), idx + 1);
             lines.push(row_line(label, active, cursor == row));
         }
-        lines.push(Line::from(""));
+        lines.push(line![""]);
 
         lines.push(section_header(&format!(
             "Grouping ({})",
@@ -580,7 +578,7 @@ impl ControlsOverlayWidget<'_> {
             let label = grouping.as_str().to_string();
             lines.push(row_line(label, active, cursor == row));
         }
-        lines.push(Line::from(""));
+        lines.push(line![""]);
 
         lines.push(section_header(&format!(
             "Filters ({})",
@@ -620,7 +618,7 @@ impl ControlsOverlayWidget<'_> {
             false,
             cursor == ControlsCursor::FilterClear,
         ));
-        lines.push(Line::from(""));
+        lines.push(line![""]);
 
         lines.push(section_header("Sort"));
         for (idx, sort) in SORT_OPTIONS.iter().enumerate() {
@@ -637,10 +635,7 @@ impl ControlsOverlayWidget<'_> {
 }
 
 fn section_header(label: &str) -> Line<'static> {
-    Line::from(Span::styled(
-        label.to_string(),
-        Style::default().add_modifier(Modifier::BOLD),
-    ))
+    line![span!(Modifier::BOLD; "{label}")]
 }
 
 fn row_line(label: String, active: bool, cursored: bool) -> Line<'static> {
@@ -655,7 +650,7 @@ fn row_line(label: String, active: bool, cursored: bool) -> Line<'static> {
         style = style.add_modifier(Modifier::BOLD);
     }
     let active_tag = if active { "  active" } else { "" };
-    Line::from(Span::styled(format!("{marker}{label}{active_tag}"), style))
+    line![span!(style; "{marker}{label}{active_tag}")]
 }
 
 fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
@@ -665,10 +660,7 @@ fn filter_row(name: &str, value: String, cursored: bool) -> Line<'static> {
     } else {
         Style::default()
     };
-    Line::from(Span::styled(
-        format!("{marker}{name:9} {value}  [ Edit ]"),
-        style,
-    ))
+    line![span!(style; "{marker}{name:9} {value}  [ Edit ]")]
 }
 
 fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
@@ -681,7 +673,7 @@ fn checkbox_row(label: &str, checked: bool, cursored: bool) -> Line<'static> {
         style = style.add_modifier(Modifier::BOLD);
     }
     let box_glyph = if checked { "[x]" } else { "[ ]" };
-    Line::from(Span::styled(format!("{marker}{box_glyph} {label}"), style))
+    line![span!(style; "{marker}{box_glyph} {label}")]
 }
 
 fn harness_value(filter: &RowFilter) -> String {
