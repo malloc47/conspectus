@@ -27,6 +27,7 @@
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
+use ratatui::macros::span;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
@@ -164,10 +165,7 @@ fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let prefix =
         format!("Conspectus · {view_label} · {freshness}{agent_cell} agents · {mux_total} mux");
     let prefix_width = prefix.chars().count();
-    let mut spans: Vec<Span<'static>> = vec![Span::styled(
-        prefix,
-        Style::default().add_modifier(Modifier::BOLD),
-    )];
+    let mut spans: Vec<Span<'static>> = vec![span!(Modifier::BOLD; "{prefix}")];
 
     // Append per-harness and per-mux-state chips when the terminal
     // has the room. Drops chip labels first (counts only) and then
@@ -289,29 +287,20 @@ fn append_header_chips(
             }
             first = false;
             spans.push(harness_badge(label, theme));
-            spans.push(Span::raw(format!(" {count}")));
+            spans.push(span!(" {count}"));
         }
         spans.push(Span::raw(SECTION_SEPARATOR));
     }
 
     // Mux chip section: one chip per state with the theme-colored glyph.
-    spans.push(Span::styled(
-        "◉".to_string(),
-        Style::default().fg(theme.mux_attached),
-    ));
-    spans.push(Span::raw(format!(" {}", counts.mux_attached)));
+    spans.push(span!(Style::default().fg(theme.mux_attached); "◉"));
+    spans.push(span!(" {}", counts.mux_attached));
     spans.push(Span::raw(CHIP_SEPARATOR));
-    spans.push(Span::styled(
-        "◐".to_string(),
-        Style::default().fg(theme.mux_ambiguous),
-    ));
-    spans.push(Span::raw(format!(" {}", counts.mux_ambiguous)));
+    spans.push(span!(Style::default().fg(theme.mux_ambiguous); "◐"));
+    spans.push(span!(" {}", counts.mux_ambiguous));
     spans.push(Span::raw(CHIP_SEPARATOR));
-    spans.push(Span::styled(
-        "◯".to_string(),
-        Style::default().add_modifier(theme.mux_unmuxed),
-    ));
-    spans.push(Span::raw(format!(" {}", counts.mux_unmuxed)));
+    spans.push(span!(theme.mux_unmuxed; "◯"));
+    spans.push(span!(" {}", counts.mux_unmuxed));
 }
 
 /// Render the header's agents count. When a filter is active and the
@@ -404,23 +393,15 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
     let settings = render_view_state_chips(app);
 
     let mut spans = vec![
-        Span::styled(
-            format!("{scope} "),
-            Style::default().add_modifier(theme.placeholder),
-        ),
-        Span::styled(settings, Style::default().fg(theme.cwd_mark)),
-        Span::styled(
-            format!(" · {hints}"),
-            Style::default().add_modifier(theme.placeholder),
-        ),
+        span!(theme.placeholder; "{scope} "),
+        span!(Style::default().fg(theme.cwd_mark); "{settings}"),
+        span!(theme.placeholder; " · {hints}"),
     ];
 
     if stale {
-        spans.push(Span::styled(
-            "  stale",
-            Style::default()
-                .fg(theme.warning)
-                .add_modifier(Modifier::BOLD),
+        spans.push(span!(
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
+            "  stale"
         ));
     }
 
@@ -764,25 +745,17 @@ fn left_panel_title(app: &App) -> Line<'static> {
     let mut first = true;
     for &view in crate::tui::widgets::controls::VIEW_OPTIONS {
         if !first {
-            spans.push(Span::styled(
-                " · ",
-                Style::default().fg(theme.secondary_text),
-            ));
+            spans.push(span!(Style::default().fg(theme.secondary_text); " · "));
         }
         first = false;
         let label = view_label(view);
         if view == active {
-            spans.push(Span::styled(
-                label,
-                Style::default()
-                    .fg(theme.panel_focus_accent)
-                    .add_modifier(Modifier::BOLD),
+            spans.push(span!(
+                Style::default().fg(theme.panel_focus_accent).add_modifier(Modifier::BOLD);
+                "{label}"
             ));
         } else {
-            spans.push(Span::styled(
-                label,
-                Style::default().fg(theme.secondary_text),
-            ));
+            spans.push(span!(Style::default().fg(theme.secondary_text); "{label}"));
         }
     }
     spans.push(Span::raw(" "));
@@ -810,15 +783,9 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         } else {
             style.color
         };
-        spans.push(Span::styled(
-            format!("{} ", style.glyph),
-            Style::default().fg(color),
-        ));
+        spans.push(span!(Style::default().fg(color); "{} ", style.glyph));
     }
-    spans.push(Span::styled(
-        label,
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    spans.push(span!(Modifier::BOLD; "{label}"));
     // T8-038: render the full drilldown chain in short `kind:tag`
     // form so the operator can see depth at a glance, with elision
     // (`first … last`) when the chain exceeds the title's available
@@ -858,15 +825,9 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
             // in `secondary_text`; the chain itself carries its own
             // per-hop styling (kind glyph in kind color, tag in
             // secondary_text) so the spans are pushed verbatim.
-            spans.push(Span::styled(
-                " ◀ ",
-                Style::default().fg(app.theme().secondary_text),
-            ));
+            spans.push(span!(Style::default().fg(app.theme().secondary_text); " ◀ "));
             spans.extend(chain.spans);
-            spans.push(Span::styled(
-                depth_suffix,
-                Style::default().fg(app.theme().secondary_text),
-            ));
+            spans.push(span!(Style::default().fg(app.theme().secondary_text); "{depth_suffix}"));
         }
     }
     spans.push(Span::raw(" "));
@@ -900,10 +861,8 @@ fn right_panel_kind_label(app: &App) -> &'static str {
 /// after `Tab`.
 fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     let focused = app.focus() == panel;
-    Span::styled(
-        if focused { "▸ " } else { "  " }.to_string(),
-        Style::default().fg(app.theme().panel_focus_accent),
-    )
+    let glyph = if focused { "▸ " } else { "  " };
+    span!(Style::default().fg(app.theme().panel_focus_accent); "{glyph}")
 }
 
 fn empty_left_panel_text(app: &App) -> String {
@@ -978,10 +937,7 @@ fn append_group_body_spans(
 ) {
     let label = compact_path_label(&group.display_path);
     let label_width = UnicodeWidthStr::width(label.as_str());
-    spans.push(Span::styled(
-        label,
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    spans.push(span!(Modifier::BOLD; "{label}"));
     // Pad the label cell so the secondary content starts at the
     // same column across every visible group row. Skipped when the
     // label is already at or past the target.
@@ -1000,17 +956,12 @@ fn append_group_body_spans(
             }
             _ => secondary,
         };
-        spans.push(Span::styled(
-            format!("  {rendered}"),
-            Style::default().add_modifier(theme.placeholder),
-        ));
+        spans.push(span!(theme.placeholder; "  {rendered}"));
     }
     if group.is_launch_context {
-        spans.push(Span::styled(
-            "  (cwd)".to_string(),
-            Style::default()
-                .fg(theme.cwd_mark)
-                .add_modifier(theme.placeholder),
+        spans.push(span!(
+            Style::default().fg(theme.cwd_mark).add_modifier(theme.placeholder);
+            "  (cwd)"
         ));
     }
 }
@@ -1079,10 +1030,7 @@ fn append_group_summary_spans(
         return;
     }
     let count = format!("({})", summary.agents);
-    spans.push(Span::styled(
-        format!("  {count:>count_width$}"),
-        Style::default().add_modifier(theme.placeholder),
-    ));
+    spans.push(span!(theme.placeholder; "  {count:>count_width$}"));
     if summary.ambiguous > 0 {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
