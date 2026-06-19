@@ -422,7 +422,7 @@ fn push_provider_chips(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>)
             spans.push(Span::raw("  "));
             leading_space = true;
         }
-        spans.push(Span::styled(label.to_string(), style));
+        spans.push(span!(style; "{label}"));
     };
 
     if status.tmux_disabled {
@@ -1033,11 +1033,9 @@ fn append_group_summary_spans(
     spans.push(span!(theme.placeholder; "  {count:>count_width$}"));
     if summary.ambiguous > 0 {
         spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            "⚠",
-            Style::default()
-                .fg(theme.warning)
-                .add_modifier(Modifier::BOLD),
+        spans.push(span!(
+            Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
+            "⚠"
         ));
     }
 }
@@ -1138,62 +1136,38 @@ fn render_left_row(
             spans.extend(render_mux_session_spans(mux, theme, now, remaining));
         }
         RowKind::Pr(pr) => {
-            spans.push(Span::styled(
-                pr.repo_display.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+            spans.push(span!(Modifier::BOLD; "{}", pr.repo_display.clone()));
             if let Some(state) = pr.state.as_deref() {
                 let style = match state {
                     "open" => Style::default().fg(theme.mux_attached),
                     "closed" | "merged" => Style::default().add_modifier(theme.placeholder),
                     _ => Style::default().fg(theme.secondary_text),
                 };
-                spans.push(Span::styled(format!("  {state}"), style));
+                spans.push(span!(style; "  {state}"));
             }
             if pr.is_draft {
-                spans.push(Span::styled(
-                    "  draft",
-                    Style::default().add_modifier(theme.placeholder),
-                ));
+                spans.push(span!(theme.placeholder; "  draft"));
             }
             if let Some(branch) = &pr.branch_name {
-                spans.push(Span::styled(
-                    format!("  {branch}"),
-                    Style::default().add_modifier(theme.placeholder),
-                ));
+                spans.push(span!(theme.placeholder; "  {branch}"));
             }
             if let Some(updated) = &pr.updated_recency {
-                spans.push(Span::styled(
-                    format!("  {updated}"),
-                    Style::default().fg(theme.secondary_text),
-                ));
+                spans.push(span!(Style::default().fg(theme.secondary_text); "  {updated}"));
             }
-            spans.push(Span::styled(
-                format!("  ({})", pr.attached_count),
-                Style::default().add_modifier(theme.placeholder),
-            ));
+            spans.push(span!(theme.placeholder; "  ({})", pr.attached_count));
         }
         RowKind::Fork(fork) => {
-            spans.push(Span::styled(
-                fork.fork_label.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+            spans.push(span!(Modifier::BOLD; "{}", fork.fork_label.clone()));
             if let Some(parent) = &fork.parent_label {
-                spans.push(Span::styled(
-                    format!("  parent:{parent}"),
-                    Style::default().fg(theme.secondary_text),
+                spans.push(span!(
+                    Style::default().fg(theme.secondary_text);
+                    "  parent:{parent}"
                 ));
             }
             if let Some(scope) = &fork.scope {
-                spans.push(Span::styled(
-                    format!("  {scope}"),
-                    Style::default().add_modifier(theme.placeholder),
-                ));
+                spans.push(span!(theme.placeholder; "  {scope}"));
             }
-            spans.push(Span::styled(
-                format!("  ({})", fork.child_count),
-                Style::default().add_modifier(theme.placeholder),
-            ));
+            spans.push(span!(theme.placeholder; "  ({})", fork.child_count));
         }
         RowKind::Pin(pin) => {
             // Pinned, but unbound — dim "📌" marker + display name.
@@ -1201,20 +1175,15 @@ fn render_left_row(
             // H-PIN-016's TUI polish; for the v1 slice we reuse the
             // existing `placeholder` modifier to keep the row visibly
             // distinct without inventing a new Theme key.
-            spans.push(Span::styled(
-                "📌  ".to_string(),
-                Style::default().add_modifier(theme.placeholder),
-            ));
-            spans.push(Span::styled(
-                pin.display_name.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                format!(
-                    "  ({} · {} · {} · {})",
-                    pin.state_label, pin.harness_label, pin.cwd_display, pin.mux_label
-                ),
-                Style::default().add_modifier(theme.placeholder),
+            spans.push(span!(theme.placeholder; "📌  "));
+            spans.push(span!(Modifier::BOLD; "{}", pin.display_name.clone()));
+            spans.push(span!(
+                theme.placeholder;
+                "  ({} · {} · {} · {})",
+                pin.state_label,
+                pin.harness_label,
+                pin.cwd_display,
+                pin.mux_label
             ));
         }
         RowKind::Repo(repo) => {
@@ -1250,10 +1219,7 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     // explicit node lookup commands.
     let session_id =
         truncate_to_width_no_marker(&session.session.session_key, SESSION_ID_COLUMN_WIDTH);
-    spans.push(Span::styled(
-        format!("{session_id}  "),
-        Style::default().fg(theme.secondary_text),
-    ));
+    spans.push(span!(Style::default().fg(theme.secondary_text); "{session_id}  "));
     // The badge widget pads internally so every chip is the same
     // width regardless of label length; no external padding span
     // needed.
@@ -1263,7 +1229,7 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     let recency_style = recency_bucket(Some(now), session.activity_epoch)
         .map(|bucket| bucket.style(theme))
         .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
-    spans.push(Span::styled(format!("{recency:>4}"), recency_style));
+    spans.push(span!(recency_style; "{recency:>4}"));
     spans.push(Span::raw("  "));
     spans.push(mux_indicator_span(session.mux_state, theme));
     if session.pin_id.is_some() {
@@ -1271,10 +1237,7 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         // finalized alongside the rest of the H-PIN-016 styling
         // polish; for the v1 slice we reuse `placeholder` so the
         // marker reads without depending on a new theme key.
-        spans.push(Span::styled(
-            "  📌",
-            Style::default().add_modifier(theme.placeholder),
-        ));
+        spans.push(span!(theme.placeholder; "  📌"));
     }
     if let Some(label) = session.display_label().filter(|label| !label.is_empty()) {
         let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
@@ -1287,16 +1250,17 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         } else {
             Style::default()
         };
-        spans.push(Span::styled(format!("  {label}"), style));
+        spans.push(span!(style; "  {label}"));
     }
     if let Some(project) = session
         .project_display
         .as_deref()
         .filter(|project| !project.is_empty())
     {
-        spans.push(Span::styled(
-            format!("  {:<16}", truncate_to_width(project, 16)),
-            Style::default().fg(theme.secondary_text),
+        spans.push(span!(
+            Style::default().fg(theme.secondary_text);
+            "  {:<16}",
+            truncate_to_width(project, 16)
         ));
     }
     spans
@@ -1316,11 +1280,10 @@ fn append_session_preview(
         return;
     }
     spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        truncate_to_width(preview, width - used - 2),
-        Style::default()
-            .fg(theme.secondary_text)
-            .add_modifier(Modifier::ITALIC),
+    spans.push(span!(
+        Style::default().fg(theme.secondary_text).add_modifier(Modifier::ITALIC);
+        "{}",
+        truncate_to_width(preview, width - used - 2)
     ));
 }
 
@@ -1335,31 +1298,25 @@ fn render_repo_spans(repo: &crate::tui::rows::RepoRow, theme: &Theme) -> Vec<Spa
     const KIND_BADGE_WIDTH: usize = 6; // ` repo `
     let mut spans = Vec::new();
     let short_id = truncate_to_width_no_marker(&repo.short_id, SHORT_ID_COLUMN_WIDTH);
-    spans.push(Span::styled(
-        format!("{short_id:<SHORT_ID_COLUMN_WIDTH$}  "),
-        Style::default().fg(theme.secondary_text),
+    spans.push(span!(
+        Style::default().fg(theme.secondary_text);
+        "{short_id:<SHORT_ID_COLUMN_WIDTH$}  "
     ));
-    spans.push(Span::styled(
-        format!("{:<KIND_BADGE_WIDTH$}", " repo "),
-        Style::default()
-            .fg(theme.secondary_text)
-            .add_modifier(theme.badge),
+    spans.push(span!(
+        Style::default().fg(theme.secondary_text).add_modifier(theme.badge);
+        "{:<KIND_BADGE_WIDTH$}",
+        " repo "
     ));
     spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        repo.display_name.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    spans.push(span!(Modifier::BOLD; "{}", repo.display_name.clone()));
     if let Some(path) = repo
         .canonical_path
         .as_deref()
         .filter(|p| !p.is_empty() && *p != repo.display_name)
     {
-        spans.push(Span::styled(
-            format!("  {path}"),
-            Style::default()
-                .fg(theme.secondary_text)
-                .add_modifier(Modifier::DIM),
+        spans.push(span!(
+            Style::default().fg(theme.secondary_text).add_modifier(Modifier::DIM);
+            "  {path}"
         ));
     }
     spans
@@ -1384,9 +1341,10 @@ fn render_mux_session_spans(
     // steals horizontal space.
     let label = compact_mux_native_id(&mux.native_id);
     let label_width = mux_label_column_width(width);
-    spans.push(Span::styled(
-        pad_to_width(truncate_to_width_strict(&label, label_width), label_width),
-        Style::default().fg(theme.link_id),
+    spans.push(span!(
+        Style::default().fg(theme.link_id);
+        "{}",
+        pad_to_width(truncate_to_width_strict(&label, label_width), label_width)
     ));
 
     if width <= spans_width(&spans) + 4 {
@@ -1405,41 +1363,33 @@ fn render_mux_session_spans(
         .map(|bucket| bucket.style(theme))
         .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
     spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        format!("{:>4}", truncate_to_width_strict(&recency, 4)),
-        recency_style,
+    spans.push(span!(
+        recency_style;
+        "{:>4}",
+        truncate_to_width_strict(&recency, 4)
     ));
 
     spans.push(Span::raw("  "));
     match mux.client_attached {
         Some(true) => {
-            spans.push(Span::styled("◉", Style::default().fg(theme.mux_attached)));
+            spans.push(span!(Style::default().fg(theme.mux_attached); "◉"));
         }
         Some(false) => {
-            spans.push(Span::styled(
-                "◯",
-                Style::default().add_modifier(theme.mux_unmuxed),
-            ));
+            spans.push(span!(theme.mux_unmuxed; "◯"));
         }
         None => {
-            spans.push(Span::styled(
-                "?",
-                Style::default().add_modifier(theme.placeholder),
-            ));
+            spans.push(span!(theme.placeholder; "?"));
         }
     }
     if mux.ambiguous_count > 0 {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled("◐", Style::default().fg(theme.mux_ambiguous)));
+        spans.push(span!(Style::default().fg(theme.mux_ambiguous); "◐"));
     }
     if mux.pin_id.is_some() {
         // Bound-pin marker on the mux row. Same glyph the agent-
         // session row uses (ui.rs:1027) so pin-bound muxes scan
         // the same way pin-bound sessions do.
-        spans.push(Span::styled(
-            "  📌",
-            Style::default().add_modifier(theme.placeholder),
-        ));
+        spans.push(span!(theme.placeholder; "  📌"));
     }
 
     append_mux_single_session_preview(&mut spans, mux, theme, width);
@@ -1455,10 +1405,7 @@ fn append_mux_agent_labels(
     use crate::tui::widgets::badge::harness_badge;
 
     if mux.agent_labels.is_empty() {
-        spans.push(Span::styled(
-            " no agent ".to_string(),
-            Style::default().add_modifier(theme.placeholder),
-        ));
+        spans.push(span!(theme.placeholder; " no agent "));
         return;
     }
 
@@ -1472,9 +1419,9 @@ fn append_mux_agent_labels(
 
     let hidden_labels = mux.agent_labels.len().saturating_sub(max_labels);
     if hidden_labels > 0 {
-        spans.push(Span::styled(
-            format!(" +{hidden_labels}"),
-            Style::default().fg(theme.secondary_text),
+        spans.push(span!(
+            Style::default().fg(theme.secondary_text);
+            " +{hidden_labels}"
         ));
     }
 }
@@ -1506,11 +1453,10 @@ fn append_mux_single_session_preview(
         return;
     }
     spans.push(Span::raw("  "));
-    spans.push(Span::styled(
-        truncate_to_width(preview, width - used - 2),
-        Style::default()
-            .fg(theme.secondary_text)
-            .add_modifier(Modifier::ITALIC),
+    spans.push(span!(
+        Style::default().fg(theme.secondary_text).add_modifier(Modifier::ITALIC);
+        "{}",
+        truncate_to_width(preview, width - used - 2)
     ));
 }
 
@@ -1524,17 +1470,14 @@ fn spans_width(spans: &[Span<'_>]) -> usize {
 fn render_candidate_spans(candidate: &MuxCandidateRow, theme: &Theme) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let glyph = if candidate.is_preferred {
-        Span::styled("◉ ", Style::default().fg(theme.mux_attached))
+        span!(Style::default().fg(theme.mux_attached); "◉ ")
     } else {
-        Span::styled("◯ ", Style::default().add_modifier(theme.mux_unmuxed))
+        span!(theme.mux_unmuxed; "◯ ")
     };
     spans.push(glyph);
     spans.push(Span::raw(compact_mux_label(&candidate.mux_label)));
     if candidate.is_preferred {
-        spans.push(Span::styled(
-            "  (preferred)".to_string(),
-            Style::default().add_modifier(theme.placeholder),
-        ));
+        spans.push(span!(theme.placeholder; "  (preferred)"));
     }
     spans
 }
@@ -1551,10 +1494,7 @@ fn render_candidate_spans(candidate: &MuxCandidateRow, theme: &Theme) -> Vec<Spa
 /// follows `theme.pr_*`.
 fn node_kind_glyph_span(kind: NodeKind, theme: &Theme) -> Span<'static> {
     let style = node_kind_style(kind, theme);
-    Span::styled(
-        format!("{} ", style.glyph),
-        Style::default().fg(style.color),
-    )
+    span!(Style::default().fg(style.color); "{} ", style.glyph)
 }
 
 /// Variant of [`node_kind_glyph_span`] for PR rows: emits the
@@ -1574,7 +1514,7 @@ fn forge_pr_glyph_span(pr: &PrRow, theme: &Theme) -> Span<'static> {
             _ => theme.pr_open,
         }
     };
-    Span::styled(format!("{} ", style.glyph), Style::default().fg(color))
+    span!(Style::default().fg(color); "{} ", style.glyph)
 }
 
 /// Map a [`GroupRow`] to its node kind so the renderer can stamp the
@@ -1619,9 +1559,9 @@ fn mux_indicator_span(state: MuxIndicator, theme: &Theme) -> Span<'static> {
     // Both `Ambiguous` and `Unmuxed` fail that test and share the `◯`
     // glyph — ambiguity surfaces only on the enclosing group row.
     match state {
-        MuxIndicator::Attached => Span::styled("◉", Style::default().fg(theme.mux_attached)),
+        MuxIndicator::Attached => span!(Style::default().fg(theme.mux_attached); "◉"),
         MuxIndicator::Ambiguous { .. } | MuxIndicator::Unmuxed => {
-            Span::styled("◯", Style::default().add_modifier(theme.mux_unmuxed))
+            span!(theme.mux_unmuxed; "◯")
         }
     }
 }
@@ -1635,7 +1575,7 @@ fn disclosure_span(row: &crate::tui::rows::Row, app: &App) -> Span<'static> {
     } else {
         "▶ "
     };
-    Span::styled(glyph, Style::default().fg(app.theme().disclosure))
+    span!(Style::default().fg(app.theme().disclosure); "{glyph}")
 }
 
 fn row_indent(depth: u8) -> String {
@@ -1774,9 +1714,10 @@ fn fit_spans_to_width(mut spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'
         let remaining = width.saturating_sub(used);
         if remaining > 0 {
             let style = span.style;
-            out.push(Span::styled(
-                truncate_to_width_strict(span.content.as_ref(), remaining),
-                style,
+            out.push(span!(
+                style;
+                "{}",
+                truncate_to_width_strict(span.content.as_ref(), remaining)
             ));
         }
         break;
@@ -2181,10 +2122,7 @@ fn render_node_field_line(
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    let label = Span::styled(
-        format!("  {:<14}", field.label),
-        Style::default().add_modifier(Modifier::BOLD),
-    );
+    let label = span!(Modifier::BOLD; "  {:<14}", field.label);
     let mut spans = vec![label];
     // ADR 0073 §3: render the kind-chip glyph before the value so the
     // chip stays anchored beside the label even when the value wraps
@@ -2194,18 +2132,16 @@ fn render_node_field_line(
         spans.push(kind_chip_span(kind, theme));
         spans.push(Span::raw(" "));
     }
-    spans.push(Span::styled(field.value.clone(), style));
+    spans.push(span!(style; "{}", field.value.clone()));
     if field.long_value.is_some() {
-        spans.push(Span::styled(
-            "  (truncated · o)".to_string(),
-            Style::default().add_modifier(theme.placeholder),
-        ));
+        spans.push(span!(theme.placeholder; "  (truncated · o)"));
     }
     if let Some(annotation) = field.annotation {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            annotation.to_string(),
-            Style::default().fg(theme.warning),
+        spans.push(span!(
+            Style::default().fg(theme.warning);
+            "{}",
+            annotation
         ));
     }
     Line::from(spans)
@@ -2224,10 +2160,7 @@ fn render_node_field_line(
 /// directly off the row.
 fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
     let Some(node_kind) = NodeKind::from_snake_case(kind) else {
-        return Span::styled(
-            "?".to_string(),
-            Style::default().add_modifier(theme.placeholder),
-        );
+        return span!(theme.placeholder; "?");
     };
     let style = node_kind_style(node_kind, theme);
     let color = if matches!(node_kind, NodeKind::ForgePr) {
@@ -2235,7 +2168,7 @@ fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
     } else {
         style.color
     };
-    Span::styled(style.glyph, Style::default().fg(color))
+    span!(Style::default().fg(color); "{}", style.glyph)
 }
 
 /// Width of the verb column in row lines (ADR 0074 §3 mockup). The
@@ -2293,19 +2226,11 @@ fn render_other_link_line(
     use crate::tui::explorer::EdgeStateLabel;
     let (indent, prefix_span, label_style) = match link.edge_state {
         EdgeStateLabel::Conflict => {
-            let prefix = Span::styled(
-                "⚠ ".to_string(),
-                Style::default()
-                    .fg(theme.edge_conflict)
-                    .add_modifier(Modifier::BOLD),
-            );
-            (
-                "    ",
-                Some(prefix),
-                Style::default()
-                    .fg(theme.edge_conflict)
-                    .add_modifier(Modifier::BOLD),
-            )
+            let conflict_style = Style::default()
+                .fg(theme.edge_conflict)
+                .add_modifier(Modifier::BOLD);
+            let prefix = span!(conflict_style; "⚠ ");
+            ("    ", Some(prefix), conflict_style)
         }
         EdgeStateLabel::AltOf(_) | EdgeStateLabel::Resolves => {
             ("      ", None, Style::default().fg(theme.edge_alt_of))
@@ -2353,10 +2278,10 @@ fn render_related_row(
         }
         spans.push(prefix);
     }
-    spans.push(Span::styled(verb_text, row_style));
+    spans.push(span!(row_style; "{verb_text}"));
     spans.push(kind_chip);
     spans.push(Span::raw(" "));
-    spans.push(Span::styled(link.neighbor_label.clone(), label_style));
+    spans.push(span!(label_style; "{}", link.neighbor_label.clone()));
     if show_edge_meta {
         let trailing = format!(
             "  · {} · {} · {}",
@@ -2364,7 +2289,7 @@ fn render_related_row(
             link.confidence.snake_case(),
             link.state.snake_case(),
         );
-        spans.push(Span::styled(trailing, label_style));
+        spans.push(span!(label_style; "{trailing}"));
     }
     Line::from(spans)
 }
@@ -2395,7 +2320,7 @@ fn render_other_header_line(
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    Line::from(Span::styled(text, style))
+    Line::from(span!(style; "{text}"))
 }
 
 /// Render an Other-zone unresolved-evidence row. Shape mirrors
@@ -2414,7 +2339,7 @@ fn render_other_unresolved_line(
     if highlight {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    Line::from(Span::styled(text, style))
+    Line::from(span!(style; "{text}"))
 }
 
 fn unresolved_evidence_summary(row: &crate::tui::explorer::UnresolvedRow) -> String {
@@ -2476,9 +2401,9 @@ fn draw_explorer_preview(
             state: link_state,
             edge_state,
         } => {
-            lines.push(Line::from(Span::styled(
-                format!("  neighbor    {neighbor_label}"),
-                Style::default().add_modifier(Modifier::BOLD),
+            lines.push(Line::from(span!(
+                Modifier::BOLD;
+                "  neighbor    {neighbor_label}"
             )));
             for field in fields {
                 lines.push(render_node_field_line(field, false, theme));
@@ -2491,11 +2416,8 @@ fn draw_explorer_preview(
                 edge_state.snake_case(),
             );
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<14}", "edge"),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(edge_value, Style::default().fg(theme.warning)),
+                span!(Modifier::BOLD; "  {:<14}", "edge"),
+                span!(Style::default().fg(theme.warning); "{edge_value}"),
             ]));
         }
         RowPreview::Unresolved {
@@ -2505,9 +2427,9 @@ fn draw_explorer_preview(
             confidence,
             state: link_state,
         } => {
-            lines.push(Line::from(Span::styled(
-                format!("  unresolved  {node_type}"),
-                Style::default().add_modifier(Modifier::BOLD),
+            lines.push(Line::from(span!(
+                Modifier::BOLD;
+                "  unresolved  {node_type}"
             )));
             for (label, value) in [
                 ("harness_key", evidence.harness_key.as_deref()),
@@ -2517,27 +2439,19 @@ fn draw_explorer_preview(
             ] {
                 if let Some(value) = value {
                     lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("  {:<14}", label),
-                            Style::default().add_modifier(Modifier::BOLD),
-                        ),
+                        span!(Modifier::BOLD; "  {label:<14}"),
                         Span::raw(value.to_string()),
                     ]));
                 }
             }
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<14}", "edge"),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(
-                        "{} · {} · {}",
-                        provenance.snake_case(),
-                        confidence.snake_case(),
-                        link_state.snake_case(),
-                    ),
-                    Style::default().add_modifier(theme.placeholder),
+                span!(Modifier::BOLD; "  {:<14}", "edge"),
+                span!(
+                    theme.placeholder;
+                    "{} · {} · {}",
+                    provenance.snake_case(),
+                    confidence.snake_case(),
+                    link_state.snake_case()
                 ),
             ]));
         }
@@ -2862,20 +2776,15 @@ fn chip_divider_line(
     let suffix_width = suffix_text.chars().count();
     let trailing_rule = 2;
     let leading_rule = width.saturating_sub(chip_width + suffix_width + trailing_rule);
-    let chip_span = Span::styled(
-        chip_text,
-        Style::default()
-            .fg(theme.panel_focus_accent)
-            .add_modifier(theme.badge),
+    let chip_span = span!(
+        Style::default().fg(theme.panel_focus_accent).add_modifier(theme.badge);
+        "{chip_text}"
     );
     let suffix_span = (suffix_width > 0)
-        .then(|| Span::styled(suffix_text, Style::default().fg(theme.secondary_text)));
+        .then(|| span!(Style::default().fg(theme.secondary_text); "{suffix_text}"));
     let mut spans = Vec::with_capacity(4);
     if leading_rule > 0 {
-        spans.push(Span::styled(
-            "─".repeat(leading_rule),
-            Style::default().add_modifier(theme.divider),
-        ));
+        spans.push(span!(theme.divider; "{}", "─".repeat(leading_rule)));
     }
     match anchor {
         ChipAnchor::Left => {
@@ -2891,25 +2800,20 @@ fn chip_divider_line(
             spans.push(chip_span);
         }
     }
-    spans.push(Span::styled(
-        "─".repeat(trailing_rule),
-        Style::default().add_modifier(theme.divider),
-    ));
+    spans.push(span!(theme.divider; "{}", "─".repeat(trailing_rule)));
     Line::from(spans)
 }
 
 fn render_header_field(field: &HeaderField, section: SectionKind, theme: &Theme) -> Line<'static> {
-    let label = Span::styled(
-        format!("{:<10}", field.label),
-        Style::default().add_modifier(Modifier::BOLD),
-    );
+    let label = span!(Modifier::BOLD; "{:<10}", field.label);
     let value_style = field_value_style(section, field, theme);
-    let mut spans = vec![label, Span::styled(field.value.clone(), value_style)];
+    let mut spans = vec![label, span!(value_style; "{}", field.value.clone())];
     if let Some(annotation) = field.annotation {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            annotation.to_string(),
-            Style::default().fg(theme.warning),
+        spans.push(span!(
+            Style::default().fg(theme.warning);
+            "{}",
+            annotation
         ));
     }
     Line::from(spans)
