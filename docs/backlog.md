@@ -6583,6 +6583,313 @@ do not get lost inside their originating workstreams.
     resolver-side and renderer-side stories agree on what
     "candidate fan-out" means.
 
+### TUI Widget Ecosystem Adoption (H-WIDG-*)
+
+Posture shift: the TUI carries ~5.2k LOC of in-house widget code
+across `src/tui/widgets/` (badge, controls, help, input,
+multi_select, pins, search, toast, value_modal). Recent hardening
+cycles (H-UI-001..008, fix(tui) commits on narrow-pane truncation,
+wrap-attached chips, scrollbar columns) have repeatedly traced
+defects back to bespoke primitives. This workstream commits to a
+more dep-friendly posture: prefer well-maintained ratatui-ecosystem
+crates over in-tree reimplementations where the seam is clean, with
+ADR 0067 snapshot tests as the regression net per swap.
+
+Adoption tiers (cribbed from the dep landscape audit):
+
+- **Tier A** — high-confidence drop-ins that retire substantial
+  in-tree LOC. Each is conceptually 1:1 with an existing widget;
+  effort dominated by snapshot-fixture regeneration and ADR 0032
+  theme glue.
+- **Tier B** — capability-add adoptions for surfaces Conspectus
+  does not have yet. Gated on a concrete trigger story.
+- **Tier C** — strategic kit evaluation. `rat-widget` is the one
+  upstream that could plausibly absorb several in-tree forms under
+  one design system. Spike before commit.
+- **Tier D** — explicit pass list (frameworks, gated pickers,
+  tree-widget extraction). Recorded so future audits don't
+  re-relitigate.
+
+Dependency shape:
+
+```
+H-WIDG-001 (macros cleanup) ──┬─→ H-WIDG-002 (multi_select → ratatui-cheese)
+                              ├─→ H-WIDG-003 (toast → ratatui-toaster)
+                              ├─→ H-WIDG-004 (overlay framing → tui-popup)
+                              ├─→ H-WIDG-005 (help → ratatui-cheese.help)
+                              ├─→ H-WIDG-006 (tui-textarea, gated)
+                              ├─→ H-WIDG-007 (tui-skeleton, gated on T8-007)
+                              ├─→ H-WIDG-008 (throbber-widgets-tui, gated)
+                              └─→ H-WIDG-009 (rat-widget kit spike)
+                                          │
+                                          ├─→ H-WIDG-010 (ratatui-explorer cwd picker, gated)
+                                          └─→ H-WIDG-011 (tui-tree-widget explorer extract, deferred)
+```
+
+Cross-cutting expectations across every Tier A swap:
+
+- One focused PR per swap; snapshot fixtures regenerate in the
+  same commit so the review reads the visual delta directly.
+- ADR 0032 `[tui.theme]` keys keep working; estimate 50–100 LOC of
+  glue per swap.
+- License posture preserved (MIT or MIT/Apache-2.0 only — no
+  copyleft adoptions without an ADR).
+- Snapshot-replayable reducer (ADR 0067) stays the source of truth;
+  no widget that owns the event loop is adopted into the runtime.
+
+- [ ] `H-WIDG-001` Adopt `ratatui-macros` for `Span` / `Line` /
+  `Text` / layout boilerplate.
+  - Motivation: `ratatui-macros` 0.7 ships `span!` / `line!` /
+    `text!` / `constraints!` / `vertical!` / `horizontal!` / `row!`
+    macros that retire the `Span::raw / Span::styled / Line::from(
+    vec![…]) / Style::default().add_modifier(…)` chains that
+    dominate dense renderer code. It is already in `Cargo.lock`
+    transitively (via `tui-markdown`); the ratatui 0.30 facade
+    re-exports it as `ratatui::macros` behind the `macros` feature
+    flag, which the current Conspectus configuration
+    (`default-features = false, features = ["crossterm"]`) does
+    *not* enable. This is the lowest-risk forcing function for the
+    workstream — pure cleanup, zero new direct deps, zero new
+    runtime behavior.
+  - Scope:
+      - Add `"macros"` to the ratatui feature list in `Cargo.toml`.
+      - Sweep `src/tui/ui.rs` (242 Span/Line/Style call sites in
+        6287 LOC), `src/tui/widgets/pins.rs` (56 sites in 1733
+        LOC), `src/tui/widgets/search.rs` (24/756),
+        `src/tui/widgets/help.rs` (16/598), and
+        `src/tui/widgets/controls.rs` (16/1142) — the five files
+        carrying ~95% of the renderer boilerplate. Smaller files
+        (`badge.rs`, `toast.rs`, `multi_select.rs`,
+        `value_modal.rs`, `input.rs`) opportunistic only.
+      - Land in reviewable slices: one focused widget file per
+        commit so snapshot regeneration is per-file, not a single
+        sprawling diff.
+      - Where a style combines `Style::default().fg(c)
+        .add_modifier(BOLD)`, build the Style outside the macro
+        and pass it as `span!(style; "…")` — macro syntax only
+        cleanly accepts a single Color/Modifier/Style.
+      - Use `line!` / `text!` for static keymaps and chip
+        compositions; keep manual `Line::from` for spans built in
+        loops where the macro buys nothing.
+      - Use `vertical!` / `horizontal!` / `constraints!` where
+        layout call sites are dense; the explorer detail pane
+        (`src/tui/detail.rs`, 2679 LOC) and `ui.rs` outer panel
+        split are the obvious candidates.
+  - Tests: the existing `cargo nextest run --all-targets
+    --all-features` corpus must stay green. Ratatui buffer
+    snapshots regenerate where rendering changed; insta should
+    show byte-identical output for pure mechanical conversions and
+    only meaningful diffs where a style consolidation altered the
+    output. Snapshot review is the visual proof that no semantic
+    drift slipped in.
+  - Open questions:
+      - Whether the macros should be re-exported under a project
+        prelude (`crate::tui::macros::*`) to localize style and
+        survive a future ratatui re-org. Recommend yes once two or
+        more files import the same macro set.
+      - Whether `row!` (Table rows) is worth adopting; Conspectus
+        builds tables programmatically via `comfy-table`, not
+        ratatui Tables, so probably not.
+  - Blockers: none. Land before the other tiers so the new code
+    written for swaps lands in the macro idiom from day one.
+
+- [ ] `H-WIDG-002` Swap `widgets/multi_select.rs` for
+  `ratatui-cheese.multi_select`.
+  - Motivation: F8-006 shipped the in-tree multi-select as a pure
+    state machine — 406 LOC of generic list-with-checkbox logic.
+    `ratatui-cheese` 0.7 ships a Bubbletea-inspired
+    `multi_select` widget that is conceptually 1:1 with the
+    existing API. The forcing function for the whole workstream:
+    cleanest seam, smallest snapshot blast radius, strongest
+    signal on whether the theme/snapshot integration cost is what
+    the audit predicted.
+  - Scope:
+      - Add `ratatui-cheese = "0.7"` to `[dependencies]` (MIT,
+        ratatui 0.30, ~96% docs coverage).
+      - Replace `MultiSelectState` / `MultiSelectOutcome` /
+        `MultiSelectItem` with `ratatui-cheese` equivalents.
+        Map item-by-index storage so the App state container does
+        not need to know item types.
+      - Bridge `[tui.theme]` keys to the upstream theme primitive
+        (estimate 50–100 LOC of glue in `src/tui/theme.rs`).
+      - Update controls-overlay harness and mux-state sub-editors
+        (the two current call sites) to dispatch through the new
+        widget's event API.
+      - Regenerate every Ratatui buffer snapshot covering a
+        multi-select panel.
+  - Tests: reducer tests for confirm / cancel / clear / toggle
+    semantics keep their shape; snapshot tests regenerate.
+  - Open questions: whether the upstream widget's keymap matches
+    Conspectus's (Space toggle, Enter confirm, Esc cancel) without
+    a remap shim. Verify during impl; flag if a remap is needed.
+  - Blockers: `H-WIDG-001` (so the new bridge code lands in the
+    macro idiom).
+
+- [ ] `H-WIDG-003` Swap `widgets/toast.rs` for `ratatui-toaster`.
+  - Motivation: in-tree toast surface is 235 LOC carrying
+    info/success/warning/error variants, positioning, and a small
+    engine. `ratatui-toaster` 0.1.3 (Unlicense OR MIT, ratatui
+    0.30) covers the same shape with a builder API. Low risk;
+    small surface to bridge.
+  - Scope: replace `widgets/toast.rs` and the toast call sites
+    (status-bar transient hints, pin command results) with the
+    upstream engine. Bridge theme colors. Verify mtime / no-churn
+    behavior matches the in-tree pattern.
+  - Tests: existing toast unit tests; snapshot regeneration for
+    rows that capture a toast.
+  - Open questions: whether `ratatui-toaster` 0.1.x is mature
+    enough to depend on directly, or whether
+    `ratatui-comfy-toaster` (richer; same author posture) is the
+    safer pick. Recommend toaster first (smaller surface); switch
+    to comfy if the simple variant misses a feature.
+  - Blockers: `H-WIDG-001`.
+
+- [ ] `H-WIDG-004` Replace bordered-frame overlay code with
+  `tui-popup`.
+  - Motivation: seven overlays (rename, controls, pins, search,
+    help, value, viewer) each carry their own centered-bordered-
+    box framing math. The framing layer alone is ~400–600 LOC of
+    near-duplication across the widget files. `tui-popup` 0.7.6
+    (MIT/Apache, ratatui 0.30) is a `Popup` widget that handles
+    auto-sizing, centering, borders, and optional reposition via
+    `PopupState`. Logic state machines stay in-tree; only the
+    bordered frame leaves.
+  - Scope: introduce a `popup_frame(&Theme, &str)` helper that
+    composes `tui-popup` with Conspectus's theme keys; convert
+    each of the seven overlays to use it. Keep the overlay
+    routing cascade in `src/tui/snapshot.rs` unchanged — popup is
+    framing, not routing.
+  - Tests: snapshot regeneration per converted overlay.
+  - Open questions: whether `tui-popup`'s drag-to-reposition is
+    desired (likely no — overlays should stay where they spawn).
+  - Blockers: `H-WIDG-001`.
+
+- [ ] `H-WIDG-005` Adopt `ratatui-cheese.help` for the `?` help
+  overlay.
+  - Motivation: 598 LOC of mostly static keybinding rendering.
+    `ratatui-cheese` ships a Bubbletea-style `help` widget that
+    handles the keymap → display layout. Domain-specific content
+    (the icon legend, the kind-glyph blurbs) stays in-tree as data
+    that feeds the upstream widget.
+  - Scope: rebuild the help overlay around the upstream widget;
+    keep the icon-legend section as a separately-rendered block.
+    Theme glue.
+  - Tests: snapshot regeneration; key dispatch tests
+    (Esc / q / `?` close) keep shape.
+  - Blockers: `H-WIDG-001`, `H-WIDG-004` (so the framing layer is
+    already on `tui-popup`).
+
+- [ ] `H-WIDG-006` Adopt `tui-textarea` when a multi-line input
+  field lands on the backlog.
+  - Motivation: `widgets/input.rs` shells over `tui-input` for
+    single-line entry. Multi-line input is unbuilt today; future
+    candidates: pin `reason` notes, richer alias editing,
+    PR-comment composer for forge surfaces. `tui-textarea` 0.7
+    (MIT, ratatui 0.29+, pure state machine, 96% docs) is the
+    canonical drop-in.
+  - Scope: deferred until a story names the surface that needs
+    multi-line. Adopt the moment one does; do not preempt.
+  - Blockers: a downstream story that demands multi-line input.
+
+- [ ] `H-WIDG-007` Adopt `tui-skeleton` for background-load
+  placeholders.
+  - Motivation: T8-007 (background discovery on its own thread)
+    needs visible loading state so the operator knows the snapshot
+    is refreshing instead of frozen. `tui-skeleton` 0.3 ships
+    Block / Table / List / Text / KvTable / BarChart variants with
+    Breathe / Sweep / Plasma / Noise animation modes; stateless
+    (animates from elapsed-ms passed by the caller). Drop-in for
+    every row tree and detail-pane shape Conspectus renders.
+  - Scope: paired with T8-007. Use `SkeletonList` for the row
+    tree and `SkeletonKvTable` for the detail pane during the
+    refresh window.
+  - Blockers: `T8-007`.
+
+- [ ] `H-WIDG-008` Adopt `throbber-widgets-tui` for in-flight
+  spinners.
+  - Motivation: pin launch, attach round-trip, refresh, and
+    mux-capture refresh are operations where a momentary spinner
+    would communicate "working" without inventing visible state.
+    `throbber-widgets-tui` 0.11 (Zlib, ratatui 0.30) is the
+    standard pick.
+  - Scope: replace any in-tree "..." status placeholders with the
+    upstream throbber; integrate into the status bar.
+  - Open questions: license is Zlib (permissive but unusual).
+    Verify it doesn't conflict with the MIT-only posture.
+    Recommend an ADR-tier ack if Zlib is the only blocker.
+  - Blockers: `H-WIDG-001`.
+
+- [ ] `H-WIDG-009` Spike: evaluate `rat-widget` as a cohesive
+  widget kit.
+  - Motivation: `rat-widget` 3.2.1 (MIT/Apache, ratatui 0.30) is
+    the widget half of `rat-salsa`, usable standalone as pure
+    `StatefulWidget`s. It covers input / date / calendar / table /
+    dialog / button / checkbox / radio / slider under shared
+    focus / scroll / event traits (`rat-focus`, `rat-scrolled`,
+    `rat-event`). The single upstream that could plausibly
+    absorb multiple in-tree widgets (controls form, pins forms,
+    future settings UI) under one design system.
+  - Scope (time-boxed, ~1 sprint, analogous to T8-044's
+    tui-pantry spike):
+      - Add `rat-widget = "3"` as a `[dev-dependencies]` first;
+        port one focused surface as a parallel implementation
+        (recommend the pin `create` form — densest in-tree form
+        editor at present).
+      - Spike outcome at the end: a one-paragraph note recording
+        (a) whether the focus / scroll / event traits compose
+        cleanly with Conspectus's reducer, (b) the theme glue
+        cost, (c) the go/no-go call. If go: file follow-up
+        stories per form; promote to `[dependencies]`. If no-go:
+        rip out the dev-dep, record the lesson.
+  - Risks: the kit posture invites tighter coupling. Verify the
+    individual widgets are usable without the full
+    rat-event / rat-focus / rat-scrolled trifecta — partial
+    adoption is the only sustainable mode.
+  - Blockers: `H-WIDG-001`. Ideally lands after `H-WIDG-002` /
+    `003` / `004` so the Tier A swap experience informs the
+    spike's evaluation rubric.
+
+- [ ] `H-WIDG-010` `ratatui-explorer` cwd picker for pin
+  `create` / `adopt`.
+  - Motivation: pin `create` and `adopt` forms currently take
+    typed paths. A real file/directory picker would be a UX
+    upgrade with no domain risk. `ratatui-explorer` 0.3 (MIT,
+    ratatui 0.30) is the canonical drop-in.
+  - Scope: deferred until the pin-form UX is on the agenda.
+    Verify event-loop ownership (this crate's `handle()` API may
+    couple more tightly than the others); flag during impl.
+  - Blockers: a downstream story that decides the picker UX.
+
+- [ ] `H-WIDG-011` `tui-tree-widget` extraction for the explorer.
+  - Motivation: `src/tui/explorer.rs` (3272 LOC) carries an
+    in-tree tree state machine alongside domain-aware rendering.
+    `tui-tree-widget` 0.24 (MIT, ratatui 0.30) would let the
+    expand / collapse / selection state move upstream; only
+    domain rendering stays in-tree.
+  - Scope: deferred. Re-evaluate when the explorer is next on
+    the audit list (post H-UI-004) or when a defect traces back to
+    the tree state machine specifically.
+  - Blockers: explorer re-think on the agenda.
+
+#### TUI Widget Ecosystem — explicit pass list (Tier D)
+
+Recorded so future audits do not re-relitigate.
+
+- `tuirealm`, `widgetui`, `tui-react` — framework-tier;
+  React/Elm/Bevy-style component models. Conflict with
+  ADR 0067's snapshot-replayable reducer. Pass.
+- `rat-salsa` (framework, distinct from `rat-widget` above) —
+  event queue + tasks + timers; owns the loop. Same conflict.
+  Pass.
+- `ratatui-interact` — pure-compose, mouse hit-testing, focus
+  manager. Steal the mouse hit-testing *pattern* if mouse support
+  ever becomes a goal; do not take the framework — ~70% of its
+  widget catalog duplicates the in-tree surface.
+- `tui-overlay` — interesting "drawer / modal / popover / toast
+  from a single primitive" abstraction, but pre-1.0 (v0.1.2) and
+  `tui-popup` is the more conservative pick. Re-evaluate once
+  `tui-overlay` reaches 0.4+.
+
 ## Phase 7: Continuous Operation And Snapshot Persistence
 
 Source plan: pending; this section is the workstream skeleton. See
