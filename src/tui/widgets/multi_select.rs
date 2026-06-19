@@ -1,24 +1,27 @@
 //! Multi-select list overlay primitive (ADR 0031, F8-006).
 //!
-//! Used by the controls overlay's harness and mux-state sub-editors
-//! and intended to host any future "pick zero or more from a fixed
-//! set" surface. Pure state machine: callers own the items and the
-//! state, dispatch crossterm key events through [`MultiSelectState::handle_key`],
-//! and react to the returned [`MultiSelectOutcome`].
+//! Thin shim over [`ratatui_cheese::multi_select`] (H-WIDG-002). The
+//! upstream crate owns the cursor + selection state machine and the
+//! per-row rendering; this module preserves the in-tree
+//! [`MultiSelectOutcome`] + [`MultiSelectState::handle_key`] contract
+//! that `widgets/controls.rs`'s sub-editor dispatch expects, so the
+//! swap stays a single-file change at the API boundary. The bordered
+//! centered modal + buffer-clear remain in this module because
+//! they're UI integration code, not widget rendering.
 //!
-//! The widget is generic over an item label type so callers can use
-//! `&'static str`, `String`, an enum, or anything that implements
-//! [`MultiSelectItem`]. The state stores the selection by index,
-//! keeping the type parameter to the public surface and out of the
-//! state itself — that way it can sit inside the App without
-//! infecting the reducer signature.
+//! Theme glue is deliberately omitted in this slice — the upstream
+//! widget renders with its default dark palette. Bridging the
+//! `[tui.theme]` keys (ADR 0032) to `MultiSelectStyles` is a
+//! follow-up; the modal reads correctly without it for now.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::macros::line;
+use ratatui::widgets::{Block, Borders, StatefulWidget, Widget};
+use ratatui_cheese::multi_select::{
+    MultiSelect as CheeseMultiSelect, MultiSelectOption, MultiSelectState as CheeseMultiSelectState,
+};
 
 /// Anything that can label itself in the multi-select list. Two
 /// implementations are provided out of the box — for `&'static str`
@@ -51,18 +54,37 @@ pub enum MultiSelectOutcome {
     Cancel,
 }
 
-/// Pure state for a multi-select list: cursor index, selected-set,
-/// total item count, and the modal title. The state knows nothing
-/// about how the items are formatted — callers pass the same item
-/// slice in at every render and `handle_key` call so the widget can
-/// stay generic at the API boundary without paying for type
-/// parameters in storage.
-#[derive(Debug, Clone)]
+/// Pure state for a multi-select list. Wraps
+/// [`ratatui_cheese::multi_select::MultiSelectState`] so the in-tree
+/// callers keep their handle_key/outcome contract while the cursor
+/// movement, wrapping, and toggle semantics come from upstream.
+#[derive(Debug)]
 pub struct MultiSelectState {
     title: String,
     item_count: usize,
-    cursor: usize,
-    selected: Vec<bool>,
+    inner: CheeseMultiSelectState,
+}
+
+impl Clone for MultiSelectState {
+    fn clone(&self) -> Self {
+        // CheeseMultiSelectState holds a `Box<dyn Fn>` validator that
+        // blocks #[derive(Clone)]. The in-tree shim does not use
+        // validators, so cloning rebuilds a fresh state with the same
+        // cursor + selection footprint. Focus state is always `true`
+        // for the open sub-editor surface so it's set unconditionally
+        // alongside the inner reconstruction.
+        let mut inner = CheeseMultiSelectState::new(self.item_count);
+        inner.set_cursor(self.inner.cursor());
+        for idx in self.inner.selected_indices() {
+            inner.set_selected(idx, true);
+        }
+        inner.set_focused(self.inner.focused());
+        Self {
+            title: self.title.clone(),
+            item_count: self.item_count,
+            inner,
+        }
+    }
 }
 
 impl MultiSelectState {
@@ -71,17 +93,17 @@ impl MultiSelectState {
     /// range entries are silently ignored so callers can re-use
     /// stored selections across item-list shape changes.
     pub fn new(title: impl Into<String>, item_count: usize, initially_selected: &[usize]) -> Self {
-        let mut selected = vec![false; item_count];
+        let mut inner = CheeseMultiSelectState::new(item_count);
         for idx in initially_selected {
-            if let Some(slot) = selected.get_mut(*idx) {
-                *slot = true;
+            if *idx < item_count {
+                inner.set_selected(*idx, true);
             }
         }
+        inner.set_focused(true);
         Self {
             title: title.into(),
             item_count,
-            cursor: 0,
-            selected,
+            inner,
         }
     }
 
@@ -90,7 +112,7 @@ impl MultiSelectState {
     }
 
     pub fn cursor(&self) -> usize {
-        self.cursor
+        self.inner.cursor()
     }
 
     pub fn item_count(&self) -> usize {
@@ -99,27 +121,24 @@ impl MultiSelectState {
 
     /// Sorted indices of every currently-checked item.
     pub fn selected_indices(&self) -> Vec<usize> {
-        self.selected
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, on)| on.then_some(idx))
-            .collect()
+        self.inner.selected_indices()
     }
 
     pub fn is_selected(&self, idx: usize) -> bool {
-        self.selected.get(idx).copied().unwrap_or(false)
+        self.inner.is_selected(idx)
     }
 
     /// Dispatch a crossterm key event.
     ///
-    /// - `Up` / `k`: move cursor up (wraps).
-    /// - `Down` / `j`: move cursor down (wraps).
+    /// - `Up` / `k`: move cursor up (wraps via upstream `prev`).
+    /// - `Down` / `j`: move cursor down (wraps via upstream `next`).
     /// - `Space`: toggle the item under the cursor.
     /// - `Enter`: confirm; returns the selected indices.
     /// - `Esc` (or `Ctrl-C`): cancel.
     ///
     /// Empty lists confirm with an empty vector and cancel as usual;
-    /// they cannot toggle.
+    /// upstream `next` / `prev` / `toggle_current` are all no-ops on
+    /// an empty option set.
     pub fn handle_key(&mut self, event: KeyEvent) -> MultiSelectOutcome {
         if event.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(event.code, KeyCode::Char('c'))
@@ -130,36 +149,18 @@ impl MultiSelectState {
             KeyCode::Enter => MultiSelectOutcome::Confirm(self.selected_indices()),
             KeyCode::Esc => MultiSelectOutcome::Cancel,
             KeyCode::Up | KeyCode::Char('k') => {
-                self.move_cursor(-1);
+                self.inner.prev();
                 MultiSelectOutcome::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.move_cursor(1);
+                self.inner.next();
                 MultiSelectOutcome::Continue
             }
             KeyCode::Char(' ') => {
-                self.toggle_at_cursor();
+                self.inner.toggle_current(None);
                 MultiSelectOutcome::Continue
             }
             _ => MultiSelectOutcome::Continue,
-        }
-    }
-
-    fn move_cursor(&mut self, delta: i32) {
-        if self.item_count == 0 {
-            self.cursor = 0;
-            return;
-        }
-        let len = self.item_count as i32;
-        let mut next = self.cursor as i32 + delta;
-        // Wrap (-1 → len-1, len → 0).
-        next = ((next % len) + len) % len;
-        self.cursor = next as usize;
-    }
-
-    fn toggle_at_cursor(&mut self) {
-        if let Some(slot) = self.selected.get_mut(self.cursor) {
-            *slot = !*slot;
         }
     }
 }
@@ -193,44 +194,36 @@ impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(self.state.title().to_string()));
-        let inner = block.inner(modal);
+            .title(line![self.state.title().to_string()]);
+        let inner_area = block.inner(modal);
         block.render(modal, buf);
 
-        // Render each item as `[x] label` or `[ ] label`; cursor row
-        // gets a reverse-video highlight so it's obvious where space
-        // applies.
-        let inner_width = inner.width as usize;
-        let visible_rows = inner.height as usize;
-        let scroll = compute_scroll(self.state.cursor(), visible_rows, self.items.len());
-        for (row_idx, item_idx) in
-            (scroll..(scroll + visible_rows).min(self.items.len())).enumerate()
-        {
-            let checked = if self.state.is_selected(item_idx) {
-                "[x]"
-            } else {
-                "[ ]"
-            };
-            let mut text = format!("{checked} {}", self.items[item_idx].label());
-            if text.chars().count() > inner_width {
-                text = text.chars().take(inner_width).collect();
-            }
-            let para = Paragraph::new(Line::from(text));
-            let row_area = Rect {
-                x: inner.x,
-                y: inner.y + row_idx as u16,
-                width: inner.width,
-                height: 1,
-            };
-            para.render(row_area, buf);
-            if item_idx == self.state.cursor() {
-                for x in row_area.left()..row_area.right() {
-                    if let Some(cell) = buf.cell_mut((x, row_area.y)) {
-                        cell.set_style(Style::default().add_modifier(Modifier::REVERSED));
-                    }
-                }
-            }
+        // Bridge our `[T: MultiSelectItem]` slice into upstream
+        // `MultiSelectOption`s. The Vec lives for the duration of
+        // this call so the borrow into the widget is valid.
+        let options: Vec<MultiSelectOption<'_>> = self
+            .items
+            .iter()
+            .map(|item| MultiSelectOption::new(item.label()))
+            .collect();
+
+        // The upstream widget renders via &mut state. We're behind a
+        // shared borrow, so build a mirror that reflects cursor +
+        // selections and pass that. Render may not mutate it
+        // meaningfully today, but a mirror keeps the contract honest
+        // either way.
+        let mut mirror = CheeseMultiSelectState::new(self.state.item_count);
+        mirror.set_cursor(self.state.cursor());
+        for idx in self.state.selected_indices() {
+            mirror.set_selected(idx, true);
         }
+        mirror.set_focused(true);
+
+        // Title is rendered by the bordered Block above; pass an
+        // empty title to the upstream widget so it doesn't re-stamp
+        // a second one inside the inner area.
+        let widget = CheeseMultiSelect::new("", &options);
+        StatefulWidget::render(&widget, inner_area, buf, &mut mirror);
     }
 }
 
@@ -256,17 +249,6 @@ pub fn centered_modal_rect(area: Rect, item_count: usize) -> Rect {
         y,
         width,
         height,
-    }
-}
-
-fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
-    if visible_rows == 0 || total <= visible_rows {
-        return 0;
-    }
-    if cursor >= visible_rows {
-        cursor + 1 - visible_rows
-    } else {
-        0
     }
 }
 
@@ -379,21 +361,6 @@ mod tests {
         let outcome = state.handle_key(key(KeyCode::Tab));
         assert_eq!(outcome, MultiSelectOutcome::Continue);
         assert_eq!(state.cursor(), 0);
-    }
-
-    #[test]
-    fn compute_scroll_keeps_cursor_in_view() {
-        // 10 items, viewport 3, cursor at 5 → scroll = 3 so cursor
-        // lands at row 2 (last visible).
-        assert_eq!(compute_scroll(5, 3, 10), 3);
-        // Cursor before viewport keeps scroll at zero.
-        assert_eq!(compute_scroll(1, 3, 10), 0);
-        // Cursor exactly at the bottom edge of the first viewport
-        // (idx = viewport-1) does not yet scroll.
-        assert_eq!(compute_scroll(2, 3, 10), 0);
-        // Empty / small lists don't scroll.
-        assert_eq!(compute_scroll(0, 3, 0), 0);
-        assert_eq!(compute_scroll(0, 5, 3), 0);
     }
 
     #[test]
