@@ -14,6 +14,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
@@ -185,12 +186,10 @@ impl Widget for SearchOverlayWidget<'_> {
                 }
             }
         }
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(format!(
-                " / search ({} matches) ",
-                self.state.matches().len()
-            )));
+        let block = Block::default().borders(Borders::ALL).title(line![format!(
+            " / search ({} matches) ",
+            self.state.matches().len()
+        )]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
@@ -199,10 +198,10 @@ impl Widget for SearchOverlayWidget<'_> {
         // TextInputState's value rather than instantiating its
         // widget, since we want the query and the result list in a
         // single bordered modal.
-        let query_line = Line::from(vec![
-            Span::styled("/", Style::default().fg(self.theme.panel_focus_accent)),
-            Span::raw(self.state.query().to_string()),
-        ]);
+        let query_line = line![
+            span!(Style::default().fg(self.theme.panel_focus_accent); "/"),
+            self.state.query().to_string(),
+        ];
         let query_area = Rect {
             x: inner.x,
             y: inner.y,
@@ -224,11 +223,7 @@ impl Widget for SearchOverlayWidget<'_> {
             } else {
                 "(no matches)"
             };
-            Paragraph::new(Line::from(Span::styled(
-                label,
-                Style::default().add_modifier(self.theme.placeholder),
-            )))
-            .render(list_area, buf);
+            Paragraph::new(line![span!(self.theme.placeholder; "{label}")]).render(list_area, buf);
             return;
         }
 
@@ -300,10 +295,7 @@ fn build_match_line(
     };
     let prefix = if is_cursor { "> " } else { "  " };
     let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(
-        prefix.to_string(),
-        span_style(false, Style::default()),
-    ));
+    spans.push(span!(span_style(false, Style::default()); "{prefix}"));
     // H-UI-002 slice: prepend a kind glyph so operators scan
     // results by symbol (`● session`, `▣ mux`, `⇄ pr`, …) instead
     // of relying on the textual `kind:` prefix some labels carry.
@@ -311,10 +303,7 @@ fn build_match_line(
     // spaces so the label column stays aligned across the result
     // list — operators don't see the label jiggle row by row.
     spans.push(search_kind_glyph_span(&m.id, theme, is_cursor));
-    spans.push(Span::styled(
-        label.clone(),
-        span_style(false, Style::default()),
-    ));
+    spans.push(span!(span_style(false, Style::default()); "{}", label.clone()));
 
     // If we can show a snippet (haystack present and either
     // distinct from the label or carrying a match range), append
@@ -324,10 +313,7 @@ fn build_match_line(
     let matched_range = m.matched_range.clone().unwrap_or(0..0);
     let snippet_distinct = haystack != label;
     if !haystack.is_empty() && snippet_distinct {
-        spans.push(Span::styled(
-            "  · ".to_string(),
-            span_style(true, Style::default()),
-        ));
+        spans.push(span!(span_style(true, Style::default()); "  · "));
         let snippet = snippet_around(haystack, matched_range, snippet_budget);
         // The matched portion always renders bold + yellow so it
         // pops on both cursor and non-cursor rows; pre/post context
@@ -342,14 +328,12 @@ fn build_match_line(
             let pre = snippet.text[..range.start].to_string();
             let mid = snippet.text[range.start..range.end].to_string();
             let post = snippet.text[range.end..].to_string();
-            spans.push(Span::styled(pre, span_style(true, Style::default())));
-            spans.push(Span::styled(mid, match_style));
-            spans.push(Span::styled(post, span_style(true, Style::default())));
+            let dim = span_style(true, Style::default());
+            spans.push(span!(dim; "{pre}"));
+            spans.push(span!(match_style; "{mid}"));
+            spans.push(span!(dim; "{post}"));
         } else {
-            spans.push(Span::styled(
-                snippet.text,
-                span_style(true, Style::default()),
-            ));
+            spans.push(span!(span_style(true, Style::default()); "{}", snippet.text));
         }
     }
 
@@ -381,14 +365,12 @@ fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
 /// identity legible.
 fn search_kind_glyph_span(id: &RowId, theme: &Theme, is_cursor: bool) -> Span<'static> {
     let Some(kind) = search_row_node_kind(id) else {
-        return Span::styled(
-            "  ".to_string(),
-            if is_cursor {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            },
-        );
+        let style = if is_cursor {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        return span!(style; "  ");
     };
     let style = node_kind_style(kind, theme);
     // ForgePr's slate color is `Color::Reset`; mirror the dodge
@@ -403,7 +385,7 @@ fn search_kind_glyph_span(id: &RowId, theme: &Theme, is_cursor: bool) -> Span<'s
     if is_cursor {
         span_style = span_style.add_modifier(Modifier::REVERSED);
     }
-    Span::styled(format!("{} ", style.glyph), span_style)
+    span!(span_style; "{} ", style.glyph)
 }
 
 fn centered_modal_rect(area: Rect) -> Rect {
