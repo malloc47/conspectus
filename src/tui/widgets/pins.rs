@@ -23,8 +23,9 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::tui::widgets::input::TextInputState;
@@ -901,7 +902,7 @@ impl Widget for PinsOverlayWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Pins "));
+            .title(line![" Pins "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
@@ -912,11 +913,10 @@ impl Widget for PinsOverlayWidget<'_> {
             let row = PinsCursor::Action(idx);
             lines.push(row_line((*label).to_string(), cursor == row));
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "↑/↓ move · Enter pick · Esc close",
-            Style::default().add_modifier(Modifier::DIM),
-        )));
+        lines.push(line![""]);
+        lines.push(line![
+            span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")
+        ]);
 
         Paragraph::new(lines).render(inner, buf);
 
@@ -959,7 +959,7 @@ impl Widget for PinCreateWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Create Pin "));
+            .title(line![" Create Pin "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
@@ -994,17 +994,14 @@ impl Widget for PinCreateWidget<'_> {
             pin_create_field(7, "store", self.state.store.label(), self.state.cursor),
         ];
         if let Some(error) = &self.state.error {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                error.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
+            lines.push(line![""]);
+            lines.push(line![span!(Modifier::BOLD; "{}", error.clone())]);
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Up/Down field · type to edit · Space cycles store · Enter create · Esc cancel",
-            Style::default().add_modifier(Modifier::DIM),
-        )));
+        lines.push(line![""]);
+        lines.push(line![span!(
+            Modifier::DIM;
+            "Up/Down field · type to edit · Space cycles store · Enter create · Esc cancel"
+        )]);
 
         Paragraph::new(lines).render(inner, buf);
     }
@@ -1018,7 +1015,7 @@ fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize)
         Style::default()
     };
     let value = if value.trim().is_empty() { "-" } else { value };
-    Line::from(Span::styled(format!("{marker}{label:11} {value}"), style))
+    line![span!(style; "{marker}{label:11} {value}")]
 }
 
 fn pin_create_modal_rect(area: Rect) -> Rect {
@@ -1052,7 +1049,7 @@ impl Widget for PinEditWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Edit Pin "));
+            .title(line![" Edit Pin "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
@@ -1082,22 +1079,19 @@ impl Widget for PinEditWidget<'_> {
                 self.state.launch_argv.value(),
                 self.state.cursor,
             ),
-            Line::from(format!("  harness     {}", self.state.target.harness)),
-            Line::from(format!("  cwd         {}", self.state.target.cwd)),
-            Line::from(format!("  store       {}", self.state.target.store_path)),
+            line![format!("  harness     {}", self.state.target.harness)],
+            line![format!("  cwd         {}", self.state.target.cwd)],
+            line![format!("  store       {}", self.state.target.store_path)],
         ];
         if let Some(error) = &self.state.error {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                error.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
+            lines.push(line![""]);
+            lines.push(line![span!(Modifier::BOLD; "{}", error.clone())]);
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Up/Down field · type to edit · Enter save · Esc cancel",
-            Style::default().add_modifier(Modifier::DIM),
-        )));
+        lines.push(line![""]);
+        lines.push(line![span!(
+            Modifier::DIM;
+            "Up/Down field · type to edit · Enter save · Esc cancel"
+        )]);
 
         Paragraph::new(lines).render(inner, buf);
     }
@@ -1126,13 +1120,13 @@ impl Widget for PinRebindWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Rebind Pin "));
+            .title(line![" Rebind Pin "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
         let mut lines = vec![
-            Line::from(format!("  id          {}", self.state.target.id)),
-            Line::from(format!("  display     {}", self.state.target.display_name)),
+            line![format!("  id          {}", self.state.target.id)],
+            line![format!("  display     {}", self.state.target.display_name)],
             pin_create_field(
                 0,
                 "mux.name",
@@ -1145,20 +1139,17 @@ impl Widget for PinRebindWidget<'_> {
                 self.state.mux_socket.value(),
                 self.state.cursor,
             ),
-            Line::from(format!("  store       {}", self.state.target.store_path)),
+            line![format!("  store       {}", self.state.target.store_path)],
         ];
         if let Some(error) = &self.state.error {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                error.clone(),
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
+            lines.push(line![""]);
+            lines.push(line![span!(Modifier::BOLD; "{}", error.clone())]);
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Up/Down field · type to edit · Enter save · Esc cancel",
-            Style::default().add_modifier(Modifier::DIM),
-        )));
+        lines.push(line![""]);
+        lines.push(line![span!(
+            Modifier::DIM;
+            "Up/Down field · type to edit · Enter save · Esc cancel"
+        )]);
 
         Paragraph::new(lines).render(inner, buf);
     }
@@ -1203,13 +1194,13 @@ impl Widget for PinBindWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Bind Pin "));
+            .title(line![" Bind Pin "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
         let mut lines = Vec::new();
         if let Some(first) = self.state.options.first() {
-            lines.push(Line::from(format!("pin       {}", first.pin_id)));
+            lines.push(line![format!("pin       {}", first.pin_id)]);
         }
         for (idx, option) in self.state.options.iter().enumerate() {
             let marker = if idx == self.state.cursor { "> " } else { "  " };
@@ -1218,16 +1209,13 @@ impl Widget for PinBindWidget<'_> {
             } else {
                 Style::default()
             };
-            lines.push(Line::from(Span::styled(
-                format!("{marker}{}", option.label),
-                style,
-            )));
+            lines.push(line![span!(style; "{marker}{}", option.label)]);
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Up/Down choose · Enter bind · Esc cancel",
-            Style::default().add_modifier(Modifier::DIM),
-        )));
+        lines.push(line![""]);
+        lines.push(line![span!(
+            Modifier::DIM;
+            "Up/Down choose · Enter bind · Esc cancel"
+        )]);
         Paragraph::new(lines).render(inner, buf);
     }
 }
@@ -1263,25 +1251,19 @@ impl Widget for PinRemoveWidget<'_> {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Remove Pin "));
+            .title(line![" Remove Pin "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
 
         let lines = vec![
-            Line::from(vec![
-                Span::raw("id       "),
-                Span::styled(
-                    self.state.target.id.clone(),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(format!("display  {}", self.state.target.display_name)),
-            Line::from(format!("store    {}", self.state.target.store_path)),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Enter remove · Esc cancel",
-                Style::default().add_modifier(Modifier::DIM),
-            )),
+            line![
+                "id       ",
+                span!(Modifier::BOLD; "{}", self.state.target.id.clone()),
+            ],
+            line![format!("display  {}", self.state.target.display_name)],
+            line![format!("store    {}", self.state.target.store_path)],
+            line![""],
+            line![span!(Modifier::DIM; "Enter remove · Esc cancel")],
         ];
         Paragraph::new(lines).render(inner, buf);
     }
@@ -1296,10 +1278,7 @@ fn pin_remove_modal_rect(area: Rect) -> Rect {
 }
 
 fn section_header(label: &str) -> Line<'static> {
-    Line::from(Span::styled(
-        label.to_string(),
-        Style::default().add_modifier(Modifier::BOLD),
-    ))
+    line![span!(Modifier::BOLD; "{label}")]
 }
 
 fn row_line(label: String, cursored: bool) -> Line<'static> {
@@ -1308,7 +1287,7 @@ fn row_line(label: String, cursored: bool) -> Line<'static> {
     if cursored {
         style = style.add_modifier(Modifier::REVERSED);
     }
-    Line::from(Span::styled(format!("{marker}{label}"), style))
+    line![span!(style; "{marker}{label}")]
 }
 
 fn centered_modal_rect(area: Rect) -> Rect {
