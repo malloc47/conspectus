@@ -10,8 +10,9 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 
 use crate::tui::Theme;
@@ -111,7 +112,7 @@ impl Widget for HelpOverlayWidget<'_> {
         }
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(Line::from(" Help "));
+            .title(line![" Help "]);
         let inner = block.inner(modal);
         block.render(modal, buf);
         let para = Paragraph::new(body_lines(self.theme)).scroll((self.state.scroll, 0));
@@ -126,13 +127,10 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     let bind = |lines: &mut Vec<Line<'static>>, key: &str, desc: &str| {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {key:<14}"),
-                Style::default().fg(theme.panel_focus_accent),
-            ),
-            Span::raw(desc.to_string()),
-        ]));
+        lines.push(line![
+            span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}"),
+            desc.to_string(),
+        ]);
     };
 
     section(&mut lines, "Discoverable controls (ADR 0031)");
@@ -317,10 +315,9 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     push_icon_legend(&mut lines, theme);
     blank(&mut lines);
 
-    lines.push(Line::from(Span::styled(
-        "Press Esc, q, or ? to close.",
-        Style::default().add_modifier(theme.placeholder),
-    )));
+    lines.push(line![
+        span!(theme.placeholder; "Press Esc, q, or ? to close.")
+    ]);
     lines
 }
 
@@ -341,15 +338,12 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         } else {
             style.color
         };
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled(format!("{} ", style.glyph), Style::default().fg(color)),
-            Span::styled(
-                format!("{:<14}", node_kind_display_name(kind)),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(node_kind_help_blurb(kind).to_string()),
-        ]));
+        lines.push(line![
+            "  ",
+            span!(Style::default().fg(color); "{} ", style.glyph),
+            span!(Modifier::BOLD; "{:<14}", node_kind_display_name(kind)),
+            node_kind_help_blurb(kind).to_string(),
+        ]);
     }
 }
 
@@ -388,14 +382,11 @@ fn node_kind_help_blurb(kind: NodeKind) -> &'static str {
 }
 
 fn section(lines: &mut Vec<Line<'static>>, title: &str) {
-    lines.push(Line::from(Span::styled(
-        title.to_string(),
-        Style::default().add_modifier(Modifier::BOLD),
-    )));
+    lines.push(line![span!(Modifier::BOLD; "{title}")]);
 }
 
 fn blank(lines: &mut Vec<Line<'static>>) {
-    lines.push(Line::from(""));
+    lines.push(line![""]);
 }
 
 /// Centered modal sized to roughly two thirds of the terminal,
