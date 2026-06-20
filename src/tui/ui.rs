@@ -839,7 +839,7 @@ fn empty_left_panel_text(app: &App) -> String {
         // "no sessions discovered" so the operator knows their
         // filter — not the world — is the reason.
         let chips = render_filter_chips(app.filter());
-        return format!("No rows match `{chips}`.\nPress `F` to clear filters, `v` to edit.");
+        return format!("No rows match `{chips}`.\nPress `F` to clear filters, `f` to edit.");
     }
     "No sessions discovered.\nPress `r` to refresh or `q` to quit.".to_string()
 }
