@@ -14,6 +14,7 @@ use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
+use ratatui_cheese::help::Binding;
 use tui_popup::KnownSize;
 
 use crate::tui::Theme;
@@ -150,198 +151,191 @@ impl Widget for HelpBody<'_> {
     }
 }
 
-/// Build the static keymap. The first column is the key, the second
-/// is a one-line description. Sections are bold; bindings are plain
-/// text.
+/// One named section in the help overlay's keymap. Sections render
+/// as a bold header followed by every enabled binding in the
+/// section, then a blank spacer row.
+struct HelpSection {
+    title: &'static str,
+    bindings: Vec<Binding>,
+}
+
+/// The static keymap as data. Sections come first; the node-kind
+/// icon legend is rendered separately because it's not a binding
+/// list. Bindings are
+/// [`ratatui_cheese::help::Binding`](Binding) so future refactors
+/// (filter to a view-specific set, disable a binding, etc.) become
+/// operations on the data rather than on rendered lines. The
+/// renderer keeps the in-tree sectioned-vertical layout — cheese's
+/// short / multi-column modes don't fit our 200+ char descriptions
+/// (H-WIDG-005 path question).
+fn keymap_sections() -> Vec<HelpSection> {
+    vec![
+        HelpSection {
+            title: "Discoverable controls (ADR 0031)",
+            bindings: vec![
+                Binding::new(
+                    "f",
+                    "Open the controls overlay (view / grouping / filters / sort)",
+                ),
+                Binding::new(
+                    "p",
+                    "Open the pins overlay (create / rename / remove / bind / rebind / adopt)",
+                ),
+                Binding::new("?", "This help"),
+            ],
+        },
+        HelpSection {
+            title: "Actions",
+            bindings: vec![
+                Binding::new(
+                    "Enter",
+                    "Default action on the selected row (T8-043): attach mux/muxed sessions, view un-muxed sessions, expand groups",
+                ),
+                Binding::new("a", "Attach to the selected mux"),
+                Binding::new(
+                    "i",
+                    "Copy the selected agent or mux session's full id to the clipboard",
+                ),
+                Binding::new(
+                    "R",
+                    "Rename the selected agent session or pin's display name",
+                ),
+                Binding::new(
+                    "v",
+                    "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
+                ),
+                Binding::new("r", "Refresh discovery now"),
+                Binding::new(
+                    "S",
+                    "Resume the selected un-muxed agent session in a new terminal",
+                ),
+                Binding::new("q / Ctrl-C", "Quit"),
+            ],
+        },
+        HelpSection {
+            title: "Pins (ADR 0057)",
+            bindings: vec![
+                Binding::new("p", "Open the pins overlay (menu listing every action)"),
+                Binding::new(
+                    "N",
+                    "New pin — opens the create form seeded from the current selection",
+                ),
+                Binding::new(
+                    "L",
+                    "Launch the selected pin (same code path as Enter on an unbound pin row)",
+                ),
+                Binding::new(
+                    "R",
+                    "Rename the selected pin's display name (same key as session rename)",
+                ),
+                Binding::new(
+                    "B",
+                    "Rebind the selected pin's mux target (mux name + optional socket)",
+                ),
+                Binding::new(
+                    "b",
+                    "Bind picker for the selected PinAmbiguous row (status hint otherwise)",
+                ),
+                Binding::new("A", "Adopt the selected live mux row as a new pin"),
+                Binding::new("Delete", "Remove the selected pin (two-press confirmation)"),
+            ],
+        },
+        HelpSection {
+            title: "View switching",
+            bindings: vec![
+                Binding::new(
+                    "1 – 5",
+                    "Switch directly to view N (sessions, mux, union, prs, forks)",
+                ),
+                Binding::new("] / [", "Cycle to next / previous view"),
+            ],
+        },
+        HelpSection {
+            title: "Filters & grouping",
+            bindings: vec![
+                Binding::new("F", "Clear all active filters for the visible view"),
+                Binding::new("Ctrl-G", "Cycle grouping forward for the active view"),
+            ],
+        },
+        HelpSection {
+            title: "Search",
+            bindings: vec![Binding::new(
+                "/",
+                "Open the search overlay (ranks within the active filter set)",
+            )],
+        },
+        HelpSection {
+            title: "Navigation",
+            bindings: vec![
+                Binding::new("j / k / ↓ / ↑", "Move selection down / up"),
+                Binding::new(
+                    "l / → / h / ←",
+                    "Expand / collapse the selected left-tree row (vi-style fold)",
+                ),
+                Binding::new("PgDn / PgUp", "Page through the row tree"),
+                Binding::new("g / G", "First / last row"),
+                Binding::new(
+                    "Enter",
+                    "Left tree: row-kind default action (attach / view / expand); right pane: drill or expand a group",
+                ),
+                Binding::new("Tab", "Cycle focus between left tree and right panel"),
+                Binding::new("J / K", "Scroll the right-panel preview"),
+            ],
+        },
+        HelpSection {
+            title: "Detail-pane graph explorer (right focus)",
+            bindings: vec![
+                Binding::new(
+                    "j / k",
+                    "Move the explorer cursor between Node fields and relationship rows",
+                ),
+                Binding::new(
+                    "Enter",
+                    "Copy the value on a Node-zone field row · drill on a link row · expand on a group header",
+                ),
+                Binding::new("e", "Toggle expand/collapse on a multi-link group header"),
+                Binding::new(
+                    "Backspace",
+                    "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane",
+                ),
+                Binding::new(
+                    "F",
+                    "Toggle Expanded Node Detail (every per-kind field) on the focused node",
+                ),
+                Binding::new(
+                    "E",
+                    "Toggle edge meta (provenance · confidence · state) on link rows",
+                ),
+                Binding::new(
+                    "o",
+                    "Open the full untruncated value for the cursor row in a modal",
+                ),
+            ],
+        },
+    ]
+}
+
+/// Render the keymap as `Vec<Line<'static>>` lines, one per
+/// binding plus section headers, blank spacers, the icon legend,
+/// and the close hint. Layout stays sectioned-vertical because
+/// cheese's short / multi-column Help modes don't fit our long
+/// descriptions; the win is that the keymap is now data
+/// ([`keymap_sections`]) rather than imperative `bind(...)` calls.
 fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    let bind = |lines: &mut Vec<Line<'static>>, key: &str, desc: &str| {
-        lines.push(line![
-            span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}"),
-            desc.to_string(),
-        ]);
-    };
+    for section in keymap_sections() {
+        self::section(&mut lines, section.title);
+        for binding in &section.bindings {
+            if !binding.is_enabled() {
+                continue;
+            }
+            lines.push(binding_line(binding.key(), binding.description(), theme));
+        }
+        blank(&mut lines);
+    }
 
-    section(&mut lines, "Discoverable controls (ADR 0031)");
-    bind(
-        &mut lines,
-        "f",
-        "Open the controls overlay (view / grouping / filters / sort)",
-    );
-    bind(
-        &mut lines,
-        "p",
-        "Open the pins overlay (create / rename / remove / bind / rebind / adopt)",
-    );
-    bind(&mut lines, "?", "This help");
-    blank(&mut lines);
-
-    section(&mut lines, "Actions");
-    bind(
-        &mut lines,
-        "Enter",
-        "Default action on the selected row (T8-043): attach mux/muxed sessions, view un-muxed sessions, expand groups",
-    );
-    bind(&mut lines, "a", "Attach to the selected mux");
-    bind(
-        &mut lines,
-        "i",
-        "Copy the selected agent or mux session's full id to the clipboard",
-    );
-    bind(
-        &mut lines,
-        "R",
-        "Rename the selected agent session or pin's display name",
-    );
-    bind(
-        &mut lines,
-        "v",
-        "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
-    );
-    bind(&mut lines, "r", "Refresh discovery now");
-    bind(
-        &mut lines,
-        "S",
-        "Resume the selected un-muxed agent session in a new terminal",
-    );
-    bind(&mut lines, "q / Ctrl-C", "Quit");
-    blank(&mut lines);
-
-    section(&mut lines, "Pins (ADR 0057)");
-    bind(
-        &mut lines,
-        "p",
-        "Open the pins overlay (menu listing every action)",
-    );
-    bind(
-        &mut lines,
-        "N",
-        "New pin — opens the create form seeded from the current selection",
-    );
-    bind(
-        &mut lines,
-        "L",
-        "Launch the selected pin (same code path as Enter on an unbound pin row)",
-    );
-    bind(
-        &mut lines,
-        "R",
-        "Rename the selected pin's display name (same key as session rename)",
-    );
-    bind(
-        &mut lines,
-        "B",
-        "Rebind the selected pin's mux target (mux name + optional socket)",
-    );
-    bind(
-        &mut lines,
-        "b",
-        "Bind picker for the selected PinAmbiguous row (status hint otherwise)",
-    );
-    bind(
-        &mut lines,
-        "A",
-        "Adopt the selected live mux row as a new pin",
-    );
-    bind(
-        &mut lines,
-        "Delete",
-        "Remove the selected pin (two-press confirmation)",
-    );
-    blank(&mut lines);
-
-    section(&mut lines, "View switching");
-    bind(
-        &mut lines,
-        "1 – 5",
-        "Switch directly to view N (sessions, mux, union, prs, forks)",
-    );
-    bind(&mut lines, "] / [", "Cycle to next / previous view");
-    blank(&mut lines);
-
-    section(&mut lines, "Filters & grouping");
-    bind(
-        &mut lines,
-        "F",
-        "Clear all active filters for the visible view",
-    );
-    bind(
-        &mut lines,
-        "Ctrl-G",
-        "Cycle grouping forward for the active view",
-    );
-    blank(&mut lines);
-
-    section(&mut lines, "Search");
-    bind(
-        &mut lines,
-        "/",
-        "Open the search overlay (ranks within the active filter set)",
-    );
-    blank(&mut lines);
-
-    section(&mut lines, "Navigation");
-    bind(&mut lines, "j / k / ↓ / ↑", "Move selection down / up");
-    bind(
-        &mut lines,
-        "l / → / h / ←",
-        "Expand / collapse the selected left-tree row (vi-style fold)",
-    );
-    bind(&mut lines, "PgDn / PgUp", "Page through the row tree");
-    bind(&mut lines, "g / G", "First / last row");
-    bind(
-        &mut lines,
-        "Enter",
-        "Left tree: row-kind default action (attach / view / expand); right pane: drill or expand a group",
-    );
-    bind(
-        &mut lines,
-        "Tab",
-        "Cycle focus between left tree and right panel",
-    );
-    bind(&mut lines, "J / K", "Scroll the right-panel preview");
-    blank(&mut lines);
-
-    section(&mut lines, "Detail-pane graph explorer (right focus)");
-    bind(
-        &mut lines,
-        "j / k",
-        "Move the explorer cursor between Node fields and relationship rows",
-    );
-    bind(
-        &mut lines,
-        "Enter",
-        "Copy the value on a Node-zone field row · drill on a link row · expand on a group header",
-    );
-    bind(
-        &mut lines,
-        "e",
-        "Toggle expand/collapse on a multi-link group header",
-    );
-    bind(
-        &mut lines,
-        "Backspace",
-        "Back out of the most recent drilldown hop · once the stack is empty, press twice to return focus to the left pane",
-    );
-    bind(
-        &mut lines,
-        "F",
-        "Toggle Expanded Node Detail (every per-kind field) on the focused node",
-    );
-    bind(
-        &mut lines,
-        "E",
-        "Toggle edge meta (provenance · confidence · state) on link rows",
-    );
-    bind(
-        &mut lines,
-        "o",
-        "Open the full untruncated value for the cursor row in a modal",
-    );
-    blank(&mut lines);
-
-    section(&mut lines, "Node kind icons (ADR 0073)");
+    self::section(&mut lines, "Node kind icons (ADR 0073)");
     push_icon_legend(&mut lines, theme);
     blank(&mut lines);
 
@@ -349,6 +343,16 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
         span!(theme.placeholder; "Press Esc, q, or ? to close.")
     ]);
     lines
+}
+
+/// Render a single binding as `  <key:<14>  <description>`. The
+/// key column inherits `theme.panel_focus_accent` so operators
+/// scan the keymap by accent color.
+fn binding_line(key: &str, description: &str, theme: &Theme) -> Line<'static> {
+    line![
+        span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}"),
+        description.to_string(),
+    ]
 }
 
 /// Built-in legend mapping each `NodeKind` glyph to its
