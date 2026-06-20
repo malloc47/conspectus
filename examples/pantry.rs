@@ -31,6 +31,7 @@ use std::borrow::Cow;
 
 use conspectus::tui::rows::RowId;
 use conspectus::tui::search::{SearchItem, SubstringBackend};
+use conspectus::tui::theme::StyleSpec;
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
 use conspectus::tui::widgets::input::{TextInputState, TextInputWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
@@ -43,7 +44,9 @@ use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::widgets::Widget;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Line;
+use ratatui::widgets::{Paragraph, Widget};
 use tui_pantry::Ingredient;
 
 /// Configuration for one multi-select preview variant. The state is
@@ -430,6 +433,113 @@ enum PinsVariant {
     Remove(PinMutationTarget),
 }
 
+/// One row in the theme harness — pairs a `[tui.theme]` key name
+/// with its rendered sample. Color rows render a `███` block in
+/// the key's color; Modifier rows render a label with the modifier
+/// applied; StyleSpec rows combine both.
+enum ThemeSample {
+    Color(Color),
+    Modifier(Modifier),
+    Style(StyleSpec),
+}
+
+impl ThemeSample {
+    /// Render a labeled sample as a single `Line`. Column layout:
+    /// `  <key:24>  <preview:18>  <description>`.
+    fn line(&self, key: &'static str, description: &'static str) -> Line<'static> {
+        match self {
+            // Three solid blocks (`█` is the heavy block in Unicode);
+            // the per-cell color reads the key's hue cleanly even
+            // under reduced terminal palettes.
+            ThemeSample::Color(c) => {
+                let mut line = Line::default();
+                line.spans.push(format!("  {key:<24}  ").into());
+                line.spans
+                    .push(ratatui::text::Span::styled("███", Style::default().fg(*c)));
+                line.spans
+                    .push(format!("              {description}").into());
+                line
+            }
+            ThemeSample::Modifier(m) => {
+                let mut line = Line::default();
+                line.spans.push(format!("  {key:<24}  ").into());
+                line.spans.push(ratatui::text::Span::styled(
+                    "modifier-sample  ",
+                    Style::default().add_modifier(*m),
+                ));
+                line.spans.push(description.to_string().into());
+                line
+            }
+            ThemeSample::Style(spec) => {
+                let mut style = Style::default().add_modifier(spec.modifier);
+                if let Some(color) = spec.color {
+                    style = style.fg(color);
+                }
+                let mut line = Line::default();
+                line.spans.push(format!("  {key:<24}  ").into());
+                line.spans
+                    .push(ratatui::text::Span::styled("style-sample     ", style));
+                line.spans.push(description.to_string().into());
+                line
+            }
+        }
+    }
+}
+
+/// A one-section block in the theme harness — a bold header plus
+/// one row per `[tui.theme]` key.
+struct ThemeSection {
+    title: &'static str,
+    rows: Vec<(&'static str, ThemeSample, &'static str)>,
+}
+
+/// The theme harness ingredient renders every `[tui.theme]` key
+/// against `Theme::default()` as a labeled sample column. Forward-
+/// looking: when palette presets (dark/light, ADR follow-up) land,
+/// add additional variants that swap in those preset themes.
+struct ThemeHarnessIngredient;
+
+impl Ingredient for ThemeHarnessIngredient {
+    fn group(&self) -> &str {
+        "Theme"
+    }
+
+    fn name(&self) -> &str {
+        "Default palette"
+    }
+
+    fn source(&self) -> &str {
+        "conspectus::tui::theme"
+    }
+
+    fn description(&self) -> &str {
+        "Every [tui.theme] key rendered against Theme::default() as a labeled sample. Palette-work reference."
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        let theme = Theme::default();
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::styled(
+            "Theme::default() — every [tui.theme] key as a sample.",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        lines.push(Line::raw(""));
+
+        for section in theme_sections(&theme) {
+            lines.push(Line::styled(
+                section.title.to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            for (key, sample, description) in &section.rows {
+                lines.push(sample.line(key, description));
+            }
+            lines.push(Line::raw(""));
+        }
+
+        Paragraph::new(lines).render(area, buf);
+    }
+}
+
 /// Configuration for one pins-overlay preview variant.
 struct PinsIngredient {
     variant: PinsVariant,
@@ -730,8 +840,252 @@ fn main() -> std::io::Result<()> {
             description_text:
                 "Two-press remove confirmation showing the pin's id / display / store before destruction.",
         }),
+        Box::new(ThemeHarnessIngredient),
     ];
     tui_pantry::run!(ingredients)
+}
+
+/// Section index for the theme harness. Each section groups the
+/// `[tui.theme]` keys by their semantic role — harness identity,
+/// recency buckets, mux state, etc. Adding a new key to `Theme`
+/// only requires extending this index, not touching the renderer.
+fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
+    vec![
+        ThemeSection {
+            title: "Harness identity",
+            rows: vec![
+                (
+                    "harness_claude",
+                    ThemeSample::Color(theme.harness_claude),
+                    "claude row badge",
+                ),
+                (
+                    "harness_codex",
+                    ThemeSample::Color(theme.harness_codex),
+                    "codex row badge",
+                ),
+                (
+                    "harness_opencode",
+                    ThemeSample::Color(theme.harness_opencode),
+                    "opencode row badge",
+                ),
+                (
+                    "harness_aider",
+                    ThemeSample::Color(theme.harness_aider),
+                    "aider row badge",
+                ),
+                (
+                    "harness_unknown",
+                    ThemeSample::Color(theme.harness_unknown),
+                    "fallback when the harness key is unrecognized",
+                ),
+            ],
+        },
+        ThemeSection {
+            title: "Recency buckets",
+            rows: vec![
+                (
+                    "recency_fresh",
+                    ThemeSample::Style(theme.recency_fresh),
+                    "rows touched in the last minute",
+                ),
+                (
+                    "recency_active",
+                    ThemeSample::Style(theme.recency_active),
+                    "rows touched in the last hour",
+                ),
+                (
+                    "recency_recent",
+                    ThemeSample::Style(theme.recency_recent),
+                    "rows touched today",
+                ),
+                (
+                    "recency_cold",
+                    ThemeSample::Style(theme.recency_cold),
+                    "rows older than the recent bucket",
+                ),
+            ],
+        },
+        ThemeSection {
+            title: "Mux state",
+            rows: vec![
+                (
+                    "mux_attached",
+                    ThemeSample::Color(theme.mux_attached),
+                    "◉ glyph + attached counts",
+                ),
+                (
+                    "mux_ambiguous",
+                    ThemeSample::Color(theme.mux_ambiguous),
+                    "◐ glyph + ambiguous counts",
+                ),
+                (
+                    "mux_unmuxed",
+                    ThemeSample::Modifier(theme.mux_unmuxed),
+                    "◯ glyph (modifier-only by default for terminal compat)",
+                ),
+            ],
+        },
+        ThemeSection {
+            title: "Selection / focus",
+            rows: vec![
+                (
+                    "selection_active",
+                    ThemeSample::Modifier(theme.selection_active),
+                    "left-pane focused row",
+                ),
+                (
+                    "selection_inactive",
+                    ThemeSample::Modifier(theme.selection_inactive),
+                    "left-pane unfocused row",
+                ),
+                (
+                    "panel_focus_accent",
+                    ThemeSample::Color(theme.panel_focus_accent),
+                    "▸ focus arrow + popup-frame border",
+                ),
+            ],
+        },
+        ThemeSection {
+            title: "Structural / semantic",
+            rows: vec![
+                (
+                    "cwd_mark",
+                    ThemeSample::Color(theme.cwd_mark),
+                    "(cwd) launch-context marker",
+                ),
+                (
+                    "link_id",
+                    ThemeSample::Color(theme.link_id),
+                    "session id columns + detail-pane ids",
+                ),
+                (
+                    "placeholder",
+                    ThemeSample::Modifier(theme.placeholder),
+                    "dim hint text + truncated values",
+                ),
+                (
+                    "secondary_text",
+                    ThemeSample::Color(theme.secondary_text),
+                    "short ids + snippet text",
+                ),
+                (
+                    "disclosure",
+                    ThemeSample::Color(theme.disclosure),
+                    "▶ ▼ expand/collapse glyphs",
+                ),
+                (
+                    "divider",
+                    ThemeSample::Modifier(theme.divider),
+                    "section dividers between chips",
+                ),
+                (
+                    "warning",
+                    ThemeSample::Color(theme.warning),
+                    "⚠ ambiguity glyph + stale-cache message",
+                ),
+                (
+                    "error",
+                    ThemeSample::Color(theme.error),
+                    "error toast + status-bar errors",
+                ),
+                (
+                    "success",
+                    ThemeSample::Color(theme.success),
+                    "success toast border",
+                ),
+            ],
+        },
+        ThemeSection {
+            title: "PR state",
+            rows: vec![
+                (
+                    "pr_open",
+                    ThemeSample::Color(theme.pr_open),
+                    "open PR rows + forge_pr default hue",
+                ),
+                (
+                    "pr_closed",
+                    ThemeSample::Color(theme.pr_closed),
+                    "closed PR rows",
+                ),
+                (
+                    "pr_merged",
+                    ThemeSample::Color(theme.pr_merged),
+                    "merged PR rows",
+                ),
+                (
+                    "pr_draft",
+                    ThemeSample::Color(theme.pr_draft),
+                    "draft PR rows",
+                ),
+            ],
+        },
+        ThemeSection {
+            title: "Badge composition",
+            rows: vec![(
+                "badge",
+                ThemeSample::Modifier(theme.badge),
+                "REVERSED|BOLD by default; the chip look",
+            )],
+        },
+        ThemeSection {
+            title: "Node kind (ADR 0073)",
+            rows: vec![
+                (
+                    "node_workspace",
+                    ThemeSample::Color(theme.node_workspace),
+                    "▦ glyph in row tree + detail pane",
+                ),
+                (
+                    "node_repo",
+                    ThemeSample::Color(theme.node_repo),
+                    "◆ glyph in row tree + detail pane",
+                ),
+                (
+                    "node_checkout",
+                    ThemeSample::Color(theme.node_checkout),
+                    "◇ glyph",
+                ),
+                (
+                    "node_agent_session",
+                    ThemeSample::Color(theme.node_agent_session),
+                    "● glyph in detail pane only (row uses pill)",
+                ),
+                (
+                    "node_mux_session",
+                    ThemeSample::Color(theme.node_mux_session),
+                    "▣ glyph",
+                ),
+                (
+                    "node_runtime_process",
+                    ThemeSample::Color(theme.node_runtime_process),
+                    "⚙ glyph",
+                ),
+                (
+                    "node_branch",
+                    ThemeSample::Color(theme.node_branch),
+                    "⎇ glyph",
+                ),
+                ("node_fork", ThemeSample::Color(theme.node_fork), "⑂ glyph"),
+            ],
+        },
+        ThemeSection {
+            title: "Detail-pane edge state (ADR 0075)",
+            rows: vec![
+                (
+                    "edge_alt_of",
+                    ThemeSample::Color(theme.edge_alt_of),
+                    "non-winning AltOf rows in the Other zone",
+                ),
+                (
+                    "edge_conflict",
+                    ThemeSample::Color(theme.edge_conflict),
+                    "Conflict rows with the ⚠ prefix",
+                ),
+            ],
+        },
+    ]
 }
 
 /// Owned mutation target shared by the Edit / Rebind / Remove pin
