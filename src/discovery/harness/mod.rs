@@ -13,6 +13,7 @@
 //! is a [`DiscoveryProvider`] that runs every registered adapter and merges
 //! fragments deterministically through [`merge_fragments`].
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -137,7 +138,7 @@ pub(crate) fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
-        node_provenance: BTreeMap::new(),
+        node_provenance: snapshot.node_provenance,
     }
 }
 

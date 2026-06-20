@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
@@ -28,6 +29,78 @@ pub mod workspace;
 
 pub fn empty_graph() -> GraphSnapshot {
     GraphSnapshot::empty()
+}
+
+/// Unix epoch (seconds) captured from the wall clock. Used by each
+/// discovery adapter to stamp the per-link `freshness_epoch` and
+/// per-node `NodeProvenance.freshness_epoch` it emits (P7-002). The
+/// implementation defaults to `0` when the clock is somehow before
+/// the epoch — the schema treats that as the "unknown" sentinel.
+pub fn current_epoch() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|delta| i64::try_from(delta.as_secs()).unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Fill in the `(provider, freshness_epoch)` defaults on a freshly
+/// built fragment. Idempotent and first-write-wins:
+///
+/// * Links whose `source_metadata.adapter` is empty inherit
+///   `provider`; links whose `freshness_epoch` is `None` inherit
+///   `epoch`.
+/// * Every node whose id is missing from `fragment.node_provenance`
+///   gains a fresh entry with `(provider, Some(epoch))`.
+///
+/// Per-emit overrides (e.g. a harness adapter stamping a per-session
+/// transcript mtime instead of the wall clock) survive intact —
+/// the helper only fills in what nothing else set.
+pub fn stamp_fragment(fragment: &mut GraphFragment, provider: &str, epoch: i64) {
+    for link in &mut fragment.candidate_links {
+        if link.source_metadata.adapter.is_empty() {
+            link.source_metadata.adapter = provider.to_string();
+        }
+        if link.source_metadata.freshness_epoch.is_none() {
+            link.source_metadata.freshness_epoch = Some(epoch);
+        }
+    }
+    for node in &fragment.nodes {
+        let id = node.id();
+        fragment
+            .node_provenance
+            .entry(id)
+            .or_insert_with(|| NodeProvenance {
+                provider: provider.to_string(),
+                freshness_epoch: Some(epoch),
+            });
+    }
+}
+
+/// Snapshot-flavored peer of [`stamp_fragment`]. Mutator passes
+/// (cross-link inference, codex log attribution, hook sidecar
+/// replay) edit the shared snapshot in place rather than returning a
+/// fresh fragment; this helper lets them stamp any new
+/// candidate-link or node they added without revisiting every
+/// emit point. The same first-write-wins rule applies.
+pub fn stamp_snapshot_mutations(snapshot: &mut GraphSnapshot, provider: &str, epoch: i64) {
+    for link in &mut snapshot.candidate_links {
+        if link.source_metadata.adapter.is_empty() {
+            link.source_metadata.adapter = provider.to_string();
+        }
+        if link.source_metadata.freshness_epoch.is_none() {
+            link.source_metadata.freshness_epoch = Some(epoch);
+        }
+    }
+    for node in &snapshot.nodes {
+        let id = node.id();
+        snapshot
+            .node_provenance
+            .entry(id)
+            .or_insert_with(|| NodeProvenance {
+                provider: provider.to_string(),
+                freshness_epoch: Some(epoch),
+            });
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -487,6 +560,12 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
 
     let mut fragment = snapshot_fragment(merge_fragments(fragments));
     fragment.diagnostics.extend(diagnostics);
+    // Tag observed-cwd-derived nodes/links as a distinct provider so
+    // partial eviction (P7-005) can refresh them without touching the
+    // primary `git` slice. First-write-wins on the per-node sidecar
+    // keeps the canonical `git` provenance for nodes that surfaced
+    // through both paths.
+    stamp_fragment(&mut fragment, "git::cwd", current_epoch());
     fragment
 }
 

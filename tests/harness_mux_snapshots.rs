@@ -15,6 +15,8 @@ use conspectus::model::GraphNode;
 use conspectus::output::render_graph_json;
 use conspectus::resolve::resolve_snapshot;
 
+mod support;
+
 #[test]
 fn orphan_harness_session_snapshot() {
     let fixture = ScenarioFixture::new();
@@ -248,6 +250,7 @@ fn assert_snapshot(fixture: &ScenarioFixture, name: &str, config: LocalDiscovery
     let snapshot = discover_local_with([fixture.path()], config).expect("discover");
     let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render");
     let normalized = fixture.normalize(&rendered);
+    let normalized = support::redact_freshness_epoch(&normalized);
     insta::assert_snapshot!(name, normalized);
 }
 

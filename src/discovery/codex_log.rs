@@ -206,6 +206,10 @@ pub fn apply_codex_log_attribution(
             snapshot.candidate_links.push(link);
         }
     }
+
+    // Stamp any nodes/links added above with the codex_log provider;
+    // first-write-wins so earlier providers' entries survive.
+    crate::discovery::stamp_snapshot_mutations(snapshot, ADAPTER_NAME, now_epoch);
 }
 
 /// Pick the highest-suffix `logs_<N>.sqlite`. Mirrors the state-reader's

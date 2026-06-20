@@ -858,8 +858,69 @@ pub struct GraphSnapshot {
     /// instrumented yet; the loader falls back to the schema's
     /// `'unknown'` / `0` defaults for nodes without an entry. See
     /// [`NodeProvenance`].
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    ///
+    /// Serializes as a JSON array of `{node_id, provider,
+    /// freshness_epoch}` entries (via [`node_provenance_serde`])
+    /// because JSON object keys must be strings and `NodeId` is a
+    /// structured type. The in-memory shape stays a `BTreeMap` so
+    /// loader lookups are O(log n) and the per-node iteration order
+    /// is deterministic.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        with = "node_provenance_serde"
+    )]
     pub node_provenance: BTreeMap<NodeId, NodeProvenance>,
+}
+
+/// Round-trip helper for the `GraphSnapshot::node_provenance`
+/// sidecar. The map serializes as an ordered list of
+/// `NodeProvenanceEntry` records so the JSON payload remains
+/// hand-inspectable and tooling-friendly; the in-memory shape stays
+/// `BTreeMap<NodeId, NodeProvenance>` for fast lookups.
+mod node_provenance_serde {
+    use std::collections::BTreeMap;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{NodeId, NodeProvenance};
+
+    #[derive(Serialize, Deserialize)]
+    struct Entry {
+        node_id: NodeId,
+        #[serde(flatten)]
+        provenance: NodeProvenance,
+    }
+
+    pub fn serialize<S>(
+        map: &BTreeMap<NodeId, NodeProvenance>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let entries: Vec<Entry> = map
+            .iter()
+            .map(|(node_id, provenance)| Entry {
+                node_id: node_id.clone(),
+                provenance: provenance.clone(),
+            })
+            .collect();
+        entries.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<BTreeMap<NodeId, NodeProvenance>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries: Vec<Entry> = Vec::deserialize(deserializer)?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| (entry.node_id, entry.provenance))
+            .collect())
+    }
 }
 
 impl GraphSnapshot {

@@ -13,6 +13,7 @@
 //! implementation so they never need a real `gh` install or network call.
 //! See ADR 0011 for the rationale.
 
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io;
@@ -81,7 +82,7 @@ pub(crate) fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
-        node_provenance: BTreeMap::new(),
+        node_provenance: snapshot.node_provenance,
     }
 }
 

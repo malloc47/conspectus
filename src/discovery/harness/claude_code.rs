@@ -94,7 +94,13 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         let Some(state_root) = context.harness_state_root(self.harness_key()) else {
             return Ok(GraphFragment::empty());
         };
-        discover_state(state_root)
+        let mut fragment = discover_state(state_root)?;
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            HARNESS_KEY,
+            crate::discovery::current_epoch(),
+        );
+        Ok(fragment)
     }
 
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {

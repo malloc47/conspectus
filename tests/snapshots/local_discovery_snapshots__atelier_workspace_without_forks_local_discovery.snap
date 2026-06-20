@@ -78,7 +78,8 @@ expression: normalized
           "member_path_kind": "directory",
           "provider_source_path": "/sources/repo-a",
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -106,7 +107,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -137,7 +139,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -191,5 +194,45 @@ expression: normalized
       "selected_link_id": "atelier:workspace:/fixture:workspace_contains_repo:repo:/fixture/repo-a/.git:repo-a"
     }
   ],
-  "diagnostics": []
+  "diagnostics": [],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    }
+  ]
 }

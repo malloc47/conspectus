@@ -18,5 +18,15 @@ expression: normalized
   ],
   "candidate_links": [],
   "resolved_relationships": [],
-  "diagnostics": []
+  "diagnostics": [],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:solo"
+      },
+      "provider": "tmux",
+      "freshness_epoch": "<redacted>"
+    }
+  ]
 }

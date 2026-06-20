@@ -63,6 +63,14 @@ pub fn apply_declared_links(
         }
     }
 
+    // Stamp newly-added declared links with the `declared` provider.
+    // First-write-wins protects earlier provenance entries.
+    crate::discovery::stamp_snapshot_mutations(
+        snapshot,
+        "declared",
+        crate::discovery::current_epoch(),
+    );
+
     snapshot.canonicalize();
 }
 

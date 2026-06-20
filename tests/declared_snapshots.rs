@@ -20,6 +20,8 @@ use conspectus::output::render_graph_json;
 use conspectus::output::table::{self, Projection};
 use conspectus::resolve::resolve_snapshot;
 
+mod support;
+
 #[test]
 fn local_declared_link_with_matched_target_snapshot() {
     let fixture = DeclaredFixture::with_session_and_mux();
@@ -135,7 +137,8 @@ target = {{ type = "mux_session", native_id = "tmux:editor" }}
 fn run(fixture: &DeclaredFixture) -> String {
     let snapshot = discover_local_with([fixture.path()], fixture.config()).expect("discover");
     let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render");
-    fixture.normalize(&rendered)
+    let normalized = fixture.normalize(&rendered);
+    support::redact_freshness_epoch(&normalized)
 }
 
 fn run_table(fixture: &DeclaredFixture, projection: Projection) -> String {

@@ -1,6 +1,6 @@
 ---
 source: tests/atelier_delegation_snapshots.rs
-assertion_line: 83
+assertion_line: 108
 expression: fixture.normalize(&graph)
 ---
 {
@@ -196,7 +196,8 @@ expression: fixture.normalize(&graph)
           "harness_key": "codex",
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -232,7 +233,8 @@ expression: fixture.normalize(&graph)
           "forked": true,
           "link": false,
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -268,7 +270,8 @@ expression: fixture.normalize(&graph)
           "forked": true,
           "link": false,
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -301,7 +304,8 @@ expression: fixture.normalize(&graph)
           "forked": true,
           "link": false,
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -331,7 +335,8 @@ expression: fixture.normalize(&graph)
           "created_epoch": 1,
           "fork_mode": "worktree",
           "fork_name": "alpha"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -374,7 +379,8 @@ expression: fixture.normalize(&graph)
           "harness_key": "codex",
           "lineage_fidelity": "native",
           "lineage_kind": "fork"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -409,7 +415,8 @@ expression: fixture.normalize(&graph)
           "created_epoch": 1,
           "fork_mode": "worktree",
           "fork_name": "alpha"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -441,7 +448,8 @@ expression: fixture.normalize(&graph)
           "member_path_kind": "directory",
           "provider_source_path": "/sources/repo-a",
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -473,7 +481,8 @@ expression: fixture.normalize(&graph)
           "member_path_kind": "directory",
           "provider_source_path": "/sources/repo-b",
           "repo_name": "repo-b"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -503,7 +512,8 @@ expression: fixture.normalize(&graph)
         "evidence": "session cwd within fork root",
         "fields": {
           "fork_root": "/fixture/.atelier/forks/alpha"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -533,7 +543,8 @@ expression: fixture.normalize(&graph)
         "evidence": "session cwd within workspace member",
         "fields": {
           "workspace_member_root": "/fixture"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -564,7 +575,8 @@ expression: fixture.normalize(&graph)
         "fields": {
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1700000500
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -592,7 +604,8 @@ expression: fixture.normalize(&graph)
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -623,7 +636,8 @@ expression: fixture.normalize(&graph)
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -651,7 +665,8 @@ expression: fixture.normalize(&graph)
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -682,7 +697,8 @@ expression: fixture.normalize(&graph)
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -892,6 +908,132 @@ expression: fixture.normalize(&graph)
       "kind": "unresolved_endpoint",
       "link_id": "atelier:fork:atelier:alpha:rooted_at_path:/fixture/.atelier/forks/alpha",
       "relation": "rooted_at_path"
+    }
+  ],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/sources/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-b/.git"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "root": ".atelier/forks/alpha/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-alpha"
+      },
+      "provider": "codex",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:alpha"
+      },
+      "provider": "tmux",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "refname": "fork/alpha/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
     }
   ]
 }

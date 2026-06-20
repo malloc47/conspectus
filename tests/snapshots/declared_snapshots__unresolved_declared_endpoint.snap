@@ -31,7 +31,8 @@ expression: snapshot
           "id": "orphan-link",
           "path": "/fixture/project/.conspectus.toml",
           "store": "local"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"

@@ -1,6 +1,5 @@
 ---
 source: tests/local_discovery_snapshots.rs
-assertion_line: 139
 expression: normalized
 ---
 {
@@ -76,7 +75,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -107,7 +107,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -149,5 +150,48 @@ expression: normalized
       "selected_link_id": "git:checkout:repo:/fixture/repo/.git@/fixture/repo-linked:checked_out_branch:branch:repo:/fixture/repo/.git@refs/heads/linked"
     }
   ],
-  "diagnostics": []
+  "diagnostics": [],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo/.git"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo-linked"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/linked"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    }
+  ]
 }

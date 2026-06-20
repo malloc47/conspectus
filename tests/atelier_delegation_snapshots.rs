@@ -18,6 +18,8 @@ use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixtur
 use conspectus::discovery::tmux::FakeTmux;
 use conspectus::model::GraphSnapshot;
 
+mod support;
+
 #[test]
 fn atelier_delegation_comparison_fixture_snapshot() {
     let fixture = AtelierDelegationFixture::new();
@@ -161,6 +163,10 @@ impl AtelierDelegationFixture {
         if let Some(name) = self.root().file_name().and_then(|s| s.to_str()) {
             out = out.replace(name, "fixture");
         }
+        // Redact wall-clock-derived P7-002 freshness timestamps so the
+        // snapshot stays stable across runs. The provider key itself
+        // (alongside the redacted epoch) still anchors the diff.
+        out = support::redact_freshness_epoch(&out);
         out
     }
 

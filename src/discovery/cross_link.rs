@@ -170,6 +170,14 @@ fn infer_with_readers(
 
     suppress_subagent_mux_links(snapshot);
 
+    // First-write-wins stamping covers links/nodes added above
+    // without overriding entries earlier providers already tagged.
+    crate::discovery::stamp_snapshot_mutations(
+        snapshot,
+        ADAPTER_NAME,
+        crate::discovery::current_epoch(),
+    );
+
     snapshot.canonicalize();
 }
 
@@ -3561,7 +3569,15 @@ mod tests {
 
         infer(&mut snapshot);
 
-        assert!(snapshot.candidate_links.contains(&lineage));
+        // `infer` now stamps any link missing `source_metadata.freshness_epoch`
+        // (P7-002), so equality on the raw `lineage` fixture is no longer the
+        // right invariant; check existence by id instead.
+        assert!(
+            snapshot
+                .candidate_links
+                .iter()
+                .any(|link| link.id == lineage.id)
+        );
     }
 
     // --- Subagent mux suppression tests ---

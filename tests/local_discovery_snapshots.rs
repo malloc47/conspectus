@@ -6,6 +6,8 @@ use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
 use conspectus::output::render_graph_json;
 use conspectus::resolve::resolve_snapshot;
 
+mod support;
+
 #[test]
 fn plain_repo_local_discovery_snapshot() {
     let fixture = LocalFixture::new();
@@ -135,6 +137,7 @@ fn assert_local_snapshot(name: &str, root: impl AsRef<Path>, fixture: &LocalFixt
         .expect("local discovery succeeds");
     let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render graph");
     let normalized = normalize_fixture_paths(&rendered, fixture.root());
+    let normalized = support::redact_freshness_epoch(&normalized);
 
     insta::assert_snapshot!(name, normalized);
 }

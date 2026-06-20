@@ -532,17 +532,20 @@ impl<R: GhRunner> GitHubForgeProvider<R> {
 
 impl<R: GhRunner + 'static> DiscoveryProvider for GitHubForgeProvider<R> {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+        let epoch = crate::discovery::current_epoch();
         let mut fragments = Vec::with_capacity(context.roots().len());
         for root in context.roots() {
             fragments.push(self.discover_repo(root)?);
         }
         let merged = merge_fragments(fragments);
-        Ok(GraphFragment {
+        let mut fragment = GraphFragment {
             nodes: merged.nodes,
             candidate_links: merged.candidate_links,
             diagnostics: merged.diagnostics,
-            node_provenance: BTreeMap::new(),
-        })
+            node_provenance: merged.node_provenance,
+        };
+        crate::discovery::stamp_fragment(&mut fragment, FORGE_ADAPTER, epoch);
+        Ok(fragment)
     }
 }
 

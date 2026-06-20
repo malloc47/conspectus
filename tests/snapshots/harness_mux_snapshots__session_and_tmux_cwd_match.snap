@@ -53,7 +53,8 @@ expression: normalized
         "fields": {
           "match_kind": "exact_cwd_match",
           "mux_activity_epoch": 1700000500
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -76,5 +77,25 @@ expression: normalized
       "selected_link_id": "cross_link:agent_session:codex:/fixture/.state/codex:session-x:linked_to_mux:mux_session:tmux:alpha:exact_cwd_match"
     }
   ],
-  "diagnostics": []
+  "diagnostics": [],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "session-x"
+      },
+      "provider": "codex",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "mux_session",
+        "native_id": "tmux:alpha"
+      },
+      "provider": "tmux",
+      "freshness_epoch": "<redacted>"
+    }
+  ]
 }

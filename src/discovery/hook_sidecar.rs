@@ -101,6 +101,11 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
             emit_runtime_process_observation(snapshot, &session, &mux, &record, role);
         }
     }
+
+    // Stamp any nodes/links the hook-sidecar pass added with the
+    // `hook_sidecar` provider; first-write-wins so prior entries (the
+    // harness adapters' sessions, tmux's mux nodes, etc.) survive.
+    crate::discovery::stamp_snapshot_mutations(snapshot, ADAPTER_NAME, current_epoch());
 }
 
 /// Maps the mux's active pane command back to the harness key when the

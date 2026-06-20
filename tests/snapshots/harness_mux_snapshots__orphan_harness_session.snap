@@ -17,5 +17,17 @@ expression: normalized
   ],
   "candidate_links": [],
   "resolved_relationships": [],
-  "diagnostics": []
+  "diagnostics": [],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/fixture/.state/codex",
+        "session_key": "orphan-session"
+      },
+      "provider": "codex",
+      "freshness_epoch": "<redacted>"
+    }
+  ]
 }

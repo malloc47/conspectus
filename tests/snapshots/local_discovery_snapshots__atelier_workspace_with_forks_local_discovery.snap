@@ -211,7 +211,8 @@ expression: normalized
           "forked": true,
           "link": false,
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -247,7 +248,8 @@ expression: normalized
           "forked": true,
           "link": false,
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -280,7 +282,8 @@ expression: normalized
           "forked": true,
           "link": false,
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -310,7 +313,8 @@ expression: normalized
           "created_epoch": 1,
           "fork_mode": "worktree",
           "fork_name": "alpha"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -345,7 +349,8 @@ expression: normalized
           "created_epoch": 1,
           "fork_mode": "worktree",
           "fork_name": "alpha"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -378,7 +383,8 @@ expression: normalized
           "forked": false,
           "link": true,
           "repo_name": "repo-b"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -408,7 +414,8 @@ expression: normalized
           "created_epoch": 2,
           "fork_mode": "selected",
           "fork_name": "beta"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -438,7 +445,8 @@ expression: normalized
           "created_epoch": 2,
           "fork_mode": "selected",
           "fork_name": "beta"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -474,7 +482,8 @@ expression: normalized
           "forked": false,
           "link": true,
           "repo_name": "repo-b"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -509,7 +518,8 @@ expression: normalized
           "created_epoch": 2,
           "fork_mode": "selected",
           "fork_name": "beta"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -539,7 +549,8 @@ expression: normalized
           "created_epoch": 3,
           "fork_mode": "research",
           "fork_name": "research"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -574,7 +585,8 @@ expression: normalized
           "created_epoch": 3,
           "fork_mode": "research",
           "fork_name": "research"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -606,7 +618,8 @@ expression: normalized
           "member_path_kind": "directory",
           "provider_source_path": "/sources/repo-a",
           "repo_name": "repo-a"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -638,7 +651,8 @@ expression: normalized
           "member_path_kind": "directory",
           "provider_source_path": "/sources/repo-b",
           "repo_name": "repo-b"
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -666,7 +680,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -697,7 +712,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -725,7 +741,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -756,7 +773,8 @@ expression: normalized
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -987,6 +1005,149 @@ expression: normalized
       "kind": "unresolved_endpoint",
       "link_id": "atelier:fork:atelier:research:rooted_at_path:/fixture/.atelier/forks/research",
       "relation": "rooted_at_path"
+    }
+  ],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/sources/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/sources/repo-b"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-a/.git"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo-b/.git"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "root": ".atelier/forks/alpha/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/sources/repo-b"
+        },
+        "root": "repo-b"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "root": "/fixture/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "root": "/fixture/repo-b"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "workspace",
+        "root": "/fixture"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/sources/repo-a"
+        },
+        "refname": "fork/alpha/repo-a"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-a/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo-b/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "fork",
+        "provider_source_key": "atelier:alpha"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "fork",
+        "provider_source_key": "atelier:beta"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "fork",
+        "provider_source_key": "atelier:research"
+      },
+      "provider": "atelier",
+      "freshness_epoch": "<redacted>"
     }
   ]
 }

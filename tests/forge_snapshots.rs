@@ -13,6 +13,8 @@ use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
 use conspectus::output::{render_graph_json, table};
 use conspectus::resolve::resolve_snapshot;
 
+mod support;
+
 #[test]
 fn forge_zero_pull_requests_json_snapshot() {
     let fixture = RepoFixture::new("git@github.com:octo/repo.git");
@@ -95,7 +97,8 @@ fn session_table_union_projection_with_pr_snapshot() {
 fn render_json(fixture: &RepoFixture, config: LocalDiscoveryConfig) -> String {
     let snapshot = discover_local_with([fixture.path()], config).expect("discover");
     let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render json");
-    fixture.normalize(&rendered)
+    let normalized = fixture.normalize(&rendered);
+    support::redact_freshness_epoch(&normalized)
 }
 
 fn render_table(

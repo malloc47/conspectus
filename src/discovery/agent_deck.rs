@@ -92,6 +92,7 @@ fn default_profiles_root(multi_repo_worktrees_root: &Path) -> PathBuf {
 
 impl DiscoveryProvider for AgentDeckDiscovery {
     fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+        let epoch = crate::discovery::current_epoch();
         if !self.root.is_dir() {
             return Ok(GraphFragment::empty());
         }
@@ -113,7 +114,9 @@ impl DiscoveryProvider for AgentDeckDiscovery {
             let workspace_path = entry.path();
             fragments.push(self.discover_workspace(&workspace_path, &title_map)?);
         }
-        Ok(snapshot_fragment(merge_fragments(fragments)))
+        let mut fragment = snapshot_fragment(merge_fragments(fragments));
+        crate::discovery::stamp_fragment(&mut fragment, "agent_deck", epoch);
+        Ok(fragment)
     }
 }
 
@@ -334,7 +337,7 @@ fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
-        node_provenance: BTreeMap::new(),
+        node_provenance: snapshot.node_provenance,
     }
 }
 

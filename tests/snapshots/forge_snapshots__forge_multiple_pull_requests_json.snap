@@ -1,6 +1,5 @@
 ---
 source: tests/forge_snapshots.rs
-assertion_line: 59
 expression: rendered
 ---
 {
@@ -120,7 +119,8 @@ expression: rendered
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "git common dir"
+        "evidence": "git common dir",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -151,7 +151,8 @@ expression: rendered
       "freshness": "fresh",
       "source_metadata": {
         "adapter": "git",
-        "evidence": "symbolic HEAD"
+        "evidence": "symbolic HEAD",
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -189,7 +190,8 @@ expression: rendered
           "is_draft": false,
           "state": "open",
           "updated_epoch": 1772712000
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -229,7 +231,8 @@ expression: rendered
           "is_draft": false,
           "state": "merged",
           "updated_epoch": 1772625600
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -269,7 +272,8 @@ expression: rendered
           "is_draft": false,
           "state": "closed",
           "updated_epoch": 1772539200
-        }
+        },
+        "freshness_epoch": "<redacted>"
       },
       "state": {
         "state": "active"
@@ -340,6 +344,74 @@ expression: rendered
       "kind": "unresolved_endpoint",
       "link_id": "github:repo:/fixture/repo/.git:branch_has_forge_pr:repo#3",
       "relation": "branch_has_forge_pr"
+    }
+  ],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "repo",
+        "common_dir": "/fixture/repo/.git"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "checkout",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "root": "/fixture/repo"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "branch",
+        "repo": {
+          "common_dir": "/fixture/repo/.git"
+        },
+        "refname": "refs/heads/main"
+      },
+      "provider": "git",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "octo",
+        "repo": "repo",
+        "number": 1
+      },
+      "provider": "github",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "octo",
+        "repo": "repo",
+        "number": 2
+      },
+      "provider": "github",
+      "freshness_epoch": "<redacted>"
+    },
+    {
+      "node_id": {
+        "type": "forge_pr",
+        "provider": "github",
+        "host": "github.com",
+        "owner": "octo",
+        "repo": "repo",
+        "number": 3
+      },
+      "provider": "github",
+      "freshness_epoch": "<redacted>"
     }
   ]
 }

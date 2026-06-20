@@ -63,12 +63,18 @@ impl HarnessAdapter for AiderAdapter {
             }));
         }
 
-        Ok(GraphFragment {
+        let mut fragment = GraphFragment {
             nodes,
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
-        })
+        };
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            HARNESS_KEY,
+            crate::discovery::current_epoch(),
+        );
+        Ok(fragment)
     }
 }
 

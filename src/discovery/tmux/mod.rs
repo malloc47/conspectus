@@ -1048,12 +1048,18 @@ impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             }));
         }
 
-        Ok(GraphFragment {
+        let mut fragment = GraphFragment {
             nodes,
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
             node_provenance: BTreeMap::new(),
-        })
+        };
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            TMUX_BACKEND,
+            crate::discovery::current_epoch(),
+        );
+        Ok(fragment)
     }
 }
 

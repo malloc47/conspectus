@@ -27,13 +27,16 @@ impl GenericWorkspaceDiscovery {
 
 impl DiscoveryProvider for GenericWorkspaceDiscovery {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+        let epoch = crate::discovery::current_epoch();
         let mut fragments = Vec::new();
 
         for root in context.roots() {
             fragments.push(self.discover_root(root)?);
         }
 
-        Ok(snapshot_fragment(merge_fragments(fragments)))
+        let mut fragment = snapshot_fragment(merge_fragments(fragments));
+        crate::discovery::stamp_fragment(&mut fragment, "generic_workspace", epoch);
+        Ok(fragment)
     }
 }
 
@@ -200,7 +203,7 @@ fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
-        node_provenance: BTreeMap::new(),
+        node_provenance: snapshot.node_provenance,
     }
 }
 
