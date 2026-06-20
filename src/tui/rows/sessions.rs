@@ -17,7 +17,7 @@
 //!   "Ungrouped" bucket (one synthetic group at the top level,
 //!   regardless of `SessionsGrouping`).
 //!
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
@@ -153,8 +153,10 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             lineage_stack: HashSet::new(),
             session_bearing_worktrees: &session_bearing_worktrees,
         };
+        let disambiguating = title_disambiguating_sessions(&sessions);
         for entry in sessions {
-            emit_session(&mut ctx, 0, entry);
+            let flag = disambiguating.contains(&entry.id);
+            emit_session(&mut ctx, 0, entry, flag);
         }
         return tree;
     }
@@ -845,8 +847,10 @@ fn emit_checkout_bucket(
         if workspace_changed {
             push_workspace_row(ctx.tree, 0, workspace_root, ctx.data, ctx.home);
         }
+        let disambiguating = title_disambiguating_sessions(&sessions);
         for entry in sessions {
-            emit_session(ctx, 1, entry);
+            let flag = disambiguating.contains(&entry.id);
+            emit_session(ctx, 1, entry, flag);
         }
         *last_workspace = Some(key.workspace);
         *last_repo = None;
@@ -886,8 +890,10 @@ fn emit_checkout_bucket(
         depth.saturating_add(1)
     };
 
+    let disambiguating = title_disambiguating_sessions(&sessions);
     for entry in sessions {
-        emit_session(ctx, session_depth, entry);
+        let flag = disambiguating.contains(&entry.id);
+        emit_session(ctx, session_depth, entry, flag);
     }
 
     *last_workspace = Some(key.workspace);
@@ -982,12 +988,52 @@ fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>
             is_launch_context: false,
         }),
     });
+    let disambiguating = title_disambiguating_sessions(&sessions);
     for entry in sessions {
-        emit_session(ctx, 1, entry);
+        let flag = disambiguating.contains(&entry.id);
+        emit_session(ctx, 1, entry, flag);
     }
 }
 
-fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
+/// P8-015: compute the set of session ids in `entries` whose row
+/// label should incorporate the harness-recorded title. A session
+/// qualifies when (a) its `title` attribute is non-empty *and* (b)
+/// another session in the same group bucket shares the same rendered
+/// harness label. The check is bucket-scoped, not snapshot-scoped,
+/// so adding a new same-harness session to a project later refreshes
+/// produces a deterministic flip of the existing rows without
+/// reordering them.
+fn title_disambiguating_sessions(entries: &[SessionEntry<'_>]) -> HashSet<NodeId> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for entry in entries {
+        *counts
+            .entry(harness_label(&entry.node.harness_key))
+            .or_insert(0) += 1;
+    }
+    entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .node
+                .title
+                .as_deref()
+                .is_some_and(|t| !t.trim().is_empty())
+                && counts
+                    .get(&harness_label(&entry.node.harness_key))
+                    .copied()
+                    .unwrap_or(0)
+                    >= 2
+        })
+        .map(|entry| entry.id.clone())
+        .collect()
+}
+
+fn emit_session(
+    ctx: &mut EmitCtx<'_, '_>,
+    depth: u8,
+    entry: SessionEntry<'_>,
+    title_disambiguates: bool,
+) {
     let candidates = ctx.data.mux_candidates_for_session(&entry.id);
     let mux_state = match candidates.len() {
         0 => MuxIndicator::Unmuxed,
@@ -1025,6 +1071,7 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
             preview: entry.node.last_message_preview.clone(),
             title: entry.node.title.clone(),
             alias: ctx.data.snapshot.aliases.get(&entry.id).map(str::to_string),
+            title_disambiguates,
             primary_node: entry.id.clone(),
             pin_id: ctx.data.pin_id_by_bound_session.get(&entry.id).cloned(),
         }),
@@ -1032,8 +1079,11 @@ fn emit_session(ctx: &mut EmitCtx<'_, '_>, depth: u8, entry: SessionEntry<'_>) {
 
     if has_lineage_children {
         let inserted = ctx.lineage_stack.insert(entry.id.clone());
+        // Lineage children are a nested subtree of one parent, not
+        // peer rows in the same project group, so the bucket-scoped
+        // disambiguation flag never applies — pass `false`.
         for child in lineage_children {
-            emit_session(ctx, depth.saturating_add(1), child);
+            emit_session(ctx, depth.saturating_add(1), child, false);
         }
         if inserted {
             ctx.lineage_stack.remove(&entry.id);
@@ -3876,6 +3926,174 @@ mod tests {
             has_pin_row,
             "expected a pin row after resolver run: {:#?}",
             tree.rows
+        );
+    }
+
+    // ----- P8-015: title-disambiguation in the row tree ----------------
+
+    fn session_keys_with_disambiguating_titles(tree: &RowTree) -> Vec<String> {
+        tree.rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(s) if s.title_disambiguates => {
+                    Some(s.session.session_key.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn session_keys_in_order(tree: &RowTree) -> Vec<String> {
+        tree.rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(s) => Some(s.session.session_key.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn p8_015_snapshot_with_sessions(cwd: &str, specs: &[(&str, &str, Option<&str>)]) -> RowTree {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(repo(cwd));
+        snapshot.nodes.push(worktree(cwd, cwd));
+        for (harness, key, title) in specs {
+            snapshot.nodes.push(agent_session(
+                harness,
+                "/state",
+                key,
+                Some(cwd),
+                *title,
+                None,
+            ));
+        }
+        let snapshot = resolve_snapshot(snapshot);
+        build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(home().as_path()),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        })
+    }
+
+    #[test]
+    fn title_disambiguation_off_for_single_session_per_harness() {
+        // Case 1: a project group with one codex and one opencode
+        // session — both already disambiguated by harness label, so
+        // neither row should incorporate its title.
+        let tree = p8_015_snapshot_with_sessions(
+            "/home/op/src/proj",
+            &[
+                ("codex", "alpha", Some("scratch draft")),
+                ("opencode", "beta", Some("review pass")),
+            ],
+        );
+        let flagged = session_keys_with_disambiguating_titles(&tree);
+        assert!(
+            flagged.is_empty(),
+            "no row should be flagged when harness already disambiguates: {flagged:?}"
+        );
+    }
+
+    #[test]
+    fn title_disambiguation_on_for_same_harness_siblings_with_distinct_titles() {
+        // Case 2: two codex sessions in the same project group, both
+        // carrying distinct titles — both rows are flagged.
+        let tree = p8_015_snapshot_with_sessions(
+            "/home/op/src/proj",
+            &[
+                ("codex", "alpha", Some("scratch draft")),
+                ("codex", "beta", Some("review pass")),
+            ],
+        );
+        let mut flagged = session_keys_with_disambiguating_titles(&tree);
+        flagged.sort();
+        assert_eq!(
+            flagged,
+            vec!["alpha".to_string(), "beta".to_string()],
+            "both same-harness siblings should be flagged"
+        );
+    }
+
+    #[test]
+    fn title_disambiguation_only_flags_the_session_with_a_title() {
+        // Case 3: two codex sessions in the same project group, but
+        // only one has a title — only the titled row is flagged. The
+        // untitled row stays clean (no `tree_label`).
+        let tree = p8_015_snapshot_with_sessions(
+            "/home/op/src/proj",
+            &[
+                ("codex", "alpha", Some("scratch draft")),
+                ("codex", "beta", None),
+            ],
+        );
+        let flagged = session_keys_with_disambiguating_titles(&tree);
+        assert_eq!(flagged, vec!["alpha".to_string()]);
+        // The untitled row still emits a normal AgentSessionRow — it
+        // just doesn't gain a tree label.
+        let alpha = tree
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(s) if s.session.session_key == "alpha" => Some(s),
+                _ => None,
+            })
+            .expect("alpha row present");
+        let beta = tree
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(s) if s.session.session_key == "beta" => Some(s),
+                _ => None,
+            })
+            .expect("beta row present");
+        assert_eq!(alpha.tree_label(), Some("scratch draft"));
+        assert_eq!(beta.tree_label(), None);
+    }
+
+    #[test]
+    fn title_disambiguation_flips_deterministically_on_refresh_without_reordering() {
+        // Case 4: a project starts with one codex session whose title
+        // is hidden (no collision). A refresh adds a second codex
+        // session with a different title; the previously-clean row
+        // gains its title and the new row arrives with a title too,
+        // both in the same deterministic position the row tree built
+        // them in. Sort order across the refresh is preserved (the
+        // collision flag never re-keys the sort).
+        let first = p8_015_snapshot_with_sessions(
+            "/home/op/src/proj",
+            &[("codex", "alpha", Some("scratch draft"))],
+        );
+        assert!(
+            session_keys_with_disambiguating_titles(&first).is_empty(),
+            "single-session group should not flag titles"
+        );
+        let pre_order = session_keys_in_order(&first);
+        assert_eq!(pre_order, vec!["alpha".to_string()]);
+
+        let second = p8_015_snapshot_with_sessions(
+            "/home/op/src/proj",
+            &[
+                ("codex", "alpha", Some("scratch draft")),
+                ("codex", "beta", Some("review pass")),
+            ],
+        );
+        let mut flagged = session_keys_with_disambiguating_titles(&second);
+        flagged.sort();
+        assert_eq!(
+            flagged,
+            vec!["alpha".to_string(), "beta".to_string()],
+            "both rows should gain the disambiguation flag once a sibling appears"
+        );
+        let post_order = session_keys_in_order(&second);
+        // `alpha` retains its slot; `beta` appends. The session-key
+        // sort order is alphabetical, so this is the stable shape.
+        assert_eq!(
+            post_order,
+            vec!["alpha".to_string(), "beta".to_string()],
+            "row order must stay deterministic across the refresh"
         );
     }
 }

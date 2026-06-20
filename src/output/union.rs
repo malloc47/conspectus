@@ -26,6 +26,7 @@ use super::render::{
     unique_prefix_len,
 };
 use super::table::agent_session_key_for_label;
+use crate::filter::{MuxStateKey, SessionMatchInputs};
 
 type SessionKey = (String, String, String);
 
@@ -57,6 +58,7 @@ struct UnionRow {
     title: Option<String>,
     preview: Option<String>,
     alias_display_name: Option<String>,
+    last_active_epoch: Option<i64>,
     // Mux-side fields (populated when node_kind = 'mux_session'):
     backend: Option<String>,
     native_id: Option<String>,
@@ -89,7 +91,7 @@ struct PreferredMux {
 pub fn build_union_rows_from_conn(
     conn: &Connection,
     columns: &[&'static str],
-    _options: &RenderOptions,
+    options: &RenderOptions,
 ) -> rusqlite::Result<Vec<Vec<String>>> {
     let rows_data = fetch_union_rows(conn)?;
     let preferred_mux = fetch_preferred_mux_per_agent(conn)?;
@@ -108,7 +110,23 @@ pub fn build_union_rows_from_conn(
             .collect(),
     );
 
+    let filter_active = options.filter.has_narrowing_predicates();
     for (row, full_short) in rows_data.iter().zip(body_full_ids.iter()) {
+        if filter_active {
+            match row.node_kind.as_str() {
+                "agent_session" => {
+                    if !agent_matches_filter(row, &preferred_mux, options) {
+                        continue;
+                    }
+                }
+                // Mirror the TUI union view (`src/tui/rows/union.rs`):
+                // mux rows drop whenever any narrowing predicate is
+                // active since none of the v1 dimensions apply
+                // directly to a mux row.
+                "mux_session" => continue,
+                _ => continue,
+            }
+        }
         let short_id = &full_short[..id_len];
         let preferred = row
             .agent_session_key()
@@ -123,6 +141,28 @@ pub fn build_union_rows_from_conn(
     }
 
     Ok(rows)
+}
+
+fn agent_matches_filter(
+    row: &UnionRow,
+    preferred_mux: &HashMap<SessionKey, PreferredMux>,
+    options: &RenderOptions,
+) -> bool {
+    let Some(harness) = row.harness_key.as_deref() else {
+        return false;
+    };
+    let candidate_count = row
+        .agent_session_key()
+        .as_ref()
+        .and_then(|k| preferred_mux.get(k))
+        .map(|m| m.candidate_count)
+        .unwrap_or(0);
+    options.filter.matches_session(&SessionMatchInputs {
+        harness_key: harness,
+        now_epoch: options.now_epoch,
+        last_active_epoch: row.last_active_epoch,
+        mux_state: MuxStateKey::from_candidate_count(candidate_count),
+    })
 }
 
 struct CellCtx<'a> {
@@ -203,6 +243,7 @@ fn fetch_union_rows(conn: &Connection) -> rusqlite::Result<Vec<UnionRow>> {
                 a.harness_key, a.state_scope, a.session_key, \
                 a.cwd AS agent_cwd, a.title, a.last_message_preview, \
                 al.display_name AS alias_display_name, \
+                a.last_active_epoch, \
                 m.backend, m.native_id, m.cwd AS mux_cwd \
          FROM v_nodes v \
          LEFT JOIN node_agent_sessions a \
@@ -235,9 +276,10 @@ fn fetch_union_rows(conn: &Connection) -> rusqlite::Result<Vec<UnionRow>> {
             title: row.get(6)?,
             preview: row.get(7)?,
             alias_display_name: row.get(8)?,
-            backend: row.get(9)?,
-            native_id: row.get(10)?,
-            mux_cwd: row.get(11)?,
+            last_active_epoch: row.get(9)?,
+            backend: row.get(10)?,
+            native_id: row.get(11)?,
+            mux_cwd: row.get(12)?,
         })
     })?;
     rows.collect()

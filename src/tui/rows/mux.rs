@@ -763,6 +763,10 @@ fn agent_row(
             preview: agent.preview.clone(),
             title: agent.title.clone(),
             alias: agent.alias.clone(),
+            // P8-015 is sessions-view scoped; agent rows nested
+            // under a mux row never gain the title-as-disambiguator
+            // treatment here.
+            title_disambiguates: false,
             primary_node: node_id,
         }),
     }

@@ -3494,6 +3494,30 @@ mod tests {
         }
 
         #[test]
+        fn unmuxed_session_resolves_to_view_regardless_of_viewer_support() {
+            // T8-043: the dispatcher routes every un-muxed agent
+            // session through `SelectedDefault::View`. Harnesses
+            // without a registered viewer (or whose viewer binary is
+            // missing from `$PATH`) still resolve to `View` here —
+            // the runtime's `view_action` is what surfaces the
+            // `viewer_disabled_reason` status message after the
+            // operator presses Enter. Keeping the dispatcher
+            // uniform keeps the keymap consistent across harnesses
+            // and lets the fallback message stay actionable.
+            let mut snapshot = GraphSnapshot::empty();
+            add_repo_and_worktree(&mut snapshot, "/p/proj");
+            // `aider` has no viewer registered in v1 (see
+            // `H-TRANSCRIPT-007` deferred), so this is the
+            // unsupported-viewer surface for the dispatcher.
+            snapshot
+                .nodes
+                .push(session_node("aider", "/state", "abc", "/p/proj"));
+            let mut app = build_sessions_app(snapshot);
+            app.update(Msg::NavDown);
+            assert_eq!(selected_default_action(&app), SelectedDefault::View);
+        }
+
+        #[test]
         fn unbound_pin_row_resolves_to_launch_pin() {
             use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
 

@@ -1213,6 +1213,14 @@ impl App {
         &self.config
     }
 
+    /// Test-only mutator for the run config so tests can twiddle
+    /// fields like `current_tmux_session` after construction without
+    /// rebuilding the entire fixture.
+    #[cfg(test)]
+    pub fn config_mut(&mut self) -> &mut RunConfig {
+        &mut self.config
+    }
+
     /// Enable F8-013 last-active-view persistence. The runtime calls
     /// this at startup with a `TuiStateCache` resolver pointed at
     /// `$XDG_STATE_HOME/conspectus/tui-state.json`. Snapshot mode

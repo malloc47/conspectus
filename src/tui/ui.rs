@@ -1203,7 +1203,11 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         // marker reads without depending on a new theme key.
         spans.push(span!(theme.placeholder; "  📌"));
     }
-    if let Some(label) = session.display_label().filter(|label| !label.is_empty()) {
+    // P8-015: the row's tree label surfaces the operator-chosen
+    // alias unconditionally and the harness-recorded title only when
+    // the builder flagged this row for disambiguation. Right pane,
+    // search index, and status hints still read `display_label`.
+    if let Some(label) = session.tree_label().filter(|label| !label.is_empty()) {
         let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
         let style = if session
             .alias
@@ -4669,6 +4673,7 @@ mod tests {
             preview: None,
             title: None,
             alias: None,
+            title_disambiguates: false,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
         };
@@ -4818,6 +4823,7 @@ mod tests {
             preview: None,
             title: None,
             alias: None,
+            title_disambiguates: false,
             primary_node: NodeId::AgentSession(AgentSessionId::new("claude", "/state", "abc")),
             pin_id: None,
         });
@@ -4908,6 +4914,7 @@ mod tests {
             preview: None,
             title: Some("harness title".into()),
             alias: Some("ingest-refactor".into()),
+            title_disambiguates: false,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
         };
@@ -4947,6 +4954,7 @@ mod tests {
             preview: None,
             title: None,
             alias: None,
+            title_disambiguates: false,
             primary_node: NodeId::AgentSession(AgentSessionId::new("opencode", "/state", long_id)),
             pin_id: None,
         };
@@ -4978,6 +4986,12 @@ mod tests {
             preview: None,
             title: Some(long_title.into()),
             alias: None,
+            // P8-015: the renderer only surfaces the title when the
+            // builder flagged the row for disambiguation; the
+            // truncation assertion is exercising the renderer's
+            // width cap, so flip this on so the title actually
+            // reaches the row.
+            title_disambiguates: true,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
         };
@@ -5084,6 +5098,7 @@ mod tests {
             preview: Some("latest message".into()),
             title: None,
             alias: None,
+            title_disambiguates: false,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
         };
@@ -5123,6 +5138,7 @@ mod tests {
             preview: None,
             title: None,
             alias: None,
+            title_disambiguates: false,
             primary_node: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             pin_id: None,
         };
@@ -5410,6 +5426,258 @@ mod tests {
         assert!(
             text.contains("sort:recency"),
             "sort chip missing from status bar: {text}"
+        );
+    }
+
+    #[test]
+    fn contextual_status_offers_ambiguous_attach_hint_with_choose_affordance() {
+        // T8-014: when the selected agent-session row resolves to an
+        // ambiguous mux candidate set, the status bar advertises the
+        // preferred-target attach plus the `m choose` affordance.
+        //
+        // Forcing `MuxIndicator::Ambiguous` on a session row goes
+        // through the cwd-suppression path in `resolve::mod`: two
+        // distinct sessions claim the same mux via `exact_cwd_match`
+        // evidence, which makes the resolver leave
+        // `selected_link_id = None` on the `LinkedToMux` slot. The
+        // sessions row-tree builder then surfaces every competing
+        // candidate, so the row reports `candidate_count = 2`.
+        use crate::model::{
+            Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
+            Provenance, RelationKind, SourceMetadata,
+        };
+
+        fn cwd_link(id: &str, session: AgentSessionId, mux: MuxSessionId) -> GraphLink {
+            let mut metadata = SourceMetadata::default();
+            metadata.fields.insert(
+                "match_kind".to_string(),
+                serde_json::json!("exact_cwd_match"),
+            );
+            GraphLink {
+                id: id.to_string(),
+                source: NodeId::AgentSession(session),
+                target: LinkEndpoint::Node {
+                    id: NodeId::MuxSession(mux),
+                },
+                relation: RelationKind::LinkedToMux,
+                provenance: Provenance::Discovered,
+                confidence: Confidence::Medium,
+                freshness: crate::model::Freshness::Fresh,
+                source_metadata: metadata,
+                state: LinkState::Active,
+            }
+        }
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "abc"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "def"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+        let editor = MuxSessionId::new("tmux:editor");
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: editor.clone(),
+            backend: "tmux".to_string(),
+            native_id: "editor".to_string(),
+            cwd: Some("/home/op/src/proj".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        let scratch = MuxSessionId::new("tmux:scratch");
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: scratch.clone(),
+            backend: "tmux".to_string(),
+            native_id: "scratch".to_string(),
+            cwd: Some("/home/op/src/proj".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        // The first session has cwd-evidence links to two muxes; the
+        // second session sits in the same cwd and pins each mux as
+        // well. That gives both muxes "multiple distinct sessions"
+        // and triggers the cwd-suppression path on both slots for
+        // session `abc`, leaving `selected_link_id = None`.
+        snapshot.candidate_links.push(cwd_link(
+            "abc-editor",
+            AgentSessionId::new("codex", "/state", "abc"),
+            editor.clone(),
+        ));
+        snapshot.candidate_links.push(cwd_link(
+            "abc-scratch",
+            AgentSessionId::new("codex", "/state", "abc"),
+            scratch.clone(),
+        ));
+        snapshot.candidate_links.push(cwd_link(
+            "def-editor",
+            AgentSessionId::new("codex", "/state", "def"),
+            editor,
+        ));
+        snapshot.candidate_links.push(cwd_link(
+            "def-scratch",
+            AgentSessionId::new("codex", "/state", "def"),
+            scratch,
+        ));
+        let snapshot = resolve_snapshot(snapshot);
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        // Step past the group row onto the first (ambiguous) session row.
+        app.update(Msg::NavDown);
+
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("Enter/a attach preferred"),
+            "ambiguous row should advertise preferred attach: {text}"
+        );
+        assert!(
+            text.contains("m choose"),
+            "ambiguous row should advertise the choose affordance: {text}"
+        );
+    }
+
+    #[test]
+    fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
+        // T8-014: a group-row selection should surface the
+        // expand/collapse fold bindings, not an attach hint.
+        let app = seeded_app();
+        // Auto-selection lands on the project group row, which is
+        // exactly what we want to assert against.
+        let area = Rect::new(0, 0, 120, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("Enter/l expand"),
+            "group row should advertise expand: {text}"
+        );
+        assert!(
+            text.contains("h collapse"),
+            "group row should advertise collapse: {text}"
+        );
+    }
+
+    #[test]
+    fn status_bar_renders_stale_chip_when_refresh_failure_recorded() {
+        // T8-014: a recorded refresh failure surfaces a `stale` chip
+        // ahead of any provider chips so the operator notices the
+        // background data is older than expected. The test runs at
+        // 220 columns to keep the contextual left-zone text from
+        // cropping the chip suffix.
+        let mut app = seeded_app();
+        app.update(Msg::SetRefreshFailure("network unavailable".to_string()));
+        app.update(Msg::SetStatus(None));
+
+        let area = Rect::new(0, 0, 220, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("stale"),
+            "stale chip should render once a refresh failure is recorded: {text}"
+        );
+    }
+
+    #[test]
+    fn status_bar_renders_provider_error_chip_for_unavailable_tmux() {
+        // T8-014: a tmux provider error renders a right-zone chip
+        // labelled `tmux:<reason>` so the operator sees why the mux
+        // surface is empty.
+        let mut app = seeded_app();
+        app.update(Msg::SetProviderStatus(crate::tui::app::ProviderStatus {
+            tmux_disabled: false,
+            tmux_available: Some(false),
+            tmux_reason: Some("missing binary".to_string()),
+            forge_disabled: false,
+            forge_available: None,
+            forge_reason: None,
+        }));
+
+        let area = Rect::new(0, 0, 220, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("tmux:missing binary"),
+            "provider error chip should surface the reason: {text}"
+        );
+    }
+
+    #[test]
+    fn contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session() {
+        // T8-043: when the selected row is muxed but the preferred
+        // mux happens to be the operator's *current* tmux session,
+        // `resolve_attach_target` returns `CurrentTmuxSession`. The
+        // status hint should fall through to `attach_disabled_reason`
+        // so the operator sees a "refusing to attach …" cue instead
+        // of the default `Enter/a attach` text.
+        let mut app = muxed_app("editor", None);
+        app.update(Msg::NavDown);
+        // Pretend conspectus was launched inside the same tmux
+        // session the selected row is attached to. The RunConfig
+        // field is normally populated from `$TMUX` at startup.
+        app.config_mut().current_tmux_session = Some("editor".to_string());
+
+        let area = Rect::new(0, 0, 160, 24);
+        let buffer = render_to_buffer(&app, area);
+        let text = buffer_to_string(&buffer);
+        assert!(
+            text.contains("refusing to attach current tmux session `editor`"),
+            "current-tmux row should surface the disabled-attach reason: {text}"
+        );
+        assert!(
+            !text.contains("Enter/a attach"),
+            "Enter/a attach hint must not render when attach is disabled: {text}"
         );
     }
 

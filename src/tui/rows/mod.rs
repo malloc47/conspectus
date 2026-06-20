@@ -188,13 +188,22 @@ pub struct AgentSessionRow {
     /// The renderer decides whether and where to display it.
     pub preview: Option<String>,
     /// Title attribute on the session, if set (opencode chat topics
-    /// today). Right panel renders it as a header field; the tree
-    /// uses it only after `P8-015` lands.
+    /// today). The right panel always renders it as a header field;
+    /// the left tree row picks it up only when
+    /// [`Self::title_disambiguates`] is `true`.
     pub title: Option<String>,
     /// Operator-chosen display name from the ADR 0029 alias overlay,
     /// when set. Takes precedence over [`Self::title`] at every
     /// projection site via [`Self::display_label`].
     pub alias: Option<String>,
+    /// P8-015: the sessions row-tree builder flips this on when the
+    /// parent project group contains another same-harness session
+    /// and this row carries a non-empty `title`. The left-tree
+    /// renderer consults it via [`Self::tree_label`] so titles only
+    /// surface in the row when they disambiguate. The right pane,
+    /// search index, and status hints continue to read
+    /// [`Self::display_label`] / [`Self::title`] unconditionally.
+    pub title_disambiguates: bool,
     pub primary_node: NodeId,
     /// Pin id when this agent-session row is the live realization of
     /// a [`crate::model::PinCandidate`] (ADR 0057). Renderers add a
@@ -212,6 +221,23 @@ impl AgentSessionRow {
     /// callers can render the short-id suffix instead.
     pub fn display_label(&self) -> Option<&str> {
         self.alias.as_deref().or(self.title.as_deref())
+    }
+
+    /// Display label for the left-tree row body (P8-015). Alias wins
+    /// when set (operator-chosen names are always meaningful in the
+    /// tree); otherwise the title is surfaced only when the builder
+    /// flagged this row as needing disambiguation. The right pane,
+    /// status hints, and search index keep using
+    /// [`Self::display_label`] so the title is never hidden from
+    /// surfaces where it carries diagnostic value.
+    pub fn tree_label(&self) -> Option<&str> {
+        if let Some(alias) = self.alias.as_deref().filter(|s| !s.is_empty()) {
+            return Some(alias);
+        }
+        if self.title_disambiguates {
+            return self.title.as_deref().filter(|s| !s.is_empty());
+        }
+        None
     }
 }
 

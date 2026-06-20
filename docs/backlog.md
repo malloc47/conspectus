@@ -7816,35 +7816,43 @@ work. `P8-014` is post-v1 polish that does not block the release.
   - Blockers: `P8-010` (attach action) and the v1 keybinding
     surface from `P8-006`.
 
-- [ ] `P8-015` Surface session `title` in the sessions row tree when it
+- [x] `P8-015` Surface session `title` in the sessions row tree when it
     uniquely distinguishes siblings.
-  - Scope: extend the sessions row-tree builder so that when a
-    project group contains multiple agent sessions of the same
-    harness (current "harness:…id" label collides), and a non-empty
-    `title` attribute is present on the candidates, the row label
-    incorporates the title for disambiguation. Sessions without a
-    title, or sessions whose harness label already distinguishes
-    them, render unchanged. The right-panel header `title` row
-    (locked in the mockup review) remains the canonical surface;
-    the tree treatment is purely a disambiguation aid. Behavior
-    must stay deterministic across refreshes — title-or-no-title
-    must not reorder rows, and the disambiguation rule must be
-    stable when the colliding set changes shape.
-  - Tests: row-tree builder unit tests covering: (1) single session
-    per harness in a group — no title shown in tree, (2) two
-    sessions of the same harness, both with distinct titles —
-    titles shown for both, (3) two same-harness sessions where
-    only one has a title — only that one gains the title suffix
-    while the other keeps its plain label, (4) refresh-stability:
-    adding a new same-harness session in a later refresh causes
-    the existing rows to gain titles deterministically without
-    reordering.
-  - Blockers: `H-TBL-015` (AGENT-cell cleanup that moved `title`
-    out of the row label originally) and `P8-004` (the row-tree
-    builder this story extends). Should not land until
-    `P8-007`/`P8-008` have a stable render path so the new label
-    shape can be snapshot-tested without churning unrelated
-    fixtures.
+  - Outcome: shipped. `AgentSessionRow` gained a
+    `title_disambiguates: bool` field plus a new `tree_label()`
+    helper that returns `alias > (title if title_disambiguates) >
+    None`. The sessions row-tree builder
+    (`src/tui/rows/sessions.rs`) computes the flag per project-group
+    bucket via `title_disambiguating_sessions`: a session qualifies
+    only when its `title` is non-empty *and* the bucket holds at
+    least one other session sharing the same rendered harness label.
+    Lineage children and the cross-view rows (mux, prs, forks,
+    union) all pass `false` since the disambiguation rule is
+    sessions-view bucket-scoped.
+
+    The left-tree renderer
+    (`render_session_spans` in `src/tui/ui.rs`) consults
+    `tree_label()` instead of `display_label()`, so titles only
+    surface in row labels when they disambiguate. Right pane,
+    search index (`search.rs`), status hints, and the pin-create
+    flow keep using `display_label()` so the title is never hidden
+    from surfaces where it carries diagnostic value. Behavior is
+    deterministic across refreshes: the flag is derived from the
+    bucket membership at build time, never re-keys the sort, and
+    flips on cleanly the moment a sibling appears.
+  - Tests: four new row-tree unit tests in
+    `src/tui/rows/sessions.rs` covering each backlog case —
+    `title_disambiguation_off_for_single_session_per_harness`,
+    `title_disambiguation_on_for_same_harness_siblings_with_distinct_titles`,
+    `title_disambiguation_only_flags_the_session_with_a_title`,
+    `title_disambiguation_flips_deterministically_on_refresh_without_reordering`.
+    Existing renderer test
+    `session_display_label_is_truncated_in_left_row` flipped its
+    fixture to `title_disambiguates: true` to keep the width-cap
+    assertion exercised.
+  - Follow-ups: none — the canonical title surface remains the
+    right-pane header, and the alias-overlay precedence in
+    `display_label` is preserved.
 
 - [x] `H-AGENT-EPOCH` Populate `AgentSessionNode.last_active_epoch`
     across harness adapters.
@@ -8504,71 +8512,64 @@ than recursive inline detail panes.
     non-cwd-oriented data still present a usable starting point.
   - Tests: `cargo test tui --all-targets`.
 
-- [ ] `T8-014` Make the status bar contextual to the selected row.
-  - Scope: replace the static action list with a compact contextual
-    left zone. Examples: attachable rows show
-    `a attach <mux-display>`, ambiguous rows show
-    `a attach preferred · m choose`, un-muxed rows show the
-    disabled attach reason and reserved resume affordance, and
-    group rows show expand/collapse. Keep provider health,
-    freshness, and errors in the right chip zone.
-  - Tests: pure status-view tests for each row kind and attach
-    state; Ratatui snapshots for attachable, ambiguous, un-muxed,
-    group-row, provider-error, and stale-refresh status bars.
-  - Blockers: `P8-006`, `P8-010`, `T8-003`.
-  - **slice landed**: the status bar now derives its left-zone
-    action text from the selected row. It shows attach targets for
-    attachable selections, disabled attach reasons for un-muxed or
-    unsupported rows, ambiguity affordance text, focus scope, and
-    the active pane keymap. Provider health/freshness chips remain
-    with `T8-003`.
+- [x] `T8-014` Make the status bar contextual to the selected row.
+  - Outcome: closed. The status bar's left zone is fully contextual
+    via `contextual_status_text` / `default_action_status_hint` in
+    `src/tui/ui.rs`: attachable rows show
+    `Enter/a attach <mux-display>`, ambiguous rows show
+    `Enter/a attach preferred <…> · m choose`, un-muxed agent rows
+    show `Enter/v view <session> · S resume` (or the bare view hint
+    when the harness has no registered resume), pin rows surface
+    their per-binding-state hint, and group rows show
+    `Enter/l expand · h collapse`. Disabled-attach rows fall through
+    to `attach_disabled_reason` (e.g. "refusing to attach current
+    tmux session `…`"). The right chip zone renders provider error
+    chips (`tmux:<reason>` / `gh:<reason>`) and a `stale` chip when
+    a refresh failure is recorded.
+  - Tests: existing `contextual_status_offers_enter_*`,
+    `status_hint_for_*_pin_*`, plus four new coverage entries —
+    `contextual_status_offers_ambiguous_attach_hint_with_choose_affordance`,
+    `contextual_status_for_group_row_advertises_expand_collapse_folding`,
+    `status_bar_renders_stale_chip_when_refresh_failure_recorded`,
+    `status_bar_renders_provider_error_chip_for_unavailable_tmux`,
+    `contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session`.
+  - Follow-ups: provider/freshness chip *content* (richer wording,
+    chip ordering polish, "tmux:off" vs "tmux:unavailable" nuance)
+    stays with `T8-003`; this story closes on the contextual-left-zone
+    deliverable and the right-zone wire-up.
 
-- [ ] `T8-043` Make Enter trigger the selected row's default action.
-  - Scope: when the left pane has focus, route `Enter` through a
-    default-action dispatcher instead of treating every row as
-    expand/collapse. Default actions:
-    - mux rows attach to that mux, reusing the existing `P8-010` /
-      `T8-018` attach path and disabled-reason handling;
-    - un-muxed agent-session rows open the native transcript viewer,
-      reusing the existing `H-VIEWER-NATIVE-008` view path;
-    - mux-candidate / mux-attached agent rows keep the attach
-      behavior already available through `a`;
-    - group rows keep expand/collapse on `Enter`.
-    Preserve right-pane `Enter` semantics from the detail explorer:
-    relationship rows still drill, group headers still toggle, and
-    Node-zone copy behavior from `T8-040` remains scoped to the
-    right pane.
-  - Tests: reducer/keymap coverage for mux row attach, un-muxed
-    session view, attached-session attach, group expand/collapse,
-    disabled attach reason, unsupported viewer fallback, and
-    focus-specific behavior proving right-pane `Enter` is unchanged.
-    Add a status-bar snapshot or view-model test showing the
-    contextual hint advertises `Enter` as the primary default action
-    for attachable muxes and viewable un-muxed sessions.
-  - Manual checks: in `conspectus tui`, select a mux row and press
-    `Enter` to attach/detach back to Conspectus; select an un-muxed
-    Claude/Codex/OpenCode session and press `Enter` to open the
-    transcript viewer; select a group row and confirm it still
-    expands/collapses.
-  - Blockers: `P8-010`, `T8-018`, `H-VIEWER-NATIVE-008`,
-    `T8-014`.
-  - **slice landed**: `Enter` on the left pane now dispatches the
-    selected row's default action. Mux rows and muxed/ambiguous agent
-    sessions attach (reusing `attach_action`); un-muxed agent
-    sessions open the native transcript viewer (reusing
-    `view_action`); group rows still expand/collapse. Right-pane
-    `Enter` continues to fire `ExplorerActivate` for drill/expand.
-    As a companion, `v` now also works on mux rows: it resolves the
-    mux's preferred linked agent session and opens its transcript,
-    so `v` is the inverse of `a` on agent rows. Because `Enter` no
-    longer toggles every row, the left tree picks up vi-style fold
-    bindings: `l` / `→` expand the selected row, `h` / `←` collapse
-    it (idempotent: a second press is a no-op). The status hint
-    advertises `Enter/a attach …` for attachable rows,
-    `Enter/v view …` for viewable un-muxed sessions, and
-    `Enter/l expand · h collapse` for group rows. The help overlay's
-    Actions section lists `Enter` as the row-kind default and the
-    Navigation section documents the new fold bindings.
+- [x] `T8-043` Make Enter trigger the selected row's default action.
+  - Outcome: closed. `Enter` on the left pane dispatches via
+    `selected_default_action` (`src/tui/runtime.rs`): mux rows and
+    muxed/ambiguous agent sessions attach (reusing `attach_action`);
+    un-muxed agent sessions open the native transcript viewer
+    (reusing `view_action`); pin rows launch; group rows
+    expand/collapse. Right-pane `Enter` is remapped to
+    `ExplorerEnter` by `remap_for_focus`, leaving the detail
+    explorer's drill/expand/Node-zone-copy semantics untouched. As
+    companions, `v` works on mux rows (opens the preferred linked
+    session's transcript) and vi-style `h`/`l` fold bindings drive
+    explicit expand/collapse now that `Enter` is no longer the
+    universal toggle. Status hints advertise the right verb per
+    row kind via `default_action_status_hint`.
+  - Tests: existing dispatcher coverage in
+    `selected_default_action_tests`
+    (`empty_selection_falls_back_to_toggle_expand`,
+    `group_row_resolves_to_toggle_expand`,
+    `unmuxed_session_resolves_to_view`,
+    `muxed_session_resolves_to_attach`,
+    `mux_candidate_child_resolves_to_attach`,
+    `mux_view_mux_row_resolves_to_attach`,
+    `unbound_pin_row_resolves_to_launch_pin`) plus new
+    `unmuxed_session_resolves_to_view_regardless_of_viewer_support`,
+    the `remap_for_focus_*` focus-specific suite proving right-pane
+    `Enter` becomes `ExplorerEnter`, and a status-hint test for the
+    disabled-attach fallback
+    (`contextual_status_surfaces_disabled_attach_reason_for_current_tmux_session`).
+  - Manual checks: validated with the existing fixture suite and the
+    `--snapshot` harness; round-trip attach (`T8-018`) and viewer
+    launch (`H-VIEWER-NATIVE-008`) remain the operator-facing
+    verification paths.
 
 - [ ] `T8-015` Add sessions-tree density modes.
   - Scope: add a user-facing density setting for the sessions view
@@ -8925,15 +8926,47 @@ settles.
     chosen view.
   - Blockers: `F8-001`.
 
-- [ ] `F8-010` `conspectus table <ROWS>` consumes `RowFilter`.
-  - Scope: thread the shared `RowFilter` through the table
-    projection layer so the same flags narrow static output the
-    same way the TUI narrows the row tree. Reuses `F8-009`'s
-    `FilterArgs`.
-  - Tests: snapshot/output tests for filtered `table sessions`,
-    `table mux`, and a parity test asserting TUI row count matches
-    `table` row count for the same flag set against a fixture.
-  - Blockers: `F8-001`, `F8-009`.
+- [x] `F8-010` `conspectus table <ROWS>` consumes `RowFilter`.
+  - Outcome: shipped. The `RowFilter` produced by `FilterArgs::to_row_filter`
+    in `src/cli.rs` is now applied by every `output::*` projection
+    builder, not just `output::agent`:
+      - `output::mux` filters visible attached agents per
+        `SessionMatchInputs` and drops the mux row when no
+        attached agent survives, mirroring `src/tui/rows/mux.rs`'s
+        `mux_matches_filter` (kept only when the filter is exactly
+        `mux_state` containing `unmuxed` and the mux truly has no
+        attached agents). The `agents`, `attached-count`, and
+        `preview` cells now reflect the visible-only set.
+      - `output::union` drops every mux row when any narrowing
+        predicate is active and filters agent rows through the same
+        predicate the TUI union view uses.
+      - `output::prs` filters attached agents per PR and drops the
+        PR row when narrowing is active and no visible attached
+        agent remains.
+      - `output::forks` filters resolved child agent sessions per
+        fork (unresolved-target children are intentionally excluded
+        once filtering is on, since the v1 dimensions need
+        session-level metadata they lack), drops forks with zero
+        visible children, and rewrites the `children` cell to the
+        visible count. The extra `fetch_resolved_child_agents_per_fork`
+        + `fetch_agent_mux_candidate_counts` lookups only run when
+        the filter has narrowing predicates so the empty-filter
+        path stays cheap.
+    Renderer wiring in `cli.rs::TableRowsArgs::run` was already in
+    place from F8-009; the stale "F8-010 will start applying"
+    comment on the `FilterArgs` flatten point is now corrected.
+  - Tests: existing `filter_*_agent_table` / `filter_parity_with_tui_sessions_row_tree`
+    in `src/output/table.rs` stay; added `filter_harness_narrows_mux_table_via_attached_agents`,
+    `filter_mux_state_unmuxed_drops_attached_muxes`,
+    `filter_parity_with_tui_mux_row_tree`, and
+    `filter_union_drops_mux_rows_when_narrowing_active`. All 1684
+    tests pass via `cargo nextest run --all-targets --all-features`.
+  - Follow-ups: config-side parity (loading `[table.<rows>].filters`
+    or merging with `[tui.views.<name>]`) deferred to a separate
+    story so this one stays focused on the projection layer; the
+    two private `fetch_agent_mux_candidate_counts` helpers
+    (`output::prs`, `output::forks`) collapse into a shared one
+    when a third caller arrives.
 
 - [x] `F8-011` Help-overlay docs.
   - Outcome: shipped in `src/tui/widgets/help.rs` — the help

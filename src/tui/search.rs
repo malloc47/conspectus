@@ -330,6 +330,7 @@ mod tests {
                 preview: Some(preview.to_string()),
                 title: None,
                 alias: alias.map(str::to_string),
+                title_disambiguates: false,
                 primary_node: primary,
                 pin_id: None,
             }),

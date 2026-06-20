@@ -172,6 +172,12 @@ fn agent_row(
             preview: agent.preview.clone(),
             title: agent.title.clone(),
             alias: agent.alias.clone(),
+            // P8-015 is sessions-view scoped — other views render
+            // agent rows directly under their parent (PR, fork,
+            // mux), where "same-harness collision in a project
+            // group" doesn't apply. Leave the flag off and the
+            // tree label stays alias-only.
+            title_disambiguates: false,
             primary_node: node_id,
         }),
     }

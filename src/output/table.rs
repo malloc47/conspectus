@@ -2740,4 +2740,108 @@ mod tests {
             tree_sessions
         );
     }
+
+    #[test]
+    fn filter_harness_narrows_mux_table_via_attached_agents() {
+        // The fixture has one mux (`editor`) with `opencode` attached.
+        // Filtering by `opencode` keeps the row; filtering by
+        // `claude-code` drops it because the mux has at least one
+        // attached agent but none survives the filter.
+        let snapshot = three_session_snapshot();
+        let opts_keep = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["opencode"])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table_keep = render_with(&snapshot, Projection::Mux, &opts_keep);
+        assert_eq!(body_row_count(&table_keep), 1, "table:\n{table_keep}");
+        assert!(table_keep.contains("opencode"));
+
+        let opts_drop = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table_drop = render_with(&snapshot, Projection::Mux, &opts_drop);
+        assert_eq!(body_row_count(&table_drop), 0, "table:\n{table_drop}");
+    }
+
+    #[test]
+    fn filter_mux_state_unmuxed_drops_attached_muxes() {
+        // The editor mux has one attached agent. `mux_state=unmuxed`
+        // alone is the only filter shape where the mux row is kept
+        // for *empty* muxes; here the mux is non-empty so it drops.
+        let snapshot = three_session_snapshot();
+        let options = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                mux_state: Some(crate::filter::MuxStateFilter::from_values([
+                    crate::filter::MuxStateKey::Unmuxed,
+                ])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Mux, &options);
+        assert_eq!(body_row_count(&table), 0, "table:\n{table}");
+    }
+
+    #[test]
+    fn filter_parity_with_tui_mux_row_tree() {
+        use crate::tui::MuxGrouping;
+        use crate::tui::rows::mux::{MuxBuildInputsFromConn, build_mux_tree_from_conn};
+
+        let snapshot = three_session_snapshot();
+        let filter = crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["opencode"])),
+            max_age: Some(std::time::Duration::from_secs(24 * 60 * 60)),
+            ..crate::filter::RowFilter::default()
+        };
+        let table_options = RenderOptions::wide()
+            .with_filter(filter.clone())
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Mux, &table_options);
+
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
+            conn: &conn,
+            home: None,
+            now: Some(1_000_000),
+            filter,
+            grouping: MuxGrouping::Session,
+        })
+        .expect("mux tree");
+        let tree_mux_rows = tree
+            .rows
+            .iter()
+            .filter(|row| matches!(row.kind, crate::tui::rows::RowKind::MuxSession(_)))
+            .count();
+
+        assert_eq!(
+            body_row_count(&table),
+            tree_mux_rows,
+            "table mux rows ({}) should equal TUI mux rows ({}) for the same filter\ntable:\n{table}",
+            body_row_count(&table),
+            tree_mux_rows,
+        );
+    }
+
+    #[test]
+    fn filter_union_drops_mux_rows_when_narrowing_active() {
+        // The union projection mirrors the TUI union view: any
+        // narrowing predicate hides every mux row since none of the
+        // v1 dimensions describe a bare mux.
+        let snapshot = three_session_snapshot();
+        let options = RenderOptions::wide()
+            .with_filter(crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+                ..crate::filter::RowFilter::default()
+            })
+            .with_now_epoch(Some(1_000_000));
+        let table = render_with(&snapshot, Projection::Union, &options);
+        // One agent matches; the editor mux row drops.
+        assert_eq!(body_row_count(&table), 1, "table:\n{table}");
+        assert!(table.contains("claude"));
+        assert!(!table.contains("editor"));
+    }
 }

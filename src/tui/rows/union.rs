@@ -183,6 +183,10 @@ fn agent_row(
             preview: agent.preview.clone(),
             title: agent.title.clone(),
             alias: agent.alias.clone(),
+            // P8-015 is sessions-view scoped; the union projection
+            // emits a flat list, so the disambiguation flag stays
+            // off here.
+            title_disambiguates: false,
             primary_node: node_id,
             pin_id: None,
         }),

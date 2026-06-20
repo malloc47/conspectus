@@ -33,6 +33,7 @@ use super::render::{
     node_short_id_from_display, pick_strongest, unique_prefix_len,
 };
 use super::table::agent_session_key_for_label;
+use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 
 /// `(harness_key, state_scope, session_key)` triple identifying an
 /// attached agent session — same shape as in `output::agent`.
@@ -73,6 +74,9 @@ struct AttachedAgent {
     /// Triple of the source agent session, used to look up the
     /// per-agent ambiguity count (`*` marker in the indicator).
     session_key: SessionKey,
+    /// Source agent's last-active epoch (Unix seconds) — feeds
+    /// `RowFilter::max_age` evaluation when filtering mux rows.
+    last_active_epoch: Option<i64>,
 }
 
 // -----------------------------------------------------------------------------
@@ -84,7 +88,7 @@ struct AttachedAgent {
 pub fn build_mux_rows_from_conn(
     conn: &Connection,
     columns: &[&'static str],
-    _options: &RenderOptions,
+    options: &RenderOptions,
 ) -> rusqlite::Result<Vec<Vec<String>>> {
     let muxes = fetch_mux_rows(conn)?;
     let attachments = fetch_attachment_lookup(conn)?;
@@ -104,19 +108,83 @@ pub fn build_mux_rows_from_conn(
             .collect(),
     );
 
+    let empty_attached: Vec<AttachedAgent> = Vec::new();
     for (row, full_short) in muxes.iter().zip(body_full_ids.iter()) {
         let short_id = &full_short[..id_len];
-        let attached = attachments.get(&row.node_id_display).map(Vec::as_slice);
+        let all_attached = attachments
+            .get(&row.node_id_display)
+            .unwrap_or(&empty_attached);
+        let visible_attached: Vec<AttachedAgent> = all_attached
+            .iter()
+            .filter(|agent| agent_matches_filter(agent, &ambiguity, options, &options.filter))
+            .cloned()
+            .collect();
+        if !mux_matches_filter(all_attached, &visible_attached, &options.filter) {
+            continue;
+        }
         let ctx = CellCtx {
             row,
             short_id,
-            attached,
+            attached: if visible_attached.is_empty() {
+                None
+            } else {
+                Some(visible_attached.as_slice())
+            },
             ambiguity: &ambiguity,
         };
         rows.push(columns.iter().map(|key| cell(key, &ctx)).collect());
     }
 
     Ok(rows)
+}
+
+fn agent_matches_filter(
+    agent: &AttachedAgent,
+    ambiguity: &HashMap<SessionKey, usize>,
+    options: &RenderOptions,
+    filter: &RowFilter,
+) -> bool {
+    if !filter.has_narrowing_predicates() {
+        return true;
+    }
+    let candidate_count = ambiguity.get(&agent.session_key).copied().unwrap_or(0);
+    filter.matches_session(&SessionMatchInputs {
+        harness_key: &agent.session_key.0,
+        now_epoch: options.now_epoch,
+        last_active_epoch: agent.last_active_epoch,
+        mux_state: MuxStateKey::from_candidate_count(candidate_count),
+    })
+}
+
+fn mux_matches_filter(
+    all_attached: &[AttachedAgent],
+    visible_attached: &[AttachedAgent],
+    filter: &RowFilter,
+) -> bool {
+    if !filter.has_narrowing_predicates() {
+        return true;
+    }
+    if !visible_attached.is_empty() {
+        return true;
+    }
+    // No attached agents survive the filter. Mirror the mux row-tree
+    // rule in `src/tui/rows/mux.rs:550`: keep the mux only when the
+    // operator explicitly asked for `mux_state=unmuxed` (and no other
+    // narrowing dimension is active) and the mux truly has no
+    // attached agents to begin with.
+    let RowFilter {
+        harness,
+        max_age,
+        mux_state,
+        float_muxed_sessions_top: _,
+        float_attached_muxes_top: _,
+    } = filter;
+    harness.is_none()
+        && max_age.is_none()
+        && mux_state
+            .as_ref()
+            .is_some_and(|mux_state| mux_state.values().contains(&MuxStateKey::Unmuxed))
+        && all_attached.is_empty()
 }
 
 struct CellCtx<'a> {
@@ -223,7 +291,7 @@ fn fetch_attachment_lookup(
         "SELECT ('mux_session:' || json_extract(cl.target_node, '$.native_id')) AS mux_node_id, \
                 a.harness_key, a.state_scope, a.session_key, \
                 cl.provenance, cl.confidence, cl.link_id, \
-                a.last_message_preview \
+                a.last_message_preview, a.last_active_epoch \
          FROM candidate_links cl \
          JOIN node_agent_sessions a \
            ON cl.source_kind = 'agent_session' \
@@ -247,6 +315,7 @@ fn fetch_attachment_lookup(
         confidence: String,
         link_id: String,
         preview: Option<String>,
+        last_active_epoch: Option<i64>,
     }
     let rows = stmt.query_map([], |row| {
         Ok(Raw {
@@ -258,6 +327,7 @@ fn fetch_attachment_lookup(
             confidence: row.get(5)?,
             link_id: row.get(6)?,
             preview: row.get(7)?,
+            last_active_epoch: row.get(8)?,
         })
     })?;
 
@@ -304,6 +374,7 @@ fn fetch_attachment_lookup(
             confidence: best.confidence,
             preview: best.preview,
             session_key: session,
+            last_active_epoch: best.last_active_epoch,
         });
     }
     Ok(out)

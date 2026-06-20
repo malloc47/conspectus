@@ -25,6 +25,7 @@ use super::render::{
     unique_prefix_len,
 };
 use super::table::short_session_id;
+use crate::filter::{MuxStateKey, SessionMatchInputs};
 
 #[derive(Debug, Clone)]
 struct ForkRow {
@@ -56,7 +57,7 @@ struct ParentInfo {
 pub fn build_fork_rows_from_conn(
     conn: &Connection,
     columns: &[&'static str],
-    _options: &RenderOptions,
+    options: &RenderOptions,
 ) -> rusqlite::Result<Vec<Vec<String>>> {
     let forks = fetch_fork_rows(conn)?;
     let parents = fetch_parent_session_per_fork(conn)?;
@@ -76,18 +77,82 @@ pub fn build_fork_rows_from_conn(
             .collect(),
     );
 
+    let filter_active = options.filter.has_narrowing_predicates();
+    // Resolved child-agent metadata is only needed when filter is
+    // active — without a narrowing predicate the fork row keeps the
+    // total `children` count (which includes unresolved-target
+    // candidates) and never drops.
+    let resolved_children = if filter_active {
+        Some(fetch_resolved_child_agents_per_fork(conn)?)
+    } else {
+        None
+    };
+    let candidate_counts = if filter_active {
+        Some(fetch_agent_mux_candidate_counts(conn)?)
+    } else {
+        None
+    };
+
     for (row, full_short) in forks.iter().zip(body_full_ids.iter()) {
         let short_id = &full_short[..id_len];
+        let child_count = if filter_active {
+            let visible = visible_child_count(
+                row,
+                resolved_children
+                    .as_ref()
+                    .expect("populated when filter_active"),
+                candidate_counts
+                    .as_ref()
+                    .expect("populated when filter_active"),
+                options,
+            );
+            if visible == 0 {
+                continue;
+            }
+            visible
+        } else {
+            child_counts.get(&row.node_id_display).copied().unwrap_or(0)
+        };
         let ctx = CellCtx {
             row,
             short_id,
             parent: parents.get(&row.node_id_display),
-            child_count: child_counts.get(&row.node_id_display).copied().unwrap_or(0),
+            child_count,
         };
         rows.push(columns.iter().map(|key| cell(key, &ctx)).collect());
     }
 
     Ok(rows)
+}
+
+fn visible_child_count(
+    fork: &ForkRow,
+    resolved: &HashMap<String, Vec<ChildAgent>>,
+    candidate_counts: &HashMap<String, usize>,
+    options: &RenderOptions,
+) -> usize {
+    let Some(children) = resolved.get(&fork.node_id_display) else {
+        return 0;
+    };
+    children
+        .iter()
+        .filter(|child| {
+            let candidate_count = candidate_counts.get(&child.node_id).copied().unwrap_or(0);
+            options.filter.matches_session(&SessionMatchInputs {
+                harness_key: &child.harness_key,
+                now_epoch: options.now_epoch,
+                last_active_epoch: child.last_active_epoch,
+                mux_state: MuxStateKey::from_candidate_count(candidate_count),
+            })
+        })
+        .count()
+}
+
+#[derive(Debug, Clone)]
+struct ChildAgent {
+    node_id: String,
+    harness_key: String,
+    last_active_epoch: Option<i64>,
 }
 
 struct CellCtx<'a> {
@@ -237,6 +302,77 @@ fn fetch_parent_session_per_fork(
         if let Some(label) = label {
             out.insert(fork_node_id, ParentInfo { label });
         }
+    }
+    Ok(out)
+}
+
+/// Per-fork list of resolved child agent sessions — the subset of
+/// `child_session` candidates whose target is a known
+/// `agent_session` node. Used only when a `RowFilter` is active so
+/// the filter has a per-session row to evaluate; unresolved-target
+/// children are intentionally excluded (a `RowFilter`'s predicates
+/// all need session-level metadata that isn't available for those).
+fn fetch_resolved_child_agents_per_fork(
+    conn: &Connection,
+) -> rusqlite::Result<HashMap<String, Vec<ChildAgent>>> {
+    let mut stmt = conn.prepare(
+        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
+                a.node_id, a.harness_key, a.last_active_epoch \
+         FROM candidate_links cl \
+         JOIN node_agent_sessions a \
+           ON cl.target_node_kind = 'agent_session' \
+           AND ('agent_session:' || \
+                json_extract(cl.target_node, '$.harness_key') || ':' || \
+                json_extract(cl.target_node, '$.state_scope') || ':' || \
+                json_extract(cl.target_node, '$.session_key')) = a.node_id \
+         WHERE cl.source_kind = 'fork' \
+           AND cl.relation = 'child_session' \
+           AND cl.state = 'active' \
+         ORDER BY fork_node_id, a.node_id",
+    )?;
+    let mut out: HashMap<String, Vec<ChildAgent>> = HashMap::new();
+    let rows = stmt.query_map([], |row| {
+        let fork_node_id: String = row.get(0)?;
+        Ok((
+            fork_node_id,
+            ChildAgent {
+                node_id: row.get(1)?,
+                harness_key: row.get(2)?,
+                last_active_epoch: row.get(3)?,
+            },
+        ))
+    })?;
+    for entry in rows {
+        let (fork_node_id, child) = entry?;
+        out.entry(fork_node_id).or_default().push(child);
+    }
+    Ok(out)
+}
+
+/// Per-agent count of active `linked_to_mux` candidates. Same shape
+/// as `output::prs::fetch_agent_mux_candidate_counts` — the two
+/// callers will collapse into a shared helper when a third surface
+/// arrives.
+fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
+    let mut stmt = conn.prepare(
+        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
+                 json_extract(source, '$.state_scope') || ':' || \
+                 json_extract(source, '$.session_key')) AS agent_node_id, \
+                COUNT(*) \
+         FROM candidate_links \
+         WHERE source_kind = 'agent_session' \
+           AND relation = 'linked_to_mux' \
+           AND state = 'active' \
+         GROUP BY source",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let count: i64 = row.get(1)?;
+        Ok((row.get::<_, String>(0)?, count as usize))
+    })?;
+    let mut out = HashMap::new();
+    for entry in rows {
+        let (node_id, count) = entry?;
+        out.insert(node_id, count);
     }
     Ok(out)
 }

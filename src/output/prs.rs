@@ -32,6 +32,7 @@ use super::render::{
     node_short_id_from_display, pick_strongest, strip_branch_prefix, unique_prefix_len,
 };
 use super::table::agent_session_key_for_label;
+use crate::filter::{MuxStateKey, SessionMatchInputs};
 use crate::model::path_is_ancestor_of;
 
 /// `(repo_common_dir, refname)` identifies a branch structurally.
@@ -50,9 +51,13 @@ struct PrRow {
 
 #[derive(Debug, Clone)]
 struct AgentRow {
+    /// `agent_session:<harness>:<state_scope>:<session_key>` —
+    /// matches the join key used by `fetch_agent_mux_candidate_counts`.
+    node_id: String,
     harness_key: String,
     session_key: String,
     cwd: String,
+    last_active_epoch: Option<i64>,
 }
 
 // -----------------------------------------------------------------------------
@@ -62,12 +67,13 @@ struct AgentRow {
 pub fn build_pr_rows_from_conn(
     conn: &Connection,
     columns: &[&'static str],
-    _options: &RenderOptions,
+    options: &RenderOptions,
 ) -> rusqlite::Result<Vec<Vec<String>>> {
     let prs = fetch_pr_rows(conn)?;
     let preferred_branch = fetch_preferred_branch_per_pr(conn)?;
     let checkout_roots_per_branch = fetch_checkout_roots_per_branch(conn)?;
     let agents = fetch_agents_with_cwd(conn)?;
+    let candidate_counts = fetch_agent_mux_candidate_counts(conn)?;
 
     let body_full_ids: Vec<String> = prs
         .iter()
@@ -83,13 +89,17 @@ pub fn build_pr_rows_from_conn(
             .collect(),
     );
 
+    let filter_active = options.filter.has_narrowing_predicates();
     for (row, full_short) in prs.iter().zip(body_full_ids.iter()) {
         let short_id = &full_short[..id_len];
         let branch = preferred_branch.get(&row.node_id_display);
         let attached = branch
             .and_then(|b| checkout_roots_per_branch.get(b))
-            .map(|roots| attached_agents_for_roots(&agents, roots))
+            .map(|roots| attached_agents_for_roots(&agents, roots, &candidate_counts, options))
             .unwrap_or_default();
+        if filter_active && attached.is_empty() {
+            continue;
+        }
         let ctx = CellCtx {
             row,
             short_id,
@@ -102,20 +112,39 @@ pub fn build_pr_rows_from_conn(
     Ok(rows)
 }
 
-fn attached_agents_for_roots(agents: &[AgentRow], roots: &[String]) -> Vec<String> {
+fn attached_agents_for_roots(
+    agents: &[AgentRow],
+    roots: &[String],
+    candidate_counts: &HashMap<String, usize>,
+    options: &RenderOptions,
+) -> Vec<String> {
+    let filter_active = options.filter.has_narrowing_predicates();
     let mut labels: Vec<String> = Vec::new();
     for agent in agents {
         let cwd_path = Path::new(&agent.cwd);
-        if roots
+        let under_root = roots
             .iter()
-            .any(|root| path_is_ancestor_of(Path::new(root), cwd_path))
-        {
-            labels.push(format!(
-                "{}:{}",
-                agent.harness_key,
-                agent_session_key_for_label(&agent.session_key)
-            ));
+            .any(|root| path_is_ancestor_of(Path::new(root), cwd_path));
+        if !under_root {
+            continue;
         }
+        if filter_active {
+            let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
+            let matches = options.filter.matches_session(&SessionMatchInputs {
+                harness_key: &agent.harness_key,
+                now_epoch: options.now_epoch,
+                last_active_epoch: agent.last_active_epoch,
+                mux_state: MuxStateKey::from_candidate_count(candidate_count),
+            });
+            if !matches {
+                continue;
+            }
+        }
+        labels.push(format!(
+            "{}:{}",
+            agent.harness_key,
+            agent_session_key_for_label(&agent.session_key)
+        ));
     }
     labels
 }
@@ -304,17 +333,46 @@ fn fetch_checkout_roots_per_branch(
 /// iteration that drives label collection).
 fn fetch_agents_with_cwd(conn: &Connection) -> rusqlite::Result<Vec<AgentRow>> {
     let mut stmt = conn.prepare(
-        "SELECT harness_key, session_key, cwd \
+        "SELECT node_id, harness_key, session_key, cwd, last_active_epoch \
          FROM node_agent_sessions \
          WHERE cwd IS NOT NULL \
          ORDER BY harness_key, state_scope, session_key",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(AgentRow {
-            harness_key: row.get(0)?,
-            session_key: row.get(1)?,
-            cwd: row.get(2)?,
+            node_id: row.get(0)?,
+            harness_key: row.get(1)?,
+            session_key: row.get(2)?,
+            cwd: row.get(3)?,
+            last_active_epoch: row.get(4)?,
         })
     })?;
     rows.collect()
+}
+
+/// Per-agent count of active `linked_to_mux` candidates — feeds the
+/// derived `mux_state` dimension when evaluating `RowFilter` against
+/// PR-attached agent sessions. Key form matches `node_agent_sessions.node_id`.
+fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
+    let mut stmt = conn.prepare(
+        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
+                 json_extract(source, '$.state_scope') || ':' || \
+                 json_extract(source, '$.session_key')) AS agent_node_id, \
+                COUNT(*) \
+         FROM candidate_links \
+         WHERE source_kind = 'agent_session' \
+           AND relation = 'linked_to_mux' \
+           AND state = 'active' \
+         GROUP BY source",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let count: i64 = row.get(1)?;
+        Ok((row.get::<_, String>(0)?, count as usize))
+    })?;
+    let mut out = HashMap::new();
+    for entry in rows {
+        let (node_id, count) = entry?;
+        out.insert(node_id, count);
+    }
+    Ok(out)
 }

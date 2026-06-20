@@ -1363,8 +1363,10 @@ struct TableRowsArgs {
     /// `never` forces it off.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
-    /// Filter / grouping flags (ADR 0031). The flags are recognized
-    /// today; `table` will start applying them in F8-010.
+    /// Filter / grouping flags (ADR 0031). Applied by the
+    /// `output::*` projection layer in `TableRowsArgs::run` so the
+    /// static table narrows the same rows the TUI does for the same
+    /// flag set.
     #[command(flatten)]
     filter_args: FilterArgs,
 }
@@ -1402,11 +1404,11 @@ impl TableRowsArgs {
             }
         };
 
-        // Resolve the active filter from CLI flags. Future config
-        // parity (load from `[table.<rows>].filters` or
-        // `[tui.views.sessions]`) lands as a follow-up; for v1 the
-        // CLI flags are the only source so the static table matches
-        // what the operator typed.
+        // Resolve the active filter from CLI flags (F8-010). Config
+        // parity (load from `[table.<rows>].filters` or merge with
+        // `[tui.views.<name>]`) is a follow-up; for now the CLI
+        // flags are the only source so the static table narrows the
+        // exact set the operator typed.
         let cli_filter = self.filter_args.to_row_filter()?;
         let now_epoch = current_unix_epoch_for_table();
 
