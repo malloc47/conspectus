@@ -7099,7 +7099,7 @@ Cross-cutting expectations across every Tier A swap:
     resolve cleanly. `badge.rs` and `input.rs` slices unblocked
     today.
 
-- [ ] `H-WIDG-013` Port high-variant widgets into the
+- [x] `H-WIDG-013` Port high-variant widgets into the
   `examples/pantry.rs` ingredient list (T8-044 follow-up).
   - Motivation: T8-044 spike landed "go" with the smoke test
     (`widgets/multi_select.rs` × 3 variants). The follow-up tax
@@ -7157,6 +7157,35 @@ Cross-cutting expectations across every Tier A swap:
     `Box<dyn Fn>`-style callbacks today, but verify per port.
   - Blockers: `T8-044` [met]. Each per-widget slice is
     independent.
+  - Outcome (2026-06-20): all seven targets landed across six
+    per-widget commits + a theme-harness commit:
+      - `aee8dab` Controls (4 variants)
+      - `a60fc8a` ValueModal (4 variants)
+      - `7de83fc` Help (3 variants)
+      - `16491ea` Search (4 variants)
+      - `8f8d5c1` TextInput (3 variants)
+      - `453f1b4` Pins (6 variants — one per sub-modal)
+      - `8138065` Theme harness (1 variant covering every
+        `[tui.theme]` key)
+    Plus the smoke-test multi_select (3 variants) from
+    `4f918aa` (T8-044). Total **28 ingredients across 8
+    groups** in a single `examples/pantry.rs` file (~890 LOC).
+    Per-widget glue matched the budget (~70–180 LOC each); the
+    aggregate is on the high side of the prediction because the
+    theme harness added ~290 LOC of its own (section index +
+    sample renderers) — heavier than a typical widget port
+    because it builds custom rendering rather than wrapping an
+    existing widget. Migration to `pantry.toml` + proc-macro
+    convention deferred — the single-file form is still
+    readable at 890 LOC, but is the natural next step if more
+    widgets are added.
+  - Verification: each variant verified via
+    `cargo run --example pantry -- --dump <group> --variant
+    <name> --size <wxh>`. 1666 tests stay green across all
+    commits. The `Ingredient: Send` shim pattern (hold config
+    on the ingredient, build state in `render`) generalized to
+    every port; no in-tree widget state needed exposing extra
+    methods.
 
 #### TUI Widget Ecosystem — explicit pass list (Tier D)
 
