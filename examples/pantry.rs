@@ -32,6 +32,7 @@ use std::borrow::Cow;
 use conspectus::tui::rows::RowId;
 use conspectus::tui::search::{SearchItem, SubstringBackend};
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
+use conspectus::tui::widgets::input::{TextInputState, TextInputWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
 use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
@@ -361,6 +362,53 @@ impl Ingredient for SearchVariant {
     }
 }
 
+/// Configuration for one text-input preview variant. Holds the
+/// title + initial value + cursor-left count; the widget state is
+/// constructed inside `render`.
+struct TextInputVariant {
+    title: &'static str,
+    initial: &'static str,
+    cursor_left: usize,
+    variant_name: &'static str,
+    description_text: &'static str,
+}
+
+impl Ingredient for TextInputVariant {
+    fn group(&self) -> &str {
+        "TextInput"
+    }
+
+    fn name(&self) -> &str {
+        self.variant_name
+    }
+
+    fn source(&self) -> &str {
+        "conspectus::tui::widgets::input"
+    }
+
+    fn description(&self) -> &str {
+        self.description_text
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        let theme = Theme::default();
+        let mut state = TextInputState::new(self.title, self.initial);
+        // `TextInputState::new` lands the cursor at the end so typing
+        // appends naturally; the preview moves it left when a variant
+        // wants to show the cursor mid-string.
+        for _ in 0..self.cursor_left {
+            let event = KeyEvent {
+                code: KeyCode::Left,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            };
+            let _ = state.handle_key(event);
+        }
+        TextInputWidget::new(&state).theme(&theme).render(area, buf);
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let ingredients: Vec<Box<dyn Ingredient>> = vec![
         Box::new(MultiSelectVariant {
@@ -539,6 +587,31 @@ fn main() -> std::io::Result<()> {
             variant_name: "Cursor on a non-first match",
             description_text:
                 "Same backend, different query — cursor advanced two rows to exercise the non-cursor + cursor row styling side by side.",
+        }),
+        Box::new(TextInputVariant {
+            title: " rename ",
+            initial: "",
+            cursor_left: 0,
+            variant_name: "Empty value",
+            description_text:
+                "Modal just opened — empty input, cursor at the start, awaiting first keystroke.",
+        }),
+        Box::new(TextInputVariant {
+            title: " rename ",
+            initial: "ingest-refactor",
+            cursor_left: 8,
+            variant_name: "Mid-edit (cursor mid-string)",
+            description_text:
+                "Pre-populated alias with the cursor moved 8 chars left — exercises the reversed-cell cursor cue mid-string.",
+        }),
+        Box::new(TextInputVariant {
+            title: " max age ",
+            initial:
+                "30d-or-some-other-very-long-text-value-the-operator-might-have-typed-here-to-test-the-window",
+            cursor_left: 0,
+            variant_name: "Long value (cursor at end)",
+            description_text:
+                "Value longer than the modal's inner width — exercises the `visible_window` truncation around the cursor.",
         }),
     ];
     tui_pantry::run!(ingredients)
