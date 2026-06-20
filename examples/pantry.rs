@@ -27,8 +27,13 @@ use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
 use conspectus::tui::widgets::controls::{
     ControlsContext, ControlsOverlayState, ControlsOverlayWidget,
 };
+use std::borrow::Cow;
+
+use conspectus::tui::rows::RowId;
+use conspectus::tui::search::{SearchItem, SubstringBackend};
 use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
+use conspectus::tui::widgets::search::{SearchOverlayState, SearchOverlayWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
 use ratatui::buffer::Buffer;
@@ -273,6 +278,89 @@ impl Ingredient for HelpVariant {
     }
 }
 
+/// One row in a search ingredient's mock-item set. Owned so the
+/// ingredient struct stays plain data; `SearchItem<'a>` references
+/// are built fresh inside `render`.
+struct SearchMockItem {
+    label: String,
+    haystack: String,
+    synthetic_key: &'static str,
+}
+
+/// Configuration for one search-overlay preview variant. Holds the
+/// item corpus, the query to type, and an optional cursor advance
+/// count for highlighting a particular match.
+struct SearchVariant {
+    items: Vec<SearchMockItem>,
+    query: &'static str,
+    cursor_advance: usize,
+    variant_name: &'static str,
+    description_text: &'static str,
+}
+
+impl SearchVariant {
+    fn send_chars(state: &mut SearchOverlayState, text: &str) {
+        for ch in text.chars() {
+            let event = KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            };
+            let _ = state.handle_key(event);
+        }
+    }
+
+    fn advance_cursor(state: &mut SearchOverlayState, steps: usize) {
+        for _ in 0..steps {
+            let event = KeyEvent {
+                code: KeyCode::Down,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            };
+            let _ = state.handle_key(event);
+        }
+    }
+}
+
+impl Ingredient for SearchVariant {
+    fn group(&self) -> &str {
+        "Search"
+    }
+
+    fn name(&self) -> &str {
+        self.variant_name
+    }
+
+    fn source(&self) -> &str {
+        "conspectus::tui::widgets::search"
+    }
+
+    fn description(&self) -> &str {
+        self.description_text
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        let theme = Theme::default();
+        let items: Vec<SearchItem<'_>> = self
+            .items
+            .iter()
+            .map(|m| SearchItem {
+                id: RowId::Synthetic(m.synthetic_key),
+                label: Cow::Borrowed(m.label.as_str()),
+                haystack: Cow::Borrowed(m.haystack.as_str()),
+            })
+            .collect();
+        let mut state = SearchOverlayState::new();
+        Self::send_chars(&mut state, self.query);
+        let backend = SubstringBackend;
+        state.refresh_matches(&backend, &items);
+        Self::advance_cursor(&mut state, self.cursor_advance);
+        SearchOverlayWidget::new(&state, &items, &theme).render(area, buf);
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let ingredients: Vec<Box<dyn Ingredient>> = vec![
         Box::new(MultiSelectVariant {
@@ -420,6 +508,95 @@ fn main() -> std::io::Result<()> {
             description_text:
                 "Scrolled so the Node kind icons (ADR 0073) section is in view — exercises the per-glyph rendering through `push_icon_legend`.",
         }),
+        Box::new(SearchVariant {
+            items: search_mock_items(),
+            query: "",
+            cursor_advance: 0,
+            variant_name: "Empty query",
+            description_text:
+                "Modal just opened — the `(start typing)` placeholder under the leading `/`.",
+        }),
+        Box::new(SearchVariant {
+            items: search_mock_items(),
+            query: "zzz_no_match_anywhere",
+            cursor_advance: 0,
+            variant_name: "No matches",
+            description_text:
+                "Query that doesn't match any item — the `(no matches)` placeholder under the typed query.",
+        }),
+        Box::new(SearchVariant {
+            items: search_mock_items(),
+            query: "claude",
+            cursor_advance: 0,
+            variant_name: "Several matches (cursor on first)",
+            description_text:
+                "Substring backend ranks every item containing `claude`; cursor parks on the top match.",
+        }),
+        Box::new(SearchVariant {
+            items: search_mock_items(),
+            query: "code",
+            cursor_advance: 2,
+            variant_name: "Cursor on a non-first match",
+            description_text:
+                "Same backend, different query — cursor advanced two rows to exercise the non-cursor + cursor row styling side by side.",
+        }),
     ];
     tui_pantry::run!(ingredients)
+}
+
+/// Synthetic item corpus shared across every search variant. Each
+/// row uses a `RowId::Synthetic("…")` key so no graph database is
+/// required. Labels mirror the kind of strings the live row tree
+/// surfaces (harness/session/repo/forge); haystacks add the
+/// extra fields the search backend ranks against.
+fn search_mock_items() -> Vec<SearchMockItem> {
+    [
+        (
+            "ses_166f opencode · Add minibuffer workflow",
+            "ses_166f opencode add minibuffer workflow",
+            "ses_166f",
+        ),
+        (
+            "2739a53f claude · Visual verification spike",
+            "2739a53f claude visual verification spike",
+            "ses_2739",
+        ),
+        (
+            "019eddb5 codex · Stylize the conspectus tui",
+            "019eddb5 codex stylize conspectus tui",
+            "ses_019e",
+        ),
+        (
+            "conspectus / atelier (group)",
+            "conspectus atelier agent-deck group",
+            "grp_conspectus",
+        ),
+        (
+            "mux:agentdeck_local-command",
+            "agentdeck local-command tmux mux",
+            "mux_local",
+        ),
+        (
+            "PR #87 (open) Stylesheet adjustments",
+            "pr 87 open stylesheet adjustments code",
+            "pr_87",
+        ),
+        (
+            "PR #92 (merged) Pantry harness for widgets",
+            "pr 92 merged pantry harness widgets code",
+            "pr_92",
+        ),
+        (
+            "Pin: ingest-refactor (unbound)",
+            "pin ingest refactor unbound codex",
+            "pin_ingest",
+        ),
+    ]
+    .into_iter()
+    .map(|(label, haystack, key)| SearchMockItem {
+        label: label.to_string(),
+        haystack: haystack.to_string(),
+        synthetic_key: key,
+    })
+    .collect()
 }
