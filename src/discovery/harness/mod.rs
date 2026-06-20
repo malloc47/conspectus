@@ -13,6 +13,7 @@
 //! is a [`DiscoveryProvider`] that runs every registered adapter and merges
 //! fragments deterministically through [`merge_fragments`].
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -136,6 +137,7 @@ pub(crate) fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
+        node_provenance: BTreeMap::new(),
     }
 }
 
@@ -189,6 +191,7 @@ mod tests {
                 })],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
+                node_provenance: BTreeMap::new(),
             })
         }
     }
@@ -282,6 +285,7 @@ mod tests {
                     nodes: vec![session_beta.clone()],
                     candidate_links: Vec::new(),
                     diagnostics: Vec::new(),
+                    node_provenance: BTreeMap::new(),
                 },
             })
             .with_adapter(StaticAdapter {
@@ -290,6 +294,7 @@ mod tests {
                     nodes: vec![session_alpha.clone()],
                     candidate_links: Vec::new(),
                     diagnostics: Vec::new(),
+                    node_provenance: BTreeMap::new(),
                 },
             })
             .discover(&DiscoveryContext::default())

@@ -80,6 +80,7 @@ fn declared_pin_bind(id: &str, pin_id: &str, session_key: &str, mux_native_id: &
             adapter: "declared".to_string(),
             evidence: Some("pin bind override".to_string()),
             fields,
+            freshness_epoch: None,
         },
         ..linked_to_mux(id, session_key, mux_native_id, Provenance::LocalDeclared)
     }

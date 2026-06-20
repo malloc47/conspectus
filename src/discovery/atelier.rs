@@ -20,6 +20,7 @@
 //! possible. Downstream resolution and rendering should be able to reason over
 //! the generic graph model without understanding Atelier's implementation.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -498,6 +499,7 @@ fn harness_lineage_link(
             adapter: "atelier".to_string(),
             evidence: Some(evidence.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -598,6 +600,7 @@ fn atelier_link(
             adapter: "atelier".to_string(),
             evidence: Some(evidence.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -719,6 +722,7 @@ fn atelier_workspace_repo_link(
             adapter: "atelier".to_string(),
             evidence: Some(evidence.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -747,6 +751,7 @@ fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
+        node_provenance: BTreeMap::new(),
     }
 }
 

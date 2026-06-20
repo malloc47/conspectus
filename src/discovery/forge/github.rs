@@ -14,6 +14,7 @@
 //! branch the link carries an `UnresolvedEndpoint` so the evidence
 //! survives until later discovery can resolve it.
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use anyhow::Result;
@@ -151,6 +152,7 @@ pub fn fragment_for_repo(
         nodes,
         candidate_links,
         diagnostics: Vec::new(),
+        node_provenance: BTreeMap::new(),
     }
 }
 
@@ -206,6 +208,7 @@ fn branch_pr_link(
             adapter: FORGE_ADAPTER.to_string(),
             evidence: Some("gh pr list head ref".to_string()),
             fields: branch_link_fields(record),
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -538,6 +541,7 @@ impl<R: GhRunner + 'static> DiscoveryProvider for GitHubForgeProvider<R> {
             nodes: merged.nodes,
             candidate_links: merged.candidate_links,
             diagnostics: merged.diagnostics,
+            node_provenance: BTreeMap::new(),
         })
     }
 }

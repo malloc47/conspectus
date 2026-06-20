@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::config::ConfigLoader;
-use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot};
+use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot, NodeId, NodeProvenance};
 
 pub mod agent_deck;
 pub mod aliases;
@@ -93,6 +93,11 @@ pub struct GraphFragment {
     pub nodes: Vec<GraphNode>,
     pub candidate_links: Vec<GraphLink>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Per-node producing-provider metadata (P7-002 / ADR 0037).
+    /// Adapters populate this alongside `nodes`; `merge_fragments`
+    /// folds the per-fragment map into [`GraphSnapshot::node_provenance`]
+    /// at snapshot-assembly time. See [`crate::model::NodeProvenance`].
+    pub node_provenance: BTreeMap<NodeId, NodeProvenance>,
 }
 
 impl GraphFragment {
@@ -402,6 +407,13 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     let mut nodes = BTreeMap::new();
     let mut candidate_links = BTreeMap::new();
     let mut diagnostics = Vec::new();
+    // First-write-wins on node provenance, matching the first-write-
+    // wins semantics already in place for `nodes` above. The
+    // fragment that contributed the node also owns the canonical
+    // provenance entry; later fragments don't override that even if
+    // a downstream mutator (cross_link, hook_sidecar, …) revisits
+    // the node id.
+    let mut node_provenance: BTreeMap<NodeId, NodeProvenance> = BTreeMap::new();
 
     for fragment in fragments {
         for node in fragment.nodes {
@@ -410,6 +422,10 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
 
         for link in fragment.candidate_links {
             candidate_links.entry(link.id.clone()).or_insert(link);
+        }
+
+        for (id, prov) in fragment.node_provenance {
+            node_provenance.entry(id).or_insert(prov);
         }
 
         diagnostics.extend(fragment.diagnostics);
@@ -422,6 +438,7 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
         diagnostics,
         aliases: crate::aliases::AliasOverlay::new(),
         pins: Vec::new(),
+        node_provenance,
     };
     snapshot.canonicalize();
     snapshot
@@ -478,6 +495,7 @@ fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
+        node_provenance: snapshot.node_provenance,
     }
 }
 
@@ -543,6 +561,7 @@ mod tests {
                 })],
                 candidate_links: vec![link.clone()],
                 diagnostics: Vec::new(),
+                node_provenance: BTreeMap::new(),
             }))
             .with_provider(StaticProvider(GraphFragment {
                 nodes: vec![GraphNode::MuxSession(MuxSessionNode {
@@ -560,6 +579,7 @@ mod tests {
                 })],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
+                node_provenance: BTreeMap::new(),
             }));
 
         let snapshot = discovery
@@ -601,16 +621,108 @@ mod tests {
                 nodes: vec![node.clone()],
                 candidate_links: vec![link.clone()],
                 diagnostics: Vec::new(),
+                node_provenance: BTreeMap::new(),
             },
             GraphFragment {
                 nodes: vec![node],
                 candidate_links: vec![link.clone()],
                 diagnostics: Vec::new(),
+                node_provenance: BTreeMap::new(),
             },
         ]);
 
         assert_eq!(snapshot.nodes.len(), 1);
         assert_eq!(snapshot.candidate_links, vec![link]);
+    }
+
+    #[test]
+    fn merge_fragments_folds_node_provenance_first_write_wins() {
+        // Two fragments contribute the same node id with different
+        // provenance entries. First-write-wins, matching the
+        // dedup-on-node-id semantics one block above. The
+        // unique-to-fragment-B node carries its provider through.
+        let mux_id = MuxSessionId::new("tmux:s1");
+        let mux_node = GraphNode::MuxSession(MuxSessionNode {
+            id: mux_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: "s1".to_string(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        });
+        let agent_node = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", "alpha"),
+            harness_key: "codex".to_string(),
+            cwd: None,
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        });
+        let mux_node_id = NodeId::MuxSession(mux_id);
+        let agent_node_id = agent_node.id();
+
+        let mut prov_a = BTreeMap::new();
+        prov_a.insert(
+            mux_node_id.clone(),
+            NodeProvenance {
+                provider: "tmux".to_string(),
+                freshness_epoch: Some(1_700_000_100),
+            },
+        );
+        let mut prov_b = BTreeMap::new();
+        // B contributes a competing entry for the mux node — it
+        // should lose to A's earlier write — plus a fresh entry for
+        // the agent node that A did not touch.
+        prov_b.insert(
+            mux_node_id.clone(),
+            NodeProvenance {
+                provider: "cross_link".to_string(),
+                freshness_epoch: Some(1_700_000_999),
+            },
+        );
+        prov_b.insert(
+            agent_node_id.clone(),
+            NodeProvenance {
+                provider: "harness::codex".to_string(),
+                freshness_epoch: Some(1_700_000_200),
+            },
+        );
+
+        let snapshot = merge_fragments([
+            GraphFragment {
+                nodes: vec![mux_node.clone()],
+                candidate_links: Vec::new(),
+                diagnostics: Vec::new(),
+                node_provenance: prov_a,
+            },
+            GraphFragment {
+                nodes: vec![mux_node, agent_node],
+                candidate_links: Vec::new(),
+                diagnostics: Vec::new(),
+                node_provenance: prov_b,
+            },
+        ]);
+
+        assert_eq!(snapshot.node_provenance.len(), 2);
+        assert_eq!(
+            snapshot.node_provenance.get(&mux_node_id).unwrap().provider,
+            "tmux",
+            "mux node provenance should come from the first fragment, not the second"
+        );
+        assert_eq!(
+            snapshot
+                .node_provenance
+                .get(&agent_node_id)
+                .unwrap()
+                .provider,
+            "harness::codex"
+        );
     }
 
     #[test]

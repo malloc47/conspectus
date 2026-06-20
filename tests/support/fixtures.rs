@@ -82,6 +82,7 @@ pub fn unresolved_lineage_graph() -> GraphSnapshot {
         adapter: "atelier".to_string(),
         evidence: Some("fork harness entry".to_string()),
         fields: Default::default(),
+        freshness_epoch: None,
     };
 
     resolved(GraphSnapshot {

@@ -324,6 +324,7 @@ fn linked_to_mux(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some(match_kind.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -476,6 +477,7 @@ fn hook_process_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("hook_process_observation".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -588,6 +590,7 @@ mod tests {
                 adapter: "cross_link".to_string(),
                 evidence: Some("active_pane_command_session_match".to_string()),
                 fields,
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }
@@ -614,6 +617,7 @@ mod tests {
                 adapter: "cross_link".to_string(),
                 evidence: Some("exact_cwd_match".to_string()),
                 fields,
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }
@@ -1369,6 +1373,7 @@ mod tests {
                     adapter: "cross_link".to_string(),
                     evidence: Some("active_pane_command_session_match".to_string()),
                     fields,
+                    freshness_epoch: None,
                 },
                 state: LinkState::Active,
             }

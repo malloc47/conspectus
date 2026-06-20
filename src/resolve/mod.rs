@@ -416,6 +416,7 @@ fn process_mux_link(
             adapter: "resolver".to_string(),
             evidence: Some(match_kind.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }

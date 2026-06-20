@@ -44,6 +44,7 @@
 //!   `parentUuid`. With no on-disk signal we emit no lineage candidate.
 //!   See backlog `H-LINEAGE-006` for the closure notes.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -223,6 +224,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
         nodes,
         candidate_links,
         diagnostics: Vec::new(),
+        node_provenance: BTreeMap::new(),
     })
 }
 
@@ -608,6 +610,7 @@ fn build_fork_lineage_link(
             adapter: HARNESS_KEY.to_string(),
             evidence: Some("claude-code transcript fork".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -673,6 +676,7 @@ fn build_lineage_link(
             adapter: HARNESS_KEY.to_string(),
             evidence: Some(format!("claude-code transcript {lineage_kind}")),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }

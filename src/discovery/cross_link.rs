@@ -541,6 +541,7 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("active_pane_process_match".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -705,6 +706,7 @@ fn runtime_process_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some(evidence_label.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -871,6 +873,7 @@ fn fd_runtime_process_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some(evidence.link_evidence.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -1796,6 +1799,7 @@ fn linked_to_mux(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some(evidence.to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -1820,6 +1824,7 @@ fn fork_association_link(session: &AgentSessionNode, fork: &NodeId, root: &str) 
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("session cwd within fork root".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -1850,6 +1855,7 @@ fn workspace_association_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("session cwd within workspace member".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -1879,6 +1885,7 @@ fn checkout_association_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("session cwd within checkout root".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -2117,6 +2124,7 @@ mod tests {
                 adapter: "test".to_string(),
                 evidence: Some("test workspace member".to_string()),
                 fields,
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }
@@ -2145,6 +2153,7 @@ mod tests {
                 adapter: "atelier".to_string(),
                 evidence: Some("test rooted_at_path".to_string()),
                 fields: Default::default(),
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }
@@ -2165,6 +2174,7 @@ mod tests {
                 adapter: "test".to_string(),
                 evidence: Some("test parent".to_string()),
                 fields: Default::default(),
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }
@@ -3539,6 +3549,7 @@ mod tests {
                 adapter: "atelier".to_string(),
                 evidence: Some("test lineage".to_string()),
                 fields: Default::default(),
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         };
@@ -3594,6 +3605,7 @@ mod tests {
                 adapter: "opencode".to_string(),
                 evidence: Some("opencode session.parent_id unknown".to_string()),
                 fields: Default::default(),
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }

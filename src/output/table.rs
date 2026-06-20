@@ -1414,6 +1414,7 @@ mod tests {
                 adapter: "test".to_string(),
                 evidence: None,
                 fields,
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }

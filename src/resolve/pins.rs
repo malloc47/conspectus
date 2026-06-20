@@ -268,6 +268,7 @@ fn synthesize_pin_link(
             adapter: "pin".to_string(),
             evidence: Some(format!("synthesized from pin `{}`", pin.id)),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }

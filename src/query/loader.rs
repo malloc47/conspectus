@@ -13,13 +13,16 @@
 //! discriminator + per-variant columns and JSON-text blobs per the
 //! schema documentation.
 
+use std::collections::BTreeMap;
+
 use rusqlite::{Connection, Transaction, params};
 
 use crate::aliases::AliasOverlay;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Diagnostic, ForgePrNode, ForkNode, GraphLink,
-    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, PinBinding, PinCandidate,
-    Provenance, RepoNode, ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
+    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, NodeProvenance,
+    PinBinding, PinCandidate, Provenance, RepoNode, ResolvedRelationship, RuntimeProcessNode,
+    WorkspaceNode,
 };
 
 use super::reader::BadEnum;
@@ -28,27 +31,72 @@ use super::schema::{
     relation_kind_tag,
 };
 
+/// Default values written into the `discovery_provider` /
+/// `discovery_freshness_epoch` columns when a node or candidate link
+/// has no provenance recorded. The schema's column defaults are the
+/// same — we plumb them explicitly here so the loader and the schema
+/// stay in lockstep even after future schema edits (and so a future
+/// `INSERT … RETURNING` migration cannot silently diverge).
+const UNKNOWN_PROVIDER: &str = "unknown";
+const UNKNOWN_FRESHNESS_EPOCH: i64 = 0;
+
+/// Look up the per-node provenance for `node_id`, returning the
+/// schema defaults when none is recorded. Used by every per-kind
+/// node insert so the `discovery_provider` /
+/// `discovery_freshness_epoch` columns always have explicit values.
+fn node_provenance_columns<'a>(
+    map: &'a BTreeMap<NodeId, NodeProvenance>,
+    node_id: &NodeId,
+) -> (&'a str, i64) {
+    match map.get(node_id) {
+        Some(prov) => (
+            prov.provider.as_str(),
+            prov.freshness_epoch.unwrap_or(UNKNOWN_FRESHNESS_EPOCH),
+        ),
+        None => (UNKNOWN_PROVIDER, UNKNOWN_FRESHNESS_EPOCH),
+    }
+}
+
+/// Project a candidate link's `SourceMetadata` onto the
+/// `discovery_provider` / `discovery_freshness_epoch` column pair.
+/// Adapters that have not been instrumented yet land with the schema
+/// defaults.
+fn link_provenance_columns(link: &GraphLink) -> (&str, i64) {
+    let provider = if link.source_metadata.adapter.is_empty() {
+        UNKNOWN_PROVIDER
+    } else {
+        link.source_metadata.adapter.as_str()
+    };
+    let epoch = link
+        .source_metadata
+        .freshness_epoch
+        .unwrap_or(UNKNOWN_FRESHNESS_EPOCH);
+    (provider, epoch)
+}
+
 /// Load `snapshot` into `conn`, replacing all existing rows in a single
 /// transaction. Safe to call against a fresh database that has had
 /// [`super::apply_schema`] applied, or against one previously populated
 /// by an earlier call to this function.
 ///
 /// Partial-eviction (only one provider's rows) is not implemented here.
-/// It is the natural extension once P7-002 lands provider-provenance
-/// fields on the in-memory model; the schema is ready for it
-/// (the `discovery_provider` columns) but the data is not.
+/// It is the natural extension now that P7-002 has landed the
+/// provider-provenance fields on the in-memory model and the loader
+/// fills the `discovery_provider` / `discovery_freshness_epoch`
+/// columns from them; P7-005 is the next step.
 pub fn load(snapshot: &GraphSnapshot, conn: &mut Connection) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
+    let prov = &snapshot.node_provenance;
     clear_all(&tx)?;
-    insert_repos(&tx, &snapshot.nodes)?;
-    insert_checkouts(&tx, &snapshot.nodes)?;
-    insert_workspaces(&tx, &snapshot.nodes)?;
-    insert_agent_sessions(&tx, &snapshot.nodes)?;
-    insert_mux_sessions(&tx, &snapshot.nodes)?;
-    insert_runtime_processes(&tx, &snapshot.nodes)?;
-    insert_branches(&tx, &snapshot.nodes)?;
-    insert_forks(&tx, &snapshot.nodes)?;
-    insert_forge_prs(&tx, &snapshot.nodes)?;
+    insert_repos(&tx, &snapshot.nodes, prov)?;
+    insert_checkouts(&tx, &snapshot.nodes, prov)?;
+    insert_workspaces(&tx, &snapshot.nodes, prov)?;
+    insert_agent_sessions(&tx, &snapshot.nodes, prov)?;
+    insert_mux_sessions(&tx, &snapshot.nodes, prov)?;
+    insert_runtime_processes(&tx, &snapshot.nodes, prov)?;
+    insert_branches(&tx, &snapshot.nodes, prov)?;
+    insert_forks(&tx, &snapshot.nodes, prov)?;
+    insert_forge_prs(&tx, &snapshot.nodes, prov)?;
     insert_candidate_links(&tx, &snapshot.candidate_links)?;
     insert_resolved(&tx, &snapshot.resolved_relationships)?;
     insert_diagnostics(&tx, &snapshot.diagnostics)?;
@@ -79,10 +127,16 @@ fn clear_all(tx: &Transaction) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn insert_repos(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_repos(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
-        "INSERT INTO node_repos (node_id, common_dir, source_paths, remotes) \
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO node_repos (\
+           node_id, common_dir, source_paths, remotes, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
     for node in nodes {
         let GraphNode::Repo(repo) = node else {
@@ -95,22 +149,30 @@ fn insert_repos(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
             source_paths,
             remotes,
         } = repo;
+        let (provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             common_dir,
             json_array(source_paths),
             json_array(remotes),
+            provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_checkouts(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_checkouts(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_checkouts (\
            node_id, repo_common_dir, root, git_dir, \
-           current_branch_repo_common_dir, current_branch_refname\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+           current_branch_repo_common_dir, current_branch_refname, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
     for node in nodes {
         let GraphNode::Checkout(checkout) = node else {
@@ -127,6 +189,7 @@ fn insert_checkouts(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<(
             .as_ref()
             .map(|b| (Some(b.repo.common_dir.as_str()), Some(b.refname.as_str())))
             .unwrap_or((None, None));
+        let (provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             id.repo.common_dir,
@@ -134,15 +197,23 @@ fn insert_checkouts(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<(
             git_dir,
             cb_repo_common_dir,
             cb_refname,
+            provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_workspaces(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_workspaces(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
-        "INSERT INTO node_workspaces (node_id, root, provider_name, name) \
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO node_workspaces (\
+           node_id, root, provider_name, name, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
     for node in nodes {
         let GraphNode::Workspace(workspace) = node else {
@@ -155,17 +226,30 @@ fn insert_workspaces(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<
             provider,
             name,
         } = workspace;
-        stmt.execute(params![node_id.to_string(), root, provider, name])?;
+        let (discovery_provider, freshness) = node_provenance_columns(provenance, &node_id);
+        stmt.execute(params![
+            node_id.to_string(),
+            root,
+            provider,
+            name,
+            discovery_provider,
+            freshness,
+        ])?;
     }
     Ok(())
 }
 
-fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_agent_sessions(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_agent_sessions (\
            node_id, harness_key, state_scope, session_key, cwd, title, \
-           last_message_preview, last_active_epoch, session_kind\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+           last_message_preview, last_active_epoch, session_kind, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )?;
     for node in nodes {
         let GraphNode::AgentSession(session) = node else {
@@ -185,6 +269,7 @@ fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Res
             crate::model::SessionKind::Human => "human".to_string(),
             crate::model::SessionKind::Subagent => "subagent".to_string(),
         });
+        let (provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             harness_key,
@@ -195,18 +280,25 @@ fn insert_agent_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Res
             last_message_preview,
             last_active_epoch,
             session_kind_str,
+            provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_mux_sessions(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_mux_sessions (\
            node_id, native_id, backend, cwd, \
            active_pane_command, active_pane_pid, active_pane_current_path, \
-           active_pane_start_command, client_attached, activity_epoch, created_epoch\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+           active_pane_start_command, client_attached, activity_epoch, created_epoch, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )?;
     for node in nodes {
         let GraphNode::MuxSession(mux) = node else {
@@ -227,6 +319,7 @@ fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Resul
             created_epoch,
         } = mux;
         let client_attached = client_attached.map(i64::from);
+        let (provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             native_id,
@@ -239,17 +332,24 @@ fn insert_mux_sessions(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Resul
             client_attached,
             activity_epoch,
             created_epoch,
+            provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_runtime_processes(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_runtime_processes(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_runtime_processes (\
            node_id, observation_key, pid, parent_pid, root_pane_pid, command, cwd, \
-           harness_key, role, depth, observed_epoch\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+           harness_key, role, depth, observed_epoch, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )?;
     for node in nodes {
         let GraphNode::RuntimeProcess(process) = node else {
@@ -276,6 +376,7 @@ fn insert_runtime_processes(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::
             crate::model::RuntimeProcessRole::Shell => "shell".to_string(),
             crate::model::RuntimeProcessRole::Unknown => "unknown".to_string(),
         });
+        let (provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             observation_key,
@@ -288,16 +389,23 @@ fn insert_runtime_processes(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::
             role_str,
             depth,
             observed_epoch,
+            provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_branches(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_branches(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_branches (\
-           node_id, repo_common_dir, refname, current_commit, upstream\
-         ) VALUES (?1, ?2, ?3, ?4, ?5)",
+           node_id, repo_common_dir, refname, current_commit, upstream, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )?;
     for node in nodes {
         let GraphNode::Branch(branch) = node else {
@@ -310,22 +418,30 @@ fn insert_branches(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()
             current_commit,
             upstream,
         } = branch;
+        let (provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             id.repo.common_dir,
             refname,
             current_commit,
             upstream,
+            provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_forks(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_forks(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_forks (\
-           node_id, provider_source_key, provider_name, name, scope, capabilities\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+           node_id, provider_source_key, provider_name, name, scope, capabilities, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
     for node in nodes {
         let GraphNode::Fork(fork) = node else {
@@ -340,6 +456,7 @@ fn insert_forks(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
             scope,
             capabilities,
         } = fork;
+        let (discovery_provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             provider_source_key,
@@ -347,17 +464,24 @@ fn insert_forks(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
             name,
             scope,
             json_array(capabilities),
+            discovery_provider,
+            freshness,
         ])?;
     }
     Ok(())
 }
 
-fn insert_forge_prs(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<()> {
+fn insert_forge_prs(
+    tx: &Transaction,
+    nodes: &[GraphNode],
+    provenance: &BTreeMap<NodeId, NodeProvenance>,
+) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
         "INSERT INTO node_forge_prs (\
            node_id, provider_name, host, owner, repo, number, \
-           state, url, updated_epoch, is_draft\
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+           state, url, updated_epoch, is_draft, \
+           discovery_provider, discovery_freshness_epoch\
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
     )?;
     for node in nodes {
         let GraphNode::ForgePr(pr) = node else {
@@ -376,6 +500,7 @@ fn insert_forge_prs(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<(
             updated_epoch,
             is_draft,
         } = pr;
+        let (discovery_provider, freshness) = node_provenance_columns(provenance, &node_id);
         stmt.execute(params![
             node_id.to_string(),
             provider,
@@ -387,6 +512,8 @@ fn insert_forge_prs(tx: &Transaction, nodes: &[GraphNode]) -> rusqlite::Result<(
             url,
             updated_epoch,
             i64::from(*is_draft),
+            discovery_provider,
+            freshness,
         ])?;
     }
     Ok(())
@@ -400,10 +527,11 @@ fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Re
            target_native_id, target_state_scope, target_path, target_metadata, \
            relation, provenance, confidence, freshness, \
            state, state_reason, state_overridden_by, \
-           source_adapter, source_evidence, source_fields\
+           source_adapter, source_evidence, source_fields, \
+           discovery_provider, discovery_freshness_epoch\
          ) VALUES (\
            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, \
-           ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20\
+           ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22\
          )",
     )?;
     for link in links {
@@ -424,6 +552,7 @@ fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Re
         let target_metadata = evidence
             .map(|e| json_object(&e.metadata))
             .unwrap_or_else(|| "{}".into());
+        let (discovery_provider, freshness_epoch) = link_provenance_columns(link);
         stmt.execute(params![
             link.id,
             json_node_id(&link.source),
@@ -445,6 +574,8 @@ fn insert_candidate_links(tx: &Transaction, links: &[GraphLink]) -> rusqlite::Re
             link.source_metadata.adapter,
             link.source_metadata.evidence,
             json_object(&link.source_metadata.fields),
+            discovery_provider,
+            freshness_epoch,
         ])?;
     }
     Ok(())
@@ -947,6 +1078,7 @@ mod tests {
                     m.insert("k".into(), serde_json::json!("v"));
                     m
                 },
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }
@@ -1427,5 +1559,185 @@ mod tests {
             .query_row("SELECT root FROM node_workspaces", [], |row| row.get(0))
             .unwrap();
         assert_eq!(row, "/other");
+    }
+
+    // ---- P7-002: provider provenance + freshness ----
+
+    #[test]
+    fn node_without_provenance_falls_back_to_schema_defaults() {
+        // A snapshot whose producers have not been instrumented yet
+        // should still load successfully; the loader writes the
+        // `'unknown'` / `0` defaults explicitly so the row's
+        // provenance columns are never NULL and we don't depend on
+        // SQLite's column defaults to fill them.
+        let mut conn = fresh_conn();
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes.push(GraphNode::Repo(make_repo("/r/.git")));
+        load(&snap, &mut conn).unwrap();
+        let (provider, epoch): (String, i64) = conn
+            .query_row(
+                "SELECT discovery_provider, discovery_freshness_epoch FROM node_repos",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(provider, "unknown");
+        assert_eq!(epoch, 0);
+    }
+
+    #[test]
+    fn node_provenance_sidecar_populates_discovery_columns() {
+        // When the sidecar carries `(provider, freshness_epoch)`
+        // entries the loader writes them into the SQL columns. We
+        // pick one node per *kind* so every per-table INSERT in the
+        // loader gets exercised in a single test rather than fanning
+        // out into one assertion per table.
+        let mut conn = fresh_conn();
+        let mut snap = full_snapshot();
+        let entries: Vec<(NodeId, NodeProvenance)> = snap
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(idx, node)| {
+                (
+                    node.id(),
+                    NodeProvenance {
+                        provider: format!("provider::{idx}"),
+                        freshness_epoch: Some(1_700_000_000 + idx as i64),
+                    },
+                )
+            })
+            .collect();
+        for (id, prov) in &entries {
+            snap.node_provenance.insert(id.clone(), prov.clone());
+        }
+        load(&snap, &mut conn).unwrap();
+
+        for table in [
+            "node_repos",
+            "node_checkouts",
+            "node_workspaces",
+            "node_agent_sessions",
+            "node_mux_sessions",
+            "node_runtime_processes",
+            "node_branches",
+            "node_forks",
+            "node_forge_prs",
+        ] {
+            let unknown_rows: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {table} \
+                         WHERE discovery_provider = 'unknown' \
+                            OR discovery_freshness_epoch = 0"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                unknown_rows, 0,
+                "{table} still has rows with the unknown/0 defaults"
+            );
+        }
+
+        let actual: BTreeMap<String, (String, i64)> = {
+            let mut out = BTreeMap::new();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT node_id, discovery_provider, discovery_freshness_epoch \
+                     FROM v_nodes ORDER BY node_id",
+                )
+                .unwrap();
+            for row in stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .unwrap()
+            {
+                let (id, prov, epoch) = row.unwrap();
+                out.insert(id, (prov, epoch));
+            }
+            out
+        };
+        let expected: BTreeMap<String, (String, i64)> = entries
+            .iter()
+            .map(|(id, prov)| {
+                (
+                    id.to_string(),
+                    (prov.provider.clone(), prov.freshness_epoch.unwrap()),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn link_source_metadata_drives_discovery_columns() {
+        // Candidate links project their `SourceMetadata.adapter`
+        // onto `discovery_provider` and
+        // `SourceMetadata.freshness_epoch` onto
+        // `discovery_freshness_epoch`. An empty adapter (legacy
+        // fixtures) falls back to `'unknown'`; a missing epoch falls
+        // back to `0`.
+        let mut conn = fresh_conn();
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes.push(GraphNode::Repo(make_repo("/r/.git")));
+        snap.nodes.push(GraphNode::Workspace(make_workspace("/w")));
+        let repo_id = NodeId::Repo(RepoId::new("/r/.git"));
+        let workspace_id = NodeId::Workspace(WorkspaceId::new("/w"));
+        snap.candidate_links.push(GraphLink {
+            id: "tagged".into(),
+            source: workspace_id.clone(),
+            target: LinkEndpoint::Node {
+                id: repo_id.clone(),
+            },
+            relation: RelationKind::WorkspaceContainsRepo,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata {
+                adapter: "atelier".into(),
+                evidence: None,
+                fields: Metadata::new(),
+                freshness_epoch: Some(1_700_000_500),
+            },
+            state: LinkState::Active,
+        });
+        snap.candidate_links.push(GraphLink {
+            id: "legacy".into(),
+            source: workspace_id,
+            target: LinkEndpoint::Node { id: repo_id },
+            relation: RelationKind::AssociatedWith,
+            provenance: Provenance::Discovered,
+            confidence: Confidence::Medium,
+            freshness: Freshness::Fresh,
+            source_metadata: SourceMetadata::default(),
+            state: LinkState::Active,
+        });
+        load(&snap, &mut conn).unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT link_id, discovery_provider, discovery_freshness_epoch \
+                 FROM candidate_links ORDER BY link_id",
+            )
+            .unwrap();
+        let rows: Vec<(String, String, i64)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("legacy".to_string(), "unknown".to_string(), 0),
+                ("tagged".to_string(), "atelier".to_string(), 1_700_000_500),
+            ]
+        );
     }
 }

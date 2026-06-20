@@ -6,6 +6,7 @@
 //! each root that contains an aider history marker, emits a single
 //! `AgentSession` node with the repo path as both cwd and state scope.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -66,6 +67,7 @@ impl HarnessAdapter for AiderAdapter {
             nodes,
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
+            node_provenance: BTreeMap::new(),
         })
     }
 }

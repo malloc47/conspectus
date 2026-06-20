@@ -3427,6 +3427,7 @@ mod tests {
                 adapter: "opencode".to_string(),
                 evidence: Some("opencode session.parent_id unknown".to_string()),
                 fields: Default::default(),
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }

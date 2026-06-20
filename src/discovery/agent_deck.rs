@@ -323,6 +323,7 @@ fn workspace_repo_link(
             adapter: "agent_deck".to_string(),
             evidence: Some("agent-deck multi-repo-worktrees symlink".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -333,6 +334,7 @@ fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
+        node_provenance: BTreeMap::new(),
     }
 }
 

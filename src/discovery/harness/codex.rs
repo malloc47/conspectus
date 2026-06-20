@@ -175,6 +175,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
         nodes,
         candidate_links,
         diagnostics: Vec::new(),
+        node_provenance: BTreeMap::new(),
     })
 }
 
@@ -323,6 +324,7 @@ fn build_lineage_link(
             adapter: HARNESS_KEY.to_string(),
             evidence: Some(op.evidence().to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }

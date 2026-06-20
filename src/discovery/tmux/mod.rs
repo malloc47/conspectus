@@ -6,6 +6,7 @@
 //! [`DiscoveryProvider`] that asks a runner for sessions, parses the rows, and
 //! emits provider-neutral `MuxSession` nodes.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -1051,6 +1052,7 @@ impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
             nodes,
             candidate_links: Vec::new(),
             diagnostics: Vec::new(),
+            node_provenance: BTreeMap::new(),
         })
     }
 }

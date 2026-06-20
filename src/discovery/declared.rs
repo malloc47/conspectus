@@ -133,6 +133,7 @@ fn link_from_declared(
             adapter: "declared".to_string(),
             evidence: Some(store.evidence.to_string()),
             fields: metadata(store, declared),
+            freshness_epoch: None,
         },
         state: link_state(declared),
     }

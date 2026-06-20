@@ -374,6 +374,7 @@ fn build_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("codex_log_current_thread_match".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -422,6 +423,7 @@ fn ensure_codex_runtime_process(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("codex_log_process_observation".to_string()),
             fields: Metadata::new(),
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     };
@@ -498,6 +500,7 @@ fn codex_process_link(
             adapter: ADAPTER_NAME.to_string(),
             evidence: Some("codex_log_process_thread_match".to_string()),
             fields,
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -657,6 +660,7 @@ mod tests {
                 adapter: "cross_link".to_string(),
                 evidence: Some("active_pane_command_session_match".to_string()),
                 fields,
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         }

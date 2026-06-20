@@ -408,6 +408,7 @@ fn read_candidate_links(conn: &Connection) -> rusqlite::Result<Vec<GraphLink>> {
                 adapter: source_adapter,
                 evidence: source_evidence,
                 fields: parse_metadata(&source_fields),
+                freshness_epoch: None,
             },
             state: link_state,
         })
@@ -833,6 +834,7 @@ mod tests {
                     m.insert("k".into(), serde_json::json!("v"));
                     m
                 },
+                freshness_epoch: None,
             },
             state: LinkState::Active,
         });
@@ -1062,6 +1064,7 @@ mod tests {
             diagnostics,
             aliases,
             pins,
+            node_provenance,
         } = snap;
         // Touch each binding so an unused warning surfaces if any
         // field disappears (the destructure alone catches additions;
@@ -1072,6 +1075,7 @@ mod tests {
         assert!(diagnostics.is_empty());
         assert!(aliases.iter().next().is_none());
         assert!(pins.is_empty());
+        assert!(node_provenance.is_empty());
     }
 
     /// Round-trip every `Diagnostic` variant individually so a

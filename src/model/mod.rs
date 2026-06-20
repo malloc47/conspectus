@@ -693,6 +693,43 @@ pub struct SourceMetadata {
     pub evidence: Option<String>,
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     pub fields: Metadata,
+    /// Unix epoch (seconds) captured when the producing adapter ran
+    /// against the live world. Feeds the SQL
+    /// `candidate_links.discovery_freshness_epoch` column and the
+    /// per-provider TTL comparison in `P7-003` / `P7-006`. `None`
+    /// when the adapter did not record a timestamp (the loader then
+    /// writes `0`, the schema default, so existing snapshots stay
+    /// round-trippable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freshness_epoch: Option<i64>,
+}
+
+/// Per-node producing-provider metadata (P7-002 / ADR 0037). The
+/// sidecar lives on [`GraphSnapshot`] keyed by `NodeId` so node
+/// structs themselves remain provider-agnostic and the producers
+/// have a single place to record their origin alongside whatever
+/// they were already going to push into the snapshot. The loader
+/// fills the SQL `discovery_provider` / `discovery_freshness_epoch`
+/// columns from this map; nodes without an entry land in SQL with
+/// the schema's `'unknown'` / `0` defaults so legacy snapshots
+/// (and any provider that has not yet been instrumented) keep
+/// round-tripping.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeProvenance {
+    /// Stable identifier of the producing discovery provider, e.g.
+    /// `git`, `harness::claude_code`, `tmux`, `forge::github`,
+    /// `atelier`, `pins`, `aliases`, `declared`, `cross_link`,
+    /// `codex_log`, `hook_sidecar`, `agent_deck`, `workspace`.
+    /// Convention: lowercase, `::`-separated when an area hosts
+    /// multiple adapters; mirrors `SourceMetadata.adapter` on the
+    /// link side. The canonical constants live in
+    /// `crate::discovery::providers`.
+    pub provider: String,
+    /// Unix epoch (seconds) captured when the provider produced
+    /// this node. `None` when the producer did not record a
+    /// timestamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freshness_epoch: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -816,6 +853,13 @@ pub struct GraphSnapshot {
     /// without walking `candidate_links`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pins: Vec<PinCandidate>,
+    /// Per-node producing-provider metadata (P7-002 / ADR 0037).
+    /// Empty for snapshots whose producers have not been
+    /// instrumented yet; the loader falls back to the schema's
+    /// `'unknown'` / `0` defaults for nodes without an entry. See
+    /// [`NodeProvenance`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub node_provenance: BTreeMap<NodeId, NodeProvenance>,
 }
 
 impl GraphSnapshot {

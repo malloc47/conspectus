@@ -1,5 +1,6 @@
 //! Read-only git discovery probes.
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -233,6 +234,7 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
         nodes,
         candidate_links,
         diagnostics: Vec::new(),
+        node_provenance: BTreeMap::new(),
     }
 }
 
@@ -286,6 +288,7 @@ fn git_link(source: NodeId, target: NodeId, relation: RelationKind, evidence: &s
             adapter: "git".to_string(),
             evidence: Some(evidence.to_string()),
             fields: Default::default(),
+            freshness_epoch: None,
         },
         state: LinkState::Active,
     }
@@ -303,6 +306,7 @@ fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
         nodes: snapshot.nodes,
         candidate_links: snapshot.candidate_links,
         diagnostics: snapshot.diagnostics,
+        node_provenance: BTreeMap::new(),
     }
 }
 
