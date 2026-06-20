@@ -26,9 +26,11 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::Widget;
 
+use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
+use crate::tui::widgets::popup_frame::{LinesBody, themed_popup};
 
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
@@ -881,31 +883,19 @@ fn optional(raw: &str) -> Option<String> {
 /// Centered modal widget for the pins overlay.
 pub struct PinsOverlayWidget<'a> {
     state: &'a PinsOverlayState,
+    theme: &'a Theme,
 }
 
 impl<'a> PinsOverlayWidget<'a> {
-    pub fn new(state: &'a PinsOverlayState) -> Self {
-        Self { state }
+    pub fn new(state: &'a PinsOverlayState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for PinsOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Pins "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
         let cursor = self.state.cursor();
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(section_header("Pins"));
@@ -918,51 +908,47 @@ impl Widget for PinsOverlayWidget<'_> {
             span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")
         ]);
 
-        Paragraph::new(lines).render(inner, buf);
+        let sub_editor_to_render = self.state.sub_editor();
+        let theme = self.theme;
+        let body = LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        let popup = themed_popup(body, line![" Pins "], theme);
+        popup.render(area, buf);
 
-        if let Some(editor) = self.state.sub_editor() {
-            render_sub_editor(editor, area, buf);
+        if let Some(editor) = sub_editor_to_render {
+            render_sub_editor(editor, area, buf, theme);
         }
     }
 }
 
-fn render_sub_editor(editor: &PinsSubEditor, area: Rect, buf: &mut Buffer) {
+fn render_sub_editor(editor: &PinsSubEditor, area: Rect, buf: &mut Buffer, theme: &Theme) {
     match editor {
-        PinsSubEditor::Create(state) => PinCreateWidget::new(state).render(area, buf),
-        PinsSubEditor::Edit(state) => PinEditWidget::new(state).render(area, buf),
-        PinsSubEditor::Rebind(state) => PinRebindWidget::new(state).render(area, buf),
-        PinsSubEditor::Bind(state) => PinBindWidget::new(state).render(area, buf),
-        PinsSubEditor::Remove(state) => PinRemoveWidget::new(state).render(area, buf),
+        PinsSubEditor::Create(state) => PinCreateWidget::new(state, theme).render(area, buf),
+        PinsSubEditor::Edit(state) => PinEditWidget::new(state, theme).render(area, buf),
+        PinsSubEditor::Rebind(state) => PinRebindWidget::new(state, theme).render(area, buf),
+        PinsSubEditor::Bind(state) => PinBindWidget::new(state, theme).render(area, buf),
+        PinsSubEditor::Remove(state) => PinRemoveWidget::new(state, theme).render(area, buf),
     }
 }
 
 struct PinCreateWidget<'a> {
     state: &'a PinCreateState,
+    theme: &'a Theme,
 }
 
 impl<'a> PinCreateWidget<'a> {
-    fn new(state: &'a PinCreateState) -> Self {
-        Self { state }
+    fn new(state: &'a PinCreateState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = pin_create_modal_rect(area);
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Create Pin "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
         let mut lines = vec![
             pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
             pin_create_field(
@@ -1003,7 +989,12 @@ impl Widget for PinCreateWidget<'_> {
             "Up/Down field · type to edit · Space cycles store · Enter create · Esc cancel"
         )]);
 
-        Paragraph::new(lines).render(inner, buf);
+        let body = LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        themed_popup(body, line![" Create Pin "], self.theme).render(area, buf);
     }
 }
 
@@ -1028,31 +1019,19 @@ fn pin_create_modal_rect(area: Rect) -> Rect {
 
 struct PinEditWidget<'a> {
     state: &'a PinEditState,
+    theme: &'a Theme,
 }
 
 impl<'a> PinEditWidget<'a> {
-    fn new(state: &'a PinEditState) -> Self {
-        Self { state }
+    fn new(state: &'a PinEditState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for PinEditWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = pin_edit_modal_rect(area);
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Edit Pin "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
         let mut lines = vec![
             pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
             pin_create_field(
@@ -1093,37 +1072,30 @@ impl Widget for PinEditWidget<'_> {
             "Up/Down field · type to edit · Enter save · Esc cancel"
         )]);
 
-        Paragraph::new(lines).render(inner, buf);
+        let body = LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        themed_popup(body, line![" Edit Pin "], self.theme).render(area, buf);
     }
 }
 
 struct PinRebindWidget<'a> {
     state: &'a PinRebindState,
+    theme: &'a Theme,
 }
 
 impl<'a> PinRebindWidget<'a> {
-    fn new(state: &'a PinRebindState) -> Self {
-        Self { state }
+    fn new(state: &'a PinRebindState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for PinRebindWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = pin_rebind_modal_rect(area);
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Rebind Pin "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
         let mut lines = vec![
             line![format!("  id          {}", self.state.target.id)],
             line![format!("  display     {}", self.state.target.display_name)],
@@ -1151,7 +1123,12 @@ impl Widget for PinRebindWidget<'_> {
             "Up/Down field · type to edit · Enter save · Esc cancel"
         )]);
 
-        Paragraph::new(lines).render(inner, buf);
+        let body = LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        themed_popup(body, line![" Rebind Pin "], self.theme).render(area, buf);
     }
 }
 
@@ -1173,31 +1150,19 @@ fn pin_edit_modal_rect(area: Rect) -> Rect {
 
 struct PinBindWidget<'a> {
     state: &'a PinBindState,
+    theme: &'a Theme,
 }
 
 impl<'a> PinBindWidget<'a> {
-    fn new(state: &'a PinBindState) -> Self {
-        Self { state }
+    fn new(state: &'a PinBindState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for PinBindWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = pin_bind_modal_rect(area);
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Bind Pin "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
         let mut lines = Vec::new();
         if let Some(first) = self.state.options.first() {
             lines.push(line![format!("pin       {}", first.pin_id)]);
@@ -1216,7 +1181,13 @@ impl Widget for PinBindWidget<'_> {
             Modifier::DIM;
             "Up/Down choose · Enter bind · Esc cancel"
         )]);
-        Paragraph::new(lines).render(inner, buf);
+
+        let body = LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        themed_popup(body, line![" Bind Pin "], self.theme).render(area, buf);
     }
 }
 
@@ -1230,31 +1201,19 @@ fn pin_bind_modal_rect(area: Rect) -> Rect {
 
 struct PinRemoveWidget<'a> {
     state: &'a PinRemoveState,
+    theme: &'a Theme,
 }
 
 impl<'a> PinRemoveWidget<'a> {
-    fn new(state: &'a PinRemoveState) -> Self {
-        Self { state }
+    fn new(state: &'a PinRemoveState, theme: &'a Theme) -> Self {
+        Self { state, theme }
     }
 }
 
 impl Widget for PinRemoveWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = pin_remove_modal_rect(area);
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Remove Pin "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
         let lines = vec![
             line![
                 "id       ",
@@ -1265,7 +1224,12 @@ impl Widget for PinRemoveWidget<'_> {
             line![""],
             line![span!(Modifier::DIM; "Enter remove · Esc cancel")],
         ];
-        Paragraph::new(lines).render(inner, buf);
+        let body = LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        themed_popup(body, line![" Remove Pin "], self.theme).render(area, buf);
     }
 }
 

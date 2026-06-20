@@ -18,7 +18,8 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Paragraph, Widget, Wrap};
+use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 use crate::tui::widgets::help::centered_modal_rect;
@@ -111,34 +112,54 @@ impl<'a> ValueModalWidget<'a> {
 
 impl Widget for ValueModalWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
-        // Clear the modal region so we don't blend with what's behind.
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
         let title_text = format!(" {} ", self.state.label);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(vec![
-                Span::raw(" "),
-                Span::styled(
-                    title_text,
-                    Style::default()
-                        .fg(self.theme.panel_focus_accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" "),
-            ]));
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-        let body = Paragraph::new(self.state.value.clone())
+        let title = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                title_text,
+                Style::default()
+                    .fg(self.theme.panel_focus_accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+        ]);
+        let body = ValueModalBody {
+            state: self.state,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme);
+        popup.render(area, buf);
+    }
+}
+
+/// Body wrapper for `tui_popup::Popup`. Renders the wrapped value
+/// text with vertical scroll; sizing follows the cap dims so the
+/// popup auto-sizing reproduces the in-tree rect.
+struct ValueModalBody<'a> {
+    state: &'a ValueModalState,
+    inner_width: usize,
+    inner_height: usize,
+}
+
+impl KnownSize for ValueModalBody<'_> {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl Widget for ValueModalBody<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        Paragraph::new(self.state.value.clone())
             .wrap(Wrap { trim: false })
-            .scroll((self.state.scroll, 0));
-        body.render(inner, buf);
+            .scroll((self.state.scroll, 0))
+            .render(area, buf);
     }
 }
 

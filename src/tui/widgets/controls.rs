@@ -32,7 +32,7 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::Widget;
 
 use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
 use crate::tui::Theme;
@@ -507,34 +507,30 @@ impl<'a> ControlsOverlayWidget<'a> {
 
 impl Widget for ControlsOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`; the body
+        // wrapper reports the same cap dims `centered_modal_rect`
+        // produces so auto-sizing reproduces the legacy rect.
         let modal = centered_modal_rect(area);
-        // Repaint the modal area so any dimmed body content doesn't
-        // bleed through.
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
+        let mut lines = self.body_lines();
+        lines.push(line![""]);
+        lines.push(line![
+            span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")
+        ]);
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![" Controls "]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
-
-        let lines = self.body_lines();
-        let footer = line![span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")];
-        let mut all_lines = lines;
-        all_lines.push(line![""]);
-        all_lines.push(footer);
-        let para = Paragraph::new(all_lines);
-        para.render(inner, buf);
+        let sub_editor_to_render = self.state.sub_editor();
+        let theme = self.theme;
+        let body = crate::tui::widgets::popup_frame::LinesBody {
+            lines,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        let popup =
+            crate::tui::widgets::popup_frame::themed_popup(body, line![" Controls "], theme);
+        popup.render(area, buf);
 
         // If a sub-editor is open, render it on top of the overlay.
-        if let Some(editor) = self.state.sub_editor() {
-            render_sub_editor(editor, area, buf, self.theme);
+        if let Some(editor) = sub_editor_to_render {
+            render_sub_editor(editor, area, buf, theme);
         }
     }
 }
@@ -559,7 +555,7 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
         }
         SubEditor::MaxAge(state) => {
             use crate::tui::widgets::input::TextInputWidget;
-            TextInputWidget::new(state).render(area, buf);
+            TextInputWidget::new(state).theme(theme).render(area, buf);
         }
     }
 }

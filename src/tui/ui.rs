@@ -128,7 +128,7 @@ fn draw_rename_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     use crate::tui::widgets::input::TextInputWidget;
-    let widget = TextInputWidget::new(state);
+    let widget = TextInputWidget::new(state).theme(app.theme());
     frame.render_widget(widget, area);
 }
 
@@ -146,7 +146,7 @@ fn draw_pins_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
         return;
     };
     use crate::tui::widgets::pins::PinsOverlayWidget;
-    let widget = PinsOverlayWidget::new(state);
+    let widget = PinsOverlayWidget::new(state, app.theme());
     frame.render_widget(widget, area);
 }
 

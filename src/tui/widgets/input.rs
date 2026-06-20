@@ -12,9 +12,12 @@ use ratatui::crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEvent, KeyM
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
+use tui_popup::KnownSize;
+
+use crate::tui::Theme;
 
 /// What the host should do after passing a key event through the
 /// overlay. `Continue` means the overlay stays open; `Confirm`
@@ -89,45 +92,79 @@ impl TextInputState {
 /// active bindings.
 pub const STATUS_LEGEND: &str = "Enter confirm · Esc cancel";
 
-/// Centered modal rendering of [`TextInputState`].
+/// Centered modal rendering of [`TextInputState`]. Defaults to the
+/// upstream popup palette when no `.theme(&Theme)` is provided so
+/// the constructor stays a one-arg call from existing sites.
 pub struct TextInputWidget<'a> {
     state: &'a TextInputState,
+    theme: Option<&'a Theme>,
 }
 
 impl<'a> TextInputWidget<'a> {
     pub fn new(state: &'a TextInputState) -> Self {
-        Self { state }
+        Self { state, theme: None }
+    }
+
+    /// Honor operator `[tui.theme]` overrides (ADR 0032). Without
+    /// this the bordered modal renders with the upstream defaults.
+    pub fn theme(mut self, theme: &'a Theme) -> Self {
+        self.theme = Some(theme);
+        self
     }
 }
 
 impl Widget for TextInputWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`. When a
+        // theme is set we route through `themed_popup`; otherwise
+        // fall back to upstream defaults so call sites that don't
+        // pass a theme still render legibly.
         let modal = centered_modal_rect(area);
-        // Repaint the modal background so the dimmed body stays
-        // dimmed underneath but the input area itself is opaque.
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
+        let body = TextInputBody {
+            state: self.state,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        let title = Line::from(self.state.title.clone());
+        if let Some(theme) = self.theme {
+            let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, theme);
+            popup.render(area, buf);
+        } else {
+            let popup = tui_popup::Popup::new(body).title(title);
+            popup.render(area, buf);
         }
+    }
+}
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(Line::from(self.state.title.clone()));
-        let inner = block.inner(modal);
-        block.render(modal, buf);
+/// Body wrapper that renders the visible-window text and reverses
+/// the cursor cell. Sizing follows the cap dims so the popup auto-
+/// sizing reproduces the in-tree 3-row rect.
+struct TextInputBody<'a> {
+    state: &'a TextInputState,
+    inner_width: usize,
+    inner_height: usize,
+}
 
+impl KnownSize for TextInputBody<'_> {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl Widget for TextInputBody<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
         let value = self.state.input.value();
         let cursor = self.state.input.cursor();
-        let inner_width = inner.width as usize;
+        let inner_width = area.width as usize;
 
         let display = visible_window(value, cursor, inner_width);
-        let para = Paragraph::new(Line::from(display.text.clone()));
-        para.render(inner, buf);
+        Paragraph::new(Line::from(display.text.clone())).render(area, buf);
 
-        if let Some(cell) = buf.cell_mut((inner.x + display.cursor_offset as u16, inner.y)) {
+        if let Some(cell) = buf.cell_mut((area.x + display.cursor_offset as u16, area.y)) {
             cell.set_style(Style::default().add_modifier(Modifier::REVERSED));
         }
     }

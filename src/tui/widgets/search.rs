@@ -17,7 +17,8 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Widget};
+use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 
@@ -177,22 +178,50 @@ impl<'a> SearchOverlayWidget<'a> {
 
 impl Widget for SearchOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`; the body
+        // wrapper reports the same cap dims `centered_modal_rect`
+        // produces so auto-sizing reproduces the legacy rect.
         let modal = centered_modal_rect(area);
-        // Repaint so dimmed body content doesn't bleed through.
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
-        }
-        let block = Block::default().borders(Borders::ALL).title(line![format!(
+        let title = line![format!(
             " / search ({} matches) ",
             self.state.matches().len()
-        )]);
-        let inner = block.inner(modal);
-        block.render(modal, buf);
+        )];
+        let body = SearchBody {
+            state: self.state,
+            items: self.items,
+            theme: self.theme,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, self.theme);
+        popup.render(area, buf);
+    }
+}
 
+/// Body wrapper for `tui_popup::Popup`. Renders the query row +
+/// ranked match list into the inner area; sizing is reported via
+/// the cap dims so the popup's auto-sizing reproduces the in-tree
+/// rect.
+struct SearchBody<'a> {
+    state: &'a SearchOverlayState,
+    items: &'a [SearchItem<'a>],
+    theme: &'a Theme,
+    inner_width: usize,
+    inner_height: usize,
+}
+
+impl KnownSize for SearchBody<'_> {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl Widget for SearchBody<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
         // First row: the query input (rendered as plain text with a
         // leading `/` so the operator sees the live query). Reuse
         // TextInputState's value rather than instantiating its
@@ -203,19 +232,19 @@ impl Widget for SearchOverlayWidget<'_> {
             self.state.query().to_string(),
         ];
         let query_area = Rect {
-            x: inner.x,
-            y: inner.y,
-            width: inner.width,
+            x: area.x,
+            y: area.y,
+            width: area.width,
             height: 1,
         };
         Paragraph::new(query_line).render(query_area, buf);
 
         // Divider + ranked list.
         let list_area = Rect {
-            x: inner.x,
-            y: inner.y.saturating_add(1),
-            width: inner.width,
-            height: inner.height.saturating_sub(1),
+            x: area.x,
+            y: area.y.saturating_add(1),
+            width: area.width,
+            height: area.height.saturating_sub(1),
         };
         if self.state.matches().is_empty() {
             let label = if self.state.query().is_empty() {

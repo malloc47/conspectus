@@ -21,11 +21,12 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::macros::line;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, StatefulWidget, Widget};
+use ratatui::widgets::{StatefulWidget, Widget};
 use ratatui_cheese::multi_select::{
     MultiSelect as CheeseMultiSelect, MultiSelectOption,
     MultiSelectState as CheeseMultiSelectState, MultiSelectStyles as CheeseMultiSelectStyles,
 };
+use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 
@@ -229,23 +230,51 @@ impl<'a, T: MultiSelectItem> MultiSelectWidget<'a, T> {
 
 impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // H-WIDG-004: framing through `tui_popup::Popup`. Theme glue
+        // applies when set; falls back to upstream defaults when
+        // unset so call sites that don't pass a theme still render.
         let modal = centered_modal_rect(area, self.items.len());
-        // Repaint the modal background so dimmed body content doesn't
-        // bleed through.
-        for y in modal.top()..modal.bottom() {
-            for x in modal.left()..modal.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    cell.reset();
-                }
-            }
+        let title = line![self.state.title().to_string()];
+        let body = MultiSelectBody {
+            state: self.state,
+            items: self.items,
+            theme: self.theme,
+            inner_width: modal.width.saturating_sub(2) as usize,
+            inner_height: modal.height.saturating_sub(2) as usize,
+        };
+        if let Some(theme) = self.theme {
+            let popup = crate::tui::widgets::popup_frame::themed_popup(body, title, theme);
+            Widget::render(popup, area, buf);
+        } else {
+            let popup = tui_popup::Popup::new(body).title(title);
+            Widget::render(popup, area, buf);
         }
+    }
+}
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(line![self.state.title().to_string()]);
-        let inner_area = block.inner(modal);
-        block.render(modal, buf);
+/// Body wrapper that bridges the ratatui-cheese `MultiSelect`
+/// upstream widget into a popup body. Sizing follows the cap dims
+/// the in-tree `centered_modal_rect` computed.
+struct MultiSelectBody<'a, T: MultiSelectItem> {
+    state: &'a MultiSelectState,
+    items: &'a [T],
+    theme: Option<&'a Theme>,
+    inner_width: usize,
+    inner_height: usize,
+}
 
+impl<T: MultiSelectItem> KnownSize for MultiSelectBody<'_, T> {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl<T: MultiSelectItem> Widget for MultiSelectBody<'_, T> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
         // Bridge our `[T: MultiSelectItem]` slice into upstream
         // `MultiSelectOption`s. The Vec lives for the duration of
         // this call so the borrow into the widget is valid.
@@ -257,9 +286,7 @@ impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
 
         // The upstream widget renders via &mut state. We're behind a
         // shared borrow, so build a mirror that reflects cursor +
-        // selections and pass that. Render may not mutate it
-        // meaningfully today, but a mirror keeps the contract honest
-        // either way.
+        // selections and pass that.
         let mut mirror = CheeseMultiSelectState::new(self.state.item_count);
         mirror.set_cursor(self.state.cursor());
         for idx in self.state.selected_indices() {
@@ -267,14 +294,14 @@ impl<T: MultiSelectItem> Widget for MultiSelectWidget<'_, T> {
         }
         mirror.set_focused(true);
 
-        // Title is rendered by the bordered Block above; pass an
-        // empty title to the upstream widget so it doesn't re-stamp
-        // a second one inside the inner area.
+        // Title is rendered by the popup frame; pass an empty title
+        // to the upstream widget so it doesn't re-stamp a second
+        // one inside the inner area.
         let mut widget = CheeseMultiSelect::new("", &options);
         if let Some(theme) = self.theme {
             widget = widget.styles(cheese_styles_from_theme(theme));
         }
-        StatefulWidget::render(&widget, inner_area, buf, &mut mirror);
+        StatefulWidget::render(&widget, area, buf, &mut mirror);
     }
 }
 
