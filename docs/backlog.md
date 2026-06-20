@@ -7099,6 +7099,65 @@ Cross-cutting expectations across every Tier A swap:
     resolve cleanly. `badge.rs` and `input.rs` slices unblocked
     today.
 
+- [ ] `H-WIDG-013` Port high-variant widgets into the
+  `examples/pantry.rs` ingredient list (T8-044 follow-up).
+  - Motivation: T8-044 spike landed "go" with the smoke test
+    (`widgets/multi_select.rs` × 3 variants). The follow-up tax
+    is per-widget ingredient code so visual iteration for the
+    rest of the widget surface gets the same fast loop. This is
+    opportunistic work — no widget is blocking on it — but each
+    port pays off the next time that widget needs a visual
+    judgement call.
+  - Scope, in rough priority order (each widget is one
+    independent commit):
+      - `widgets/controls.rs` ingredient — variants: default,
+        sub-editor open (harness multi-select), sub-editor open
+        (mux-state multi-select), sub-editor open (max-age
+        text input with valid/invalid value).
+      - `widgets/pins.rs` ingredients — six sub-modals × at
+        least 2 variants each (empty + filled, error + no-
+        error): Pins menu, Create, Edit, Rebind, Bind, Remove.
+      - `widgets/value_modal.rs` ingredient — variants: small
+        single-line value, multi-line wrapped value, scrolled
+        mid-way through long value, scrolled to bottom.
+      - `widgets/search.rs` ingredient — variants: empty query,
+        query with no matches, query with several matches,
+        cursor highlight on a match.
+      - `widgets/help.rs` ingredient — variants: top of keymap,
+        scrolled to middle, icon legend section, narrow
+        terminal width.
+      - `widgets/input.rs` ingredient — variants: empty value,
+        mid-edit with cursor mid-string, long value scrolled.
+      - Theme harness ingredient — exercises every
+        `[tui.theme]` key against `Theme::default()` and the
+        dark / light presets so palette work has a one-frame
+        visual reference.
+  - Per-widget LOC budget: ~50–100 LOC of ingredient code
+    depending on variant count and state complexity. Aggregate
+    ~400–500 LOC across the seven targets if all land.
+  - Migration to canonical `pantry.toml` form: once the
+    ingredient list grows beyond ~5 widgets (after the controls
+    + pins ports), migrate from the inline
+    `tui_pantry::run!(ingredients)` in `examples/pantry.rs` to
+    the proc-macro `pantry_ingredients!()` + `pantry.toml`
+    `[ingredients]` table convention. Keeps the single-file
+    form for the spike-era and the discoverable per-widget
+    module form once the list is too long to read in one
+    screen.
+  - Tests: each commit must keep
+    `cargo nextest run --all-targets --all-features` green and
+    `cargo run --example pantry -- --list` show the new
+    variants without panic. No new correctness tests required;
+    the ingredients are dev-time scaffolding.
+  - Risks: the `Ingredient: Send` bound forced the multi_select
+    smoke test to build state inside `render()` (the upstream
+    `ratatui_cheese` validator is `!Send`). Other widgets that
+    embed `!Send` state need the same "build state per render"
+    shim. None of our other widget states use
+    `Box<dyn Fn>`-style callbacks today, but verify per port.
+  - Blockers: `T8-044` [met]. Each per-widget slice is
+    independent.
+
 #### TUI Widget Ecosystem — explicit pass list (Tier D)
 
 Recorded so future audits do not re-relitigate.
@@ -8868,7 +8927,7 @@ settles.
     `F8-005` so the new view-switch accelerators all funnel through
     the same persistence seam.
 
-- [ ] `T8-044` Spike: evaluate `tui-pantry` as a widget-iteration
+- [x] `T8-044` Spike: evaluate `tui-pantry` as a widget-iteration
   harness.
   - Motivation: the TUI carries ~5.2k LOC of in-house widgets across
     `src/tui/widgets/` and visual judgement calls (column widths,
@@ -8937,6 +8996,67 @@ settles.
   - Blockers: none. Adopt during a quiet sprint before the next
     widget-heavy story (H-UI-004 audit is the natural next
     customer if the spike lands go).
+  - Outcome (2026-06-20): **go**, scoped. Landed as `4f918aa`
+    (scaffolding) and recorded here. The smoke test
+    (`widgets/multi_select.rs` × 3 variants) compiles cleanly,
+    headless `--dump` renders each variant at arbitrary
+    dimensions, and the test suite stays green with the new
+    dev-dep. The four spike questions:
+      - **(a) Visual loop materially faster than `--snapshot`?**
+        Yes. `cargo run --example pantry -- --dump MultiSelect
+        --variant "Mid-selection" --size 60x10` is a one-liner
+        that gives the exact widget rendering with no UI state
+        to compose, no key sequence to drive, and full control
+        over the rect dimensions. Compare to
+        `conspectus tui --snapshot --snapshot-keys
+        'fjjjjjjjjjjj<Enter>' --snapshot-pane left` which
+        requires choosing a fixture, knowing which key sequence
+        reaches the desired sub-editor, and gets the
+        widget-plus-app-chrome render. For
+        "does this look right at 80 cols?" / "what does the
+        empty state look like?" / "does this break at a 40-col
+        modal?", the pantry loop is materially faster.
+      - **(b) Glue per widget?** Modest. ~120 LOC for 3 variants
+        of one widget — ~40 LOC per widget for the data struct
+        + `Ingredient` impl + variant configs. Surfaces with
+        more state variants (controls overlay, pin forms with
+        error states) would land closer to 80–100 LOC each.
+        Across the 7 currently-rich widgets (controls, pins
+        forms, value modal, search, help, input, multi_select)
+        the full porting tax is ~400–500 LOC of ingredient
+        code — comparable to one of the Tier A swap commits.
+      - **(c) `pantry.toml` + ingredient model fit?** Mostly
+        yes; one workaround needed. The `Ingredient: Send`
+        bound collides with our `MultiSelectState` which carries
+        the upstream `ratatui_cheese`
+        `Option<Box<dyn Fn>>` validator (`!Send`). Workaround:
+        hold the configuration data on the ingredient, build
+        state fresh inside `render()`. Cheap and works fine. The
+        proc-macro `pantry_ingredients!` + `pantry.toml`
+        `[ingredients]` convention is the canonical idiom but is
+        not required — `tui_pantry::run!(ingredients_vec)` works
+        as a single-file form, which is what the smoke test
+        uses. Migration to the proc-macro form is a follow-up if
+        the ingredient surface grows beyond ~5 widgets.
+      - **(d) Go/no-go?** **Go.** Per-widget tax is manageable,
+        theme bridging works (the multi_select widget renders
+        through its existing `.theme()` builder; future
+        ingredients can pass `Theme::default()` or a theme
+        variant to preview operator palettes), headless dump
+        gives deterministic per-variant rendering for free, and
+        the dev-dep posture bounds the API-churn risk. Caveat
+        on scope: not every widget benefits equally. Strong
+        candidates for porting next — **controls** (sub-editor
+        variants), **pin forms** (filled / empty / error
+        states), **value modal** (small / large content),
+        **search** (empty / no-matches / with-matches),
+        **help** (the keymap legend already lives as data after
+        H-WIDG-005). Weak candidates: **badge**, **toast** (the
+        latter retired its in-tree renderer under H-WIDG-003).
+        Filing a follow-up `H-WIDG-013` to track per-widget
+        ports as opportunistic work and a theme-harness
+        ingredient that exercises every `[tui.theme]` key
+        against the dark / light presets.
 
 - [ ] `T8-022` Detect session live status (running / waiting / idle /
   error) and surface it as a row glyph and per-status header chip.
