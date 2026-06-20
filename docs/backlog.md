@@ -8898,7 +8898,24 @@ settles.
   - Tests: snapshot test for the empty frame across each view.
   - Blockers: `F8-004`, `F8-007`, `T8-003`.
 
-- [ ] `F8-013` Persist last-active view across TUI restarts.
+- [x] `F8-013` Persist last-active view across TUI restarts.
+  - Outcome: shipped. State file at
+    `$XDG_STATE_HOME/conspectus/tui-state.json` with schema v1
+    (`schema_version` + `last_view`). Persistence module
+    `src/tui_state.rs` mirrors the pin-binding sidecar pattern
+    (atomic write, skip-on-unchanged, forward-compat unknown
+    fields). `App::switch_to_view` writes best-effort through an
+    optional cache that the runtime enables in `event_loop` /
+    `static_event_loop` only — snapshot mode (ADR 0067)
+    deliberately skips enabling the cache so snapshots stay
+    deterministic. Startup precedence in `src/cli.rs`: explicit
+    `--view` → persisted → built-in `Sessions` (config
+    `default_view` integration is the F8-003 follow-up).
+    `--no-resume-view` opt-out shipped; `--snapshot` implies it.
+    Read-only invariant covered by
+    `tests/cli_tui_state_invariants.rs`. Operations docs updated
+    under §"TUI state". Open question on `ViewStates` schema
+    extension stays scoped to F8-003 as recommended.
   - Motivation: `App::config().default_view` is in-memory only,
     seeded from `[tui].default_view` config. After view switching
     (`v` / `1`..`5` / `]`/`[`), the next `conspectus tui` invocation

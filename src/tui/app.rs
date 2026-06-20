@@ -235,6 +235,14 @@ pub struct App {
     /// active fields. Sort stays global, so it lives on `App`
     /// rather than per-view.
     view_states: BTreeMap<View, ViewStateSlot>,
+    /// Optional persistence sink for the last-active view
+    /// (F8-013). When `Some`, every view switch best-effort writes
+    /// the new active view to
+    /// `$XDG_STATE_HOME/conspectus/tui-state.json`. The runtime
+    /// sets this at startup; `--no-resume-view` and `--snapshot`
+    /// leave it `None` so the file stays untouched. Test apps
+    /// likewise default to `None`.
+    tui_state_cache: Option<crate::tui_state::TuiStateCache>,
 }
 
 /// Saved-per-view UI state. Each entry holds everything that needs
@@ -525,6 +533,7 @@ impl App {
             filter,
             grouping,
             view_states: BTreeMap::new(),
+            tui_state_cache: None,
         }
     }
 
@@ -567,6 +576,14 @@ impl App {
             .unwrap_or_else(|| ViewStateSlot::defaults_for(target));
         self.restore_active_state(loaded);
         self.config.default_view = target;
+        // F8-013: persist the new active view best-effort. When the
+        // runtime hasn't enabled persistence (snapshot mode,
+        // `--no-resume-view`, or any test path), the cache is `None`
+        // and the call is a no-op. Failures here never abort the
+        // switch.
+        if let Some(cache) = &self.tui_state_cache {
+            let _ = crate::tui_state::write_last_view(cache, target);
+        }
         // Keep `config.sessions_grouping` in sync for the sessions
         // row-tree builder. Other views read their grouping from
         // `self.grouping` once their builders land.
@@ -1194,6 +1211,15 @@ impl App {
     /// Read-only access to the immutable run config.
     pub fn config(&self) -> &RunConfig {
         &self.config
+    }
+
+    /// Enable F8-013 last-active-view persistence. The runtime calls
+    /// this at startup with a `TuiStateCache` resolver pointed at
+    /// `$XDG_STATE_HOME/conspectus/tui-state.json`. Snapshot mode
+    /// and the `--no-resume-view` flag both leave the cache unset
+    /// so view switches never touch the on-disk file.
+    pub fn enable_view_persistence(&mut self, cache: crate::tui_state::TuiStateCache) {
+        self.tui_state_cache = Some(cache);
     }
 
     /// Resolved color theme (ADR 0032). Renderer reads from this in
@@ -4047,5 +4073,45 @@ mod tests {
             "newer toast must drain the queue"
         );
         assert_eq!(app.toast().current_message(), Some("copied: id"));
+    }
+
+    #[test]
+    fn switch_to_view_persists_through_enabled_cache() {
+        // F8-013: when persistence is enabled, every view switch must
+        // funnel through `crate::tui_state::write_last_view`. We pin
+        // the seam by enabling a cache pointed at a tempdir and
+        // asserting the on-disk file appears with the new view.
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
+        let cache_for_assert = cache.clone();
+
+        let mut app = App::new(RunConfig::defaults());
+        app.enable_view_persistence(cache);
+        app.switch_to_view(View::Mux);
+
+        assert_eq!(
+            crate::tui_state::read_last_view(&cache_for_assert),
+            Some(View::Mux),
+            "switch_to_view must persist through the enabled cache",
+        );
+    }
+
+    #[test]
+    fn switch_to_view_without_persistence_does_not_write() {
+        // Negative pin: when persistence is disabled (the default,
+        // matching snapshot mode and `--no-resume-view`), the on-disk
+        // file must not appear. Guards against accidental
+        // unconditional writes leaking into snapshot tests.
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
+
+        let mut app = App::new(RunConfig::defaults());
+        // Deliberately skip `enable_view_persistence`.
+        app.switch_to_view(View::Prs);
+
+        assert!(
+            crate::tui_state::read_last_view(&cache).is_none(),
+            "view switch without enabled persistence must not write",
+        );
     }
 }

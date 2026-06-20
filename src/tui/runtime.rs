@@ -105,6 +105,11 @@ fn read_fixture(path: &std::path::Path) -> Result<crate::model::GraphSnapshot> {
 /// pure reducer until the app signals quit.
 fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let mut app = App::new(config.clone());
+    // F8-013: enable last-active-view persistence. Snapshot mode and
+    // `--no-resume-view` both go through a different entry point
+    // (or skip this branch) so the file only ever moves under
+    // genuine interactive runs.
+    app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
     let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
 
     // Initial synchronous discovery.
@@ -354,6 +359,12 @@ fn static_event_loop(
 ) -> Result<()> {
     let mut snapshot = initial_snapshot;
     let mut app = App::new(config.clone());
+    // F8-013: enable last-active-view persistence for the static
+    // fixture-replay TUI mode too. Snapshot mode (ADR 0067) uses a
+    // distinct entry point in `src/tui/snapshot.rs` that
+    // deliberately skips this so the on-disk file stays
+    // unconditionally unmoved when the snapshot tooling runs.
+    app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
     set_static_data(&mut app, &config, &snapshot)?;
     let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
     refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);

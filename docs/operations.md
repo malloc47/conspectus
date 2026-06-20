@@ -612,3 +612,45 @@ only loses continuity until the next `pin launch` from a bound
 state. Future caches (PR fetches, transcript indices, etc.) will
 land under the same `$XDG_CACHE_HOME/conspectus/` root rather
 than inside `.conspectus.toml` or the project config directory.
+
+## TUI state
+
+The TUI persists the operator's last-active view at
+`$XDG_STATE_HOME/conspectus/tui-state.json` (sibling to the hook
+state-root under `$XDG_STATE_HOME/conspectus/hooks/`). The file
+is rebuildable cache, not authoritative state — losing it costs
+nothing more than starting the next `conspectus tui` in the
+configured default view instead of the one the operator last
+switched to.
+
+Schema v1:
+
+```json
+{
+  "schema_version": 1,
+  "last_view": "sessions"
+}
+```
+
+`last_view` is one of `sessions`, `mux`, `union`, `prs`, or
+`forks`. Unknown values, malformed JSON, or a missing file all
+collapse to "no persisted view" without surfacing an error;
+unknown fields round-trip through writes so future schema bumps
+do not strand old payloads.
+
+**Startup precedence:** explicit `--view <name>` flag wins →
+persisted `last_view` wins → config `[tui].default_view` →
+built-in `View::Sessions`.
+
+**Opt-outs:** pass `--no-resume-view` to ignore the persisted
+value for a single run (useful for scripts and tests that need a
+deterministic starting view). The `--snapshot` dev path implies
+`--no-resume-view` so snapshot regeneration never depends on
+whatever view the operator last touched outside the fixture.
+
+**Read-only invariant:** only `conspectus tui` reads or writes
+the file. The `graph`, `table`, `query`, `node show`, and `pin
+*` surfaces all leave it byte-identical, enforced by
+`tests/cli_tui_state_invariants.rs`. Writes are atomic
+(tempfile + rename) and skip-on-unchanged so quiet TUI sessions
+produce no mtime churn.

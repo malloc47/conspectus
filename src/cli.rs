@@ -1694,9 +1694,18 @@ struct TuiArgs {
     /// working directory when omitted.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
-    /// Initial left-panel organization.
-    #[arg(long, value_enum, default_value_t = ViewFlag::Sessions)]
-    view: ViewFlag,
+    /// Initial left-panel organization. When omitted, F8-013's
+    /// persisted-last-view sidecar wins; if absent, falls back to
+    /// `[tui].default_view` and finally `sessions`.
+    #[arg(long, value_enum)]
+    view: Option<ViewFlag>,
+    /// Disable the F8-013 persisted-last-view sidecar for this
+    /// run. The session still uses the standard precedence
+    /// (`--view` > config default > `sessions`) for its starting
+    /// view but does not write the sidecar on view switches.
+    /// `--snapshot` implies this automatically.
+    #[arg(long = "no-resume-view")]
+    no_resume_view: bool,
     /// Deprecated alias for `--grouping` when `--view sessions` is
     /// active (ADR 0031). Continues to work but emits a one-line
     /// deprecation warning to stderr; `--grouping` overrides on
@@ -1829,7 +1838,8 @@ impl Default for TuiArgs {
     fn default() -> Self {
         Self {
             scan_roots: Vec::new(),
-            view: ViewFlag::Sessions,
+            view: None,
+            no_resume_view: false,
             sessions_grouping: None,
             sort: SortFlag::Hierarchy,
             filter_args: FilterArgs::default(),
@@ -2072,7 +2082,27 @@ impl TuiArgs {
             vec![cwd.clone()]
         };
 
-        let view = view_from_flag(self.view);
+        // F8-013 view precedence:
+        //   1. explicit `--view` flag wins.
+        //   2. otherwise read the persisted last-active view from
+        //      `$XDG_STATE_HOME/conspectus/tui-state.json`.
+        //   3. otherwise fall back to `[tui].default_view` /
+        //      `View::Sessions`.
+        // `--no-resume-view` and `--snapshot` both skip step 2 so the
+        // start view stays deterministic for scripts and the
+        // snapshot fixture path.
+        #[cfg(feature = "snapshot")]
+        let suppress_resume = self.no_resume_view || self.snapshot;
+        #[cfg(not(feature = "snapshot"))]
+        let suppress_resume = self.no_resume_view;
+        let view = if let Some(flag) = self.view {
+            view_from_flag(flag)
+        } else if !suppress_resume {
+            let cache = conspectus::tui_state::TuiStateCache::from_env();
+            conspectus::tui_state::read_last_view(&cache).unwrap_or(conspectus::tui::View::Sessions)
+        } else {
+            conspectus::tui::View::Sessions
+        };
 
         // Resolve initial filter: CLI flags win over config.
         let cli_filter = self.filter_args.to_row_filter()?;
