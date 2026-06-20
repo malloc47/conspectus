@@ -8754,8 +8754,14 @@ status-bar / empty-frame stories converge on `F8-005` for the
 keybinding surface; `F8-011` documents the final keymap once it
 settles.
 
-- [ ] `F8-001` Define `RowFilter` predicate + dimension types in a
+- [x] `F8-001` Define `RowFilter` predicate + dimension types in a
     crate-public module.
+  - Outcome: shipped in `src/filter.rs` with `RowFilter`,
+    `HarnessFilter::Any`, `MuxStateFilter::Any`, and
+    `MuxStateKey { Attached, Ambiguous, Unmuxed }` per ADR 0031.
+    Predicate applies in `build_sessions_tree` so empty groups
+    collapse. Unit tests cover the v1 dimensions and their
+    intersection.
   - Scope: introduce `src/filter.rs` with `RowFilter`,
     `HarnessFilter::Any(Vec<String>)`,
     `MuxStateFilter::Any(Vec<MuxStateKey>)`, and
@@ -8770,7 +8776,11 @@ settles.
     intersection of all three v1 dimensions.
   - Blockers: ADR 0031.
 
-- [ ] `F8-002` Per-view grouping enums for the four pending views.
+- [x] `F8-002` Per-view grouping enums for the four pending views.
+  - Outcome: shipped in `src/tui/mod.rs` — `SessionsGrouping`,
+    `MuxGrouping`, `UnionGrouping`, `PrsGrouping`, `ForksGrouping`,
+    and a `Grouping` dispatch enum. Each landed alongside the
+    matching P8-004 row-tree builder with cycle-wrap unit tests.
   - Scope: introduce `MuxGrouping`, `UnionGrouping`, `PrsGrouping`,
     and `ForksGrouping` alongside their P8-004 row-tree builders.
     Wire a `Grouping` dispatch enum so `App` state and config can
@@ -8780,7 +8790,12 @@ settles.
     values; dispatch-enum cycle-to-next tests covering wrap-around.
   - Blockers: ADR 0031; lands alongside `P8-004` for each view.
 
-- [ ] `F8-003` Per-view state retention.
+- [x] `F8-003` Per-view state retention.
+  - Outcome: shipped — `App::view_states: BTreeMap<View,
+    ViewStateSlot>` with `switch_to_view` saving the active slot
+    and loading the target slot. Fresh entries seed from
+    `[tui.views.<name>]` config defaults. Reducer tests pin
+    switch-and-return filter retention and per-view selection.
   - Scope: introduce `ViewStates` map on `App`, keyed by `View`,
     carrying `(filters, grouping, expanded, selection, left_scroll)`.
     On view switch, save the active slice and load the target
@@ -8792,7 +8807,13 @@ settles.
     across refreshes, fresh-view default seeding from config.
   - Blockers: `F8-001`, `F8-002`, `F8-005`.
 
-- [ ] `F8-004` Controls overlay (modal).
+- [x] `F8-004` Controls overlay (modal).
+  - Outcome: shipped in `src/tui/widgets/controls.rs` —
+    `ControlsOverlayState` renders the View/Grouping/Filters/Sort
+    sections with arrow-key + Enter navigation, Esc back-out, and
+    inline accelerator hints. Drill-in sub-editors cover
+    harness multi-select, max-age text input, and mux-state
+    multi-select. Snapshot + reducer tests guard each surface.
   - Scope: render a centered modal with sections for View,
     Grouping (scoped to active view), Filters (scoped to active
     view), and Sort (global). Arrow-key + Enter navigation, Esc
@@ -8807,7 +8828,13 @@ settles.
     Confirm/Cancel outcomes.
   - Blockers: `F8-001`, `F8-002`, `F8-006`.
 
-- [ ] `F8-005` Accelerator keybindings + view-switching plumbing.
+- [x] `F8-005` Accelerator keybindings + view-switching plumbing.
+  - Outcome: shipped in `src/tui/runtime.rs` — `1`–`5` (direct
+    view), `]`/`[` (cycle), `f` (controls overlay), `F` (clear
+    filters), `Ctrl-G` (cycle grouping). `v` was reassigned to
+    the session viewer in H-VIEWER-NATIVE-008 and `f` took over
+    the controls overlay role originally planned for `v`. Reducer
+    tests pin each binding.
   - Scope: bind `v` (controls overlay), `1`–`5` (direct view
     switch), `]`/`[` (cycle views), `f` (jump into the Filters
     section), `F` (clear all filters), and the grouping-cycle key.
@@ -8821,7 +8848,13 @@ settles.
     same end state.
   - Blockers: `F8-002`, `F8-004`.
 
-- [ ] `F8-006` Multi-select list widget.
+- [x] `F8-006` Multi-select list widget.
+  - Outcome: shipped in `src/tui/widgets/multi_select.rs`. Pure
+    state machine with cursor up/down, Space toggle, Enter
+    confirm, Esc cancel. Reused by both the harness and
+    mux-state sub-editors. Subsequently ported (H-WIDG-013) to
+    sit on the upstream multi-select primitive while keeping the
+    same surface.
   - Scope: shared list-with-checkbox primitive in
     `src/tui/widgets/multi_select.rs` for the harness and mux-state
     sub-editors. Pure state machine: cursor up/down, Space toggle,
@@ -8832,7 +8865,13 @@ settles.
   - Blockers: none beyond ADR 0031; can land in parallel with
     `F8-004`.
 
-- [ ] `F8-007` Status-bar filter chips + counts-with-totals.
+- [x] `F8-007` Status-bar filter chips + counts-with-totals.
+  - Outcome: shipped — `render_filter_chips` renders the active
+    filter set with stable ordering (harness → max-age →
+    mux-state) and `format_count_with_filtered` shifts header
+    counts to `<filtered>/<total>` form when a filter narrows the
+    set. The chip zone landed alongside the H-UI-004 header
+    rewrite rather than as the originally-scoped status-bar zone.
   - Scope: new status-bar zone left of provider chips, rendering
     active filter chips with ADR 0022 colors and stable ordering
     (harness → max-age → mux-state → future dimensions). Truncate
@@ -8843,7 +8882,14 @@ settles.
     states.
   - Blockers: `F8-001`, `T8-003` (provider chip zone).
 
-- [ ] `F8-008` `[tui.views.<name>]` config schema + legacy alias.
+- [x] `F8-008` `[tui.views.<name>]` config schema + legacy alias.
+  - Outcome: shipped in `src/config.rs` — `TuiViewsConfig` parses
+    `[tui.views.<name>] grouping = "…"` and
+    `[[tui.views.<name>.filters]]` sub-tables. The legacy
+    `[tui].sessions_grouping` key emits a one-line deprecation
+    warning and seeds `[tui.views.sessions].grouping` only when
+    the new key is absent. Loader unit tests cover both schemas,
+    the alias path, conflict resolution, and malformed values.
   - Scope: parse `[tui.views.<name>] grouping = "…"` and
     `[[tui.views.<name>.filters]]` sub-tables in `src/config.rs`.
     Existing `[tui].sessions_grouping` continues to load as a
@@ -8857,8 +8903,16 @@ settles.
     array-of-tables filter unions.
   - Blockers: ADR 0031; independent of TUI work.
 
-- [ ] `F8-009` CLI flag parity: shared `FilterArgs` + per-view
+- [x] `F8-009` CLI flag parity: shared `FilterArgs` + per-view
     grouping.
+  - Outcome: shipped in `src/cli.rs` — `FilterArgs` mounted on
+    both `TuiArgs` and `TableArgs` exposes `--harness`,
+    `--max-age <DURATION>`, `--mux-state`, and `--grouping
+    <VALUE>` (per-view validation). `--sessions-grouping` stays
+    as a deprecated alias with a stderr warning. CLI smoke tests
+    cover each flag, duration parse errors, and view-scoped
+    grouping rejection messages. (Table-side consumption for the
+    non-sessions projections is the remaining F8-010 work.)
   - Scope: introduce a shared `FilterArgs` struct mounted on both
     `TuiArgs` and `TableArgs`, exposing `--harness` (repeatable),
     `--max-age <DURATION>`, `--mux-state` (comma-or-repeat), and
@@ -8881,7 +8935,13 @@ settles.
     `table` row count for the same flag set against a fixture.
   - Blockers: `F8-001`, `F8-009`.
 
-- [ ] `F8-011` Help-overlay docs.
+- [x] `F8-011` Help-overlay docs.
+  - Outcome: shipped in `src/tui/widgets/help.rs` — the help
+    overlay documents the controls overlay (`f`), clear-filters
+    (`F`), direct view switches (`1`–`5`), view cycling, the
+    grouping-cycle binding, and the v1 filter dimensions. The
+    H-UI-002 icon legend layered in alongside as the
+    discoverability surface for kind glyphs.
   - Scope: extend the `?` help overlay with the new keymap
     (`v`, `1`–`5`, `]`/`[`, `f`, `F`, grouping-cycle), a one-line
     description of the controls overlay, the v1 filter dimensions,
@@ -8890,13 +8950,14 @@ settles.
   - Tests: snapshot test for the help overlay's new layout.
   - Blockers: `F8-004`, `F8-005`.
 
-- [ ] `F8-012` Filtered-zero empty frame.
-  - Scope: render `No sessions match <chips>. F clears.` in the
-    row tree when the active filter set produces zero rows.
-    Status-bar chips continue to render so the operator sees
-    exactly which predicates are active.
-  - Tests: snapshot test for the empty frame across each view.
-  - Blockers: `F8-004`, `F8-007`, `T8-003`.
+- [x] `F8-012` Filtered-zero empty frame.
+  - Outcome: shipped — `empty_left_panel_text` in `src/tui/ui.rs`
+    renders `No rows match <chips>.\nPress \`F\` to clear
+    filters, \`f\` to edit.` when the active filter drops every
+    row. The status bar continues to render the active chips so
+    the operator sees exactly which predicates are in play. The
+    hint pointed to a stale `v` binding until a follow-up commit
+    realigned it with the controls overlay accelerator (`f`).
 
 - [x] `F8-013` Persist last-active view across TUI restarts.
   - Outcome: shipped. State file at
