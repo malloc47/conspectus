@@ -28,6 +28,7 @@ use conspectus::tui::widgets::controls::{
     ControlsContext, ControlsOverlayState, ControlsOverlayWidget,
 };
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
+use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -200,6 +201,42 @@ impl Ingredient for ControlsVariant {
     }
 }
 
+/// Configuration for one value-modal preview variant. Holds the
+/// label + value + scroll position; the widget state is built per
+/// `render` so this struct stays plain data (and trivially `Send`).
+struct ValueModalVariant {
+    label: &'static str,
+    value: String,
+    scroll: u16,
+    variant_name: &'static str,
+    description_text: &'static str,
+}
+
+impl Ingredient for ValueModalVariant {
+    fn group(&self) -> &str {
+        "ValueModal"
+    }
+
+    fn name(&self) -> &str {
+        self.variant_name
+    }
+
+    fn source(&self) -> &str {
+        "conspectus::tui::widgets::value_modal"
+    }
+
+    fn description(&self) -> &str {
+        self.description_text
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        let theme = Theme::default();
+        let mut state = ValueModalState::new(self.label, &self.value);
+        state.scroll = self.scroll;
+        ValueModalWidget::new(&state, &theme).render(area, buf);
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let ingredients: Vec<Box<dyn Ingredient>> = vec![
         Box::new(MultiSelectVariant {
@@ -284,6 +321,50 @@ fn main() -> std::io::Result<()> {
             open_state: ControlsOpenState::MuxStateOpen,
             variant_name: "Mux-state sub-editor (attached + ambiguous)",
             description_text: "Mux-state multi-select open with attached + ambiguous pre-checked; the third filter sub-editor.",
+        }),
+        Box::new(ValueModalVariant {
+            label: "cwd",
+            value: "/home/malloc47/src/conspectus".to_string(),
+            scroll: 0,
+            variant_name: "Single-line value",
+            description_text: "Short scalar that fits on one row — the common `cwd` / id case.",
+        }),
+        Box::new(ValueModalVariant {
+            label: "command",
+            value: [
+                "claude --dangerously-skip-permissions --resume 7b4a01c9-3d2e-4e5d-89ce-2839ff721cad",
+                "  --max-tokens 200000",
+                "  --model claude-sonnet-4-6-20251001",
+                "  --append-system-prompt 'reviewing the spike outcome and recording findings'",
+                "  --setting-source local",
+                "  --ide vscode-attached",
+                "  --working-directory /home/malloc47/src/conspectus",
+                "  --hooks /home/malloc47/.claude/hooks.json",
+            ]
+            .join("\n"),
+            scroll: 0,
+            variant_name: "Multi-line wrapped",
+            description_text: "Eight-line command argument list — exercises the wrap renderer at the modal width.",
+        }),
+        Box::new(ValueModalVariant {
+            label: "last_message_preview",
+            value: (0..40)
+                .map(|i| format!("line-{i:02}  …content that would scroll if the modal can't fit it all on one frame"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            scroll: 15,
+            variant_name: "Scrolled (line 15)",
+            description_text: "40-line synthetic preview with the viewport scrolled 15 rows down — exercises the mid-scroll render path.",
+        }),
+        Box::new(ValueModalVariant {
+            label: "last_message_preview",
+            value: (0..40)
+                .map(|i| format!("line-{i:02}  …content that would scroll if the modal can't fit it all on one frame"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            scroll: u16::MAX,
+            variant_name: "Scrolled (bottom)",
+            description_text: "Same content as the mid-scroll variant but scrolled to the bottom (u16::MAX clamps to the last line).",
         }),
     ];
     tui_pantry::run!(ingredients)
