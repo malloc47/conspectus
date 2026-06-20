@@ -155,28 +155,39 @@ fn draw_pins_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
 // -----------------------------------------------------------------------------
 
 fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    // H-UI-004 audit shape (ADR 0078):
+    //   [updated Ns ago · ] N/M sessions · M mux
+    //     [ · <opt-in harness chips>]
+    //     [ · ⚠ N when ambiguous > 0]
+    //
+    // The `Conspectus` brand and `sessions` view-label words moved
+    // out — the brand was self-evident inside the TUI and the active
+    // view was already in the left-panel title strip with stronger
+    // visual weight. The mux-state chip section collapsed to a
+    // single `⚠ N` because ADR 0072 made the per-row chip binary and
+    // every group row already owns the ambiguity glyph. Per-harness
+    // chips became opt-in via `[tui] show_harness_chips`. Freshness
+    // promoted to the lead position.
     let theme = app.theme();
-    let view_label = view_label(app.config().default_view);
     let (agents_total, mux_total) = snapshot_counts(app.graph_db());
     let visible_sessions = visible_agent_session_count(app);
     let freshness = header_freshness(app);
-    let agent_cell = format_count_with_filtered(visible_sessions, agents_total);
+    let session_cell = format_count_with_filtered(visible_sessions, agents_total);
 
-    // Identity prefix is always rendered in bold; chips after it
-    // carry their own colors and stay independent of the prefix
-    // style so theme overrides land cleanly.
-    let prefix =
-        format!("Conspectus · {view_label} · {freshness}{agent_cell} agents · {mux_total} mux");
-    let prefix_width = prefix.chars().count();
+    // Identity prefix renders bold; chips after it carry their own
+    // colors and stay independent of the prefix style.
+    let prefix = format!("{freshness}{session_cell} sessions · {mux_total} mux");
     let mut spans: Vec<Span<'static>> = vec![span!(Modifier::BOLD; "{prefix}")];
 
-    // Append per-harness and per-mux-state chips when the terminal
-    // has the room. Drops chip labels first (counts only) and then
-    // skips chips entirely when even the counts would overflow, so
-    // the prefix above stays legible at every width.
+    // Counts walk the visible row tree, matching the count rule.
     let counts = HeaderCounts::from_app(app);
-    let budget = (area.width as usize).saturating_sub(prefix_width);
-    append_header_chips(&mut spans, &counts, theme, budget);
+
+    if app.config().show_harness_chips {
+        append_harness_chips(&mut spans, &counts, theme);
+    }
+    if counts.mux_ambiguous > 0 {
+        append_ambiguity_chip(&mut spans, counts.mux_ambiguous, theme);
+    }
 
     let widget = Paragraph::new(Line::from(spans));
     frame.render_widget(widget, area);
@@ -215,106 +226,56 @@ impl HeaderCounts {
     }
 }
 
-/// Width of one harness chip (` <label> ` + ` <count>`). Mirrors the
-/// badge widget's contract so the layout math stays in step.
-fn harness_chip_width(label: &str, count: usize) -> usize {
-    crate::tui::widgets::badge::harness_badge_width(label) + 1 + count_digits(count)
-}
-
-fn count_digits(value: usize) -> usize {
-    if value == 0 {
-        1
-    } else {
-        let mut n = value;
-        let mut d = 0;
-        while n > 0 {
-            n /= 10;
-            d += 1;
-        }
-        d
-    }
-}
-
-/// Mux chips are `<glyph> <count>` with the glyph colored from the
-/// theme. Always 3 visible cells per chip (1 glyph + 1 space + 1-2
-/// digit count); we underestimate digit width as 1 for layout math
-/// since the difference is at most one cell per chip.
-const MUX_CHIP_BASE_WIDTH: usize = 3;
+/// Separators between the chip sections (H-UI-004). `SECTION_SEPARATOR`
+/// joins the prefix to the optional opt-in / triage chips; the per-chip
+/// `CHIP_SEPARATOR` joins individual harness chips within the opt-in
+/// section.
 const CHIP_SEPARATOR: &str = "  ";
 const SECTION_SEPARATOR: &str = "  ·  ";
 
-fn append_header_chips(
-    spans: &mut Vec<Span<'static>>,
-    counts: &HeaderCounts,
-    theme: &Theme,
-    budget: usize,
-) {
+/// Render the opt-in per-harness chip block (H-UI-004 §"Harness chips").
+/// Drops out cleanly when the row tree is empty so a freshly-launched
+/// dashboard with no rows yet doesn't get a hanging trailing
+/// separator.
+fn append_harness_chips(spans: &mut Vec<Span<'static>>, counts: &HeaderCounts, theme: &Theme) {
     use crate::tui::widgets::badge::harness_badge;
-    if counts.by_harness.is_empty()
-        && counts.mux_attached == 0
-        && counts.mux_ambiguous == 0
-        && counts.mux_unmuxed == 0
-    {
+    if counts.by_harness.is_empty() {
         return;
     }
-
-    let harness_section_width: usize = counts
-        .by_harness
-        .iter()
-        .map(|(label, n)| harness_chip_width(label, *n))
-        .sum::<usize>()
-        + counts.by_harness.len().saturating_sub(1) * CHIP_SEPARATOR.len();
-
-    let mux_section_width = MUX_CHIP_BASE_WIDTH * 3 + CHIP_SEPARATOR.len() * 2;
-
-    let want = SECTION_SEPARATOR.len()
-        + harness_section_width
-        + SECTION_SEPARATOR.len()
-        + mux_section_width;
-
-    if budget < SECTION_SEPARATOR.len() + mux_section_width {
-        // Not enough room for even the mux chip section; bail out
-        // and keep the bare prefix.
-        return;
-    }
-
-    let include_harness = budget >= want;
-
     spans.push(Span::raw(SECTION_SEPARATOR));
-
-    if include_harness {
-        let mut first = true;
-        for (label, count) in &counts.by_harness {
-            if !first {
-                spans.push(Span::raw(CHIP_SEPARATOR));
-            }
-            first = false;
-            spans.push(harness_badge(label, theme));
-            spans.push(span!(" {count}"));
+    let mut first = true;
+    for (label, count) in &counts.by_harness {
+        if !first {
+            spans.push(Span::raw(CHIP_SEPARATOR));
         }
-        spans.push(Span::raw(SECTION_SEPARATOR));
+        first = false;
+        spans.push(harness_badge(label, theme));
+        spans.push(span!(" {count}"));
     }
-
-    // Mux chip section: one chip per state with the theme-colored glyph.
-    spans.push(span!(Style::default().fg(theme.mux_attached); "◉"));
-    spans.push(span!(" {}", counts.mux_attached));
-    spans.push(Span::raw(CHIP_SEPARATOR));
-    spans.push(span!(Style::default().fg(theme.mux_ambiguous); "◐"));
-    spans.push(span!(" {}", counts.mux_ambiguous));
-    spans.push(Span::raw(CHIP_SEPARATOR));
-    spans.push(span!(theme.mux_unmuxed; "◯"));
-    spans.push(span!(" {}", counts.mux_unmuxed));
 }
 
-/// Render the header's agents count. When a filter is active and the
-/// visible row count differs from the snapshot's total, format as
-/// `<filtered> of <total>` per ADR 0031; otherwise keep the bare
-/// count so unfiltered runs render exactly as before.
+/// Render the ambiguity triage chip (`⚠ N`) — only called when N > 0
+/// (H-UI-004 §"Mux-state chips"). Uses ADR 0072's `⚠` vocabulary so
+/// the header signal aligns with the per-group glyph the row tree
+/// already shows.
+fn append_ambiguity_chip(spans: &mut Vec<Span<'static>>, ambiguous: usize, theme: &Theme) {
+    spans.push(Span::raw(SECTION_SEPARATOR));
+    spans.push(span!(
+        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
+        "⚠"
+    ));
+    spans.push(span!(" {ambiguous}"));
+}
+
+/// Render the header's session count. When a filter is active and
+/// the visible row count differs from the snapshot's total, format
+/// as `<filtered>/<total>` (H-UI-004 §"Count wording"); otherwise
+/// keep the bare count so unfiltered runs render minimally.
 fn format_count_with_filtered(visible: usize, total: usize) -> String {
     if visible == total {
         total.to_string()
     } else {
-        format!("{visible} of {total}")
+        format!("{visible}/{total}")
     }
 }
 
@@ -3468,9 +3429,12 @@ mod tests {
 
         assert!(
             text.contains("sessions"),
-            "header view label missing: {text}"
+            "session count word missing: {text}"
         );
-        assert!(text.contains("1 agents"), "agent count missing: {text}");
+        // H-UI-004: count wording switched from "N agents" to
+        // "N sessions" so the header vocabulary matches the rest
+        // of the TUI.
+        assert!(text.contains("1 sessions"), "session count missing: {text}");
         assert!(
             text.contains("~/src/proj"),
             "shortened path missing: {text}"
@@ -3491,43 +3455,133 @@ mod tests {
     }
 
     #[test]
-    fn header_renders_per_harness_and_per_mux_state_chips_at_wide_width() {
-        // Phase 5: dense header. With a single codex session that's
-        // un-muxed, the chip row should carry one `[codex] 1` chip
-        // plus the three mux-state glyphs (◉/◐/◯) with counts.
+    fn header_drops_brand_view_label_and_state_chips_by_default() {
+        // H-UI-004: the audit deleted the `Conspectus` brand and
+        // `sessions` view-label words from the header prefix
+        // (duplicated by the left-panel title strip), made the
+        // harness chips opt-in (see the `show_harness_chips`
+        // variant below), and collapsed the three-bucket mux chip
+        // section to a single `⚠ N` chip that only renders when
+        // N > 0. With the showcase fixture having zero ambiguous
+        // rows, the header should now read approximately
+        // `updated Ns ago · N/M sessions · M mux` with no chips.
         let app = seeded_app();
         let area = Rect::new(0, 0, 160, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         let header = text.lines().next().expect("header line");
 
-        assert!(header.contains("codex"), "harness chip missing: {header}");
-        assert!(header.contains("◉"), "mux attached glyph missing: {header}",);
         assert!(
-            header.contains("◐"),
-            "mux ambiguous glyph missing: {header}",
+            !header.contains("Conspectus"),
+            "brand should be dropped: {header}",
         );
-        assert!(header.contains("◯"), "mux unmuxed glyph missing: {header}",);
-        // One codex session, all three mux counts are visible.
-        assert!(header.contains(" 1"), "codex count missing: {header}");
+        assert!(
+            header.contains("sessions"),
+            "session count label present: {header}",
+        );
+        assert!(
+            !header.contains("agents"),
+            "Atelier-era `agents` word should be replaced with `sessions`: {header}",
+        );
+        assert!(header.contains("mux"), "mux count missing: {header}");
+        // Old chip vocabulary should not render — both the harness
+        // pill text and the three-bucket mux glyphs.
+        assert!(
+            !header.contains("◉") && !header.contains("◐") && !header.contains("◯"),
+            "three-bucket mux chips should be gone post-audit: {header}",
+        );
     }
 
     #[test]
-    fn header_falls_back_to_prefix_only_at_very_narrow_width() {
-        // When the terminal is narrower than the chip section can
-        // afford, the header collapses to just the prefix (no chips).
-        // The existing "N agents · M mux" tail still shows so the
-        // operator sees their counts even without the chip detail.
+    fn header_fits_at_narrow_width_post_audit() {
+        // After the H-UI-004 audit the bare header is short enough
+        // to fit comfortably at 80 cols (and even at 40 cols with
+        // truncation). The pre-audit baseline `Conspectus · sessions ·
+        // updated 0s ago · N of M agents · M mux` was ~65 cells, with
+        // chip sections then overflowing entirely.
         let app = seeded_app();
-        let area = Rect::new(0, 0, 40, 24);
+        let area = Rect::new(0, 0, 80, 24);
         let buffer = render_to_buffer(&app, area);
         let text = buffer_to_string(&buffer);
         let header = text.lines().next().expect("header line");
-
         assert!(
-            !header.contains('◉') && !header.contains('◐') && !header.contains('◯'),
-            "mux chips should be dropped at narrow width: {header}",
+            header.contains("sessions") && header.contains("mux"),
+            "narrow header keeps the count signals: {header}",
         );
+        // The render area is 80 cells wide; the rendered header
+        // (post-trim) should be far shorter than that.
+        let rendered = header.trim_end();
+        assert!(
+            rendered.len() < 80,
+            "narrow header should fit comfortably: {rendered:?}",
+        );
+    }
+
+    #[test]
+    fn header_shows_harness_chips_when_opt_in_is_set() {
+        // H-UI-004 §"Harness chips": per-harness count chips render
+        // only when `[tui] show_harness_chips = true` is set in the
+        // operator's config. Default-off seeded_app + a separately
+        // seeded opt-in app exercise both paths.
+        let opt_in = seeded_app_with_harness_chips();
+        let area = Rect::new(0, 0, 200, 24);
+        let buffer = render_to_buffer(&opt_in, area);
+        let text = buffer_to_string(&buffer);
+        let header = text.lines().next().expect("header line");
+        assert!(
+            header.contains("codex"),
+            "harness chip should render when opt-in: {header}",
+        );
+    }
+
+    /// Seed a test App with `[tui] show_harness_chips = true`.
+    fn seeded_app_with_harness_chips() -> App {
+        // Reproduce the seeded_app data path but flip the opt-in.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new(
+                "/home/op/src/proj",
+            ))));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: CheckoutId::new(RepoId::new("/home/op/src/proj"), "/home/op/src/proj"),
+            root: "/home/op/src/proj".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "abc"),
+                harness_key: "codex".to_string(),
+                cwd: Some("/home/op/src/proj".to_string()),
+                title: Some("Phase 8 walkthrough".to_string()),
+                last_message_preview: Some("could you give me a bit more context?".to_string()),
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+        let snapshot = resolve_snapshot(snapshot);
+
+        let tree = build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(std::path::Path::new("/home/op")),
+            now: None,
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let mut config = RunConfig::defaults();
+        config.default_view = View::Sessions;
+        config.show_harness_chips = true;
+        let mut app = App::new(config);
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snapshot),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app
     }
 
     #[test]

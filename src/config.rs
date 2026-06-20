@@ -56,6 +56,12 @@ pub struct TuiConfig {
     /// Resolved color theme (ADR 0032). Built from `[tui.theme]` with
     /// unspecified entries falling back to [`Theme::default`].
     pub theme: Theme,
+    /// Opt-in display of per-harness count chips in the top header
+    /// (H-UI-004 audit). Default `false`: row badges already carry
+    /// per-session identity and group summaries carry per-group
+    /// totals. Operators who want the aggregate set
+    /// `[tui] show_harness_chips = true` in their config.
+    pub show_harness_chips: bool,
 }
 
 /// Settings under `[tui.detail]` in `.conspectus.toml` / user config
@@ -205,6 +211,12 @@ struct TuiFile {
     /// and the field falls back to its default.
     #[serde(default)]
     theme: Option<BTreeMap<String, toml::Value>>,
+    /// `[tui] show_harness_chips` opt-in for the per-harness count
+    /// chips in the top header (H-UI-004 audit). Default `false`;
+    /// see the field of the same name on [`TuiConfig`] for the
+    /// motivation.
+    #[serde(default)]
+    show_harness_chips: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -544,6 +556,10 @@ fn merge_tui(
         && let Some(show_edge_meta) = detail_file.show_edge_meta
     {
         config.detail.show_edge_meta = show_edge_meta;
+    }
+
+    if let Some(show_harness_chips) = file.show_harness_chips {
+        config.show_harness_chips = show_harness_chips;
     }
 
     if let Some(theme_file) = file.theme {

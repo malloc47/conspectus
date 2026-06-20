@@ -95,6 +95,12 @@ pub struct RunConfig {
     /// runtime per-session `E` accelerator flips this in memory; the
     /// config knob just sets the default.
     pub show_edge_meta: bool,
+    /// Opt-in display of per-harness count chips in the top header
+    /// (H-UI-004 audit). Default `false`: row badges already carry
+    /// per-session identity and group summaries carry per-group
+    /// totals, so the aggregate is opt-in only. Sourced from
+    /// `[tui].show_harness_chips` in the on-disk config.
+    pub show_harness_chips: bool,
 }
 
 impl RunConfig {
@@ -115,6 +121,7 @@ impl RunConfig {
             current_tmux_session: None,
             theme: Theme::default(),
             show_edge_meta: false,
+            show_harness_chips: false,
         }
     }
 }
