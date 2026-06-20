@@ -6345,7 +6345,7 @@ do not get lost inside their originating workstreams.
     verb (`associated with`) stays open until a real operator
     confusion materializes.
 
-- [ ] `H-UI-004` Audit the sessions-pane header content
+- [x] `H-UI-004` Audit the sessions-pane header content
   holistically.
   - Scope: review every span the left-pane header
     (`src/tui/ui.rs:left_panel_title` + `append_header_chips`)
@@ -6384,6 +6384,33 @@ do not get lost inside their originating workstreams.
     for re-evaluating the header chips); coordinate with
     `H-UI-002` so any new glyph language doesn't get rewritten
     twice.
+  - Outcome (2026-06-20): audit landed in three commits +
+    ADR 0078. Per-element verdict + width snapshots captured
+    in `docs/plans/sessions-header-audit.md` (`53767ac`);
+    implementation in `8360768` rewrites `draw_header` per the
+    seven decisions the operator approved
+    (drop brand + `sessions` view-label words, switch
+    `N of M agents` → `N/M sessions`, add `[tui]
+    show_harness_chips` opt-in, collapse three-bucket mux
+    chips to `⚠ N` only when N > 0, keep freshness in
+    header, apply uniformly across views); ADR 0078
+    (`b8922ff`) memorializes the cross-surface rubric
+    (header carries freshness + load-bearing counts + opt-in
+    aggregates + actionable triage chips; row tree carries
+    per-row signals; status bar carries focus + view-state
+    chips + contextual hints + transient toasts) for future
+    chrome work.
+    Width reclaimed: header drops from ~150 cells at default
+    to ~42 cells; pre-audit even the bare prefix overflowed at
+    70 cols, the post-audit header fits at 50 cols with room
+    to spare. 1667 tests pass byte-identical; the two
+    pre-audit chip tests retired (their behavior no longer
+    exists), replaced by three post-audit tests
+    (default-drop, narrow-fit, opt-in shows chips).
+    Deferred: per-view count language (mux view still says
+    `sessions`), mobile-narrow layout (< 40 cols), status-bar
+    evolution under F8-013 — all recorded in ADR 0078's
+    "Open Questions Deferred" section.
 
 - [x] `H-UI-005` Resolved-vs-candidate visual separation in the
   detail-pane explorer.
