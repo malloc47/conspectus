@@ -7270,29 +7270,20 @@ read path plus Unix-socket write path. `P7-002` is still
 foundational and should land before any persistence or eviction
 code.
 
-- [ ] `P7-001` ADR: graph snapshot persistence format and lifecycle.
-  - Scope: settle the on-disk snapshot format and lifecycle. Under
-    the Stage 3 SQLite pivot (Phase 9), the canonical persisted
-    store is `$XDG_DATA_HOME/conspectus/graph.sqlite` plus its
-    `-wal` and `-shm` sidecars under WAL mode; the versioned JSON
-    document survives as a peer export
-    (`conspectus dump --format json`). Concrete decisions: (a) the
-    SQLite schema version recorded via `PRAGMA user_version`,
-    aligned with the in-memory `GraphSnapshot` schema version,
-    (b) the location under `$XDG_DATA_HOME/conspectus/`, (c) atomic-
-    write semantics delegated to SQLite transactions (no temp+rename
-    dance for the primary store), (d) the schema-migration policy
-    (forward-only, with `rusqlite_migration` or a hand-rolled
-    `user_version`-driven applier), (e) the `--no-cache` /
-    `--refresh` CLI flag surface and their interaction with the
-    warm-start path, (f) snapshot rotation via `VACUUM INTO` for
-    debugging backups. Record as a new ADR under `docs/adr/`. This
-    ADR absorbs the persistence-model decisions previously listed in
-    the Stage 3 plan as ADR-B.
-  - Tests: none directly; ADR is the deliverable. A scaffold
-    schema-apply test may land alongside as a compile check.
-  - Blockers: ADR-A (Stage 3 engine selection, the SQLite ADR) must
-    land first since the format-vs-engine decision is now joint.
+- [x] `P7-001` ADR: graph snapshot persistence format and lifecycle.
+  - Outcome: accepted as ADR 0037 (snapshot-persistence-sqlite).
+    The ADR settles the canonical store at
+    `$XDG_DATA_HOME/conspectus/graph.sqlite`, schema versioning via
+    `PRAGMA user_version` aligned with the in-memory model, atomic
+    writes via SQLite transactions (no temp+rename), forward-only
+    migrations, the `--no-cache` / `--refresh` flag semantics, the
+    `provider_state` table + per-row `discovery_provider` /
+    `discovery_freshness_epoch` columns that feed P7-002 / P7-005,
+    and `VACUUM INTO` for rotation. The schema-apply scaffold
+    landed alongside P9-001/P9-002 (`src/query/schema.sql`,
+    `src/query/schema.rs`) and the canonical path resolver lives
+    at `src/query/runner.rs::graph_db_path`. Implementation of the
+    save/load lifecycle is `P7-003`.
 
 - [ ] `P7-002` Add provider provenance and freshness metadata to graph
   nodes and candidate links.
@@ -7335,35 +7326,22 @@ code.
     next run recovers.
   - Blockers: `P7-001`, `P7-002`.
 
-- [ ] `P7-004` ADR: continuous server mode architecture and transport.
-  - Scope: settle the architecture of `conspectus serve`. Under the
-    Stage 3 SQLite pivot (Phase 9), WAL-mode handles concurrent
-    reads natively, so the transport surface collapses to writes
-    only. Concrete decisions: (a) read path — every process opens
-    `graph.sqlite` in read-only mode (`SQLITE_OPEN_READONLY`) and
-    relies on WAL for concurrent reader semantics; no IPC for
-    queries, (b) write path — when the server is running, it owns
-    the writer connection; one-shot CLI mutations (rename,
-    declared-link CRUD) route through a Unix domain socket at
-    `$XDG_RUNTIME_DIR/conspectus/server.sock`; when absent, the
-    one-shot CLI takes the writer lock directly, (c) IPC protocol —
-    length-prefixed JSON request/response for the mutation surface
-    only, (d) the standard pragma triplet on every connection
+- [x] `P7-004` ADR: continuous server mode architecture and transport.
+  - Outcome: accepted as ADR 0038 (cli-server-transport-wal). The
+    ADR settles the WAL-backed read path (every process opens
+    `graph.sqlite` read-only, no IPC for queries), the writer
+    contract (server owns the writer connection when running,
+    one-shot CLI takes the lock when absent), the length-prefixed
+    JSON mutation socket at
+    `$XDG_RUNTIME_DIR/conspectus/server.sock`, the pragma triplet
     (`synchronous=NORMAL`, `busy_timeout=5000`,
-    `wal_autocheckpoint=1000`), (e) the `[server]` and
-    `[server.intervals]` TOML config shape and per-provider interval
-    defaults, (f) provider failure isolation (per-provider back-off,
-    surfaced via diagnostics), (g) server lifecycle expectations
-    (user-managed; no auto-spawn from CLI; documented systemd /
-    launchd integrations later). Record as a new ADR under
-    `docs/adr/`. This ADR absorbs the transport-model decisions
-    previously listed in the Stage 3 plan as ADR-C. The
-    "absence of a server is not an error" guarantee is preserved by
-    construction since reads never require the server.
-  - Tests: none directly; ADR is the deliverable.
-  - Blockers: ADR-A (Stage 3 engine selection) and `P7-001`. P7-001
-    must settle the persistence format before the transport ADR can
-    cite it concretely.
+    `wal_autocheckpoint=1000`) — already applied in
+    `src/query/runner.rs::apply_query_pragmas` — the `[server]` /
+    `[server.intervals]` config shape, per-provider failure
+    isolation expectations, and the no-auto-spawn lifecycle. The
+    "absence of a server is not an error" guarantee falls out of
+    the WAL read path. Implementation of `conspectus serve` is
+    `P7-006`; the CLI client integration is `P7-007`.
 
 - [ ] `P7-005` Implement partial graph eviction at provider granularity.
   - Scope: introduce a graph-merge primitive that, given an existing
