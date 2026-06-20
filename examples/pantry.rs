@@ -27,6 +27,7 @@ use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
 use conspectus::tui::widgets::controls::{
     ControlsContext, ControlsOverlayState, ControlsOverlayWidget,
 };
+use conspectus::tui::widgets::help::{HelpOverlayState, HelpOverlayWidget};
 use conspectus::tui::widgets::multi_select::{MultiSelectState, MultiSelectWidget};
 use conspectus::tui::widgets::value_modal::{ValueModalState, ValueModalWidget};
 use conspectus::tui::{Grouping, SessionsGrouping, Sort, Theme, View};
@@ -237,6 +238,41 @@ impl Ingredient for ValueModalVariant {
     }
 }
 
+/// Configuration for one help-overlay preview variant. The only
+/// state is the scroll offset; the keymap is static data baked into
+/// the renderer.
+struct HelpVariant {
+    scroll: u16,
+    variant_name: &'static str,
+    description_text: &'static str,
+}
+
+impl Ingredient for HelpVariant {
+    fn group(&self) -> &str {
+        "Help"
+    }
+
+    fn name(&self) -> &str {
+        self.variant_name
+    }
+
+    fn source(&self) -> &str {
+        "conspectus::tui::widgets::help"
+    }
+
+    fn description(&self) -> &str {
+        self.description_text
+    }
+
+    fn render(&self, area: Rect, buf: &mut Buffer) {
+        let theme = Theme::default();
+        let state = HelpOverlayState {
+            scroll: self.scroll,
+        };
+        HelpOverlayWidget::new(&state, &theme).render(area, buf);
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let ingredients: Vec<Box<dyn Ingredient>> = vec![
         Box::new(MultiSelectVariant {
@@ -365,6 +401,24 @@ fn main() -> std::io::Result<()> {
             scroll: u16::MAX,
             variant_name: "Scrolled (bottom)",
             description_text: "Same content as the mid-scroll variant but scrolled to the bottom (u16::MAX clamps to the last line).",
+        }),
+        Box::new(HelpVariant {
+            scroll: 0,
+            variant_name: "Top of keymap",
+            description_text:
+                "Help modal at scroll=0 — the operator's first glance when they press `?`.",
+        }),
+        Box::new(HelpVariant {
+            scroll: 20,
+            variant_name: "Scrolled mid (line 20)",
+            description_text:
+                "Mid-scroll view — around the Pins (ADR 0057) section in the default keymap.",
+        }),
+        Box::new(HelpVariant {
+            scroll: 50,
+            variant_name: "Icon legend (scroll 50)",
+            description_text:
+                "Scrolled so the Node kind icons (ADR 0073) section is in view — exercises the per-glyph rendering through `push_icon_legend`.",
         }),
     ];
     tui_pantry::run!(ingredients)
