@@ -30,6 +30,12 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "allo
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = { version = "7", default-features = false }
 indexmap = { version = "2.7", features = ["serde"] }
+# `conspectus serve` filesystem watchers (ADR 0081). Wraps
+# inotify (Linux), kqueue + FSEvents (macOS), kqueue (BSD).
+# Used as a latency optimization on top of interval polling;
+# the daemon falls back to polling cleanly when watcher
+# installation fails for any reason (rlimit, EACCES, NFS, …).
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
 # Unix FFI shim for `conspectus serve`'s socket path resolution
 # (getuid for the `$TMPDIR/conspectus-$UID/` fallback per
 # ADR 0038). Already pulled in transitively via signal-hook +

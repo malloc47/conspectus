@@ -47,12 +47,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 
+pub mod watcher;
+
 use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
 use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with};
 use crate::model::GraphSnapshot;
 use crate::query::{load_cached_snapshot, persist_snapshot};
 use crate::resolve::resolve_snapshot;
+use crate::server::watcher::{NotifyWatcher, NullWatcher, Watcher, WatcherEvent};
 
 /// Observable per-class scheduler state (P7-008). Each class
 /// thread updates its entry on every cycle; the `status` socket
@@ -673,6 +676,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         let shutdown = Arc::clone(&shutdown);
         let state = Arc::clone(&state);
         let class = *class;
+        let watcher = build_watcher_for(class);
         handles.push(thread::spawn(move || {
             class_loop(
                 class,
@@ -680,6 +684,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
                 &intervals,
                 &writer_lock,
                 &state,
+                watcher,
                 &shutdown,
             );
         }));
@@ -717,6 +722,45 @@ pub fn run(config: ServeConfig) -> Result<()> {
     Ok(())
 }
 
+/// Build the watcher appropriate for `class` (P7-009 / ADR 0081).
+///
+/// `Harness` watches every configured harness state directory
+/// from `LocalDiscoveryConfig::from_env`. If `notify` installation
+/// fails (rlimit, unsupported filesystem, etc.) the fallback is
+/// a [`NullWatcher`] so the class still ticks on its interval.
+/// `Mux` / `Git` / `Forge` use [`NullWatcher`] until their own
+/// watcher targets land (git refs, etc.).
+fn build_watcher_for(class: ProviderClass) -> Box<dyn Watcher> {
+    if matches!(class, ProviderClass::Harness) {
+        let discovery_config = LocalDiscoveryConfig::from_env();
+        let paths: Vec<PathBuf> = discovery_config
+            .harness_state_roots
+            .values()
+            .cloned()
+            .collect();
+        match NotifyWatcher::new(paths.iter().map(|p| p.as_path())) {
+            Ok(watcher) => {
+                let path_summary: Vec<String> =
+                    paths.iter().map(|p| p.display().to_string()).collect();
+                eprintln!(
+                    "conspectus serve: harness watcher installed on {} path(s): {}",
+                    paths.len(),
+                    path_summary.join(", ")
+                );
+                Box::new(watcher)
+            }
+            Err(err) => {
+                eprintln!(
+                    "conspectus serve: harness watcher install failed, falling back to interval polling: {err:#}"
+                );
+                Box::new(NullWatcher)
+            }
+        }
+    } else {
+        Box::new(NullWatcher)
+    }
+}
+
 /// Register SIGINT and SIGTERM against the shared shutdown
 /// flag (ADR 0080). Other signals follow the same pattern when
 /// they land (SIGHUP for config reload, SIGUSR1 for status
@@ -743,6 +787,7 @@ fn class_loop(
     intervals: &ServerIntervals,
     writer_lock: &Mutex<()>,
     state: &Mutex<SchedulerState>,
+    mut watcher: Box<dyn Watcher>,
     shutdown: &AtomicBool,
 ) {
     let interval = class.ttl_duration(intervals);
@@ -753,11 +798,19 @@ fn class_loop(
     );
     run_cycle(class, scan_roots, intervals, writer_lock, state);
     while !shutdown.load(Ordering::Relaxed) {
-        sleep_with_shutdown(interval, shutdown);
-        if shutdown.load(Ordering::Relaxed) {
-            break;
+        match wait_for_class_signal(watcher.as_mut(), interval, shutdown) {
+            WatcherEvent::ShuttingDown => break,
+            // Both Changed and Timeout trigger a cycle. The
+            // distinction matters for observability (a watcher
+            // wake fired before the interval) but the work is
+            // identical: re-run this class's slice.
+            WatcherEvent::Changed | WatcherEvent::Timeout => {
+                if shutdown.load(Ordering::Relaxed) {
+                    break;
+                }
+                run_cycle(class, scan_roots, intervals, writer_lock, state);
+            }
         }
-        run_cycle(class, scan_roots, intervals, writer_lock, state);
     }
     eprintln!(
         "conspectus serve: {} scheduler stopping after shutdown signal",
@@ -765,20 +818,33 @@ fn class_loop(
     );
 }
 
-/// Sleep for up to `total`, polling the shutdown flag every
-/// 200ms so a signal that arrives mid-sleep is observed quickly.
-/// 200ms is short enough for snappy Ctrl-C response and long
-/// enough to keep idle CPU near zero.
-fn sleep_with_shutdown(total: Duration, shutdown: &AtomicBool) {
+/// Wait up to `interval` for the class's watcher to fire,
+/// returning early on `Changed` so the cycle runs as soon as
+/// the OS reports a filesystem change. Polls the shutdown flag
+/// every 200ms so SIGINT/SIGTERM is observed within that
+/// window regardless of how long the class interval is (a
+/// 5-minute forge tick would otherwise hold the daemon
+/// hostage to shutdown for the full window).
+fn wait_for_class_signal(
+    watcher: &mut dyn Watcher,
+    interval: Duration,
+    shutdown: &AtomicBool,
+) -> WatcherEvent {
     let poll = Duration::from_millis(200);
-    let deadline = Instant::now() + total;
+    let deadline = Instant::now() + interval;
     while Instant::now() < deadline {
         if shutdown.load(Ordering::Relaxed) {
-            return;
+            return WatcherEvent::ShuttingDown;
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
-        thread::sleep(remaining.min(poll));
+        let chunk = remaining.min(poll);
+        match watcher.wait(chunk) {
+            WatcherEvent::Changed => return WatcherEvent::Changed,
+            WatcherEvent::ShuttingDown => return WatcherEvent::ShuttingDown,
+            WatcherEvent::Timeout => continue,
+        }
     }
+    WatcherEvent::Timeout
 }
 
 /// Acquire the writer lock and run one class cycle. Errors are

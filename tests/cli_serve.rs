@@ -588,6 +588,124 @@ fn cli_refresh_class_routes_through_daemon_when_present() {
 }
 
 #[test]
+fn serve_harness_watcher_fires_on_state_dir_change() {
+    // P7-009 end-to-end: the daemon installs a filesystem
+    // watcher on every configured harness state dir. When a
+    // file appears in one of them, the harness scheduler
+    // wakes immediately and runs a cycle — observable as the
+    // harness class's last_completed_epoch advancing well
+    // before its 5-second interval.
+    //
+    // The harness state dirs come from CONSPECTUS_<HARNESS>_STATE
+    // env vars (which we usually clear in tests to keep
+    // discovery deterministic). For this test we point the
+    // codex state dir at a controlled tempdir so we can poke
+    // it and observe the watcher fire.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+    let codex_state = tempfile::TempDir::new().expect("codex state");
+
+    let mut serve_cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut serve_cmd, home.path(), data.path(), runtime.path());
+    // Override the deletion isolated_env_args did so the codex
+    // state dir we control is actually watched. CODEX is the
+    // simplest harness — its state dir just needs to exist for
+    // the watcher install to succeed.
+    serve_cmd.env("CONSPECTUS_CODEX_STATE", codex_state.path());
+    serve_cmd
+        .current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = serve_cmd.spawn().expect("spawn serve");
+    let socket = socket_path_under(runtime.path());
+    assert!(wait_for_socket(&socket, Duration::from_secs(5)));
+
+    // Let the daemon's startup activity settle: every class
+    // runs its first cycle synchronously, and peer-class first
+    // cycles can occasionally touch the harness state dir,
+    // firing the watcher once before the test writes its
+    // trigger. A short sleep is sufficient because the first
+    // cycle in this empty-workspace setup finishes in
+    // milliseconds.
+    std::thread::sleep(Duration::from_millis(800));
+
+    // Record the trigger wall-clock. The watcher-driven cycle
+    // we're looking for must have `last_started_epoch >=
+    // trigger_epoch`. This avoids the baseline-counting race
+    // entirely — we don't care what the harness was doing
+    // before; we only care that a cycle starts after our
+    // trigger.
+    let trigger_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Trigger the watcher: create a file in the watched dir.
+    // The harness scheduler should wake within a fraction of
+    // a second — well before the 5s interval.
+    std::fs::write(codex_state.path().join("triggered"), b"hi").expect("write trigger file");
+
+    // Wait up to 3 seconds for a harness cycle to start at or
+    // after the trigger. 3s is comfortably below the 5s
+    // interval, so success here means the watcher woke the
+    // scheduler rather than the timer firing.
+    let saw_wake = wait_for_harness_started_at_or_after(
+        runtime.path(),
+        home.path(),
+        data.path(),
+        cwd.path(),
+        trigger_epoch,
+        Duration::from_secs(3),
+    );
+
+    let _ = child.kill();
+    let output = child.wait_with_output().expect("collect output");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        saw_wake,
+        "watcher should have woken the harness scheduler within 3s of the file create; \
+         trigger_epoch={trigger_epoch}; daemon stderr:\n{stderr}"
+    );
+}
+
+/// Poll `conspectus status --format json` until the harness
+/// `last_started_epoch` is at or after `floor_epoch`. Returns
+/// `true` on success, `false` if `timeout` elapses first.
+fn wait_for_harness_started_at_or_after(
+    runtime_dir: &Path,
+    home: &Path,
+    data_home: &Path,
+    cwd: &Path,
+    floor_epoch: u64,
+    timeout: Duration,
+) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let mut cmd = Command::new(conspectus_bin());
+        isolated_serve_env_args(&mut cmd, home, data_home, runtime_dir);
+        cmd.current_dir(cwd)
+            .args(["status", "--format", "json"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Ok(out) = cmd.output()
+            && out.status.success()
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&out.stdout)
+            && let Some(harness) = value.get("harness")
+            && let Some(epoch) = harness.get("last_started_epoch").and_then(|v| v.as_u64())
+            && epoch >= floor_epoch
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(80));
+    }
+    false
+}
+
+#[test]
 fn serve_shuts_down_cleanly_on_sigterm() {
     // ADR 0080: SIGTERM (and SIGINT) flip a shared shutdown
     // flag that every scheduler thread polls between sleeps.
