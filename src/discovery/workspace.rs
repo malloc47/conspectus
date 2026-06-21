@@ -35,7 +35,11 @@ impl DiscoveryProvider for GenericWorkspaceDiscovery {
         }
 
         let mut fragment = snapshot_fragment(merge_fragments(fragments));
-        crate::discovery::stamp_fragment(&mut fragment, "generic_workspace", epoch);
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            crate::discovery::providers::GENERIC_WORKSPACE,
+            epoch,
+        );
         Ok(fragment)
     }
 }
@@ -189,7 +193,7 @@ fn workspace_repo_link(
         confidence: Confidence::Medium,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "generic_workspace".to_string(),
+            adapter: crate::discovery::providers::GENERIC_WORKSPACE.to_string(),
             evidence: Some(evidence.to_string()),
             fields,
             freshness_epoch: None,

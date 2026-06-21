@@ -67,7 +67,7 @@ pub fn apply_declared_links(
     // First-write-wins protects earlier provenance entries.
     crate::discovery::stamp_snapshot_mutations(
         snapshot,
-        "declared",
+        crate::discovery::providers::DECLARED,
         crate::discovery::current_epoch(),
     );
 
@@ -138,7 +138,7 @@ fn link_from_declared(
         confidence: Confidence::High,
         freshness: Freshness::Unknown,
         source_metadata: SourceMetadata {
-            adapter: "declared".to_string(),
+            adapter: crate::discovery::providers::DECLARED.to_string(),
             evidence: Some(store.evidence.to_string()),
             fields: metadata(store, declared),
             freshness_epoch: None,

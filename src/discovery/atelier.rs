@@ -59,7 +59,11 @@ impl DiscoveryProvider for AtelierWorkspaceDiscovery {
         }
 
         let mut fragment = snapshot_fragment(merge_fragments(fragments));
-        crate::discovery::stamp_fragment(&mut fragment, "atelier", epoch);
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            crate::discovery::providers::ATELIER,
+            epoch,
+        );
         Ok(fragment)
     }
 }
@@ -498,7 +502,7 @@ fn harness_lineage_link(
         confidence: lineage_confidence(harness.capability),
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "atelier".to_string(),
+            adapter: crate::discovery::providers::ATELIER.to_string(),
             evidence: Some(evidence.to_string()),
             fields,
             freshness_epoch: None,
@@ -599,7 +603,7 @@ fn atelier_link(
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "atelier".to_string(),
+            adapter: crate::discovery::providers::ATELIER.to_string(),
             evidence: Some(evidence.to_string()),
             fields,
             freshness_epoch: None,
@@ -721,7 +725,7 @@ fn atelier_workspace_repo_link(
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "atelier".to_string(),
+            adapter: crate::discovery::providers::ATELIER.to_string(),
             evidence: Some(evidence.to_string()),
             fields,
             freshness_epoch: None,

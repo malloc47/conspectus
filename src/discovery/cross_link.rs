@@ -30,7 +30,7 @@ use crate::model::{
     RuntimeProcessNode, RuntimeProcessRole, SessionKind, SourceMetadata,
 };
 
-const ADAPTER_NAME: &str = "cross_link";
+const ADAPTER_NAME: &str = crate::discovery::providers::CROSS_LINK;
 const PROCESS_TREE_MAX_DEPTH: usize = 4;
 const SESSION_FILE_ACTIVITY_WINDOW_SECONDS: i64 = 15 * 60;
 

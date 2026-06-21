@@ -74,7 +74,7 @@ const MAX_HEADER_SCAN_LINES: usize = 200;
 /// the whole transcript.
 const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
-pub const HARNESS_KEY: &str = "claude-code";
+pub const HARNESS_KEY: &str = crate::discovery::providers::CLAUDE_CODE;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ClaudeCodeAdapter;

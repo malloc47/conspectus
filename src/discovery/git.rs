@@ -171,7 +171,7 @@ impl DiscoveryProvider for GitDiscovery {
         }
 
         let mut fragment = snapshot_fragment(merge_fragments(fragments));
-        crate::discovery::stamp_fragment(&mut fragment, "git", epoch);
+        crate::discovery::stamp_fragment(&mut fragment, crate::discovery::providers::GIT, epoch);
         Ok(fragment)
     }
 }
@@ -288,7 +288,7 @@ fn git_link(source: NodeId, target: NodeId, relation: RelationKind, evidence: &s
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "git".to_string(),
+            adapter: crate::discovery::providers::GIT.to_string(),
             evidence: Some(evidence.to_string()),
             fields: Default::default(),
             freshness_epoch: None,

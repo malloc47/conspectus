@@ -29,7 +29,7 @@ pub mod github;
 
 pub use github::{GhPullRequestParser, PullRequestRecord, PullRequestState};
 
-pub const GITHUB_PROVIDER: &str = "github";
+pub const GITHUB_PROVIDER: &str = crate::discovery::providers::GITHUB;
 pub const GITHUB_DEFAULT_HOST: &str = "github.com";
 
 /// JSON fields requested from `gh pr list --json <fields>`. Kept in one

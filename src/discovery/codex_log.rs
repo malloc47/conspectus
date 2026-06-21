@@ -44,7 +44,7 @@ use crate::model::{
     RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
 };
 
-const ADAPTER_NAME: &str = "codex_log";
+const ADAPTER_NAME: &str = crate::discovery::providers::CODEX_LOG;
 /// Default upper bound on log-row age accepted as evidence. This bound
 /// serves two purposes; both justify keeping it nonzero by default and
 /// neither matches ADR 0028's hook-sidecar TTL semantics:

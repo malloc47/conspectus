@@ -23,6 +23,7 @@
 use std::collections::BTreeSet;
 
 use crate::config::ServerIntervals;
+use crate::discovery::providers;
 use crate::model::GraphSnapshot;
 
 /// The four interval classes ADR 0038 / ADR 0079 define for the
@@ -62,12 +63,23 @@ impl ProviderClass {
 /// bucket.
 pub fn provider_class(provider: &str) -> Option<ProviderClass> {
     match provider {
-        "git" | "git::cwd" | "atelier" | "generic_workspace" | "agent_deck" => {
+        s if s == providers::GIT
+            || s == providers::GIT_CWD
+            || s == providers::ATELIER
+            || s == providers::GENERIC_WORKSPACE
+            || s == providers::AGENT_DECK =>
+        {
             Some(ProviderClass::Git)
         }
-        "tmux" => Some(ProviderClass::Mux),
-        "claude-code" | "codex" | "opencode" | "aider" => Some(ProviderClass::Harness),
-        "github" => Some(ProviderClass::Forge),
+        s if s == providers::TMUX => Some(ProviderClass::Mux),
+        s if s == providers::CLAUDE_CODE
+            || s == providers::CODEX
+            || s == providers::OPENCODE
+            || s == providers::AIDER =>
+        {
+            Some(ProviderClass::Harness)
+        }
+        s if s == providers::GITHUB => Some(ProviderClass::Forge),
         _ => None,
     }
 }
@@ -76,7 +88,12 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
 /// Always evicted from the prior before merging; always re-run
 /// after fresh discovery + warm-start merge land. See ADR 0079
 /// for the rationale.
-pub const MUTATOR_PROVIDERS: &[&str] = &["cross_link", "codex_log", "hook_sidecar", "declared"];
+pub const MUTATOR_PROVIDERS: &[&str] = &[
+    providers::CROSS_LINK,
+    providers::CODEX_LOG,
+    providers::HOOK_SIDECAR,
+    providers::DECLARED,
+];
 
 /// Decision produced by [`compute_freshness_gate`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

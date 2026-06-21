@@ -48,7 +48,7 @@ use crate::model::{
 /// be many MB, so a bounded tail keeps the scan cheap.
 const TAIL_SCAN_BYTES: u64 = 32 * 1024;
 
-pub const HARNESS_KEY: &str = "codex";
+pub const HARNESS_KEY: &str = crate::discovery::providers::CODEX;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CodexAdapter;

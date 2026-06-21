@@ -30,7 +30,7 @@ use crate::model::{
 
 use super::{GH_PR_LIST_FIELDS, GITHUB_DEFAULT_HOST, GITHUB_PROVIDER, GhOutcome, GhRunner};
 
-const FORGE_ADAPTER: &str = "github";
+const FORGE_ADAPTER: &str = crate::discovery::providers::GITHUB;
 
 /// Provider-neutral pull-request record emitted by forge adapters.
 ///

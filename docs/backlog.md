@@ -7399,10 +7399,17 @@ code.
     remains the eventual answer when schema drift actually
     surfaces user pain; until then "rebuild and overwrite"
     is the safer default.
-  - Follow-ups: optional `H-REF-009` centralizes provider key
-    constants into a `discovery::providers` module; the
-    strings still match `source_metadata.adapter` literals
-    exactly so the rename is mechanical.
+  - Follow-ups: `H-REF-009` landed alongside the hardening
+    work — every per-emit provider key now lives in
+    `src/discovery/providers.rs`, and the per-module
+    `HARNESS_KEY` / `ADAPTER_NAME` / `FORGE_ADAPTER` /
+    `GITHUB_PROVIDER` / `TMUX_BACKEND` constants re-export
+    from there. `cache::provider_class` +
+    `cache::MUTATOR_PROVIDERS` reference the consts so a new
+    provider that forgets to register the canonical string
+    breaks CI rather than silently joining the always-rerun
+    bucket. The on-disk cache stays binary-compatible since
+    the const string values are unchanged.
 
 - [x] `P7-004` ADR: continuous server mode architecture and transport.
   - Outcome: accepted as ADR 0038 (cli-server-transport-wal). The

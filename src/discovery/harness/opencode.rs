@@ -34,7 +34,7 @@ use crate::model::{
     UnresolvedEndpoint, normalize_last_message_preview,
 };
 
-pub const HARNESS_KEY: &str = "opencode";
+pub const HARNESS_KEY: &str = crate::discovery::providers::OPENCODE;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OpenCodeAdapter;

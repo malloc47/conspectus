@@ -17,7 +17,13 @@ use anyhow::{Context, Result};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
 
-pub const TMUX_BACKEND: &str = "tmux";
+/// Mux-backend identifier stamped on `MuxSessionId` /
+/// `MuxSessionNode.backend` AND on the discovery provenance for
+/// tmux-derived nodes/links. The two concerns (model identity
+/// vs provider stamp) happen to share the same string — the
+/// alias to [`crate::discovery::providers::TMUX`] makes that
+/// equivalence explicit and keeps the literal in one place.
+pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
 /// session roots can safely contain spaces.

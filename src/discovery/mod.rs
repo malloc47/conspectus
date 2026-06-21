@@ -25,6 +25,7 @@ pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
 pub mod pins;
+pub mod providers;
 pub mod tmux;
 pub mod workspace;
 
@@ -724,7 +725,7 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
     // primary `git` slice. First-write-wins on the per-node sidecar
     // keeps the canonical `git` provenance for nodes that surfaced
     // through both paths.
-    stamp_fragment(&mut fragment, "git::cwd", current_epoch());
+    stamp_fragment(&mut fragment, providers::GIT_CWD, current_epoch());
     fragment
 }
 

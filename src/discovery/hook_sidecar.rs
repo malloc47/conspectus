@@ -14,7 +14,7 @@ use crate::model::{
     RelationKind, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
 };
 
-const ADAPTER_NAME: &str = "hook_sidecar";
+const ADAPTER_NAME: &str = crate::discovery::providers::HOOK_SIDECAR;
 
 pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch: i64) {
     let mut records: Vec<HookRecord> = hook::HookStore::new(root)

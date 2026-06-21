@@ -15,7 +15,7 @@ use crate::discovery::harness::HarnessAdapter;
 use crate::discovery::{DiscoveryContext, GraphFragment};
 use crate::model::{AgentSessionId, AgentSessionNode, GraphNode};
 
-pub const HARNESS_KEY: &str = "aider";
+pub const HARNESS_KEY: &str = crate::discovery::providers::AIDER;
 pub const SESSION_KEY: &str = "default";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

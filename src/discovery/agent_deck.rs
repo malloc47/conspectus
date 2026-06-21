@@ -115,7 +115,11 @@ impl DiscoveryProvider for AgentDeckDiscovery {
             fragments.push(self.discover_workspace(&workspace_path, &title_map)?);
         }
         let mut fragment = snapshot_fragment(merge_fragments(fragments));
-        crate::discovery::stamp_fragment(&mut fragment, "agent_deck", epoch);
+        crate::discovery::stamp_fragment(
+            &mut fragment,
+            crate::discovery::providers::AGENT_DECK,
+            epoch,
+        );
         Ok(fragment)
     }
 }
@@ -323,7 +327,7 @@ fn workspace_repo_link(
         confidence: Confidence::High,
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
-            adapter: "agent_deck".to_string(),
+            adapter: crate::discovery::providers::AGENT_DECK.to_string(),
             evidence: Some("agent-deck multi-repo-worktrees symlink".to_string()),
             fields,
             freshness_epoch: None,
