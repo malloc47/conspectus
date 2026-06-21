@@ -88,6 +88,102 @@ pub fn persist_snapshot(snapshot: &GraphSnapshot, override_path: Option<&Path>) 
     Ok(())
 }
 
+/// Maximum number of `VACUUM INTO` snapshots [`rotate_backup`]
+/// retains under `<graph.sqlite parent>/backups/`. Matches the
+/// `N=5` value from ADR 0037's "Rotation and backups" section.
+pub const BACKUP_RETENTION: usize = 5;
+
+/// Produce a point-in-time backup of the persisted graph
+/// database via `VACUUM INTO` and prune older backups so at most
+/// [`BACKUP_RETENTION`] survive, per ADR 0037.
+///
+/// Triggered by callers that know they just performed a cold
+/// rebuild (no warm-start cache hit) — the warm-start path's
+/// "always persist" cadence would otherwise produce one backup
+/// per CLI invocation, which is wasteful churn. Backups are
+/// **debugging artifacts**, not part of the warm-start read
+/// path; the warm-start path always reads `graph.sqlite`
+/// directly.
+///
+/// `override_path` overrides the canonical `graph.sqlite`
+/// location (tests use this). Backups land under
+/// `<override_path parent>/backups/graph-<epoch>.sqlite` —
+/// epoch-named so file listing order matches chronological
+/// order. Best-effort: I/O failures bubble up as `Err` so the
+/// caller can warn + continue without aborting the run.
+pub fn rotate_backup(override_path: Option<&Path>) -> Result<()> {
+    let graph_path = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(graph_db_path);
+    if !graph_path.exists() {
+        // No primary file means there is nothing to back up.
+        // This happens on the very first run when the operator
+        // wired `--no-cache` so no persist landed; treat as a
+        // no-op rather than a hard error.
+        return Ok(());
+    }
+    let parent = graph_path.parent().ok_or_else(|| {
+        anyhow::anyhow!("graph cache path has no parent: {}", graph_path.display())
+    })?;
+    let backups_dir = parent.join("backups");
+    std::fs::create_dir_all(&backups_dir)
+        .with_context(|| format!("create {}", backups_dir.display()))?;
+
+    let epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup_path = backups_dir.join(format!("graph-{epoch}.sqlite"));
+
+    // `VACUUM INTO` produces a self-contained copy without
+    // blocking other readers/writers, per ADR 0037. The path
+    // must not already exist; epoch granularity is one second so
+    // a back-to-back rotate within the same wall-clock second
+    // would collide. Detect that and skip — losing a redundant
+    // backup is fine.
+    if backup_path.exists() {
+        return Ok(());
+    }
+    let conn = Connection::open_with_flags(
+        &graph_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .with_context(|| format!("open {} read-only for backup", graph_path.display()))?;
+    conn.execute(
+        "VACUUM INTO ?",
+        rusqlite::params![backup_path.to_string_lossy().as_ref()],
+    )
+    .with_context(|| format!("VACUUM INTO {}", backup_path.display()))?;
+
+    prune_old_backups(&backups_dir).with_context(|| format!("prune {}", backups_dir.display()))?;
+    Ok(())
+}
+
+/// Keep the [`BACKUP_RETENTION`] newest `graph-<epoch>.sqlite`
+/// files in `dir`; delete the rest. Sorting is by filename which
+/// — given the epoch encoding — equals chronological order.
+fn prune_old_backups(dir: &Path) -> Result<()> {
+    let mut backups: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("graph-") && name.ends_with(".sqlite"))
+        })
+        .collect();
+    backups.sort();
+    if backups.len() <= BACKUP_RETENTION {
+        return Ok(());
+    }
+    let drop_count = backups.len() - BACKUP_RETENTION;
+    for path in backups.into_iter().take(drop_count) {
+        let _ = std::fs::remove_file(&path);
+    }
+    Ok(())
+}
+
 /// Probe whether the file at `path` is a usable SQLite database
 /// the writer can open. If not, rename it to a sibling
 /// `.corrupt.<epoch>` so the subsequent open-with-CREATE can
@@ -378,6 +474,117 @@ mod tests {
         assert!(
             result.is_none(),
             "an empty database file must round-trip as Ok(None)"
+        );
+    }
+
+    #[test]
+    fn rotate_backup_writes_to_sibling_backups_dir() {
+        // Smoke test for the basic VACUUM INTO + naming flow.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+        persist_snapshot(&GraphSnapshot::empty(), Some(&path)).expect("write primary");
+        rotate_backup(Some(&path)).expect("rotate");
+
+        let backups_dir = tmp.path().join("backups");
+        let mut entries: Vec<String> = std::fs::read_dir(&backups_dir)
+            .expect("read backups dir")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        entries.sort();
+        assert_eq!(entries.len(), 1, "exactly one backup after one rotate");
+        assert!(
+            entries[0].starts_with("graph-") && entries[0].ends_with(".sqlite"),
+            "backup must be epoch-named; got `{}`",
+            entries[0]
+        );
+    }
+
+    #[test]
+    fn rotate_backup_prunes_to_retention_when_exceeded() {
+        // Stage BACKUP_RETENTION + 3 fake backups by hand, call
+        // rotate once, and confirm only the newest
+        // BACKUP_RETENTION survive. We hand-make the files
+        // because epoch granularity is one second; calling
+        // `rotate_backup` BACKUP_RETENTION+1 times in quick
+        // succession would collide on filename and skip writes.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+        persist_snapshot(&GraphSnapshot::empty(), Some(&path)).expect("write primary");
+        let backups_dir = tmp.path().join("backups");
+        std::fs::create_dir_all(&backups_dir).expect("mkdir backups");
+        // Stamp eight ascending-epoch fake backups. The retention
+        // pass sorts by filename — which equals chronological
+        // order under our naming — and keeps the newest N.
+        for i in 1..=BACKUP_RETENTION + 3 {
+            let fake = backups_dir.join(format!("graph-{i:020}.sqlite"));
+            std::fs::write(&fake, b"placeholder").expect("write fake backup");
+        }
+        assert_eq!(
+            std::fs::read_dir(&backups_dir).unwrap().count(),
+            BACKUP_RETENTION + 3
+        );
+
+        // The rotate call itself also writes a new backup (with a
+        // wall-clock epoch that sorts last), so post-rotate the
+        // directory holds exactly BACKUP_RETENTION entries.
+        rotate_backup(Some(&path)).expect("rotate");
+
+        let surviving: Vec<String> = std::fs::read_dir(&backups_dir)
+            .expect("read")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            surviving.len(),
+            BACKUP_RETENTION,
+            "post-rotate should retain exactly N=BACKUP_RETENTION; got {surviving:?}"
+        );
+    }
+
+    #[test]
+    fn rotate_backup_ignores_non_matching_files_in_backups_dir() {
+        // The retention sweep must only touch its own files.
+        // An operator-authored note or an unrelated SQLite dump
+        // dropped into `backups/` should survive every rotate
+        // call, even if it pushes the count above the retention.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+        persist_snapshot(&GraphSnapshot::empty(), Some(&path)).expect("write primary");
+        let backups_dir = tmp.path().join("backups");
+        std::fs::create_dir_all(&backups_dir).expect("mkdir backups");
+        let user_note = backups_dir.join("README.txt");
+        std::fs::write(&user_note, b"operator note: do not delete").expect("write note");
+        for i in 1..=BACKUP_RETENTION + 5 {
+            let fake = backups_dir.join(format!("graph-{i:020}.sqlite"));
+            std::fs::write(&fake, b"placeholder").expect("write fake backup");
+        }
+
+        rotate_backup(Some(&path)).expect("rotate");
+
+        assert!(
+            user_note.exists(),
+            "unrelated files in backups/ must survive retention sweeps"
+        );
+    }
+
+    #[test]
+    fn rotate_backup_is_a_noop_when_primary_is_missing() {
+        // Operator ran with `--no-cache` so no primary file ever
+        // landed. Triggering a rotate from a peer command (or
+        // from the cold-rebuild path on a fully-suppressed run)
+        // must not error.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+        // No persist_snapshot call.
+        rotate_backup(Some(&path)).expect("rotate no-op");
+        assert!(
+            !tmp.path().join("backups").exists()
+                || std::fs::read_dir(tmp.path().join("backups"))
+                    .map(|d| d.count())
+                    .unwrap_or(0)
+                    == 0,
+            "missing primary should not create or populate backups/"
         );
     }
 

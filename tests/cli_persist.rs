@@ -248,6 +248,77 @@ fn table_sessions_warm_start_carries_fresh_provider_slice_through_to_post_run_ca
 }
 
 #[test]
+fn table_sessions_writes_a_backup_on_the_first_cold_run_but_not_on_subsequent_warm_runs() {
+    // ADR 0037 rotation contract: cold rebuilds produce a
+    // VACUUM INTO backup; warm-start runs do not. The first
+    // invocation against an empty cache is a cold rebuild and
+    // should leave one backup behind; the second invocation
+    // (warm-start hit) should not add a second.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success();
+
+    let backups_dir = data.path().join("conspectus").join("backups");
+    let after_cold: Vec<_> = std::fs::read_dir(&backups_dir)
+        .expect("read backups dir")
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(
+        after_cold.len(),
+        1,
+        "cold rebuild should leave exactly one backup; got {after_cold:?}"
+    );
+
+    // Warm-start run: the cache is populated, the freshness gate
+    // sees nothing stale, no providers re-run. Backup count must
+    // stay at 1.
+    isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success();
+    let after_warm: Vec<_> = std::fs::read_dir(&backups_dir)
+        .expect("re-read backups dir")
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(
+        after_warm.len(),
+        1,
+        "warm-start run must not produce an additional backup; got {after_warm:?}"
+    );
+
+    // `--refresh` forces a cold rebuild and should add a fresh
+    // backup. Sleep one second so the epoch-named file does not
+    // collide with the first backup (rotate skips colliding
+    // names by design).
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--refresh")
+        .assert()
+        .success();
+    let after_refresh: Vec<_> = std::fs::read_dir(&backups_dir)
+        .expect("post-refresh read")
+        .filter_map(Result::ok)
+        .collect();
+    assert_eq!(
+        after_refresh.len(),
+        2,
+        "--refresh cold rebuild should add a second backup; got {after_refresh:?}"
+    );
+}
+
+#[test]
 fn table_sessions_recovers_from_a_truncated_graph_cache() {
     // Hardening: a malformed `graph.sqlite` (truncated bytes,
     // bad header, mid-write crash that left the file unreadable)

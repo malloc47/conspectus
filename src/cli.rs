@@ -1558,12 +1558,34 @@ fn warm_start_discover_and_resolve(
     intervals: &conspectus::config::ServerIntervals,
 ) -> Result<conspectus::model::GraphSnapshot> {
     let prior = load_warm_start_prior(refresh);
+    // ADR 0037 rotation trigger: this run is a cold rebuild
+    // either because the operator forced one (`--refresh`) or
+    // because the warm-start path found no usable cache (first
+    // run, schema mismatch, corruption healed). Both states
+    // produce a "known-clean" full snapshot worth backing up.
+    let cold_rebuild = refresh
+        || (prior.nodes.is_empty()
+            && prior.candidate_links.is_empty()
+            && prior.node_provenance.is_empty());
     let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
     let snapshot =
         conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
     let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
     cache_resolved_snapshot(&snapshot, no_cache);
+    if cold_rebuild && !no_cache {
+        rotate_backup_best_effort();
+    }
     Ok(snapshot)
+}
+
+/// Best-effort wrapper around [`conspectus::query::rotate_backup`]
+/// that swallows failures into a one-line warning. Backups are
+/// debugging artifacts per ADR 0037; a failed rotate must not
+/// abort the run.
+fn rotate_backup_best_effort() {
+    if let Err(err) = conspectus::query::rotate_backup(None) {
+        eprintln!("conspectus: warning: failed to rotate graph cache backup: {err:#}");
+    }
 }
 
 /// P7-003: persist a freshly resolved snapshot to the canonical

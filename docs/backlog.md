@@ -7381,14 +7381,28 @@ code.
     (`discover_local_warm_with_*`); CLI integration tests in
     `tests/cli_persist.rs` covering the cold/warm/refresh
     matrix plus the end-to-end fresh-slice carryover.
-  - Follow-ups: schema-version mismatch fallback,
-    malformed-snapshot recovery, and the `VACUUM INTO`
-    rotation/retention from ADR 0037 are still open; they did
-    not block phase 3 and will be picked up alongside the
-    daemon work in `P7-006`. Optional `H-REF-009` centralizes
-    provider key constants into a `discovery::providers`
-    module; the strings still match `source_metadata.adapter`
-    literals exactly so the rename is mechanical.
+  - Hardening (landed alongside phase 4):
+    `load_cached_snapshot` now reads `PRAGMA user_version` up
+    front and treats any mismatch — including the
+    bare-database `user_version = 0` case — as a cache miss
+    so the cold rebuild + post-run persist heals the file.
+    The writer probes the existing file before opening and
+    moves an unusable cache aside to `.corrupt.<epoch>` for
+    forensic inspection so the subsequent `OPEN_CREATE` can
+    produce a fresh database. `query::persist::rotate_backup`
+    produces `VACUUM INTO 'backups/graph-<epoch>.sqlite'`
+    point-in-time copies on every cold rebuild (no warm-start
+    cache hit, or `--refresh`) and prunes to the
+    `BACKUP_RETENTION = 5` newest per ADR 0037; the TUI's
+    continuous-refresh path deliberately does not rotate. The
+    forward-only migration chain hinted at in ADR 0037
+    remains the eventual answer when schema drift actually
+    surfaces user pain; until then "rebuild and overwrite"
+    is the safer default.
+  - Follow-ups: optional `H-REF-009` centralizes provider key
+    constants into a `discovery::providers` module; the
+    strings still match `source_metadata.adapter` literals
+    exactly so the rename is mechanical.
 
 - [x] `P7-004` ADR: continuous server mode architecture and transport.
   - Outcome: accepted as ADR 0038 (cli-server-transport-wal). The
