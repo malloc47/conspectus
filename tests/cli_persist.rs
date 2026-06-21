@@ -83,9 +83,11 @@ fn table_sessions_skips_persistence_when_no_cache_flag_is_passed() {
 }
 
 #[test]
-fn table_sessions_accepts_refresh_flag_as_a_noop_for_now() {
-    // The flag surfaces ahead of the warm-start read path landing so
-    // scripts can opt in early; the writer side keeps running.
+fn table_sessions_with_refresh_still_persists_the_writer_output() {
+    // `--refresh` skips the warm-start *read* but leaves the writer
+    // side running so the next invocation can warm-start off this
+    // run. The behavioral distinction from `--no-cache` is the
+    // entire point of separating the two flags.
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
     let cwd = tempfile::TempDir::new().expect("cwd temp");
@@ -103,5 +105,46 @@ fn table_sessions_accepts_refresh_flag_as_a_noop_for_now() {
         expected.exists(),
         "`--refresh` alone should not suppress the writer; {} should exist",
         expected.display()
+    );
+}
+
+#[test]
+fn table_sessions_warm_starts_from_a_prior_run_without_erroring() {
+    // P7-003 phase 2 round-trip: run `table sessions` once to
+    // populate the cache, then run it again so the second invocation
+    // reads `graph.sqlite` via the warm-start backstop, merges it
+    // with the live discovery output, re-resolves, and persists
+    // back. A regression that breaks the read path (schema drift,
+    // bad reader, missing handle) would surface here as either a
+    // non-zero exit or a stderr warning the test pins down.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success();
+
+    let cache = data.path().join("conspectus").join("graph.sqlite");
+    assert!(cache.exists(), "first run should populate the cache");
+
+    let output = isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .output()
+        .expect("second run");
+    assert!(
+        output.status.success(),
+        "second run should succeed: stderr=\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("failed to read graph cache"),
+        "warm-start read should not surface a warning; got stderr:\n{stderr}"
     );
 }

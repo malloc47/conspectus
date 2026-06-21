@@ -16,7 +16,7 @@ pub mod runner;
 pub mod schema;
 
 pub use loader::load;
-pub use persist::{graph_db_path, persist_snapshot};
+pub use persist::{graph_db_path, load_cached_snapshot, persist_snapshot};
 pub use reader::read_snapshot;
 
 use crate::model::GraphSnapshot;

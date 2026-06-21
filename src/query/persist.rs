@@ -29,6 +29,7 @@ use rusqlite::{Connection, OpenFlags};
 use crate::model::GraphSnapshot;
 
 use super::loader::load;
+use super::reader::read_snapshot;
 use super::schema::apply_schema;
 
 /// Canonical on-disk location for the persisted graph database, per
@@ -73,6 +74,37 @@ pub fn persist_snapshot(snapshot: &GraphSnapshot, override_path: Option<&Path>) 
     apply_schema(&conn).with_context(|| format!("apply schema on {}", path.display()))?;
     load(snapshot, &mut conn).with_context(|| format!("load snapshot into {}", path.display()))?;
     Ok(())
+}
+
+/// Read the persisted graph from the canonical `graph.sqlite`
+/// location (or `override_path` when set). Returns `Ok(None)` when
+/// the file does not yet exist — a cold start on a fresh machine,
+/// not an error. Any other failure (corrupt schema, unreadable
+/// permissions) propagates so callers can warn + fall back to a
+/// pure cold rebuild.
+///
+/// The connection is opened read-only: the warm-start path never
+/// mutates the cache, only the writer side of the same invocation
+/// does (via [`persist_snapshot`] at the end of the run).
+///
+/// P7-003 phase 2: this powers the backstop-only warm-start the
+/// CLI runs before fresh discovery. Phase 3 will graduate this
+/// into per-provider TTL comparison + selective re-run.
+pub fn load_cached_snapshot(override_path: Option<&Path>) -> Result<Option<GraphSnapshot>> {
+    let path = override_path
+        .map(PathBuf::from)
+        .unwrap_or_else(graph_db_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(
+        &path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .with_context(|| format!("open {} read-only", path.display()))?;
+    let snapshot =
+        read_snapshot(&conn).with_context(|| format!("read snapshot from {}", path.display()))?;
+    Ok(Some(snapshot))
 }
 
 /// Pragma triplet from ADR 0038 plus `journal_mode = WAL`. The
@@ -171,6 +203,51 @@ mod tests {
                 .collect()
         };
         assert_eq!(common_dirs, vec!["/b".to_string()]);
+    }
+
+    #[test]
+    fn load_cached_snapshot_returns_none_when_file_missing() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let missing = tmp.path().join("never_written.sqlite");
+        let result = load_cached_snapshot(Some(&missing)).expect("load");
+        assert!(
+            result.is_none(),
+            "cold-start cache miss must surface as Ok(None), not an error"
+        );
+    }
+
+    #[test]
+    fn load_cached_snapshot_round_trips_a_written_snapshot() {
+        // Writer + reader meet here so a future refactor that lets
+        // them drift (different schema versions, different column
+        // mapping, etc.) trips this test before it ships.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+
+        let mut snap = GraphSnapshot::empty();
+        let repo_id = RepoId::new("/r/.git");
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+        snap.node_provenance.insert(
+            crate::model::NodeId::Repo(repo_id.clone()),
+            NodeProvenance {
+                provider: "git".to_string(),
+                freshness_epoch: Some(1_700_000_900),
+            },
+        );
+
+        persist_snapshot(&snap, Some(&path)).expect("write");
+        let loaded = load_cached_snapshot(Some(&path))
+            .expect("load")
+            .expect("written snapshot reloads as Some");
+        assert_eq!(loaded.nodes.len(), 1);
+        assert_eq!(loaded.node_provenance.len(), 1);
+        let entry = loaded
+            .node_provenance
+            .get(&crate::model::NodeId::Repo(repo_id))
+            .expect("provenance for the written node");
+        assert_eq!(entry.provider, "git");
+        assert_eq!(entry.freshness_epoch, Some(1_700_000_900));
     }
 
     #[test]

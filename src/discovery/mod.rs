@@ -517,6 +517,33 @@ pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> Gr
     snapshot
 }
 
+/// Warm-start backstop merge (P7-003 phase 2). Folds `prior` into
+/// `fresh` so live discovery results override the persisted cache
+/// wherever they collide, and the cache only contributes nodes,
+/// candidate-links, and per-node provenance the fresh run did not
+/// emit (e.g. things discovered against a previous cwd).
+///
+/// Implemented on top of [`merge_fragments`] with the fresh
+/// fragment listed first — the first-write-wins rule already in
+/// place for unioned providers gives us exactly the override
+/// semantics the warm-start path wants. `resolved_relationships`,
+/// `pins`, and `aliases` from the prior snapshot are intentionally
+/// dropped: the resolver re-runs on the merged candidate set, and
+/// pins / aliases reload from their on-disk configs alongside the
+/// fresh discovery pass.
+///
+/// Phase 3 will graduate this from "always merge everything" to
+/// per-provider TTL comparison + selective re-run via the P7-005
+/// eviction primitive.
+pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnapshot {
+    // `merge_fragments` already drops `resolved_relationships`,
+    // `pins`, and `aliases` on the returned snapshot; the CLI
+    // re-resolves and reloads pins/aliases from the live config
+    // loader after this helper returns. Keeping that off the
+    // warm-start path avoids round-tripping stale derived state.
+    merge_fragments([snapshot_fragment(fresh), snapshot_fragment(prior)])
+}
+
 fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
     let mut roots = BTreeSet::new();
 
@@ -802,6 +829,111 @@ mod tests {
                 .provider,
             "harness::codex"
         );
+    }
+
+    #[test]
+    fn merge_with_prior_lets_fresh_win_and_keeps_prior_only_nodes() {
+        // Backstop merge semantics: collisions resolve to `fresh`,
+        // prior-only nodes survive as a stale-but-better-than-empty
+        // fallback. The persisted cache continues to surface state
+        // the live scan did not see (e.g. a repo from yesterday's
+        // cwd) without overriding anything the live scan refreshed.
+        let mux_id = MuxSessionId::new("tmux:keep");
+        let fresh_mux = GraphNode::MuxSession(MuxSessionNode {
+            id: mux_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: "keep".to_string(),
+            cwd: Some("/fresh/cwd".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        });
+        let prior_mux = GraphNode::MuxSession(MuxSessionNode {
+            id: mux_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: "keep".to_string(),
+            cwd: Some("/stale/cwd".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        });
+        let prior_only = GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("codex", "/state", "from-cache"),
+            harness_key: "codex".to_string(),
+            cwd: None,
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        });
+        let prior_only_id = prior_only.id();
+
+        let mut fresh = GraphSnapshot::empty();
+        fresh.nodes.push(fresh_mux);
+        fresh.node_provenance.insert(
+            NodeId::MuxSession(mux_id.clone()),
+            NodeProvenance {
+                provider: "tmux".to_string(),
+                freshness_epoch: Some(1_700_000_900),
+            },
+        );
+
+        let mut prior = GraphSnapshot::empty();
+        prior.nodes.push(prior_mux);
+        prior.nodes.push(prior_only);
+        prior.node_provenance.insert(
+            NodeId::MuxSession(mux_id.clone()),
+            NodeProvenance {
+                provider: "tmux".to_string(),
+                freshness_epoch: Some(1_700_000_100),
+            },
+        );
+        prior.node_provenance.insert(
+            prior_only_id.clone(),
+            NodeProvenance {
+                provider: "harness::codex".to_string(),
+                freshness_epoch: Some(1_700_000_050),
+            },
+        );
+
+        let merged = merge_with_prior(fresh, prior);
+
+        // The fresh mux's cwd survives the merge — prior loses on
+        // the collision.
+        let merged_mux = merged
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::MuxSession(s) if s.id == mux_id => Some(s),
+                _ => None,
+            })
+            .expect("mux node present in merged snapshot");
+        assert_eq!(merged_mux.cwd.as_deref(), Some("/fresh/cwd"));
+
+        // The prior-only agent session still appears.
+        assert!(
+            merged.nodes.iter().any(|node| node.id() == prior_only_id),
+            "prior-only node should survive the backstop merge"
+        );
+
+        // Provenance for the collision uses fresh's epoch.
+        let mux_prov = merged
+            .node_provenance
+            .get(&NodeId::MuxSession(mux_id.clone()))
+            .expect("mux provenance");
+        assert_eq!(mux_prov.freshness_epoch, Some(1_700_000_900));
+
+        // Resolver re-runs on the merged snapshot — warm-start
+        // never carries forward resolved relationships.
+        assert!(merged.resolved_relationships.is_empty());
     }
 
     #[test]

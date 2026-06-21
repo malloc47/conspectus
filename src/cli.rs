@@ -1375,11 +1375,12 @@ struct TableRowsArgs {
     /// Does not affect the rendered output.
     #[arg(long = "no-cache")]
     no_cache: bool,
-    /// P7-003: force a cold rebuild of every provider, ignoring the
-    /// persisted cache. No-op until the warm-start read path lands
-    /// (the writer always runs unless `--no-cache` is set); the flag
-    /// is accepted now so scripts can adopt it ahead of the
-    /// behavioral change.
+    /// P7-003: skip the warm-start read so this invocation rebuilds
+    /// from the live providers alone, ignoring the persisted cache.
+    /// The writer side still runs unless `--no-cache` is also set,
+    /// so the next invocation can warm-start off this run's output.
+    /// Phase 3 will graduate the warm-start path from a backstop
+    /// merge into per-provider TTL comparison + selective re-run.
     #[arg(long = "refresh")]
     refresh: bool,
 }
@@ -1430,12 +1431,15 @@ impl TableRowsArgs {
         } else {
             conspectus::discovery::discover_local_at_roots(self.scan_roots)?
         };
+        // P7-003 phase 2: optionally overlay the persisted cache as
+        // a backstop so prior-only nodes survive while live data
+        // still wins on every collision. `--refresh` skips the read
+        // entirely for operators who want a guaranteed cold scan.
+        let snapshot = warm_start_snapshot(snapshot, self.refresh);
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
         // P7-003: persist the resolved graph so the next invocation
         // can warm-start. Best-effort; failures are surfaced to
-        // stderr but never block rendering. The `--refresh` flag is
-        // a no-op until the warm-start read path lands.
-        let _ = self.refresh;
+        // stderr but never block rendering.
         cache_resolved_snapshot(&snapshot, self.no_cache);
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
@@ -1476,6 +1480,35 @@ fn current_unix_epoch_for_table() -> Option<i64> {
 /// primary product. `no_cache` lets the operator opt out for a
 /// single invocation (e.g. when running against a non-writable
 /// `$HOME` or wanting an in-memory-only render).
+/// P7-003 phase 2: optionally fold the persisted `graph.sqlite`
+/// cache into `fresh` as a backstop. The fresh fragment wins on
+/// every collision (first-write-wins via
+/// [`conspectus::discovery::merge_with_prior`]); the cache only
+/// contributes nodes the live scan did not emit. `refresh = true`
+/// bypasses the read so the operator gets a guaranteed cold scan
+/// even when the cache is healthy.
+///
+/// Best-effort: a corrupted or unreadable cache prints a
+/// `conspectus: warning:` line to stderr and the run continues
+/// against `fresh` alone — losing a backstop should never abort
+/// the command.
+fn warm_start_snapshot(
+    fresh: conspectus::model::GraphSnapshot,
+    refresh: bool,
+) -> conspectus::model::GraphSnapshot {
+    if refresh {
+        return fresh;
+    }
+    match conspectus::query::load_cached_snapshot(None) {
+        Ok(Some(prior)) => conspectus::discovery::merge_with_prior(fresh, prior),
+        Ok(None) => fresh,
+        Err(err) => {
+            eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
+            fresh
+        }
+    }
+}
+
 fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapshot, no_cache: bool) {
     if no_cache {
         return;
