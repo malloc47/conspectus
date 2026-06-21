@@ -203,6 +203,124 @@ struct DispatchCtx {
     writer_lock: Arc<Mutex<()>>,
 }
 
+/// Outcome of a client-side socket call.
+#[derive(Debug)]
+pub enum ClientOutcome<T> {
+    /// The daemon responded successfully with `T` as the parsed
+    /// response payload.
+    Ok(T),
+    /// The daemon responded with a structured error (`result: "error"`).
+    DaemonError { code: String, message: String },
+    /// No daemon is listening on the socket. Callers fall back
+    /// to local execution.
+    NoDaemon,
+    /// The connection or framing layer hit an unrecoverable
+    /// error (e.g. partial read, malformed frame). Callers
+    /// typically surface this as a CLI error.
+    Transport(anyhow::Error),
+}
+
+/// Send a `ping` request to the daemon. Returns the echoed
+/// `args` payload on success. Mostly useful as a liveness
+/// probe + a smoke test for the wire shape; the CLI uses it to
+/// detect whether to route a follow-up command through the
+/// socket or fall back to one-shot mode.
+pub fn client_ping() -> ClientOutcome<serde_json::Value> {
+    call_command("ping", serde_json::Value::Null, "ping")
+}
+
+/// Send a `refresh` request to the daemon. Returns the
+/// `refreshed_epoch` field on success — the wall-clock second at
+/// which the daemon took the writer lock to begin the cold
+/// rebuild.
+pub fn client_refresh() -> ClientOutcome<u64> {
+    match call_command("refresh", serde_json::Value::Null, "cli-refresh") {
+        ClientOutcome::Ok(value) => match value.get("refreshed_epoch").and_then(|v| v.as_u64()) {
+            Some(epoch) => ClientOutcome::Ok(epoch),
+            None => ClientOutcome::Transport(anyhow!(
+                "refresh response missing refreshed_epoch: {value}"
+            )),
+        },
+        other => match other {
+            ClientOutcome::DaemonError { code, message } => {
+                ClientOutcome::DaemonError { code, message }
+            }
+            ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
+            ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
+            ClientOutcome::Ok(_) => unreachable!(),
+        },
+    }
+}
+
+/// Common framing for client-side calls. Connects to the
+/// canonical socket path, sends the framed request, reads the
+/// framed response, parses the JSON envelope.
+fn call_command(
+    command: &str,
+    args: serde_json::Value,
+    id: &str,
+) -> ClientOutcome<serde_json::Value> {
+    let path = socket_path();
+    let mut stream = match UnixStream::connect(&path) {
+        Ok(stream) => stream,
+        Err(err)
+            if err.kind() == std::io::ErrorKind::NotFound
+                || err.kind() == std::io::ErrorKind::ConnectionRefused =>
+        {
+            return ClientOutcome::NoDaemon;
+        }
+        Err(err) => {
+            return ClientOutcome::Transport(
+                anyhow!(err).context(format!("connect to {}", path.display())),
+            );
+        }
+    };
+    let request = serde_json::json!({
+        "command": command,
+        "args": args,
+        "id": id,
+    });
+    let payload = match serde_json::to_vec(&request) {
+        Ok(v) => v,
+        Err(err) => return ClientOutcome::Transport(anyhow!(err)),
+    };
+    if let Err(err) = write_frame(&mut stream, &payload) {
+        return ClientOutcome::Transport(err);
+    }
+    let frame = match read_frame(&mut stream) {
+        Ok(v) => v,
+        Err(err) => return ClientOutcome::Transport(err),
+    };
+    let envelope: serde_json::Value = match serde_json::from_slice(&frame) {
+        Ok(v) => v,
+        Err(err) => return ClientOutcome::Transport(anyhow!(err).context("parse response JSON")),
+    };
+    match envelope.get("result").and_then(|v| v.as_str()) {
+        Some("ok") => ClientOutcome::Ok(
+            envelope
+                .get("data")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        Some("error") => {
+            let code = envelope
+                .get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let message = envelope
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no message)")
+                .to_string();
+            ClientOutcome::DaemonError { code, message }
+        }
+        _ => ClientOutcome::Transport(anyhow!("response envelope missing result: {envelope}")),
+    }
+}
+
 /// Per-connection handler. Reads one request frame, dispatches
 /// it, writes the response. ADR 0038's framing is one
 /// request/response per connection (the daemon does not

@@ -318,6 +318,84 @@ fn serve_socket_rejects_unknown_command() {
 }
 
 #[test]
+fn cli_refresh_command_falls_back_to_local_when_no_daemon() {
+    // No `conspectus serve` running → no socket → `conspectus
+    // refresh` should print the local-fallback line and exit 0.
+    // Pins the "absence of a server is not an error" guarantee
+    // from ADR 0038 at the client side.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("refresh")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = cmd.output().expect("run refresh");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "refresh should succeed even without a daemon: stderr=\n{stderr}"
+    );
+    assert!(
+        stdout.contains("refreshed via in-process cold rebuild"),
+        "expected in-process fallback line; stdout=\n{stdout}"
+    );
+
+    let cache = data.path().join("conspectus").join("graph.sqlite");
+    assert!(
+        cache.exists(),
+        "in-process fallback should populate {}",
+        cache.display()
+    );
+}
+
+#[test]
+fn cli_refresh_command_uses_daemon_when_present() {
+    // With `conspectus serve` running, the client should route
+    // through the socket and print the "via daemon" line.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut serve_cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut serve_cmd, home.path(), data.path(), runtime.path());
+    serve_cmd
+        .current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = serve_cmd.spawn().expect("spawn serve");
+    let socket = socket_path_under(runtime.path());
+    assert!(wait_for_socket(&socket, Duration::from_secs(5)));
+
+    let mut client_cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut client_cmd, home.path(), data.path(), runtime.path());
+    client_cmd
+        .current_dir(cwd.path())
+        .arg("refresh")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = client_cmd.output().expect("run refresh client");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(
+        stdout.contains("refreshed via daemon"),
+        "expected daemon-routed line; stdout=\n{stdout}"
+    );
+}
+
+#[test]
 fn serve_shuts_down_cleanly_on_sigterm() {
     // ADR 0080: SIGTERM (and SIGINT) flip a shared shutdown
     // flag that every scheduler thread polls between sleeps.

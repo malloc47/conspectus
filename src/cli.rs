@@ -56,6 +56,7 @@ impl Cli {
             Command::Query(args) => args.run(),
             Command::Pin(args) => args.run(),
             Command::Serve(args) => args.run(),
+            Command::Refresh(args) => args.run(),
             #[cfg(debug_assertions)]
             Command::Dev(args) => args.run(),
         }
@@ -94,6 +95,11 @@ enum Command {
     /// `graph.sqlite` warm between one-shot CLI invocations
     /// (ADR 0038 / P7-006).
     Serve(ServeArgs),
+    /// Force a full cold rebuild of the graph cache. Talks to a
+    /// running `conspectus serve` daemon over the mutation
+    /// socket when present; falls back to an in-process cold
+    /// rebuild when no daemon is running.
+    Refresh(RefreshArgs),
     /// Debug-only developer commands.
     #[cfg(debug_assertions)]
     #[command(hide = true)]
@@ -375,6 +381,71 @@ impl ServeArgs {
             scan_roots,
             intervals: outcome.config.server.intervals,
         })
+    }
+}
+
+#[derive(Debug, Args, Default)]
+struct RefreshArgs {
+    /// Discovery scan root for the in-process fallback path
+    /// (used only when no daemon is running). When omitted the
+    /// fallback uses the process cwd.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl RefreshArgs {
+    fn run(self) -> Result<()> {
+        // Try the daemon socket first. If a `conspectus serve`
+        // process is running it owns the freshest writer
+        // discipline and is also the canonical place to
+        // coordinate a refresh.
+        match conspectus::server::client_refresh() {
+            conspectus::server::ClientOutcome::Ok(epoch) => {
+                println!("refreshed via daemon (epoch={epoch})");
+                return Ok(());
+            }
+            conspectus::server::ClientOutcome::DaemonError { code, message } => {
+                bail!("daemon refused refresh ({code}): {message}");
+            }
+            conspectus::server::ClientOutcome::Transport(err) => {
+                eprintln!(
+                    "conspectus: warning: daemon socket error, falling back to local refresh: {err:#}"
+                );
+            }
+            conspectus::server::ClientOutcome::NoDaemon => {
+                // Expected when no daemon is running. Silent
+                // fall-through to the local path; an operator
+                // who started `conspectus serve` and didn't see
+                // a `refreshed via daemon` line will recognize
+                // the absence themselves.
+            }
+        }
+
+        // Fallback: local cold rebuild. Mirrors `--refresh` on
+        // the read-side commands so the operator can use
+        // `conspectus refresh` interchangeably whether or not
+        // the daemon is up.
+        let cwd = std::env::current_dir()?;
+        let loader = config::ConfigLoader::from_env();
+        let outcome = loader.load_from(&cwd);
+        for diagnostic in &outcome.diagnostics {
+            eprintln!(
+                "conspectus: warning: {}: {}",
+                diagnostic.path.display(),
+                diagnostic.message
+            );
+        }
+        let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
+            vec![cwd]
+        } else {
+            self.scan_roots
+        };
+        // `refresh = true`, `no_cache = false`: force cold +
+        // persist + rotate a backup, same shape as `table
+        // sessions --refresh` would do.
+        warm_start_discover_and_resolve(roots, true, false, &outcome.config.server.intervals)?;
+        println!("refreshed via in-process cold rebuild");
+        Ok(())
     }
 }
 
