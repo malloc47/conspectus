@@ -89,6 +89,69 @@ fn serve_populates_graph_cache_within_first_tick() {
 }
 
 #[test]
+fn serve_shuts_down_cleanly_on_sigterm() {
+    // ADR 0080: SIGTERM (and SIGINT) flip a shared shutdown
+    // flag that every scheduler thread polls between sleeps.
+    // The daemon should exit with status 0 within a few seconds
+    // of the signal and emit the "stopped" line on stderr.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_env_args(&mut cmd, home.path(), data.path());
+    cmd.current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("spawn serve");
+
+    // Let the daemon finish its synchronous first-tick batch so
+    // signal arrival lands during the inter-tick sleep — the
+    // exact path the shutdown latch is designed to cover.
+    std::thread::sleep(Duration::from_millis(800));
+
+    // SIGTERM the child via libc (the std Child API only knows
+    // SIGKILL on Unix). `kill -TERM <pid>` is the daemon-style
+    // shutdown the operator (or systemd) would actually send.
+    unsafe {
+        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+    }
+
+    // Give the daemon up to 5s to observe the signal and exit
+    // cleanly; the inter-tick poll cadence is 200ms so this is
+    // generous. Hang detection: if exit takes longer, fail.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait().expect("try_wait") {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => break None,
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+
+    if status.is_none() {
+        // Don't hang the test runner if shutdown is broken.
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("daemon did not exit within 5s of SIGTERM");
+    }
+    let output = child.wait_with_output().expect("collect output");
+    assert!(
+        output.status.success(),
+        "daemon should exit 0 on SIGTERM; got {:?}",
+        output.status
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stopped"),
+        "expected `stopped` line in stderr after graceful shutdown; got:\n{stderr}"
+    );
+}
+
+#[test]
 fn serve_logs_startup_line_to_stderr() {
     // Operators (and future P7-008 status checks) need to see
     // when the daemon actually started; this pins the startup

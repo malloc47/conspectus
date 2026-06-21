@@ -7,38 +7,40 @@
 //! per ADR 0079) and each thread re-runs *only its class's*
 //! discovery providers on its own `[server.intervals]` cadence.
 //!
-//! Layers A and B (this file): per-class scheduling with
-//! cycle-level failure isolation. The mutation socket and
-//! graceful shutdown land in layer C per ADR 0038. Today the
-//! daemon shares the same writer-lock discipline as the one-shot
-//! CLI: both call [`crate::query::persist_snapshot`], which
-//! serializes via SQLite's `busy_timeout` (ADR 0037). To keep
-//! per-thread cycles atomic across load-prior + evict + run +
-//! persist, every thread takes a process-local [`std::sync::Mutex`]
-//! before its cycle, so two class threads cannot race on a
-//! load/merge/write sequence and silently clobber each other's
-//! slice. The mutation socket upgrades that to a dedicated
-//! writer thread plus a request queue when it lands.
+//! Layers A, B, and the shutdown half of layer C (this file):
+//! per-class scheduling with cycle-level failure isolation and
+//! SIGINT/SIGTERM graceful shutdown per ADR 0080. The mutation
+//! socket from ADR 0038 lands in the second half of layer C.
+//! Today the daemon shares the same writer-lock discipline as
+//! the one-shot CLI: both call [`crate::query::persist_snapshot`],
+//! which serializes via SQLite's `busy_timeout` (ADR 0037). To
+//! keep per-thread cycles atomic across load-prior + evict + run
+//! + persist, every thread takes a process-local
+//! [`std::sync::Mutex`] before its cycle, so two class threads
+//! cannot race on a load/merge/write sequence and silently
+//! clobber each other's slice. The mutation socket upgrades that
+//! to a dedicated writer thread plus a request queue when it
+//! lands.
 //!
 //! Lifecycle expectations:
 //!
 //! * The process is user-managed (systemd user unit, launchd
 //!   agent, or `conspectus serve &`) per ADR 0038. The CLI
 //!   must not auto-spawn it.
-//! * SIGTERM / SIGINT currently terminate the process abruptly.
-//!   Because SQLite WAL recovery makes the on-disk graph
-//!   consistent on every open, the worst case is losing the
-//!   in-flight cycle's discovery work — which the next start
-//!   redoes anyway. Graceful shutdown lands with the mutation
-//!   socket since that is where in-flight state (open client
-//!   connections, the writer transaction queue) actually needs
-//!   draining.
+//! * SIGINT and SIGTERM flip a shared shutdown flag via
+//!   `signal-hook` (ADR 0080). Every scheduler thread polls the
+//!   flag between sleeps so a shutdown that arrives mid-tick
+//!   still completes the cycle in progress before exiting. The
+//!   200ms poll cadence trades a negligible CPU floor for
+//!   snappy Ctrl-C response.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
@@ -59,11 +61,11 @@ pub struct ServeConfig {
     pub intervals: ServerIntervals,
 }
 
-/// Spawn the per-class scheduler threads and block forever
-/// (until the process is signalled). Returns only if every
-/// worker thread exits — which they currently don't, since each
-/// runs an infinite loop. Layer C will replace the loops with a
-/// shared [`std::sync::atomic::AtomicBool`] shutdown latch.
+/// Spawn the per-class scheduler threads and block on the
+/// shutdown signal (SIGINT or SIGTERM, registered via
+/// `signal-hook` per ADR 0080). Returns once every worker
+/// thread has observed the shutdown flag, finished its in-flight
+/// cycle, and exited.
 pub fn run(config: ServeConfig) -> Result<()> {
     eprintln!(
         "conspectus serve: starting; per-class scheduler; scan roots = {:?}",
@@ -75,34 +77,56 @@ pub fn run(config: ServeConfig) -> Result<()> {
     // so two threads cannot race on the merge step. Briefly held
     // for the entire cycle; for v1 this trades throughput
     // (forge's minutes-long discovery blocks harness/mux) for
-    // correctness. Layer C splits this into a writer thread + a
-    // request channel so the load is back-pressured rather than
-    // serialized.
+    // correctness. A future layer splits this into a writer
+    // thread + a request channel so the load is back-pressured
+    // rather than serialized.
     let writer_lock = Arc::new(Mutex::new(()));
 
     let scan_roots = Arc::new(config.scan_roots);
     let intervals = Arc::new(config.intervals);
+
+    // Shutdown latch per ADR 0080. signal-hook flips this atomic
+    // on SIGINT/SIGTERM; every scheduler thread polls it between
+    // sleeps so a shutdown that arrives mid-tick still completes
+    // the cycle in progress before exiting.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    register_shutdown_signals(&shutdown).context("install signal handlers for SIGINT/SIGTERM")?;
 
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     for class in ProviderClass::all() {
         let writer_lock = Arc::clone(&writer_lock);
         let scan_roots = Arc::clone(&scan_roots);
         let intervals = Arc::clone(&intervals);
+        let shutdown = Arc::clone(&shutdown);
         let class = *class;
         handles.push(thread::spawn(move || {
-            class_loop(class, &scan_roots, &intervals, &writer_lock);
+            class_loop(class, &scan_roots, &intervals, &writer_lock, &shutdown);
         }));
     }
 
-    // Join every thread. If a thread panics (rather than the
-    // typical infinite-loop body), its panic is reported on
-    // stderr and the other threads keep running.
+    // Join every thread. With the shutdown latch in place, each
+    // loop exits cleanly when SIGINT/SIGTERM is observed; we
+    // wait for all of them so a graceful shutdown surfaces a
+    // single "stopped" line on stderr at the end.
     for handle in handles {
         if let Err(panic) = handle.join() {
             eprintln!("conspectus serve: scheduler thread panicked: {panic:?}");
         }
     }
 
+    eprintln!("conspectus serve: stopped");
+    Ok(())
+}
+
+/// Register SIGINT and SIGTERM against the shared shutdown
+/// flag (ADR 0080). Other signals follow the same pattern when
+/// they land (SIGHUP for config reload, SIGUSR1 for status
+/// dumps).
+fn register_shutdown_signals(shutdown: &Arc<AtomicBool>) -> Result<()> {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    use signal_hook::flag;
+    flag::register(SIGINT, Arc::clone(shutdown)).context("register SIGINT handler")?;
+    flag::register(SIGTERM, Arc::clone(shutdown)).context("register SIGTERM handler")?;
     Ok(())
 }
 
@@ -110,12 +134,16 @@ pub fn run(config: ServeConfig) -> Result<()> {
 /// startup (so the cache is populated before the first sleep)
 /// then ticks at the class's interval. Errors per cycle log to
 /// stderr and the loop continues so a transient blip does not
-/// silently retire the class's refresh duty.
+/// silently retire the class's refresh duty. The shutdown
+/// latch is polled between cycles and at every chunk of the
+/// inter-tick sleep so a Ctrl-C does not have to wait up to a
+/// full forge interval (5 minutes) to be observed.
 fn class_loop(
     class: ProviderClass,
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
     writer_lock: &Mutex<()>,
+    shutdown: &AtomicBool,
 ) {
     let interval = class.ttl_duration(intervals);
     eprintln!(
@@ -124,9 +152,32 @@ fn class_loop(
         interval
     );
     run_cycle(class, scan_roots, intervals, writer_lock);
-    loop {
-        thread::sleep(interval);
+    while !shutdown.load(Ordering::Relaxed) {
+        sleep_with_shutdown(interval, shutdown);
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
         run_cycle(class, scan_roots, intervals, writer_lock);
+    }
+    eprintln!(
+        "conspectus serve: {} scheduler stopping after shutdown signal",
+        class.name()
+    );
+}
+
+/// Sleep for up to `total`, polling the shutdown flag every
+/// 200ms so a signal that arrives mid-sleep is observed quickly.
+/// 200ms is short enough for snappy Ctrl-C response and long
+/// enough to keep idle CPU near zero.
+fn sleep_with_shutdown(total: Duration, shutdown: &AtomicBool) {
+    let poll = Duration::from_millis(200);
+    let deadline = Instant::now() + total;
+    while Instant::now() < deadline {
+        if shutdown.load(Ordering::Relaxed) {
+            return;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        thread::sleep(remaining.min(poll));
     }
 }
 
