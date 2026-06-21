@@ -7450,24 +7450,57 @@ code.
     empty prior reduces the new path to the prior cold-only
     behavior.
 
-- [ ] `P7-006` Implement `conspectus serve`.
-  - Scope: long-running process that holds the in-memory graph,
-    schedules each provider's refresh on its configured interval per
-    `P7-004`, applies the merge primitive from `P7-005` on each
-    successful provider tick, persists snapshots to disk per
-    `P7-003`, and isolates provider failures so a broken provider
-    does not halt the loop. Implement the transport chosen by
-    `P7-004`. Logging and error reporting go to stderr (or a
-    user-configurable log path) and are surfaced via `P7-008`.
-  - Tests: integration tests with a fake clock and fake providers
-    covering interval scheduling, per-provider failure isolation,
-    graceful shutdown on SIGINT/SIGTERM, snapshot persistence on
-    change, and merging concurrent provider results.
-  - Manual checks: `conspectus serve &` from a real workspace;
-    confirm `conspectus session` returns near-instantly while the
-    server is running; kill the server and confirm the CLI falls
-    back to one-shot mode.
-  - Blockers: `P7-003`, `P7-004`, `P7-005`.
+- [x] `P7-006` Implement `conspectus serve`.
+  - Outcome: landed in three layers across the same workstream.
+    - Layer A: minimal daemon with a single warm-start tick
+      loop on the shortest `[server.intervals]` cadence,
+      cycle-level failure isolation, stderr logging. Reuses
+      `discover_local_warm_with` + `persist_snapshot` so the
+      daemon's writes are byte-for-byte equivalent to a one-
+      shot `conspectus table` invocation.
+    - Layer B: per-class scheduler. One thread per ADR 0079
+      class (git / mux / harness / forge); each wakes on its
+      class's interval and refreshes only its own slice (evict
+      + run skipping every other class via the freshness gate).
+      A process-local writer Mutex around each cycle keeps two
+      class threads from racing on load + persist. Mutex
+      poisoning auto-recovers since the on-disk cache is the
+      durable state. Adds
+      `ProviderClass::{ttl_duration, providers, name, all}` so
+      the scheduler can iterate classes generically.
+    - Layer C: graceful shutdown + mutation socket. ADR 0080
+      records the choice of `signal-hook` for SIGINT/SIGTERM
+      observability. The shutdown latch is a shared
+      `Arc<AtomicBool>` every thread polls between sleeps so
+      Ctrl-C is observed within 200ms. The Unix-domain socket
+      binds at the canonical path from ADR 0038
+      (`$XDG_RUNTIME_DIR/conspectus/server.sock` with TMPDIR
+      fallback), mode 0600, length-prefixed JSON framing
+      verbatim. v1 dispatch handles `ping` (wire-shape probe)
+      and `refresh` (force a cold rebuild on the daemon side);
+      `conspectus refresh` is the matching CLI client that
+      routes through the socket when present and falls back to
+      an in-process cold rebuild when the daemon is absent.
+  - Tests: 7 integration tests in `tests/cli_serve.rs` —
+    populates the cache on first tick, logs startup, shuts down
+    cleanly on SIGTERM, ping round-trips, unknown command
+    returns a stable error code, refresh advances the cache
+    mtime, and `conspectus refresh` exercises both the daemon-
+    routed and the in-process-fallback paths.
+  - Manual checks: `conspectus serve &` followed by
+    `conspectus table sessions` in another shell returns the
+    warm-cached data; killing the server and rerunning the CLI
+    works without intervention; the socket file is unlinked on
+    graceful shutdown.
+  - Deferred follow-ups: rename / declare-link / ignore-link
+    over the socket. The daemon does not (yet) hold a long-
+    lived writer connection, so one-shot CLI mutations
+    continue to serialize against the daemon's writes via
+    SQLite's `busy_timeout` — the same coordination peer one-
+    shot CLIs already use. Routing those commands through the
+    socket is a clean refactor when the writer connection
+    becomes dedicated (and would unblock the per-mutation
+    audit trail P7-008 will want).
 
 - [ ] `P7-007` Implement CLI ↔ server snapshot read path.
   - Scope: when a server is running (detected by an existing

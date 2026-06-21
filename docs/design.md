@@ -855,13 +855,19 @@ on regular invocations; absence of a server is not an error.
 Transport between the CLI and the server is settled by ADR 0038. Reads
 go straight to the SQLite database file (see "Graph Snapshot
 Persistence" below) under WAL mode's concurrent-reader semantics; no
-IPC is involved. Writes route through a Unix domain socket at
-`$XDG_RUNTIME_DIR/conspectus/server.sock` when the server is running,
-falling back to a direct SQLite writer lock when the server is absent.
-The socket carries only mutation commands (rename, declared-link CRUD,
-`--refresh` cold rebuilds) using length-prefixed JSON framing. The
-"absence is not an error" guarantee is preserved by construction since
-reads never require the server.
+IPC is involved. The mutation socket lives at
+`$XDG_RUNTIME_DIR/conspectus/server.sock` (mode 0600) with length-
+prefixed JSON framing. `conspectus refresh` routes through the socket
+when a daemon is running and falls back to an in-process cold rebuild
+when it is not — both paths print which one they took so operators can
+see at a glance whether the daemon is reachable. The rename / declared-
+link / ignore-link mutation commands currently flow through one-shot
+CLI rather than the socket; the daemon does not yet hold a long-lived
+writer connection, so peer writes serialize against the daemon's
+scheduled writes via SQLite's `busy_timeout` exactly the same way two
+one-shot CLIs would coordinate. Routing those commands through the
+socket is a future cleanup. The "absence is not an error" guarantee is
+preserved by construction since reads never require the server.
 
 Configuration extends the existing TOML config with a `[server]` table
 plus per-provider interval keys; specific keys and defaults belong in
