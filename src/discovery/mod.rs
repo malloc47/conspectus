@@ -16,6 +16,7 @@ use crate::model::{Diagnostic, GraphLink, GraphNode, GraphSnapshot, NodeId, Node
 pub mod agent_deck;
 pub mod aliases;
 pub mod atelier;
+pub mod cache;
 pub mod codex_log;
 pub mod cross_link;
 pub mod declared;
@@ -189,7 +190,19 @@ pub trait DiscoveryProvider {
 
 #[derive(Default)]
 pub struct LocalDiscovery {
-    providers: Vec<Box<dyn DiscoveryProvider>>,
+    providers: Vec<KeyedProvider>,
+}
+
+struct KeyedProvider {
+    /// Provider keys this entry emits. Empty means "unkeyed" — the
+    /// entry always runs and is never skippable. The warm-start
+    /// path's [`discover_skipping`](LocalDiscovery::discover_skipping)
+    /// drops the entry iff *every* key is in the skip set, so a
+    /// bundled provider (e.g. [`harness::HarnessDiscovery`] emitting
+    /// `claude-code`/`codex`/`opencode`/`aider`) survives unless
+    /// every one of its harnesses is fresh in the prior snapshot.
+    keys: Vec<&'static str>,
+    inner: Box<dyn DiscoveryProvider>,
 }
 
 impl LocalDiscovery {
@@ -198,17 +211,51 @@ impl LocalDiscovery {
     }
 
     pub fn with_provider(mut self, provider: impl DiscoveryProvider + 'static) -> Self {
-        self.providers.push(Box::new(provider));
+        self.providers.push(KeyedProvider {
+            keys: Vec::new(),
+            inner: Box::new(provider),
+        });
+        self
+    }
+
+    /// Tag this provider with the granular per-emit provider keys
+    /// it stamps onto its outputs (see ADR 0079). The warm-start
+    /// path uses these to decide whether the prior cache covers
+    /// the entry's slice. Pass an empty slice (or use
+    /// [`with_provider`]) to opt out of TTL gating.
+    pub fn with_keyed_provider(
+        mut self,
+        keys: &[&'static str],
+        provider: impl DiscoveryProvider + 'static,
+    ) -> Self {
+        self.providers.push(KeyedProvider {
+            keys: keys.to_vec(),
+            inner: Box::new(provider),
+        });
         self
     }
 
     pub fn discover(&self, context: &DiscoveryContext) -> Result<GraphSnapshot> {
+        self.discover_skipping(context, &BTreeSet::new())
+    }
+
+    /// Run every provider whose key set is *not* fully covered by
+    /// `skip`. Unkeyed providers (empty key set) always run. The
+    /// returned snapshot has the same shape as
+    /// [`Self::discover`]'s output; downstream merge with a prior
+    /// cache supplies the slices for skipped providers.
+    pub fn discover_skipping(
+        &self,
+        context: &DiscoveryContext,
+        skip: &BTreeSet<String>,
+    ) -> Result<GraphSnapshot> {
         let mut fragments = Vec::with_capacity(self.providers.len());
-
-        for provider in &self.providers {
-            fragments.push(provider.discover(context)?);
+        for keyed in &self.providers {
+            if !keyed.keys.is_empty() && keyed.keys.iter().all(|k| skip.contains(*k)) {
+                continue;
+            }
+            fragments.push(keyed.inner.discover(context)?);
         }
-
         Ok(merge_fragments(fragments))
     }
 }
@@ -227,46 +274,132 @@ pub fn discover_local_with(
     roots: impl IntoIterator<Item = impl Into<PathBuf>>,
     config: LocalDiscoveryConfig,
 ) -> Result<GraphSnapshot> {
+    discover_local_warm_with(roots, config, GraphSnapshot::empty(), &Default::default())
+}
+
+/// Warm-start discovery driver (P7-003 phase 3). The thin
+/// wrapper [`discover_local_with`] passes an empty `prior` and
+/// default intervals, which collapses the freshness gate to "no
+/// providers are fresh" and runs every adapter cold.
+///
+/// With a non-empty `prior` and real `intervals`, the warm-start
+/// path:
+///
+/// 1. Asks [`cache::compute_freshness_gate`] which provider keys
+///    are fresh (skip running), stale (evict from prior + re-run),
+///    or always-evict (mutators + unmapped keys).
+/// 2. Evicts every stale + always-evict slice from `prior` via
+///    [`GraphSnapshot::evict_provider`] so the prior backstop
+///    contributes only the fresh slices.
+/// 3. Runs the heavy-provider chain with
+///    [`LocalDiscovery::discover_skipping`], passing the fresh
+///    set as the skip filter.
+/// 4. Folds the observed-cwd git probe in, merges with the
+///    evicted prior via [`merge_with_prior`] (fresh wins on every
+///    collision), and re-runs every mutator pass against the
+///    merged snapshot.
+///
+/// Mutators always re-run because their outputs are derived from
+/// whatever the heavy providers produced this invocation. The
+/// always-evict bucket pulls their cached slices so deleted
+/// upstream state cannot linger.
+pub fn discover_local_warm_with(
+    roots: impl IntoIterator<Item = impl Into<PathBuf>>,
+    config: LocalDiscoveryConfig,
+    prior: GraphSnapshot,
+    intervals: &crate::config::ServerIntervals,
+) -> Result<GraphSnapshot> {
     let mut context = DiscoveryContext::from_roots(roots)?;
 
     for (key, root) in &config.harness_state_roots {
         context = context.with_harness_state_root(key.clone(), root.clone());
     }
 
+    let now = current_epoch();
+    let gate = cache::compute_freshness_gate(&prior, intervals, now);
+    let mut prior = prior;
+    for key in gate.keys_to_evict() {
+        prior.evict_provider(&key);
+    }
+
+    // The tmux + forge runners are owned trait objects we move
+    // into the per-provider constructors. Take them out of the
+    // config now so `apply_mutators` below can still borrow the
+    // remaining fields without a partial-move issue.
+    let mut config = config;
+    let tmux_runner = config.tmux_runner.take();
+    let forge_runner = config.forge_runner.take();
+
     let mut providers = LocalDiscovery::new()
-        .with_provider(git::GitDiscovery::new())
-        .with_provider(atelier::AtelierWorkspaceDiscovery::new())
-        .with_provider(workspace::GenericWorkspaceDiscovery::new())
-        .with_provider(harness::HarnessDiscovery::with_default_adapters());
+        .with_keyed_provider(&["git"], git::GitDiscovery::new())
+        .with_keyed_provider(&["atelier"], atelier::AtelierWorkspaceDiscovery::new())
+        .with_keyed_provider(
+            &["generic_workspace"],
+            workspace::GenericWorkspaceDiscovery::new(),
+        )
+        .with_keyed_provider(
+            &["claude-code", "codex", "opencode", "aider"],
+            harness::HarnessDiscovery::with_default_adapters(),
+        );
 
     if let Some(root) = config.agent_deck_root.clone() {
-        providers = providers.with_provider(agent_deck::AgentDeckDiscovery::new(root));
+        providers = providers
+            .with_keyed_provider(&["agent_deck"], agent_deck::AgentDeckDiscovery::new(root));
     }
 
-    if let Some(runner) = config.tmux_runner {
-        providers = providers.with_provider(tmux::TmuxDiscovery::with_runner(runner));
-    }
-
-    if let Some(runner) = config.forge_runner {
+    if let Some(runner) = tmux_runner {
         providers =
-            providers.with_provider(forge::github::GitHubForgeProvider::with_runner(runner));
+            providers.with_keyed_provider(&["tmux"], tmux::TmuxDiscovery::with_runner(runner));
     }
 
-    let mut snapshot = providers.discover(&context)?;
-    let cwd_git_fragment = observed_cwd_git_fragment(&snapshot);
-    snapshot = merge_fragments([snapshot_fragment(snapshot), cwd_git_fragment]);
+    if let Some(runner) = forge_runner {
+        providers = providers.with_keyed_provider(
+            &["github"],
+            forge::github::GitHubForgeProvider::with_runner(runner),
+        );
+    }
+
+    let mut fresh = providers.discover_skipping(&context, &gate.fresh)?;
+    let cwd_git_fragment = observed_cwd_git_fragment(&fresh);
+    fresh = merge_fragments([snapshot_fragment(fresh), cwd_git_fragment]);
+
+    // Phase-2 backstop merge with the evicted prior. The fresh
+    // fragment wins on every collision; the prior fills in
+    // slices the live run did not emit (the providers we
+    // skipped because they were fresh).
+    let mut snapshot = merge_with_prior(fresh, prior);
+
+    apply_mutators(&mut snapshot, &config, &context);
+    Ok(snapshot)
+}
+
+/// Always-rerun mutator block extracted from
+/// [`discover_local_warm_with`]. Runs against the merged
+/// (fresh + prior backstop) snapshot so cross-references,
+/// codex-log attribution, hook sidecar replay, and the declared
+/// link/alias/pin overlays land against the canonical merged
+/// state regardless of which heavy providers were skipped.
+///
+/// The corresponding slices in `prior` are pre-evicted by
+/// [`discover_local_warm_with`]'s gate, so each mutator stamps
+/// its fresh outputs into a clean slot via first-write-wins.
+fn apply_mutators(
+    snapshot: &mut GraphSnapshot,
+    config: &LocalDiscoveryConfig,
+    context: &DiscoveryContext,
+) {
     let codex_pids_per_mux = if config.process_tree_enabled {
-        cross_link::infer(&mut snapshot);
-        cross_link::active_harness_pids_per_mux(&snapshot, &cross_link::LinuxProcSnapshot)
+        cross_link::infer(snapshot);
+        cross_link::active_harness_pids_per_mux(snapshot, &cross_link::LinuxProcSnapshot)
     } else {
-        cross_link::infer_without_process_tree(&mut snapshot);
+        cross_link::infer_without_process_tree(snapshot);
         std::collections::BTreeMap::new()
     };
     if !config.codex_log_disabled
         && let Some(codex_state_root) = config.harness_state_roots.get(harness::codex::HARNESS_KEY)
     {
         codex_log::apply_codex_log_attribution(
-            &mut snapshot,
+            snapshot,
             codex_state_root,
             &codex_pids_per_mux,
             codex_log::current_epoch(),
@@ -274,14 +407,13 @@ pub fn discover_local_with(
         );
     }
     if let Some(root) = &config.hook_sidecar_root {
-        hook_sidecar::apply_hook_sidecars(&mut snapshot, root, hook_sidecar::current_epoch());
+        hook_sidecar::apply_hook_sidecars(snapshot, root, hook_sidecar::current_epoch());
     }
     if let Some(loader) = &config.declared_config_loader {
-        declared::apply_declared_links(&mut snapshot, &context, loader);
-        aliases::apply_aliases(&mut snapshot, &context, loader);
-        pins::apply_pins(&mut snapshot, &context, loader);
+        declared::apply_declared_links(snapshot, context, loader);
+        aliases::apply_aliases(snapshot, context, loader);
+        pins::apply_pins(snapshot, context, loader);
     }
-    Ok(snapshot)
 }
 
 /// Configuration that controls which providers run during local discovery.
@@ -948,6 +1080,89 @@ mod tests {
 
         assert_eq!(context.roots().len(), 2);
         assert!(context.roots()[0].is_absolute());
+    }
+
+    #[test]
+    fn discover_local_warm_with_keeps_fresh_provider_slice_from_prior() {
+        // Stage a prior snapshot with a `github` slice timestamped
+        // *just now* (well within the 5-minute forge TTL). The
+        // forge runner is *not* installed in the config, so a cold
+        // rebuild would have no github nodes; the warm-start path
+        // should observe github is fresh, skip running it (vacuous
+        // here), and let the prior slice flow through the
+        // backstop merge so the result still carries it.
+        //
+        // Uses a `RepoNode` as a stand-in payload because the
+        // freshness gate runs on `node_provenance.provider`, not
+        // the node type; the warm-start contract only cares about
+        // the provider key, not which node variant carries it.
+        use crate::config::ServerIntervals;
+        use crate::model::RepoNode;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let mut prior = GraphSnapshot::empty();
+        let repo_id = crate::model::RepoId::new("/fresh-github/.git");
+        let node_id = NodeId::Repo(repo_id.clone());
+        prior.nodes.push(GraphNode::Repo(RepoNode::new(repo_id)));
+        prior.node_provenance.insert(
+            node_id.clone(),
+            NodeProvenance {
+                provider: "github".to_string(),
+                freshness_epoch: Some(current_epoch()),
+            },
+        );
+
+        let snapshot = discover_local_warm_with(
+            [temp.path()],
+            LocalDiscoveryConfig::empty(),
+            prior,
+            &ServerIntervals::default(),
+        )
+        .expect("warm-start discovery");
+
+        assert!(
+            snapshot.nodes.iter().any(|node| node.id() == node_id),
+            "fresh github slice should survive the warm-start merge"
+        );
+    }
+
+    #[test]
+    fn discover_local_warm_with_evicts_stale_slice_and_re_runs_cold() {
+        // Same setup but the prior github slice is stamped at
+        // epoch 0 — well past the 5-minute TTL relative to
+        // wall-clock `now`. The gate marks it stale and the
+        // warm-start path evicts it from the prior; since no forge
+        // runner is wired up, the live run emits no github node
+        // either, so the result has zero github nodes (correctly
+        // reflecting deleted upstream state).
+        use crate::config::ServerIntervals;
+        use crate::model::RepoNode;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let mut prior = GraphSnapshot::empty();
+        let repo_id = crate::model::RepoId::new("/stale-github/.git");
+        let node_id = NodeId::Repo(repo_id.clone());
+        prior.nodes.push(GraphNode::Repo(RepoNode::new(repo_id)));
+        prior.node_provenance.insert(
+            node_id.clone(),
+            NodeProvenance {
+                provider: "github".to_string(),
+                freshness_epoch: Some(0),
+            },
+        );
+
+        let snapshot = discover_local_warm_with(
+            [temp.path()],
+            LocalDiscoveryConfig::empty(),
+            prior,
+            &ServerIntervals::default(),
+        )
+        .expect("warm-start discovery");
+
+        assert!(
+            !snapshot.nodes.iter().any(|node| node.id() == node_id),
+            "stale github slice should be evicted; no forge runner means nothing replaces it"
+        );
     }
 
     #[test]
