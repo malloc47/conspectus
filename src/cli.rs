@@ -57,6 +57,7 @@ impl Cli {
             Command::Pin(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
+            Command::Status(args) => args.run(),
             #[cfg(debug_assertions)]
             Command::Dev(args) => args.run(),
         }
@@ -100,6 +101,11 @@ enum Command {
     /// socket when present; falls back to an in-process cold
     /// rebuild when no daemon is running.
     Refresh(RefreshArgs),
+    /// Print the daemon's per-class scheduler state — last tick
+    /// epoch, success / error outcome, error detail. Returns a
+    /// one-line "no daemon running" message and exits 0 when
+    /// no `conspectus serve` is up.
+    Status(StatusArgs),
     /// Debug-only developer commands.
     #[cfg(debug_assertions)]
     #[command(hide = true)]
@@ -446,6 +452,75 @@ impl RefreshArgs {
         warm_start_discover_and_resolve(roots, true, false, &outcome.config.server.intervals)?;
         println!("refreshed via in-process cold rebuild");
         Ok(())
+    }
+}
+
+#[derive(Debug, Args, Default)]
+struct StatusArgs {
+    /// Output format. `human` (default) prints one line per
+    /// class with last-tick freshness; `json` emits the
+    /// machine-readable shape the daemon returns over the
+    /// socket.
+    #[arg(long, value_enum, default_value_t = StatusFormatFlag::Human)]
+    format: StatusFormatFlag,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum StatusFormatFlag {
+    #[default]
+    Human,
+    Json,
+}
+
+impl StatusArgs {
+    fn run(self) -> Result<()> {
+        match conspectus::server::client_status() {
+            conspectus::server::ClientOutcome::Ok(classes) => {
+                match self.format {
+                    StatusFormatFlag::Json => {
+                        let value = serde_json::to_value(&classes)?;
+                        println!("{}", serde_json::to_string_pretty(&value)?);
+                    }
+                    StatusFormatFlag::Human => render_status_human(&classes),
+                }
+                Ok(())
+            }
+            conspectus::server::ClientOutcome::DaemonError { code, message } => {
+                bail!("daemon refused status ({code}): {message}");
+            }
+            conspectus::server::ClientOutcome::Transport(err) => Err(err),
+            conspectus::server::ClientOutcome::NoDaemon => {
+                println!("no daemon running");
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Render the daemon-side ClassState map as a one-line-per-class
+/// human-readable block. Empty map prints "no class state yet —
+/// daemon may have just started." The "yet" framing avoids
+/// surprising the operator who started the daemon a beat ago.
+fn render_status_human(
+    classes: &std::collections::BTreeMap<String, conspectus::server::ClassState>,
+) {
+    if classes.is_empty() {
+        println!("no class state yet — daemon may have just started");
+        return;
+    }
+    let now = current_unix_epoch_for_table().unwrap_or(0);
+    for (class, state) in classes {
+        let outcome = state.last_outcome.as_deref().unwrap_or("pending");
+        let age = match state.last_completed_epoch {
+            Some(epoch) => format!("{}s ago", (now - epoch).max(0)),
+            None => "—".to_string(),
+        };
+        let error = state
+            .last_error
+            .as_deref()
+            .map(|m| format!("; error: {m}"))
+            .unwrap_or_default();
+        println!("{class:8} {outcome:6} last={age}{error}");
     }
 }
 

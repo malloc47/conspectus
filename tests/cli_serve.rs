@@ -318,6 +318,108 @@ fn serve_socket_rejects_unknown_command() {
 }
 
 #[test]
+fn cli_status_no_daemon_reports_cleanly() {
+    // ADR 0038 "absence is not an error" contract surfaces in
+    // `conspectus status` too: no socket → exit 0 + one-line
+    // "no daemon running" stdout.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("status")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = cmd.output().expect("run status");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("no daemon running"),
+        "expected no-daemon line; got:\n{stdout}"
+    );
+}
+
+#[test]
+fn cli_status_with_daemon_lists_each_class() {
+    // Spawn the daemon, give every class time to complete its
+    // first synchronous-on-startup cycle, then query status and
+    // assert each class shows up with last_outcome = "ok".
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut serve_cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut serve_cmd, home.path(), data.path(), runtime.path());
+    serve_cmd
+        .current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = serve_cmd.spawn().expect("spawn serve");
+    let socket = socket_path_under(runtime.path());
+    assert!(wait_for_socket(&socket, Duration::from_secs(5)));
+
+    // Each class kicks off its first cycle immediately. The
+    // writer Mutex serializes them, so under nextest's parallel
+    // load it can take a noticeable beat for all four to flush.
+    // 15s is generous — solo it lands in under 200ms.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut json_value = serde_json::Value::Null;
+    while Instant::now() < deadline {
+        let mut status_cmd = Command::new(conspectus_bin());
+        isolated_serve_env_args(&mut status_cmd, home.path(), data.path(), runtime.path());
+        status_cmd
+            .current_dir(cwd.path())
+            .args(["status", "--format", "json"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let out = status_cmd.output().expect("run status --format json");
+        // The poll condition: every class has not only started
+        // its first cycle but also completed it with a non-null
+        // outcome. `started_epoch` lands on entry; `last_outcome`
+        // lands on completion. Polling on the former only races
+        // against the cycle in flight.
+        if out.status.success()
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&out.stdout)
+            && let Some(map) = value.as_object()
+            && map.len() == 4
+            && map
+                .values()
+                .all(|entry| entry.get("last_outcome").is_some_and(|v| !v.is_null()))
+        {
+            json_value = value;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let map = json_value
+        .as_object()
+        .expect("status JSON should be an object");
+    for class in ["git", "mux", "harness", "forge"] {
+        let entry = map
+            .get(class)
+            .unwrap_or_else(|| panic!("class `{class}` missing from status; got {map:?}"));
+        let outcome = entry
+            .get("last_outcome")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            outcome, "ok",
+            "class `{class}` should have completed its first cycle with ok outcome; entry = {entry}"
+        );
+    }
+}
+
+#[test]
 fn cli_refresh_command_falls_back_to_local_when_no_daemon() {
     // No `conspectus serve` running → no socket → `conspectus
     // refresh` should print the local-fallback line and exit 0.

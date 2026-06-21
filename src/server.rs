@@ -34,6 +34,7 @@
 //!   200ms poll cadence trades a negligible CPU floor for
 //!   snappy Ctrl-C response.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -52,6 +53,74 @@ use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with};
 use crate::model::GraphSnapshot;
 use crate::query::{load_cached_snapshot, persist_snapshot};
 use crate::resolve::resolve_snapshot;
+
+/// Observable per-class scheduler state (P7-008). Each class
+/// thread updates its entry on every cycle; the `status` socket
+/// command reads under a [`Mutex`]. Serialized verbatim into the
+/// status response so a future operator-facing diff or
+/// monitoring tool can consume the same shape as `conspectus
+/// status --format json`.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ClassState {
+    /// Wall-clock epoch (seconds) at which the most recent cycle
+    /// for this class started. `None` before the first tick.
+    pub last_started_epoch: Option<i64>,
+    /// Wall-clock epoch at which the most recent cycle for this
+    /// class finished. `< last_started_epoch` means a cycle is
+    /// currently in flight; equal means idle between ticks.
+    pub last_completed_epoch: Option<i64>,
+    /// `"ok"` when the most recent completed cycle succeeded;
+    /// `"error"` when it failed. `None` before the first
+    /// completion.
+    pub last_outcome: Option<String>,
+    /// Error detail string when `last_outcome == "error"`.
+    /// Cleared on the next successful cycle.
+    pub last_error: Option<String>,
+}
+
+/// Shared scheduler state — one entry per provider class. The
+/// daemon owns the `Arc<Mutex<_>>`; class threads briefly take
+/// the lock to write their cycle outcome, the status handler
+/// briefly takes it to snapshot for serialization. Held only for
+/// the duration of a single read or write, never across
+/// discovery work.
+#[derive(Debug, Default)]
+pub struct SchedulerState {
+    classes: BTreeMap<&'static str, ClassState>,
+}
+
+impl SchedulerState {
+    /// Clone the current per-class map. The result owns its
+    /// strings so the caller can drop the lock immediately.
+    pub fn snapshot(&self) -> BTreeMap<String, ClassState> {
+        self.classes
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect()
+    }
+
+    fn record_started(&mut self, class: ProviderClass, epoch: i64) {
+        self.classes
+            .entry(class.name())
+            .or_default()
+            .last_started_epoch = Some(epoch);
+    }
+
+    fn record_completed(&mut self, class: ProviderClass, epoch: i64, outcome: Result<(), String>) {
+        let entry = self.classes.entry(class.name()).or_default();
+        entry.last_completed_epoch = Some(epoch);
+        match outcome {
+            Ok(()) => {
+                entry.last_outcome = Some("ok".to_string());
+                entry.last_error = None;
+            }
+            Err(message) => {
+                entry.last_outcome = Some("error".to_string());
+                entry.last_error = Some(message);
+            }
+        }
+    }
+}
 
 /// Inputs to the daemon main loop. Built by the CLI shell from
 /// `[server.intervals]` + `--scan-root` + the discovered cwd.
@@ -201,6 +270,7 @@ struct DispatchCtx {
     scan_roots: Arc<Vec<PathBuf>>,
     intervals: Arc<ServerIntervals>,
     writer_lock: Arc<Mutex<()>>,
+    state: Arc<Mutex<SchedulerState>>,
 }
 
 /// Outcome of a client-side socket call.
@@ -227,6 +297,31 @@ pub enum ClientOutcome<T> {
 /// socket or fall back to one-shot mode.
 pub fn client_ping() -> ClientOutcome<serde_json::Value> {
     call_command("ping", serde_json::Value::Null, "ping")
+}
+
+/// Send a `status` request to the daemon. Returns the per-class
+/// state map on success. The map keys are the
+/// [`ProviderClass::name`] values (`"git"`, `"mux"`,
+/// `"harness"`, `"forge"`); a class that has not yet completed
+/// its first tick may be absent from the map.
+pub fn client_status() -> ClientOutcome<BTreeMap<String, ClassState>> {
+    match call_command("status", serde_json::Value::Null, "cli-status") {
+        ClientOutcome::Ok(value) => {
+            let classes = value
+                .get("classes")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            match serde_json::from_value::<BTreeMap<String, ClassState>>(classes) {
+                Ok(map) => ClientOutcome::Ok(map),
+                Err(err) => ClientOutcome::Transport(anyhow!(err).context("parse status payload")),
+            }
+        }
+        ClientOutcome::DaemonError { code, message } => {
+            ClientOutcome::DaemonError { code, message }
+        }
+        ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
+        ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
+    }
 }
 
 /// Send a `refresh` request to the daemon. Returns the
@@ -369,6 +464,7 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
             error: None,
         },
         "refresh" => handle_refresh(request, ctx),
+        "status" => handle_status(request, ctx),
         unknown => Response {
             id: request.id.clone(),
             result: "error",
@@ -378,6 +474,40 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
                 message: format!("unknown command `{unknown}`"),
             }),
         },
+    }
+}
+
+/// `status` command handler (P7-008). Snapshots the
+/// [`SchedulerState`] under the Mutex (held only long enough to
+/// clone the map), serializes it as JSON, returns. The handler
+/// does no I/O beyond the response write so it stays responsive
+/// even while a class thread is mid-cycle.
+fn handle_status(request: &Request, ctx: &DispatchCtx) -> Response {
+    let guard = match ctx.state.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let snapshot = guard.snapshot();
+    drop(guard);
+    let data = match serde_json::to_value(&snapshot) {
+        Ok(v) => v,
+        Err(err) => {
+            return Response {
+                id: request.id.clone(),
+                result: "error",
+                data: None,
+                error: Some(ErrorBody {
+                    code: "status_serialize_failed".to_string(),
+                    message: format!("{err:#}"),
+                }),
+            };
+        }
+    };
+    Response {
+        id: request.id.clone(),
+        result: "ok",
+        data: Some(serde_json::json!({"classes": data})),
+        error: None,
     }
 }
 
@@ -490,6 +620,12 @@ pub fn run(config: ServeConfig) -> Result<()> {
     // rather than serialized.
     let writer_lock = Arc::new(Mutex::new(()));
 
+    // Per-class scheduler state observed via the `status` socket
+    // command (P7-008). Threads briefly take the Mutex to write
+    // their cycle outcome; the status handler briefly takes it
+    // to snapshot.
+    let state = Arc::new(Mutex::new(SchedulerState::default()));
+
     let scan_roots = Arc::new(config.scan_roots);
     let intervals = Arc::new(config.intervals);
 
@@ -506,9 +642,17 @@ pub fn run(config: ServeConfig) -> Result<()> {
         let scan_roots = Arc::clone(&scan_roots);
         let intervals = Arc::clone(&intervals);
         let shutdown = Arc::clone(&shutdown);
+        let state = Arc::clone(&state);
         let class = *class;
         handles.push(thread::spawn(move || {
-            class_loop(class, &scan_roots, &intervals, &writer_lock, &shutdown);
+            class_loop(
+                class,
+                &scan_roots,
+                &intervals,
+                &writer_lock,
+                &state,
+                &shutdown,
+            );
         }));
     }
 
@@ -517,6 +661,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         scan_roots: Arc::clone(&scan_roots),
         intervals: Arc::clone(&intervals),
         writer_lock: Arc::clone(&writer_lock),
+        state: Arc::clone(&state),
     };
     handles.push(thread::spawn(move || {
         socket_listener_loop(listener, listener_ctx, &listener_shutdown);
@@ -568,6 +713,7 @@ fn class_loop(
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
     writer_lock: &Mutex<()>,
+    state: &Mutex<SchedulerState>,
     shutdown: &AtomicBool,
 ) {
     let interval = class.ttl_duration(intervals);
@@ -576,13 +722,13 @@ fn class_loop(
         class.name(),
         interval
     );
-    run_cycle(class, scan_roots, intervals, writer_lock);
+    run_cycle(class, scan_roots, intervals, writer_lock, state);
     while !shutdown.load(Ordering::Relaxed) {
         sleep_with_shutdown(interval, shutdown);
         if shutdown.load(Ordering::Relaxed) {
             break;
         }
-        run_cycle(class, scan_roots, intervals, writer_lock);
+        run_cycle(class, scan_roots, intervals, writer_lock, state);
     }
     eprintln!(
         "conspectus serve: {} scheduler stopping after shutdown signal",
@@ -607,13 +753,19 @@ fn sleep_with_shutdown(total: Duration, shutdown: &AtomicBool) {
 }
 
 /// Acquire the writer lock and run one class cycle. Errors are
-/// logged and swallowed so the calling loop keeps going.
+/// logged and swallowed so the calling loop keeps going. Writes
+/// the cycle outcome (started_epoch, completed_epoch, success
+/// / error + message) into the shared [`SchedulerState`] for
+/// `conspectus status` to observe.
 fn run_cycle(
     class: ProviderClass,
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
     writer_lock: &Mutex<()>,
+    state: &Mutex<SchedulerState>,
 ) {
+    let started = wall_clock_epoch();
+    record_state_started(state, class, started);
     // Poisoned-mutex recovery: a panic in a peer class while it
     // held the lock taints it, but the on-disk graph is durable
     // and re-reading prior on the next acquisition heals any
@@ -623,12 +775,54 @@ fn run_cycle(
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Err(err) = try_class_cycle(class, scan_roots, intervals) {
-        eprintln!(
-            "conspectus serve: {} cycle failed, retrying next tick: {err:#}",
-            class.name()
-        );
+    let outcome = try_class_cycle(class, scan_roots, intervals);
+    let completed = wall_clock_epoch();
+    match outcome {
+        Ok(()) => record_state_completed(state, class, completed, Ok(())),
+        Err(err) => {
+            let msg = format!("{err:#}");
+            eprintln!(
+                "conspectus serve: {} cycle failed, retrying next tick: {msg}",
+                class.name()
+            );
+            record_state_completed(state, class, completed, Err(msg));
+        }
     }
+}
+
+/// Wall-clock epoch (seconds since UNIX_EPOCH). Defaults to 0
+/// on clock-before-epoch which the rest of the codebase already
+/// treats as the "unknown" sentinel.
+fn wall_clock_epoch() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Write a `started_epoch` to the shared state. Poisoned-mutex
+/// recovery follows the same pattern as the writer lock; the
+/// in-memory observability is best-effort and durability lives
+/// in SQLite.
+fn record_state_started(state: &Mutex<SchedulerState>, class: ProviderClass, epoch: i64) {
+    let mut guard = match state.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.record_started(class, epoch);
+}
+
+fn record_state_completed(
+    state: &Mutex<SchedulerState>,
+    class: ProviderClass,
+    epoch: i64,
+    outcome: Result<(), String>,
+) {
+    let mut guard = match state.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.record_completed(class, epoch, outcome);
 }
 
 /// Load the prior cache, evict this class's slice so the
