@@ -2,21 +2,23 @@
 //!
 //! Long-running process that keeps `graph.sqlite` fresh in the
 //! background so concurrent one-shot CLI invocations (and the
-//! TUI) read warmed-up data on every open. The daemon runs the
-//! same warm-start cycle the one-shot CLI runs — load prior,
-//! discover skipping fresh providers, merge, resolve, persist —
-//! on a tick driven by the shortest interval from
-//! `[server.intervals]`.
+//! TUI) read warmed-up data on every open. The daemon spawns one
+//! worker thread per provider class (harness / mux / git / forge
+//! per ADR 0079) and each thread re-runs *only its class's*
+//! discovery providers on its own `[server.intervals]` cadence.
 //!
-//! Layer A (this file): single-thread tick loop, cycle-level
-//! failure isolation. Per-class scheduling, graceful shutdown,
-//! and the mutation socket land in subsequent layers per
-//! ADR 0038. The daemon currently shares the same writer-lock
-//! discipline as the one-shot CLI: both call
-//! [`crate::query::persist_snapshot`], which serializes via
-//! SQLite's `busy_timeout` (ADR 0037). The mutation socket
-//! upgrades that to a dedicated writer connection when it
-//! lands.
+//! Layers A and B (this file): per-class scheduling with
+//! cycle-level failure isolation. The mutation socket and
+//! graceful shutdown land in layer C per ADR 0038. Today the
+//! daemon shares the same writer-lock discipline as the one-shot
+//! CLI: both call [`crate::query::persist_snapshot`], which
+//! serializes via SQLite's `busy_timeout` (ADR 0037). To keep
+//! per-thread cycles atomic across load-prior + evict + run +
+//! persist, every thread takes a process-local [`std::sync::Mutex`]
+//! before its cycle, so two class threads cannot race on a
+//! load/merge/write sequence and silently clobber each other's
+//! slice. The mutation socket upgrades that to a dedicated
+//! writer thread plus a request queue when it lands.
 //!
 //! Lifecycle expectations:
 //!
@@ -28,17 +30,20 @@
 //!   consistent on every open, the worst case is losing the
 //!   in-flight cycle's discovery work — which the next start
 //!   redoes anyway. Graceful shutdown lands with the mutation
-//!   socket since that's where in-flight state (open client
+//!   socket since that is where in-flight state (open client
 //!   connections, the writer transaction queue) actually needs
 //!   draining.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 use anyhow::Result;
 
 use crate::config::ServerIntervals;
+use crate::discovery::cache::ProviderClass;
 use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with};
+use crate::model::GraphSnapshot;
 use crate::query::{load_cached_snapshot, persist_snapshot};
 use crate::resolve::resolve_snapshot;
 
@@ -49,64 +54,132 @@ pub struct ServeConfig {
     /// Discovery scan roots. Empty means "use the process cwd"
     /// just like the one-shot CLI's default.
     pub scan_roots: Vec<PathBuf>,
-    /// Per-class warm-start TTL intervals. The shortest of the
-    /// four also drives the daemon's tick cadence — running a
-    /// full warm-start cycle at the shortest interval refreshes
-    /// each class no less often than its individual TTL while
-    /// remaining trivially correct under the freshness gate
-    /// (classes whose TTL has not expired are skipped on every
-    /// cycle until they do).
+    /// Per-class warm-start TTL intervals. Each class gets its
+    /// own scheduler thread that ticks on its interval.
     pub intervals: ServerIntervals,
 }
 
-/// Block the calling thread on the daemon main loop until the
-/// process is terminated. Each iteration runs one warm-start
-/// cycle and sleeps for the shortest configured interval. Cycle
-/// failures log to stderr and the loop continues so a transient
-/// provider blip cannot kill the daemon.
-///
-/// Returns only on irrecoverable error (currently: never —
-/// every cycle failure is logged + swallowed).
+/// Spawn the per-class scheduler threads and block forever
+/// (until the process is signalled). Returns only if every
+/// worker thread exits — which they currently don't, since each
+/// runs an infinite loop. Layer C will replace the loops with a
+/// shared [`std::sync::atomic::AtomicBool`] shutdown latch.
 pub fn run(config: ServeConfig) -> Result<()> {
-    let tick = shortest_interval(&config.intervals);
     eprintln!(
-        "conspectus serve: starting; tick interval = {tick:?}, scan roots = {:?}",
+        "conspectus serve: starting; per-class scheduler; scan roots = {:?}",
         config.scan_roots
     );
-    loop {
-        if let Err(err) = run_one_cycle(&config.scan_roots, &config.intervals) {
-            // Cycle-level isolation. The mutator/provider chain
-            // already swallows most provider-specific errors
-            // into the snapshot's `diagnostics` field; this
-            // catches the residual failure modes (e.g. the
-            // writer hitting a permission error) without
-            // killing the daemon.
-            eprintln!("conspectus serve: cycle failed, retrying next tick: {err:#}");
+
+    // Single process-local writer lock. Each class thread takes
+    // it before its load-prior + evict + run + persist sequence
+    // so two threads cannot race on the merge step. Briefly held
+    // for the entire cycle; for v1 this trades throughput
+    // (forge's minutes-long discovery blocks harness/mux) for
+    // correctness. Layer C splits this into a writer thread + a
+    // request channel so the load is back-pressured rather than
+    // serialized.
+    let writer_lock = Arc::new(Mutex::new(()));
+
+    let scan_roots = Arc::new(config.scan_roots);
+    let intervals = Arc::new(config.intervals);
+
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
+    for class in ProviderClass::all() {
+        let writer_lock = Arc::clone(&writer_lock);
+        let scan_roots = Arc::clone(&scan_roots);
+        let intervals = Arc::clone(&intervals);
+        let class = *class;
+        handles.push(thread::spawn(move || {
+            class_loop(class, &scan_roots, &intervals, &writer_lock);
+        }));
+    }
+
+    // Join every thread. If a thread panics (rather than the
+    // typical infinite-loop body), its panic is reported on
+    // stderr and the other threads keep running.
+    for handle in handles {
+        if let Err(panic) = handle.join() {
+            eprintln!("conspectus serve: scheduler thread panicked: {panic:?}");
         }
-        std::thread::sleep(tick);
+    }
+
+    Ok(())
+}
+
+/// Per-class scheduler loop. Runs one cycle immediately on
+/// startup (so the cache is populated before the first sleep)
+/// then ticks at the class's interval. Errors per cycle log to
+/// stderr and the loop continues so a transient blip does not
+/// silently retire the class's refresh duty.
+fn class_loop(
+    class: ProviderClass,
+    scan_roots: &[PathBuf],
+    intervals: &ServerIntervals,
+    writer_lock: &Mutex<()>,
+) {
+    let interval = class.ttl_duration(intervals);
+    eprintln!(
+        "conspectus serve: {} scheduler started; interval = {:?}",
+        class.name(),
+        interval
+    );
+    run_cycle(class, scan_roots, intervals, writer_lock);
+    loop {
+        thread::sleep(interval);
+        run_cycle(class, scan_roots, intervals, writer_lock);
     }
 }
 
-/// Single warm-start cycle: load the prior cache, run discovery
-/// with the freshness gate, resolve, persist. Mirrors the
-/// one-shot CLI's pairing of
-/// [`crate::discovery::discover_local_warm_with`] with
-/// [`crate::query::persist_snapshot`] so the daemon's writes are
-/// byte-for-byte equivalent to a one-shot `conspectus table`
-/// invocation.
-fn run_one_cycle(scan_roots: &[PathBuf], intervals: &ServerIntervals) -> Result<()> {
-    let prior = match load_cached_snapshot(None) {
+/// Acquire the writer lock and run one class cycle. Errors are
+/// logged and swallowed so the calling loop keeps going.
+fn run_cycle(
+    class: ProviderClass,
+    scan_roots: &[PathBuf],
+    intervals: &ServerIntervals,
+    writer_lock: &Mutex<()>,
+) {
+    // Poisoned-mutex recovery: a panic in a peer class while it
+    // held the lock taints it, but the on-disk graph is durable
+    // and re-reading prior on the next acquisition heals any
+    // half-finished state. Carry on rather than aborting the
+    // daemon.
+    let _guard = match writer_lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Err(err) = try_class_cycle(class, scan_roots, intervals) {
+        eprintln!(
+            "conspectus serve: {} cycle failed, retrying next tick: {err:#}",
+            class.name()
+        );
+    }
+}
+
+/// Load the prior cache, evict this class's slice so the
+/// freshness gate marks it as untested, run discovery (which
+/// then runs only this class's providers since every other class
+/// is still fresh), merge + resolve + persist. The shared writer
+/// lock around `run_cycle` ensures no peer thread reads-old +
+/// writes between our load and write.
+fn try_class_cycle(
+    class: ProviderClass,
+    scan_roots: &[PathBuf],
+    intervals: &ServerIntervals,
+) -> Result<()> {
+    let mut prior = match load_cached_snapshot(None) {
         Ok(Some(snap)) => snap,
-        Ok(None) => crate::model::GraphSnapshot::empty(),
+        Ok(None) => GraphSnapshot::empty(),
         Err(err) => {
-            // Read failures are handled the same way the one-
-            // shot CLI handles them: warn + fall back to cold.
-            // The post-cycle persist will heal the cache if it
-            // is corrupt (the writer's move-aside path).
-            eprintln!("conspectus serve: failed to read graph cache: {err:#}");
-            crate::model::GraphSnapshot::empty()
+            eprintln!(
+                "conspectus serve: {} failed to read graph cache: {err:#}",
+                class.name()
+            );
+            GraphSnapshot::empty()
         }
     };
+    for provider in class.providers() {
+        prior.evict_provider(provider);
+    }
     let discovery_config = LocalDiscoveryConfig::from_env();
     let snapshot =
         discover_local_warm_with(scan_roots.to_vec(), discovery_config, prior, intervals)?;
@@ -115,43 +188,56 @@ fn run_one_cycle(scan_roots: &[PathBuf], intervals: &ServerIntervals) -> Result<
     Ok(())
 }
 
-/// The shortest of the four configured class intervals. Drives
-/// the daemon's tick cadence in layer A; layer B replaces this
-/// with per-class independent timers.
-fn shortest_interval(intervals: &ServerIntervals) -> Duration {
-    [
-        intervals.harness,
-        intervals.mux,
-        intervals.git,
-        intervals.forge,
-    ]
-    .into_iter()
-    .min()
-    .unwrap_or_else(|| Duration::from_secs(5))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
-    fn shortest_interval_picks_the_min() {
-        let intervals = ServerIntervals {
-            harness: Duration::from_secs(5),
-            mux: Duration::from_secs(3),
-            git: Duration::from_secs(30),
-            forge: Duration::from_secs(300),
+    fn writer_lock_recovers_from_poison() {
+        // Simulates the per-class panic case: a thread panics
+        // while holding the lock, leaving it poisoned. Subsequent
+        // acquisitions must still succeed so the surviving class
+        // threads can keep ticking — the on-disk SQLite cache is
+        // the durable state, not the in-process lock.
+        let lock = Arc::new(Mutex::new(()));
+        let panicker = {
+            let lock = Arc::clone(&lock);
+            thread::spawn(move || {
+                let _guard = lock.lock().unwrap();
+                panic!("simulated class-thread panic");
+            })
         };
-        assert_eq!(shortest_interval(&intervals), Duration::from_secs(3));
+        let _ = panicker.join();
+        // The same `Err -> into_inner` recovery the scheduler uses.
+        let _guard = match lock.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
     }
 
     #[test]
-    fn shortest_interval_defaults_are_5s() {
-        // The default ServerIntervals has harness=mux=5s, so the
-        // tick lands at 5s.
+    fn class_intervals_use_server_interval_durations() {
+        // Pin the mapping: a future refactor that swaps the
+        // class -> interval wiring would silently change the
+        // scheduler cadence. The test compares against the
+        // ServerIntervals defaults.
+        let intervals = ServerIntervals::default();
         assert_eq!(
-            shortest_interval(&ServerIntervals::default()),
+            ProviderClass::Harness.ttl_duration(&intervals),
             Duration::from_secs(5)
+        );
+        assert_eq!(
+            ProviderClass::Mux.ttl_duration(&intervals),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            ProviderClass::Git.ttl_duration(&intervals),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            ProviderClass::Forge.ttl_duration(&intervals),
+            Duration::from_secs(300)
         );
     }
 }

@@ -1564,16 +1564,24 @@ fn current_unix_epoch_for_table() -> Option<i64> {
 /// falls back to empty rather than aborting — the writer side
 /// still runs at the end of the invocation and will heal the
 /// file on the next attempt.
-fn load_warm_start_prior(refresh: bool) -> conspectus::model::GraphSnapshot {
+///
+/// Returns `(prior, prior_was_cache_hit)`. The boolean tracks
+/// whether the prior came from an actual cache hit vs a
+/// cache miss / refresh / corruption fallback — phase-3
+/// rotation logic uses the latter as the "this was a cold
+/// rebuild" signal so an empty-but-cached snapshot (e.g. a
+/// freshly persisted run from an empty workspace) does not
+/// falsely trigger a backup rotate.
+fn load_warm_start_prior(refresh: bool) -> (conspectus::model::GraphSnapshot, bool) {
     if refresh {
-        return conspectus::model::GraphSnapshot::empty();
+        return (conspectus::model::GraphSnapshot::empty(), false);
     }
     match conspectus::query::load_cached_snapshot(None) {
-        Ok(Some(prior)) => prior,
-        Ok(None) => conspectus::model::GraphSnapshot::empty(),
+        Ok(Some(prior)) => (prior, true),
+        Ok(None) => (conspectus::model::GraphSnapshot::empty(), false),
         Err(err) => {
             eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
-            conspectus::model::GraphSnapshot::empty()
+            (conspectus::model::GraphSnapshot::empty(), false)
         }
     }
 }
@@ -1595,16 +1603,16 @@ fn warm_start_discover_and_resolve(
     no_cache: bool,
     intervals: &conspectus::config::ServerIntervals,
 ) -> Result<conspectus::model::GraphSnapshot> {
-    let prior = load_warm_start_prior(refresh);
+    let (prior, prior_was_cache_hit) = load_warm_start_prior(refresh);
     // ADR 0037 rotation trigger: this run is a cold rebuild
     // either because the operator forced one (`--refresh`) or
     // because the warm-start path found no usable cache (first
     // run, schema mismatch, corruption healed). Both states
     // produce a "known-clean" full snapshot worth backing up.
-    let cold_rebuild = refresh
-        || (prior.nodes.is_empty()
-            && prior.candidate_links.is_empty()
-            && prior.node_provenance.is_empty());
+    // An empty-but-cached prior (an earlier run from an empty
+    // workspace) is *not* a cold rebuild — we already backed up
+    // when that empty cache was first written.
+    let cold_rebuild = !prior_was_cache_hit;
     let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
     let snapshot =
         conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
@@ -5632,7 +5640,7 @@ fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<GraphSnapshot>
     let roots = effective_scan_roots(scan_roots, &cwd);
     let loader = ConfigLoader::from_env();
     let outcome = loader.load_from(&cwd);
-    let prior = load_warm_start_prior(false);
+    let (prior, _was_cache_hit) = load_warm_start_prior(false);
     let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
     conspectus::discovery::discover_local_warm_with(
         roots,

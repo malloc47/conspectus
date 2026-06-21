@@ -42,13 +42,62 @@ impl ProviderClass {
     /// Per-class TTL pulled from the resolved
     /// [`ServerIntervals`].
     pub fn ttl_seconds(self, intervals: &ServerIntervals) -> i64 {
-        let dur = match self {
+        let dur = self.ttl_duration(intervals);
+        i64::try_from(dur.as_secs()).unwrap_or(i64::MAX)
+    }
+
+    /// Same as [`Self::ttl_seconds`] but returns the underlying
+    /// [`std::time::Duration`] so `std::thread::sleep` / channel
+    /// timeouts can consume it directly without round-tripping
+    /// through seconds. The daemon's per-class scheduler is the
+    /// primary caller (P7-006 layer B).
+    pub fn ttl_duration(self, intervals: &ServerIntervals) -> std::time::Duration {
+        match self {
             Self::Git => intervals.git,
             Self::Mux => intervals.mux,
             Self::Harness => intervals.harness,
             Self::Forge => intervals.forge,
-        };
-        i64::try_from(dur.as_secs()).unwrap_or(i64::MAX)
+        }
+    }
+
+    /// Every granular provider key this class owns. Inverse of
+    /// [`provider_class`]; the daemon's per-class scheduler uses
+    /// this to evict a class's slice from the prior cache before
+    /// re-running just that class's providers.
+    pub fn providers(self) -> &'static [&'static str] {
+        match self {
+            Self::Git => &[
+                providers::GIT,
+                providers::GIT_CWD,
+                providers::ATELIER,
+                providers::GENERIC_WORKSPACE,
+                providers::AGENT_DECK,
+            ],
+            Self::Mux => &[providers::TMUX],
+            Self::Harness => &[
+                providers::CLAUDE_CODE,
+                providers::CODEX,
+                providers::OPENCODE,
+                providers::AIDER,
+            ],
+            Self::Forge => &[providers::GITHUB],
+        }
+    }
+
+    /// Stable name used in log lines / future status output.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Git => "git",
+            Self::Mux => "mux",
+            Self::Harness => "harness",
+            Self::Forge => "forge",
+        }
+    }
+
+    /// The full set of classes the daemon schedules. Returned in
+    /// a stable order so logs and tests are deterministic.
+    pub fn all() -> &'static [ProviderClass] {
+        &[Self::Git, Self::Mux, Self::Harness, Self::Forge]
     }
 }
 
@@ -341,6 +390,26 @@ mod tests {
         assert!(keys.contains("git"));
         assert!(keys.contains("cross_link"));
         assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn class_providers_is_the_inverse_of_provider_class() {
+        // Every key in any class's providers() list must map back
+        // to that class via provider_class. A divergence between
+        // the two means the daemon's per-class scheduler would
+        // evict-and-re-run a slice the freshness gate doesn't
+        // consider part of the class — silently leaking work.
+        for class in ProviderClass::all() {
+            for provider in class.providers() {
+                let recovered = provider_class(provider);
+                assert_eq!(
+                    recovered,
+                    Some(*class),
+                    "ProviderClass::{class:?}.providers() lists `{provider}` \
+                     but provider_class maps it to {recovered:?}"
+                );
+            }
+        }
     }
 
     #[test]

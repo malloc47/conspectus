@@ -50,16 +50,29 @@ fn serve_populates_graph_cache_within_first_tick() {
 
     let mut child = cmd.spawn().expect("spawn conspectus serve");
 
-    // Poll the cache path; the first cycle runs synchronously
-    // on startup so the file appears quickly. Bail out at 10s
-    // to avoid hanging CI on a deeper regression.
+    // Poll for a valid schema, not just file existence: the
+    // writer creates the SQLite file inside open() and only
+    // *then* applies the schema, so a naive existence check
+    // races against the in-flight first persist. Reading
+    // `user_version > 0` is the cheap "schema has been applied"
+    // signal that callers (other daemon ticks, peer one-shot
+    // CLIs) use too.
     let cache_path = data.path().join("conspectus").join("graph.sqlite");
     let deadline = Instant::now() + Duration::from_secs(10);
+    let mut observed_version: u32 = 0;
     while Instant::now() < deadline {
-        if cache_path.exists() {
+        if cache_path.exists()
+            && let Ok(conn) = rusqlite::Connection::open_with_flags(
+                &cache_path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            && let Ok(v) = conn.query_row::<u32, _, _>("PRAGMA user_version", [], |row| row.get(0))
+            && v > 0
+        {
+            observed_version = v;
             break;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
     }
 
     // Kill the daemon before asserting so a hanging child does
@@ -68,22 +81,10 @@ fn serve_populates_graph_cache_within_first_tick() {
     let _ = child.wait();
 
     assert!(
-        cache_path.exists(),
-        "daemon should populate {} within the first tick",
-        cache_path.display()
-    );
-
-    let conn = rusqlite::Connection::open_with_flags(
-        &cache_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .expect("open persisted database");
-    let user_version: u32 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("read user_version");
-    assert!(
-        user_version > 0,
-        "daemon writer should set user_version; got {user_version}"
+        observed_version > 0,
+        "daemon writer should set user_version within the deadline; \
+         cache exists={}, observed={observed_version}",
+        cache_path.exists()
     );
 }
 
