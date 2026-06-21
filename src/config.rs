@@ -11,6 +11,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
@@ -34,6 +35,43 @@ pub const USER_CONFIG_RELATIVE: &str = "conspectus/config.toml";
 pub struct Config {
     pub table: TableConfig,
     pub tui: TuiConfig,
+    pub server: ServerConfig,
+}
+
+/// Settings under `[server]`. Configures both the `conspectus
+/// serve` daemon (P7-006) and the one-shot CLI's warm-start TTL
+/// gate (P7-003 phase 3) per ADR 0079. The shared shape is the
+/// whole point: a single per-class number controls both
+/// "refresh this often" and "stale after this long" — recording
+/// the same value twice would drift.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ServerConfig {
+    pub intervals: ServerIntervals,
+}
+
+/// Per-provider-class refresh / TTL durations.
+///
+/// Defaults match ADR 0038 (`harness=5s`, `mux=5s`, `git=30s`,
+/// `forge=5m`). The four classes collapse the granular per-emit
+/// provider strings (`git`, `git::cwd`, `tmux`, `github`,
+/// `claude-code`, …) per the mapping in ADR 0079.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServerIntervals {
+    pub harness: Duration,
+    pub mux: Duration,
+    pub git: Duration,
+    pub forge: Duration,
+}
+
+impl Default for ServerIntervals {
+    fn default() -> Self {
+        Self {
+            harness: Duration::from_secs(5),
+            mux: Duration::from_secs(5),
+            git: Duration::from_secs(30),
+            forge: Duration::from_secs(300),
+        }
+    }
 }
 
 /// Settings under `[tui]` in `.conspectus.toml` / user config.
@@ -183,11 +221,33 @@ struct ConfigFile {
     table: Option<TableFile>,
     #[serde(default)]
     tui: Option<TuiFile>,
+    /// `[server]` table per ADR 0038 + ADR 0079. Optional; absence
+    /// keeps the [`ServerIntervals::default`] values.
+    #[serde(default)]
+    server: Option<ServerFile>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
     #[serde(default)]
     session: Option<toml::Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ServerFile {
+    #[serde(default)]
+    intervals: Option<ServerIntervalsFile>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ServerIntervalsFile {
+    #[serde(default)]
+    harness: Option<String>,
+    #[serde(default)]
+    mux: Option<String>,
+    #[serde(default)]
+    git: Option<String>,
+    #[serde(default)]
+    forge: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -463,6 +523,88 @@ fn merge_from_file(
     if let Some(tui) = parsed.tui {
         merge_tui(&mut config.tui, tui, home, path, diagnostics);
     }
+
+    if let Some(server) = parsed.server {
+        merge_server(&mut config.server, server, path, diagnostics);
+    }
+}
+
+fn merge_server(
+    config: &mut ServerConfig,
+    file: ServerFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(intervals) = file.intervals else {
+        return;
+    };
+    merge_server_intervals(&mut config.intervals, intervals, path, diagnostics);
+}
+
+fn merge_server_intervals(
+    config: &mut ServerIntervals,
+    file: ServerIntervalsFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    // Per-field merge: each interval is independent, so a malformed
+    // value diagnoses and leaves the default in place rather than
+    // killing the rest of the table. This matches the ADR 0079
+    // "best-effort merge" contract.
+    set_server_interval(
+        &mut config.harness,
+        "harness",
+        file.harness,
+        path,
+        diagnostics,
+    );
+    set_server_interval(&mut config.mux, "mux", file.mux, path, diagnostics);
+    set_server_interval(&mut config.git, "git", file.git, path, diagnostics);
+    set_server_interval(&mut config.forge, "forge", file.forge, path, diagnostics);
+}
+
+fn set_server_interval(
+    target: &mut Duration,
+    field: &str,
+    raw: Option<String>,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(raw) = raw else { return };
+    match parse_duration_short(&raw) {
+        Ok(duration) => *target = duration,
+        Err(message) => diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: format!("invalid `[server.intervals]` `{field}` value `{raw}`: {message}"),
+        }),
+    }
+}
+
+/// Parse a short-form duration string of the shape
+/// `<non-negative-integer><ms|s|m|h>`. Shared with the CLI
+/// `--refresh-interval` flag (which calls through its own
+/// historical `parse_tui_duration` wrapper); the format is the
+/// same so operators can copy values between flag and config.
+fn parse_duration_short(input: &str) -> Result<Duration, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("empty duration".into());
+    }
+    let split = trimmed
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| "missing unit (expected ms/s/m/h)".to_string())?;
+    let (num_str, suffix) = trimmed.split_at(split);
+    let value: u64 = num_str
+        .parse()
+        .map_err(|_| format!("not a non-negative integer: `{num_str}`"))?;
+    let dur = match suffix {
+        "ms" => Duration::from_millis(value),
+        "s" => Duration::from_secs(value),
+        "m" => Duration::from_secs(value.saturating_mul(60)),
+        "h" => Duration::from_secs(value.saturating_mul(3600)),
+        other => return Err(format!("unknown unit `{other}` (expected ms/s/m/h)")),
+    };
+    Ok(dur)
 }
 
 fn merge_tui(
@@ -968,6 +1110,105 @@ mod tests {
         let outcome = loader.load_from(&home);
 
         assert!(outcome.project_path.is_none());
+    }
+
+    #[test]
+    fn server_intervals_default_when_absent() {
+        // No `[server]` block at all → every class keeps its ADR
+        // 0038 default. P7-003 phase 3's TTL gate falls back to
+        // these numbers on a fresh install.
+        let temp = TempDir::new().expect("temp dir");
+        let loader = ConfigLoader::new()
+            .with_home(temp.path())
+            .with_xdg_config_home(temp.path().join("xdg"));
+        let outcome = loader.load_from(temp.path());
+        let intervals = outcome.config.server.intervals;
+        assert_eq!(intervals.harness, Duration::from_secs(5));
+        assert_eq!(intervals.mux, Duration::from_secs(5));
+        assert_eq!(intervals.git, Duration::from_secs(30));
+        assert_eq!(intervals.forge, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn server_intervals_parse_each_supported_unit() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[server.intervals]\n\
+             harness = \"500ms\"\n\
+             mux     = \"10s\"\n\
+             git     = \"2m\"\n\
+             forge   = \"1h\"\n",
+        );
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+        assert!(
+            outcome.diagnostics.is_empty(),
+            "expected no diagnostics; got {:?}",
+            outcome.diagnostics
+        );
+        let intervals = outcome.config.server.intervals;
+        assert_eq!(intervals.harness, Duration::from_millis(500));
+        assert_eq!(intervals.mux, Duration::from_secs(10));
+        assert_eq!(intervals.git, Duration::from_secs(120));
+        assert_eq!(intervals.forge, Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn server_intervals_unset_field_keeps_default() {
+        // Partial override: only `forge` is bumped; the other
+        // classes keep their defaults rather than collapsing to
+        // zero. Per-field independence is the ADR 0079 contract.
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[server.intervals]\nforge = \"10m\"\n",
+        );
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+        assert!(outcome.diagnostics.is_empty());
+        let intervals = outcome.config.server.intervals;
+        assert_eq!(intervals.harness, Duration::from_secs(5));
+        assert_eq!(intervals.mux, Duration::from_secs(5));
+        assert_eq!(intervals.git, Duration::from_secs(30));
+        assert_eq!(intervals.forge, Duration::from_secs(600));
+    }
+
+    #[test]
+    fn server_intervals_malformed_value_diagnoses_and_keeps_default() {
+        // A single malformed value emits a diagnostic and falls
+        // back to the default for that field; the rest of the
+        // table still merges. Matches the broader best-effort
+        // merge contract elsewhere in this loader.
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[server.intervals]\nharness = \"5q\"\nmux = \"7s\"\n",
+        );
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+        assert_eq!(
+            outcome.diagnostics.len(),
+            1,
+            "exactly one diagnostic for the malformed value"
+        );
+        assert!(
+            outcome.diagnostics[0].message.contains("harness"),
+            "diagnostic should name the offending field; got {}",
+            outcome.diagnostics[0].message
+        );
+        // Field falls back to default; other field still merged.
+        assert_eq!(
+            outcome.config.server.intervals.harness,
+            Duration::from_secs(5)
+        );
+        assert_eq!(outcome.config.server.intervals.mux, Duration::from_secs(7));
     }
 
     #[test]
