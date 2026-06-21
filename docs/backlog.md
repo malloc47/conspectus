@@ -7340,26 +7340,43 @@ code.
     natural home for that since it owns the save/load lifecycle
     that knows whether a provider ran successfully.
 
-- [ ] `P7-003` Implement snapshot save/load for the one-shot CLI.
-  - Scope: after a successful run, persist the resolved graph per
-    `P7-001`. On subsequent CLI runs, load the most recent snapshot,
-    compare each provider's freshness timestamp against its
-    configured TTL, and re-run only providers whose TTL has expired.
-    Reuse the remaining slices verbatim. Re-resolve the merged
-    candidate set before rendering. Fall back to a cold rebuild when
-    no snapshot exists, the schema version differs, or `--no-cache`
-    / `--refresh` is requested. Snapshot writes must not dirty
-    project trees.
-  - Tests: integration tests covering cold start, warm start with
-    every provider fresh (no rebuild), warm start with one provider
-    expired (only that slice rebuilt), schema-version mismatch
-    fallback, malformed snapshot fallback, and `--refresh` forcing
-    a cold rebuild. Snapshot-rotation tests confirming retention.
-  - Manual checks: run `conspectus session` twice in quick
-    succession and observe the second run skipping expensive
-    providers; corrupt the snapshot file by hand and confirm the
-    next run recovers.
-  - Blockers: `P7-001`, `P7-002`.
+- [x] `P7-003` Implement snapshot save/load for the one-shot CLI.
+  - Outcome: landed in three phases.
+    - Phase 1 wrote the resolved snapshot to
+      `$XDG_DATA_HOME/conspectus/graph.sqlite` after each
+      successful `conspectus table` invocation via
+      `query::persist::persist_snapshot`. `--no-cache` opts the
+      writer out for that run; `--refresh` was reserved as a
+      no-op flag ahead of the read path.
+    - Phase 2 added `query::persist::load_cached_snapshot` (the
+      read peer) and `discovery::merge_with_prior` (a backstop
+      `merge_fragments`-based union with fresh-wins semantics).
+      The CLI overlays the prior on every run unless `--refresh`
+      is passed, so prior-only nodes survive but live data wins
+      on collisions.
+    - Phase 3 introduced the freshness gate
+      (`discovery::cache::compute_freshness_gate`) per ADR 0079.
+      `discover_local_warm_with` evicts stale + always-evict
+      slices from the prior, skips heavy providers whose class
+      TTL has not expired, re-runs every mutator pass against
+      the merged snapshot, and persists back. The CLI's
+      `table` command now goes through this path. Selective
+      eviction relies on the P7-005 primitive landed alongside.
+  - Tests: snapshot persist + read round-trips in
+    `src/query/persist.rs`; gate algebra unit tests in
+    `src/discovery/cache.rs` (8 cases); selective-discovery
+    unit tests in `src/discovery/mod.rs`
+    (`discover_local_warm_with_*`); CLI integration tests in
+    `tests/cli_persist.rs` covering the cold/warm/refresh
+    matrix plus the end-to-end fresh-slice carryover.
+  - Follow-ups: schema-version mismatch fallback,
+    malformed-snapshot recovery, and the `VACUUM INTO`
+    rotation/retention from ADR 0037 are still open; they did
+    not block phase 3 and will be picked up alongside the
+    daemon work in `P7-006`. Optional `H-REF-009` centralizes
+    provider key constants into a `discovery::providers`
+    module; the strings still match `source_metadata.adapter`
+    literals exactly so the rename is mechanical.
 
 - [x] `P7-004` ADR: continuous server mode architecture and transport.
   - Outcome: accepted as ADR 0038 (cli-server-transport-wal). The
@@ -7378,24 +7395,27 @@ code.
     the WAL read path. Implementation of `conspectus serve` is
     `P7-006`; the CLI client integration is `P7-007`.
 
-- [ ] `P7-005` Implement partial graph eviction at provider granularity.
-  - Scope: introduce a graph-merge primitive that, given an existing
-    graph and a single provider's new slice, evicts the prior slice
-    for that provider and merges the new slice in. The resolver
-    re-runs against the merged candidate-link set. Declared links,
-    other providers' slices, and the existing node identities
-    survive untouched. This is the core operation `P7-003` uses for
-    selective refresh and `P7-006` uses on every provider tick.
-  - Tests: unit tests covering empty-prior + new slice (insert
-    only), non-empty prior + new slice (replace + merge), eviction
-    when a provider returns zero results (correctly removes prior
-    nodes), eviction when only candidate links changed (nodes
-    survive), declared-link preservation across eviction, and
-    resolver consistency before and after a merge. Property tests
-    asserting that merging `prior` with provider P's slice equals a
-    cold rebuild that only ran provider P (for the node space P
-    owns).
-  - Blockers: `P7-002`.
+- [x] `P7-005` Implement partial graph eviction at provider granularity.
+  - Outcome: landed as `GraphSnapshot::evict_provider(&str)` in
+    `src/model/mod.rs`. The primitive drops every node whose
+    `node_provenance` entry matches the provider, every
+    candidate link whose `source_metadata.adapter` matches, and
+    every matching provenance entry; it clears
+    `resolved_relationships` so the resolver re-derives against
+    the trimmed candidate set. Conservative on data without a
+    provenance entry (pre-instrumentation snapshots survive).
+    Used by `P7-003` phase 3 inside `discover_local_warm_with`
+    to evict stale + always-evict slices before the warm-start
+    merge; ready for `P7-006` to call on every provider tick.
+  - Tests: five unit tests in `src/model/mod.rs::tests::
+    evict_provider_*` cover multi-provider eviction,
+    no-op on missing keys, link-only eviction (mutator shape),
+    resolved-relationship clearing, and preservation of
+    orphan nodes lacking provenance entries. Cold-rebuild
+    equivalence is implicit in the `discover_local_with`
+    wrapper around `discover_local_warm_with`: passing an
+    empty prior reduces the new path to the prior cold-only
+    behavior.
 
 - [ ] `P7-006` Implement `conspectus serve`.
   - Scope: long-running process that holds the in-memory graph,

@@ -865,7 +865,10 @@ reads never require the server.
 
 Configuration extends the existing TOML config with a `[server]` table
 plus per-provider interval keys; specific keys and defaults belong in
-ADR 0038.
+ADR 0038. The same `[server.intervals]` table doubles as the one-shot
+CLI's warm-start TTL per ADR 0079: the daemon treats each value as
+"refresh this often," the CLI treats it as "any slice older than this
+is stale." Recording the same number twice would drift.
 
 ## Graph Snapshot Persistence
 
@@ -912,16 +915,33 @@ This provenance is what makes partial eviction possible:
   (or a tightly-paired follow-up). Re-run cadence (eager, batched,
   or lazy) is left to ADR 0037 and the implementing stories.
 
-The one-shot CLI's warm-start path:
+The one-shot CLI's warm-start path (per ADR 0079 and `P7-003` phase 3):
 
-1. Open `graph.sqlite` if it exists and the schema version matches.
-2. For each provider, compare its `last_run_at` in `provider_state`
-   against its configured TTL.
-3. Re-run only providers whose TTL has expired; reuse the rest.
-4. Re-resolve and render.
+1. Open `graph.sqlite` if it exists and read the snapshot into memory.
+   An absent file is a cold start, not an error.
+2. For each provider key observed in the snapshot, find the max
+   `freshness_epoch` across the per-node provenance sidecar and the
+   per-link `source_metadata` and compare `now - max_epoch` against
+   the configured class TTL from `[server.intervals]`.
+3. Evict the stale provider slices (and the always-rerun mutator
+   slices: `cross_link`, `codex_log`, `hook_sidecar`, `declared`)
+   from the prior via `GraphSnapshot::evict_provider`.
+4. Run only the stale + untested heavy providers; skip the fresh
+   ones via `LocalDiscovery::discover_skipping`.
+5. Merge fresh discovery with the evicted prior so the fresh
+   fragment wins on every collision and the prior fills only the
+   slices the live run skipped.
+6. Re-run the always-rerun mutators against the merged snapshot.
+7. Re-resolve and render; persist the resolved snapshot back to
+   `graph.sqlite` so the next invocation can warm-start.
 
-If no database exists, the schema version differs, or `--no-cache` /
-`--refresh` is requested, fall back to a cold rebuild.
+`--refresh` collapses step 1's prior to empty, which makes the gate
+classify nothing as fresh and forces a cold rebuild. `--no-cache`
+suppresses the writer in step 7 so the run does not mutate the
+on-disk cache. Per-emit `freshness_epoch` rather than the
+ADR 0037 `provider_state` table drives the gate; the
+`provider_state` write remains deferred until the daemon owns the
+lifecycle context that knows whether a run was successful.
 
 Server / one-shot CLI coexistence (ADR 0038) is built on top of
 this persistence model. Readers open `graph.sqlite` in read-only
