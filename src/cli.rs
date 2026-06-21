@@ -1369,6 +1369,19 @@ struct TableRowsArgs {
     /// flag set.
     #[command(flatten)]
     filter_args: FilterArgs,
+    /// P7-003: skip writing the resolved snapshot to the canonical
+    /// `graph.sqlite` cache after this invocation. Useful for
+    /// debugging or when running against a non-writable `$HOME`.
+    /// Does not affect the rendered output.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
+    /// P7-003: force a cold rebuild of every provider, ignoring the
+    /// persisted cache. No-op until the warm-start read path lands
+    /// (the writer always runs unless `--no-cache` is set); the flag
+    /// is accepted now so scripts can adopt it ahead of the
+    /// behavioral change.
+    #[arg(long = "refresh")]
+    refresh: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -1418,6 +1431,12 @@ impl TableRowsArgs {
             conspectus::discovery::discover_local_at_roots(self.scan_roots)?
         };
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        // P7-003: persist the resolved graph so the next invocation
+        // can warm-start. Best-effort; failures are surfaced to
+        // stderr but never block rendering. The `--refresh` flag is
+        // a no-op until the warm-start read path lands.
+        let _ = self.refresh;
+        cache_resolved_snapshot(&snapshot, self.no_cache);
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {
@@ -1448,6 +1467,22 @@ fn current_unix_epoch_for_table() -> Option<i64> {
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|d| i64::try_from(d.as_secs()).ok())
+}
+
+/// P7-003: persist a freshly resolved snapshot to the canonical
+/// `graph.sqlite` location. Best-effort: a write failure prints a
+/// `conspectus: warning:` line to stderr but never aborts the
+/// command — the rendered output the operator just saw is the
+/// primary product. `no_cache` lets the operator opt out for a
+/// single invocation (e.g. when running against a non-writable
+/// `$HOME` or wanting an in-memory-only render).
+fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapshot, no_cache: bool) {
+    if no_cache {
+        return;
+    }
+    if let Err(err) = conspectus::query::persist_snapshot(snapshot, None) {
+        eprintln!("conspectus: warning: failed to persist graph cache: {err:#}");
+    }
 }
 
 /// Resolve which column set to render, with CLI overriding config.

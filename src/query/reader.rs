@@ -66,7 +66,55 @@ pub fn read_snapshot(conn: &Connection) -> rusqlite::Result<GraphSnapshot> {
     snap.diagnostics = read_diagnostics(conn)?;
     snap.pins = read_pins(conn)?;
     snap.aliases = read_aliases(conn)?;
+    snap.node_provenance = read_node_provenance(conn, &snap.nodes)?;
     Ok(snap)
+}
+
+/// Reconstruct the `node_provenance` sidecar by joining `v_nodes`
+/// (the schema's `UNION ALL` over every `node_<kind>` table) on
+/// `node_id`. Rows whose `discovery_provider` is the schema's
+/// `'unknown'` default are skipped so the rebuilt snapshot stays
+/// equivalent to what the producer originally pushed in — a
+/// not-yet-instrumented adapter never had a sidecar entry, so the
+/// reconstruction shouldn't invent one either.
+fn read_node_provenance(
+    conn: &Connection,
+    nodes: &[GraphNode],
+) -> rusqlite::Result<std::collections::BTreeMap<crate::model::NodeId, crate::model::NodeProvenance>>
+{
+    use std::collections::BTreeMap;
+    let mut rows_by_id: BTreeMap<String, (String, i64)> = BTreeMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT node_id, discovery_provider, discovery_freshness_epoch \
+         FROM v_nodes \
+         WHERE discovery_provider != 'unknown' OR discovery_freshness_epoch != 0",
+    )?;
+    let mapped = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    for row in mapped {
+        let (id, provider, epoch) = row?;
+        rows_by_id.insert(id, (provider, epoch));
+    }
+
+    let mut out = BTreeMap::new();
+    for node in nodes {
+        let key = node.id().to_string();
+        if let Some((provider, epoch)) = rows_by_id.remove(&key) {
+            out.insert(
+                node.id(),
+                crate::model::NodeProvenance {
+                    provider,
+                    freshness_epoch: if epoch == 0 { None } else { Some(epoch) },
+                },
+            );
+        }
+    }
+    Ok(out)
 }
 
 // -----------------------------------------------------------------------------

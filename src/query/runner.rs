@@ -379,12 +379,10 @@ fn open_connection(override_path: Option<&std::path::Path>) -> Result<Connection
 }
 
 /// Canonical on-disk location for the graph database, per ADR 0037.
+/// Delegates to [`super::persist::graph_db_path`] so the writer and
+/// reader paths can never disagree on where the file lives.
 fn graph_db_path() -> PathBuf {
-    let base = env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join("conspectus").join("graph.sqlite")
+    super::persist::graph_db_path()
 }
 
 fn apply_query_pragmas(conn: &Connection) -> Result<()> {
