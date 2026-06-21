@@ -1426,16 +1426,24 @@ impl TableRowsArgs {
         let cli_filter = self.filter_args.to_row_filter()?;
         let now_epoch = current_unix_epoch_for_table();
 
-        let snapshot = if self.scan_roots.is_empty() {
-            conspectus::discovery::discover_local_at_roots([cwd])?
+        // P7-003 phase 3: feed the persisted cache + per-class TTL
+        // intervals into the discovery driver so providers whose
+        // slices are still fresh skip running entirely. `--refresh`
+        // collapses the prior to empty, which falls back to the
+        // cold-rebuild behavior the phase-2 wiring already had.
+        let prior = load_warm_start_prior(self.refresh);
+        let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
+        let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
+            vec![cwd]
         } else {
-            conspectus::discovery::discover_local_at_roots(self.scan_roots)?
+            self.scan_roots.clone()
         };
-        // P7-003 phase 2: optionally overlay the persisted cache as
-        // a backstop so prior-only nodes survive while live data
-        // still wins on every collision. `--refresh` skips the read
-        // entirely for operators who want a guaranteed cold scan.
-        let snapshot = warm_start_snapshot(snapshot, self.refresh);
+        let snapshot = conspectus::discovery::discover_local_warm_with(
+            roots,
+            discovery_config,
+            prior,
+            &outcome.config.server.intervals,
+        )?;
         let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
         // P7-003: persist the resolved graph so the next invocation
         // can warm-start. Best-effort; failures are surfaced to
@@ -1473,6 +1481,29 @@ fn current_unix_epoch_for_table() -> Option<i64> {
         .and_then(|d| i64::try_from(d.as_secs()).ok())
 }
 
+/// P7-003 phase 3: load the persisted `graph.sqlite` cache as
+/// the warm-start `prior` for [`conspectus::discovery::
+/// discover_local_warm_with`]. `refresh = true` returns an empty
+/// snapshot so the discovery driver's freshness gate sees no
+/// cached slices and runs every provider cold. A corrupted or
+/// unreadable cache emits a `conspectus: warning:` line and
+/// falls back to empty rather than aborting — the writer side
+/// still runs at the end of the invocation and will heal the
+/// file on the next attempt.
+fn load_warm_start_prior(refresh: bool) -> conspectus::model::GraphSnapshot {
+    if refresh {
+        return conspectus::model::GraphSnapshot::empty();
+    }
+    match conspectus::query::load_cached_snapshot(None) {
+        Ok(Some(prior)) => prior,
+        Ok(None) => conspectus::model::GraphSnapshot::empty(),
+        Err(err) => {
+            eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
+            conspectus::model::GraphSnapshot::empty()
+        }
+    }
+}
+
 /// P7-003: persist a freshly resolved snapshot to the canonical
 /// `graph.sqlite` location. Best-effort: a write failure prints a
 /// `conspectus: warning:` line to stderr but never aborts the
@@ -1480,35 +1511,6 @@ fn current_unix_epoch_for_table() -> Option<i64> {
 /// primary product. `no_cache` lets the operator opt out for a
 /// single invocation (e.g. when running against a non-writable
 /// `$HOME` or wanting an in-memory-only render).
-/// P7-003 phase 2: optionally fold the persisted `graph.sqlite`
-/// cache into `fresh` as a backstop. The fresh fragment wins on
-/// every collision (first-write-wins via
-/// [`conspectus::discovery::merge_with_prior`]); the cache only
-/// contributes nodes the live scan did not emit. `refresh = true`
-/// bypasses the read so the operator gets a guaranteed cold scan
-/// even when the cache is healthy.
-///
-/// Best-effort: a corrupted or unreadable cache prints a
-/// `conspectus: warning:` line to stderr and the run continues
-/// against `fresh` alone — losing a backstop should never abort
-/// the command.
-fn warm_start_snapshot(
-    fresh: conspectus::model::GraphSnapshot,
-    refresh: bool,
-) -> conspectus::model::GraphSnapshot {
-    if refresh {
-        return fresh;
-    }
-    match conspectus::query::load_cached_snapshot(None) {
-        Ok(Some(prior)) => conspectus::discovery::merge_with_prior(fresh, prior),
-        Ok(None) => fresh,
-        Err(err) => {
-            eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
-            fresh
-        }
-    }
-}
-
 fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapshot, no_cache: bool) {
     if no_cache {
         return;
