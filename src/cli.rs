@@ -397,17 +397,37 @@ struct RefreshArgs {
     /// fallback uses the process cwd.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
+    /// Refresh only one provider class (`git`, `mux`,
+    /// `harness`, or `forge`) instead of the full graph. With
+    /// the daemon running, the per-class refresh evicts only
+    /// that class's slice and re-runs only its providers. In
+    /// the in-process fallback the same constraint applies, so
+    /// the wall-clock cost matches a single class's discovery.
+    #[arg(long)]
+    class: Option<String>,
 }
 
 impl RefreshArgs {
     fn run(self) -> Result<()> {
+        // Validate the --class value up front so we surface a
+        // useful error regardless of whether we route through
+        // the daemon or the fallback path.
+        if let Some(name) = self.class.as_deref()
+            && conspectus::discovery::cache::ProviderClass::parse(name).is_none()
+        {
+            bail!("unknown --class `{name}`; expected one of git, mux, harness, forge");
+        }
+
         // Try the daemon socket first. If a `conspectus serve`
         // process is running it owns the freshest writer
         // discipline and is also the canonical place to
         // coordinate a refresh.
-        match conspectus::server::client_refresh() {
+        match conspectus::server::client_refresh(self.class.as_deref()) {
             conspectus::server::ClientOutcome::Ok(epoch) => {
-                println!("refreshed via daemon (epoch={epoch})");
+                match self.class.as_deref() {
+                    Some(class) => println!("refreshed {class} via daemon (epoch={epoch})"),
+                    None => println!("refreshed via daemon (epoch={epoch})"),
+                }
                 return Ok(());
             }
             conspectus::server::ClientOutcome::DaemonError { code, message } => {
@@ -427,10 +447,14 @@ impl RefreshArgs {
             }
         }
 
-        // Fallback: local cold rebuild. Mirrors `--refresh` on
-        // the read-side commands so the operator can use
-        // `conspectus refresh` interchangeably whether or not
-        // the daemon is up.
+        // Fallback: in-process refresh. For a full refresh, do
+        // the same warm-start cold-rebuild path the table
+        // command runs with `--refresh`. For a per-class refresh
+        // we load the prior, evict the class, re-run discovery,
+        // resolve, persist — mirroring the daemon's
+        // try_class_cycle except without the writer Mutex (the
+        // SQLite busy_timeout coordinates against any peer
+        // writer including a fresh daemon).
         let cwd = std::env::current_dir()?;
         let loader = config::ConfigLoader::from_env();
         let outcome = loader.load_from(&cwd);
@@ -446,13 +470,58 @@ impl RefreshArgs {
         } else {
             self.scan_roots
         };
-        // `refresh = true`, `no_cache = false`: force cold +
-        // persist + rotate a backup, same shape as `table
-        // sessions --refresh` would do.
-        warm_start_discover_and_resolve(roots, true, false, &outcome.config.server.intervals)?;
-        println!("refreshed via in-process cold rebuild");
+        match self.class.as_deref() {
+            None => {
+                warm_start_discover_and_resolve(
+                    roots,
+                    true,
+                    false,
+                    &outcome.config.server.intervals,
+                )?;
+                println!("refreshed via in-process cold rebuild");
+            }
+            Some(name) => {
+                // `parse` was validated above.
+                let class = conspectus::discovery::cache::ProviderClass::parse(name)
+                    .expect("class validated above");
+                in_process_class_refresh(class, roots, &outcome.config.server.intervals)?;
+                println!("refreshed {name} via in-process per-class refresh");
+            }
+        }
         Ok(())
     }
+}
+
+/// In-process per-class refresh used by `conspectus refresh
+/// --class <name>` when no daemon is available. Mirrors the
+/// daemon-side `try_class_cycle`: load prior cache, evict the
+/// class's slice so the freshness gate marks it untested, run
+/// discovery (which then runs only this class because every
+/// other class is still TTL-fresh), resolve, persist.
+fn in_process_class_refresh(
+    class: conspectus::discovery::cache::ProviderClass,
+    roots: Vec<PathBuf>,
+    intervals: &conspectus::config::ServerIntervals,
+) -> Result<()> {
+    let mut prior = match conspectus::query::load_cached_snapshot(None) {
+        Ok(Some(snap)) => snap,
+        Ok(None) => conspectus::model::GraphSnapshot::empty(),
+        Err(err) => {
+            eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
+            conspectus::model::GraphSnapshot::empty()
+        }
+    };
+    for provider in class.providers() {
+        prior.evict_provider(provider);
+    }
+    let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
+    let snapshot =
+        conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
+    let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+    if let Err(err) = conspectus::query::persist_snapshot(&snapshot, None) {
+        eprintln!("conspectus: warning: failed to persist graph cache: {err:#}");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Args, Default)]

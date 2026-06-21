@@ -99,6 +99,21 @@ impl ProviderClass {
     pub fn all() -> &'static [ProviderClass] {
         &[Self::Git, Self::Mux, Self::Harness, Self::Forge]
     }
+
+    /// Parse a class identifier produced by [`Self::name`] back
+    /// into a `ProviderClass`. The daemon's `refresh --class`
+    /// command uses this to map operator input ("forge") to the
+    /// internal enum without coupling the CLI to the enum
+    /// variant directly.
+    pub fn parse(name: &str) -> Option<ProviderClass> {
+        match name {
+            "git" => Some(Self::Git),
+            "mux" => Some(Self::Mux),
+            "harness" => Some(Self::Harness),
+            "forge" => Some(Self::Forge),
+            _ => None,
+        }
+    }
 }
 
 /// Map a granular per-emit provider string to its interval

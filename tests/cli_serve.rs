@@ -498,6 +498,96 @@ fn cli_refresh_command_uses_daemon_when_present() {
 }
 
 #[test]
+fn cli_refresh_class_unknown_errors_before_socket() {
+    // `--class bogus` must fail fast with a clear "unknown
+    // class" line, independent of whether a daemon is running.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .args(["refresh", "--class", "bogus"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = cmd.output().expect("run refresh --class bogus");
+    assert!(
+        !output.status.success(),
+        "unknown class should be a non-zero exit"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unknown --class") && stderr.contains("bogus"),
+        "expected unknown-class error; stderr=\n{stderr}"
+    );
+}
+
+#[test]
+fn cli_refresh_class_runs_in_process_when_no_daemon() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .args(["refresh", "--class", "git"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = cmd.output().expect("run refresh --class git");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("refreshed git via in-process per-class refresh"),
+        "expected per-class in-process line; stdout=\n{stdout}"
+    );
+    assert!(data.path().join("conspectus").join("graph.sqlite").exists());
+}
+
+#[test]
+fn cli_refresh_class_routes_through_daemon_when_present() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut serve_cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut serve_cmd, home.path(), data.path(), runtime.path());
+    serve_cmd
+        .current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = serve_cmd.spawn().expect("spawn serve");
+    let socket = socket_path_under(runtime.path());
+    assert!(wait_for_socket(&socket, Duration::from_secs(5)));
+
+    let mut client_cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut client_cmd, home.path(), data.path(), runtime.path());
+    client_cmd
+        .current_dir(cwd.path())
+        .args(["refresh", "--class", "forge"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = client_cmd.output().expect("client refresh forge");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("refreshed forge via daemon"),
+        "expected daemon-routed per-class line; stdout=\n{stdout}"
+    );
+}
+
+#[test]
 fn serve_shuts_down_cleanly_on_sigterm() {
     // ADR 0080: SIGTERM (and SIGINT) flip a shared shutdown
     // flag that every scheduler thread polls between sleeps.

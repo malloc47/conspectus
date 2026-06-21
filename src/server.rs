@@ -324,12 +324,18 @@ pub fn client_status() -> ClientOutcome<BTreeMap<String, ClassState>> {
     }
 }
 
-/// Send a `refresh` request to the daemon. Returns the
-/// `refreshed_epoch` field on success — the wall-clock second at
-/// which the daemon took the writer lock to begin the cold
+/// Send a `refresh` request to the daemon. When `class` is
+/// `Some`, only that class's slice is re-run; when `None`, the
+/// daemon performs a full cold rebuild. Returns the
+/// `refreshed_epoch` field on success — the wall-clock second
+/// at which the daemon took the writer lock to begin the
 /// rebuild.
-pub fn client_refresh() -> ClientOutcome<u64> {
-    match call_command("refresh", serde_json::Value::Null, "cli-refresh") {
+pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
+    let args = match class {
+        Some(c) => serde_json::json!({"class": c}),
+        None => serde_json::Value::Null,
+    };
+    match call_command("refresh", args, "cli-refresh") {
         ClientOutcome::Ok(value) => match value.get("refreshed_epoch").and_then(|v| v.as_u64()) {
             Some(epoch) => ClientOutcome::Ok(epoch),
             None => ClientOutcome::Transport(anyhow!(
@@ -512,27 +518,50 @@ fn handle_status(request: &Request, ctx: &DispatchCtx) -> Response {
 }
 
 /// `refresh` command handler. Acquires the writer lock and runs
-/// a cold rebuild (empty prior → freshness gate marks every
-/// class as untested → every adapter runs), persists the
-/// result. Synchronous from the client's perspective; the
-/// response lands only after the rebuild commits.
+/// either a full cold rebuild (default) or — when the caller
+/// passes `args.class = "<name>"` — only that class's slice via
+/// the same `try_class_cycle` the scheduler uses. Synchronous
+/// from the client's perspective; the response lands only after
+/// the rebuild commits.
 fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
+    let class_arg = request.args.get("class").and_then(|v| v.as_str());
+    let class = match class_arg {
+        None => None,
+        Some(name) => match ProviderClass::parse(name) {
+            Some(c) => Some(c),
+            None => {
+                return Response {
+                    id: request.id.clone(),
+                    result: "error",
+                    data: None,
+                    error: Some(ErrorBody {
+                        code: "unknown_class".to_string(),
+                        message: format!(
+                            "unknown class `{name}`; expected one of git, mux, harness, forge"
+                        ),
+                    }),
+                };
+            }
+        },
+    };
+
     let guard_result = ctx.writer_lock.lock();
     let _guard = match guard_result {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let outcome = run_full_rebuild(&ctx.scan_roots, &ctx.intervals);
+    let started = wall_clock_epoch() as u64;
+    let outcome = match class {
+        None => run_full_rebuild(&ctx.scan_roots, &ctx.intervals),
+        Some(c) => try_class_cycle(c, &ctx.scan_roots, &ctx.intervals),
+    };
     match outcome {
         Ok(()) => Response {
             id: request.id.clone(),
             result: "ok",
             data: Some(serde_json::json!({
                 "refreshed_epoch": started,
+                "class": class.map(|c| c.name()),
             })),
             error: None,
         },
