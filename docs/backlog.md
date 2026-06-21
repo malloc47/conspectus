@@ -7360,8 +7360,20 @@ code.
       slices from the prior, skips heavy providers whose class
       TTL has not expired, re-runs every mutator pass against
       the merged snapshot, and persists back. The CLI's
-      `table` command now goes through this path. Selective
+      `table` command went through this path first. Selective
       eviction relies on the P7-005 primitive landed alongside.
+    - Phase 4 generalized the wire-up to every command that
+      runs discovery. `node show`, `graph`, and the `tui`
+      command now all go through `warm_start_discover_and_resolve`
+      (or its TUI peer in `tui::runtime::discover_and_resolve`).
+      Each one gained `--no-cache` / `--refresh` flags so the
+      whole `conspectus` surface has uniform warm-start
+      semantics. The declared/pin store-selection helper reads
+      the prior too but deliberately skips the writer — it's a
+      transient pre-write probe, not the user's primary
+      artifact. The TUI's refresh loop persists on every
+      successful cycle so a peer one-shot CLI invocation in
+      another shell sees the freshest data.
   - Tests: snapshot persist + read round-trips in
     `src/query/persist.rs`; gate algebra unit tests in
     `src/discovery/cache.rs` (8 cases); selective-discovery

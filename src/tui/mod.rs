@@ -101,6 +101,20 @@ pub struct RunConfig {
     /// totals, so the aggregate is opt-in only. Sourced from
     /// `[tui].show_harness_chips` in the on-disk config.
     pub show_harness_chips: bool,
+    /// Per-class warm-start TTL intervals from `[server.intervals]`
+    /// (ADR 0079). The discovery loop reads the persisted cache and
+    /// skips re-running providers whose class TTL has not expired.
+    /// Defaults to the ADR 0038 starting values.
+    pub intervals: crate::config::ServerIntervals,
+    /// P7-003 phase 4: suppress the writer for this TUI invocation.
+    /// The discovery loop still reads from the cache; only the
+    /// post-refresh write is skipped.
+    pub no_cache: bool,
+    /// P7-003 phase 4: force a cold scan on every discovery cycle
+    /// — useful for "I just changed something on disk, ignore the
+    /// cache." The writer still runs unless `no_cache` is also set
+    /// so the next invocation can warm-start off this run.
+    pub refresh: bool,
 }
 
 impl RunConfig {
@@ -122,6 +136,9 @@ impl RunConfig {
             theme: Theme::default(),
             show_edge_meta: false,
             show_harness_chips: false,
+            intervals: crate::config::ServerIntervals::default(),
+            no_cache: false,
+            refresh: false,
         }
     }
 }

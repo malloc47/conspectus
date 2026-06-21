@@ -1200,17 +1200,41 @@ struct NodeShowArgs {
     /// the resolution rules.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
+    /// P7-003 phase 4: suppress the writer for this invocation.
+    /// The render still uses the warm-start cache; the post-render
+    /// write is skipped.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
+    /// P7-003 phase 4: skip the warm-start read so this run scans
+    /// every provider cold. Writer still runs unless `--no-cache`
+    /// is also set.
+    #[arg(long = "refresh")]
+    refresh: bool,
 }
 
 impl NodeShowArgs {
     fn run(self) -> Result<()> {
         let cwd = std::env::current_dir()?;
-        let snapshot = if self.scan_roots.is_empty() {
-            conspectus::discovery::discover_local_at_roots([cwd])?
+        let loader = config::ConfigLoader::from_env();
+        let outcome = loader.load_from(&cwd);
+        for diagnostic in &outcome.diagnostics {
+            eprintln!(
+                "conspectus: warning: {}: {}",
+                diagnostic.path.display(),
+                diagnostic.message
+            );
+        }
+        let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
+            vec![cwd]
         } else {
-            conspectus::discovery::discover_local_at_roots(self.scan_roots)?
+            self.scan_roots.clone()
         };
-        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        let snapshot = warm_start_discover_and_resolve(
+            roots,
+            self.refresh,
+            self.no_cache,
+            &outcome.config.server.intervals,
+        )?;
         let conn = conspectus::query::materialize_snapshot(&snapshot)?;
         let id = match conspectus::output::node_show::resolve_node_id_from_conn(&conn, &self.id)? {
             Ok(id) => id,
@@ -1245,6 +1269,13 @@ struct GraphArgs {
     /// nodes. Defaults to include (ADR 0050).
     #[arg(long = "diagnostic-nodes", value_enum, default_value_t = InclusionFlag::Include)]
     diagnostic_nodes: InclusionFlag,
+    /// P7-003 phase 4: suppress the writer for this invocation.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
+    /// P7-003 phase 4: skip the warm-start read so this run scans
+    /// every provider cold.
+    #[arg(long = "refresh")]
+    refresh: bool,
 }
 
 impl Default for GraphArgs {
@@ -1254,18 +1285,35 @@ impl Default for GraphArgs {
             scan_roots: Vec::new(),
             candidates: InclusionFlag::Include,
             diagnostic_nodes: InclusionFlag::Include,
+            no_cache: false,
+            refresh: false,
         }
     }
 }
 
 impl GraphArgs {
     fn run(self) -> Result<()> {
-        let snapshot = if self.scan_roots.is_empty() {
-            conspectus::discovery::discover_local_at_roots([std::env::current_dir()?])?
+        let cwd = std::env::current_dir()?;
+        let loader = config::ConfigLoader::from_env();
+        let outcome = loader.load_from(&cwd);
+        for diagnostic in &outcome.diagnostics {
+            eprintln!(
+                "conspectus: warning: {}: {}",
+                diagnostic.path.display(),
+                diagnostic.message
+            );
+        }
+        let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
+            vec![cwd]
         } else {
-            conspectus::discovery::discover_local_at_roots(self.scan_roots)?
+            self.scan_roots.clone()
         };
-        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+        let snapshot = warm_start_discover_and_resolve(
+            roots,
+            self.refresh,
+            self.no_cache,
+            &outcome.config.server.intervals,
+        )?;
 
         match self.format {
             OutputFormat::Json => {
@@ -1426,29 +1474,17 @@ impl TableRowsArgs {
         let cli_filter = self.filter_args.to_row_filter()?;
         let now_epoch = current_unix_epoch_for_table();
 
-        // P7-003 phase 3: feed the persisted cache + per-class TTL
-        // intervals into the discovery driver so providers whose
-        // slices are still fresh skip running entirely. `--refresh`
-        // collapses the prior to empty, which falls back to the
-        // cold-rebuild behavior the phase-2 wiring already had.
-        let prior = load_warm_start_prior(self.refresh);
-        let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
         let roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
             vec![cwd]
         } else {
             self.scan_roots.clone()
         };
-        let snapshot = conspectus::discovery::discover_local_warm_with(
+        let snapshot = warm_start_discover_and_resolve(
             roots,
-            discovery_config,
-            prior,
+            self.refresh,
+            self.no_cache,
             &outcome.config.server.intervals,
         )?;
-        let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
-        // P7-003: persist the resolved graph so the next invocation
-        // can warm-start. Best-effort; failures are surfaced to
-        // stderr but never block rendering.
-        cache_resolved_snapshot(&snapshot, self.no_cache);
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {
@@ -1502,6 +1538,32 @@ fn load_warm_start_prior(refresh: bool) -> conspectus::model::GraphSnapshot {
             conspectus::model::GraphSnapshot::empty()
         }
     }
+}
+
+/// P7-003 phase 4: shared discovery driver used by every CLI
+/// command that renders a resolved graph (`table`, `node show`,
+/// `graph`). Threads the warm-start prior + per-class TTL
+/// intervals through [`discover_local_warm_with`], resolves the
+/// merged snapshot, and persists the result so the next
+/// invocation can warm-start.
+///
+/// `refresh` collapses the prior to empty (force-cold scan);
+/// `no_cache` suppresses the writer for this invocation.
+/// Mirrors the table command's flag semantics so behavior stays
+/// uniform across read-only graph commands.
+fn warm_start_discover_and_resolve(
+    roots: Vec<PathBuf>,
+    refresh: bool,
+    no_cache: bool,
+    intervals: &conspectus::config::ServerIntervals,
+) -> Result<conspectus::model::GraphSnapshot> {
+    let prior = load_warm_start_prior(refresh);
+    let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
+    let snapshot =
+        conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
+    let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
+    cache_resolved_snapshot(&snapshot, no_cache);
+    Ok(snapshot)
 }
 
 /// P7-003: persist a freshly resolved snapshot to the canonical
@@ -1807,6 +1869,17 @@ struct TuiArgs {
     /// reads. Graph-resident previews continue to render.
     #[arg(long = "no-live-preview")]
     no_live_preview: bool,
+    /// P7-003 phase 4: suppress the writer for this TUI invocation.
+    /// The discovery loop still reads from the cache on each
+    /// refresh; only the post-refresh write is skipped.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
+    /// P7-003 phase 4: force a cold scan on every refresh. The
+    /// writer still runs unless `--no-cache` is also set so
+    /// concurrent one-shot CLI invocations in other shells still
+    /// benefit from this session's discovery output.
+    #[arg(long = "refresh")]
+    refresh: bool,
     /// When to colorize the output. `auto` (default) emits ANSI
     /// only when stdout is a TTY (and respects `NO_COLOR`,
     /// `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces
@@ -1918,6 +1991,8 @@ impl Default for TuiArgs {
             refresh_interval: "30s".to_string(),
             mux_preview_interval: "2s".to_string(),
             no_live_preview: false,
+            no_cache: false,
+            refresh: false,
             color: ColorFlag::Auto,
             #[cfg(feature = "snapshot")]
             snapshot: false,
@@ -2254,6 +2329,9 @@ impl TuiArgs {
             theme: outcome.config.tui.theme.clone(),
             show_edge_meta: outcome.config.tui.detail.show_edge_meta,
             show_harness_chips: outcome.config.tui.show_harness_chips,
+            intervals: outcome.config.server.intervals.clone(),
+            no_cache: self.no_cache,
+            refresh: self.refresh,
         };
 
         #[cfg(feature = "snapshot")]
@@ -5482,10 +5560,26 @@ fn effective_scan_roots(scan_roots: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// P7-003 phase 4: read-only warm-start variant of discovery used
+/// by the declared/pin store-selection helpers. We deliberately
+/// skip the writer here: this helper is a transient pre-write
+/// probe, not the user's primary artifact, and rewriting the
+/// cache from a CRUD-adjacent code path would surprise operators
+/// who expected the cache to track their last render. Reading the
+/// prior is still safe and saves the cold-rebuild cost.
 fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
     let cwd = std::env::current_dir()?;
     let roots = effective_scan_roots(scan_roots, &cwd);
-    conspectus::discovery::discover_local_at_roots(roots)
+    let loader = ConfigLoader::from_env();
+    let outcome = loader.load_from(&cwd);
+    let prior = load_warm_start_prior(false);
+    let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
+    conspectus::discovery::discover_local_warm_with(
+        roots,
+        discovery_config,
+        prior,
+        &outcome.config.server.intervals,
+    )
 }
 
 /// Candidate stores the read-modify-write helpers should look in when

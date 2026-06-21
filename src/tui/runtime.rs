@@ -19,7 +19,6 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 
-use crate::discovery::discover_local_at_roots;
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
 use crate::model::MuxSessionId;
 use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
@@ -714,14 +713,56 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 
 /// Run discovery and resolver on the calling thread, returning the
 /// resolved snapshot (no SQLite materialization).
+///
+/// P7-003 phase 4: every TUI discovery cycle now reads the
+/// persisted cache and skips re-running heavy providers whose
+/// class TTL has not expired. The resolved snapshot is persisted
+/// back at the end of each cycle (unless `RunConfig::no_cache` is
+/// set) so a peer one-shot CLI invocation in another shell also
+/// benefits from the freshest data. `RunConfig::refresh` collapses
+/// the prior to empty for a forced cold scan.
 pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
     let roots: Vec<PathBuf> = if config.scan_roots.is_empty() {
         vec![std::env::current_dir()?]
     } else {
         config.scan_roots.clone()
     };
-    let snapshot = discover_local_at_roots(roots)?;
-    Ok(resolve_snapshot(snapshot))
+    let prior = if config.refresh {
+        crate::model::GraphSnapshot::empty()
+    } else {
+        match crate::query::load_cached_snapshot(None) {
+            Ok(Some(snap)) => snap,
+            Ok(None) => crate::model::GraphSnapshot::empty(),
+            Err(err) => {
+                // Best-effort: a corrupt or unreadable cache
+                // becomes a cold-scan fallback for this cycle.
+                // The TUI status line will surface refresh
+                // outcomes via separate provider-status plumbing;
+                // a noisy stderr per cycle would clobber the
+                // terminal during a live session.
+                let _ = err;
+                crate::model::GraphSnapshot::empty()
+            }
+        }
+    };
+    let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
+    let snapshot = crate::discovery::discover_local_warm_with(
+        roots,
+        discovery_config,
+        prior,
+        &config.intervals,
+    )?;
+    let snapshot = resolve_snapshot(snapshot);
+    if !config.no_cache
+        && let Err(err) = crate::query::persist_snapshot(&snapshot, None)
+    {
+        // Same rationale as the read-side: avoid stderr spam
+        // during the live session. A persistent write failure is
+        // still observable via the disk state (graph.sqlite stops
+        // updating) and via the next one-shot CLI invocation.
+        let _ = err;
+    }
+    Ok(snapshot)
 }
 
 /// Resolve the current selection to a renameable row and seed the
