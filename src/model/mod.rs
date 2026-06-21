@@ -1,6 +1,6 @@
 //! Core graph model boundaries.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
@@ -940,6 +940,44 @@ impl GraphSnapshot {
                 .then_with(|| a.store_path.cmp(&b.store_path))
         });
     }
+
+    /// Remove every node, candidate link, and provenance entry
+    /// belonging to `provider`. Used by the warm-start path
+    /// (P7-003 phase 3) to evict a stale provider's slice before
+    /// re-running it, and by the eventual `conspectus serve` tick
+    /// to swap a single provider's contribution without rebuilding
+    /// the rest of the graph (P7-005).
+    ///
+    /// Semantics:
+    ///
+    /// * Nodes are dropped iff their `node_provenance` entry's
+    ///   provider equals `provider`. Nodes without a provenance
+    ///   entry are kept (they pre-date instrumentation; eviction
+    ///   stays conservative).
+    /// * Candidate links are dropped iff their
+    ///   `source_metadata.adapter` equals `provider`. Declared
+    ///   links, cross-link inferences, and other providers' links
+    ///   survive untouched.
+    /// * The matching `node_provenance` entries are removed.
+    /// * `resolved_relationships` are cleared because the resolver
+    ///   runs against `candidate_links` and must re-derive after
+    ///   the candidate set changes.
+    /// * `aliases`, `pins`, and `diagnostics` are independent of
+    ///   provider identity and survive intact.
+    pub fn evict_provider(&mut self, provider: &str) {
+        let mut evicted_ids: BTreeSet<NodeId> = BTreeSet::new();
+        for (id, prov) in &self.node_provenance {
+            if prov.provider == provider {
+                evicted_ids.insert(id.clone());
+            }
+        }
+        self.nodes.retain(|node| !evicted_ids.contains(&node.id()));
+        self.candidate_links
+            .retain(|link| link.source_metadata.adapter != provider);
+        self.node_provenance
+            .retain(|_, prov| prov.provider != provider);
+        self.resolved_relationships.clear();
+    }
 }
 
 /// Snapshot-resident pin record loaded from `[[pins.entries]]` TOML
@@ -1254,5 +1292,151 @@ mod tests {
         // Rust would refuse to construct the String at all).
         assert_eq!(preview.chars().count(), LAST_MESSAGE_PREVIEW_CAP);
         assert!(preview.ends_with('…'));
+    }
+
+    /// Helper: build a candidate link tagged with `provider` so
+    /// eviction-by-source_metadata tests stay readable.
+    fn provider_link(id: &str, provider: &str) -> GraphLink {
+        let source = NodeId::Repo(RepoId::new(format!("/{id}-src/.git")));
+        let target = NodeId::Repo(RepoId::new(format!("/{id}-tgt/.git")));
+        let mut link = GraphLink::new(
+            id,
+            source,
+            LinkEndpoint::Node { id: target },
+            RelationKind::BelongsToRepo,
+            Provenance::StrongDiscovered,
+        );
+        link.source_metadata.adapter = provider.to_string();
+        link
+    }
+
+    #[test]
+    fn evict_provider_drops_only_matching_nodes_and_links() {
+        // Two providers contribute nodes + links into one snapshot.
+        // Evicting one leaves the other untouched.
+        let git_repo = RepoNode::new(RepoId::new("/git-only/.git"));
+        let git_id = NodeId::Repo(git_repo.id.clone());
+        let workspace_id = WorkspaceId::new("/tmux-only");
+        let tmux_workspace = WorkspaceNode {
+            id: workspace_id.clone(),
+            root: "/tmux-only".to_string(),
+            provider: Some("atelier".to_string()),
+            name: None,
+        };
+        let workspace_node_id = NodeId::Workspace(workspace_id.clone());
+
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes.push(GraphNode::Repo(git_repo));
+        snap.nodes.push(GraphNode::Workspace(tmux_workspace));
+        snap.candidate_links.push(provider_link("git-link", "git"));
+        snap.candidate_links
+            .push(provider_link("tmux-link", "tmux"));
+        snap.node_provenance.insert(
+            git_id.clone(),
+            NodeProvenance {
+                provider: "git".to_string(),
+                freshness_epoch: Some(100),
+            },
+        );
+        snap.node_provenance.insert(
+            workspace_node_id.clone(),
+            NodeProvenance {
+                provider: "tmux".to_string(),
+                freshness_epoch: Some(200),
+            },
+        );
+
+        snap.evict_provider("git");
+
+        assert_eq!(snap.nodes.len(), 1, "tmux node should survive");
+        assert!(matches!(&snap.nodes[0], GraphNode::Workspace(w) if w.id == workspace_id));
+        assert_eq!(snap.candidate_links.len(), 1);
+        assert_eq!(snap.candidate_links[0].id, "tmux-link");
+        assert!(!snap.node_provenance.contains_key(&git_id));
+        assert!(snap.node_provenance.contains_key(&workspace_node_id));
+    }
+
+    #[test]
+    fn evict_provider_is_a_noop_when_provider_has_no_slice() {
+        // Eviction must be idempotent and gracefully handle keys
+        // that simply don't appear in this snapshot (e.g. a forge
+        // provider on a snapshot built with no GitHub repos).
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new("/r/.git"))));
+        snap.node_provenance.insert(
+            NodeId::Repo(RepoId::new("/r/.git")),
+            NodeProvenance {
+                provider: "git".to_string(),
+                freshness_epoch: Some(100),
+            },
+        );
+        let before = snap.clone();
+        snap.evict_provider("never-existed");
+        // The only legitimate difference is `resolved_relationships`
+        // being cleared; the before snapshot has none either so the
+        // shapes match.
+        assert_eq!(snap.nodes, before.nodes);
+        assert_eq!(snap.candidate_links, before.candidate_links);
+        assert_eq!(snap.node_provenance, before.node_provenance);
+    }
+
+    #[test]
+    fn evict_provider_keeps_nodes_without_provenance_entries() {
+        // Pre-instrumentation snapshots may contain nodes the
+        // provenance sidecar doesn't know about. Eviction skips
+        // those rather than dropping them — the conservative
+        // default avoids losing data we can't attribute.
+        let mut snap = GraphSnapshot::empty();
+        let orphan_id = NodeId::Repo(RepoId::new("/orphan/.git"));
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(RepoId::new("/orphan/.git"))));
+        // No node_provenance entry for the orphan.
+
+        snap.evict_provider("git");
+
+        assert!(
+            snap.nodes.iter().any(|n| n.id() == orphan_id),
+            "orphan node missing from provenance must survive eviction"
+        );
+    }
+
+    #[test]
+    fn evict_provider_evicts_candidate_links_even_when_no_node_matches() {
+        // The candidate-links sweep stands on its own: a mutator
+        // that only emitted links (e.g. cross_link) must have its
+        // links pulled even though it emitted no nodes.
+        let mut snap = GraphSnapshot::empty();
+        snap.candidate_links
+            .push(provider_link("xl-1", "cross_link"));
+        snap.candidate_links
+            .push(provider_link("xl-2", "cross_link"));
+        snap.candidate_links.push(provider_link("keep", "git"));
+
+        snap.evict_provider("cross_link");
+
+        assert_eq!(snap.candidate_links.len(), 1);
+        assert_eq!(snap.candidate_links[0].id, "keep");
+    }
+
+    #[test]
+    fn evict_provider_clears_resolved_relationships_to_force_re_resolve() {
+        let mut snap = GraphSnapshot::empty();
+        let repo_id = RepoId::new("/r/.git");
+        let checkout_id = CheckoutId::new(repo_id.clone(), "/r");
+        snap.resolved_relationships.push(ResolvedRelationship {
+            source: NodeId::Repo(repo_id),
+            target: NodeId::Checkout(checkout_id),
+            relation: RelationKind::CreatedCheckout,
+            selected_link_id: Some("git-link".to_string()),
+            competing_link_ids: Vec::new(),
+        });
+
+        snap.evict_provider("git");
+
+        assert!(
+            snap.resolved_relationships.is_empty(),
+            "evict_provider must clear resolved relationships so the resolver re-runs"
+        );
     }
 }
