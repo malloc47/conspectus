@@ -30,6 +30,12 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "allo
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = { version = "7", default-features = false }
 indexmap = { version = "2.7", features = ["serde"] }
+# Unix FFI shim for `conspectus serve`'s socket path resolution
+# (getuid for the `$TMPDIR/conspectus-$UID/` fallback per
+# ADR 0038). Already pulled in transitively via signal-hook +
+# rusqlite; promoted to a direct dep so the daemon's socket
+# code can name it explicitly. Tiny, pure-FFI, mature.
+libc = "0.2"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
 ratatui-cheese = "0.7"
 ratatui-comfy-toaster = { version = "0.4", default-features = false }
@@ -55,11 +61,6 @@ unicode-width = "0.2"
 [dev-dependencies]
 assert_cmd = "2.0"
 insta = "1.42"
-# Test-only: send SIGTERM to a spawned `conspectus serve` child
-# to exercise the graceful-shutdown path (ADR 0080). `Child::kill`
-# uses SIGKILL, which bypasses the signal-hook latch the test is
-# trying to exercise.
-libc = "0.2"
 # T8-044 spike: evaluating tui-pantry as a Storybook-style widget
 # preview harness. Lives in dev-deps; promoted (or ripped) per the
 # spike's go/no-go outcome.

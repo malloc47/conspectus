@@ -6,7 +6,9 @@
 //! `$XDG_DATA_HOME` so the cache it inspects is unambiguously
 //! the one this run produced.
 
-use std::path::Path;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -18,6 +20,48 @@ fn isolated_env_args(cmd: &mut Command, home: &Path, data_home: &Path) {
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
     cmd.env_remove("CONSPECTUS_CLAUDE_CODE_STATE");
     cmd.env_remove("CONSPECTUS_OPENCODE_STATE");
+}
+
+/// Apply env-var isolation including a fresh `XDG_RUNTIME_DIR`
+/// so each test owns its own socket path. Without this, two
+/// parallel daemon tests fight over the same socket file.
+fn isolated_serve_env_args(cmd: &mut Command, home: &Path, data_home: &Path, runtime_dir: &Path) {
+    isolated_env_args(cmd, home, data_home);
+    cmd.env("XDG_RUNTIME_DIR", runtime_dir);
+}
+
+/// Read or write a length-prefixed JSON frame per ADR 0038.
+fn write_request(stream: &mut UnixStream, payload: &serde_json::Value) {
+    let bytes = serde_json::to_vec(payload).expect("serialize request");
+    let len = u32::try_from(bytes.len()).expect("request fits in u32");
+    stream
+        .write_all(&len.to_be_bytes())
+        .expect("write length prefix");
+    stream.write_all(&bytes).expect("write request body");
+}
+
+fn read_response(stream: &mut UnixStream) -> serde_json::Value {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).expect("read length prefix");
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut body = vec![0u8; len];
+    stream.read_exact(&mut body).expect("read response body");
+    serde_json::from_slice(&body).expect("parse response JSON")
+}
+
+fn socket_path_under(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join("conspectus").join("server.sock")
+}
+
+fn wait_for_socket(path: &Path, deadline: Duration) -> bool {
+    let stop = Instant::now() + deadline;
+    while Instant::now() < stop {
+        if path.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    false
 }
 
 fn conspectus_bin() -> std::path::PathBuf {
@@ -40,9 +84,10 @@ fn serve_populates_graph_cache_within_first_tick() {
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
     let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
 
     let mut cmd = Command::new(conspectus_bin());
-    isolated_env_args(&mut cmd, home.path(), data.path());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
     cmd.current_dir(cwd.path())
         .arg("serve")
         .stdout(Stdio::null())
@@ -89,6 +134,102 @@ fn serve_populates_graph_cache_within_first_tick() {
 }
 
 #[test]
+fn serve_socket_echoes_a_ping_request() {
+    // ADR 0038 wire shape: 4-byte big-endian length prefix +
+    // UTF-8 JSON. The v1 dispatch table only knows `ping` (the
+    // mutation commands land in the next commit); pinging
+    // confirms the socket binds, framing round-trips, and the
+    // dispatcher correlates the request id into the response.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("spawn serve");
+
+    let socket = socket_path_under(runtime.path());
+    let connected = wait_for_socket(&socket, Duration::from_secs(5)) || {
+        // Bind happens before the listener loop, so if 5s
+        // passed we have a deeper problem. Don't hang.
+        let _ = child.kill();
+        let _ = child.wait();
+        false
+    };
+    assert!(
+        connected,
+        "daemon should bind {} within 5s",
+        socket.display()
+    );
+
+    let mut stream = UnixStream::connect(&socket).expect("connect to daemon socket");
+    write_request(
+        &mut stream,
+        &serde_json::json!({
+            "command": "ping",
+            "args": {"hello": "world"},
+            "id": "req-1",
+        }),
+    );
+    let response = read_response(&mut stream);
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(response["id"], "req-1", "id must round-trip");
+    assert_eq!(response["result"], "ok");
+    assert_eq!(
+        response["data"]["echo"]["hello"], "world",
+        "ping should echo the args payload"
+    );
+}
+
+#[test]
+fn serve_socket_rejects_unknown_command() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("spawn serve");
+    let socket = socket_path_under(runtime.path());
+    assert!(wait_for_socket(&socket, Duration::from_secs(5)));
+
+    let mut stream = UnixStream::connect(&socket).expect("connect");
+    write_request(
+        &mut stream,
+        &serde_json::json!({"command": "do-the-thing", "id": "rq-9"}),
+    );
+    let response = read_response(&mut stream);
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(response["id"], "rq-9");
+    assert_eq!(response["result"], "error");
+    assert_eq!(response["error"]["code"], "unknown_command");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("do-the-thing")
+    );
+}
+
+#[test]
 fn serve_shuts_down_cleanly_on_sigterm() {
     // ADR 0080: SIGTERM (and SIGINT) flip a shared shutdown
     // flag that every scheduler thread polls between sleeps.
@@ -98,8 +239,9 @@ fn serve_shuts_down_cleanly_on_sigterm() {
     let data = tempfile::TempDir::new().expect("data temp");
     let cwd = tempfile::TempDir::new().expect("cwd temp");
 
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
     let mut cmd = Command::new(conspectus_bin());
-    isolated_env_args(&mut cmd, home.path(), data.path());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
     cmd.current_dir(cwd.path())
         .arg("serve")
         .stdout(Stdio::null())
@@ -159,9 +301,10 @@ fn serve_logs_startup_line_to_stderr() {
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
     let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
 
     let mut cmd = Command::new(conspectus_bin());
-    isolated_env_args(&mut cmd, home.path(), data.path());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
     cmd.current_dir(cwd.path())
         .arg("serve")
         .stdout(Stdio::null())

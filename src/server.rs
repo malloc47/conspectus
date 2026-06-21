@@ -14,13 +14,13 @@
 //! Today the daemon shares the same writer-lock discipline as
 //! the one-shot CLI: both call [`crate::query::persist_snapshot`],
 //! which serializes via SQLite's `busy_timeout` (ADR 0037). To
-//! keep per-thread cycles atomic across load-prior + evict + run
-//! + persist, every thread takes a process-local
-//! [`std::sync::Mutex`] before its cycle, so two class threads
-//! cannot race on a load/merge/write sequence and silently
-//! clobber each other's slice. The mutation socket upgrades that
-//! to a dedicated writer thread plus a request queue when it
-//! lands.
+//! keep per-thread cycles atomic across the full
+//! load-prior-then-evict-then-run-then-persist sequence, every
+//! thread takes a process-local [`std::sync::Mutex`] before its
+//! cycle so two class threads cannot race on a load/merge/write
+//! ordering and silently clobber each other's slice. The
+//! mutation socket upgrades that to a dedicated writer thread
+//! plus a request queue when it lands.
 //!
 //! Lifecycle expectations:
 //!
@@ -34,13 +34,17 @@
 //!   200ms poll cadence trades a negligible CPU floor for
 //!   snappy Ctrl-C response.
 
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Serialize};
 
 use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
@@ -61,6 +65,206 @@ pub struct ServeConfig {
     pub intervals: ServerIntervals,
 }
 
+/// Resolve the canonical Unix-domain socket path per ADR 0038.
+///
+/// Resolution order:
+///
+/// 1. `$XDG_RUNTIME_DIR/conspectus/server.sock` (the documented
+///    canonical location on Linux + freedesktop-spec setups).
+/// 2. `$TMPDIR/conspectus-$UID/server.sock` (fallback when
+///    `XDG_RUNTIME_DIR` is unset — common on stock macOS).
+/// 3. `/tmp/conspectus-$UID/server.sock` (final fallback when
+///    `$TMPDIR` is also unset).
+///
+/// The `-$UID` segregation in the TMPDIR fallback prevents
+/// collisions on multi-user systems where the runtime dir is
+/// shared. The socket file itself is mode 0600 either way.
+pub fn socket_path() -> PathBuf {
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return PathBuf::from(dir).join("conspectus").join("server.sock");
+    }
+    // SAFETY: getuid() is async-signal-safe and never fails.
+    let uid = unsafe { libc::getuid() };
+    let base = std::env::var_os("TMPDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    base.join(format!("conspectus-{uid}")).join("server.sock")
+}
+
+/// Bind the Unix-domain socket at [`socket_path`], creating the
+/// parent directory if needed and unlinking any stale socket
+/// file from a previous run that did not clean up. The listener
+/// is set non-blocking so the listener thread can poll the
+/// shutdown flag between accepts.
+fn bind_socket(path: &Path) -> Result<UnixListener> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create socket parent dir {}", parent.display()))?;
+    }
+    // A previous daemon that crashed without cleaning up its
+    // socket file would otherwise make `bind` return EADDRINUSE.
+    // The unlink is unconditional because the socket file is
+    // useless once the owning process is gone — stale sockets do
+    // not serve.
+    let _ = std::fs::remove_file(path);
+    let listener = UnixListener::bind(path).with_context(|| format!("bind {}", path.display()))?;
+    listener
+        .set_nonblocking(true)
+        .context("set socket non-blocking")?;
+    // Mode 0600: only the owner can read/write. Defends against
+    // any reader on a shared host poking at the protocol or
+    // sniffing mutation traffic.
+    let mut perms = std::fs::metadata(path)
+        .with_context(|| format!("stat {}", path.display()))?
+        .permissions();
+    perms.set_mode(0o600);
+    std::fs::set_permissions(path, perms).with_context(|| format!("chmod {}", path.display()))?;
+    Ok(listener)
+}
+
+/// Wire-shape request frame per ADR 0038. `id` is opaque to the
+/// server — it round-trips into the response so a multiplexing
+/// client (none today, but the spec leaves the door open) can
+/// correlate. `args` is provider-specific JSON; commands that
+/// take no arguments leave it as the default `null`.
+#[derive(Debug, Deserialize)]
+struct Request {
+    command: String,
+    #[serde(default)]
+    args: serde_json::Value,
+    #[serde(default)]
+    id: String,
+}
+
+/// Wire-shape response frame per ADR 0038. `result` is the
+/// two-state `"ok"` / `"error"` discriminator the client matches
+/// on first; `data` and `error` are populated mutually
+/// exclusively based on `result`.
+#[derive(Debug, Serialize)]
+struct Response {
+    id: String,
+    result: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ErrorBody>,
+}
+
+/// Structured error body inside a `result = "error"` response.
+/// `code` is a stable machine-readable identifier the CLI can
+/// pattern-match on; `message` is the human-readable detail.
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    code: String,
+    message: String,
+}
+
+/// Read one length-prefixed frame from the stream. The 4-byte
+/// big-endian prefix matches the wire format ADR 0038
+/// specifies; an oversized length is rejected to avoid a
+/// hostile client allocating gigabytes by sending a forged
+/// header.
+fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>> {
+    const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+    let mut len_buf = [0u8; 4];
+    stream
+        .read_exact(&mut len_buf)
+        .context("read length prefix")?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len > MAX_FRAME_BYTES {
+        return Err(anyhow!(
+            "request frame size {len} exceeds {MAX_FRAME_BYTES}-byte cap"
+        ));
+    }
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).context("read frame body")?;
+    Ok(buf)
+}
+
+/// Write one length-prefixed frame to the stream.
+fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
+    let len =
+        u32::try_from(payload.len()).context("response too large for 32-bit length prefix")?;
+    stream
+        .write_all(&len.to_be_bytes())
+        .context("write length prefix")?;
+    stream.write_all(payload).context("write frame body")?;
+    Ok(())
+}
+
+/// Per-connection handler. Reads one request frame, dispatches
+/// it, writes the response. ADR 0038's framing is one
+/// request/response per connection (the daemon does not
+/// multiplex). Errors during the read/write are logged + the
+/// connection is dropped; a misbehaving client cannot crash the
+/// daemon.
+fn handle_connection(mut stream: UnixStream) {
+    if let Err(err) = try_handle_connection(&mut stream) {
+        eprintln!("conspectus serve: socket handler error: {err:#}");
+    }
+}
+
+fn try_handle_connection(stream: &mut UnixStream) -> Result<()> {
+    let frame = read_frame(stream)?;
+    let request: Request = serde_json::from_slice(&frame).context("parse request JSON")?;
+    let response = dispatch(&request);
+    let payload = serde_json::to_vec(&response).context("serialize response JSON")?;
+    write_frame(stream, &payload)?;
+    Ok(())
+}
+
+/// Command-dispatch table. v1 ships `ping` only; the real
+/// mutation commands (rename / declare-link / ignore-link /
+/// refresh per ADR 0038) land in the next commit.
+fn dispatch(request: &Request) -> Response {
+    match request.command.as_str() {
+        "ping" => Response {
+            id: request.id.clone(),
+            result: "ok",
+            data: Some(serde_json::json!({"echo": request.args.clone()})),
+            error: None,
+        },
+        unknown => Response {
+            id: request.id.clone(),
+            result: "error",
+            data: None,
+            error: Some(ErrorBody {
+                code: "unknown_command".to_string(),
+                message: format!("unknown command `{unknown}`"),
+            }),
+        },
+    }
+}
+
+/// Socket listener loop. Non-blocking accept + 200ms poll cadence
+/// so a shutdown signal is observed without the listener needing
+/// special wakeup. Per-connection handling spawns a fresh worker
+/// thread so a slow client cannot stall other in-flight
+/// requests. The accepted connections themselves are blocking
+/// — the per-connection handler does one read + one write then
+/// closes, so blocking is fine and matches the framing's
+/// one-request-per-connection contract.
+fn socket_listener_loop(listener: UnixListener, shutdown: &AtomicBool) {
+    while !shutdown.load(Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((stream, _addr)) => {
+                if let Err(err) = stream.set_nonblocking(false) {
+                    eprintln!("conspectus serve: failed to reset connection blocking: {err:#}");
+                    continue;
+                }
+                thread::spawn(move || handle_connection(stream));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(200));
+            }
+            Err(err) => {
+                eprintln!("conspectus serve: accept failed: {err:#}");
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+}
+
 /// Spawn the per-class scheduler threads and block on the
 /// shutdown signal (SIGINT or SIGTERM, registered via
 /// `signal-hook` per ADR 0080). Returns once every worker
@@ -71,6 +275,11 @@ pub fn run(config: ServeConfig) -> Result<()> {
         "conspectus serve: starting; per-class scheduler; scan roots = {:?}",
         config.scan_roots
     );
+
+    let socket_path = socket_path();
+    let listener = bind_socket(&socket_path)
+        .with_context(|| format!("bind socket at {}", socket_path.display()))?;
+    eprintln!("conspectus serve: listening on {}", socket_path.display());
 
     // Single process-local writer lock. Each class thread takes
     // it before its load-prior + evict + run + persist sequence
@@ -104,6 +313,11 @@ pub fn run(config: ServeConfig) -> Result<()> {
         }));
     }
 
+    let listener_shutdown = Arc::clone(&shutdown);
+    handles.push(thread::spawn(move || {
+        socket_listener_loop(listener, &listener_shutdown);
+    }));
+
     // Join every thread. With the shutdown latch in place, each
     // loop exits cleanly when SIGINT/SIGTERM is observed; we
     // wait for all of them so a graceful shutdown surfaces a
@@ -114,6 +328,13 @@ pub fn run(config: ServeConfig) -> Result<()> {
         }
     }
 
+    // Unlink the socket file. A stale file would otherwise make
+    // the next `conspectus serve` invocation hit EADDRINUSE on
+    // bind (bind_socket also handles this on the next startup,
+    // but cleaning up here keeps the runtime dir tidy and
+    // matches the "socket file is useless without the owning
+    // process" invariant).
+    let _ = std::fs::remove_file(&socket_path);
     eprintln!("conspectus serve: stopped");
     Ok(())
 }
