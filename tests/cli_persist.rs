@@ -248,6 +248,56 @@ fn table_sessions_warm_start_carries_fresh_provider_slice_through_to_post_run_ca
 }
 
 #[test]
+fn table_sessions_recovers_from_a_truncated_graph_cache() {
+    // Hardening: a malformed `graph.sqlite` (truncated bytes,
+    // bad header, mid-write crash that left the file unreadable)
+    // must not abort the run. The CLI should warn, fall back to
+    // a cold rebuild, and heal the file via the post-run write.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    let cache_dir = data.path().join("conspectus");
+    std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+    let cache_path = cache_dir.join("graph.sqlite");
+
+    // Drop a few bytes of garbage in place of the database. The
+    // SQLite open call survives (it lazily validates on first
+    // query) but the version pragma read will fail, surfacing
+    // the malformed-cache path.
+    std::fs::write(&cache_path, b"this is not a sqlite database").expect("write garbage");
+
+    let output = isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .output()
+        .expect("run against malformed cache");
+
+    assert!(
+        output.status.success(),
+        "warm-start must recover from a malformed cache: stderr=\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Post-run write should have replaced the garbage with a
+    // real SQLite database carrying the current schema. Open
+    // read-only and verify a valid `user_version`.
+    let conn = rusqlite::Connection::open_with_flags(
+        &cache_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("reopen healed cache");
+    let user_version: u32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("read user_version");
+    assert!(
+        user_version > 0,
+        "post-run write should heal the cache with a valid user_version; got {user_version}"
+    );
+}
+
+#[test]
 fn table_sessions_with_refresh_drops_a_fresh_cached_slice() {
     // The counterpart to the test above: with `--refresh`, the
     // warm-start prior is forced to empty, so even a

@@ -30,7 +30,7 @@ use crate::model::GraphSnapshot;
 
 use super::loader::load;
 use super::reader::read_snapshot;
-use super::schema::apply_schema;
+use super::schema::{SCHEMA_VERSION, apply_schema, read_user_version};
 
 /// Canonical on-disk location for the persisted graph database, per
 /// ADR 0037. Resolves under `$XDG_DATA_HOME/conspectus/` when set,
@@ -62,6 +62,18 @@ pub fn persist_snapshot(snapshot: &GraphSnapshot, override_path: Option<&Path>) 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
+    // If the existing file is not a usable SQLite database (e.g.
+    // truncated bytes from a mid-write crash, half-applied
+    // migration, manual `echo > graph.sqlite` from the operator),
+    // SQLite refuses to open it even with `OPEN_CREATE` because
+    // the path is already populated. Detect that case up front
+    // and move the unusable file aside so this run can heal the
+    // cache by writing a fresh database in its place. The
+    // moved-aside file stays around for forensic inspection
+    // rather than being silently deleted.
+    if path.exists() {
+        move_aside_if_unusable(&path);
+    }
     let mut conn = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -74,6 +86,41 @@ pub fn persist_snapshot(snapshot: &GraphSnapshot, override_path: Option<&Path>) 
     apply_schema(&conn).with_context(|| format!("apply schema on {}", path.display()))?;
     load(snapshot, &mut conn).with_context(|| format!("load snapshot into {}", path.display()))?;
     Ok(())
+}
+
+/// Probe whether the file at `path` is a usable SQLite database
+/// the writer can open. If not, rename it to a sibling
+/// `.corrupt.<epoch>` so the subsequent open-with-CREATE can
+/// produce a fresh database in its place. Best-effort: rename
+/// failures fall through silently and the next open will surface
+/// the underlying error with full context.
+fn move_aside_if_unusable(path: &Path) {
+    let Ok(conn) = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+    ) else {
+        return;
+    };
+    let probe: rusqlite::Result<u32> = conn.query_row("PRAGMA user_version", [], |row| row.get(0));
+    drop(conn);
+    if probe.is_ok() {
+        return;
+    }
+    let epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(format!(".corrupt.{epoch}"));
+    let aside = PathBuf::from(aside);
+    if std::fs::rename(path, &aside).is_ok() {
+        eprintln!(
+            "conspectus: warning: graph cache at {} was unusable; moved aside to {} \
+             and rebuilding from cold",
+            path.display(),
+            aside.display()
+        );
+    }
 }
 
 /// Read the persisted graph from the canonical `graph.sqlite`
@@ -102,6 +149,45 @@ pub fn load_cached_snapshot(override_path: Option<&Path>) -> Result<Option<Graph
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
     )
     .with_context(|| format!("open {} read-only", path.display()))?;
+    // Schema-version gate (ADR 0037). A mismatched user_version
+    // means either:
+    //   * the database is fresh / empty (user_version = 0), or
+    //   * a different binary version wrote it.
+    // In both cases we treat the warm-start as a cache miss and
+    // return `Ok(None)`; the caller falls back to a cold rebuild
+    // and the post-run persist overwrites the file with the
+    // current schema. A migration chain (forward-only per ADR
+    // 0037) lands when schema drift is actually surfacing user
+    // pain — until then, "rebuild and overwrite" is the safer
+    // default than "try to read across versions."
+    // A garbage / non-SQLite file opens successfully (SQLite
+    // validates lazily) but the very first query fails with
+    // `NotADatabase`. Treat that as a cache miss so the cold
+    // rebuild + persist (which moves the bad file aside) can
+    // heal the cache. No warning here: the persist side will
+    // emit a more useful "moved aside" line and double-warning
+    // would just clutter the terminal.
+    let observed = match read_user_version(&conn) {
+        Ok(v) => v,
+        Err(rusqlite::Error::SqliteFailure(err, _))
+            if err.code == rusqlite::ErrorCode::NotADatabase =>
+        {
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(err)
+                .with_context(|| format!("read PRAGMA user_version from {}", path.display()));
+        }
+    };
+    if observed != SCHEMA_VERSION {
+        eprintln!(
+            "conspectus: warning: graph cache at {} has schema version {observed} \
+             but this binary expects {SCHEMA_VERSION}; rebuilding from cold and \
+             the next write will overwrite the file with the current schema",
+            path.display()
+        );
+        return Ok(None);
+    }
     let snapshot =
         read_snapshot(&conn).with_context(|| format!("read snapshot from {}", path.display()))?;
     Ok(Some(snapshot))
@@ -248,6 +334,51 @@ mod tests {
             .expect("provenance for the written node");
         assert_eq!(entry.provider, "git");
         assert_eq!(entry.freshness_epoch, Some(1_700_000_900));
+    }
+
+    #[test]
+    fn load_cached_snapshot_falls_back_when_schema_version_mismatches() {
+        // Simulates the binary-upgrade case: a previous binary
+        // wrote the file at one schema version and the new binary
+        // expects another. The warm-start path must treat this as
+        // a cache miss rather than an error so the cold rebuild +
+        // persist heals the file.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+        persist_snapshot(&GraphSnapshot::empty(), Some(&path)).expect("write");
+        // Stomp the user_version to something the binary does not
+        // expect. Anything other than `SCHEMA_VERSION` should
+        // trigger the fallback path; pick a far-future value to
+        // also exercise the binary-downgrade case implicitly.
+        {
+            let conn = Connection::open(&path).expect("open rw");
+            conn.execute_batch("PRAGMA user_version = 9999")
+                .expect("stomp version");
+        }
+
+        let result = load_cached_snapshot(Some(&path)).expect("load");
+        assert!(
+            result.is_none(),
+            "schema-version mismatch must surface as Ok(None), not an error or stale snapshot"
+        );
+    }
+
+    #[test]
+    fn load_cached_snapshot_falls_back_on_zero_user_version() {
+        // A bare SQLite file with no schema and no user_version
+        // (the default `0`) should also map to a cache miss
+        // rather than trying to read tables that don't exist yet.
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let path = tmp.path().join("graph.sqlite");
+        {
+            let _ = Connection::open(&path).expect("create empty db");
+        }
+
+        let result = load_cached_snapshot(Some(&path)).expect("load");
+        assert!(
+            result.is_none(),
+            "an empty database file must round-trip as Ok(None)"
+        );
     }
 
     #[test]
