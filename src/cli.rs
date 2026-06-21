@@ -55,6 +55,7 @@ impl Cli {
             Command::Alias(args) => args.run(),
             Command::Query(args) => args.run(),
             Command::Pin(args) => args.run(),
+            Command::Serve(args) => args.run(),
             #[cfg(debug_assertions)]
             Command::Dev(args) => args.run(),
         }
@@ -89,6 +90,10 @@ enum Command {
     Query(QueryArgs),
     /// Author or inspect session pins (ADR 0057).
     Pin(Box<PinArgs>),
+    /// Run the long-lived background daemon that keeps
+    /// `graph.sqlite` warm between one-shot CLI invocations
+    /// (ADR 0038 / P7-006).
+    Serve(ServeArgs),
     /// Debug-only developer commands.
     #[cfg(debug_assertions)]
     #[command(hide = true)]
@@ -337,6 +342,39 @@ impl ColumnsArgs {
             PagerOptions::from_flags(self.pager, self.no_pager),
         );
         Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct ServeArgs {
+    /// Discovery scan root. Repeatable. Defaults to the current
+    /// working directory when omitted, mirroring the one-shot
+    /// CLI's discovery surface.
+    #[arg(long = "scan-root", value_name = "PATH")]
+    scan_roots: Vec<PathBuf>,
+}
+
+impl ServeArgs {
+    fn run(self) -> Result<()> {
+        let cwd = std::env::current_dir()?;
+        let loader = config::ConfigLoader::from_env();
+        let outcome = loader.load_from(&cwd);
+        for diagnostic in &outcome.diagnostics {
+            eprintln!(
+                "conspectus: warning: {}: {}",
+                diagnostic.path.display(),
+                diagnostic.message
+            );
+        }
+        let scan_roots: Vec<PathBuf> = if self.scan_roots.is_empty() {
+            vec![cwd]
+        } else {
+            self.scan_roots
+        };
+        conspectus::server::run(conspectus::server::ServeConfig {
+            scan_roots,
+            intervals: outcome.config.server.intervals,
+        })
     }
 }
 
