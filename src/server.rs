@@ -192,31 +192,57 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Shared context handed to every per-connection worker so
+/// command handlers that need to mutate the on-disk graph can
+/// reach the same writer lock + discovery config the scheduler
+/// threads use. Cheaply cloneable (every field is an `Arc`).
+#[derive(Clone)]
+struct DispatchCtx {
+    scan_roots: Arc<Vec<PathBuf>>,
+    intervals: Arc<ServerIntervals>,
+    writer_lock: Arc<Mutex<()>>,
+}
+
 /// Per-connection handler. Reads one request frame, dispatches
 /// it, writes the response. ADR 0038's framing is one
 /// request/response per connection (the daemon does not
 /// multiplex). Errors during the read/write are logged + the
 /// connection is dropped; a misbehaving client cannot crash the
 /// daemon.
-fn handle_connection(mut stream: UnixStream) {
-    if let Err(err) = try_handle_connection(&mut stream) {
+fn handle_connection(mut stream: UnixStream, ctx: DispatchCtx) {
+    if let Err(err) = try_handle_connection(&mut stream, &ctx) {
         eprintln!("conspectus serve: socket handler error: {err:#}");
     }
 }
 
-fn try_handle_connection(stream: &mut UnixStream) -> Result<()> {
+fn try_handle_connection(stream: &mut UnixStream, ctx: &DispatchCtx) -> Result<()> {
     let frame = read_frame(stream)?;
     let request: Request = serde_json::from_slice(&frame).context("parse request JSON")?;
-    let response = dispatch(&request);
+    let response = dispatch(&request, ctx);
     let payload = serde_json::to_vec(&response).context("serialize response JSON")?;
     write_frame(stream, &payload)?;
     Ok(())
 }
 
-/// Command-dispatch table. v1 ships `ping` only; the real
-/// mutation commands (rename / declare-link / ignore-link /
-/// refresh per ADR 0038) land in the next commit.
-fn dispatch(request: &Request) -> Response {
+/// Command-dispatch table. v1 ships:
+///
+/// * `ping` — wire-shape sanity check; echoes `args` back under
+///   `data.echo`. The CLI client uses this for liveness probes.
+/// * `refresh` — forces a full cold rebuild on the daemon side:
+///   loads no prior, runs every discovery provider, persists,
+///   and rotates a backup per ADR 0037. Useful when an operator
+///   knows the on-disk world changed in a way the TTL gate would
+///   not pick up for a while (e.g. they just `gh pr create`d
+///   and want forge state refreshed now without waiting 5
+///   minutes for the next forge tick).
+///
+/// The rename / declare-link / ignore-link mutation commands
+/// remain operator-callable through one-shot CLI; they bypass
+/// the daemon's writer lock and serialize against the daemon's
+/// scheduled writes via SQLite's `busy_timeout`. Routing those
+/// through the socket is a future cleanup once the daemon owns
+/// a long-lived writer connection per ADR 0038.
+fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
     match request.command.as_str() {
         "ping" => Response {
             id: request.id.clone(),
@@ -224,6 +250,7 @@ fn dispatch(request: &Request) -> Response {
             data: Some(serde_json::json!({"echo": request.args.clone()})),
             error: None,
         },
+        "refresh" => handle_refresh(request, ctx),
         unknown => Response {
             id: request.id.clone(),
             result: "error",
@@ -236,6 +263,59 @@ fn dispatch(request: &Request) -> Response {
     }
 }
 
+/// `refresh` command handler. Acquires the writer lock and runs
+/// a cold rebuild (empty prior → freshness gate marks every
+/// class as untested → every adapter runs), persists the
+/// result. Synchronous from the client's perspective; the
+/// response lands only after the rebuild commits.
+fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
+    let guard_result = ctx.writer_lock.lock();
+    let _guard = match guard_result {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let outcome = run_full_rebuild(&ctx.scan_roots, &ctx.intervals);
+    match outcome {
+        Ok(()) => Response {
+            id: request.id.clone(),
+            result: "ok",
+            data: Some(serde_json::json!({
+                "refreshed_epoch": started,
+            })),
+            error: None,
+        },
+        Err(err) => Response {
+            id: request.id.clone(),
+            result: "error",
+            data: None,
+            error: Some(ErrorBody {
+                code: "refresh_failed".to_string(),
+                message: format!("{err:#}"),
+            }),
+        },
+    }
+}
+
+/// Force a cold rebuild: empty prior so the freshness gate
+/// trips for every class, run discovery, persist. Counterpart to
+/// `--refresh` on the one-shot CLI.
+fn run_full_rebuild(scan_roots: &[PathBuf], intervals: &ServerIntervals) -> Result<()> {
+    let discovery_config = LocalDiscoveryConfig::from_env();
+    let snapshot = discover_local_warm_with(
+        scan_roots.to_vec(),
+        discovery_config,
+        GraphSnapshot::empty(),
+        intervals,
+    )?;
+    let snapshot = resolve_snapshot(snapshot);
+    persist_snapshot(&snapshot, None)?;
+    Ok(())
+}
+
 /// Socket listener loop. Non-blocking accept + 200ms poll cadence
 /// so a shutdown signal is observed without the listener needing
 /// special wakeup. Per-connection handling spawns a fresh worker
@@ -244,7 +324,7 @@ fn dispatch(request: &Request) -> Response {
 /// — the per-connection handler does one read + one write then
 /// closes, so blocking is fine and matches the framing's
 /// one-request-per-connection contract.
-fn socket_listener_loop(listener: UnixListener, shutdown: &AtomicBool) {
+fn socket_listener_loop(listener: UnixListener, ctx: DispatchCtx, shutdown: &AtomicBool) {
     while !shutdown.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, _addr)) => {
@@ -252,7 +332,8 @@ fn socket_listener_loop(listener: UnixListener, shutdown: &AtomicBool) {
                     eprintln!("conspectus serve: failed to reset connection blocking: {err:#}");
                     continue;
                 }
-                thread::spawn(move || handle_connection(stream));
+                let ctx = ctx.clone();
+                thread::spawn(move || handle_connection(stream, ctx));
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(200));
@@ -314,8 +395,13 @@ pub fn run(config: ServeConfig) -> Result<()> {
     }
 
     let listener_shutdown = Arc::clone(&shutdown);
+    let listener_ctx = DispatchCtx {
+        scan_roots: Arc::clone(&scan_roots),
+        intervals: Arc::clone(&intervals),
+        writer_lock: Arc::clone(&writer_lock),
+    };
     handles.push(thread::spawn(move || {
-        socket_listener_loop(listener, &listener_shutdown);
+        socket_listener_loop(listener, listener_ctx, &listener_shutdown);
     }));
 
     // Join every thread. With the shutdown latch in place, each

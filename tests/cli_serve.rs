@@ -191,6 +191,94 @@ fn serve_socket_echoes_a_ping_request() {
 }
 
 #[test]
+fn serve_socket_refresh_command_writes_a_fresh_snapshot() {
+    // The `refresh` socket command forces a full cold rebuild on
+    // the daemon side: empty prior + every adapter runs + the
+    // result lands in `graph.sqlite`. Useful for "I just did
+    // something on disk, refresh now" without waiting for the
+    // next forge tick.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("spawn serve");
+    let socket = socket_path_under(runtime.path());
+    assert!(wait_for_socket(&socket, Duration::from_secs(5)));
+
+    let cache_path = data.path().join("conspectus").join("graph.sqlite");
+    // Wait until the daemon has finished its initial cycle so we
+    // know any user_version change after the refresh is the
+    // refresh's doing rather than the startup write's. We use a
+    // valid-schema poll since file existence races against
+    // first-write per the earlier test's note.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if cache_path.exists()
+            && rusqlite::Connection::open_with_flags(
+                &cache_path,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )
+            .ok()
+            .and_then(|c| {
+                c.query_row::<u32, _, _>("PRAGMA user_version", [], |row| row.get(0))
+                    .ok()
+            })
+            .is_some_and(|v| v > 0)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let mtime_before = std::fs::metadata(&cache_path)
+        .expect("stat cache")
+        .modified()
+        .expect("modified time");
+
+    // Sleep enough to make the mtime delta observable. Most
+    // filesystems track mtime at second granularity.
+    std::thread::sleep(Duration::from_millis(1100));
+
+    let mut stream = UnixStream::connect(&socket).expect("connect");
+    write_request(
+        &mut stream,
+        &serde_json::json!({"command": "refresh", "id": "refresh-1"}),
+    );
+    let response = read_response(&mut stream);
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert_eq!(response["id"], "refresh-1");
+    assert_eq!(
+        response["result"], "ok",
+        "refresh should succeed; got error: {:?}",
+        response["error"]
+    );
+    assert!(
+        response["data"]["refreshed_epoch"].as_u64().is_some(),
+        "refresh response should include refreshed_epoch"
+    );
+
+    let mtime_after = std::fs::metadata(&cache_path)
+        .expect("stat cache after")
+        .modified()
+        .expect("modified time after");
+    assert!(
+        mtime_after > mtime_before,
+        "refresh should bump the cache mtime (before={mtime_before:?}, after={mtime_after:?})"
+    );
+}
+
+#[test]
 fn serve_socket_rejects_unknown_command() {
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
