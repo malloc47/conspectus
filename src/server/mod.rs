@@ -56,6 +56,7 @@ use crate::model::GraphSnapshot;
 use crate::query::{load_cached_snapshot, persist_snapshot};
 use crate::resolve::resolve_snapshot;
 use crate::server::watcher::{NotifyWatcher, NullWatcher, Watcher, WatcherEvent};
+use crate::snapshot;
 
 /// Observable per-class scheduler state (P7-008). Each class
 /// thread updates its entry on every cycle; the `status` socket
@@ -264,6 +265,21 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Shared cache of the most recently serialized snapshot bytes
+/// (header + rkyv archive) per ADR 0083. The daemon updates it
+/// after every successful cycle so the upcoming P11-006 socket
+/// `snapshot` command can serve verbatim bytes without
+/// re-serializing per connection. `None` before the first cycle
+/// completes. The `Arc` around `Vec<u8>` lets the socket handler
+/// clone-and-return without copying the payload.
+///
+/// A future optimization can replace the `Mutex` with `ArcSwap`
+/// once the socket command's profile shows readers contending
+/// with writers (the writer Mutex around each cycle already
+/// serializes the producer side, so contention is only on the
+/// socket path).
+pub type SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>;
+
 /// Shared context handed to every per-connection worker so
 /// command handlers that need to mutate the on-disk graph can
 /// reach the same writer lock + discovery config the scheduler
@@ -274,6 +290,7 @@ struct DispatchCtx {
     intervals: Arc<ServerIntervals>,
     writer_lock: Arc<Mutex<()>>,
     state: Arc<Mutex<SchedulerState>>,
+    snapshot_bytes: SnapshotBytes,
 }
 
 /// Outcome of a client-side socket call.
@@ -555,8 +572,8 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
     };
     let started = wall_clock_epoch() as u64;
     let outcome = match class {
-        None => run_full_rebuild(&ctx.scan_roots, &ctx.intervals),
-        Some(c) => try_class_cycle(c, &ctx.scan_roots, &ctx.intervals),
+        None => run_full_rebuild(&ctx.scan_roots, &ctx.intervals, &ctx.snapshot_bytes),
+        Some(c) => try_class_cycle(c, &ctx.scan_roots, &ctx.intervals, &ctx.snapshot_bytes),
     };
     match outcome {
         Ok(()) => Response {
@@ -583,7 +600,11 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
 /// Force a cold rebuild: empty prior so the freshness gate
 /// trips for every class, run discovery, persist. Counterpart to
 /// `--refresh` on the one-shot CLI.
-fn run_full_rebuild(scan_roots: &[PathBuf], intervals: &ServerIntervals) -> Result<()> {
+fn run_full_rebuild(
+    scan_roots: &[PathBuf],
+    intervals: &ServerIntervals,
+    snapshot_bytes: &SnapshotBytes,
+) -> Result<()> {
     let discovery_config = LocalDiscoveryConfig::from_env();
     let snapshot = discover_local_warm_with(
         scan_roots.to_vec(),
@@ -593,7 +614,48 @@ fn run_full_rebuild(scan_roots: &[PathBuf], intervals: &ServerIntervals) -> Resu
     )?;
     let snapshot = resolve_snapshot(snapshot);
     persist_snapshot(&snapshot, None)?;
+    dual_write_artifact(&snapshot, snapshot_bytes);
     Ok(())
+}
+
+/// Serialize `snapshot` to its on-disk byte layout per ADR 0083,
+/// write the artifact atomically to [`snapshot::graph_bin_path`],
+/// and refresh the in-memory bytes cache so the upcoming P11-006
+/// socket `snapshot` command can serve verbatim.
+///
+/// **Best-effort.** A serialization or write failure logs a
+/// single warning and returns without an error so the parent
+/// cycle keeps its SQLite-side durability guarantee. The
+/// `graph.bin` artifact is a *secondary* writer during the
+/// dual-write window; the legacy `graph.sqlite` path stays
+/// durable until P11-011 removes it.
+fn dual_write_artifact(snap: &GraphSnapshot, snapshot_bytes: &SnapshotBytes) {
+    let bytes = match snapshot::serialize_to_bytes(snap) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("conspectus serve: snapshot serialize failed (graph.bin skipped): {err:#}");
+            return;
+        }
+    };
+    let path = snapshot::graph_bin_path();
+    if let Err(err) = snapshot::write_atomic_bytes(&path, &bytes) {
+        eprintln!(
+            "conspectus serve: snapshot write to {} failed (cache still updated): {err:#}",
+            path.display()
+        );
+        // Fall through to the cache update — readers connected
+        // over the socket should still see the new snapshot even
+        // if the on-disk file write failed.
+    }
+    let arc = Arc::new(bytes);
+    match snapshot_bytes.lock() {
+        Ok(mut guard) => {
+            *guard = Some(arc);
+        }
+        Err(poisoned) => {
+            *poisoned.into_inner() = Some(arc);
+        }
+    }
 }
 
 /// Socket listener loop. Non-blocking accept + 200ms poll cadence
@@ -658,6 +720,12 @@ pub fn run(config: ServeConfig) -> Result<()> {
     // to snapshot.
     let state = Arc::new(Mutex::new(SchedulerState::default()));
 
+    // Cached serialized snapshot bytes for the upcoming P11-006
+    // socket `snapshot` command. The daemon updates this after
+    // every successful cycle via [`dual_write_artifact`]; `None`
+    // before the first cycle.
+    let snapshot_bytes: SnapshotBytes = Arc::new(Mutex::new(None));
+
     let scan_roots = Arc::new(config.scan_roots);
     let intervals = Arc::new(config.intervals);
 
@@ -675,6 +743,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         let intervals = Arc::clone(&intervals);
         let shutdown = Arc::clone(&shutdown);
         let state = Arc::clone(&state);
+        let snapshot_bytes = Arc::clone(&snapshot_bytes);
         let class = *class;
         let watcher = build_watcher_for(class);
         handles.push(thread::spawn(move || {
@@ -684,6 +753,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
                 &intervals,
                 &writer_lock,
                 &state,
+                &snapshot_bytes,
                 watcher,
                 &shutdown,
             );
@@ -696,6 +766,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         intervals: Arc::clone(&intervals),
         writer_lock: Arc::clone(&writer_lock),
         state: Arc::clone(&state),
+        snapshot_bytes: Arc::clone(&snapshot_bytes),
     };
     handles.push(thread::spawn(move || {
         socket_listener_loop(listener, listener_ctx, &listener_shutdown);
@@ -781,12 +852,14 @@ fn register_shutdown_signals(shutdown: &Arc<AtomicBool>) -> Result<()> {
 /// latch is polled between cycles and at every chunk of the
 /// inter-tick sleep so a Ctrl-C does not have to wait up to a
 /// full forge interval (5 minutes) to be observed.
+#[allow(clippy::too_many_arguments)]
 fn class_loop(
     class: ProviderClass,
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
     writer_lock: &Mutex<()>,
     state: &Mutex<SchedulerState>,
+    snapshot_bytes: &SnapshotBytes,
     mut watcher: Box<dyn Watcher>,
     shutdown: &AtomicBool,
 ) {
@@ -796,7 +869,14 @@ fn class_loop(
         class.name(),
         interval
     );
-    run_cycle(class, scan_roots, intervals, writer_lock, state);
+    run_cycle(
+        class,
+        scan_roots,
+        intervals,
+        writer_lock,
+        state,
+        snapshot_bytes,
+    );
     while !shutdown.load(Ordering::Relaxed) {
         match wait_for_class_signal(watcher.as_mut(), interval, shutdown) {
             WatcherEvent::ShuttingDown => break,
@@ -808,7 +888,14 @@ fn class_loop(
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }
-                run_cycle(class, scan_roots, intervals, writer_lock, state);
+                run_cycle(
+                    class,
+                    scan_roots,
+                    intervals,
+                    writer_lock,
+                    state,
+                    snapshot_bytes,
+                );
             }
         }
     }
@@ -858,6 +945,7 @@ fn run_cycle(
     intervals: &ServerIntervals,
     writer_lock: &Mutex<()>,
     state: &Mutex<SchedulerState>,
+    snapshot_bytes: &SnapshotBytes,
 ) {
     let started = wall_clock_epoch();
     record_state_started(state, class, started);
@@ -870,7 +958,7 @@ fn run_cycle(
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let outcome = try_class_cycle(class, scan_roots, intervals);
+    let outcome = try_class_cycle(class, scan_roots, intervals, snapshot_bytes);
     let completed = wall_clock_epoch();
     match outcome {
         Ok(()) => record_state_completed(state, class, completed, Ok(())),
@@ -930,6 +1018,7 @@ fn try_class_cycle(
     class: ProviderClass,
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
+    snapshot_bytes: &SnapshotBytes,
 ) -> Result<()> {
     let mut prior = match load_cached_snapshot(None) {
         Ok(Some(snap)) => snap,
@@ -950,6 +1039,7 @@ fn try_class_cycle(
         discover_local_warm_with(scan_roots.to_vec(), discovery_config, prior, intervals)?;
     let snapshot = resolve_snapshot(snapshot);
     persist_snapshot(&snapshot, None)?;
+    dual_write_artifact(&snapshot, snapshot_bytes);
     Ok(())
 }
 

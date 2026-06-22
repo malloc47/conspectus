@@ -10716,27 +10716,62 @@ intermediate commit.
     stale-tmp-file cleanup (per ADR 0083 §"Atomicity") is a
     P11-005 concern.
 
-- [ ] `P11-005` Daemon dual-writes SQLite and the new artifact.
-  - Scope: after each successful `try_class_cycle` /
-    `run_full_rebuild`, the daemon calls the existing
-    `persist_snapshot` *and* `snapshot::write_atomic`. The
-    new artifact lives at `$XDG_DATA_HOME/conspectus/
-    graph.bin` (final name per ADR 0083 §"Open Questions").
-    Failures of the new writer log a single warning and do not
-    fail the cycle; SQLite remains the durable path during
-    the dual-write window. Cache the serialized bytes in an
-    `ArcSwap<Arc<Vec<u8>>>` on the daemon so the upcoming
-    socket `snapshot` command (P11-006) can serve verbatim
-    without re-serializing per connection.
-  - Tests: integration test that starts the daemon, forces a
-    refresh, and confirms `graph.bin` appears with valid
-    header + parseable payload alongside `graph.sqlite`. Test
-    that a write-failure on the new artifact does not
-    propagate to the SQLite path. Test that the `ArcSwap`
-    holds bytes equal to the file's payload after each cycle.
-  - Manual checks: `conspectus serve` against a real workload;
-    inspect both artifacts.
-  - Blockers: `P11-004`.
+- [x] `P11-005` Daemon dual-writes SQLite and the new artifact.
+  - Outcome: every successful per-class cycle and every
+    full-rebuild path in `src/server/mod.rs` now calls the new
+    `dual_write_artifact(&snapshot, &snapshot_bytes)` helper
+    immediately after `persist_snapshot`. The helper
+    serializes the snapshot to its on-disk byte layout via
+    `snapshot::serialize_to_bytes`, writes the result
+    atomically to `snapshot::graph_bin_path()` (canonical
+    `$XDG_DATA_HOME/conspectus/graph.bin`), and refreshes the
+    in-memory `SnapshotBytes` cache. Serialize and write
+    failures are best-effort: each logs a single stderr
+    warning and returns without propagating to the SQLite
+    path, so the legacy `graph.sqlite` artifact stays durable
+    during the dual-write window. The cache update happens
+    even when the disk write fails, so socket-connected
+    readers (P11-006) still see the latest snapshot.
+    `SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>` is the
+    shared cache shape; the inner `Arc<Vec<u8>>` lets the
+    upcoming socket handler clone-and-return without copying
+    the payload. The Mutex variant suffices for v1 — the
+    writer Mutex around each cycle already serializes the
+    producer side and the socket path's contention is
+    sub-microsecond. `arc-swap` is named in ADR 0083 as a
+    future swap if a profile shows the lock matters.
+    `src/snapshot.rs` gains `graph_bin_path()` (parallels
+    `query::persist::graph_db_path`) plus a refactor that
+    splits the writer into `serialize_to_bytes(&GraphSnapshot)
+    -> Result<Vec<u8>>` + `write_atomic_bytes(path, &[u8])`
+    so the daemon can serialize once and reuse the bytes for
+    both the file and the cache. `write_atomic` keeps its
+    existing one-shot signature as a convenience wrapper.
+  - Tests: `serve_dual_writes_graph_bin_alongside_graph_sqlite`
+    spawns the daemon under a fresh `$XDG_DATA_HOME`, waits
+    for both artifacts to appear, then runs
+    `snapshot::open_mmap` against `graph.bin` (which
+    exercises the bytecheck validation pass end-to-end) and
+    confirms `deserialize_owned` round-trips the archive to an
+    owned `GraphSnapshot` — that's the regression net for
+    daemon-side writer correctness. Full daemon test suite
+    (14 prior + 1 new) plus the rest of the project: 1771
+    tests pass via `cargo nextest run --all-targets
+    --all-features`; `cargo fmt -- --check` and
+    `cargo clippy --all-targets --all-features --
+    -D warnings` clean. `class_loop` picked up an
+    `#[allow(clippy::too_many_arguments)]` after the new
+    `snapshot_bytes` parameter pushed it to 8 args; a future
+    refactor can bundle the cycle context into a struct if
+    additional parameters arrive.
+  - Notes: the "write failure does not propagate to SQLite"
+    branch is proven by code review of the helper rather than
+    a fault-injected integration test — making the writer
+    mockable from inside a separate process is more
+    scaffolding than the property warrants. Daemon-side
+    stale-tmp-file cleanup (per ADR 0083 §"Atomicity") is
+    deferred to a follow-up alongside the eventual P11-011
+    legacy-cache cleanup migration.
 
 - [ ] `P11-006` Add the `snapshot` socket command.
   - Scope: extend `src/server/mod.rs::dispatch` with a

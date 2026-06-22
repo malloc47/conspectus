@@ -27,6 +27,7 @@
 //! [`open_mmap`] (or [`open_mmap_unvalidated`] when the caller
 //! trusts the source — e.g. the socket-served bytes path).
 
+use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -65,6 +66,21 @@ const RESERVED_LEN: usize = 16;
 /// (we currently don't pre-allocate, but the cap defends against
 /// future code that might).
 const MAX_PAYLOAD_LEN: usize = 1 << 30; // 1 GiB
+
+/// Canonical on-disk location for the zero-copy snapshot artifact
+/// per ADR 0083. Resolves under `$XDG_DATA_HOME/conspectus/` when
+/// set, otherwise `$HOME/.local/share/conspectus/`, otherwise the
+/// current directory — same lookup order as
+/// [`crate::query::persist::graph_db_path`] so the daemon's two
+/// artifacts (the legacy `graph.sqlite` and the new `graph.bin`)
+/// live side-by-side during the P11 dual-write window.
+pub fn graph_bin_path() -> PathBuf {
+    let base = env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join("conspectus").join("graph.bin")
+}
 
 /// Errors returned by the snapshot reader/writer. Discriminated
 /// so callers can pattern-match: a CLI fallback that wants to
@@ -183,24 +199,46 @@ impl Header {
     }
 }
 
-/// Serialize `snapshot` and write the resulting header + payload
-/// to `path` atomically. The bytes land in
-/// `<path>.tmp.<pid>` first, are `fsync`ed, then renamed over
-/// `path`. POSIX rename is atomic on the same filesystem; the
-/// parent directory is `fsync`ed best-effort so the rename itself
-/// is durable across a crash.
-///
-/// On failure mid-write, the tmp file may remain on disk; the
-/// daemon's startup logic should clean stale tmp files matching
-/// its glob (handled in P11-005's daemon wiring, not here).
-pub fn write_atomic(path: &Path, snapshot: &GraphSnapshot) -> Result<()> {
-    let bytes = rkyv::to_bytes::<rancor::Error>(snapshot).map_err(SnapshotError::Serialize)?;
-    let payload_len = u32::try_from(bytes.len()).map_err(|_| SnapshotError::PayloadTooLarge {
-        len: bytes.len(),
+/// Serialize `snapshot` to the on-disk byte layout (header +
+/// rkyv archive). Returns the bytes ready to be `mmap`'d or
+/// written verbatim. The daemon dual-write path (P11-005) calls
+/// this once per cycle so the same bytes can land in the
+/// on-disk file *and* the in-memory cache the socket
+/// `snapshot` command serves from.
+pub fn serialize_to_bytes(snapshot: &GraphSnapshot) -> Result<Vec<u8>> {
+    let payload = rkyv::to_bytes::<rancor::Error>(snapshot).map_err(SnapshotError::Serialize)?;
+    let payload_len = u32::try_from(payload.len()).map_err(|_| SnapshotError::PayloadTooLarge {
+        len: payload.len(),
         max: u32::MAX as usize,
     })?;
     let header = Header::new(payload_len);
+    let mut buf = Vec::with_capacity(HEADER_LEN + payload.len());
+    buf.extend_from_slice(&header.to_bytes());
+    buf.extend_from_slice(&payload);
+    Ok(buf)
+}
 
+/// Serialize `snapshot` and write the resulting header + payload
+/// to `path` atomically. Convenience wrapper around
+/// [`serialize_to_bytes`] + [`write_atomic_bytes`]. The bytes
+/// land in `<path>.tmp.<pid>` first, are `fsync`ed, then renamed
+/// over `path`. POSIX rename is atomic on the same filesystem;
+/// the parent directory is `fsync`ed best-effort so the rename
+/// itself is durable across a crash.
+///
+/// On failure mid-write, the tmp file may remain on disk; the
+/// daemon's startup logic should clean stale tmp files matching
+/// its glob.
+pub fn write_atomic(path: &Path, snapshot: &GraphSnapshot) -> Result<()> {
+    let bytes = serialize_to_bytes(snapshot)?;
+    write_atomic_bytes(path, &bytes)
+}
+
+/// Atomic-rename write of pre-serialized snapshot bytes (header +
+/// payload, as produced by [`serialize_to_bytes`]). Split out from
+/// [`write_atomic`] so the daemon can serialize once for both the
+/// on-disk file and the socket-cache.
+pub fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("snapshot path has no parent directory"))?;
@@ -215,8 +253,7 @@ pub fn write_atomic(path: &Path, snapshot: &GraphSnapshot) -> Result<()> {
             .write(true)
             .truncate(true)
             .open(&tmp)?;
-        tmp_file.write_all(&header.to_bytes())?;
-        tmp_file.write_all(&bytes)?;
+        tmp_file.write_all(bytes)?;
         tmp_file.sync_all()?;
     }
 

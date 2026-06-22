@@ -279,6 +279,71 @@ fn serve_socket_refresh_command_writes_a_fresh_snapshot() {
 }
 
 #[test]
+fn serve_dual_writes_graph_bin_alongside_graph_sqlite() {
+    // P11-005 contract: every successful per-class cycle calls
+    // both `persist_snapshot` (writes graph.sqlite) and
+    // `snapshot::write_atomic` (writes graph.bin). Spawn the
+    // daemon, wait for both artifacts to appear under
+    // $XDG_DATA_HOME/conspectus/, then validate graph.bin via
+    // `snapshot::open_mmap` — that asserts the header magic +
+    // version + payload pass bytecheck end-to-end.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+    let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let mut cmd = Command::new(conspectus_bin());
+    isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
+    cmd.current_dir(cwd.path())
+        .arg("serve")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().expect("spawn serve");
+
+    let bin_path = data.path().join("conspectus").join("graph.bin");
+    let sqlite_path = data.path().join("conspectus").join("graph.sqlite");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if bin_path.exists() && sqlite_path.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(
+        sqlite_path.exists(),
+        "graph.sqlite should land under {}",
+        data.path().display()
+    );
+    assert!(
+        bin_path.exists(),
+        "graph.bin should land alongside graph.sqlite under {}",
+        data.path().display()
+    );
+
+    // `open_mmap` runs the bytecheck validation pass; surviving
+    // that is the assertion the on-disk file is structurally
+    // sound from header through every archived field. The
+    // deserialize_owned call is the secondary check the archive
+    // round-trips back to a real `GraphSnapshot`.
+    let handle = conspectus::snapshot::open_mmap(&bin_path).expect("graph.bin must validate");
+    assert_eq!(handle.header().format_version, 1);
+    let owned = conspectus::snapshot::deserialize_owned(&handle).expect("deserialize graph.bin");
+    // Cold-discovery against an empty $HOME yields an empty
+    // graph; the round-trip itself is the regression net we
+    // care about here, not the snapshot's content shape.
+    assert!(
+        owned.nodes.is_empty(),
+        "discovery against an empty home should produce an empty snapshot, got {} nodes",
+        owned.nodes.len()
+    );
+}
+
+#[test]
 fn serve_socket_rejects_unknown_command() {
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
