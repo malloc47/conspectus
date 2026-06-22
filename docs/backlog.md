@@ -10554,8 +10554,8 @@ reader is off SQLite does the deletion sequence (`P11-010` →
 `P11-013`) start; that ordering keeps `main` releasable at every
 intermediate commit.
 
-- [ ] `P11-001` ADR: retire SQLite persistence and query surface.
-  - Outcome: accept as ADR 0082. The ADR settles the
+- [x] `P11-001` ADR: retire SQLite persistence and query surface.
+  - Outcome: accepted as ADR 0082. The ADR settles the
     architectural pivot — daemon-as-source-of-truth, single
     on-disk artifact for daemonless reads, no SQL surface, no
     schema migrations, no rotation/backups. Names the cluster
@@ -10564,10 +10564,9 @@ intermediate commit.
     writer-fallback fork goes away; the socket gains a
     `snapshot` read command). Implementation lands across the
     remaining P11 stories.
-  - Blockers: none. ADR-only.
 
-- [ ] `P11-002` ADR: zero-copy snapshot format selection.
-  - Outcome: accept as ADR 0083. The ADR settles **rkyv** as
+- [x] `P11-002` ADR: zero-copy snapshot format selection.
+  - Outcome: accepted as ADR 0083. The ADR settles **rkyv** as
     the on-disk format with a 32-byte fixed header (magic,
     `format_version`, `payload_len`, reserved), POSIX
     atomic-rename writes, `bytecheck` validation on
@@ -10577,7 +10576,6 @@ intermediate commit.
     in the ADR) and the dep set (`rkyv` + `memmap2`).
     Records the rejected alternatives (FlatBuffers, Cap'n
     Proto, postcard+mmap, JSON+mmap).
-  - Blockers: none. ADR-only.
 
 - [ ] `P11-003` Add rkyv archive derives to the graph model.
   - Scope: add `#[derive(rkyv::Archive, rkyv::Serialize,
