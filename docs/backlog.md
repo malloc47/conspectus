@@ -10580,12 +10580,18 @@ intermediate commit.
 - [ ] `P11-003` Add rkyv archive derives to the graph model.
   - Scope: add `#[derive(rkyv::Archive, rkyv::Serialize,
     rkyv::Deserialize)]` to every type transitively reachable
-    from `GraphSnapshot`. Survey for `serde_json::Value` use
-    inside model types and convert each one to a
-    pre-serialized `String` field per ADR 0083's option (a).
-    Update consumers that read the field to parse on access;
-    the existing JSON dump path is unaffected. Add `rkyv =
-    { version = "0.8", features = ["bytecheck", "alloc"] }` to
+    from `GraphSnapshot`. The pre-implementation survey
+    counted 130+ producer insertions into `Metadata`
+    (`BTreeMap<String, serde_json::Value>`) at
+    `SourceMetadata.fields` and `UnresolvedEndpoint.metadata`,
+    plus dozens of consumer-side `.get(...)?.as_str()` reads.
+    Per the ADR 0083 amendment, handle `Value` via a rkyv
+    `#[rkyv(with = ValueAsJson)]` adapter that encodes
+    `serde_json::Value` as JSON-text bytes inside the archive
+    only; the live model API stays exactly as it is, so
+    neither producer nor consumer call sites need to change.
+    Add `rkyv = { version = "0.8", features = ["bytecheck",
+    "alloc"] }` and `serde_json` (already present) to
     `Cargo.toml`. Confirm `cargo build` stays green for both
     the default and `--no-default-features` configurations.
     Document the live-vs-archived pattern in the model module
@@ -10596,9 +10602,15 @@ intermediate commit.
     `rkyv::access::<ArchivedGraphSnapshot, _>`, and asserts
     every field round-trips through `deserialize`.
     `every_node_id_variant_archives_and_round_trips` covers
-    the `NodeId` enum exhaustively. The existing
-    `graph_snapshot_field_drift_guard` destructure test picks
-    up any new field automatically.
+    the `NodeId` enum exhaustively. A focused
+    `metadata_with_every_value_variant_round_trips` test
+    populates a `SourceMetadata.fields` map with one entry per
+    `Value` variant (String, Number, Bool, Array, Object,
+    Null) and asserts equality after the archive/deserialize
+    cycle — the regression net for the `ValueAsJson` adapter.
+    The existing `graph_snapshot_field_drift_guard`
+    destructure test picks up any new model field
+    automatically.
   - Manual checks: `cargo build` + `cargo test` clean; spot-
     check archived size for a real local snapshot is in the
     expected single-digit MB range.

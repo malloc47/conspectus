@@ -220,23 +220,47 @@ nearly all derive-only.
 
 The two flagged friction points:
 
-1. `SourceMetadata::fields: serde_json::Value` and any other
-   `serde_json::Value` payload. rkyv has no native `Value`
-   support. Options:
-   - (a) Store the metadata pre-serialized as `String`
-     (JSON text). Reader parses on demand for sites that
-     need typed access. Trades a tiny per-access cost in
-     exchange for not redesigning the metadata model.
+1. `SourceMetadata::fields: serde_json::Value` and
+   `UnresolvedEndpoint::metadata: Metadata` (both alias
+   `BTreeMap<String, serde_json::Value>`). rkyv has no native
+   `Value` support. The pre-implementation survey of P11-003
+   counted 130+ producer-side `Value::String/Number/Array/...`
+   insertions across `discovery/` and `resolve/`, plus dozens
+   of consumer-side `fields.get(...)?.as_str()` patterns in
+   `output/html/`, `tui/rows/`, and the discovery
+   cross-validation paths. Three options were considered:
+   - (a) Store metadata pre-serialized as `String` (JSON
+     text). Smallest *format* change but requires touching
+     every producer insertion (each `Value::String(...)`
+     becomes a `serde_json::to_string` step) and every
+     consumer access (each `.get(...)?.as_str()` needs a
+     parse step first). Pays parse cost per access on every
+     consumer.
    - (b) Replace `serde_json::Value` with a typed enum of
-     the variants actually used. Larger refactor but cleaner
-     long-term.
-   - (c) Use the `rkyv_with` adapter pattern with a custom
-     archive impl wrapping `Value`.
+     the variants actually used (String / Number / Array /
+     Bool / Object). Largest refactor; cleaner long-term but
+     loses the "anything serializable goes" property
+     producers rely on, and the 4× `Value::Object` insertions
+     would need their own typed shape.
+   - (c) Use rkyv's `#[rkyv(with = ...)]` adapter pattern with
+     a custom archive impl wrapping `Value`. The adapter
+     encodes `Value` as JSON-text bytes inside the archive
+     only; the live `Metadata = BTreeMap<String, Value>` API
+     stays exactly as-is. Producers don't change; consumers
+     that go through `deserialize_owned` (i.e., every reader
+     today) see a regular `BTreeMap<String, Value>`. The
+     Value→bytes→Value cost is paid once per archive cycle
+     on the daemon side and once per deserialize on the
+     reader side — not per access.
    
-   Decision: start with (a). It is the smallest change, keeps
-   the metadata-shape decision open, and the per-access parse
-   cost is negligible at target scale. If (b) becomes
-   warranted by other forces, it's a focused refactor.
+   **Decision: (c).** The adapter pattern keeps the model
+   API untouched, leaves the producer/consumer code base
+   unchanged, and confines the rkyv friction to a single
+   wrapper type. The earlier inclination toward (a) ("smallest
+   change") rested on a "tiny per-access cost" assumption that
+   the P11-003 survey did not bear out. (a) and (b) remain
+   available if a future profile shows the adapter is the
+   bottleneck for a specific hot path.
 
 2. `BTreeMap<NodeId, …>` and similar. rkyv supports
    `ArchivedBTreeMap`; sorted-key invariants are preserved.
@@ -289,10 +313,14 @@ surface shrinks.
   via prepared statement" (SQLite) to "single linear walk
   producing AlignedVec" (rkyv). Net daemon CPU on the write
   side drops.
-- The `serde_json::Value`-as-text decision means a small set
-  of access sites pay a parse cost. If profiling later shows
-  this is meaningful, the typed-enum refactor is a clean
-  follow-up.
+- The `serde_json::Value` adapter (option (c)) keeps the live
+  `Metadata` API unchanged but means archive-time and
+  deserialize-time each pay a Value↔JSON-text conversion for
+  every metadata map. At target snapshot size this is
+  unmeasurable; if profiling later shows it dominates the
+  daemon's per-cycle serialize cost, the typed-enum refactor
+  (option (b)) is a clean follow-up that does not invalidate
+  the on-disk layout.
 - rkyv-archived files are not hand-inspectable. The existing
   `conspectus graph --format json` export remains the
   documented inter-tool boundary for cases where humans (or
@@ -394,9 +422,12 @@ surface shrinks.
   them. Bumping `format_version` is reserved for changes that
   break readers.
 
-- **Does the `serde_json::Value`-as-text decision interact
-  badly with any existing site?** A pre-implementation
-  survey should catalogue every consumer of
-  `SourceMetadata.fields` and verify each one parses fresh
-  per call rather than holding a long-lived typed reference.
-  Spike work for the first P11 implementation story.
+- **Does the `Value` adapter introduce surprise behavior at
+  any existing site?** The P11-003 pre-implementation survey
+  counted 130+ producer insertions and dozens of consumer
+  accesses; option (c) was chosen precisely because no
+  producer or consumer site needs to change. The remaining
+  risk is whether rkyv's `#[rkyv(with = ...)]` derive handles
+  `BTreeMap<String, Value>` cleanly through the wrapper; the
+  P11-003 round-trip test (`every_node_id_variant_archives_
+  and_round_trips`) is the regression net.
