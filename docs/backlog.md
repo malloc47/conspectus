@@ -10506,6 +10506,361 @@ this phase migrates whichever ones exist when each story lands.
     `src/output/dot.rs` (optional: render reason in the DOT edge
     tooltip), and `src/query/` (selected_reason column).
 
+## Phase 11: SQLite Retirement And Zero-Copy Snapshot
+
+Source plan: ADRs 0082 (retire SQLite) and 0083 (zero-copy
+snapshot format). Phase goal: replace the SQLite-backed
+persistence + query cluster with a daemon-centric in-memory
+`GraphSnapshot` plus a single mmap-able on-disk artifact in a
+zero-copy format (rkyv). Delete `src/query/`, the `conspectus
+query` subcommand, the `query` Cargo feature, and the bundled
+libsqlite3 build. The producer pipeline (discovery → resolve →
+`GraphSnapshot`) is unchanged; this phase is entirely about the
+consumer-side read surface and persistence story.
+
+Driving observations from Phase 7 + 9 + 10 in production:
+
+- Full cold discovery is single-digit seconds at target scale;
+  the warm-start cache is not measurably faster for a TUI
+  launch (the original justification for SQLite as a warm-start
+  store no longer holds).
+- The daemon already holds a fully-hydrated `GraphSnapshot`;
+  serializing to SQLite rows and reconstructing typed nodes via
+  `query::reader` on every consumer call is a marshalling tax
+  that exists only to feed the SQL surface.
+- `conspectus query <sql>` is a nice-to-have that accounts for
+  negligible operator-visible use vs. the ~6500 lines + bundled
+  C dep it costs.
+
+Dependency shape inside the phase:
+
+```
+P11-001 (ADR 0082) ──┐
+P11-002 (ADR 0083) ──┤
+                     ├──→ P11-003 (model derives) ──→ P11-004 (format module) ──→ P11-005 (daemon dual-write)
+                     │                                                              ├──→ P11-006 (socket snapshot cmd) ──→ P11-007 (TUI socket cutover)
+                     │                                                              └──→ P11-008 (CLI mmap-or-rebuild) ──→ P11-009 (daemon warm-start, optional)
+                     │
+                     │  (after every reader is off SQLite)
+                     │
+                     └──→ P11-010 (drop `conspectus query`) ──→ P11-011 (delete src/query/, drop rusqlite) ──→ P11-012 (ADR supersession + design.md) ──→ P11-013 (operator migration notes)
+```
+
+`P11-003`, `P11-004`, `P11-005` form the additive landing
+sequence; the daemon writes both formats during the dual-write
+window so reader cutovers (`P11-006` → `P11-009`) can land
+incrementally without breaking either side. Only after every
+reader is off SQLite does the deletion sequence (`P11-010` →
+`P11-013`) start; that ordering keeps `main` releasable at every
+intermediate commit.
+
+- [ ] `P11-001` ADR: retire SQLite persistence and query surface.
+  - Outcome: accept as ADR 0082. The ADR settles the
+    architectural pivot — daemon-as-source-of-truth, single
+    on-disk artifact for daemonless reads, no SQL surface, no
+    schema migrations, no rotation/backups. Names the cluster
+    of ADRs it supersedes (0036, 0037, 0039, 0040, 0042, 0043,
+    0044) and the partial-supersession of ADR 0038 (the
+    writer-fallback fork goes away; the socket gains a
+    `snapshot` read command). Implementation lands across the
+    remaining P11 stories.
+  - Blockers: none. ADR-only.
+
+- [ ] `P11-002` ADR: zero-copy snapshot format selection.
+  - Outcome: accept as ADR 0083. The ADR settles **rkyv** as
+    the on-disk format with a 32-byte fixed header (magic,
+    `format_version`, `payload_len`, reserved), POSIX
+    atomic-rename writes, `bytecheck` validation on
+    daemonless / warm-start reads, validation skipped on
+    socket-served payloads. Records the `serde_json::Value`-
+    as-text decision for `SourceMetadata.fields` (option (a)
+    in the ADR) and the dep set (`rkyv` + `memmap2`).
+    Records the rejected alternatives (FlatBuffers, Cap'n
+    Proto, postcard+mmap, JSON+mmap).
+  - Blockers: none. ADR-only.
+
+- [ ] `P11-003` Add rkyv archive derives to the graph model.
+  - Scope: add `#[derive(rkyv::Archive, rkyv::Serialize,
+    rkyv::Deserialize)]` to every type transitively reachable
+    from `GraphSnapshot`. Survey for `serde_json::Value` use
+    inside model types and convert each one to a
+    pre-serialized `String` field per ADR 0083's option (a).
+    Update consumers that read the field to parse on access;
+    the existing JSON dump path is unaffected. Add `rkyv =
+    { version = "0.8", features = ["bytecheck", "alloc"] }` to
+    `Cargo.toml`. Confirm `cargo build` stays green for both
+    the default and `--no-default-features` configurations.
+    Document the live-vs-archived pattern in the model module
+    docs so contributors find the explanation when they look.
+  - Tests: a smoke test in `src/model/mod.rs` that builds a
+    sample `GraphSnapshot` from each `NodeKind` variant,
+    serializes via `rkyv::to_bytes`, accesses via
+    `rkyv::access::<ArchivedGraphSnapshot, _>`, and asserts
+    every field round-trips through `deserialize`.
+    `every_node_id_variant_archives_and_round_trips` covers
+    the `NodeId` enum exhaustively. The existing
+    `graph_snapshot_field_drift_guard` destructure test picks
+    up any new field automatically.
+  - Manual checks: `cargo build` + `cargo test` clean; spot-
+    check archived size for a real local snapshot is in the
+    expected single-digit MB range.
+  - Blockers: `P11-002`.
+
+- [ ] `P11-004` Implement the snapshot format module.
+  - Scope: a new `src/snapshot/` module owns the format. It
+    exposes:
+    - `pub const FORMAT_VERSION: u32 = 1;`
+    - `pub fn write_atomic(path: &Path, snapshot: &GraphSnapshot)
+      -> Result<()>` — serializes via `rkyv::to_bytes`, writes
+      header + payload to `<path>.tmp.<pid>`, `fsync`s, renames
+      over `path`, and best-effort `fsync`s the parent dir.
+    - `pub fn open_mmap(path: &Path) -> Result<SnapshotMmap>` —
+      opens the file, mmaps it, parses + validates the header,
+      validates the payload via `bytecheck`, returns a handle
+      that derefs to `&ArchivedGraphSnapshot`.
+    - `pub fn deserialize_owned(handle: &SnapshotMmap) ->
+      Result<GraphSnapshot>` — explicit escape hatch for test /
+      JSON-dump call sites that need an owned snapshot.
+    - Header parsing rejects mismatched magic / version with a
+      typed error so callers can distinguish "incompatible
+      format" from transport errors.
+    The module has zero callers in this story — it is the
+    library piece every downstream P11 story consumes.
+    `memmap2 = "0.9"` lands here.
+  - Tests: round-trip a sample `GraphSnapshot` through
+    `write_atomic` + `open_mmap` and assert archived equality
+    plus deserialized equality. Crash-mid-write test that
+    truncates the tmp file before rename and confirms the
+    target path is untouched. Header-mismatch tests for wrong
+    magic, future `format_version`, and past `format_version`.
+    `bytecheck` validation test with a manually-corrupted
+    payload byte. Concurrent reader/writer test that mmaps
+    the file from thread A while thread B does a full
+    `write_atomic` cycle, asserting A's view stays consistent
+    until A re-opens (validates the inode-liveness contract).
+  - Manual checks: `cargo build` + `cargo test` clean;
+    inspect `graph.bin` with `xxd | head` to confirm header
+    layout matches ADR 0083.
+  - Blockers: `P11-003`.
+
+- [ ] `P11-005` Daemon dual-writes SQLite and the new artifact.
+  - Scope: after each successful `try_class_cycle` /
+    `run_full_rebuild`, the daemon calls the existing
+    `persist_snapshot` *and* `snapshot::write_atomic`. The
+    new artifact lives at `$XDG_DATA_HOME/conspectus/
+    graph.bin` (final name per ADR 0083 §"Open Questions").
+    Failures of the new writer log a single warning and do not
+    fail the cycle; SQLite remains the durable path during
+    the dual-write window. Cache the serialized bytes in an
+    `ArcSwap<Arc<Vec<u8>>>` on the daemon so the upcoming
+    socket `snapshot` command (P11-006) can serve verbatim
+    without re-serializing per connection.
+  - Tests: integration test that starts the daemon, forces a
+    refresh, and confirms `graph.bin` appears with valid
+    header + parseable payload alongside `graph.sqlite`. Test
+    that a write-failure on the new artifact does not
+    propagate to the SQLite path. Test that the `ArcSwap`
+    holds bytes equal to the file's payload after each cycle.
+  - Manual checks: `conspectus serve` against a real workload;
+    inspect both artifacts.
+  - Blockers: `P11-004`.
+
+- [ ] `P11-006` Add the `snapshot` socket command.
+  - Scope: extend `src/server/mod.rs::dispatch` with a
+    `snapshot` command that reads the daemon's cached
+    `ArcSwap<Arc<Vec<u8>>>` from P11-005 and returns the
+    bytes as the response payload. The framing stays
+    length-prefixed JSON for control but the snapshot bytes
+    ride in a `data.bytes` base64 field — or, if base64
+    overhead becomes objectionable, the framing gains a
+    binary-payload variant (decision deferred to
+    implementation review). Add `client_snapshot()` in the
+    same module returning `ClientOutcome<Vec<u8>>` symmetric
+    with `client_status` / `client_refresh`. Error code
+    `snapshot_unavailable` when the daemon has not yet
+    completed its first cycle.
+  - Tests: integration test that starts the daemon, calls
+    `client_snapshot`, parses the returned bytes via
+    `snapshot::open_mmap` (writing to a tmp file first, since
+    the call returns bytes), and asserts archived equality
+    against the file at `graph.bin`. Test the "first cycle
+    not yet done" error path by querying immediately on
+    startup. Round-trip framing test for the binary-payload
+    decision once implementation lands.
+  - Manual checks: `conspectus serve &` then a hand-rolled
+    socket client returns a parseable snapshot.
+  - Blockers: `P11-005`.
+
+- [ ] `P11-007` Cut the TUI over to socket-served snapshots.
+  - Scope: when the daemon is reachable, the TUI calls
+    `client_snapshot` instead of `query::read_snapshot` on
+    every refresh tick. Connection is held open for the
+    lifetime of the TUI session so per-tick cost is one
+    request/response (no socket setup churn). When the
+    daemon is absent, the TUI falls through to the cold
+    rebuild path it uses today. Pre-rkyv-cutover behavior
+    (reading from SQLite via `query::read_snapshot`) stays
+    available as a fallback during the dual-write window;
+    remove that fallback in P11-011. Update
+    `src/tui/runtime.rs`, `src/tui/app.rs`,
+    `src/tui/detail.rs`, `src/tui/explorer.rs`,
+    `src/tui/actions.rs`, `src/tui/rows/sessions.rs`,
+    `src/tui/rows/mux.rs` — every `read_snapshot(conn)` site
+    grepped in the survey for this phase.
+  - Tests: TUI integration tests that point at a running
+    test-fixture daemon and assert frame parity against the
+    pre-cutover behavior on the existing snapshot test
+    corpus. Daemon-absent fallback test covering the same
+    fixture. Per-frame latency budget test (loose; main goal
+    is "no regression") if a benchmark substrate exists.
+  - Manual checks: `conspectus tui` with the daemon up vs.
+    down — both behave correctly; with the daemon up the
+    refresh feels snappier.
+  - Blockers: `P11-006`.
+
+- [ ] `P11-008` One-shot CLI mmap-or-rebuild path.
+  - Scope: every one-shot CLI command that reads the graph
+    (`session`, `table`, `node show`, `graph`, `query` until
+    it is deleted in P11-010) gains a new resolution order:
+    (a) prefer `client_snapshot` when the daemon is up; (b)
+    otherwise `snapshot::open_mmap` if `graph.bin` is fresh
+    enough (TTL = the slowest class interval per ADR 0082's
+    open question, default 5 min); (c) otherwise cold-build
+    and write the artifact for the next invocation. Replace
+    every `load_cached_snapshot` call site with the new
+    helper; the SQLite read fallback stays during the
+    dual-write window. Add `--no-cache` / `--refresh` flag
+    semantics per ADR 0082: `--refresh` forces (c);
+    `--no-cache` skips the write at the end of (c).
+  - Tests: CLI integration tests covering the three branches
+    (daemon-up, mmap-fresh, cold-rebuild) plus the TTL
+    stale-artifact branch. Confirm `--refresh` and
+    `--no-cache` semantics on each path. End-to-end tests
+    that a daemon-up `conspectus session` returns the same
+    output as a daemon-down cold-rebuild for the same
+    fixture state.
+  - Manual checks: `conspectus session` latency with daemon
+    up (sub-second), with daemon down + fresh artifact
+    (fast), with daemon down + no artifact (cold-rebuild
+    cost).
+  - Blockers: `P11-006`.
+
+- [ ] `P11-009` Daemon warm-start from the on-disk artifact.
+  - Scope: on startup, the daemon attempts
+    `snapshot::open_mmap` to seed its in-memory snapshot
+    before the first per-class cycle runs. If the artifact is
+    missing, malformed, or version-mismatched, log one line
+    and proceed with a cold rebuild. The warm-start payload
+    seeds the `ArcSwap<Arc<Vec<u8>>>` so a socket
+    `snapshot` request that lands before the first cycle
+    returns the prior data rather than `snapshot_unavailable`.
+    Optional — land only if startup latency is operator-visible
+    on the target workload.
+  - Tests: integration test that pre-populates the artifact,
+    starts the daemon, and confirms `client_snapshot` works
+    before the first scheduled cycle. Test the "stale on-disk
+    artifact" path (forge data older than the forge interval):
+    daemon still serves it pre-cycle but the next cycle
+    overwrites.
+  - Manual checks: time `conspectus serve` to first
+    `client_snapshot` success with vs. without a warm
+    artifact.
+  - Blockers: `P11-005`, `P11-008`. Optional per the scope.
+
+- [ ] `P11-010` Remove the `conspectus query` subcommand.
+  - Scope: delete the `Query` variant from the `cli::Command`
+    enum, the `QueryArgs` struct, the saved-view registry,
+    `--similar-to`, `--load-extension`, the
+    `OutputFormat::{Table, Json, Csv, Tsv}` query-flavor
+    variants (the table renderer's identically-named
+    variants are unaffected), `docs/query-guide.md`, and the
+    embedding-overlay surface from ADR 0042 (the
+    `embeddings` table reference in schema docs and the
+    `P9-FU-001` story; the import command never landed). Add
+    a stderr hint when a script invokes `conspectus query`:
+    "removed in favor of `conspectus graph --format json |
+    jq` — see CHANGELOG." Stub remains for one release cycle
+    then deletes in a follow-up commit; or remove cleanly
+    here per implementation taste (defer the call to review).
+  - Tests: remove `tests/cli_query.rs`, `tests/
+    query_regression.rs`, and any per-feature CI matrix
+    entries. CLI smoke test that `conspectus query` exits
+    non-zero with the hint message (if the stub-for-a-cycle
+    path is taken) or exits with the standard "unknown
+    command" clap error (if the clean removal path is
+    taken).
+  - Manual checks: `conspectus --help` no longer lists
+    `query`.
+  - Blockers: `P11-007`, `P11-008`. (Every read path must be
+    off SQLite before the query surface is removed since the
+    query surface and the SQLite store share the
+    `query::reader` machinery.)
+
+- [ ] `P11-011` Delete `src/query/`, drop `rusqlite`, drop the
+  `query` Cargo feature.
+  - Scope: remove `src/query/` in its entirety, the `query`
+    feature from `Cargo.toml` and every `cfg(feature =
+    "query")` gate that referenced it, `rusqlite` and the
+    bundled-sqlite features, the `MIN_SQLITE_VERSION` floor
+    and its tests, `query::materialize_snapshot` and its call
+    sites in `src/cli.rs` (every `materialize_snapshot` call
+    that survived the reader cutover was a query-feature
+    consumer and goes with it), and the `graph.sqlite` /
+    `backups/` / `graph.sqlite-wal` / `graph.sqlite-shm`
+    paths from the cache layout. Add a one-time migration
+    helper at daemon startup that unlinks any legacy
+    `graph.sqlite*` files in the cache directory after
+    successful first cycle — single-shot cleanup, removable
+    after one release. The SQLite read fallback in
+    `P11-007` / `P11-008` deletes here.
+  - Tests: full suite green after deletion. Build matrix
+    confirms no `cfg(feature = "query")` references remain
+    (`rg "feature = \"query\""` clean). Lockfile diff
+    confirms `rusqlite` and `libsqlite3-sys` are gone.
+    Binary size measurement (`ls -lh target/release/
+    conspectus` before/after) captured in the story outcome.
+  - Manual checks: clean-build wall-clock measurement
+    before/after; confirm `conspectus` runs end-to-end with
+    no missing-dep crash.
+  - Blockers: `P11-010`.
+
+- [ ] `P11-012` Supersede the SQLite ADR cluster and rewrite
+  design.md.
+  - Scope: update the status block on ADRs 0036, 0037, 0039,
+    0040, 0042, 0043, 0044 to "Superseded by ADR 0082" with a
+    one-paragraph note pointing readers at the new model.
+    Update ADR 0038 to a "Partially superseded" status: the
+    read path becomes "socket `snapshot` command or mmap of
+    `graph.bin`"; the write path's writer-fallback fork
+    retires; the existing mutation/refresh framing stays.
+    Rewrite `docs/design.md` §"Continuous Operation Mode" and
+    §"Graph Snapshot Persistence" against the new model
+    (in-memory daemon + zero-copy mmap artifact + no SQL
+    surface); the §"Conspectus Query Surface" section deletes.
+    Update `README.md` CLI block to drop `conspectus query`.
+    Cross-link every superseded ADR back to 0082 in its
+    Status section.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: ADR index renders correctly; design.md
+    reads as a single coherent story after the rewrite.
+  - Blockers: `P11-011`.
+
+- [ ] `P11-013` Operator migration notes.
+  - Scope: add a CHANGELOG entry calling out the removal of
+    `conspectus query` with the suggested replacement
+    (`conspectus graph --format json | jq`) and the on-disk
+    cache path change (`graph.sqlite` → `graph.bin`). Update
+    `docs/operations.md` with a "Migration from 0.x" section
+    covering the cache file change, the daemon's new socket
+    `snapshot` command, the removal of `--load-extension` and
+    `--similar-to`, and the one-time legacy-cache cleanup
+    behavior from P11-011. Note that user-authored TOML
+    (`.conspectus.toml`, aliases, pins) is unaffected.
+  - Tests: docs-only; `git diff --check`.
+  - Manual checks: re-read the migration section as a user
+    seeing it for the first time.
+  - Blockers: `P11-012`.
+
 ### Command Search And Minibuffer
 
 The TUI surface (`conspectus tui`) is growing in keybindings, sub-views,
