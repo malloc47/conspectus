@@ -406,6 +406,42 @@ pub fn deserialize_owned(handle: &SnapshotMmap) -> Result<GraphSnapshot> {
         .map_err(SnapshotError::Deserialize)
 }
 
+/// Decode a complete on-disk byte sequence (header + rkyv
+/// archive) into an owned [`GraphSnapshot`]. Used by the
+/// daemon-socket consumer path (P11-007) where the bytes
+/// already live in memory — writing them to a tmp file just to
+/// call [`open_mmap`] would be silly. Validation policy mirrors
+/// [`open_mmap`]: the payload is validated via `bytecheck` so
+/// hostile or truncated bytes return a typed error rather than
+/// UB. Header parsing rejects wrong magic / version up front.
+pub fn from_bytes(bytes: &[u8]) -> Result<GraphSnapshot> {
+    if bytes.len() < HEADER_LEN {
+        return Err(SnapshotError::Truncated {
+            needed: HEADER_LEN,
+            actual: bytes.len(),
+        });
+    }
+    let header = Header::parse(&bytes[..HEADER_LEN])?;
+    let payload_len = header.payload_len as usize;
+    if payload_len > MAX_PAYLOAD_LEN {
+        return Err(SnapshotError::PayloadTooLarge {
+            len: payload_len,
+            max: MAX_PAYLOAD_LEN,
+        });
+    }
+    let expected = HEADER_LEN + payload_len;
+    if bytes.len() < expected {
+        return Err(SnapshotError::Truncated {
+            needed: expected,
+            actual: bytes.len(),
+        });
+    }
+    let payload = &bytes[HEADER_LEN..expected];
+    let archived = rkyv::access::<ArchivedGraphSnapshot, rancor::Error>(payload)
+        .map_err(SnapshotError::Validate)?;
+    rkyv::deserialize::<GraphSnapshot, rancor::Error>(archived).map_err(SnapshotError::Deserialize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +618,41 @@ mod tests {
         // The handle should still open + validate cleanly.
         let handle = open_mmap(&path).expect("reopen");
         assert_eq!(handle.header().format_version, FORMAT_VERSION);
+    }
+
+    #[test]
+    fn from_bytes_round_trips_a_serialized_snapshot() {
+        // P11-007's daemon-socket consumer path receives the
+        // serialized bytes verbatim from the daemon and decodes
+        // them in-memory (no detour through a tmp file).
+        // `from_bytes` is the helper that path uses; round-trip
+        // it against the same fixture the file-based path uses.
+        let snap = sample_snapshot();
+        let bytes = serialize_to_bytes(&snap).expect("serialize");
+        let mut decoded = from_bytes(&bytes).expect("from_bytes");
+        decoded.canonicalize();
+        assert_eq!(decoded, snap);
+    }
+
+    #[test]
+    fn from_bytes_rejects_short_buffer() {
+        let bytes = [0u8; 8];
+        let err = from_bytes(&bytes).expect_err("short buffer must error");
+        assert!(matches!(
+            err,
+            SnapshotError::Truncated {
+                needed: HEADER_LEN,
+                actual: 8
+            }
+        ));
+    }
+
+    #[test]
+    fn from_bytes_rejects_wrong_magic() {
+        let mut bytes = serialize_to_bytes(&sample_snapshot()).expect("serialize");
+        bytes[0..8].copy_from_slice(b"OTHERMAG");
+        let err = from_bytes(&bytes).expect_err("wrong magic must error");
+        assert!(matches!(err, SnapshotError::WrongMagic { .. }));
     }
 
     #[test]

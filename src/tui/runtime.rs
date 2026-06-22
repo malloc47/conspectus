@@ -714,7 +714,20 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 /// Run discovery and resolver on the calling thread, returning the
 /// resolved snapshot (no SQLite materialization).
 ///
-/// P7-003 phase 4: every TUI discovery cycle now reads the
+/// P11-007 cutover: when `conspectus serve` is reachable on the
+/// socket, this short-circuits and pulls the already-resolved
+/// snapshot from the daemon via `client_snapshot` — a single
+/// IPC round-trip instead of a full discovery + resolve cycle.
+/// `RunConfig::refresh` forces the local discovery path even
+/// with a daemon up (the operator typically uses `--refresh` to
+/// bypass cache effects and the daemon's TTL gates apply to its
+/// own ticks, not to the caller's intent). When the daemon is
+/// absent or the snapshot is malformed, falls back to the
+/// pre-cutover local discovery path verbatim — preserving ADR
+/// 0038's "absence of a server is not an error" guarantee for
+/// the TUI surface.
+///
+/// P7-003 phase 4: the local-discovery branch reads the
 /// persisted cache and skips re-running heavy providers whose
 /// class TTL has not expired. The resolved snapshot is persisted
 /// back at the end of each cycle (unless `RunConfig::no_cache` is
@@ -722,6 +735,11 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 /// benefits from the freshest data. `RunConfig::refresh` collapses
 /// the prior to empty for a forced cold scan.
 pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::GraphSnapshot> {
+    if !config.refresh
+        && let Some(snapshot) = try_daemon_snapshot()
+    {
+        return Ok(snapshot);
+    }
     let roots: Vec<PathBuf> = if config.scan_roots.is_empty() {
         vec![std::env::current_dir()?]
     } else {
@@ -763,6 +781,28 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
         let _ = err;
     }
     Ok(snapshot)
+}
+
+/// Best-effort attempt to fetch the freshest snapshot from a
+/// running `conspectus serve` daemon. Returns `Some` only when
+/// the daemon responds with a structurally valid snapshot;
+/// every other outcome (no daemon, snapshot_unavailable error
+/// during the daemon's first cycle, transport error, malformed
+/// bytes) returns `None` so the caller falls through to local
+/// discovery. The fallback is silent for the same reason the
+/// rest of the TUI's refresh path is silent on errors: a noisy
+/// stderr per cycle would clobber the terminal during a live
+/// session.
+fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
+    use crate::server::{ClientOutcome, client_snapshot};
+    let bytes = match client_snapshot() {
+        ClientOutcome::Ok(bytes) => bytes,
+        // Every other outcome is "fall back to local discovery."
+        // The daemon may be absent, mid-first-cycle, or hung; any
+        // of those means the local path is the right answer.
+        _ => return None,
+    };
+    crate::snapshot::from_bytes(&bytes).ok()
 }
 
 /// Resolve the current selection to a renameable row and seed the
