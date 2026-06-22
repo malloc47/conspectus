@@ -144,7 +144,9 @@ pub fn load_alias_entry_for_node(
 /// Resolved alias overlay carried alongside a [`GraphSnapshot`].
 /// Maps a [`NodeId`] to the operator-chosen display name with local
 /// stores taking precedence over global stores per ADR 0029.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct AliasOverlay {
     entries: BTreeMap<NodeId, String>,
 }

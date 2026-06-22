@@ -43,6 +43,14 @@ notify = { version = "8", default-features = false, features = ["macos_kqueue"] 
 # code can name it explicitly. Tiny, pure-FFI, mature.
 libc = "0.2"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "macros"] }
+# Zero-copy archive format for the on-disk graph snapshot
+# (ADR 0083). Replaces the SQLite-backed persistence layer; the
+# daemon writes a single mmap-able artifact per cycle, readers
+# deserialize once with bytecheck validation. The
+# `serde_json::Value` payloads inside `Metadata` are handled via
+# a `MetadataAsJson` adapter in `src/model/rkyv_adapters.rs` per
+# the ADR 0083 amendment (option c).
+rkyv = { version = "0.8", features = ["bytecheck", "alloc"] }
 ratatui-cheese = "0.7"
 ratatui-comfy-toaster = { version = "0.4", default-features = false }
 tui-popup = "0.7"

@@ -7,6 +7,9 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod rkyv_adapters;
+use rkyv_adapters::MetadataAsJson;
+
 pub type Metadata = BTreeMap<String, Value>;
 
 /// Rank active candidate links by provenance precedence, then confidence,
@@ -47,7 +50,21 @@ pub fn path_is_ancestor_of(ancestor: &Path, descendant: &Path) -> bool {
 
 macro_rules! simple_id {
     ($name:ident, $kind:literal, $field:ident) => {
-        #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+        #[derive(
+            Clone,
+            Debug,
+            Eq,
+            PartialEq,
+            Ord,
+            PartialOrd,
+            Hash,
+            Serialize,
+            Deserialize,
+            rkyv::Archive,
+            rkyv::Serialize,
+            rkyv::Deserialize,
+        )]
+        #[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
         pub struct $name {
             pub $field: String,
         }
@@ -74,7 +91,21 @@ simple_id!(MuxSessionId, "mux_session", native_id);
 simple_id!(ForkId, "fork", provider_source_key);
 simple_id!(RuntimeProcessId, "runtime_process", observation_key);
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 pub struct CheckoutId {
     pub repo: RepoId,
     pub root: String,
@@ -95,7 +126,21 @@ impl fmt::Display for CheckoutId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 pub struct AgentSessionId {
     pub harness_key: String,
     pub state_scope: String,
@@ -126,7 +171,21 @@ impl fmt::Display for AgentSessionId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 pub struct BranchId {
     pub repo: RepoId,
     pub refname: String,
@@ -147,7 +206,21 @@ impl fmt::Display for BranchId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 pub struct ForgePrId {
     pub provider: String,
     pub host: String,
@@ -184,8 +257,22 @@ impl fmt::Display for ForgePrId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 pub enum NodeId {
     Repo(RepoId),
     Checkout(CheckoutId),
@@ -227,7 +314,19 @@ impl fmt::Display for NodeId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GraphNode {
     Repo(RepoNode),
@@ -261,7 +360,19 @@ impl GraphNode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RepoNode {
     pub id: RepoId,
     pub common_dir: String,
@@ -282,7 +393,19 @@ impl RepoNode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct CheckoutNode {
     pub id: CheckoutId,
     pub root: String,
@@ -303,7 +426,19 @@ impl CheckoutNode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct WorkspaceNode {
     pub id: WorkspaceId,
     pub root: String,
@@ -313,7 +448,19 @@ pub struct WorkspaceNode {
     pub name: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct AgentSessionNode {
     pub id: AgentSessionId,
     pub harness_key: String,
@@ -341,7 +488,19 @@ pub struct AgentSessionNode {
     pub session_kind: Option<SessionKind>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct MuxSessionNode {
     pub id: MuxSessionId,
     pub backend: String,
@@ -378,7 +537,19 @@ pub struct MuxSessionNode {
     pub created_epoch: Option<i64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RuntimeProcessNode {
     pub id: RuntimeProcessId,
     pub observation_key: String,
@@ -402,7 +573,19 @@ pub struct RuntimeProcessNode {
     pub observed_epoch: Option<i64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct BranchNode {
     pub id: BranchId,
     pub refname: String,
@@ -412,7 +595,19 @@ pub struct BranchNode {
     pub upstream: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ForkNode {
     pub id: ForkId,
     pub provider: String,
@@ -425,7 +620,19 @@ pub struct ForkNode {
     pub capabilities: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ForgePrNode {
     pub id: ForgePrId,
     pub provider: String,
@@ -448,7 +655,20 @@ pub struct ForgePrNode {
 /// set `Subagent` so the TUI and resolver can distinguish human-driven work
 /// from auxiliary traffic. Harnesses without subagent semantics leave this
 /// `None` (sparse default).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
     Human,
@@ -458,7 +678,20 @@ pub enum SessionKind {
 /// Best-effort role classification for ephemeral runtime process
 /// observations. The role is diagnostic and resolver-supporting; it
 /// is not durable identity.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProcessRole {
     HumanAgent,
@@ -468,7 +701,19 @@ pub enum RuntimeProcessRole {
     Unknown,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationKind {
     AssociatedWith,
@@ -522,7 +767,20 @@ impl RelationKind {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     LocalDeclared,
@@ -574,7 +832,20 @@ impl Provenance {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
     High,
@@ -593,7 +864,20 @@ impl Confidence {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Freshness {
     Fresh,
@@ -601,14 +885,32 @@ pub enum Freshness {
     Unknown,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LinkEndpoint {
     Node { id: NodeId },
     Unresolved { evidence: UnresolvedEndpoint },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct UnresolvedEndpoint {
     pub node_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -620,10 +922,23 @@ pub struct UnresolvedEndpoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
+    #[rkyv(with = MetadataAsJson)]
     pub metadata: Metadata,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum LinkState {
     Active,
@@ -644,7 +959,16 @@ impl LinkState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct GraphLink {
     pub id: String,
     pub source: NodeId,
@@ -686,12 +1010,23 @@ impl GraphLink {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct SourceMetadata {
     pub adapter: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
+    #[rkyv(with = MetadataAsJson)]
     pub fields: Metadata,
     /// Unix epoch (seconds) captured when the producing adapter ran
     /// against the live world. Feeds the SQL
@@ -714,7 +1049,18 @@ pub struct SourceMetadata {
 /// the schema's `'unknown'` / `0` defaults so legacy snapshots
 /// (and any provider that has not yet been instrumented) keep
 /// round-tripping.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct NodeProvenance {
     /// Stable identifier of the producing discovery provider, e.g.
     /// `git`, `harness::claude_code`, `tmux`, `forge::github`,
@@ -732,7 +1078,19 @@ pub struct NodeProvenance {
     pub freshness_epoch: Option<i64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ResolvedRelationship {
     pub source: NodeId,
     /// Placeholder target that carries the would-have-been winner's
@@ -767,7 +1125,19 @@ pub struct ResolvedRelationship {
     pub competing_link_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Diagnostic {
     UnresolvedEndpoint {
@@ -826,13 +1196,35 @@ pub enum Diagnostic {
 /// ADR 0058 §Q5: the recorded last-bound session a `PinUnbound`
 /// diagnostic optionally carries. Drives the launch path's
 /// "Enter to resume X" hint surface.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PinLastSession {
     pub session_id: String,
     pub observed_epoch: i64,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct GraphSnapshot {
     pub nodes: Vec<GraphNode>,
     pub candidate_links: Vec<GraphLink>,
@@ -885,7 +1277,7 @@ mod node_provenance_serde {
 
     use super::{NodeId, NodeProvenance};
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
     struct Entry {
         node_id: NodeId,
         #[serde(flatten)]
@@ -986,7 +1378,19 @@ impl GraphSnapshot {
 /// the resolver pass ([`crate::resolve::pins`]) once mux lookup and
 /// harness attribution have run; pre-resolve snapshots leave it as
 /// `None`.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PinCandidate {
     /// Pin id from the TOML entry; unique within its store.
     pub id: String,
@@ -1018,7 +1422,19 @@ pub struct PinCandidate {
 /// Ambiguous-binding cases resolve to `Bound` for the resolver's
 /// preferred candidate and emit a parallel `Diagnostic::PinAmbiguous`
 /// listing the competing candidates so the operator can override.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PinBinding {
     /// The mux exists and a `pin.harness` session was attributed to
@@ -1041,7 +1457,19 @@ pub enum PinBinding {
 /// the schema in [`crate::pins::PinMux`] but lives in the model
 /// crate so consumers can read it without depending on the
 /// pin-schema module.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PinMuxRef {
     pub backend: String,
     pub name: String,
@@ -1438,5 +1866,272 @@ mod tests {
             snap.resolved_relationships.is_empty(),
             "evict_provider must clear resolved relationships so the resolver re-runs"
         );
+    }
+
+    // ---- ADR 0083 rkyv archive round-trip coverage (P11-003) ----
+
+    /// Construct a `GraphSnapshot` populated with one of every
+    /// `NodeKind` plus link, resolved-relationship, diagnostic,
+    /// alias, pin, and node-provenance entries. The fixture is the
+    /// shared input for the rkyv archive round-trip tests below;
+    /// putting it here (rather than building a fresh one per test)
+    /// keeps the variant coverage in lockstep with what the format
+    /// is expected to preserve.
+    fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
+        let repo_id = RepoId::new("/r/.git");
+        let checkout_id = CheckoutId::new(repo_id.clone(), "/r");
+        let workspace_id = WorkspaceId::new("/ws");
+        let agent_id = AgentSessionId::new("codex", "/h", "sess-1");
+        let mux_id = MuxSessionId::new("tmux:editor");
+        let runtime_id = RuntimeProcessId::new("proc-1");
+        let branch_id = BranchId::new(repo_id.clone(), "refs/heads/main");
+        let fork_id = ForkId::new("github:owner:repo");
+        let pr_id = ForgePrId::new("github", "github.com", "owner", "repo", 1);
+
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes
+            .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+        snap.nodes.push(GraphNode::Checkout(CheckoutNode::new(
+            checkout_id.clone(),
+            "/r",
+        )));
+        snap.nodes.push(GraphNode::Workspace(WorkspaceNode {
+            id: workspace_id.clone(),
+            root: "/ws".to_string(),
+            provider: Some("agent-deck".to_string()),
+            name: Some("ws".to_string()),
+        }));
+        snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
+            id: agent_id.clone(),
+            harness_key: "codex".to_string(),
+            cwd: Some("/r".to_string()),
+            title: Some("hello".to_string()),
+            last_message_preview: Some("hi".to_string()),
+            last_active_epoch: Some(1),
+            session_kind: Some(SessionKind::Human),
+        }));
+        snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: mux_id.clone(),
+            backend: "tmux".to_string(),
+            native_id: "editor".to_string(),
+            cwd: Some("/r".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: Some(true),
+            activity_epoch: Some(2),
+            created_epoch: Some(3),
+        }));
+        snap.nodes
+            .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
+                id: runtime_id.clone(),
+                observation_key: "proc-1".to_string(),
+                pid: Some(42),
+                parent_pid: None,
+                root_pane_pid: None,
+                command: Some("claude-code".to_string()),
+                cwd: Some("/r".to_string()),
+                harness_key: Some("codex".to_string()),
+                role: Some(RuntimeProcessRole::HumanAgent),
+                depth: Some(1),
+                observed_epoch: Some(4),
+            }));
+        snap.nodes.push(GraphNode::Branch(BranchNode {
+            id: branch_id.clone(),
+            refname: "refs/heads/main".to_string(),
+            current_commit: Some("abc".to_string()),
+            upstream: Some("origin/main".to_string()),
+        }));
+        snap.nodes.push(GraphNode::Fork(ForkNode {
+            id: fork_id.clone(),
+            provider: "github".to_string(),
+            provider_source_key: "github:owner:repo".to_string(),
+            name: Some("repo".to_string()),
+            scope: None,
+            capabilities: vec!["read".to_string()],
+        }));
+        snap.nodes.push(GraphNode::ForgePr(ForgePrNode {
+            id: pr_id.clone(),
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            number: 1,
+            state: Some("open".to_string()),
+            url: Some("https://example".to_string()),
+            updated_epoch: Some(5),
+            is_draft: false,
+        }));
+
+        let mut fields = Metadata::new();
+        fields.insert("s".to_string(), Value::String("hi".to_string()));
+        fields.insert("n".to_string(), Value::from(42i64));
+        fields.insert("b".to_string(), Value::Bool(true));
+        fields.insert("arr".to_string(), serde_json::json!([1, 2, "three"]));
+        fields.insert("obj".to_string(), serde_json::json!({"k": "v"}));
+        fields.insert("z".to_string(), Value::Null);
+
+        let mut link = GraphLink::new(
+            "link-1",
+            NodeId::AgentSession(agent_id.clone()),
+            LinkEndpoint::Node {
+                id: NodeId::MuxSession(mux_id.clone()),
+            },
+            RelationKind::LinkedToMux,
+            Provenance::StrongDiscovered,
+        );
+        link.source_metadata.adapter = "tmux".to_string();
+        link.source_metadata.fields = fields.clone();
+        link.source_metadata.freshness_epoch = Some(6);
+        snap.candidate_links.push(link);
+
+        let unresolved_link = GraphLink::new(
+            "link-2",
+            NodeId::AgentSession(agent_id.clone()),
+            LinkEndpoint::Unresolved {
+                evidence: UnresolvedEndpoint {
+                    node_type: "mux".to_string(),
+                    harness_key: Some("codex".to_string()),
+                    native_id: Some("ghost".to_string()),
+                    state_scope: None,
+                    path: None,
+                    metadata: fields.clone(),
+                },
+            },
+            RelationKind::LinkedToMux,
+            Provenance::Discovered,
+        );
+        snap.candidate_links.push(unresolved_link);
+
+        snap.resolved_relationships.push(ResolvedRelationship {
+            source: NodeId::AgentSession(agent_id.clone()),
+            target: NodeId::MuxSession(mux_id.clone()),
+            relation: RelationKind::LinkedToMux,
+            selected_link_id: Some("link-1".to_string()),
+            competing_link_ids: vec!["link-2".to_string()],
+        });
+
+        snap.diagnostics.push(Diagnostic::UnresolvedEndpoint {
+            link_id: "link-2".to_string(),
+            relation: RelationKind::LinkedToMux,
+        });
+
+        snap.aliases
+            .insert(NodeId::AgentSession(agent_id.clone()), "Alpha".to_string());
+
+        snap.pins.push(PinCandidate {
+            id: "pin-1".to_string(),
+            display_name: "Pin Alpha".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/r".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "editor".to_string(),
+                socket_name: None,
+            },
+            launch_argv: Some(vec!["codex".to_string()]),
+            reason: Some("primary".to_string()),
+            provenance: Provenance::LocalPin,
+            store_path: "/r/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::Bound {
+                mux: mux_id.clone(),
+                session: agent_id.clone(),
+            }),
+        });
+
+        snap.node_provenance.insert(
+            NodeId::Repo(repo_id),
+            NodeProvenance {
+                provider: "git".to_string(),
+                freshness_epoch: Some(7),
+            },
+        );
+        snap.node_provenance.insert(
+            NodeId::AgentSession(agent_id),
+            NodeProvenance {
+                provider: "harness::codex".to_string(),
+                freshness_epoch: Some(8),
+            },
+        );
+
+        snap.canonicalize();
+        snap
+    }
+
+    #[test]
+    fn graph_snapshot_rkyv_round_trip_preserves_every_field() {
+        let snap = populated_snapshot_for_archive_tests();
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&snap).expect("archive snapshot");
+        let mut decoded: GraphSnapshot =
+            rkyv::from_bytes::<GraphSnapshot, rkyv::rancor::Error>(&bytes)
+                .expect("deserialize snapshot");
+        // `canonicalize` is idempotent on a canonical snapshot, so
+        // calling it again is harmless and provides defense against
+        // any future deserializer that returns an unsorted shape.
+        decoded.canonicalize();
+        assert_eq!(decoded, snap);
+    }
+
+    /// Regression net for the `ValueAsJson` adapter in
+    /// `src/model/rkyv_adapters.rs`. Covers every `serde_json::Value`
+    /// variant (String, Number, Bool, Array, Object, Null) through a
+    /// full archive → deserialize cycle so a future adapter regression
+    /// surfaces in CI rather than at a consumer site.
+    #[test]
+    fn metadata_with_every_value_variant_round_trips() {
+        let mut fields = Metadata::new();
+        fields.insert("s".to_string(), Value::String("hi".to_string()));
+        fields.insert("i".to_string(), Value::from(42i64));
+        fields.insert("f".to_string(), Value::from(2.5f64));
+        fields.insert("b".to_string(), Value::Bool(true));
+        fields.insert("z".to_string(), Value::Null);
+        fields.insert("arr".to_string(), serde_json::json!([1, "two", false]));
+        fields.insert(
+            "obj".to_string(),
+            serde_json::json!({"nested": {"k": [1, 2]}}),
+        );
+
+        let original = SourceMetadata {
+            adapter: "test".to_string(),
+            evidence: Some("ev".to_string()),
+            fields,
+            freshness_epoch: Some(99),
+        };
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("archive metadata");
+        let decoded: SourceMetadata =
+            rkyv::from_bytes::<SourceMetadata, rkyv::rancor::Error>(&bytes)
+                .expect("deserialize metadata");
+
+        assert_eq!(decoded, original);
+    }
+
+    /// Every `NodeId` variant must round-trip through the archive
+    /// since `NodeId` is the key of `GraphSnapshot::node_provenance`
+    /// and `AliasOverlay::entries`. If a future variant adds a
+    /// payload type whose archive impl is missing, this test catches
+    /// it before any consumer hits the failure.
+    #[test]
+    fn every_node_id_variant_archives_and_round_trips() {
+        let repo = RepoId::new("/r/.git");
+        let variants = [
+            NodeId::Repo(repo.clone()),
+            NodeId::Checkout(CheckoutId::new(repo.clone(), "/r")),
+            NodeId::Workspace(WorkspaceId::new("/ws")),
+            NodeId::AgentSession(AgentSessionId::new("codex", "/h", "sess")),
+            NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+            NodeId::RuntimeProcess(RuntimeProcessId::new("proc-1")),
+            NodeId::Branch(BranchId::new(repo.clone(), "refs/heads/main")),
+            NodeId::Fork(ForkId::new("github:owner:repo")),
+            NodeId::ForgePr(ForgePrId::new("github", "github.com", "o", "r", 1)),
+        ];
+        for id in &variants {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(id)
+                .unwrap_or_else(|e| panic!("archive {id:?}: {e}"));
+            let decoded: NodeId = rkyv::from_bytes::<NodeId, rkyv::rancor::Error>(&bytes)
+                .unwrap_or_else(|e| panic!("deserialize {id:?}: {e}"));
+            assert_eq!(&decoded, id);
+        }
     }
 }
