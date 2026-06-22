@@ -10773,31 +10773,64 @@ intermediate commit.
     deferred to a follow-up alongside the eventual P11-011
     legacy-cache cleanup migration.
 
-- [ ] `P11-006` Add the `snapshot` socket command.
-  - Scope: extend `src/server/mod.rs::dispatch` with a
-    `snapshot` command that reads the daemon's cached
-    `ArcSwap<Arc<Vec<u8>>>` from P11-005 and returns the
-    bytes as the response payload. The framing stays
-    length-prefixed JSON for control but the snapshot bytes
-    ride in a `data.bytes` base64 field — or, if base64
-    overhead becomes objectionable, the framing gains a
-    binary-payload variant (decision deferred to
-    implementation review). Add `client_snapshot()` in the
-    same module returning `ClientOutcome<Vec<u8>>` symmetric
-    with `client_status` / `client_refresh`. Error code
-    `snapshot_unavailable` when the daemon has not yet
-    completed its first cycle.
-  - Tests: integration test that starts the daemon, calls
-    `client_snapshot`, parses the returned bytes via
-    `snapshot::open_mmap` (writing to a tmp file first, since
-    the call returns bytes), and asserts archived equality
-    against the file at `graph.bin`. Test the "first cycle
-    not yet done" error path by querying immediately on
-    startup. Round-trip framing test for the binary-payload
-    decision once implementation lands.
-  - Manual checks: `conspectus serve &` then a hand-rolled
-    socket client returns a parseable snapshot.
-  - Blockers: `P11-005`.
+- [x] `P11-006` Add the `snapshot` socket command.
+  - Outcome: the daemon's `dispatch` table picks up a
+    `snapshot` arm (`handle_snapshot`) that reads the cached
+    bytes from P11-005's `SnapshotBytes`, base64-encodes
+    them, and returns under `data.bytes`. Pre-first-cycle
+    callers get a `result: "error"` envelope with code
+    `snapshot_unavailable` and a "daemon has not completed
+    its first cycle" message so the caller can fall through
+    rather than block (P11-008's mmap-or-rebuild path is the
+    natural consumer). The handler clones the `Arc<Vec<u8>>`
+    out of the cache under the Mutex (held only long enough
+    to copy the Arc handle), drops the guard, then encodes —
+    so a long base64 pass does not block class threads from
+    updating the cache.
+    `client_snapshot()` in `src/server/mod.rs` is the typed
+    helper symmetric with `client_status` / `client_refresh`:
+    sends the framed request, base64-decodes the response
+    `data.bytes`, returns `ClientOutcome<Vec<u8>>`. Daemon
+    errors and transport errors flow through the existing
+    `ClientOutcome` variants unchanged.
+    Framing decision: base64 in JSON rather than a
+    binary-frame variant. Tradeoff documented in the
+    `Cargo.toml` `base64` comment block — at conspectus's
+    single-digit-MB snapshot scale the 4/3 expansion is
+    irrelevant and keeps the protocol uniform. The 16 MiB
+    `MAX_FRAME_BYTES` cap in `read_frame` accommodates
+    snapshots up to ~12 MiB raw; if real-world graphs ever
+    push past that, the binary-frame variant becomes the
+    upgrade path.
+    `Cargo.toml` gains `base64 = "0.22"` (~50 KB pure Rust,
+    MIT/Apache, ubiquitous in the ecosystem). Small enough
+    to fit the dep policy without an ADR; the rationale is
+    captured in the Cargo.toml comment block + this story
+    outcome.
+  - Tests: two integration tests in `tests/cli_serve.rs` —
+    `serve_socket_snapshot_command_returns_graph_bin_bytes`
+    spawns the daemon, waits for `graph.bin` to land,
+    requests a snapshot over the socket via hand-rolled
+    framing (proves the wire shape independently of the
+    typed client), confirms the decoded bytes equal the
+    on-disk artifact byte-for-byte, and re-validates them
+    via `snapshot::open_mmap` + `deserialize_owned` to
+    assert they form a structurally sound archive.
+    `serve_socket_snapshot_command_errors_before_first_cycle`
+    races the daemon's first cycle to exercise the
+    `snapshot_unavailable` path — accepts either outcome
+    (the cycle may finish before the request lands on a
+    fast machine) but verifies the error envelope carries
+    the documented code when it does fire. Full suite:
+    `cargo nextest run --all-targets --all-features` green
+    at 1773 tests; `cargo fmt -- --check` and
+    `cargo clippy --all-targets --all-features --
+    -D warnings` clean.
+  - Notes: the typed `client_snapshot` helper isn't directly
+    unit-tested — its surface is thin (frame → base64 →
+    bytes) and the integration test exercises the same wire
+    path. P11-007 (TUI cutover) will be the first real
+    consumer.
 
 - [ ] `P11-007` Cut the TUI over to socket-served snapshots.
   - Scope: when the daemon is reachable, the TUI calls

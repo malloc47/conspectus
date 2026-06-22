@@ -373,6 +373,44 @@ pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
     }
 }
 
+/// Send a `snapshot` request to the daemon and return the
+/// decoded snapshot bytes (header + rkyv archive per ADR 0083).
+/// Pre-first-cycle responses surface as
+/// `DaemonError { code: "snapshot_unavailable" }`; callers
+/// typically translate that into a cold-rebuild fallback path
+/// (P11-008) or a "waiting for first cycle" UI hint.
+///
+/// The returned bytes can be passed to
+/// `snapshot::open_mmap_unvalidated` after writing to a tmp
+/// file (or, eventually, fed to a future `from_bytes` reader
+/// that skips the mmap detour). Validation is skipped because
+/// the bytes come from the daemon's own
+/// `dual_write_artifact` cycle — already structurally sound.
+pub fn client_snapshot() -> ClientOutcome<Vec<u8>> {
+    use base64::Engine;
+
+    match call_command("snapshot", serde_json::Value::Null, "cli-snapshot") {
+        ClientOutcome::Ok(value) => {
+            let Some(encoded) = value.get("bytes").and_then(|v| v.as_str()) else {
+                return ClientOutcome::Transport(anyhow!(
+                    "snapshot response missing data.bytes string: {value}"
+                ));
+            };
+            match base64::engine::general_purpose::STANDARD.decode(encoded) {
+                Ok(bytes) => ClientOutcome::Ok(bytes),
+                Err(err) => ClientOutcome::Transport(
+                    anyhow!(err).context("decode snapshot response bytes (base64)"),
+                ),
+            }
+        }
+        ClientOutcome::DaemonError { code, message } => {
+            ClientOutcome::DaemonError { code, message }
+        }
+        ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
+        ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
+    }
+}
+
 /// Common framing for client-side calls. Connects to the
 /// canonical socket path, sends the framed request, reads the
 /// framed response, parses the JSON envelope.
@@ -474,6 +512,13 @@ fn try_handle_connection(stream: &mut UnixStream, ctx: &DispatchCtx) -> Result<(
 ///   not pick up for a while (e.g. they just `gh pr create`d
 ///   and want forge state refreshed now without waiting 5
 ///   minutes for the next forge tick).
+/// * `status` — returns the per-class `SchedulerState` map.
+/// * `snapshot` — returns the cached serialized snapshot bytes
+///   (header + rkyv archive per ADR 0083) base64-encoded under
+///   `data.bytes`. P11-007 (TUI) and P11-008 (CLI mmap-or-
+///   rebuild) consume this command. Returns
+///   `snapshot_unavailable` when the daemon has not yet
+///   completed its first cycle.
 ///
 /// The rename / declare-link / ignore-link mutation commands
 /// remain operator-callable through one-shot CLI; they bypass
@@ -491,6 +536,7 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
         },
         "refresh" => handle_refresh(request, ctx),
         "status" => handle_status(request, ctx),
+        "snapshot" => handle_snapshot(request, ctx),
         unknown => Response {
             id: request.id.clone(),
             result: "error",
@@ -500,6 +546,49 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
                 message: format!("unknown command `{unknown}`"),
             }),
         },
+    }
+}
+
+/// `snapshot` command handler (P11-006). Reads the cached
+/// serialized snapshot bytes the daemon populates after every
+/// successful cycle (`dual_write_artifact`), base64-encodes
+/// them into `data.bytes`, and returns. Pre-first-cycle calls
+/// (the cache is `None`) get a `snapshot_unavailable` error so
+/// the client can decide whether to wait, retry, or fall back
+/// to cold rebuild.
+///
+/// The handler does no I/O beyond the response write — it just
+/// clones the `Arc<Vec<u8>>` out of the cache under the Mutex
+/// (held only long enough to copy the Arc handle), drops the
+/// guard, then encodes. A long base64 pass therefore does not
+/// block class threads from updating the cache.
+fn handle_snapshot(request: &Request, ctx: &DispatchCtx) -> Response {
+    use base64::Engine;
+
+    let bytes = {
+        let guard = match ctx.snapshot_bytes.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.clone()
+    };
+    let Some(bytes) = bytes else {
+        return Response {
+            id: request.id.clone(),
+            result: "error",
+            data: None,
+            error: Some(ErrorBody {
+                code: "snapshot_unavailable".to_string(),
+                message: "daemon has not completed its first cycle".to_string(),
+            }),
+        };
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes.as_slice());
+    Response {
+        id: request.id.clone(),
+        result: "ok",
+        data: Some(serde_json::json!({"bytes": encoded})),
+        error: None,
     }
 }
 

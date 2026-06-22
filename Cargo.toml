@@ -58,6 +58,14 @@ rkyv = { version = "0.8", features = ["bytecheck", "alloc"] }
 # mapped pages. memmap2 is the standard idiomatic Rust mmap
 # crate; tiny, mature, MIT-licensed.
 memmap2 = "0.9"
+# Base64 codec for the daemon socket's `snapshot` response
+# (P11-006). The wire framing stays length-prefixed JSON per
+# ADR 0038; binary snapshot bytes ride in a `data.bytes`
+# base64 field so the protocol surface stays uniform. The
+# ~4/3 size expansion is fine at conspectus's snapshot scale
+# (single-digit MB); a binary-frame variant is the natural
+# upgrade if snapshots ever push past the 16 MiB frame cap.
+base64 = "0.22"
 ratatui-cheese = "0.7"
 ratatui-comfy-toaster = { version = "0.4", default-features = false }
 tui-popup = "0.7"
