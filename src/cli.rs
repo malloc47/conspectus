@@ -1801,32 +1801,52 @@ fn load_warm_start_prior(refresh: bool) -> (conspectus::model::GraphSnapshot, bo
     }
 }
 
-/// P7-003 phase 4: shared discovery driver used by every CLI
-/// command that renders a resolved graph (`table`, `node show`,
-/// `graph`). Threads the warm-start prior + per-class TTL
-/// intervals through [`discover_local_warm_with`], resolves the
-/// merged snapshot, and persists the result so the next
-/// invocation can warm-start.
+/// P11-008 resolution chain for every one-shot CLI command
+/// that renders a resolved graph (`table`, `node show`,
+/// `graph`, and `query` until it retires in P11-010). The order
+/// is:
 ///
-/// `refresh` collapses the prior to empty (force-cold scan);
-/// `no_cache` suppresses the writer for this invocation.
-/// Mirrors the table command's flag semantics so behavior stays
-/// uniform across read-only graph commands.
+/// 1. **Daemon snapshot**: when `conspectus serve` is reachable
+///    on the socket, request the freshly-resolved snapshot via
+///    `client_snapshot()`, decode it, and return. Skips
+///    discovery + resolve + persist entirely.
+/// 2. **Cold rebuild**: the existing P7-003 phase 4 path —
+///    load warm-start prior from SQLite, run
+///    `discover_local_warm_with` with the per-class TTL gates,
+///    resolve, dual-write graph.sqlite + graph.bin so the next
+///    daemon cycle (or a future mmap-fresh path) can serve it.
+///    Backup rotation fires here when this run is a true cold
+///    rebuild.
+///
+/// `refresh` (operator-forced cold scan via `--refresh`)
+/// bypasses (1) so the flag semantic — "ignore caches,
+/// rebuild from disk" — is preserved. `no_cache` skips the
+/// dual-write at the end of (2).
+///
+/// The "mmap fresh `graph.bin`" branch named in P11-008's
+/// original scope is **deferred**: TOML-rooted mutator
+/// providers (declared, aliases, pins per
+/// `cache::MUTATOR_PROVIDERS`) edit files in the workspace
+/// that the wall-clock TTL freshness gate cannot reason about,
+/// so a sub-second TOML edit between two CLI invocations
+/// would silently shadow a real change. A proper revival
+/// either tracks input mtimes against the artifact or re-runs
+/// mutator-class providers after the mmap; either is bigger
+/// than the daemonless cold-rebuild cost (single-digit seconds
+/// per ADR 0082) justifies. The CLI still **writes**
+/// `graph.bin` on every cold rebuild so the daemon-resident
+/// flow and future mmap-fresh revival both have the artifact
+/// ready.
 fn warm_start_discover_and_resolve(
     roots: Vec<PathBuf>,
     refresh: bool,
     no_cache: bool,
     intervals: &conspectus::config::ServerIntervals,
 ) -> Result<conspectus::model::GraphSnapshot> {
+    if !refresh && let Some(snapshot) = try_daemon_snapshot() {
+        return Ok(snapshot);
+    }
     let (prior, prior_was_cache_hit) = load_warm_start_prior(refresh);
-    // ADR 0037 rotation trigger: this run is a cold rebuild
-    // either because the operator forced one (`--refresh`) or
-    // because the warm-start path found no usable cache (first
-    // run, schema mismatch, corruption healed). Both states
-    // produce a "known-clean" full snapshot worth backing up.
-    // An empty-but-cached prior (an earlier run from an empty
-    // workspace) is *not* a cold rebuild — we already backed up
-    // when that empty cache was first written.
     let cold_rebuild = !prior_was_cache_hit;
     let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
     let snapshot =
@@ -1839,6 +1859,22 @@ fn warm_start_discover_and_resolve(
     Ok(snapshot)
 }
 
+/// Best-effort daemon-snapshot fetch. Returns `Some` only when
+/// the daemon responds with a structurally valid snapshot;
+/// every other outcome (no daemon, snapshot_unavailable error
+/// during first cycle, transport error, malformed bytes)
+/// returns `None` so the caller falls through. Silent: a noisy
+/// stderr per CLI invocation would clobber whatever the
+/// operator was reading.
+fn try_daemon_snapshot() -> Option<conspectus::model::GraphSnapshot> {
+    use conspectus::server::{ClientOutcome, client_snapshot};
+    let bytes = match client_snapshot() {
+        ClientOutcome::Ok(bytes) => bytes,
+        _ => return None,
+    };
+    conspectus::snapshot::from_bytes(&bytes).ok()
+}
+
 /// Best-effort wrapper around [`conspectus::query::rotate_backup`]
 /// that swallows failures into a one-line warning. Backups are
 /// debugging artifacts per ADR 0037; a failed rotate must not
@@ -1849,19 +1885,33 @@ fn rotate_backup_best_effort() {
     }
 }
 
-/// P7-003: persist a freshly resolved snapshot to the canonical
-/// `graph.sqlite` location. Best-effort: a write failure prints a
-/// `conspectus: warning:` line to stderr but never aborts the
-/// command — the rendered output the operator just saw is the
-/// primary product. `no_cache` lets the operator opt out for a
-/// single invocation (e.g. when running against a non-writable
-/// `$HOME` or wanting an in-memory-only render).
+/// P7-003 + P11-008: dual-write a freshly resolved snapshot to
+/// the canonical `graph.sqlite` and `graph.bin` locations.
+/// Best-effort: each writer failure prints a `conspectus:
+/// warning:` line to stderr but never aborts the command — the
+/// rendered output the operator just saw is the primary
+/// product. `no_cache` lets the operator opt out for a single
+/// invocation (e.g. when running against a non-writable `$HOME`
+/// or wanting an in-memory-only render).
+///
+/// The graph.bin write mirrors the daemon's dual-write
+/// (P11-005) so a daemonless one-shot CLI populates the cache
+/// the *next* invocation's mmap-or-rebuild path (P11-008
+/// branch 2) reads from. The daemon's own writes still take
+/// priority when it is running.
 fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapshot, no_cache: bool) {
     if no_cache {
         return;
     }
     if let Err(err) = conspectus::query::persist_snapshot(snapshot, None) {
         eprintln!("conspectus: warning: failed to persist graph cache: {err:#}");
+    }
+    let bin_path = conspectus::snapshot::graph_bin_path();
+    if let Err(err) = conspectus::snapshot::write_atomic(&bin_path, snapshot) {
+        eprintln!(
+            "conspectus: warning: failed to write {}: {err:#}",
+            bin_path.display()
+        );
     }
 }
 

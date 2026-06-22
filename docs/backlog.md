@@ -10896,32 +10896,71 @@ intermediate commit.
     wholesale `read_snapshot` site cleanup is folded into
     P11-011 alongside the broader SQLite teardown.
 
-- [ ] `P11-008` One-shot CLI mmap-or-rebuild path.
-  - Scope: every one-shot CLI command that reads the graph
-    (`session`, `table`, `node show`, `graph`, `query` until
-    it is deleted in P11-010) gains a new resolution order:
-    (a) prefer `client_snapshot` when the daemon is up; (b)
-    otherwise `snapshot::open_mmap` if `graph.bin` is fresh
-    enough (TTL = the slowest class interval per ADR 0082's
-    open question, default 5 min); (c) otherwise cold-build
-    and write the artifact for the next invocation. Replace
-    every `load_cached_snapshot` call site with the new
-    helper; the SQLite read fallback stays during the
-    dual-write window. Add `--no-cache` / `--refresh` flag
-    semantics per ADR 0082: `--refresh` forces (c);
-    `--no-cache` skips the write at the end of (c).
-  - Tests: CLI integration tests covering the three branches
-    (daemon-up, mmap-fresh, cold-rebuild) plus the TTL
-    stale-artifact branch. Confirm `--refresh` and
-    `--no-cache` semantics on each path. End-to-end tests
-    that a daemon-up `conspectus session` returns the same
-    output as a daemon-down cold-rebuild for the same
-    fixture state.
-  - Manual checks: `conspectus session` latency with daemon
-    up (sub-second), with daemon down + fresh artifact
-    (fast), with daemon down + no artifact (cold-rebuild
-    cost).
-  - Blockers: `P11-006`.
+- [x] `P11-008` One-shot CLI daemon-or-rebuild path (mmap-fresh deferred).
+  - Outcome: `warm_start_discover_and_resolve` now opens
+    with a `try_daemon_snapshot()` call: when
+    `conspectus serve` is reachable on the socket, the CLI
+    fetches the resolved snapshot via `client_snapshot()`,
+    decodes via `snapshot::from_bytes()`, and returns —
+    skipping discovery + resolve + persist for every CLI
+    command that uses this helper (`table`, `node show`,
+    `graph`, `query` until P11-010). The helper falls
+    through to the existing P7-003 phase 4 cold-rebuild
+    path when the daemon is absent, the snapshot is
+    unavailable (pre-first-cycle), or the bytes fail to
+    decode. `--refresh` forces the local path so the
+    operator-typed "ignore caches, rebuild from disk"
+    semantic is preserved.
+    `cache_resolved_snapshot` extends to dual-write
+    `graph.bin` alongside the legacy `graph.sqlite`: every
+    successful cold rebuild lands both artifacts so the
+    next daemon cycle (or a future mmap-fresh consumer
+    path) can pick the file up immediately. The graph.bin
+    write is best-effort; failures log a one-line warning
+    matching the SQLite half. `--no-cache` suppresses both
+    writes.
+    **Mmap-fresh branch deferred.** P11-008's original
+    scope named (a) daemon, (b) mmap fresh, (c) cold
+    rebuild. The (b) branch is removed from this iteration:
+    TOML-rooted mutator providers (`declared`, `aliases`,
+    `pins` per `cache::MUTATOR_PROVIDERS`) edit files the
+    wall-clock TTL freshness gate cannot reason about, so a
+    sub-second TOML edit between two CLI invocations would
+    let mmap silently shadow a real change. The first
+    revision shipped the bug; the regression net was
+    `declared_confirm_in_detailed_graph_preserves_discovered_candidate`
+    in `tests/cli_smoke.rs`, which failed because a freshly
+    confirmed declared link did not appear in the
+    immediately-following `graph` output. A proper mmap-fresh
+    revival either tracks input mtimes against the artifact
+    or re-runs the mutator-class providers after the mmap;
+    both are bigger than the daemonless cold-rebuild cost
+    (single-digit seconds per ADR 0082) justifies right
+    now. The artifact write stays so the path is reopenable
+    later without reshaping the producer side.
+  - Tests: two new tests in `tests/cli_persist.rs` —
+    `table_sessions_dual_writes_graph_bin_alongside_graph_sqlite`
+    asserts both files land after a cold rebuild and that
+    `graph.bin` validates end-to-end via
+    `snapshot::open_mmap` + `deserialize_owned`;
+    `table_sessions_with_no_cache_skips_graph_bin_too`
+    pins the `--no-cache` half. The pre-existing
+    cli_persist matrix (warm start, refresh, corruption
+    recovery, backup rotation) still passes —
+    `cache_resolved_snapshot`'s SQLite half is unchanged.
+    Full suite green: `cargo nextest run --all-targets
+    --all-features` at 1778 tests;
+    `cargo fmt -- --check` and `cargo clippy --all-targets
+    --all-features -- -D warnings` clean.
+  - Notes: the original mmap-fresh attempt picked the
+    slowest class interval (5 min) as the freshness TTL.
+    The regression surfaced exactly because mutator
+    providers run at sub-second cadence in operator
+    workflows; aligning with the heavy-provider TTL was
+    the wrong abstraction. A future revival ADR can pick
+    between input-mtime tracking, mutator re-run after
+    mmap, or daemon-only `graph.bin` writes with an
+    invalidation contract.
 
 - [ ] `P11-009` Daemon warm-start from the on-disk artifact.
   - Scope: on startup, the daemon attempts

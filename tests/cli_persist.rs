@@ -61,6 +61,82 @@ fn table_sessions_persists_graph_sqlite_at_the_canonical_path() {
 }
 
 #[test]
+fn table_sessions_dual_writes_graph_bin_alongside_graph_sqlite() {
+    // P11-008 contract: every cold rebuild writes both the
+    // legacy graph.sqlite (P7-003) AND the new zero-copy
+    // graph.bin (ADR 0083) so a follow-up daemon cycle or a
+    // future mmap-fresh consumer can pick the file up
+    // immediately. Without this dual-write, the only path
+    // populating graph.bin would be conspectus serve — and the
+    // backlog plan reserves daemon-only writes for after
+    // P11-011's SQLite removal.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .assert()
+        .success();
+
+    let bin = data.path().join("conspectus").join("graph.bin");
+    let sqlite = data.path().join("conspectus").join("graph.sqlite");
+    assert!(
+        sqlite.exists(),
+        "graph.sqlite should land at {}",
+        sqlite.display()
+    );
+    assert!(
+        bin.exists(),
+        "graph.bin should land alongside graph.sqlite at {}",
+        bin.display()
+    );
+
+    // Validate graph.bin end-to-end via the snapshot module's
+    // mmap reader (which runs bytecheck) and deserialize. The
+    // empty cwd + isolated env produces an empty snapshot;
+    // the regression net here is "the writer produced a
+    // structurally sound archive," not the content shape.
+    let handle = conspectus::snapshot::open_mmap(&bin).expect("graph.bin must validate");
+    assert_eq!(handle.header().format_version, 1);
+    let owned = conspectus::snapshot::deserialize_owned(&handle).expect("deserialize");
+    assert!(
+        owned.nodes.is_empty(),
+        "empty cwd should produce empty graph"
+    );
+}
+
+#[test]
+fn table_sessions_with_no_cache_skips_graph_bin_too() {
+    // Per P11-008, the dual-write helper honors --no-cache:
+    // neither graph.sqlite nor graph.bin should land when the
+    // operator opts out. The graph.sqlite half is the
+    // pre-existing assertion in the next test; this one pins
+    // the graph.bin half so a future helper change that
+    // forgets the no_cache branch surfaces in CI.
+    let home = tempfile::TempDir::new().expect("home temp");
+    let data = tempfile::TempDir::new().expect("data temp");
+    let cwd = tempfile::TempDir::new().expect("cwd temp");
+
+    isolated_cmd(home.path(), data.path())
+        .current_dir(cwd.path())
+        .arg("table")
+        .arg("sessions")
+        .arg("--no-cache")
+        .assert()
+        .success();
+
+    let bin = data.path().join("conspectus").join("graph.bin");
+    assert!(
+        !bin.exists(),
+        "--no-cache should suppress graph.bin; got {}",
+        bin.display()
+    );
+}
+
+#[test]
 fn table_sessions_skips_persistence_when_no_cache_flag_is_passed() {
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
