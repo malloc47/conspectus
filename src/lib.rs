@@ -19,6 +19,7 @@ pub mod rename;
 pub mod resolve;
 #[cfg(feature = "query")]
 pub mod server;
+pub mod snapshot;
 pub mod tui;
 pub mod tui_state;
 pub mod viewer;

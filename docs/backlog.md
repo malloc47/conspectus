@@ -10631,42 +10631,90 @@ intermediate commit.
     C bindings). `memmap2` lands in P11-004 alongside the
     format module.
 
-- [ ] `P11-004` Implement the snapshot format module.
-  - Scope: a new `src/snapshot/` module owns the format. It
-    exposes:
-    - `pub const FORMAT_VERSION: u32 = 1;`
-    - `pub fn write_atomic(path: &Path, snapshot: &GraphSnapshot)
-      -> Result<()>` — serializes via `rkyv::to_bytes`, writes
-      header + payload to `<path>.tmp.<pid>`, `fsync`s, renames
-      over `path`, and best-effort `fsync`s the parent dir.
-    - `pub fn open_mmap(path: &Path) -> Result<SnapshotMmap>` —
-      opens the file, mmaps it, parses + validates the header,
-      validates the payload via `bytecheck`, returns a handle
-      that derefs to `&ArchivedGraphSnapshot`.
-    - `pub fn deserialize_owned(handle: &SnapshotMmap) ->
-      Result<GraphSnapshot>` — explicit escape hatch for test /
-      JSON-dump call sites that need an owned snapshot.
-    - Header parsing rejects mismatched magic / version with a
-      typed error so callers can distinguish "incompatible
-      format" from transport errors.
+- [x] `P11-004` Implement the snapshot format module.
+  - Outcome: `src/snapshot.rs` (single-file module rather than
+    a directory; the surface is small enough to not warrant
+    one) exposes the format primitives:
+    - `MAGIC: [u8; 8] = *b"CONSPECT"`, `HEADER_LEN = 32`,
+      `FORMAT_VERSION: u32 = 1`, `RESERVED_LEN = 16`,
+      `MAX_PAYLOAD_LEN = 1 GiB` (the read-side cap to bound
+      future pre-allocators).
+    - `Header { magic, format_version, payload_len, reserved }`
+      with `Header::new(payload_len)`, `Header::to_bytes()`,
+      and `Header::parse(&[u8])`. Parsing returns typed errors
+      so callers distinguish wrong-magic, version-mismatch,
+      and truncated headers up front.
+    - `pub fn write_atomic(path, snapshot)` — `rkyv::to_bytes`
+      → write header+payload to `<filename>.tmp.<pid>` →
+      `sync_all` → POSIX rename over target → best-effort
+      parent-dir `sync_all`. The pid-suffixed tmp path lets
+      two concurrent invocations write without clobbering
+      each other; the rename arbitrates the final state.
+    - `SnapshotMmap` (Debug-derived) holds the mmap + parsed
+      header. `archived() -> &ArchivedGraphSnapshot` returns a
+      zero-cost borrow into the mapped pages via
+      `rkyv::access_unchecked` (validation already ran).
+      `payload()` exposes the raw archive bytes for callers
+      that want them; `header()` returns the parsed header.
+    - `pub fn open_mmap(path)` — opens, mmaps, parses the
+      header, validates the payload via
+      `rkyv::access::<ArchivedGraphSnapshot, rancor::Error>`
+      (the bytecheck pass).
+    - `pub fn open_mmap_unvalidated(path)` — same minus the
+      validation pass, for callers that trust the source
+      (e.g. the P11-006 socket-served bytes path).
+    - `pub fn deserialize_owned(&SnapshotMmap) ->
+      Result<GraphSnapshot>` — escape hatch for tests /
+      JSON-dump call sites; rkyv-deserializes the archive
+      into an owned tree.
+    - `SnapshotError` enum (thiserror-derived) discriminates
+      `Io`, `Truncated`, `WrongMagic`,
+      `IncompatibleVersion { expected, found }`,
+      `PayloadTooLarge`, and the three rkyv stages
+      (`Serialize`, `Validate`, `Deserialize`).
+    `Cargo.toml` gains `memmap2 = "0.9"` (~2k Rust lines, no
+    transitives). `src/lib.rs` registers `pub mod snapshot;`.
     The module has zero callers in this story — it is the
-    library piece every downstream P11 story consumes.
-    `memmap2 = "0.9"` lands here.
-  - Tests: round-trip a sample `GraphSnapshot` through
-    `write_atomic` + `open_mmap` and assert archived equality
-    plus deserialized equality. Crash-mid-write test that
-    truncates the tmp file before rename and confirms the
-    target path is untouched. Header-mismatch tests for wrong
-    magic, future `format_version`, and past `format_version`.
-    `bytecheck` validation test with a manually-corrupted
-    payload byte. Concurrent reader/writer test that mmaps
-    the file from thread A while thread B does a full
-    `write_atomic` cycle, asserting A's view stays consistent
-    until A re-opens (validates the inode-liveness contract).
-  - Manual checks: `cargo build` + `cargo test` clean;
-    inspect `graph.bin` with `xxd | head` to confirm header
-    layout matches ADR 0083.
-  - Blockers: `P11-003`.
+    library piece P11-005 (daemon writes), P11-006 (socket
+    `snapshot` command), P11-007 (TUI cutover), and P11-008
+    (CLI mmap-or-rebuild) all consume.
+  - Tests: nine unit tests in `src/snapshot::tests` —
+    `header_round_trips_through_bytes` (byte layout pin),
+    `header_rejects_short_buffer`,
+    `header_rejects_wrong_magic`,
+    `header_rejects_future_format_version`,
+    `header_rejects_past_format_version`,
+    `write_atomic_then_open_mmap_round_trips` (the
+    end-to-end check including `deserialize_owned` equality),
+    `open_mmap_rejects_corrupted_payload_byte` (zeroes the
+    trailing 64 bytes of the payload — where rkyv lays out
+    the root struct + relative pointers — and asserts the
+    bytecheck validation pass returns `SnapshotError::Validate`;
+    mid-payload byte flips were too lenient because they
+    landed in String bodies that bytecheck doesn't
+    structurally validate),
+    `write_atomic_failure_mid_write_leaves_target_untouched`
+    (writes a partial tmp file without renaming, confirms
+    the target file is byte-identical to its pre-write
+    state),
+    `concurrent_reader_holds_old_snapshot_across_writer_rename`
+    (validates the POSIX inode-liveness contract from
+    ADR 0083 §"Atomicity": a reader's mmap keeps seeing the
+    pre-rename payload while a peer writer atomic-renames a
+    different snapshot over the same path; a fresh open
+    picks up the new content). All nine pass; full suite
+    `cargo nextest run --all-targets --all-features` green at
+    1770 tests; `cargo fmt -- --check` and `cargo clippy
+    --all-targets --all-features -- -D warnings` clean.
+  - Notes: rkyv 0.8's bytecheck validates structural soundness
+    (pointers, lengths, enum discriminants) but not content
+    semantics, so a single-byte flip in the middle of a
+    String body does not trigger validation failure. The
+    "corrupt the trailing edge" strategy is the regression
+    net we actually want — it exercises the
+    pointers-and-lengths bytecheck cares about. Daemon-side
+    stale-tmp-file cleanup (per ADR 0083 §"Atomicity") is a
+    P11-005 concern.
 
 - [ ] `P11-005` Daemon dual-writes SQLite and the new artifact.
   - Scope: after each successful `try_class_cycle` /

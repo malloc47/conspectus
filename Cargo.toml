@@ -51,6 +51,13 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm",
 # a `MetadataAsJson` adapter in `src/model/rkyv_adapters.rs` per
 # the ADR 0083 amendment (option c).
 rkyv = { version = "0.8", features = ["bytecheck", "alloc"] }
+# mmap wrapper for the on-disk snapshot reader (ADR 0083). The
+# snapshot module maps the file, validates the header + rkyv
+# payload via `bytecheck`, then hands consumers an
+# `&ArchivedGraphSnapshot` that borrows directly from the
+# mapped pages. memmap2 is the standard idiomatic Rust mmap
+# crate; tiny, mature, MIT-licensed.
+memmap2 = "0.9"
 ratatui-cheese = "0.7"
 ratatui-comfy-toaster = { version = "0.4", default-features = false }
 tui-popup = "0.7"
