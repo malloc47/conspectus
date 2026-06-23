@@ -10984,34 +10984,40 @@ intermediate commit.
     artifact.
   - Blockers: `P11-005`, `P11-008`. Optional per the scope.
 
-- [ ] `P11-010` Remove the `conspectus query` subcommand.
-  - Scope: delete the `Query` variant from the `cli::Command`
-    enum, the `QueryArgs` struct, the saved-view registry,
-    `--similar-to`, `--load-extension`, the
-    `OutputFormat::{Table, Json, Csv, Tsv}` query-flavor
-    variants (the table renderer's identically-named
-    variants are unaffected), `docs/query-guide.md`, and the
-    embedding-overlay surface from ADR 0042 (the
-    `embeddings` table reference in schema docs and the
-    `P9-FU-001` story; the import command never landed). Add
-    a stderr hint when a script invokes `conspectus query`:
-    "removed in favor of `conspectus graph --format json |
-    jq` — see CHANGELOG." Stub remains for one release cycle
-    then deletes in a follow-up commit; or remove cleanly
-    here per implementation taste (defer the call to review).
-  - Tests: remove `tests/cli_query.rs`, `tests/
-    query_regression.rs`, and any per-feature CI matrix
-    entries. CLI smoke test that `conspectus query` exits
-    non-zero with the hint message (if the stub-for-a-cycle
-    path is taken) or exits with the standard "unknown
-    command" clap error (if the clean removal path is
-    taken).
-  - Manual checks: `conspectus --help` no longer lists
-    `query`.
-  - Blockers: `P11-007`, `P11-008`. (Every read path must be
-    off SQLite before the query surface is removed since the
-    query surface and the SQLite store share the
-    `query::reader` machinery.)
+- [x] `P11-010` Remove the `conspectus query` subcommand.
+  - Outcome: clean removal — the `Query(QueryArgs)` enum
+    variant on `cli::Command`, the dispatch arm, the
+    `QueryArgs` struct, `QueryFormatFlag`, the
+    `From<QueryFormatFlag> for conspectus::query::OutputFormat`
+    impl, the `impl QueryArgs::run`, and the
+    `resolve_query_width` helper are all gone from
+    `src/cli.rs`. The clap "unknown subcommand" error is the
+    operator-facing response (no stub-with-hint cycle —
+    nothing in the wild was scripting against this yet).
+    `tests/cli_query.rs` and `tests/query_regression.rs`
+    delete; the `cli_pin_invariants.rs` tests that ran
+    `["query", "SELECT ..."]` to assert read-only pin
+    invariants drop the now-impossible cases (the parallel
+    `graph` / `table` / `pin list` / `pin show` /
+    `node show` assertions still cover the same read-side
+    read-only property). `docs/query-guide.md` and
+    `docs/vector-search.md` (ADR 0042's surface, no
+    operator-facing remnant after the subcommand drop)
+    delete. `README.md`'s read-command list drops `query`.
+    `src/query/` stays intact in this story — the TUI's
+    `GraphDb::from_snapshot` materialization and the 14
+    `query::read_snapshot(...)` call sites still consume
+    it. Those get ripped out in P11-011 alongside the
+    `rusqlite` drop.
+    `design.md`'s "Conspectus Query Surface" section keeps
+    its live reference for now; P11-012's rewrite covers
+    that and the broader ADR supersession.
+  - Tests: 25 fewer tests overall (the cli_query + query
+    regression binaries) and 2 pin-invariant tests pruned
+    to drop the query-command assertions. `cargo nextest
+    run --all-targets --all-features` green at 1753 tests;
+    `cargo fmt -- --check` and `cargo clippy --all-targets
+    --all-features -- -D warnings` clean.
 
 - [ ] `P11-011` Delete `src/query/`, drop `rusqlite`, drop the
   `query` Cargo feature.

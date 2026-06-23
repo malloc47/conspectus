@@ -53,7 +53,6 @@ impl Cli {
             Command::Hook(args) => args.run(),
             Command::Rename(args) => args.run(),
             Command::Alias(args) => args.run(),
-            Command::Query(args) => args.run(),
             Command::Pin(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
@@ -88,8 +87,6 @@ enum Command {
     Rename(RenameArgs),
     /// Inspect operator-authored session aliases.
     Alias(AliasArgs),
-    /// Run a read-only SQL query against the graph (ADR 0036).
-    Query(QueryArgs),
     /// Author or inspect session pins (ADR 0057).
     Pin(Box<PinArgs>),
     /// Run the long-lived background daemon that keeps
@@ -5974,144 +5971,4 @@ fn _selection_display(selection: &DeclaredStoreSelection) -> String {
         DeclaredStoreKind::User => "user",
     };
     format!("{kind} {}", selection.path.display())
-}
-
-#[derive(Debug, Args)]
-struct QueryArgs {
-    /// SQL to run against the graph database (read-only). Required
-    /// unless `--list-views` or `--similar-to` is set.
-    #[arg(required_unless_present_any = ["list_views", "similar_to"])]
-    sql: Option<String>,
-    /// Output format for the result. `table` is the default
-    /// width-aware columnar text rendering; `json` emits one object
-    /// per row; `csv` emits RFC-4180-compliant CSV; `tsv` emits
-    /// tab-separated values with embedded tabs/newlines escaped.
-    #[arg(long, value_enum, default_value_t = QueryFormatFlag::Table)]
-    format: QueryFormatFlag,
-    /// Target total width in display columns for the `table` format.
-    /// When unset and stdout is a TTY, falls back to the detected
-    /// terminal width; otherwise renders untruncated. Mirrors the
-    /// `--width` flag on `conspectus table`.
-    #[arg(long, value_name = "N")]
-    width: Option<usize>,
-    /// Render untruncated regardless of TTY width detection. Useful
-    /// when piping to a file or pager. Conflicts with `--width`.
-    #[arg(long, conflicts_with = "width")]
-    wide: bool,
-    /// When to colorize output. `auto` (default) emits ANSI only when
-    /// stdout is a TTY (and respects `NO_COLOR`, `CLICOLOR`,
-    /// `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces it on; `never`
-    /// forces it off. Currently affects only the `table` format.
-    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
-    color: ColorFlag,
-    /// Print the curated saved-view library and exit, instead of
-    /// running SQL. See `docs/query-guide.md` for descriptions and
-    /// example queries.
-    #[arg(long, conflicts_with_all = ["sql", "format", "width", "wide", "similar_to"])]
-    list_views: bool,
-    /// Find embeddings nearest to the named node. Cosine-distance
-    /// linear scan over the `embeddings` table (ADR 0042). Result
-    /// columns are `node_id`, `source_field`, `model`, `distance`
-    /// (ordered ascending; lower is more similar). Mutually
-    /// exclusive with `sql` and `--list-views`.
-    #[arg(long, value_name = "NODE_ID", conflicts_with_all = ["sql", "list_views"])]
-    similar_to: Option<String>,
-    /// Embedded field to compare against when running `--similar-to`.
-    /// Defaults to `last_message_preview`. Ignored when
-    /// `--similar-to` is absent.
-    #[arg(long, value_name = "FIELD", requires = "similar_to")]
-    field: Option<String>,
-    /// Maximum nearest-neighbor results to return. Defaults to 10.
-    /// Ignored when `--similar-to` is absent.
-    #[arg(long, value_name = "N", requires = "similar_to")]
-    limit: Option<usize>,
-    /// Load a SQLite loadable extension (e.g. `sqlite-vec`, ADR 0042)
-    /// after opening the connection. The extension's functions and
-    /// virtual tables then become available to the user's SQL.
-    #[arg(long = "load-extension", value_name = "PATH")]
-    load_extension: Option<PathBuf>,
-}
-
-#[derive(Copy, Clone, Debug, ValueEnum)]
-enum QueryFormatFlag {
-    Table,
-    Json,
-    Csv,
-    Tsv,
-}
-
-impl From<QueryFormatFlag> for conspectus::query::OutputFormat {
-    fn from(value: QueryFormatFlag) -> Self {
-        match value {
-            QueryFormatFlag::Table => Self::Table,
-            QueryFormatFlag::Json => Self::Json,
-            QueryFormatFlag::Csv => Self::Csv,
-            QueryFormatFlag::Tsv => Self::Tsv,
-        }
-    }
-}
-
-impl QueryArgs {
-    fn run(self) -> Result<()> {
-        if self.list_views {
-            print!("{}", conspectus::query::render_saved_views_list());
-            return Ok(());
-        }
-        let stdout_is_tty = io::stdout().is_terminal();
-        let color = resolve_color_from_env(self.color, stdout_is_tty);
-        let width = resolve_query_width(self.width, self.wide, stdout_is_tty);
-        if let Some(target) = self.similar_to.as_deref() {
-            let rendered = conspectus::query::run_similar_to(conspectus::query::SimilarToInputs {
-                target_node_id: target,
-                source_field: self
-                    .field
-                    .as_deref()
-                    .unwrap_or(conspectus::query::DEFAULT_SIMILAR_TO_FIELD),
-                limit: self
-                    .limit
-                    .unwrap_or(conspectus::query::DEFAULT_SIMILAR_TO_LIMIT),
-                format: self.format.into(),
-                db_path: None,
-                width,
-                color,
-                load_extension: self.load_extension,
-            })?;
-            print!("{rendered}");
-            return Ok(());
-        }
-        // `sql` is `required_unless_present_any = ["list_views", "similar_to"]`,
-        // so clap has already enforced that we have a string here.
-        let sql = self
-            .sql
-            .as_deref()
-            .expect("clap guarantees sql is present without --list-views/--similar-to");
-        let rendered = conspectus::query::run_query(conspectus::query::QueryInputs {
-            sql,
-            format: self.format.into(),
-            db_path: None,
-            width,
-            color,
-            load_extension: self.load_extension,
-        })?;
-        print!("{rendered}");
-        Ok(())
-    }
-}
-
-/// Resolve the effective table-render width for `conspectus query`,
-/// matching `conspectus table`'s behavior (ADR 0020): explicit
-/// `--width N` wins; `--wide` forces untruncated; otherwise detect
-/// from the terminal when stdout is a TTY; otherwise return `None`.
-fn resolve_query_width(explicit: Option<usize>, wide: bool, stdout_is_tty: bool) -> Option<usize> {
-    if wide {
-        return None;
-    }
-    if let Some(w) = explicit {
-        return Some(w);
-    }
-    if stdout_is_tty {
-        terminal_size::terminal_size().map(|(w, _)| w.0 as usize)
-    } else {
-        None
-    }
 }

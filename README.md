@@ -175,7 +175,7 @@ until the next `pin launch` from a bound state.
 
 ### Read-only invariant
 
-Read commands (`graph`, `node show`, `table`, `query`, `pin list`,
+Read commands (`graph`, `node show`, `table`, `pin list`,
 `pin show`, `tui`) never create, mtime-touch, or content-modify any
 `.conspectus.toml` / user config bearing a `[pins]` section. Mutation
 is reserved to `pin create / rename / rm / bind / rebind / adopt` and

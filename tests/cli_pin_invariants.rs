@@ -2,7 +2,7 @@
 //!
 //! Mirrors P5-004 for declared links: every `conspectus` subcommand
 //! that the operator can run without expressing write intent
-//! (`graph`, `node show`, `table`, `query`, `pin list`, `pin show`)
+//! (`graph`, `node show`, `table`, `pin list`, `pin show`)
 //! must NOT create, mtime-touch, or content-modify `.conspectus.toml`
 //! / user-config files that contain a `[pins]` table. The interactive
 //! `tui` event loop needs a pseudo-terminal, so these process smokes
@@ -237,14 +237,6 @@ fn pin_show_does_not_mutate_pin_bearing_configs() {
 }
 
 #[test]
-fn query_does_not_mutate_pin_bearing_configs() {
-    let sandbox = Sandbox::new();
-    let before = sandbox.fingerprints();
-    sandbox.run(&["query", "SELECT COUNT(*) FROM v_nodes"]);
-    sandbox.assert_unchanged(&before);
-}
-
-#[test]
 fn node_show_does_not_mutate_pin_bearing_configs() {
     let sandbox = Sandbox::new();
     let before = sandbox.fingerprints();
@@ -273,13 +265,6 @@ fn read_only_commands_do_not_create_pin_configs_in_clean_repo() {
     sandbox
         .command()
         .args(["table", "sessions"])
-        .assert()
-        .success();
-    sandbox.assert_no_pin_configs_created();
-
-    sandbox
-        .command()
-        .args(["query", "SELECT COUNT(*) FROM v_nodes"])
         .assert()
         .success();
     sandbox.assert_no_pin_configs_created();
