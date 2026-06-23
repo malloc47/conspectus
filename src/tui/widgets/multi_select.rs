@@ -275,11 +275,16 @@ impl<T: MultiSelectItem> KnownSize for MultiSelectBody<'_, T> {
 
 impl<T: MultiSelectItem> Widget for MultiSelectBody<'_, T> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let visible_rows = area.height as usize;
+        let scroll = compute_scroll(self.state.cursor(), visible_rows, self.items.len());
+
         // Bridge our `[T: MultiSelectItem]` slice into upstream
         // `MultiSelectOption`s. The Vec lives for the duration of
         // this call so the borrow into the widget is valid.
         let options: Vec<MultiSelectOption<'_>> = self
             .items
+            .get(scroll..(scroll + visible_rows).min(self.items.len()))
+            .unwrap_or(&[])
             .iter()
             .map(|item| MultiSelectOption::new(item.label()))
             .collect();
@@ -287,10 +292,14 @@ impl<T: MultiSelectItem> Widget for MultiSelectBody<'_, T> {
         // The upstream widget renders via &mut state. We're behind a
         // shared borrow, so build a mirror that reflects cursor +
         // selections and pass that.
-        let mut mirror = CheeseMultiSelectState::new(self.state.item_count);
-        mirror.set_cursor(self.state.cursor());
+        let mut mirror = CheeseMultiSelectState::new(options.len());
+        mirror.set_cursor(self.state.cursor().saturating_sub(scroll));
         for idx in self.state.selected_indices() {
-            mirror.set_selected(idx, true);
+            if let Some(visible_idx) = idx.checked_sub(scroll)
+                && visible_idx < options.len()
+            {
+                mirror.set_selected(visible_idx, true);
+            }
         }
         mirror.set_focused(true);
 
@@ -302,6 +311,17 @@ impl<T: MultiSelectItem> Widget for MultiSelectBody<'_, T> {
             widget = widget.styles(cheese_styles_from_theme(theme));
         }
         StatefulWidget::render(&widget, area, buf, &mut mirror);
+    }
+}
+
+fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
+    if visible_rows == 0 || total <= visible_rows {
+        return 0;
+    }
+    if cursor >= visible_rows {
+        cursor + 1 - visible_rows
+    } else {
+        0
     }
 }
 
@@ -447,5 +467,13 @@ mod tests {
         assert_eq!(static_items[0].label(), "one");
         let owned: Vec<String> = vec!["a".to_string(), "b".to_string()];
         assert_eq!(owned[1].label(), "b");
+    }
+
+    #[test]
+    fn selected_last_row_scrolls_into_short_multi_select_body() {
+        let offset = compute_scroll(9, 4, 10);
+        assert_eq!(offset, 6);
+        assert!(9 >= offset);
+        assert!(9 < offset + 4);
     }
 }

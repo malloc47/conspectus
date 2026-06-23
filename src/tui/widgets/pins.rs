@@ -26,11 +26,12 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::Widget;
+use ratatui::widgets::{Paragraph, Widget};
+use tui_popup::KnownSize;
 
 use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
-use crate::tui::widgets::popup_frame::{LinesBody, themed_popup};
+use crate::tui::widgets::popup_frame::themed_popup;
 
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
@@ -895,7 +896,6 @@ impl<'a> PinsOverlayWidget<'a> {
 impl Widget for PinsOverlayWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
-        let modal = centered_modal_rect(area);
         let cursor = self.state.cursor();
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(section_header("Pins"));
@@ -907,10 +907,16 @@ impl Widget for PinsOverlayWidget<'_> {
         lines.push(line![
             span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")
         ]);
+        let modal = centered_modal_rect(area);
 
         let sub_editor_to_render = self.state.sub_editor();
         let theme = self.theme;
-        let body = LinesBody {
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(
+                pins_menu_cursor_line(cursor),
+                modal.height.saturating_sub(2) as usize,
+                lines.len(),
+            ),
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -948,7 +954,6 @@ impl<'a> PinCreateWidget<'a> {
 impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
-        let modal = pin_create_modal_rect(area);
         let mut lines = vec![
             pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
             pin_create_field(
@@ -988,8 +993,14 @@ impl Widget for PinCreateWidget<'_> {
             Modifier::DIM;
             "Up/Down field · type to edit · Space cycles store · Enter create · Esc cancel"
         )]);
+        let modal = pin_create_modal_rect(area, lines.len());
 
-        let body = LinesBody {
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(
+                Some(self.state.cursor),
+                modal.height.saturating_sub(2) as usize,
+                lines.len(),
+            ),
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -1009,12 +1020,9 @@ fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize)
     line![span!(style; "{marker}{label:11} {value}")]
 }
 
-fn pin_create_modal_rect(area: Rect) -> Rect {
+fn pin_create_modal_rect(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
-    let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
+    modal_rect_for_content(area, width, content_lines, 10)
 }
 
 struct PinEditWidget<'a> {
@@ -1031,7 +1039,6 @@ impl<'a> PinEditWidget<'a> {
 impl Widget for PinEditWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
-        let modal = pin_edit_modal_rect(area);
         let mut lines = vec![
             pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
             pin_create_field(
@@ -1071,8 +1078,14 @@ impl Widget for PinEditWidget<'_> {
             Modifier::DIM;
             "Up/Down field · type to edit · Enter save · Esc cancel"
         )]);
+        let modal = pin_edit_modal_rect(area, lines.len());
 
-        let body = LinesBody {
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(
+                Some(self.state.cursor),
+                modal.height.saturating_sub(2) as usize,
+                lines.len(),
+            ),
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -1095,7 +1108,6 @@ impl<'a> PinRebindWidget<'a> {
 impl Widget for PinRebindWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
-        let modal = pin_rebind_modal_rect(area);
         let mut lines = vec![
             line![format!("  id          {}", self.state.target.id)],
             line![format!("  display     {}", self.state.target.display_name)],
@@ -1122,8 +1134,14 @@ impl Widget for PinRebindWidget<'_> {
             Modifier::DIM;
             "Up/Down field · type to edit · Enter save · Esc cancel"
         )]);
+        let modal = pin_rebind_modal_rect(area, lines.len());
 
-        let body = LinesBody {
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(
+                Some(2 + self.state.cursor),
+                modal.height.saturating_sub(2) as usize,
+                lines.len(),
+            ),
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -1132,20 +1150,14 @@ impl Widget for PinRebindWidget<'_> {
     }
 }
 
-fn pin_rebind_modal_rect(area: Rect) -> Rect {
+fn pin_rebind_modal_rect(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(70, area.width.saturating_sub(4)).max(44);
-    let height = std::cmp::min(12, area.height.saturating_sub(2)).max(9);
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
+    modal_rect_for_content(area, width, content_lines, 9)
 }
 
-fn pin_edit_modal_rect(area: Rect) -> Rect {
+fn pin_edit_modal_rect(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(78, area.width.saturating_sub(4)).max(46);
-    let height = std::cmp::min(14, area.height.saturating_sub(2)).max(10);
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
+    modal_rect_for_content(area, width, content_lines, 10)
 }
 
 struct PinBindWidget<'a> {
@@ -1162,7 +1174,6 @@ impl<'a> PinBindWidget<'a> {
 impl Widget for PinBindWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
-        let modal = pin_bind_modal_rect(area);
         let mut lines = Vec::new();
         if let Some(first) = self.state.options.first() {
             lines.push(line![format!("pin       {}", first.pin_id)]);
@@ -1181,8 +1192,15 @@ impl Widget for PinBindWidget<'_> {
             Modifier::DIM;
             "Up/Down choose · Enter bind · Esc cancel"
         )]);
+        let modal = pin_bind_modal_rect(area, lines.len());
+        let option_start = usize::from(!self.state.options.is_empty());
 
-        let body = LinesBody {
+        let body = ScrollLinesBody {
+            scroll_offset: scroll_offset_for_cursor(
+                Some(option_start + self.state.cursor),
+                modal.height.saturating_sub(2) as usize,
+                lines.len(),
+            ),
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -1191,12 +1209,9 @@ impl Widget for PinBindWidget<'_> {
     }
 }
 
-fn pin_bind_modal_rect(area: Rect) -> Rect {
+fn pin_bind_modal_rect(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
-    let height = std::cmp::min(12, area.height.saturating_sub(2)).max(7);
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
+    modal_rect_for_content(area, width, content_lines, 7)
 }
 
 struct PinRemoveWidget<'a> {
@@ -1213,7 +1228,6 @@ impl<'a> PinRemoveWidget<'a> {
 impl Widget for PinRemoveWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
-        let modal = pin_remove_modal_rect(area);
         let lines = vec![
             line![
                 "id       ",
@@ -1224,7 +1238,9 @@ impl Widget for PinRemoveWidget<'_> {
             line![""],
             line![span!(Modifier::DIM; "Enter remove · Esc cancel")],
         ];
-        let body = LinesBody {
+        let modal = pin_remove_modal_rect(area, lines.len());
+        let body = ScrollLinesBody {
+            scroll_offset: 0,
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
             inner_height: modal.height.saturating_sub(2) as usize,
@@ -1233,12 +1249,9 @@ impl Widget for PinRemoveWidget<'_> {
     }
 }
 
-fn pin_remove_modal_rect(area: Rect) -> Rect {
+fn pin_remove_modal_rect(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
-    let height = std::cmp::min(8, area.height.saturating_sub(2)).max(7);
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
+    modal_rect_for_content(area, width, content_lines, 7)
 }
 
 fn section_header(label: &str) -> Line<'static> {
@@ -1255,10 +1268,18 @@ fn row_line(label: String, cursored: bool) -> Line<'static> {
 }
 
 fn centered_modal_rect(area: Rect) -> Rect {
+    centered_modal_rect_for_content(area, pins_menu_content_lines())
+}
+
+fn centered_modal_rect_for_content(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(50, area.width.saturating_sub(4)).max(32);
-    let max_height = area.height.saturating_sub(2);
-    let desired = 14;
-    let height = (desired as u16).clamp(8, max_height.max(8));
+    modal_rect_for_content(area, width, content_lines, 8)
+}
+
+fn modal_rect_for_content(area: Rect, width: u16, content_lines: usize, min_height: u16) -> Rect {
+    let max_height = area.height;
+    let desired = content_lines.saturating_add(2) as u16;
+    let height = desired.clamp(min_height, max_height.max(min_height));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect {
@@ -1267,6 +1288,57 @@ fn centered_modal_rect(area: Rect) -> Rect {
         width,
         height,
     }
+}
+
+fn pins_menu_content_lines() -> usize {
+    1 + PIN_ACTION_OPTIONS.len() + 2
+}
+
+fn pins_menu_cursor_line(cursor: PinsCursor) -> Option<usize> {
+    let PinsCursor::Action(idx) = cursor;
+    Some(1 + idx)
+}
+
+struct ScrollLinesBody {
+    lines: Vec<Line<'static>>,
+    inner_width: usize,
+    inner_height: usize,
+    scroll_offset: u16,
+}
+
+impl KnownSize for ScrollLinesBody {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl Widget for ScrollLinesBody {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        Paragraph::new(self.lines)
+            .scroll((self.scroll_offset, 0))
+            .render(area, buf);
+    }
+}
+
+fn scroll_offset_for_cursor(
+    cursor_line: Option<usize>,
+    inner_height: usize,
+    content_height: usize,
+) -> u16 {
+    let Some(cursor_line) = cursor_line else {
+        return 0;
+    };
+    if inner_height == 0 || cursor_line < inner_height {
+        return 0;
+    }
+    let max_scroll = content_height.saturating_sub(inner_height);
+    cursor_line
+        .saturating_sub(inner_height.saturating_sub(1))
+        .min(max_scroll) as u16
 }
 
 #[cfg(test)]
@@ -1310,6 +1382,32 @@ mod tests {
             state.handle_key(&ctx, key(KeyCode::Down));
         }
         assert_eq!(state.cursor(), PinsCursor::Action(0));
+    }
+
+    #[test]
+    fn pins_menu_content_count_tracks_rendered_body() {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(section_header("Pins"));
+        for label in PIN_ACTION_OPTIONS {
+            lines.push(row_line((*label).to_string(), false));
+        }
+        lines.push(Line::default());
+        lines.push(Line::from(span!(
+            Modifier::DIM;
+            "↑/↓ move · Enter pick · Esc close"
+        )));
+        assert_eq!(pins_menu_content_lines(), lines.len());
+    }
+
+    #[test]
+    fn selected_last_pin_action_scrolls_into_short_menu_body() {
+        let cursor_line = pins_menu_cursor_line(PinsCursor::Action(PIN_ACTION_OPTIONS.len() - 1));
+        let inner_height = 4;
+        let offset = scroll_offset_for_cursor(cursor_line, inner_height, pins_menu_content_lines());
+        let cursor_line = cursor_line.unwrap();
+        assert!(offset > 0, "short pins menu should scroll");
+        assert!(cursor_line >= offset as usize);
+        assert!(cursor_line < offset as usize + inner_height);
     }
 
     #[test]
@@ -1672,5 +1770,24 @@ mod tests {
             })
         );
         assert!(state.sub_editor().is_none());
+    }
+
+    #[test]
+    fn bind_picker_selected_last_option_scrolls_into_short_body() {
+        let options: Vec<PinBindOption> = (0..8)
+            .map(|idx| PinBindOption {
+                pin_id: "ingest".to_string(),
+                session_key: format!("session-{idx}"),
+                label: format!("codex:session-{idx}"),
+            })
+            .collect();
+        let state = PinBindState::new(options);
+        let cursor_line = 1 + state.options.len() - 1;
+        let content_height = 1 + state.options.len() + 2;
+        let inner_height = 5;
+        let offset = scroll_offset_for_cursor(Some(cursor_line), inner_height, content_height);
+        assert!(offset > 0, "short bind picker should scroll");
+        assert!(cursor_line >= offset as usize);
+        assert!(cursor_line < offset as usize + inner_height);
     }
 }

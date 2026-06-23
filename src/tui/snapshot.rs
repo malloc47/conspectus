@@ -240,6 +240,7 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::OpenSearch => app.open_search_overlay(),
         Action::OpenHelp => app.open_help_overlay(),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, config, key),
+        Action::PinsOverlayKey(key) => handle_pins_overlay_key(app, key),
         Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),
         Action::HelpOverlayKey(key) => handle_help_overlay_key(app, key),
         Action::Refresh => runtime::refresh(app, config),
@@ -248,6 +249,26 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
                 "conspectus: snapshot mode skipped unsupported action: {}",
                 action_label(&other)
             );
+        }
+    }
+}
+
+fn handle_pins_overlay_key(app: &mut App, key: KeyEvent) {
+    use crate::tui::widgets::pins::PinsOutcome;
+    let ctx = app.pins_context();
+    let outcome = match app.pins_overlay_mut() {
+        Some(state) => state.handle_key(&ctx, key),
+        None => return,
+    };
+    match outcome {
+        PinsOutcome::Continue => {}
+        PinsOutcome::Close | PinsOutcome::ApplyAndClose(_) => {
+            app.close_pins_overlay();
+        }
+        PinsOutcome::ApplyAndStay(_) => {
+            app.update(crate::tui::app::Msg::SetStatus(Some(
+                "snapshot mode skipped mutating pin action".to_string(),
+            )));
         }
     }
 }
