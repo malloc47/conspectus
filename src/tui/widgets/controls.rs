@@ -32,7 +32,8 @@ use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::Widget;
+use ratatui::widgets::{Paragraph, Widget};
+use tui_popup::KnownSize;
 
 use crate::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
 use crate::tui::Theme;
@@ -510,19 +511,23 @@ impl Widget for ControlsOverlayWidget<'_> {
         // H-WIDG-004: framing through `tui_popup::Popup`; the body
         // wrapper reports the same cap dims `centered_modal_rect`
         // produces so auto-sizing reproduces the legacy rect.
-        let modal = centered_modal_rect(area);
         let mut lines = self.body_lines();
-        lines.push(line![""]);
-        lines.push(line![
-            span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close")
-        ]);
+        lines.push(Line::default());
+        lines.push(Line::from(
+            span!(Modifier::DIM; "↑/↓ move · Enter pick · Esc close"),
+        ));
+        let modal = centered_modal_rect_for_content(area, lines.len());
+        let inner_height = modal.height.saturating_sub(2) as usize;
+        let scroll_offset =
+            scroll_offset_for_cursor(self.cursor_line_index(), inner_height, lines.len());
 
         let sub_editor_to_render = self.state.sub_editor();
         let theme = self.theme;
-        let body = crate::tui::widgets::popup_frame::LinesBody {
+        let body = ControlsBody {
             lines,
             inner_width: modal.width.saturating_sub(2) as usize,
-            inner_height: modal.height.saturating_sub(2) as usize,
+            inner_height,
+            scroll_offset,
         };
         let popup =
             crate::tui::widgets::popup_frame::themed_popup(body, line![" Controls "], theme);
@@ -638,6 +643,101 @@ impl ControlsOverlayWidget<'_> {
         }
         lines
     }
+
+    fn cursor_line_index(&self) -> Option<usize> {
+        let cursor = self.state.cursor();
+        match cursor {
+            ControlsCursor::View(idx) => Some(1 + idx),
+            ControlsCursor::Grouping(idx) => {
+                let grouping_header = 1 + VIEW_OPTIONS.len() + 1;
+                Some(grouping_header + 1 + idx)
+            }
+            ControlsCursor::FilterHarness
+            | ControlsCursor::FilterMaxAge
+            | ControlsCursor::FilterMuxState
+            | ControlsCursor::FilterFloatMuxedSessions
+            | ControlsCursor::FilterFloatAttachedMuxes
+            | ControlsCursor::FilterClear => {
+                let filter_header =
+                    1 + VIEW_OPTIONS.len() + 1 + 1 + Grouping::values_for(self.ctx.view).len() + 1;
+                let offset = match cursor {
+                    ControlsCursor::FilterHarness => 1,
+                    ControlsCursor::FilterMaxAge => 2,
+                    ControlsCursor::FilterMuxState => 3,
+                    ControlsCursor::FilterFloatMuxedSessions
+                    | ControlsCursor::FilterFloatAttachedMuxes => 4,
+                    ControlsCursor::FilterClear => {
+                        if matches!(self.ctx.view, View::Sessions | View::Mux) {
+                            5
+                        } else {
+                            4
+                        }
+                    }
+                    _ => unreachable!("filter cursor matched above"),
+                };
+                Some(filter_header + offset)
+            }
+            ControlsCursor::Sort(idx) => {
+                let filter_rows = if matches!(self.ctx.view, View::Sessions | View::Mux) {
+                    5
+                } else {
+                    4
+                };
+                let sort_header = 1
+                    + VIEW_OPTIONS.len()
+                    + 1
+                    + 1
+                    + Grouping::values_for(self.ctx.view).len()
+                    + 1
+                    + 1
+                    + filter_rows
+                    + 1;
+                Some(sort_header + 1 + idx)
+            }
+        }
+    }
+}
+
+struct ControlsBody {
+    lines: Vec<Line<'static>>,
+    inner_width: usize,
+    inner_height: usize,
+    scroll_offset: u16,
+}
+
+impl KnownSize for ControlsBody {
+    fn width(&self) -> usize {
+        self.inner_width
+    }
+
+    fn height(&self) -> usize {
+        self.inner_height
+    }
+}
+
+impl Widget for ControlsBody {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        Paragraph::new(self.lines)
+            .scroll((self.scroll_offset, 0))
+            .render(area, buf);
+    }
+}
+
+fn scroll_offset_for_cursor(
+    cursor_line: Option<usize>,
+    inner_height: usize,
+    content_height: usize,
+) -> u16 {
+    let Some(cursor_line) = cursor_line else {
+        return 0;
+    };
+    if inner_height == 0 || cursor_line < inner_height {
+        return 0;
+    }
+    let max_scroll = content_height.saturating_sub(inner_height);
+    cursor_line
+        .saturating_sub(inner_height.saturating_sub(1))
+        .min(max_scroll) as u16
 }
 
 fn section_header(label: &str) -> Line<'static> {
@@ -724,17 +824,17 @@ fn sort_label(sort: Sort) -> &'static str {
     }
 }
 
-/// 60-column centered modal sized to its content. Falls back to a
-/// taller window when the terminal can spare the rows; the
-/// renderer truncates extra lines rather than scrolling.
+/// 60-column centered modal sized to its content. When the terminal
+/// is too short for every row, the body scrolls enough to keep the
+/// selected row visible.
 pub fn centered_modal_rect(area: Rect) -> Rect {
+    centered_modal_rect_for_content(area, max_controls_content_lines())
+}
+
+fn centered_modal_rect_for_content(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
-    let max_height = area.height.saturating_sub(2);
-    // Content is 5 view rows + 5 grouping rows + 4 filter rows
-    // (+ 1 view-scoped checkbox on sessions/mux) + 2 sort rows +
-    // 4 section headers + 3 blank lines + 1 footer +
-    // 1 blank-before-footer = up to 21 lines, plus 2 for the border.
-    let desired = 23;
+    let max_height = area.height;
+    let desired = content_lines.saturating_add(2);
     let height = (desired as u16).clamp(8, max_height.max(8));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -744,6 +844,32 @@ pub fn centered_modal_rect(area: Rect) -> Rect {
         width,
         height,
     }
+}
+
+fn max_controls_content_lines() -> usize {
+    VIEW_OPTIONS
+        .iter()
+        .map(|view| {
+            let filter_rows = if matches!(*view, View::Sessions | View::Mux) {
+                5
+            } else {
+                4
+            };
+            let body_lines = 1
+                + VIEW_OPTIONS.len()
+                + 1
+                + 1
+                + Grouping::values_for(*view).len()
+                + 1
+                + 1
+                + filter_rows
+                + 1
+                + 1
+                + SORT_OPTIONS.len();
+            body_lines + 2
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -1108,6 +1234,54 @@ mod tests {
         };
         assert!(!filter.is_empty());
         assert!(!filter.has_narrowing_predicates());
+    }
+
+    #[test]
+    fn max_content_line_count_tracks_rendered_controls_body() {
+        let filter = RowFilter::default();
+        let theme = Theme::default();
+        let max_rendered = VIEW_OPTIONS
+            .iter()
+            .map(|view| {
+                let ctx = ctx_with(
+                    *view,
+                    Grouping::default_for(*view),
+                    &filter,
+                    Sort::Hierarchy,
+                );
+                let state = ControlsOverlayState::new(&ctx);
+                let widget = ControlsOverlayWidget::new(&state, ctx, &theme);
+                widget.body_lines().len() + 2
+            })
+            .max()
+            .unwrap();
+        assert_eq!(max_controls_content_lines(), max_rendered);
+    }
+
+    #[test]
+    fn selected_last_sort_row_scrolls_into_short_controls_body() {
+        let filter = RowFilter::default();
+        let ctx = ctx_with(
+            View::Sessions,
+            Grouping::default_for(View::Sessions),
+            &filter,
+            Sort::Hierarchy,
+        );
+        let state = ControlsOverlayState {
+            cursor: ControlsCursor::Sort(1),
+            sub_editor: None,
+        };
+        let theme = Theme::default();
+        let widget = ControlsOverlayWidget::new(&state, ctx, &theme);
+        let mut lines = widget.body_lines();
+        lines.push(Line::default());
+        lines.push(Line::from("↑/↓ move · Enter pick · Esc close"));
+        let cursor_line = widget.cursor_line_index().unwrap();
+        let inner_height = 10;
+        let offset = scroll_offset_for_cursor(Some(cursor_line), inner_height, lines.len());
+        assert!(offset > 0, "short controls body should scroll");
+        assert!(cursor_line >= offset as usize);
+        assert!(cursor_line < offset as usize + inner_height);
     }
 
     #[test]
