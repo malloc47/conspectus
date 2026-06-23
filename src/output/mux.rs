@@ -16,8 +16,8 @@
 //!   group by mux `node_id` in Rust, and remember each attached
 //!   agent's label, provenance/confidence, and `last_message_preview`.
 //! - Side-lookup for the per-agent ambiguity count that feeds the
-//!   `*` marker in the per-attachment indicator: count active
-//!   `linked_to_mux` candidates per source session.
+//!   `*` marker in the per-attachment indicator: count distinct
+//!   active mux targets per source session.
 //!
 //! All JOINs to typed `node_<kind>` tables go through Display-form
 //! reconstruction from the endpoint JSON (`'mux_session:' || …`)
@@ -380,15 +380,16 @@ fn fetch_attachment_lookup(
     Ok(out)
 }
 
-/// Per-source counts of active `linked_to_mux` candidates. Feeds the
-/// ambiguity `*` marker on the `agents` cell's per-attachment
-/// indicator.
+/// Per-source counts of distinct active `linked_to_mux` mux targets.
+/// Feeds the ambiguity `*` marker on the `agents` cell's
+/// per-attachment indicator. Multiple evidence links to the same mux
+/// are corroboration, not ambiguity.
 fn fetch_per_agent_ambiguity(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, usize>> {
     let mut stmt = conn.prepare(
         "SELECT json_extract(source, '$.harness_key') AS h, \
                 json_extract(source, '$.state_scope') AS s, \
                 json_extract(source, '$.session_key') AS k, \
-                COUNT(*) AS cnt \
+                COUNT(DISTINCT target_node) AS cnt \
          FROM candidate_links \
          WHERE source_kind = 'agent_session' \
            AND relation = 'linked_to_mux' \

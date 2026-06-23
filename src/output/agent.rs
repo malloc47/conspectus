@@ -35,7 +35,7 @@
 //! `workspace` `checkout` `branch` `repo` `fork` `declared`
 //! `preview` `title` `activity`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use rusqlite::Connection;
 
@@ -395,8 +395,8 @@ fn fetch_branch_lookup(conn: &Connection) -> rusqlite::Result<HashMap<String, St
 
 /// Active `linked_to_mux` candidate links keyed by source session.
 /// For each session we keep the preferred candidate (provenance →
-/// confidence → link_id ordering) plus the count of active
-/// candidates (for the ambiguity marker in `mux-conf`).
+/// confidence → link_id ordering) plus the count of distinct active
+/// mux targets (for the ambiguity marker in `mux-conf`).
 fn fetch_mux_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, MuxInfo>> {
     // Pull all active linked_to_mux candidates whose source is an
     // agent_session and whose target is a known mux node. Group by
@@ -413,7 +413,7 @@ fn fetch_mux_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, M
         "SELECT json_extract(cl.source, '$.harness_key') AS h, \
                 json_extract(cl.source, '$.state_scope') AS s, \
                 json_extract(cl.source, '$.session_key') AS k, \
-                cl.link_id, cl.provenance, cl.confidence, \
+                cl.link_id, cl.target_node, cl.provenance, cl.confidence, \
                 m.backend, m.native_id \
          FROM candidate_links cl \
          JOIN node_mux_sessions m \
@@ -427,6 +427,7 @@ fn fetch_mux_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, M
     #[allow(dead_code)] // link_id is read via the pick_strongest tiebreak accessor
     struct Raw {
         link_id: String,
+        target_node: String,
         provenance: String,
         confidence: String,
         backend: String,
@@ -441,10 +442,11 @@ fn fetch_mux_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, M
             session_key(&h, &s, &k),
             Raw {
                 link_id: row.get(3)?,
-                provenance: row.get(4)?,
-                confidence: row.get(5)?,
-                backend: row.get(6)?,
-                native_id: row.get(7)?,
+                target_node: row.get(4)?,
+                provenance: row.get(5)?,
+                confidence: row.get(6)?,
+                backend: row.get(7)?,
+                native_id: row.get(8)?,
             },
         ))
     })?;
@@ -454,7 +456,11 @@ fn fetch_mux_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, M
     }
     let mut out = HashMap::new();
     for (key, candidates) in per_session {
-        let candidate_count = candidates.len();
+        let candidate_count = candidates
+            .iter()
+            .map(|candidate| candidate.target_node.as_str())
+            .collect::<BTreeSet<_>>()
+            .len();
         let Some(best) = pick_strongest(candidates, |r| (&r.provenance, &r.confidence, &r.link_id))
         else {
             continue;

@@ -350,15 +350,16 @@ fn fetch_agents_with_cwd(conn: &Connection) -> rusqlite::Result<Vec<AgentRow>> {
     rows.collect()
 }
 
-/// Per-agent count of active `linked_to_mux` candidates — feeds the
-/// derived `mux_state` dimension when evaluating `RowFilter` against
-/// PR-attached agent sessions. Key form matches `node_agent_sessions.node_id`.
+/// Per-agent count of distinct active `linked_to_mux` mux targets —
+/// feeds the derived `mux_state` dimension when evaluating
+/// `RowFilter` against PR-attached agent sessions. Key form matches
+/// `node_agent_sessions.node_id`.
 fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
     let mut stmt = conn.prepare(
         "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
                  json_extract(source, '$.state_scope') || ':' || \
                  json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(*) \
+                COUNT(DISTINCT target_node) \
          FROM candidate_links \
          WHERE source_kind = 'agent_session' \
            AND relation = 'linked_to_mux' \

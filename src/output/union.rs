@@ -17,7 +17,7 @@
 //! query rather than turning into a correlated subquery on the
 //! primary query.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use rusqlite::Connection;
 
@@ -297,7 +297,7 @@ fn fetch_preferred_mux_per_agent(
         "SELECT json_extract(cl.source, '$.harness_key') AS h, \
                 json_extract(cl.source, '$.state_scope') AS s, \
                 json_extract(cl.source, '$.session_key') AS k, \
-                cl.link_id, cl.provenance, cl.confidence, \
+                cl.link_id, cl.target_node, cl.provenance, cl.confidence, \
                 m.backend, m.native_id \
          FROM candidate_links cl \
          JOIN node_mux_sessions m \
@@ -311,6 +311,7 @@ fn fetch_preferred_mux_per_agent(
     #[allow(dead_code)] // link_id is read via pick_strongest's tiebreak accessor
     struct Raw {
         link_id: String,
+        target_node: String,
         provenance: String,
         confidence: String,
         backend: String,
@@ -325,10 +326,11 @@ fn fetch_preferred_mux_per_agent(
             session_key(&h, &s, &k),
             Raw {
                 link_id: row.get(3)?,
-                provenance: row.get(4)?,
-                confidence: row.get(5)?,
-                backend: row.get(6)?,
-                native_id: row.get(7)?,
+                target_node: row.get(4)?,
+                provenance: row.get(5)?,
+                confidence: row.get(6)?,
+                backend: row.get(7)?,
+                native_id: row.get(8)?,
             },
         ))
     })?;
@@ -338,7 +340,11 @@ fn fetch_preferred_mux_per_agent(
     }
     let mut out = HashMap::new();
     for (key, candidates) in per_session {
-        let candidate_count = candidates.len();
+        let candidate_count = candidates
+            .iter()
+            .map(|candidate| candidate.target_node.as_str())
+            .collect::<BTreeSet<_>>()
+            .len();
         let Some(best) = pick_strongest(candidates, |r: &Raw| {
             (&r.provenance, &r.confidence, &r.link_id)
         }) else {

@@ -349,16 +349,16 @@ fn fetch_resolved_child_agents_per_fork(
     Ok(out)
 }
 
-/// Per-agent count of active `linked_to_mux` candidates. Same shape
-/// as `output::prs::fetch_agent_mux_candidate_counts` — the two
-/// callers will collapse into a shared helper when a third surface
-/// arrives.
+/// Per-agent count of distinct active `linked_to_mux` mux targets.
+/// Same shape as `output::prs::fetch_agent_mux_candidate_counts` —
+/// the two callers will collapse into a shared helper when a third
+/// surface arrives.
 fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
     let mut stmt = conn.prepare(
         "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
                  json_extract(source, '$.state_scope') || ':' || \
                  json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(*) \
+                COUNT(DISTINCT target_node) \
          FROM candidate_links \
          WHERE source_kind = 'agent_session' \
            AND relation = 'linked_to_mux' \

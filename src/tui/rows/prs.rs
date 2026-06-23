@@ -371,7 +371,7 @@ fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashM
         "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
                  json_extract(source, '$.state_scope') || ':' || \
                  json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(*) \
+                COUNT(DISTINCT target_node) \
          FROM candidate_links \
          WHERE source_kind = 'agent_session' \
            AND relation = 'linked_to_mux' \

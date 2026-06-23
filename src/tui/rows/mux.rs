@@ -719,7 +719,7 @@ fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashM
         "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
                  json_extract(source, '$.state_scope') || ':' || \
                  json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(*) \
+                COUNT(DISTINCT target_node) \
          FROM candidate_links \
          WHERE source_kind = 'agent_session' \
            AND relation = 'linked_to_mux' \
@@ -1045,6 +1045,51 @@ mod tests {
             scratch_row.attached_count, 0,
             "scratch (non-winner) must not surface a false-positive attachment",
         );
+    }
+
+    #[test]
+    fn mux_view_counts_same_target_evidence_as_one_attachment() {
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("editor"));
+        snapshot.nodes.push(session_node("session-x", "/p/editor"));
+        let session =
+            crate::model::NodeId::AgentSession(AgentSessionId::new("codex", "/state", "session-x"));
+        let mux = crate::model::NodeId::MuxSession(MuxSessionId::new("tmux:editor"));
+
+        for id in ["session-mux-log", "session-mux-process"] {
+            snapshot.candidate_links.push(GraphLink {
+                id: id.to_string(),
+                source: session.clone(),
+                target: LinkEndpoint::Node { id: mux.clone() },
+                relation: RelationKind::LinkedToMux,
+                provenance: Provenance::StrongDiscovered,
+                confidence: Confidence::High,
+                freshness: Freshness::Fresh,
+                source_metadata: SourceMetadata::default(),
+                state: LinkState::Active,
+            });
+        }
+
+        let snapshot = resolve_snapshot(snapshot);
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
+            conn: &conn,
+            home: None,
+            now: Some(1_700_000_160),
+            filter: RowFilter::default(),
+            grouping: MuxGrouping::Session,
+        })
+        .expect("mux tree");
+
+        let RowKind::MuxSession(row) = &tree.rows[0].kind else {
+            panic!("expected mux row");
+        };
+        assert_eq!(row.attached_count, 1);
+        assert_eq!(
+            row.ambiguous_count, 0,
+            "multiple evidence links to the same mux target are corroboration, not ambiguity",
+        );
+        assert_eq!(tree.rows.len(), 1);
     }
 
     #[test]
