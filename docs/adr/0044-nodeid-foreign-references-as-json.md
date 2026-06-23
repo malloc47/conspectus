@@ -2,7 +2,27 @@
 
 ## Status
 
-Accepted
+**Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md)
+and [ADR 0083](0083-zero-copy-snapshot-format.md).
+
+The schema decision this ADR settled (JSON-encoded `NodeId`
+foreign references in `candidate_links`, `resolved_relationships`,
+`diagnostics`, `aliases`) applied to the on-disk
+`graph.sqlite` that P11-011a retired. The replacement on-disk
+format is rkyv (ADR 0083) — `NodeId` is archived directly as
+a tagged enum with structural payloads, so JSON-text encoding
+no longer enters the picture for persistence. The
+`MetadataAsJson` adapter on `SourceMetadata.fields` /
+`UnresolvedEndpoint.metadata` is a separate decision recorded
+in ADR 0083 §"Model derives" and applies for a different
+reason (`serde_json::Value` has no native rkyv impl).
+
+`query::materialize_snapshot` still uses the JSON encoding for
+its in-memory render-side SQLite database while
+`src/query/` survives, but that's an internal implementation
+detail rather than a persisted-format commitment.
+
+Original status: Accepted.
 
 ## Context
 

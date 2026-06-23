@@ -2,7 +2,21 @@
 
 ## Status
 
-Accepted
+**Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md)
+(see also [ADR 0083](0083-zero-copy-snapshot-format.md) for the
+replacement on-disk format).
+
+The user-facing SQL query surface this ADR chose SQLite to power
+is gone (`conspectus query` removed in P11-010). The on-disk
+persistence layer the engine backed is gone (P11-011a). SQLite
+survives only as an internal in-memory query engine consumed by
+the output renderers — `query::materialize_snapshot` materializes
+a transient `:memory:` database per render call. The
+operator-visible commitments of this ADR (`graph.sqlite`,
+`PRAGMA user_version`, the bundled libsqlite3 floor, the WAL +
+reader/writer coordination story) are all retired.
+
+Original status: Accepted.
 
 ## Context
 

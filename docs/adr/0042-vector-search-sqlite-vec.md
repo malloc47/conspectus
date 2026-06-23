@@ -2,7 +2,19 @@
 
 ## Status
 
-Accepted
+**Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
+
+The vector-search surface this ADR defined attached to
+`conspectus query --similar-to`, which is gone (P11-010
+removed the `query` subcommand). The `embeddings` overlay
+table, the `--load-extension` flag, the import follow-up
+(P9-FU-001), and `docs/vector-search.md` all retire alongside
+the query feature. Reopening vector search would be a separate
+ADR landing against a different surface (e.g. against the
+JSON-dump export rather than an embedded SQL engine), if and
+when demand reappears.
+
+Original status: Accepted.
 
 ## Context
 

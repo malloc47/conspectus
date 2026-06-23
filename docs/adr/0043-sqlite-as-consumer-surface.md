@@ -2,7 +2,28 @@
 
 ## Status
 
-Accepted
+**Partially superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
+
+The architectural claim this ADR made — "SQLite is the consumer
+read surface for every view and renderer" — is partially
+retired. The TUI refresh path and the one-shot CLI now consume
+from the daemon socket (`client_snapshot`) or by mmapping
+`graph.bin` directly (`snapshot::open_mmap`), not from a SQLite
+read. The output renderers (`src/output/{agent,mux,union,prs,
+forks,node_show,table}.rs`) still go through
+`query::materialize_snapshot` to run their SQL against an
+in-memory database — that's an internal implementation choice
+that survives because inverting the Phase 10 migration to
+restore in-memory rendering is multi-day work that doesn't
+deliver any user-visible architectural improvement beyond what
+P11-011a already shipped. P11-011b/c/d would close that loop
+if pursued.
+
+The TUI's `read_snapshot(database.conn())` sites and the
+materialization in `App::database` are documented retirement
+targets in P11-011d.
+
+Original status: Accepted.
 
 ## Context
 

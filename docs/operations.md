@@ -603,15 +603,29 @@ the cache-side rules.
 
 ## Caches
 
-Conspectus's first cache surface is the pin-binding sidecar
-described under [Session continuity](#session-continuity) —
-per-pin JSON files under
-`$XDG_CACHE_HOME/conspectus/pin-bindings/`. The cache is fully
-rebuildable from a fresh discovery cycle, so clearing it (`rm -r`)
-only loses continuity until the next `pin launch` from a bound
-state. Future caches (PR fetches, transcript indices, etc.) will
-land under the same `$XDG_CACHE_HOME/conspectus/` root rather
-than inside `.conspectus.toml` or the project config directory.
+Conspectus has two persistent cache surfaces:
+
+- **The resolved-graph artifact** at
+  `$XDG_DATA_HOME/conspectus/graph.bin` (ADRs 0082 / 0083).
+  Written by `conspectus serve` after every successful
+  refresh cycle and by daemonless one-shot CLI invocations
+  (`conspectus table`, `node show`, `graph`) at the end of
+  their cold-rebuild path. Daemonless consumers and the
+  daemon's own warm-restart read it back via mmap; the
+  daemon's `snapshot` socket command serves the same bytes.
+  Clearing it (`rm`) only loses warm-start; the next
+  daemon cycle or CLI invocation rebuilds. There are no
+  sidecars, no schema migrations, no backup rotation.
+- **The pin-binding sidecar** described under
+  [Session continuity](#session-continuity) — per-pin JSON
+  files under `$XDG_CACHE_HOME/conspectus/pin-bindings/`.
+  The sidecar is fully rebuildable from a fresh discovery
+  cycle, so clearing it (`rm -r`) only loses continuity
+  until the next `pin launch` from a bound state.
+
+Future caches (PR fetches, transcript indices, etc.) land
+under the same `$XDG_*_HOME/conspectus/` roots rather than
+inside `.conspectus.toml` or the project config directory.
 
 ## TUI state
 
@@ -649,8 +663,86 @@ deterministic starting view). The `--snapshot` dev path implies
 whatever view the operator last touched outside the fixture.
 
 **Read-only invariant:** only `conspectus tui` reads or writes
-the file. The `graph`, `table`, `query`, `node show`, and `pin
-*` surfaces all leave it byte-identical, enforced by
+the file. The `graph`, `table`, `node show`, and `pin *`
+surfaces all leave it byte-identical, enforced by
 `tests/cli_tui_state_invariants.rs`. Writes are atomic
 (tempfile + rename) and skip-on-unchanged so quiet TUI sessions
 produce no mtime churn.
+
+## Migration from earlier 0.x
+
+Phase 11 (ADRs 0082 + 0083) retired Conspectus's SQLite
+persistence layer and the `conspectus query` user-facing SQL
+surface in favor of an in-memory daemon plus a single
+zero-copy `graph.bin` artifact on disk. Operators upgrading
+from a pre-Phase-11 build should expect the following
+visible changes:
+
+**Cache file change.** The canonical persisted artifact moves
+from `$XDG_DATA_HOME/conspectus/graph.sqlite` (plus `-wal` /
+`-shm` sidecars and the `backups/` directory) to a single
+`$XDG_DATA_HOME/conspectus/graph.bin` file. The daemon
+unlinks leftover `graph.sqlite*` files and the `backups/`
+directory on its next startup; one-shot CLIs ignore them
+without error. No operator action required, but you can clean
+them up yourself if the auto-cleanup didn't fire (e.g.
+because you haven't started a daemon yet):
+
+```sh
+rm -rf "$XDG_DATA_HOME/conspectus/graph.sqlite"* \
+       "$XDG_DATA_HOME/conspectus/backups"
+```
+
+**`conspectus query` is gone.** The subcommand and its
+flags — `--list-views`, `--similar-to`, `--load-extension`,
+`--format {table,json,csv,tsv}` (the table renderer's
+identically-named variants are unaffected) — have been
+removed. The replacement shape for ad-hoc graph inspection
+is the JSON dump:
+
+```sh
+conspectus graph --format json | jq '...'
+```
+
+If you had scripts piping `conspectus query 'SELECT … FROM
+v_*'` into a downstream tool, the simplest port is
+`conspectus graph --format json` plus jq expressions over
+`.nodes[]`, `.candidate_links[]`, `.resolved_relationships[]`.
+The pre-Phase-11 saved-view library (`v_sessions_with_repo`,
+`v_mux_attachments`, `v_pr_by_branch`, `v_fork_ancestry`,
+`v_workspace_member_repos`) no longer has a runtime surface;
+the joins they represented can be expressed as jq pipelines
+against the JSON dump.
+
+**Vector search is gone with it.** ADR 0042's
+`--similar-to` / `embeddings` overlay / `--load-extension`
+machinery retired alongside the SQL surface. If you imported
+embeddings for nearest-neighbor lookups, you'll need to
+maintain that pipeline outside Conspectus until a future ADR
+re-opens the surface against a non-SQL substrate.
+
+**Daemon socket gains a `snapshot` command.** The wire shape
+adds a `snapshot` arm alongside `ping` / `refresh` /
+`status`. Returns the serialized resolved snapshot
+base64-encoded under `data.bytes`. The TUI and one-shot CLI
+prefer the daemon path when reachable and fall through to
+cold rebuild otherwise. No flag changes; the routing is
+transparent.
+
+**User-authored TOML is unaffected.** `.conspectus.toml`
+(declared links per ADR 0014, pins per ADR 0057), user-level
+config files (aliases per ADR 0029), and the pin-binding
+sidecar under `$XDG_CACHE_HOME/conspectus/pin-bindings/` all
+keep their existing shapes and locations. Phase 11 changed
+*how the resolved graph is cached* — not *what the operator
+authors*.
+
+**Daemonless cold rebuild is the new floor.** Without
+`conspectus serve` running, every CLI invocation does a full
+discovery pass. This was single-digit seconds at target
+scale before Phase 11 (when SQLite warm-start was active)
+and remains so afterward — the architectural pivot trades
+warm-start latency for the maintenance cost of the SQLite
+machinery. Operators who want sub-second CLI response should
+run `conspectus serve` (systemd user unit, launchd agent,
+or just `conspectus serve &`).

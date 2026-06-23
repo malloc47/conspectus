@@ -2,7 +2,22 @@
 
 ## Status
 
-Accepted
+**Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md)
+and [ADR 0083](0083-zero-copy-snapshot-format.md).
+
+This ADR is fully retired. The canonical on-disk artifact is now
+`graph.bin` — a single rkyv-archived `GraphSnapshot` with a
+32-byte fixed header, written via atomic POSIX rename per ADR
+0083. Every operational property this ADR specified —
+`$XDG_DATA_HOME/conspectus/graph.sqlite`, WAL mode, the pragma
+triplet, schema versioning via `PRAGMA user_version`,
+forward-only migrations, `VACUUM INTO` rotation, the
+`backups/` directory, partial eviction as a SQL transaction —
+is gone. The daemon now cleans up any leftover
+`graph.sqlite{,-wal,-shm}` and `backups/` artifacts on startup
+(P11-011a).
+
+Original status: Accepted.
 
 ## Context
 

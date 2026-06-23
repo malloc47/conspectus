@@ -11165,42 +11165,85 @@ intermediate commit.
     after P11-011d so the operator-visible payoff for
     retiring the bundled libsqlite3 surface is recorded.
 
-- [ ] `P11-012` Supersede the SQLite ADR cluster and rewrite
+- [x] `P11-012` Supersede the SQLite ADR cluster and rewrite
   design.md.
-  - Scope: update the status block on ADRs 0036, 0037, 0039,
-    0040, 0042, 0043, 0044 to "Superseded by ADR 0082" with a
-    one-paragraph note pointing readers at the new model.
-    Update ADR 0038 to a "Partially superseded" status: the
-    read path becomes "socket `snapshot` command or mmap of
-    `graph.bin`"; the write path's writer-fallback fork
-    retires; the existing mutation/refresh framing stays.
-    Rewrite `docs/design.md` §"Continuous Operation Mode" and
-    §"Graph Snapshot Persistence" against the new model
-    (in-memory daemon + zero-copy mmap artifact + no SQL
-    surface); the §"Conspectus Query Surface" section deletes.
-    Update `README.md` CLI block to drop `conspectus query`.
-    Cross-link every superseded ADR back to 0082 in its
-    Status section.
-  - Tests: docs-only; `git diff --check`.
-  - Manual checks: ADR index renders correctly; design.md
-    reads as a single coherent story after the rewrite.
-  - Blockers: `P11-011`.
+  - Outcome: ADRs 0036, 0037, 0039, 0040, 0042, 0044 marked
+    **Superseded** by ADR 0082 with per-ADR notes explaining
+    exactly which commitments retired (the SQL query surface,
+    the on-disk SQLite persistence, the bundled libsqlite3
+    distribution carveouts, the vector-search surface, the
+    JSON-encoded NodeId schema). ADR 0043 marked **Partially
+    superseded** since the architectural claim "SQLite as
+    sole consumption surface" only retires on the user-facing
+    side (output renderers still consume
+    `query::materialize_snapshot` internally). ADR 0038
+    marked **Partially superseded** — Unix-socket framing /
+    commands / lifecycle policy stay in force; the WAL read
+    path and writer-fallback fork retire. Each supersession
+    note links back to ADR 0082 + ADR 0083 inline.
+    `docs/design.md` rewritten:
+    - §"Continuous Operation Mode" updated to describe the
+      `snapshot` socket command, the daemon-or-cold-rebuild
+      resolution chain, and the in-memory state model.
+      Filesystem watchers move from "future optimization"
+      to baseline (ADR 0081 shipped).
+    - §"Graph Snapshot Persistence" rewritten end-to-end:
+      `graph.bin` + 32-byte header + atomic rename +
+      bytecheck validation + in-memory `SnapshotState` /
+      `SnapshotBytes` caches + daemon warm-restart. No more
+      WAL, no more migrations, no more rotation.
+    - §"Query Surface" section deleted (~50 lines).
+    - §"Graph-to-View Slicing" rewritten to describe the
+      daemon-snapshot consumption path with a note that
+      internal `materialize_snapshot` for renderers survives
+      pending P11-011b/c/d.
+    - §"Remaining Design Questions → Continuous Operation
+      And Snapshot Persistence" pruned to the three open
+      questions that actually remain (eviction granularity,
+      resolver re-run cadence, adaptive intervals);
+      everything ADR 0082/0083 settled retires.
+    - §"Discovery Strategy" / §"State And Persistence"
+      mention of "JSON, SQLite, node detail" dropped to
+      "JSON, node detail" — SQLite is no longer a
+      first-class export channel.
+    Tests: docs-only; `git diff --check` clean. Full suite
+    still green (modulo the pre-existing
+    pin_state_matrix_agent_table_snapshot failure from
+    commit 84198ea).
 
-- [ ] `P11-013` Operator migration notes.
-  - Scope: add a CHANGELOG entry calling out the removal of
-    `conspectus query` with the suggested replacement
-    (`conspectus graph --format json | jq`) and the on-disk
-    cache path change (`graph.sqlite` → `graph.bin`). Update
-    `docs/operations.md` with a "Migration from 0.x" section
-    covering the cache file change, the daemon's new socket
-    `snapshot` command, the removal of `--load-extension` and
-    `--similar-to`, and the one-time legacy-cache cleanup
-    behavior from P11-011. Note that user-authored TOML
-    (`.conspectus.toml`, aliases, pins) is unaffected.
-  - Tests: docs-only; `git diff --check`.
-  - Manual checks: re-read the migration section as a user
-    seeing it for the first time.
-  - Blockers: `P11-012`.
+- [x] `P11-013` Operator migration notes.
+  - Outcome: new top-level `CHANGELOG.md` (Keep a Changelog
+    1.1.0 format) with an `[Unreleased]` section that lists
+    Phase 11's breaking changes (Removed: `conspectus query`,
+    vector-search, `graph.sqlite` persistence layer), the
+    additions (`graph.bin`, `snapshot` socket command,
+    daemon warm-restart, legacy-cache cleanup), the changed
+    behaviors (refresh/status flows now route through the
+    socket; `--no-cache` / `--refresh` semantics preserved),
+    and the unchanged surfaces (TOML, hook sidecar, OpenCode
+    SQLite usage). Cross-links to the operator migration
+    section in `docs/operations.md`.
+    `docs/operations.md` gains a `## Migration from earlier
+    0.x` section at the tail covering:
+    - Cache file change (`graph.sqlite{,-wal,-shm}` +
+      `backups/` → `graph.bin`) and the one-shot daemon
+      cleanup behavior, with an `rm -rf` recipe for
+      operators who haven't started a daemon yet.
+    - `conspectus query` removal + the `conspectus graph
+      --format json | jq` migration recipe + saved-view
+      replacement notes.
+    - Vector-search retirement.
+    - `snapshot` socket command addition (transparent to
+      operators).
+    - User-authored TOML / pins / aliases unaffected.
+    - Daemonless cold rebuild as the new floor; recommend
+      `conspectus serve` for sub-second CLI response.
+    The existing §"Caches" section rewritten to describe
+    both persistent cache surfaces (`graph.bin` + pin-
+    binding sidecar) as parallel rebuildable artifacts.
+    Two pre-existing stale references to `conspectus query`
+    in the TUI-state read-only-invariant paragraph dropped.
+    Tests: docs-only; `git diff --check` clean.
 
 ### Command Search And Minibuffer
 

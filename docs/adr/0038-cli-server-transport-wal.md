@@ -2,7 +2,43 @@
 
 ## Status
 
-Accepted
+**Partially superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md)
+and [ADR 0083](0083-zero-copy-snapshot-format.md).
+
+What stays in force:
+
+- The Unix-domain socket transport at
+  `$XDG_RUNTIME_DIR/conspectus/server.sock` (with the
+  `$TMPDIR/conspectus-$UID/` fallback), mode 0600.
+- The length-prefixed JSON framing, one request/response per
+  connection.
+- The `ping`, `refresh`, `status` command shapes (P7-006/008).
+- The "absence of a server is not an error" guarantee (now
+  structural via the on-disk `graph.bin` artifact rather than
+  via WAL).
+- The no-auto-spawn lifecycle policy.
+
+What retires:
+
+- The WAL-backed read path. Readers no longer open
+  `graph.sqlite` directly — daemonless consumers read
+  `graph.bin` via `snapshot::open_mmap` (ADR 0083), and
+  daemon-connected consumers use the new `snapshot` socket
+  command (P11-006). The pragma triplet, WAL checkpoint
+  policy, and `busy_timeout` are all gone with the SQLite
+  layer.
+- The writer-fallback fork. One-shot CLI mutations no longer
+  take a SQLite writer lock when the daemon is absent; user-
+  authored mutations write TOML files directly (declared,
+  aliases, pins per their existing ADRs), and the next
+  daemon cycle or cold rebuild picks the change up.
+- The schema-mismatch + busy-timeout coordination story.
+
+The `snapshot` socket command added in P11-006 is documented in
+ADRs 0082/0083; the JSON envelope follows the same shape as
+existing commands with a base64-encoded `data.bytes` payload.
+
+Original status: Accepted.
 
 ## Context
 

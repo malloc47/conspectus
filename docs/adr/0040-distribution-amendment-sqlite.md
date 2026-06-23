@@ -2,7 +2,21 @@
 
 ## Status
 
-Accepted
+**Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
+
+The distribution carveouts this ADR negotiated for bundled
+libsqlite3 are no longer load-bearing. P11-011a retired SQLite
+as the persistence layer; the remaining internal usage
+(`query::materialize_snapshot` for output rendering) does not
+need a bundled C compile to be the user-facing default.
+`rusqlite` itself stays in the dep tree for the OpenCode harness
+adapter and the hook sidecar (which depend on it independently
+of `src/query/`); the `bundled` feature and binary-size
+carveouts this ADR set up are due to be re-evaluated as part of
+P11-011d's final SQLite cleanup. ADR 0016's original "single
+static binary, no runtime deps" property is reinforced.
+
+Original status: Accepted.
 
 ## Context
 

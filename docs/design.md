@@ -391,7 +391,7 @@ Runtime process observations are likewise rebuildable discovery output. Per ADR
 0047, Conspectus should model them as first-class graph nodes when process
 evidence explains mux attribution, subagent filtering, server/proxy behavior, or
 graph diagnostics. Default human projections can hide process nodes, but graph
-JSON, SQLite, node detail, and visualization exports should preserve them.
+JSON, node detail, and visualization exports should preserve them.
 
 Read-only harness state and log databases are equivalent rebuildable
 observations owned by the harness itself rather than by Conspectus.
@@ -766,18 +766,28 @@ depth.
 
 ### Graph-to-View Slicing
 
-Per ADR 0043, every view, renderer, and inspection surface consumes
-SQLite rather than a long-lived `GraphSnapshot`. The producer pipeline
-still discovers and resolves a typed snapshot, then loads it into
-SQLite; after that, table projections, `node show`, TUI detail, and TUI
-row builders read from a `rusqlite::Connection`.
+The producer pipeline discovers and resolves a typed
+`GraphSnapshot`; consumers read from that snapshot. Daemon-
+connected TUI and CLI receive an owned snapshot decoded from
+the daemon's serialized cache (`client_snapshot` → rkyv
+deserialize per ADRs 0082/0083). Daemonless consumers cold-
+rebuild the same snapshot in process.
 
-Filter, grouping, selection, and row-view-model assembly stay in Rust on
-top of the SQL result set. The Rust resolver remains the source of truth
-for relationship selection (ADR 0041); SQLite is the read surface and
-saved-view library, not a replacement resolver. Future ADR 0031 views
-(Mux / Union / Prs / Forks) should be built directly against the
-connection surface instead of introducing a new in-memory selector layer.
+The output renderers (`src/output/{agent,mux,union,prs,forks,
+node_show,table}.rs`) still materialize the snapshot into a
+transient in-memory SQLite database via
+`query::materialize_snapshot` and run SQL against it. That's
+an internal implementation choice surviving from ADR 0043's
+"SQLite as Sole Consumption Surface" migration — inverting it
+to in-memory iteration is queued under P11-011b/c/d but
+delivers no user-visible architectural change beyond what
+P11-011a already shipped, so the timing is driven by
+binary-size / dependency-cleanup priorities rather than by
+load-bearing demand.
+
+Filter, grouping, selection, and row-view-model assembly stay
+in Rust. The Rust resolver remains the source of truth for
+relationship selection (ADR 0041).
 
 ### Graph Visualization Exports
 
@@ -821,185 +831,154 @@ warranted) is a contained driver rewrite, not a full rewrite.
 
 Conspectus supports two operation modes:
 
-- **One-shot CLI**: each invocation performs a fresh (or warm-started)
-  discovery pass, renders output, and exits. This is the default.
-- **Continuous server**: a long-running process maintains the graph in
-  memory and schedules per-provider refreshes on configurable intervals.
-  CLI invocations talk to the server when one is running and fall back
-  to one-shot discovery otherwise.
+- **One-shot CLI**: each invocation either fetches a resolved
+  snapshot from a running daemon or performs a cold-rebuild
+  discovery pass, renders output, and exits. This is the default
+  invocation shape.
+- **Continuous server (`conspectus serve`)**: a long-running
+  process holds the resolved `GraphSnapshot` in memory and
+  schedules per-provider-class refreshes on configurable
+  intervals. CLI invocations and the TUI talk to the server when
+  one is running and fall back to in-process discovery otherwise.
 
-The server avoids fully evented design as a starting point. Interval-based
-polling per discovery source is sufficient for the v1 of this mode.
-Filesystem watchers (inotify, fsevents) are a future optimization for
-cheap signals (harness state directories, git refs), not a prerequisite.
+The server uses interval-based polling per discovery source as
+its baseline, with filesystem-watcher wake-ups for low-latency
+signals (harness state directories per ADR 0081; git refs and
+`.conspectus.toml` are future extensions).
 
-Defaults skew toward "responsive but quiet": short intervals for cheap
-local sources, longer intervals for expensive ones. Concrete starting
-points (configurable per provider class):
+Defaults skew toward "responsive but quiet": short intervals for
+cheap local sources, longer intervals for expensive ones.
+Concrete starting points (configurable per provider class):
 
 - harness state directories: a few seconds
 - mux backends: a few seconds
 - git repo/checkout probes: tens of seconds
 - forge metadata (e.g. `gh pr list`): minutes
 
-Provider failures are isolated. A broken `gh` binary, unreachable mux
-backend, or unreadable harness state directory must not halt unrelated
-providers. Each provider carries its own success/failure status,
-last-refresh timestamp, and back-off, all surfaced to the resolver and
-status views.
+Provider failures are isolated. A broken `gh` binary,
+unreachable mux backend, or unreadable harness state directory
+must not halt unrelated providers. Each provider carries its own
+success/failure status, last-refresh timestamp, and back-off,
+surfaced via the daemon's per-class scheduler state and the
+`conspectus status` command.
 
-The server lifecycle is user-managed (systemd user unit, launchd agent,
-or a manual `conspectus serve &`). The CLI must not auto-spawn a daemon
-on regular invocations; absence of a server is not an error.
+The server lifecycle is user-managed (systemd user unit, launchd
+agent, or a manual `conspectus serve &`). The CLI must not
+auto-spawn a daemon on regular invocations; absence of a server
+is not an error.
 
-Transport between the CLI and the server is settled by ADR 0038. Reads
-go straight to the SQLite database file (see "Graph Snapshot
-Persistence" below) under WAL mode's concurrent-reader semantics; no
-IPC is involved. The mutation socket lives at
-`$XDG_RUNTIME_DIR/conspectus/server.sock` (mode 0600) with length-
-prefixed JSON framing. `conspectus refresh` routes through the socket
-when a daemon is running and falls back to an in-process cold rebuild
-when it is not — both paths print which one they took so operators can
-see at a glance whether the daemon is reachable. The rename / declared-
-link / ignore-link mutation commands currently flow through one-shot
-CLI rather than the socket; the daemon does not yet hold a long-lived
-writer connection, so peer writes serialize against the daemon's
-scheduled writes via SQLite's `busy_timeout` exactly the same way two
-one-shot CLIs would coordinate. Routing those commands through the
-socket is a future cleanup. The "absence is not an error" guarantee is
-preserved by construction since reads never require the server.
+Transport between the CLI and the server is the Unix-domain
+socket at `$XDG_RUNTIME_DIR/conspectus/server.sock` (mode 0600)
+with length-prefixed JSON framing per ADR 0038 (as amended by
+ADR 0082). The socket commands are:
 
-Configuration extends the existing TOML config with a `[server]` table
-plus per-provider interval keys; specific keys and defaults belong in
-ADR 0038. The same `[server.intervals]` table doubles as the one-shot
-CLI's warm-start TTL per ADR 0079: the daemon treats each value as
-"refresh this often," the CLI treats it as "any slice older than this
-is stale." Recording the same number twice would drift.
+- `ping` — wire-shape probe.
+- `status` — per-class scheduler observability.
+- `refresh` — force a daemon-side cold rebuild (whole graph or
+  a single class via `args.class`).
+- `snapshot` — return the serialized resolved snapshot. The
+  daemon's cycle output is cached as serialized bytes;
+  consumers decode via `snapshot::from_bytes` and use the
+  resulting `GraphSnapshot` directly.
+
+The `conspectus refresh`, `conspectus status`, `conspectus
+table` / `node show` / `graph` CLI commands and the TUI all
+prefer the daemon path when reachable and fall through to
+in-process discovery otherwise. Both paths surface which one
+they took so operators can see at a glance whether the daemon
+is responding.
+
+The "absence is not an error" guarantee is structural rather
+than incidental: every reader can either talk to the daemon
+*or* read the on-disk `graph.bin` artifact (see "Graph Snapshot
+Persistence" below) *or* cold-rebuild. The daemon being down
+just collapses the resolution chain to the last two options.
+
+Configuration extends the existing TOML config with a
+`[server]` table plus per-provider interval keys; specific keys
+and defaults belong in ADR 0038. The same `[server.intervals]`
+table doubles as the one-shot CLI's warm-start TTL per ADR
+0079.
 
 ## Graph Snapshot Persistence
 
-Graph generation is cheap for small graphs but already perceptibly slow
-when discovery touches many harness state directories, many repos, or
-expensive forge calls. Both the continuous server and the one-shot CLI
-benefit from persisting the resolved graph between runs.
+The canonical persisted graph artifact is a single zero-copy
+binary file at `$XDG_DATA_HOME/conspectus/graph.bin` per ADRs
+0082 and 0083. The file carries a 32-byte fixed header
+(`CONSPECT` magic + `format_version` + `payload_len` +
+reserved) followed by an rkyv archive of the resolved
+`GraphSnapshot`. Atomicity is the standard POSIX
+write-tmp-plus-rename idiom; POSIX inode liveness guarantees
+concurrent readers holding the old file's mapping keep seeing
+the old data until they drop it.
 
-Per ADR 0037, the canonical persisted graph artifact is a SQLite
-database at `$XDG_DATA_HOME/conspectus/graph.sqlite` in WAL mode
-(with the usual `-wal` and `-shm` sidecars). JSON survives as a peer
-export format via `conspectus dump --format json` for hand-inspection
-and portability; JSON is not on the warm-start read path.
+- The artifact is never written inside project trees.
+- There is no schema migration chain. A `format_version`
+  mismatch on read triggers a cold rebuild rather than an
+  in-place upgrade; this is acceptable because the artifact is
+  a cache and cold rebuild is fast.
+- `bytecheck` validates the on-disk payload end-to-end before
+  any reader accesses an archived field. Validation runs on
+  daemonless / warm-start reads; daemon-served bytes skip
+  validation (the daemon trusts itself).
+- The `JSON` export at `conspectus graph --format json`
+  survives as the documented inter-tool boundary for cases
+  where humans or `jq` need to inspect graph state; the rkyv
+  file is explicitly a Rust-internal cache.
 
-- The database file is never written inside project trees.
-- Atomicity is delegated to SQLite transactions (no temp-file +
-  rename dance). Crash recovery is SQLite's WAL replay.
-- Schema versioning lives in `PRAGMA user_version`, aligned with the
-  in-memory `GraphSnapshot` schema version. Migrations apply
-  forward-only; opening a database written by a newer binary on an
-  older binary fails fast with a clear error.
-- Each connection applies the standard pragma triplet:
-  `synchronous = NORMAL`, `busy_timeout = 5000`,
-  `wal_autocheckpoint = 1000`.
-- Numbered backups under `$XDG_DATA_HOME/conspectus/backups/` are
-  produced by `VACUUM INTO` after each full rebuild; the most
-  recent five are retained for debugging. Backups are not on the
-  warm-start read path.
+The daemon holds two in-memory caches that move in lockstep
+with the on-disk file:
 
-Each node, candidate link, and resolved relationship carries the
-producing provider's stable identifier and a freshness timestamp. A
-`provider_state` table holds per-provider refresh-cycle bookkeeping.
-This provenance is what makes partial eviction possible:
+- `SnapshotState`: the live `GraphSnapshot` the per-class
+  scheduler reads as its next-cycle prior. Replaces the
+  previous "read prior from `graph.sqlite`" pattern — the
+  daemon never reads its own on-disk artifact during normal
+  operation.
+- `SnapshotBytes`: the serialized form the socket `snapshot`
+  command serves verbatim without re-serializing per
+  connection.
 
-- The unit of refresh is a single provider's slice of the graph.
-- Re-running a provider is one transaction: delete the provider's
-  prior rows from `nodes`, `candidate_links`, and
-  `resolved_relationships`; insert the new rows; update
-  `provider_state`. Declared links, other providers' slices, and
-  resolver winners for unrelated keys remain untouched.
-- The resolver re-runs against the merged candidate-link set
-  whenever any provider slice changes and writes its
-  `resolved_relationships` rows back through the same transaction
-  (or a tightly-paired follow-up). Re-run cadence (eager, batched,
-  or lazy) is left to ADR 0037 and the implementing stories.
+On startup the daemon attempts to seed `SnapshotState` from
+`graph.bin` (warm-restart per P11-009). Failure on any leg
+(missing file, version mismatch, validation failure) falls
+through to first-cycle cold-rebuild semantics.
 
-The one-shot CLI's warm-start path (per ADR 0079 and `P7-003` phase 3):
+Each node, candidate link, and resolved relationship carries
+the producing provider's stable identifier and a freshness
+timestamp. This provenance is what makes partial eviction
+possible: the unit of refresh is a single provider's slice of
+the graph. Re-running a provider class on its tick evicts the
+class's slice from the in-memory prior, runs only that class's
+discovery providers, merges the result, re-resolves, and
+publishes the updated snapshot to both in-memory caches and the
+on-disk file via a single atomic-rename write.
 
-1. Open `graph.sqlite` if it exists and read the snapshot into memory.
-   An absent file is a cold start, not an error.
-2. For each provider key observed in the snapshot, find the max
-   `freshness_epoch` across the per-node provenance sidecar and the
-   per-link `source_metadata` and compare `now - max_epoch` against
-   the configured class TTL from `[server.intervals]`.
-3. Evict the stale provider slices (and the always-rerun mutator
-   slices: `cross_link`, `codex_log`, `hook_sidecar`, `declared`)
-   from the prior via `GraphSnapshot::evict_provider`.
-4. Run only the stale + untested heavy providers; skip the fresh
-   ones via `LocalDiscovery::discover_skipping`.
-5. Merge fresh discovery with the evicted prior so the fresh
-   fragment wins on every collision and the prior fills only the
-   slices the live run skipped.
-6. Re-run the always-rerun mutators against the merged snapshot.
-7. Re-resolve and render; persist the resolved snapshot back to
-   `graph.sqlite` so the next invocation can warm-start.
+The one-shot CLI's resolution chain (P11-008 + P11-011a):
 
-`--refresh` collapses step 1's prior to empty, which makes the gate
-classify nothing as fresh and forces a cold rebuild. `--no-cache`
-suppresses the writer in step 7 so the run does not mutate the
-on-disk cache. Per-emit `freshness_epoch` rather than the
-ADR 0037 `provider_state` table drives the gate; the
-`provider_state` write remains deferred until the daemon owns the
-lifecycle context that knows whether a run was successful.
+1. If `conspectus serve` is reachable on the socket, request
+   the resolved snapshot via the `snapshot` command and
+   return. Skips discovery + resolve entirely.
+2. Otherwise, run discovery with an empty prior (cold
+   rebuild), resolve, and write the resulting snapshot to
+   `graph.bin` so the next daemon cycle or future warm-start
+   has the artifact ready.
 
-Server / one-shot CLI coexistence (ADR 0038) is built on top of
-this persistence model. Readers open `graph.sqlite` in read-only
-mode and benefit from WAL's concurrent-reader guarantees regardless
-of whether a server is running. The server holds the writer
-connection for the lifetime of its process; one-shot CLI mutations
-either route through the Unix socket to the server or take the
-writer lock directly when the server is absent.
+`--refresh` bypasses (1) so the operator-typed "ignore the
+daemon, rebuild from disk" semantic is preserved.
+`--no-cache` suppresses the `graph.bin` write at the end of
+(2).
 
-## Query Surface
+Daemonless one-shot CLI mutations (`conspectus declared
+create`, `pin create`, alias renames, …) write TOML files
+directly per their existing ADRs; the next daemon cycle picks
+the change up. The CLI does not take a writer lock or
+coordinate with the daemon for these mutations — there is no
+shared on-disk SQL database to coordinate against.
 
-Per ADR 0036, Conspectus ships a user-facing SQL query surface
-backed by SQLite. The shape:
-
-- **CLI entry point**: `conspectus query <sql>`. Opens
-  `graph.sqlite` in read-only mode (per the persistence section
-  above) and runs the supplied query against the schema described
-  in P9-002. Reads never need a running server.
-- **Read-only enforcement**: the connection is opened with
-  `SQLITE_OPEN_READONLY`, which rejects DML, DDL, and writable
-  `ATTACH` attempts at the SQLite layer. Mutation of graph state
-  is reserved for the structured rename / declared-link CRUD
-  commands, which route through the server's Unix socket or take
-  the writer lock when the server is absent (ADR 0038).
-- **Schema shape**: one table per node kind (`node_repos`,
-  `node_agent_sessions`, `node_mux_sessions`, …) for
-  queryability, plus `candidate_links`, `resolved_relationships`,
-  `diagnostics`, `aliases`, and `provider_state`. A `v_nodes`
-  view unions the per-kind tables by `(node_id, node_kind)`.
-  Polymorphic blobs (`SourceMetadata.fields`,
-  `UnresolvedEndpoint.metadata`) land in `TEXT` columns holding
-  JSON, queryable via `JSON_EXTRACT`. The schema mirrors the
-  in-Rust model field-for-field; the Rust source remains the
-  source of truth (ADR 0041).
-- **Output formats**: `--format table` (width-aware columnar, per
-  ADR 0020), `--format json` (one object per row),
-  `--format csv`, `--format tsv`. Color codes per ADR 0022 when
-  stdout is a TTY.
-- **Saved views**: a small curated library
-  (`v_sessions_with_repo`, `v_mux_attachments`, `v_pr_by_branch`,
-  `v_fork_ancestry` (recursive), `v_workspace_member_repos`)
-  names the joins that exploratory users would otherwise have to
-  write by hand. `conspectus query --list-views` enumerates them.
-  The set is curated, not a contract.
-- **Build configuration**: the query surface lives behind the
-  `query` Cargo feature (ADR 0039). The shipped binary always
-  builds with the feature on; library consumers of
-  `conspectus::api` opt in.
-- **Resolver boundary**: SQL is a consumer of resolver output, not
-  a replacement for it (ADR 0041). Saved views may join or filter
-  on `resolved_relationships` but should not duplicate the
-  resolver's precedence logic.
+The legacy `graph.sqlite{,-wal,-shm}` artifacts plus the
+`backups/` directory from earlier builds are best-effort
+cleaned up by the daemon on startup; the cleanup is a one-shot
+migration helper and harmless if it fails.
 
 ## Migration Plan
 
@@ -1193,21 +1172,26 @@ declared links before they become workspace structure.
 
 ### Continuous Operation And Snapshot Persistence
 
-- What is the right CLI ↔ server transport: Unix domain socket, file-based
-  snapshot polling, or both?
-- Should the server share its discovery code path 1:1 with the one-shot CLI,
-  or fork into a dedicated coordinator with different concurrency semantics?
-- What is the right resolver re-run cadence on partial updates: eager per
-  provider tick, debounced batches, or lazy on client read?
-- Is per-provider eviction granular enough, or should eviction also support
-  per-repo / per-scan-root / per-node-kind keys?
-- Should snapshot persistence be enabled by default once stable, or stay
-  opt-in alongside server mode?
-- What is the migration story when the snapshot schema version changes:
-  drop and rebuild, in-place upgrade, or both depending on the field?
-- What are the right default refresh intervals per provider class, and should
-  they adapt to recent activity (e.g. shorten after a session is observed to
-  change)?
+Most of the questions queued here are answered. ADR 0038
+settled the Unix-domain socket transport; ADR 0079 settled the
+per-class TTL story; ADR 0080 settled signal handling;
+ADR 0081 settled the watcher dependency; ADRs 0082 and 0083
+retired the SQLite layer in favor of an in-memory daemon
+state plus a rkyv-archived `graph.bin`. The genuine open
+questions that remain:
+
+- Is per-provider eviction granular enough, or should
+  eviction also support per-repo / per-scan-root /
+  per-node-kind keys? P7-005 ships per-provider as the
+  unit; finer granularity is deferred until a real pain
+  point surfaces.
+- What is the right resolver re-run cadence on partial
+  updates: eager per provider tick (the current
+  implementation), debounced batches, or lazy on client
+  read?
+- What are the right default refresh intervals per provider
+  class, and should they adapt to recent activity (e.g.
+  shorten after a session is observed to change)?
 
 ## Deferred Design Questions
 

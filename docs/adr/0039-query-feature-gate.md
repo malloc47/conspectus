@@ -2,7 +2,20 @@
 
 ## Status
 
-Accepted
+**Superseded** by [ADR 0082](0082-retire-sqlite-persistence-and-query-surface.md).
+
+The `query` Cargo feature this ADR defined is being phased out.
+P11-010 removed `conspectus query` from the binary; P11-011a
+retired the SQLite persistence layer the feature gated.
+`src/query/` continues to exist as an internal renderer-support
+helper (P11-011b/c/d cover the final deletion), but it is no
+longer the user-facing surface this ADR's feature gate was
+designed to expose. Library consumers who set
+`default-features = false` get nothing more than they got
+before — the feature gate's audience disappears with its
+content.
+
+Original status: Accepted.
 
 ## Context
 
