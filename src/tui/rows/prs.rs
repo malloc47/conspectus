@@ -1,15 +1,15 @@
-//! SQLite-backed PRs-view row-tree builder.
-//!
-//! Lists forge PRs as parents and nests agent sessions whose cwd is under a
-//! checkout for the PR's linked branch.
+//! In-memory PRs-view row-tree builder (P11-011c / ADR 0082).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::Connection;
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
-use crate::model::{AgentSessionId, ForgePrId, NodeId, path_is_ancestor_of};
+use crate::model::{
+    AgentSessionId, AgentSessionNode, ForgePrId, ForgePrNode, GraphNode, GraphSnapshot,
+    LinkEndpoint, LinkState, NodeId, RelationKind, path_is_ancestor_of,
+};
 use crate::output::render::{node_short_id_from_display, strip_branch_prefix, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, MuxIndicator, PrRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency,
@@ -17,10 +17,11 @@ use crate::tui::rows::{
 };
 
 pub struct PrsBuildInputs<'a> {
-    pub snapshot: &'a crate::model::GraphSnapshot,
+    pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
 }
 
+/// Connection-based inputs surviving until P11-011d.
 pub struct PrsBuildInputsFromConn<'a> {
     pub conn: &'a Connection,
     pub home: Option<&'a Path>,
@@ -28,17 +29,20 @@ pub struct PrsBuildInputsFromConn<'a> {
     pub filter: RowFilter,
 }
 
+pub fn build_prs_tree_from_conn(inputs: PrsBuildInputsFromConn<'_>) -> rusqlite::Result<RowTree> {
+    let snapshot = crate::query::read_snapshot(inputs.conn)?;
+    let _ = (inputs.now, inputs.filter);
+    Ok(build_prs_tree(PrsBuildInputs {
+        snapshot: &snapshot,
+        home: inputs.home,
+    }))
+}
+
 #[derive(Clone, Debug)]
-struct PrSqlRow {
+struct PrData<'a> {
     node_id: String,
     id: ForgePrId,
-    owner: String,
-    repo: String,
-    number: u64,
-    state: Option<String>,
-    is_draft: bool,
-    url: Option<String>,
-    updated_epoch: Option<i64>,
+    node: &'a ForgePrNode,
 }
 
 #[derive(Clone, Debug)]
@@ -48,34 +52,23 @@ struct BranchLink {
 }
 
 #[derive(Clone, Debug)]
-struct AgentSqlRow {
+struct AgentData<'a> {
     node_id: String,
     id: AgentSessionId,
-    cwd: Option<String>,
-    title: Option<String>,
+    node: &'a AgentSessionNode,
     alias: Option<String>,
-    preview: Option<String>,
-    last_active_epoch: Option<i64>,
 }
 
 pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
-    let conn = crate::query::materialize_snapshot(inputs.snapshot)
-        .expect("materialize snapshot for prs TUI tree");
-    build_prs_tree_from_conn(PrsBuildInputsFromConn {
-        conn: &conn,
-        home: inputs.home,
-        now: None,
-        filter: RowFilter::default(),
-    })
-    .expect("build prs TUI tree from materialized snapshot")
-}
+    let snapshot = inputs.snapshot;
+    let filter = RowFilter::default();
+    let now: Option<i64> = None;
 
-pub fn build_prs_tree_from_conn(inputs: PrsBuildInputsFromConn<'_>) -> rusqlite::Result<RowTree> {
-    let prs = fetch_prs(inputs.conn)?;
-    let agents = fetch_agents(inputs.conn)?;
-    let candidate_counts = fetch_agent_mux_candidate_counts(inputs.conn)?;
-    let branches = fetch_preferred_branch_per_pr(inputs.conn)?;
-    let checkout_roots = fetch_checkout_roots_per_branch(inputs.conn)?;
+    let prs = collect_prs(snapshot);
+    let agents = collect_agents(snapshot);
+    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    let branches = collect_preferred_branch_per_pr(snapshot);
+    let checkout_roots = collect_checkout_roots_per_branch(snapshot);
 
     let mut node_ids: Vec<String> = prs.iter().map(|pr| pr.node_id.clone()).collect();
     node_ids.extend(agents.iter().map(|agent| agent.node_id.clone()));
@@ -101,14 +94,12 @@ pub fn build_prs_tree_from_conn(inputs: PrsBuildInputsFromConn<'_>) -> rusqlite:
             .and_then(|branch| checkout_roots.get(&branch.branch_node_id))
             .cloned()
             .unwrap_or_default();
-        let visible_agents: Vec<&AgentSqlRow> = agents
+        let visible_agents: Vec<&AgentData<'_>> = agents
             .iter()
             .filter(|agent| agent_attached_to_roots(agent, &roots))
-            .filter(|agent| {
-                session_matches_filter(agent, &candidate_counts, inputs.now, &inputs.filter)
-            })
+            .filter(|agent| session_matches_filter(agent, &candidate_counts, now, &filter))
             .collect();
-        if inputs.filter.has_narrowing_predicates() && visible_agents.is_empty() {
+        if filter.has_narrowing_predicates() && visible_agents.is_empty() {
             continue;
         }
 
@@ -118,17 +109,17 @@ pub fn build_prs_tree_from_conn(inputs: PrsBuildInputsFromConn<'_>) -> rusqlite:
             depth: 0,
             expandable: !visible_agents.is_empty(),
             kind: RowKind::Pr(PrRow {
-                pr_number: pr.number,
-                repo_display: format!("{}/{}#{}", pr.owner, pr.repo, pr.number),
-                state: pr.state.clone(),
-                is_draft: pr.is_draft,
+                pr_number: pr.node.number,
+                repo_display: format!("{}/{}#{}", pr.node.owner, pr.node.repo, pr.node.number),
+                state: pr.node.state.clone(),
+                is_draft: pr.node.is_draft,
                 branch_name: branch
                     .map(|branch| branch.refname.as_str())
                     .map(strip_branch_prefix)
                     .map(str::to_string),
-                updated_recency: format_recency(inputs.now, pr.updated_epoch),
+                updated_recency: format_recency(now, pr.node.updated_epoch),
                 attached_count: visible_agents.len(),
-                url: pr.url.clone(),
+                url: pr.node.url.clone(),
                 primary_node: node_id,
             }),
         });
@@ -143,16 +134,16 @@ pub fn build_prs_tree_from_conn(inputs: PrsBuildInputsFromConn<'_>) -> rusqlite:
                     .cloned()
                     .unwrap_or_default(),
                 inputs.home,
-                inputs.now,
+                now,
             ));
         }
     }
 
-    Ok(tree)
+    tree
 }
 
-fn agent_attached_to_roots(agent: &AgentSqlRow, roots: &[String]) -> bool {
-    let Some(cwd) = agent.cwd.as_deref() else {
+fn agent_attached_to_roots(agent: &AgentData<'_>, roots: &[String]) -> bool {
+    let Some(cwd) = agent.node.cwd.as_deref() else {
         return false;
     };
     let cwd = Path::new(cwd);
@@ -162,7 +153,7 @@ fn agent_attached_to_roots(agent: &AgentSqlRow, roots: &[String]) -> bool {
 }
 
 fn agent_row(
-    agent: &AgentSqlRow,
+    agent: &AgentData<'_>,
     depth: u8,
     candidate_counts: &HashMap<String, usize>,
     short_id: String,
@@ -180,17 +171,14 @@ fn agent_row(
             short_id,
             pin_id: None,
             harness_label: harness_label(&agent.id.harness_key),
-            cwd_display: agent.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
+            cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.last_active_epoch),
-            activity_epoch: agent.last_active_epoch,
+            recency: format_recency(now, agent.node.last_active_epoch),
+            activity_epoch: agent.node.last_active_epoch,
             mux_state: mux_indicator(candidate_count),
-            preview: agent.preview.clone(),
-            title: agent.title.clone(),
+            preview: agent.node.last_message_preview.clone(),
+            title: agent.node.title.clone(),
             alias: agent.alias.clone(),
-            // P8-015 is sessions-view scoped; agent rows nested
-            // under a PR row never gain the title-as-disambiguator
-            // treatment here.
             title_disambiguates: false,
             primary_node: node_id,
         }),
@@ -206,7 +194,7 @@ fn mux_indicator(candidate_count: usize) -> MuxIndicator {
 }
 
 fn session_matches_filter(
-    agent: &AgentSqlRow,
+    agent: &AgentData<'_>,
     candidate_counts: &HashMap<String, usize>,
     now: Option<i64>,
     filter: &RowFilter,
@@ -218,174 +206,163 @@ fn session_matches_filter(
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.id.harness_key,
         now_epoch: now,
-        last_active_epoch: agent.last_active_epoch,
+        last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
     })
 }
 
-fn fetch_prs(conn: &Connection) -> rusqlite::Result<Vec<PrSqlRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT pr.node_id, pr.provider_name, pr.host, pr.owner, pr.repo, pr.number, \
-                pr.state, pr.is_draft, pr.url, pr.updated_epoch \
-         FROM node_forge_prs pr \
-         ORDER BY pr.owner, pr.repo, pr.number DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let provider: String = row.get(1)?;
-        let host: String = row.get(2)?;
-        let owner: String = row.get(3)?;
-        let repo: String = row.get(4)?;
-        let number_i64: i64 = row.get(5)?;
-        let is_draft: i64 = row.get(7)?;
-        Ok(PrSqlRow {
-            node_id: row.get(0)?,
-            id: ForgePrId::new(
-                provider,
-                host,
-                owner.clone(),
-                repo.clone(),
-                number_i64 as u64,
-            ),
-            owner,
-            repo,
-            number: number_i64 as u64,
-            state: row.get(6)?,
-            is_draft: is_draft != 0,
-            url: row.get(8)?,
-            updated_epoch: row.get(9)?,
+// -----------------------------------------------------------------------------
+// In-memory collectors
+// -----------------------------------------------------------------------------
+
+fn collect_prs(snapshot: &GraphSnapshot) -> Vec<PrData<'_>> {
+    let mut prs: Vec<PrData<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::ForgePr(pr) => Some(PrData {
+                node_id: NodeId::ForgePr(pr.id.clone()).to_string(),
+                id: pr.id.clone(),
+                node: pr,
+            }),
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+    prs.sort_by(|a, b| {
+        a.node
+            .owner
+            .cmp(&b.node.owner)
+            .then_with(|| a.node.repo.cmp(&b.node.repo))
+            .then_with(|| b.node.number.cmp(&a.node.number))
+    });
+    prs
 }
 
-fn fetch_agents(conn: &Connection) -> rusqlite::Result<Vec<AgentSqlRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT a.node_id, a.harness_key, a.state_scope, a.session_key, \
-                a.cwd, a.title, al.display_name, a.last_message_preview, a.last_active_epoch \
-         FROM node_agent_sessions a \
-         LEFT JOIN aliases al \
-           ON al.node_kind = 'agent_session' \
-          AND json_extract(al.node, '$.harness_key') = a.harness_key \
-          AND json_extract(al.node, '$.state_scope') = a.state_scope \
-          AND json_extract(al.node, '$.session_key') = a.session_key \
-         WHERE a.cwd IS NOT NULL \
-         ORDER BY a.node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let harness_key: String = row.get(1)?;
-        let state_scope: String = row.get(2)?;
-        let session_key: String = row.get(3)?;
-        Ok(AgentSqlRow {
-            node_id: row.get(0)?,
-            id: AgentSessionId::new(harness_key, state_scope, session_key),
-            cwd: row.get(4)?,
-            title: row.get(5)?,
-            alias: row.get(6)?,
-            preview: row.get(7)?,
-            last_active_epoch: row.get(8)?,
+fn collect_agents(snapshot: &GraphSnapshot) -> Vec<AgentData<'_>> {
+    let mut agents: Vec<AgentData<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) if agent.cwd.is_some() => {
+                let id = agent.id.clone();
+                let alias = snapshot
+                    .aliases
+                    .get(&NodeId::AgentSession(id.clone()))
+                    .map(|s| s.to_string());
+                Some(AgentData {
+                    node_id: NodeId::AgentSession(id.clone()).to_string(),
+                    id,
+                    node: agent,
+                    alias,
+                })
+            }
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+    agents.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    agents
 }
 
-fn fetch_preferred_branch_per_pr(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, BranchLink>> {
-    // H-UI-008: the PR view's "preferred branch per PR" column
-    // now consumes the resolver's `BranchHasForgePr` winner via a
-    // join on `resolved_relationships.selected_link_id`. Pre-
-    // H-UI-008 we ranked candidates with `pick_strongest`, which
-    // is equivalent for principled cases but could disagree at
-    // tie-break boundaries. Filtering through the resolver keeps
-    // the tree row in sync with the detail pane's validated zone.
-    let mut stmt = conn.prepare(
-        "SELECT ('forge_pr:' || \
-                 json_extract(cl.source, '$.provider') || ':' || \
-                 json_extract(cl.source, '$.host') || '/' || \
-                 json_extract(cl.source, '$.owner') || '/' || \
-                 json_extract(cl.source, '$.repo') || '#' || \
-                 json_extract(cl.source, '$.number')) AS pr_node_id, \
-                ('branch:repo:' || json_extract(cl.target_node, '$.repo.common_dir') || '@' || \
-                 json_extract(cl.target_node, '$.refname')) AS branch_node_id, \
-                json_extract(cl.target_node, '$.refname') AS refname \
-         FROM candidate_links cl \
-         JOIN resolved_relationships rr \
-           ON rr.selected_link_id = cl.link_id \
-          AND rr.relation = 'branch_has_forge_pr' \
-         WHERE cl.source_kind = 'forge_pr' \
-           AND cl.target_node_kind = 'branch' \
-           AND cl.relation = 'branch_has_forge_pr' \
-           AND cl.state = 'active'",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            BranchLink {
-                branch_node_id: row.get(1)?,
-                refname: row.get(2)?,
-            },
-        ))
-    })?;
+/// H-UI-008: the preferred branch per PR comes from the
+/// resolver's `branch_has_forge_pr` winner. Production
+/// discovery emits these with source=ForgePr, target=Branch.
+fn collect_preferred_branch_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, BranchLink> {
+    let selected_link_ids: HashSet<&str> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|r| matches!(r.relation, RelationKind::BranchHasForgePr))
+        .filter_map(|r| r.selected_link_id.as_deref())
+        .collect();
     let mut out = HashMap::new();
-    for row in rows {
-        let (pr_node_id, branch) = row?;
-        // Resolver writes at most one winner per (source, relation)
-        // for `BranchHasForgePr` (it's not in `multi_target_relation`),
-        // so the first hit per pr_node_id is canonical.
-        out.entry(pr_node_id).or_insert(branch);
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::BranchHasForgePr) {
+            continue;
+        }
+        let NodeId::ForgePr(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: NodeId::Branch(branch_id),
+        } = &link.target
+        else {
+            continue;
+        };
+        if !selected_link_ids.contains(link.id.as_str()) {
+            continue;
+        }
+        let branch_node_id = NodeId::Branch(branch_id.clone()).to_string();
+        out.entry(link.source.to_string()).or_insert(BranchLink {
+            branch_node_id,
+            refname: branch_id.refname.clone(),
+        });
     }
-    Ok(out)
+    out
 }
 
-fn fetch_checkout_roots_per_branch(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, Vec<String>>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('branch:repo:' || json_extract(cl.target_node, '$.repo.common_dir') || '@' || \
-                json_extract(cl.target_node, '$.refname')) AS branch_node_id, \
-                c.root \
-         FROM candidate_links cl \
-         JOIN node_checkouts c \
-           ON cl.source_kind = 'checkout' \
-          AND ('checkout:repo:' || json_extract(cl.source, '$.repo.common_dir') || '@' || \
-               json_extract(cl.source, '$.root')) = c.node_id \
-         WHERE cl.source_kind = 'checkout' \
-          AND cl.target_node_kind = 'branch' \
-          AND cl.relation = 'checked_out_branch' \
-          AND cl.state = 'active' \
-         ORDER BY branch_node_id, c.root",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+fn collect_checkout_roots_per_branch(snapshot: &GraphSnapshot) -> HashMap<String, Vec<String>> {
+    let checkout_roots: HashMap<NodeId, String> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Checkout(checkout) => {
+                Some((NodeId::Checkout(checkout.id.clone()), checkout.root.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut sorted: Vec<(String, String)> = Vec::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::CheckedOutBranch) {
+            continue;
+        }
+        let NodeId::Checkout(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: NodeId::Branch(branch_id),
+        } = &link.target
+        else {
+            continue;
+        };
+        let Some(root) = checkout_roots.get(&link.source) else {
+            continue;
+        };
+        let branch_node_id = NodeId::Branch(branch_id.clone()).to_string();
+        sorted.push((branch_node_id, root.clone()));
+    }
+    sorted.sort();
     let mut out: HashMap<String, Vec<String>> = HashMap::new();
-    for row in rows {
-        let (branch_node_id, root) = row?;
+    for (branch_node_id, root) in sorted {
         out.entry(branch_node_id).or_default().push(root);
     }
-    Ok(out)
+    out
 }
 
-fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
-                 json_extract(source, '$.state_scope') || ':' || \
-                 json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(DISTINCT target_node) \
-         FROM candidate_links \
-         WHERE source_kind = 'agent_session' \
-           AND relation = 'linked_to_mux' \
-           AND state = 'active' \
-         GROUP BY source",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let count: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, count as usize))
-    })?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (node_id, count) = row?;
-        out.insert(node_id, count);
+fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.to_string())
+            .or_default()
+            .insert(target_id.to_string());
     }
-    Ok(out)
+    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }

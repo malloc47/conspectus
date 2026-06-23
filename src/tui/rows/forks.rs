@@ -1,15 +1,18 @@
-//! SQLite-backed forks-view row-tree builder.
+//! In-memory forks-view row-tree builder (P11-011c / ADR 0082).
 //!
-//! Lists forks as parents and nests resolved child agent sessions when they
-//! are present in the graph.
+//! Lists forks as parents and nests resolved child agent sessions
+//! when they are present in the graph.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::Connection;
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
-use crate::model::{AgentSessionId, ForkId, NodeId};
+use crate::model::{
+    AgentSessionId, AgentSessionNode, ForkId, ForkNode, GraphNode, GraphSnapshot, LinkEndpoint,
+    LinkState, NodeId, RelationKind,
+};
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, ForkRow, MuxIndicator, Row, RowId, RowKind, RowTree, ViewLabel,
@@ -17,10 +20,13 @@ use crate::tui::rows::{
 };
 
 pub struct ForksBuildInputs<'a> {
-    pub snapshot: &'a crate::model::GraphSnapshot,
+    pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
 }
 
+/// Connection-based inputs surviving until P11-011d retires
+/// `App::database`. Thin wrapper that reads the snapshot back
+/// out of SQLite then delegates to [`build_forks_tree`].
 pub struct ForksBuildInputsFromConn<'a> {
     pub conn: &'a Connection,
     pub home: Option<&'a Path>,
@@ -28,48 +34,55 @@ pub struct ForksBuildInputsFromConn<'a> {
     pub filter: RowFilter,
 }
 
-#[derive(Clone, Debug)]
-struct ForkSqlRow {
-    node_id: String,
-    id: ForkId,
-    provider_source_key: String,
-    provider: String,
-    name: Option<String>,
-    scope: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-struct AgentSqlRow {
-    node_id: String,
-    id: AgentSessionId,
-    cwd: Option<String>,
-    title: Option<String>,
-    alias: Option<String>,
-    preview: Option<String>,
-    last_active_epoch: Option<i64>,
-}
-
-pub fn build_forks_tree(inputs: ForksBuildInputs<'_>) -> RowTree {
-    let conn = crate::query::materialize_snapshot(inputs.snapshot)
-        .expect("materialize snapshot for forks TUI tree");
-    build_forks_tree_from_conn(ForksBuildInputsFromConn {
-        conn: &conn,
-        home: inputs.home,
-        now: None,
-        filter: RowFilter::default(),
-    })
-    .expect("build forks TUI tree from materialized snapshot")
-}
-
 pub fn build_forks_tree_from_conn(
     inputs: ForksBuildInputsFromConn<'_>,
 ) -> rusqlite::Result<RowTree> {
-    let forks = fetch_forks(inputs.conn)?;
-    let agents = fetch_agents(inputs.conn)?;
-    let candidate_counts = fetch_agent_mux_candidate_counts(inputs.conn)?;
-    let child_counts = fetch_child_counts(inputs.conn)?;
-    let child_links = fetch_resolved_child_links(inputs.conn)?;
-    let parent_labels = fetch_parent_labels(inputs.conn)?;
+    let snapshot = crate::query::read_snapshot(inputs.conn)?;
+    let _ = (inputs.now, inputs.filter); // Sessions filter doesn't apply in the forks default render.
+    Ok(build_forks_tree(ForksBuildInputs {
+        snapshot: &snapshot,
+        home: inputs.home,
+    }))
+}
+
+#[derive(Clone, Debug)]
+struct ForkData<'a> {
+    node_id: String,
+    id: ForkId,
+    node: &'a ForkNode,
+}
+
+#[derive(Clone, Debug)]
+struct AgentData<'a> {
+    node_id: String,
+    id: AgentSessionId,
+    node: &'a AgentSessionNode,
+    alias: Option<String>,
+}
+
+pub fn build_forks_tree(inputs: ForksBuildInputs<'_>) -> RowTree {
+    let snapshot = inputs.snapshot;
+    let filter = RowFilter::default();
+    let now: Option<i64> = None;
+
+    let mut forks = collect_forks(snapshot);
+    forks.sort_by(|a, b| {
+        a.node
+            .provider
+            .cmp(&b.node.provider)
+            .then_with(|| a.node.provider_source_key.cmp(&b.node.provider_source_key))
+    });
+
+    let agents = collect_agents(snapshot);
+    let agents_by_node: HashMap<&str, &AgentData<'_>> = agents
+        .iter()
+        .map(|agent| (agent.node_id.as_str(), agent))
+        .collect();
+
+    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    let child_counts = collect_child_counts(snapshot);
+    let child_links = collect_resolved_child_links(snapshot);
+    let parent_labels = collect_parent_labels(snapshot);
 
     let mut node_ids: Vec<String> = forks.iter().map(|fork| fork.node_id.clone()).collect();
     node_ids.extend(agents.iter().map(|agent| agent.node_id.clone()));
@@ -84,27 +97,20 @@ pub fn build_forks_tree_from_conn(
         .map(|(node_id, full)| (node_id.as_str(), full[..id_len].to_string()))
         .collect();
 
-    let agents_by_node: HashMap<&str, &AgentSqlRow> = agents
-        .iter()
-        .map(|agent| (agent.node_id.as_str(), agent))
-        .collect();
-
     let mut tree = RowTree {
         view: ViewLabel::Forks,
         ..RowTree::default()
     };
 
     for fork in &forks {
-        let visible_children: Vec<&AgentSqlRow> = child_links
+        let visible_children: Vec<&AgentData<'_>> = child_links
             .get(&fork.node_id)
             .into_iter()
             .flat_map(|children| children.iter())
             .filter_map(|node_id| agents_by_node.get(node_id.as_str()).copied())
-            .filter(|agent| {
-                session_matches_filter(agent, &candidate_counts, inputs.now, &inputs.filter)
-            })
+            .filter(|agent| session_matches_filter(agent, &candidate_counts, now, &filter))
             .collect();
-        if inputs.filter.has_narrowing_predicates() && visible_children.is_empty() {
+        if filter.has_narrowing_predicates() && visible_children.is_empty() {
             continue;
         }
 
@@ -115,12 +121,13 @@ pub fn build_forks_tree_from_conn(
             expandable: !visible_children.is_empty(),
             kind: RowKind::Fork(ForkRow {
                 fork_label: fork
+                    .node
                     .name
                     .as_ref()
-                    .map(|name| format!("{}:{name}", fork.provider))
-                    .unwrap_or_else(|| fork.provider_source_key.clone()),
-                provider: fork.provider.clone(),
-                scope: fork.scope.clone(),
+                    .map(|name| format!("{}:{name}", fork.node.provider))
+                    .unwrap_or_else(|| fork.node.provider_source_key.clone()),
+                provider: fork.node.provider.clone(),
+                scope: fork.node.scope.clone(),
                 parent_label: parent_labels.get(&fork.node_id).cloned(),
                 child_count: child_counts.get(&fork.node_id).copied().unwrap_or(0),
                 primary_node: node_id,
@@ -137,16 +144,16 @@ pub fn build_forks_tree_from_conn(
                     .cloned()
                     .unwrap_or_default(),
                 inputs.home,
-                inputs.now,
+                now,
             ));
         }
     }
 
-    Ok(tree)
+    tree
 }
 
 fn agent_row(
-    agent: &AgentSqlRow,
+    agent: &AgentData<'_>,
     depth: u8,
     candidate_counts: &HashMap<String, usize>,
     short_id: String,
@@ -164,19 +171,14 @@ fn agent_row(
             short_id,
             pin_id: None,
             harness_label: harness_label(&agent.id.harness_key),
-            cwd_display: agent.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
+            cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.last_active_epoch),
-            activity_epoch: agent.last_active_epoch,
+            recency: format_recency(now, agent.node.last_active_epoch),
+            activity_epoch: agent.node.last_active_epoch,
             mux_state: mux_indicator(candidate_count),
-            preview: agent.preview.clone(),
-            title: agent.title.clone(),
+            preview: agent.node.last_message_preview.clone(),
+            title: agent.node.title.clone(),
             alias: agent.alias.clone(),
-            // P8-015 is sessions-view scoped — other views render
-            // agent rows directly under their parent (PR, fork,
-            // mux), where "same-harness collision in a project
-            // group" doesn't apply. Leave the flag off and the
-            // tree label stays alias-only.
             title_disambiguates: false,
             primary_node: node_id,
         }),
@@ -192,7 +194,7 @@ fn mux_indicator(candidate_count: usize) -> MuxIndicator {
 }
 
 fn session_matches_filter(
-    agent: &AgentSqlRow,
+    agent: &AgentData<'_>,
     candidate_counts: &HashMap<String, usize>,
     now: Option<i64>,
     filter: &RowFilter,
@@ -204,215 +206,199 @@ fn session_matches_filter(
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.id.harness_key,
         now_epoch: now,
-        last_active_epoch: agent.last_active_epoch,
+        last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
     })
 }
 
-fn fetch_forks(conn: &Connection) -> rusqlite::Result<Vec<ForkSqlRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT node_id, provider_source_key, provider_name, name, scope \
-         FROM node_forks \
-         ORDER BY provider_name, provider_source_key",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let node_id: String = row.get(0)?;
-        let provider_source_key: String = row.get(1)?;
-        Ok(ForkSqlRow {
-            node_id,
-            id: ForkId::new(provider_source_key.clone()),
-            provider_source_key,
-            provider: row.get(2)?,
-            name: row.get(3)?,
-            scope: row.get(4)?,
+// -----------------------------------------------------------------------------
+// In-memory collectors
+// -----------------------------------------------------------------------------
+
+fn collect_forks(snapshot: &GraphSnapshot) -> Vec<ForkData<'_>> {
+    snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Fork(fork) => Some(ForkData {
+                node_id: NodeId::Fork(fork.id.clone()).to_string(),
+                id: fork.id.clone(),
+                node: fork,
+            }),
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect()
 }
 
-fn fetch_agents(conn: &Connection) -> rusqlite::Result<Vec<AgentSqlRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT a.node_id, a.harness_key, a.state_scope, a.session_key, \
-                a.cwd, a.title, al.display_name, a.last_message_preview, a.last_active_epoch \
-         FROM node_agent_sessions a \
-         LEFT JOIN aliases al \
-           ON al.node_kind = 'agent_session' \
-          AND json_extract(al.node, '$.harness_key') = a.harness_key \
-          AND json_extract(al.node, '$.state_scope') = a.state_scope \
-          AND json_extract(al.node, '$.session_key') = a.session_key \
-         ORDER BY a.node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let harness_key: String = row.get(1)?;
-        let state_scope: String = row.get(2)?;
-        let session_key: String = row.get(3)?;
-        Ok(AgentSqlRow {
-            node_id: row.get(0)?,
-            id: AgentSessionId::new(harness_key, state_scope, session_key),
-            cwd: row.get(4)?,
-            title: row.get(5)?,
-            alias: row.get(6)?,
-            preview: row.get(7)?,
-            last_active_epoch: row.get(8)?,
+fn collect_agents(snapshot: &GraphSnapshot) -> Vec<AgentData<'_>> {
+    let mut agents: Vec<AgentData<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) => {
+                let id = agent.id.clone();
+                let node_id_display = NodeId::AgentSession(id.clone()).to_string();
+                let alias = snapshot
+                    .aliases
+                    .get(&NodeId::AgentSession(id.clone()))
+                    .map(|s| s.to_string());
+                Some(AgentData {
+                    node_id: node_id_display,
+                    id,
+                    node: agent,
+                    alias,
+                })
+            }
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+    agents.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    agents
 }
 
-fn fetch_child_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(source, '$.provider_source_key')) AS fork_node_id, \
-                COUNT(*) \
-         FROM candidate_links \
-         WHERE source_kind = 'fork' \
-           AND relation = 'child_session' \
-           AND state = 'active' \
-           AND (target_node_kind = 'agent_session' OR target_kind = 'unresolved') \
-         GROUP BY source",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let count: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, count as usize))
-    })?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (node_id, count) = row?;
-        out.insert(node_id, count);
+fn collect_child_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut out: HashMap<String, usize> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::ChildSession) {
+            continue;
+        }
+        let NodeId::Fork(_) = &link.source else {
+            continue;
+        };
+        let counts = matches!(
+            &link.target,
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(_),
+            } | LinkEndpoint::Unresolved { .. }
+        );
+        if counts {
+            *out.entry(link.source.to_string()).or_insert(0) += 1;
+        }
     }
-    Ok(out)
+    out
 }
 
-fn fetch_resolved_child_links(
-    conn: &Connection,
-) -> rusqlite::Result<BTreeMap<String, Vec<String>>> {
-    // H-UI-008: filter `child_session` candidates through
-    // `resolved_relationships` so the fork tree only surfaces
-    // resolver-blessed children. `ChildSession` is not a
-    // `multi_target_relation`, but the only producer (atelier
-    // adapter, `src/discovery/atelier.rs:450`) emits at most one
-    // candidate per fork, so the slot key collapses to a single
-    // winner per fork — exactly the cardinality the tree expects.
-    let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
-                ('agent_session:' || json_extract(cl.target_node, '$.harness_key') || ':' || \
-                 json_extract(cl.target_node, '$.state_scope') || ':' || \
-                 json_extract(cl.target_node, '$.session_key')) AS agent_node_id \
-         FROM candidate_links cl \
-         JOIN resolved_relationships rr \
-           ON rr.selected_link_id = cl.link_id \
-          AND rr.relation = 'child_session' \
-         WHERE cl.source_kind = 'fork' \
-           AND cl.relation = 'child_session' \
-           AND cl.state = 'active' \
-           AND cl.target_node_kind = 'agent_session' \
-         ORDER BY fork_node_id, agent_node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
+/// H-UI-008: surface only resolver-blessed children. Each
+/// fork's `child_session` candidate must have a corresponding
+/// `ResolvedRelationship` with `selected_link_id`.
+fn collect_resolved_child_links(snapshot: &GraphSnapshot) -> BTreeMap<String, Vec<String>> {
+    let selected_link_ids: HashSet<&str> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|r| matches!(r.relation, RelationKind::ChildSession))
+        .filter_map(|r| r.selected_link_id.as_deref())
+        .collect();
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for row in rows {
-        let (fork_node_id, agent_node_id) = row?;
-        out.entry(fork_node_id).or_default().push(agent_node_id);
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::ChildSession) {
+            continue;
+        }
+        let NodeId::Fork(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: target_id @ NodeId::AgentSession(_),
+        } = &link.target
+        else {
+            continue;
+        };
+        if !selected_link_ids.contains(link.id.as_str()) {
+            continue;
+        }
+        out.entry(link.source.to_string())
+            .or_default()
+            .push(target_id.to_string());
     }
-    Ok(out)
+    for ids in out.values_mut() {
+        ids.sort();
+    }
+    out
 }
 
-fn fetch_parent_labels(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
-    // H-UI-008: filter `parent_session` candidates through the
-    // resolver. The atelier adapter emits at most one
-    // ParentSession candidate per fork, so the per-source slot
-    // resolves to the same winner the previous "first-wins" pass
-    // would have produced; the join keeps the row in sync with
-    // the detail pane's validated zone.
-    //
-    // LEFT JOIN + `OR cl.target_kind = 'unresolved'` keeps the
-    // unresolved-endpoint variant alive: the resolver never emits
-    // a `ResolvedRelationship` for unresolved targets (it emits a
-    // `Diagnostic::UnresolvedEndpoint` instead), but the operator
-    // still needs to see "we observed this lineage reference but
-    // the target session is missing" rendered as `?{native_id}`.
-    // This is the explicit candidate-aware surface the H-UI-008
-    // story carves out for resolver-can't-pick cases.
-    let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
-                cl.target_kind, cl.target_node_kind, cl.target_node, cl.target_native_id \
-         FROM candidate_links cl \
-         LEFT JOIN resolved_relationships rr \
-           ON rr.selected_link_id = cl.link_id \
-          AND rr.relation = 'parent_session' \
-         WHERE cl.source_kind = 'fork' \
-           AND cl.relation = 'parent_session' \
-           AND cl.state = 'active' \
-           AND (cl.target_kind = 'unresolved' OR rr.selected_link_id IS NOT NULL) \
-         ORDER BY fork_node_id, cl.link_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    })?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (fork_node_id, target_kind, target_node_kind, target_node, target_native_id) = row?;
+/// H-UI-008: per-fork parent label. The atelier adapter emits
+/// at most one ParentSession candidate per fork; we surface
+/// resolved targets via `selected_link_id` lookup and
+/// unresolved targets directly so `?{native_id}` lineage gaps
+/// remain visible.
+fn collect_parent_labels(snapshot: &GraphSnapshot) -> HashMap<String, String> {
+    let selected_link_ids: HashSet<&str> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|r| matches!(r.relation, RelationKind::ParentSession))
+        .filter_map(|r| r.selected_link_id.as_deref())
+        .collect();
+    let mut sorted_links: Vec<&crate::model::GraphLink> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| matches!(link.relation, RelationKind::ParentSession))
+        .filter(|link| matches!(link.source, NodeId::Fork(_)))
+        .filter(|link| {
+            // Either resolved or unresolved-target; if it's a
+            // resolved-node target, it must be in the
+            // resolver's selected set.
+            matches!(&link.target, LinkEndpoint::Unresolved { .. })
+                || selected_link_ids.contains(link.id.as_str())
+        })
+        .collect();
+    sorted_links.sort_by(|a, b| {
+        a.source
+            .to_string()
+            .cmp(&b.source.to_string())
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let mut out: HashMap<String, String> = HashMap::new();
+    for link in sorted_links {
+        let fork_node_id = link.source.to_string();
         if out.contains_key(&fork_node_id) {
             continue;
         }
-        let label = if target_kind == "node" && target_node_kind.as_deref() == Some("agent_session")
-        {
-            target_node
-                .as_deref()
-                .and_then(session_key_from_node_json)
-                .map(|session_key| short_session_label(&session_key))
-        } else if target_kind == "unresolved" {
-            target_native_id
+        let label = match &link.target {
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(agent_id),
+            } => Some(short_session_label(&agent_id.session_key)),
+            LinkEndpoint::Unresolved { evidence } => evidence
+                .native_id
                 .as_deref()
                 .map(short_session_label)
-                .map(|label| format!("?{label}"))
-        } else {
-            None
+                .map(|label| format!("?{label}")),
+            _ => None,
         };
         if let Some(label) = label {
             out.insert(fork_node_id, label);
         }
     }
-    Ok(out)
+    out
 }
 
-fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
-                 json_extract(source, '$.state_scope') || ':' || \
-                 json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(DISTINCT target_node) \
-         FROM candidate_links \
-         WHERE source_kind = 'agent_session' \
-           AND relation = 'linked_to_mux' \
-           AND state = 'active' \
-         GROUP BY source",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let count: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, count as usize))
-    })?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (node_id, count) = row?;
-        out.insert(node_id, count);
+fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.to_string())
+            .or_default()
+            .insert(target_id.to_string());
     }
-    Ok(out)
-}
-
-fn session_key_from_node_json(text: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    value
-        .get("session_key")
-        .and_then(|session_key| session_key.as_str())
-        .map(str::to_string)
+    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }
 
 fn short_session_label(value: &str) -> String {

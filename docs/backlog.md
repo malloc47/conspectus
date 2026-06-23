@@ -11144,8 +11144,40 @@ intermediate commit.
     and `cargo clippy --all-targets --all-features --
     -D warnings` clean.
 
-- [ ] `P11-011c/d` Delete `src/query/`, drop the `query` Cargo
-  feature, restore in-memory TUI rendering.
+- [x] `P11-011c` Rewrite TUI row builders for forks / prs / union
+  in-memory.
+  - Outcome: `src/tui/rows/{forks,prs,union}.rs` no longer call
+    `materialize_snapshot` from their `build_X_tree(snapshot, …)`
+    entry points. Each builder iterates `snapshot.nodes` /
+    `candidate_links` / `resolved_relationships` directly and
+    uses `model::pick_preferred`-equivalent ranking inline. The
+    H-UI-008 "filter through resolver" pattern is preserved by
+    pre-collecting selected `link_id`s from
+    `snapshot.resolved_relationships` and filtering candidate
+    iteration against that set.
+    `build_X_tree_from_conn` and `XBuildInputsFromConn` survive
+    as thin wrappers (read_snapshot via `src/query`, delegate
+    to the new in-memory builders). They retire in P11-011d
+    alongside the App's `GraphDb` refactor that removes all
+    Connection-based call sites.
+    `sessions.rs` already had the snapshot-based real impl
+    pre-P11-011c; only the wrapper retires later.
+    `mux.rs` is the holdout — at 1645 LoC with extensive SQL
+    + a deep grouping/sort/pin-binding pipeline, it stays
+    SQL-backed for now. P11-011d covers the full rewrite when
+    the App refactor lands and the read_snapshot wrapper
+    pattern goes away.
+  - Tests: union view's `union_view_paints_pin_id_on_bound_mux_rows`
+    snapshot test rewired to call `build_union_tree` directly
+    (no materialize) and stays green. Full suite via `cargo
+    nextest run --all-targets --all-features` at 1755 passing
+    / 1 pre-existing failure
+    (`pin_state_matrix_agent_table_snapshot`).
+    `cargo fmt -- --check` and `cargo clippy --all-targets
+    --all-features -- -D warnings` clean.
+
+- [ ] `P11-011d` Delete `src/query/`, drop the `query` Cargo
+  feature, finish in-memory TUI rendering.
   - **Status after P11-011a.** The architectural win the
     user originally cared about (no SQLite persistence
     layer, no migrations, no rotation, no on-disk SQL

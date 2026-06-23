@@ -1,15 +1,15 @@
-//! SQLite-backed union-view row-tree builder.
-//!
-//! Interleaves agent sessions and mux sessions in a single flat list while
-//! keeping agent rows visually identical to the sessions view.
+//! In-memory union-view row-tree builder (P11-011c / ADR 0082).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::Connection;
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
-use crate::model::{AgentSessionId, MuxSessionId, NodeId};
+use crate::model::{
+    AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
+    MuxSessionId, MuxSessionNode, NodeId, PinBinding, RelationKind,
+};
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
     AgentSessionRow, MuxIndicator, MuxSessionRow, Row, RowId, RowKind, RowTree, ViewLabel,
@@ -17,11 +17,12 @@ use crate::tui::rows::{
 };
 
 pub struct UnionBuildInputs<'a> {
-    pub snapshot: &'a crate::model::GraphSnapshot,
+    pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
     pub filter: RowFilter,
 }
 
+/// Connection-based inputs surviving until P11-011d.
 pub struct UnionBuildInputsFromConn<'a> {
     pub conn: &'a Connection,
     pub home: Option<&'a Path>,
@@ -29,14 +30,26 @@ pub struct UnionBuildInputsFromConn<'a> {
     pub filter: RowFilter,
 }
 
-#[derive(Clone, Debug)]
-enum UnionSqlRow {
-    Agent(AgentSqlRow),
-    Mux(MuxSqlRow),
+pub fn build_union_tree_from_conn(
+    inputs: UnionBuildInputsFromConn<'_>,
+) -> rusqlite::Result<RowTree> {
+    let snapshot = crate::query::read_snapshot(inputs.conn)?;
+    let _ = inputs.now;
+    Ok(build_union_tree(UnionBuildInputs {
+        snapshot: &snapshot,
+        home: inputs.home,
+        filter: inputs.filter,
+    }))
 }
 
-impl UnionSqlRow {
-    fn node_id_text(&self) -> &str {
+#[derive(Clone, Debug)]
+enum UnionData<'a> {
+    Agent(AgentData<'a>),
+    Mux(MuxData<'a>),
+}
+
+impl UnionData<'_> {
+    fn node_id(&self) -> &str {
         match self {
             Self::Agent(row) => &row.node_id,
             Self::Mux(row) => &row.node_id,
@@ -45,57 +58,47 @@ impl UnionSqlRow {
 }
 
 #[derive(Clone, Debug)]
-struct AgentSqlRow {
+struct AgentData<'a> {
     node_id: String,
     id: AgentSessionId,
-    cwd: Option<String>,
-    title: Option<String>,
+    node: &'a AgentSessionNode,
     alias: Option<String>,
-    preview: Option<String>,
-    last_active_epoch: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
-struct MuxSqlRow {
+struct MuxData<'a> {
     node_id: String,
     id: MuxSessionId,
-    backend: String,
-    native_id: String,
-    client_attached: Option<bool>,
-    cwd: Option<String>,
-    active_pane_current_path: Option<String>,
+    node: &'a MuxSessionNode,
     attached_count: usize,
-    activity_epoch: Option<i64>,
+}
+
+impl MuxData<'_> {
+    fn effective_cwd(&self) -> Option<&str> {
+        self.node
+            .active_pane_current_path
+            .as_deref()
+            .or(self.node.cwd.as_deref())
+    }
 }
 
 pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
-    let conn = crate::query::materialize_snapshot(inputs.snapshot)
-        .expect("materialize snapshot for union TUI tree");
-    build_union_tree_from_conn(UnionBuildInputsFromConn {
-        conn: &conn,
-        home: inputs.home,
-        now: None,
-        filter: inputs.filter,
-    })
-    .expect("build union TUI tree from materialized snapshot")
-}
+    let snapshot = inputs.snapshot;
+    let now: Option<i64> = None;
 
-pub fn build_union_tree_from_conn(
-    inputs: UnionBuildInputsFromConn<'_>,
-) -> rusqlite::Result<RowTree> {
-    let rows = fetch_union_rows(inputs.conn)?;
-    let candidate_counts = fetch_agent_mux_candidate_counts(inputs.conn)?;
-    let pin_id_by_bound_mux = fetch_pin_id_by_bound_mux(inputs.conn)?;
+    let rows = collect_union_rows(snapshot);
+    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    let pin_id_by_bound_mux = collect_pin_id_by_bound_mux(snapshot);
 
     let full_ids: Vec<String> = rows
         .iter()
-        .map(|row| node_short_id_from_display(row.node_id_text()))
+        .map(|row| node_short_id_from_display(row.node_id()))
         .collect();
     let id_len = unique_prefix_len(&full_ids);
     let short_ids: HashMap<&str, String> = rows
         .iter()
         .zip(full_ids.iter())
-        .map(|(row, full)| (row.node_id_text(), full[..id_len].to_string()))
+        .map(|(row, full)| (row.node_id(), full[..id_len].to_string()))
         .collect();
 
     let mut tree = RowTree {
@@ -105,8 +108,8 @@ pub fn build_union_tree_from_conn(
 
     for row in &rows {
         match row {
-            UnionSqlRow::Agent(agent) => {
-                if !session_matches_filter(agent, &candidate_counts, inputs.now, &inputs.filter) {
+            UnionData::Agent(agent) => {
+                if !session_matches_filter(agent, &candidate_counts, now, &inputs.filter) {
                     continue;
                 }
                 tree.rows.push(agent_row(
@@ -117,10 +120,10 @@ pub fn build_union_tree_from_conn(
                         .cloned()
                         .unwrap_or_default(),
                     inputs.home,
-                    inputs.now,
+                    now,
                 ));
             }
-            UnionSqlRow::Mux(mux) => {
+            UnionData::Mux(mux) => {
                 if inputs.filter.has_narrowing_predicates() {
                     continue;
                 }
@@ -131,23 +134,19 @@ pub fn build_union_tree_from_conn(
                     expandable: false,
                     kind: RowKind::MuxSession(MuxSessionRow {
                         mux: mux.id.clone(),
-                        backend: mux.backend.clone(),
-                        native_id: mux.native_id.clone(),
-                        client_attached: mux.client_attached,
+                        backend: mux.node.backend.clone(),
+                        native_id: mux.node.native_id.clone(),
+                        client_attached: mux.node.client_attached,
                         cwd_display: mux
                             .effective_cwd()
                             .map(|cwd| shorten_home(cwd, inputs.home)),
                         attached_count: mux.attached_count,
                         ambiguous_count: 0,
-                        recency: format_recency(inputs.now, mux.activity_epoch),
-                        activity_epoch: mux.activity_epoch,
+                        recency: format_recency(now, mux.node.activity_epoch),
+                        activity_epoch: mux.node.activity_epoch,
                         agent_labels: Vec::new(),
                         single_session_preview: None,
-                        // Bound-pin glyph: same convention as the
-                        // sessions and mux views — pin lookups
-                        // reconstruct the prefixed key from the
-                        // mux's bare native_id.
-                        pin_id: pin_id_by_bound_mux.get(&mux.native_id).cloned(),
+                        pin_id: pin_id_by_bound_mux.get(&mux.node.native_id).cloned(),
                         primary_node: node_id,
                     }),
                 });
@@ -155,11 +154,11 @@ pub fn build_union_tree_from_conn(
         }
     }
 
-    Ok(tree)
+    tree
 }
 
 fn agent_row(
-    agent: &AgentSqlRow,
+    agent: &AgentData<'_>,
     candidate_counts: &HashMap<String, usize>,
     short_id: String,
     home: Option<&Path>,
@@ -175,17 +174,14 @@ fn agent_row(
             session: agent.id.clone(),
             short_id,
             harness_label: harness_label(&agent.id.harness_key),
-            cwd_display: agent.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
+            cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
             project_display: None,
-            recency: format_recency(now, agent.last_active_epoch),
-            activity_epoch: agent.last_active_epoch,
+            recency: format_recency(now, agent.node.last_active_epoch),
+            activity_epoch: agent.node.last_active_epoch,
             mux_state: mux_indicator(candidate_count),
-            preview: agent.preview.clone(),
-            title: agent.title.clone(),
+            preview: agent.node.last_message_preview.clone(),
+            title: agent.node.title.clone(),
             alias: agent.alias.clone(),
-            // P8-015 is sessions-view scoped; the union projection
-            // emits a flat list, so the disambiguation flag stays
-            // off here.
             title_disambiguates: false,
             primary_node: node_id,
             pin_id: None,
@@ -202,7 +198,7 @@ fn mux_indicator(candidate_count: usize) -> MuxIndicator {
 }
 
 fn session_matches_filter(
-    agent: &AgentSqlRow,
+    agent: &AgentData<'_>,
     candidate_counts: &HashMap<String, usize>,
     now: Option<i64>,
     filter: &RowFilter,
@@ -214,148 +210,140 @@ fn session_matches_filter(
     filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.id.harness_key,
         now_epoch: now,
-        last_active_epoch: agent.last_active_epoch,
+        last_active_epoch: agent.node.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
     })
 }
 
-impl MuxSqlRow {
-    fn effective_cwd(&self) -> Option<&str> {
-        self.active_pane_current_path
-            .as_deref()
-            .or(self.cwd.as_deref())
-    }
-}
+// -----------------------------------------------------------------------------
+// In-memory collectors
+// -----------------------------------------------------------------------------
 
-fn fetch_union_rows(conn: &Connection) -> rusqlite::Result<Vec<UnionSqlRow>> {
-    let mut stmt = conn.prepare(
-        "WITH mux_counts AS ( \
-             SELECT ('mux_session:' || json_extract(target_node, '$.native_id')) AS mux_node_id, \
-                    COUNT(DISTINCT source) AS attached_count \
-             FROM candidate_links \
-             WHERE source_kind = 'agent_session' \
-               AND target_node_kind = 'mux_session' \
-               AND relation = 'linked_to_mux' \
-               AND state = 'active' \
-             GROUP BY target_node \
-         ) \
-         SELECT v.node_kind, v.node_id, \
-                a.harness_key, a.state_scope, a.session_key, a.cwd AS agent_cwd, \
-                a.title, al.display_name, a.last_message_preview, a.last_active_epoch, \
-                m.backend, m.native_id, m.client_attached, m.cwd AS mux_cwd, \
-                m.active_pane_current_path, COALESCE(mc.attached_count, 0), \
-                m.activity_epoch \
-         FROM v_nodes v \
-         LEFT JOIN node_agent_sessions a \
-           ON v.node_kind = 'agent_session' AND a.node_id = v.node_id \
-         LEFT JOIN aliases al \
-           ON v.node_kind = 'agent_session' \
-          AND al.node_kind = 'agent_session' \
-          AND json_extract(al.node, '$.harness_key') = a.harness_key \
-          AND json_extract(al.node, '$.state_scope') = a.state_scope \
-          AND json_extract(al.node, '$.session_key') = a.session_key \
-         LEFT JOIN node_mux_sessions m \
-           ON v.node_kind = 'mux_session' AND m.node_id = v.node_id \
-         LEFT JOIN mux_counts mc ON mc.mux_node_id = m.node_id \
-         WHERE v.node_kind IN ('agent_session', 'mux_session') \
-         ORDER BY COALESCE(a.last_active_epoch, 0) DESC, \
-                  CASE v.node_kind WHEN 'agent_session' THEN 0 ELSE 1 END, \
-                  v.node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let kind: String = row.get(0)?;
-        let node_id: String = row.get(1)?;
-        if kind == "agent_session" {
-            let harness_key: String = row.get(2)?;
-            let state_scope: String = row.get(3)?;
-            let session_key: String = row.get(4)?;
-            Ok(UnionSqlRow::Agent(AgentSqlRow {
-                node_id,
-                id: AgentSessionId::new(harness_key, state_scope, session_key),
-                cwd: row.get(5)?,
-                title: row.get(6)?,
-                alias: row.get(7)?,
-                preview: row.get(8)?,
-                last_active_epoch: row.get(9)?,
-            }))
-        } else {
-            let id_native = node_id
-                .strip_prefix("mux_session:")
-                .unwrap_or(&node_id)
-                .to_string();
-            let attached_count: i64 = row.get(15)?;
-            Ok(UnionSqlRow::Mux(MuxSqlRow {
-                node_id,
-                id: MuxSessionId::new(id_native),
-                backend: row.get(10)?,
-                native_id: row.get(11)?,
-                client_attached: row.get::<_, Option<i64>>(12)?.map(|value| value != 0),
-                cwd: row.get(13)?,
-                active_pane_current_path: row.get(14)?,
-                attached_count: attached_count as usize,
-                activity_epoch: row.get(16)?,
-            }))
-        }
-    })?;
-    rows.collect()
-}
-
-/// Read the `pins` table and build a `mux_native_id -> pin_id` map
-/// of bound pins. Used by the union view to paint the bound-pin
-/// glyph on mux rows. The pin's encoded
-/// `pin.mux.native_id() = "<backend>:<mux_native_id>"` form is
-/// stored in the table; we strip the backend prefix to match the
-/// bare `mux.native_id` carried on the mux row.
-fn fetch_pin_id_by_bound_mux(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
-    let mut stmt = conn.prepare(
-        "SELECT pin_id, mux_native_id FROM pins WHERE binding_kind = 'bound' ORDER BY pin_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let pin_id: String = row.get(0)?;
-        let mux_native_id: String = row.get(1)?;
-        Ok((pin_id, mux_native_id))
-    })?;
-    let mut map: HashMap<String, String> = HashMap::new();
-    for entry in rows {
-        let (pin_id, full) = entry?;
-        if let Some(bare) = strip_backend_prefix(&full) {
-            map.insert(bare.to_string(), pin_id);
+/// Sort key matches the SQL `ORDER BY COALESCE(last_active_epoch, 0)
+/// DESC, kind, node_id` so the row order is stable across the
+/// migration.
+fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionData<'_>> {
+    let attached_counts = collect_mux_attached_counts(snapshot);
+    let mut rows: Vec<UnionData<'_>> = Vec::new();
+    for node in &snapshot.nodes {
+        match node {
+            GraphNode::AgentSession(agent) => {
+                let id = agent.id.clone();
+                let alias = snapshot
+                    .aliases
+                    .get(&NodeId::AgentSession(id.clone()))
+                    .map(|s| s.to_string());
+                rows.push(UnionData::Agent(AgentData {
+                    node_id: NodeId::AgentSession(id.clone()).to_string(),
+                    id,
+                    node: agent,
+                    alias,
+                }));
+            }
+            GraphNode::MuxSession(mux) => {
+                let display = NodeId::MuxSession(mux.id.clone()).to_string();
+                let attached_count = attached_counts.get(&display).copied().unwrap_or(0);
+                rows.push(UnionData::Mux(MuxData {
+                    node_id: display,
+                    id: mux.id.clone(),
+                    node: mux,
+                    attached_count,
+                }));
+            }
+            _ => {}
         }
     }
-    Ok(map)
+    rows.sort_by(|a, b| {
+        let a_epoch = match a {
+            UnionData::Agent(agent) => agent.node.last_active_epoch.unwrap_or(0),
+            UnionData::Mux(_) => 0,
+        };
+        let b_epoch = match b {
+            UnionData::Agent(agent) => agent.node.last_active_epoch.unwrap_or(0),
+            UnionData::Mux(_) => 0,
+        };
+        let a_kind = match a {
+            UnionData::Agent(_) => 0,
+            UnionData::Mux(_) => 1,
+        };
+        let b_kind = match b {
+            UnionData::Agent(_) => 0,
+            UnionData::Mux(_) => 1,
+        };
+        b_epoch
+            .cmp(&a_epoch)
+            .then_with(|| a_kind.cmp(&b_kind))
+            .then_with(|| a.node_id().cmp(b.node_id()))
+    });
+    rows
 }
 
-/// Strip the leading `<backend>:` from a pin's
-/// `pin.mux.native_id()` so it lines up with the bare
-/// `MuxSessionNode.native_id` carried on the mux row. Returns
-/// `None` for non-tmux backends since the mux view only knows
-/// about tmux today.
+fn collect_mux_attached_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut per_mux: HashMap<String, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: target_id @ NodeId::MuxSession(_),
+        } = &link.target
+        else {
+            continue;
+        };
+        per_mux
+            .entry(target_id.to_string())
+            .or_default()
+            .insert(link.source.to_string());
+    }
+    per_mux.into_iter().map(|(k, v)| (k, v.len())).collect()
+}
+
+fn collect_pin_id_by_bound_mux(snapshot: &GraphSnapshot) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    for pin in &snapshot.pins {
+        let bound = matches!(pin.binding, Some(PinBinding::Bound { .. }));
+        if !bound {
+            continue;
+        }
+        let native_id = pin.mux.native_id();
+        if let Some(bare) = strip_backend_prefix(&native_id) {
+            out.insert(bare.to_string(), pin.id.clone());
+        }
+    }
+    out
+}
+
 fn strip_backend_prefix(pin_mux_native_id: &str) -> Option<&str> {
     pin_mux_native_id.strip_prefix("tmux:")
 }
 
-fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
-                 json_extract(source, '$.state_scope') || ':' || \
-                 json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(DISTINCT target_node) \
-         FROM candidate_links \
-         WHERE source_kind = 'agent_session' \
-           AND relation = 'linked_to_mux' \
-           AND state = 'active' \
-         GROUP BY source",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let count: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, count as usize))
-    })?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (node_id, count) = row?;
-        out.insert(node_id, count);
+fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.to_string())
+            .or_default()
+            .insert(target_id.to_string());
     }
-    Ok(out)
+    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }
 
 #[cfg(test)]
@@ -385,10 +373,6 @@ mod tests {
 
     #[test]
     fn union_view_paints_pin_id_on_bound_mux_rows() {
-        // Mirrors the equivalent mux-view test. A pin bound to
-        // `tmux:editor` should leave its `pin_id` on the union
-        // view's mux row so the renderer paints the bound-pin
-        // glyph here too.
         let mut snapshot = GraphSnapshot::empty();
         snapshot.nodes.push(mux("editor"));
         snapshot.nodes.push(mux("scratch"));
@@ -412,14 +396,11 @@ mod tests {
             }),
         });
 
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_union_tree_from_conn(UnionBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_union_tree(UnionBuildInputs {
+            snapshot: &snapshot,
             home: None,
-            now: Some(1_700_000_000),
             filter: RowFilter::default(),
-        })
-        .expect("union tree");
+        });
 
         let mut pin_ids: Vec<(String, Option<String>)> = tree
             .rows
@@ -446,9 +427,7 @@ mod tests {
             super::strip_backend_prefix("tmux:scratch:editor"),
             Some("scratch:editor"),
         );
-        // Non-tmux backends aren't yet supported by the mux view.
         assert_eq!(super::strip_backend_prefix("zellij:foo"), None);
-        // Unprefixed (defensive): leave it alone.
         assert_eq!(super::strip_backend_prefix("editor"), None);
     }
 }
