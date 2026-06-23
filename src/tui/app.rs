@@ -2328,6 +2328,7 @@ mod tests {
         let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
             snapshot: &snap,
             home: None,
+            now: None,
             filter: crate::tui::RowFilter::default(),
             grouping: crate::tui::MuxGrouping::Session,
             sort: crate::tui::Sort::Hierarchy,

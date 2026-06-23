@@ -1,19 +1,21 @@
-//! SQLite-backed mux-view row-tree builder.
+//! In-memory mux-view row-tree builder (P11-011d / ADR 0082).
 //!
-//! The mux view is mux-session oriented: one row per mux session, with
-//! compact metrics about known attached agent sessions. The common
-//! zero-or-one-agent case stays flat; muxes linked to multiple agents expose
-//! those agents as child rows for drill-down.
+//! The mux view is mux-session oriented: one row per mux
+//! session, with compact metrics about known attached agent
+//! sessions. The common zero-or-one-agent case stays flat;
+//! muxes linked to multiple agents expose those agents as
+//! child rows for drill-down.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
-    AgentSessionId, CheckoutId, GraphNode, GraphSnapshot, MuxSessionId, NodeId, RepoId,
-    path_is_ancestor_of,
+    AgentSessionId, AgentSessionNode, CheckoutId, GraphNode, GraphSnapshot, LinkEndpoint,
+    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinBinding, PinCandidate, RelationKind,
+    RepoId, path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
@@ -23,13 +25,18 @@ use crate::tui::rows::{
 use crate::tui::{MuxGrouping, Sort};
 
 pub struct MuxBuildInputs<'a> {
-    pub snapshot: &'a crate::model::GraphSnapshot,
+    pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
+    pub now: Option<i64>,
     pub filter: RowFilter,
     pub grouping: MuxGrouping,
     pub sort: Sort,
 }
 
+/// Connection-based inputs surviving until the App refactor
+/// removes the last `read_snapshot(conn)` consumers. Thin
+/// wrapper that reads the snapshot back out of SQLite then
+/// delegates to [`build_mux_tree`].
 pub struct MuxBuildInputsFromConn<'a> {
     pub conn: &'a Connection,
     pub home: Option<&'a Path>,
@@ -39,16 +46,32 @@ pub struct MuxBuildInputsFromConn<'a> {
     pub sort: Sort,
 }
 
+pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite::Result<RowTree> {
+    let snapshot = crate::query::read_snapshot(inputs.conn)?;
+    Ok(build_mux_tree(MuxBuildInputs {
+        snapshot: &snapshot,
+        home: inputs.home,
+        now: inputs.now,
+        filter: inputs.filter,
+        grouping: inputs.grouping,
+        sort: inputs.sort,
+    }))
+}
+
 #[derive(Clone, Debug)]
-struct MuxSqlRow {
+struct MuxData<'a> {
     node_id: String,
     id: MuxSessionId,
-    backend: String,
-    native_id: String,
-    client_attached: Option<bool>,
-    cwd: Option<String>,
-    active_pane_current_path: Option<String>,
-    activity_epoch: Option<i64>,
+    node: &'a MuxSessionNode,
+}
+
+impl MuxData<'_> {
+    fn effective_cwd(&self) -> Option<&str> {
+        self.node
+            .active_pane_current_path
+            .as_deref()
+            .or(self.node.cwd.as_deref())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -65,39 +88,20 @@ struct AttachedAgent {
 }
 
 pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
-    let conn = crate::query::materialize_snapshot(inputs.snapshot)
-        .expect("materialize snapshot for mux TUI tree");
-    build_mux_tree_from_conn(MuxBuildInputsFromConn {
-        conn: &conn,
-        home: inputs.home,
-        now: None,
-        filter: inputs.filter,
-        grouping: inputs.grouping,
-        sort: inputs.sort,
-    })
-    .expect("build mux TUI tree from materialized snapshot")
-}
+    let snapshot = inputs.snapshot;
+    let now = inputs.now;
 
-pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite::Result<RowTree> {
-    let muxes = fetch_muxes(inputs.conn)?;
-    let attachments = fetch_attached_agents(inputs.conn)?;
-    let pins = fetch_bound_pins(inputs.conn)?;
+    let muxes = collect_muxes(snapshot);
+    let attachments = collect_attached_agents(snapshot);
+    let pins: Vec<&PinCandidate> = snapshot.pins.iter().collect();
 
-    // `mux_native_id -> pin_id` for the bound-pin glyph. The mux
-    // view's native_id column carries the bare tmux session name
-    // (e.g. `editor`), while the pins table stores
-    // `pin.mux.native_id()` (e.g. `tmux:editor` or
-    // `tmux:scratch:editor` for non-default sockets). We match the
-    // bound case by stripping the `tmux:` / `tmux:<socket>:` prefix
-    // on the pin side so they line up with the mux row's
-    // `native_id`.
     let mut pin_id_by_bound_mux: HashMap<String, String> = HashMap::new();
     for pin in &pins {
-        if pin.binding_kind.as_deref() != Some("bound") {
+        if !matches!(pin.binding, Some(PinBinding::Bound { .. })) {
             continue;
         }
-        if let Some(bare) = bare_tmux_name(&pin.mux_native_id) {
-            pin_id_by_bound_mux.insert(bare.to_string(), pin.pin_id.clone());
+        if let Some(bare) = bare_tmux_name(&pin.mux.native_id()) {
+            pin_id_by_bound_mux.insert(bare.to_string(), pin.id.clone());
         }
     }
 
@@ -130,7 +134,7 @@ pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite:
         let attached = attachments.get(&mux.node_id).cloned().unwrap_or_default();
         let visible_attached: Vec<AttachedAgent> = attached
             .iter()
-            .filter(|agent| agent_matches_filter(agent, inputs.now, &inputs.filter))
+            .filter(|agent| agent_matches_filter(agent, now, &inputs.filter))
             .cloned()
             .collect();
 
@@ -142,7 +146,7 @@ pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite:
             .iter()
             .filter_map(|agent| agent.last_active_epoch)
             .max();
-        let activity_epoch = latest_epoch(mux.activity_epoch, latest_agent_epoch);
+        let activity_epoch = latest_epoch(mux.node.activity_epoch, latest_agent_epoch);
         let ambiguous_count = visible_attached
             .iter()
             .filter(|agent| agent.candidate_count > 1)
@@ -161,17 +165,17 @@ pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite:
 
         let parent_row = MuxSessionRow {
             mux: mux.id.clone(),
-            backend: mux.backend.clone(),
-            native_id: mux.native_id.clone(),
-            client_attached: mux.client_attached,
+            backend: mux.node.backend.clone(),
+            native_id: mux.node.native_id.clone(),
+            client_attached: mux.node.client_attached,
             cwd_display: cwd.as_deref().map(|cwd| shorten_home(cwd, inputs.home)),
             attached_count,
             ambiguous_count,
-            recency: format_recency(inputs.now, activity_epoch),
+            recency: format_recency(now, activity_epoch),
             activity_epoch,
             agent_labels: agent_labels(&visible_attached),
             single_session_preview,
-            pin_id: pin_id_by_bound_mux.get(&mux.native_id).cloned(),
+            pin_id: pin_id_by_bound_mux.get(&mux.node.native_id).cloned(),
             primary_node: node_id.clone(),
         };
 
@@ -192,44 +196,35 @@ pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite:
 
     match inputs.grouping {
         MuxGrouping::Session | MuxGrouping::Host => {
-            emit_flat(&mut tree, groups, &inputs, &short_ids);
+            emit_flat(&mut tree, groups, &inputs, &short_ids, now);
         }
         MuxGrouping::Repo => {
-            // Pins group sits above the repo-grouped muxes so the
-            // operator sees the deck's pinned work first. The
-            // emission is gated on the Repo grouping because that's
-            // the only mux grouping that introduces header rows;
-            // the flat groupings keep their flat appearance.
+            // Pins group sits above the repo-grouped muxes so
+            // the operator sees the deck's pinned work first.
             emit_pins_group_for_mux(&mut tree, &pins, inputs.home);
 
-            let snapshot = crate::query::read_snapshot(inputs.conn)?;
-            let path_index = PathIndex::from_snapshot(&snapshot);
-            emit_repo_grouped(&mut tree, groups, &inputs, &short_ids, &path_index);
+            let path_index = PathIndex::from_snapshot(snapshot);
+            emit_repo_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
         }
     }
 
-    Ok(tree)
+    tree
 }
 
-/// Strip the `tmux:` (default socket) or `tmux:<socket>:` (non-
-/// default socket) prefix from a pin's `mux.native_id()` so it
-/// matches the bare tmux session name carried on
-/// `MuxSqlRow.native_id`. Returns `None` when the prefix is
-/// absent — anything from a non-tmux backend won't match a tmux
-/// mux row anyway.
+/// Strip the `tmux:` (default socket) or `tmux:<socket>:`
+/// (non-default socket) prefix from a pin's
+/// `mux.native_id()` so it matches the bare tmux session name
+/// carried on `MuxSessionNode.native_id`. Returns `None` when
+/// the prefix is absent.
 fn bare_tmux_name(pin_mux_native_id: &str) -> Option<&str> {
     let rest = pin_mux_native_id.strip_prefix("tmux:")?;
     match rest.find(':') {
-        // tmux:<socket>:<name> — the second segment is the session name.
         Some(socket_end) => Some(&rest[socket_end + 1..]),
-        // tmux:<name> — default socket.
         None => Some(rest),
     }
 }
 
-fn emit_pins_group_for_mux(tree: &mut RowTree, pins: &[BoundPinRow], home: Option<&Path>) {
-    use crate::model::PinCandidate;
-
+fn emit_pins_group_for_mux(tree: &mut RowTree, pins: &[&PinCandidate], home: Option<&Path>) {
     if pins.is_empty() {
         return;
     }
@@ -246,44 +241,29 @@ fn emit_pins_group_for_mux(tree: &mut RowTree, pins: &[BoundPinRow], home: Optio
     });
 
     for pin in pins {
-        // Pull the full PinCandidate out of the `details` JSON so
-        // the row carries the same fields the sessions Pins group
-        // does (launch_argv, mux_socket, etc.). If the JSON is
-        // malformed we surface a minimal row from the columnar
-        // fields rather than dropping the pin silently.
-        let parsed: Option<PinCandidate> = serde_json::from_str(&pin.details).ok();
-        let state_label = match pin.binding_kind.as_deref() {
-            Some("bound") => "bound",
-            Some("stale_mux") => "stale-mux",
-            Some("unbound") => "unbound",
-            _ => "unresolved",
+        let state_label = match &pin.binding {
+            Some(PinBinding::Bound { .. }) => "bound",
+            Some(PinBinding::StaleMux { .. }) => "stale-mux",
+            Some(PinBinding::Unbound) => "unbound",
+            None => "unresolved",
         };
-        let mux_socket = parsed.as_ref().and_then(|p| p.mux.socket_name.clone());
-        let launch_argv = parsed
-            .as_ref()
-            .and_then(|p| p.launch_argv.clone())
-            .unwrap_or_default();
+        let pin_native_id = pin.mux.native_id();
+        let mux_socket = pin.mux.socket_name.clone();
+        let launch_argv = pin.launch_argv.clone().unwrap_or_default();
+        let bare = bare_tmux_name(&pin_native_id).unwrap_or(&pin_native_id);
         let mux_label = match mux_socket.as_deref() {
-            Some(socket) => format!(
-                "tmux:{socket}:{}",
-                bare_tmux_name(&pin.mux_native_id).unwrap_or(&pin.mux_native_id)
-            ),
-            None => format!(
-                "tmux:{}",
-                bare_tmux_name(&pin.mux_native_id).unwrap_or(&pin.mux_native_id)
-            ),
+            Some(socket) => format!("tmux:{socket}:{bare}"),
+            None => format!("tmux:{bare}"),
         };
-        let mux_name = bare_tmux_name(&pin.mux_native_id)
-            .unwrap_or(&pin.mux_native_id)
-            .to_string();
+        let mux_name = bare.to_string();
         tree.rows.push(Row {
             id: RowId::Pin {
-                pin_id: pin.pin_id.clone(),
+                pin_id: pin.id.clone(),
             },
             depth: 1,
             expandable: false,
             kind: RowKind::Pin(PinRow {
-                pin_id: pin.pin_id.clone(),
+                pin_id: pin.id.clone(),
                 display_name: pin.display_name.clone(),
                 harness: pin.harness.clone(),
                 cwd: pin.cwd.clone(),
@@ -300,17 +280,13 @@ fn emit_pins_group_for_mux(tree: &mut RowTree, pins: &[BoundPinRow], home: Optio
     }
 }
 
-/// Per-mux work product collected by the build loop. Holds enough
-/// data for the emit phase to push the parent and its child agent
-/// rows at any depth, in any order.
+/// Per-mux work product collected by the build loop.
 #[derive(Clone, Debug)]
 struct MuxGroup {
     parent_row: MuxSessionRow,
     parent_node_id: NodeId,
     children: Vec<AttachedAgent>,
     attached_count: usize,
-    /// Effective working directory used for repo grouping. `None`
-    /// when neither the active-pane path nor the session cwd resolved.
     cwd: Option<String>,
 }
 
@@ -320,7 +296,8 @@ impl MuxGroup {
         tree: &mut RowTree,
         depth: u8,
         short_ids: &HashMap<&str, String>,
-        inputs: &MuxBuildInputsFromConn<'_>,
+        home: Option<&Path>,
+        now: Option<i64>,
     ) {
         let MuxGroup {
             parent_row,
@@ -344,8 +321,8 @@ impl MuxGroup {
                     .get(agent.node_id.as_str())
                     .cloned()
                     .unwrap_or_default(),
-                inputs.home,
-                inputs.now,
+                home,
+                now,
             ));
         }
     }
@@ -354,21 +331,23 @@ impl MuxGroup {
 fn emit_flat(
     tree: &mut RowTree,
     mut groups: Vec<MuxGroup>,
-    inputs: &MuxBuildInputsFromConn<'_>,
+    inputs: &MuxBuildInputs<'_>,
     short_ids: &HashMap<&str, String>,
+    now: Option<i64>,
 ) {
     sort_mux_groups(&mut groups, inputs);
     for group in groups {
-        group.push_into(tree, 0, short_ids, inputs);
+        group.push_into(tree, 0, short_ids, inputs.home, now);
     }
 }
 
 fn emit_repo_grouped(
     tree: &mut RowTree,
     groups: Vec<MuxGroup>,
-    inputs: &MuxBuildInputsFromConn<'_>,
+    inputs: &MuxBuildInputs<'_>,
     short_ids: &HashMap<&str, String>,
     path_index: &PathIndex<'_>,
+    now: Option<i64>,
 ) {
     let mut buckets: BTreeMap<RepoBucketKey, Vec<MuxGroup>> = BTreeMap::new();
     let mut ungrouped: Vec<MuxGroup> = Vec::new();
@@ -398,7 +377,7 @@ fn emit_repo_grouped(
         push_repo_header(tree, 0, &repo_id, &display_path, inputs.home);
         sort_mux_groups(&mut groups, inputs);
         for group in groups {
-            group.push_into(tree, 1, short_ids, inputs);
+            group.push_into(tree, 1, short_ids, inputs.home, now);
         }
     }
 
@@ -415,12 +394,12 @@ fn emit_repo_grouped(
         });
         sort_mux_groups(&mut ungrouped, inputs);
         for group in ungrouped {
-            group.push_into(tree, 1, short_ids, inputs);
+            group.push_into(tree, 1, short_ids, inputs.home, now);
         }
     }
 }
 
-fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputsFromConn<'_>) {
+fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
     groups.sort_by(|left, right| {
         let left_float = usize::from(left.attached_count == 0);
         let right_float = usize::from(right.attached_count == 0);
@@ -461,8 +440,6 @@ fn push_repo_header(
     });
 }
 
-/// Bucket key for repo grouping. Sorted by display path so the
-/// rendered order is stable and human-meaningful.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RepoBucketKey {
     repo_id: RepoId,
@@ -483,17 +460,13 @@ impl PartialOrd for RepoBucketKey {
     }
 }
 
-/// Path → (repo, checkout) lookup built once per repo-grouped build.
-/// Uses the snapshot's checkout and repo nodes directly so the mux
-/// builder can mirror sessions-view repo grouping without depending
-/// on `SessionsData`.
-struct PathIndex<'a> {
+pub(super) struct PathIndex<'a> {
     snapshot: &'a GraphSnapshot,
     checkouts: Vec<(PathBuf, CheckoutId)>,
 }
 
 impl<'a> PathIndex<'a> {
-    fn from_snapshot(snapshot: &'a GraphSnapshot) -> Self {
+    pub(super) fn from_snapshot(snapshot: &'a GraphSnapshot) -> Self {
         let mut checkouts = Vec::new();
         for node in &snapshot.nodes {
             if let GraphNode::Checkout(c) = node {
@@ -506,7 +479,7 @@ impl<'a> PathIndex<'a> {
         }
     }
 
-    fn checkout_for_path(&self, path: &Path) -> Option<&CheckoutId> {
+    pub(super) fn checkout_for_path(&self, path: &Path) -> Option<&CheckoutId> {
         self.checkouts
             .iter()
             .filter(|(root, _)| path_is_ancestor_of(root, path))
@@ -514,7 +487,7 @@ impl<'a> PathIndex<'a> {
             .map(|(_, id)| id)
     }
 
-    fn repo_display_path(&self, repo: &RepoId) -> String {
+    pub(super) fn repo_display_path(&self, repo: &RepoId) -> String {
         let common_dir = repo
             .common_dir
             .strip_suffix("/.git")
@@ -540,14 +513,6 @@ fn latest_epoch(left: Option<i64>, right: Option<i64>) -> Option<i64> {
         (Some(left), Some(right)) => Some(left.max(right)),
         (Some(value), None) | (None, Some(value)) => Some(value),
         (None, None) => None,
-    }
-}
-
-impl MuxSqlRow {
-    fn effective_cwd(&self) -> Option<&str> {
-        self.active_pane_current_path
-            .as_deref()
-            .or(self.cwd.as_deref())
     }
 }
 
@@ -599,157 +564,129 @@ fn agent_matches_filter(agent: &AttachedAgent, now: Option<i64>, filter: &RowFil
     })
 }
 
-/// Read every pin from the `pins` table along with its mux
-/// `native_id` and binding state. Used to build a
-/// `mux_native_id -> pin_id` map so the mux view can paint a pin
-/// glyph next to bound muxes and emit a Pins group when grouping
-/// is in effect.
-fn fetch_bound_pins(conn: &Connection) -> rusqlite::Result<Vec<BoundPinRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT pin_id, display_name, harness, cwd, mux_native_id, \
-                store_path, binding_kind, details \
-         FROM pins ORDER BY pin_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(BoundPinRow {
-            pin_id: row.get(0)?,
-            display_name: row.get(1)?,
-            harness: row.get(2)?,
-            cwd: row.get(3)?,
-            mux_native_id: row.get(4)?,
-            store_path: row.get(5)?,
-            binding_kind: row.get(6)?,
-            details: row.get(7)?,
+// -----------------------------------------------------------------------------
+// In-memory collectors
+// -----------------------------------------------------------------------------
+
+fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
+    let mut rows: Vec<MuxData<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some(MuxData {
+                node_id: NodeId::MuxSession(mux.id.clone()).to_string(),
+                id: mux.id.clone(),
+                node: mux,
+            }),
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+    rows.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    rows
 }
 
-#[derive(Clone, Debug)]
-struct BoundPinRow {
-    pin_id: String,
-    display_name: String,
-    harness: String,
-    cwd: String,
-    mux_native_id: String,
-    store_path: String,
-    binding_kind: Option<String>,
-    details: String,
-}
-
-fn fetch_muxes(conn: &Connection) -> rusqlite::Result<Vec<MuxSqlRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT node_id, native_id, backend, client_attached, cwd, \
-                active_pane_current_path, activity_epoch \
-         FROM node_mux_sessions \
-         ORDER BY node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let node_id: String = row.get(0)?;
-        let id_native = node_id
-            .strip_prefix("mux_session:")
-            .unwrap_or(&node_id)
-            .to_string();
-        Ok(MuxSqlRow {
-            node_id,
-            id: MuxSessionId::new(id_native),
-            native_id: row.get(1)?,
-            backend: row.get(2)?,
-            client_attached: row.get::<_, Option<i64>>(3)?.map(|value| value != 0),
-            cwd: row.get(4)?,
-            active_pane_current_path: row.get(5)?,
-            activity_epoch: row.get(6)?,
+/// H-UI-008: attached agents filter through the resolver. Only
+/// `LinkedToMux` candidates whose `link_id` appears in
+/// `snapshot.resolved_relationships.selected_link_id` for the
+/// matching relation are surfaced — drops false-positive
+/// attachments under non-winning cwd evidence.
+fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<AttachedAgent>> {
+    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    let selected_link_ids: HashSet<&str> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|r| matches!(r.relation, RelationKind::LinkedToMux))
+        .filter_map(|r| r.selected_link_id.as_deref())
+        .collect();
+    let agent_lookup: HashMap<NodeId, &AgentSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) => Some((NodeId::AgentSession(agent.id.clone()), agent)),
+            _ => None,
         })
-    })?;
-    rows.collect()
-}
+        .collect();
 
-fn fetch_attached_agents(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, Vec<AttachedAgent>>> {
-    let candidate_counts = fetch_agent_mux_candidate_counts(conn)?;
-    // H-UI-008: the mux view's "attached agents" list filters to
-    // resolver-blessed `LinkedToMux` links so what shows up in the
-    // tree matches the detail pane's validated zone. Joining
-    // `resolved_relationships` on `selected_link_id` drops the
-    // candidates the resolver did not pick (false-positive
-    // attachments under non-winning cwd evidence).
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT \
-                ('mux_session:' || json_extract(cl.target_node, '$.native_id')) AS mux_node_id, \
-                a.node_id, a.harness_key, a.state_scope, a.session_key, a.cwd, a.title, \
-                al.display_name, a.last_message_preview, a.last_active_epoch \
-         FROM candidate_links cl \
-         JOIN resolved_relationships rr \
-           ON rr.selected_link_id = cl.link_id \
-          AND rr.relation = 'linked_to_mux' \
-         JOIN node_agent_sessions a \
-           ON cl.source_kind = 'agent_session' \
-          AND ('agent_session:' || json_extract(cl.source, '$.harness_key') || ':' || \
-               json_extract(cl.source, '$.state_scope') || ':' || \
-               json_extract(cl.source, '$.session_key')) = a.node_id \
-         LEFT JOIN aliases al \
-           ON al.node_kind = 'agent_session' \
-          AND json_extract(al.node, '$.harness_key') = a.harness_key \
-          AND json_extract(al.node, '$.state_scope') = a.state_scope \
-          AND json_extract(al.node, '$.session_key') = a.session_key \
-         WHERE cl.target_node_kind = 'mux_session' \
-           AND cl.relation = 'linked_to_mux' \
-           AND cl.state = 'active' \
-         ORDER BY mux_node_id, a.node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let mux_node_id: String = row.get(0)?;
-        let agent_node_id: String = row.get(1)?;
-        let harness_key: String = row.get(2)?;
-        let state_scope: String = row.get(3)?;
-        let session_key: String = row.get(4)?;
-        Ok((
-            mux_node_id,
+    let mut collected: Vec<(String, AttachedAgent)> = Vec::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        if !selected_link_ids.contains(link.id.as_str()) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: target_id @ NodeId::MuxSession(_),
+        } = &link.target
+        else {
+            continue;
+        };
+        let Some(agent) = agent_lookup.get(&link.source) else {
+            continue;
+        };
+        let agent_node_id = NodeId::AgentSession(agent.id.clone()).to_string();
+        let alias = snapshot
+            .aliases
+            .get(&NodeId::AgentSession(agent.id.clone()))
+            .map(|s| s.to_string());
+        collected.push((
+            target_id.to_string(),
             AttachedAgent {
                 node_id: agent_node_id.clone(),
-                id: AgentSessionId::new(harness_key.clone(), state_scope, session_key),
-                harness_key,
-                cwd: row.get(5)?,
-                title: row.get(6)?,
-                alias: row.get(7)?,
-                preview: row.get(8)?,
-                last_active_epoch: row.get(9)?,
+                id: agent.id.clone(),
+                harness_key: agent.harness_key.clone(),
+                cwd: agent.cwd.clone(),
+                title: agent.title.clone(),
+                alias,
+                preview: agent.last_message_preview.clone(),
+                last_active_epoch: agent.last_active_epoch,
                 candidate_count: candidate_counts.get(&agent_node_id).copied().unwrap_or(0),
             },
-        ))
-    })?;
-
-    let mut out: HashMap<String, Vec<AttachedAgent>> = HashMap::new();
-    for row in rows {
-        let (mux_node_id, agent) = row?;
-        out.entry(mux_node_id).or_default().push(agent);
+        ));
     }
-    Ok(out)
+
+    // Dedupe + group + sort to match the SQL `ORDER BY mux_node_id, a.node_id`.
+    let mut out: HashMap<String, Vec<AttachedAgent>> = HashMap::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    for (mux_id, agent) in collected {
+        if !seen.insert((mux_id.clone(), agent.node_id.clone())) {
+            continue;
+        }
+        out.entry(mux_id).or_default().push(agent);
+    }
+    for agents in out.values_mut() {
+        agents.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    }
+    out
 }
 
-fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
-                 json_extract(source, '$.state_scope') || ':' || \
-                 json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(DISTINCT target_node) \
-         FROM candidate_links \
-         WHERE source_kind = 'agent_session' \
-           AND relation = 'linked_to_mux' \
-           AND state = 'active' \
-         GROUP BY source",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let count: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, count as usize))
-    })?;
-    let mut out = HashMap::new();
-    for row in rows {
-        let (node_id, count) = row?;
-        out.insert(node_id, count);
+fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.to_string())
+            .or_default()
+            .insert(target_id.to_string());
     }
-    Ok(out)
+    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }
 
 fn agent_row(
@@ -777,9 +714,6 @@ fn agent_row(
             preview: agent.preview.clone(),
             title: agent.title.clone(),
             alias: agent.alias.clone(),
-            // P8-015 is sessions-view scoped; agent rows nested
-            // under a mux row never gain the title-as-disambiguator
-            // treatment here.
             title_disambiguates: false,
             primary_node: node_id,
         }),
@@ -793,7 +727,6 @@ fn mux_indicator(candidate_count: usize) -> MuxIndicator {
         n => MuxIndicator::Ambiguous { candidate_count: n },
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -894,16 +827,14 @@ mod tests {
         });
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         assert_eq!(
             tree.rows.len(),
@@ -933,16 +864,14 @@ mod tests {
         ));
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         let RowKind::MuxSession(row) = &tree.rows[0].kind else {
             panic!("expected mux row");
@@ -978,16 +907,14 @@ mod tests {
         }
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         assert_eq!(tree.rows.len(), 3);
         assert!(tree.rows[0].expandable);
@@ -1045,16 +972,14 @@ mod tests {
         });
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         let mux_rows: Vec<_> = tree
             .rows
@@ -1106,16 +1031,14 @@ mod tests {
         }
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         let RowKind::MuxSession(row) = &tree.rows[0].kind else {
             panic!("expected mux row");
@@ -1134,16 +1057,14 @@ mod tests {
         snapshot.nodes.push(mux_node("solo"));
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         let RowKind::MuxSession(row) = &tree.rows[0].kind else {
             panic!("expected mux row");
@@ -1178,16 +1099,14 @@ mod tests {
         });
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         let RowKind::MuxSession(row) = &tree.rows[0].kind else {
             panic!("expected mux row");
@@ -1223,7 +1142,6 @@ mod tests {
         });
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
 
         let native_ids = |tree: &RowTree| -> Vec<String> {
             tree.rows
@@ -1235,23 +1153,22 @@ mod tests {
                 .collect()
         };
 
-        let baseline = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let baseline = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("baseline mux tree");
+        });
         assert_eq!(
             native_ids(&baseline),
             vec!["alpha", "beta", "gamma"],
             "baseline order is alphabetical by node_id"
         );
 
-        let floated = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let floated = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter {
@@ -1260,8 +1177,7 @@ mod tests {
             },
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("floated mux tree");
+        });
         assert_eq!(
             native_ids(&floated),
             vec!["beta", "alpha", "gamma"],
@@ -1311,7 +1227,7 @@ mod tests {
         }
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+
         let native_ids = |tree: &RowTree| -> Vec<String> {
             tree.rows
                 .iter()
@@ -1322,26 +1238,24 @@ mod tests {
                 .collect()
         };
 
-        let hierarchy = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let hierarchy = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(now),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("hierarchy mux tree");
+        });
         assert_eq!(native_ids(&hierarchy), vec!["alpha", "beta"]);
 
-        let recency = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let recency = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(now),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Recency,
-        })
-        .expect("recency mux tree");
+        });
         assert_eq!(native_ids(&recency), vec!["beta", "alpha"]);
     }
 
@@ -1401,16 +1315,15 @@ mod tests {
         ));
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Repo,
             sort: Sort::Hierarchy,
-        })
-        .expect("repo-grouped mux tree");
+        });
 
         let row_summary: Vec<(u8, String)> = tree
             .rows
@@ -1480,16 +1393,14 @@ mod tests {
             }),
         });
 
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_000),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
 
         let mut pin_ids: Vec<(String, Option<String>)> = tree
             .rows
@@ -1554,16 +1465,15 @@ mod tests {
         });
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_000),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Repo,
             sort: Sort::Hierarchy,
-        })
-        .expect("repo-grouped mux tree");
+        });
 
         let row_summary: Vec<(u8, String)> = tree
             .rows
@@ -1613,16 +1523,15 @@ mod tests {
         });
 
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_700_000_000),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
             sort: Sort::Hierarchy,
-        })
-        .expect("session-grouped mux tree");
+        });
 
         let has_pins_group = tree
             .rows
