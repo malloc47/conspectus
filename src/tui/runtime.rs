@@ -745,40 +745,30 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
     } else {
         config.scan_roots.clone()
     };
-    let prior = if config.refresh {
-        crate::model::GraphSnapshot::empty()
-    } else {
-        match crate::query::load_cached_snapshot(None) {
-            Ok(Some(snap)) => snap,
-            Ok(None) => crate::model::GraphSnapshot::empty(),
-            Err(err) => {
-                // Best-effort: a corrupt or unreadable cache
-                // becomes a cold-scan fallback for this cycle.
-                // The TUI status line will surface refresh
-                // outcomes via separate provider-status plumbing;
-                // a noisy stderr per cycle would clobber the
-                // terminal during a live session.
-                let _ = err;
-                crate::model::GraphSnapshot::empty()
-            }
-        }
-    };
+    // P11-011a: the on-disk warm-start prior was the previous
+    // graph.sqlite. With graph.sqlite retired, the daemonless
+    // cold-rebuild path runs every provider from scratch each
+    // tick — same as the daemon does on first cycle. Discovery
+    // is single-digit seconds at target scale (ADR 0082), and
+    // the TUI's typical setup runs `conspectus serve` so the
+    // daemon-snapshot short-circuit above is the common path.
     let discovery_config = crate::discovery::LocalDiscoveryConfig::from_env();
     let snapshot = crate::discovery::discover_local_warm_with(
         roots,
         discovery_config,
-        prior,
+        crate::model::GraphSnapshot::empty(),
         &config.intervals,
     )?;
     let snapshot = resolve_snapshot(snapshot);
-    if !config.no_cache
-        && let Err(err) = crate::query::persist_snapshot(&snapshot, None)
-    {
-        // Same rationale as the read-side: avoid stderr spam
-        // during the live session. A persistent write failure is
-        // still observable via the disk state (graph.sqlite stops
-        // updating) and via the next one-shot CLI invocation.
-        let _ = err;
+    if !config.no_cache {
+        let path = crate::snapshot::graph_bin_path();
+        if let Err(err) = crate::snapshot::write_atomic(&path, &snapshot) {
+            // Avoid stderr spam during a live session. A
+            // persistent write failure is still observable via
+            // the disk state (graph.bin stops updating) and via
+            // the next one-shot CLI invocation.
+            let _ = err;
+        }
     }
     Ok(snapshot)
 }

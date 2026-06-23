@@ -1,26 +1,32 @@
-//! `conspectus serve` daemon (P7-006).
+//! `conspectus serve` daemon (P7-006 + ADR 0082).
 //!
-//! Long-running process that keeps `graph.sqlite` fresh in the
-//! background so concurrent one-shot CLI invocations (and the
-//! TUI) read warmed-up data on every open. The daemon spawns one
-//! worker thread per provider class (harness / mux / git / forge
-//! per ADR 0079) and each thread re-runs *only its class's*
-//! discovery providers on its own `[server.intervals]` cadence.
+//! Long-running process that keeps a resolved `GraphSnapshot`
+//! warm in the background so concurrent one-shot CLI invocations
+//! (and the TUI) can pull pre-resolved data over the socket
+//! without paying the discovery + resolve cost. The daemon
+//! spawns one worker thread per provider class (harness / mux /
+//! git / forge per ADR 0079) and each thread re-runs *only its
+//! class's* discovery providers on its own `[server.intervals]`
+//! cadence.
 //!
-//! Layers A, B, and the shutdown half of layer C (this file):
-//! per-class scheduling with cycle-level failure isolation and
-//! SIGINT/SIGTERM graceful shutdown per ADR 0080. The mutation
-//! socket from ADR 0038 lands in the second half of layer C.
-//! Today the daemon shares the same writer-lock discipline as
-//! the one-shot CLI: both call [`crate::query::persist_snapshot`],
-//! which serializes via SQLite's `busy_timeout` (ADR 0037). To
-//! keep per-thread cycles atomic across the full
-//! load-prior-then-evict-then-run-then-persist sequence, every
-//! thread takes a process-local [`std::sync::Mutex`] before its
-//! cycle so two class threads cannot race on a load/merge/write
-//! ordering and silently clobber each other's slice. The
-//! mutation socket upgrades that to a dedicated writer thread
-//! plus a request queue when it lands.
+//! State model (post-P11-011a):
+//!
+//! * The daemon's working state lives in two in-memory caches:
+//!   [`SnapshotState`] (the live `GraphSnapshot` used as the
+//!   per-class refresh prior) and [`SnapshotBytes`] (the
+//!   serialized form served verbatim over the socket
+//!   `snapshot` command). Both refresh in lockstep via
+//!   [`publish_snapshot`] after every successful cycle.
+//! * Persistence is the single `graph.bin` zero-copy artifact
+//!   per ADR 0083. Daemonless one-shot CLIs read it via
+//!   `snapshot::open_mmap`; the daemon's own warm-restart path
+//!   (P11-009) reads it once on startup to seed
+//!   [`SnapshotState`] so the first cycle isn't a cold rebuild.
+//! * Per-thread cycles are atomic across the full load + evict +
+//!   run + publish sequence: every class thread takes a
+//!   process-local [`std::sync::Mutex`] before its cycle so two
+//!   class threads cannot race on the cache update. The mutex
+//!   is brief; discovery runs outside it.
 //!
 //! Lifecycle expectations:
 //!
@@ -33,6 +39,10 @@
 //!   still completes the cycle in progress before exiting. The
 //!   200ms poll cadence trades a negligible CPU floor for
 //!   snappy Ctrl-C response.
+//! * Daemon startup cleans up any legacy `graph.sqlite*` files
+//!   left behind by pre-ADR-0082 builds. The cleanup is
+//!   best-effort and one-shot; the daemon has no consumer for
+//!   those files.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -53,7 +63,6 @@ use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
 use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with};
 use crate::model::GraphSnapshot;
-use crate::query::{load_cached_snapshot, persist_snapshot};
 use crate::resolve::resolve_snapshot;
 use crate::server::watcher::{NotifyWatcher, NullWatcher, Watcher, WatcherEvent};
 use crate::snapshot;
@@ -267,7 +276,7 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
 
 /// Shared cache of the most recently serialized snapshot bytes
 /// (header + rkyv archive) per ADR 0083. The daemon updates it
-/// after every successful cycle so the upcoming P11-006 socket
+/// after every successful cycle so the P11-006 socket
 /// `snapshot` command can serve verbatim bytes without
 /// re-serializing per connection. `None` before the first cycle
 /// completes. The `Arc` around `Vec<u8>` lets the socket handler
@@ -280,6 +289,19 @@ fn write_frame(stream: &mut UnixStream, payload: &[u8]) -> Result<()> {
 /// socket path).
 pub type SnapshotBytes = Arc<Mutex<Option<Arc<Vec<u8>>>>>;
 
+/// Live in-memory snapshot the per-class scheduler treats as the
+/// prior for the next cycle (P11-011a). Refreshed alongside
+/// [`SnapshotBytes`] after every successful cycle. `None` before
+/// the first cycle completes or before a P11-009 warm-start
+/// reload populates it from `graph.bin` at daemon startup.
+///
+/// Replaces the previous "read prior from `graph.sqlite`" pattern
+/// so the daemon never reads its own on-disk artifact during
+/// normal operation. The on-disk `graph.bin` exists for
+/// daemonless consumers (P11-008) and for daemon warm-restart;
+/// it is not the daemon's working state.
+pub type SnapshotState = Arc<Mutex<Option<GraphSnapshot>>>;
+
 /// Shared context handed to every per-connection worker so
 /// command handlers that need to mutate the on-disk graph can
 /// reach the same writer lock + discovery config the scheduler
@@ -291,6 +313,7 @@ struct DispatchCtx {
     writer_lock: Arc<Mutex<()>>,
     state: Arc<Mutex<SchedulerState>>,
     snapshot_bytes: SnapshotBytes,
+    snapshot_state: SnapshotState,
 }
 
 /// Outcome of a client-side socket call.
@@ -661,8 +684,19 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
     };
     let started = wall_clock_epoch() as u64;
     let outcome = match class {
-        None => run_full_rebuild(&ctx.scan_roots, &ctx.intervals, &ctx.snapshot_bytes),
-        Some(c) => try_class_cycle(c, &ctx.scan_roots, &ctx.intervals, &ctx.snapshot_bytes),
+        None => run_full_rebuild(
+            &ctx.scan_roots,
+            &ctx.intervals,
+            &ctx.snapshot_bytes,
+            &ctx.snapshot_state,
+        ),
+        Some(c) => try_class_cycle(
+            c,
+            &ctx.scan_roots,
+            &ctx.intervals,
+            &ctx.snapshot_bytes,
+            &ctx.snapshot_state,
+        ),
     };
     match outcome {
         Ok(()) => Response {
@@ -687,12 +721,13 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
 }
 
 /// Force a cold rebuild: empty prior so the freshness gate
-/// trips for every class, run discovery, persist. Counterpart to
-/// `--refresh` on the one-shot CLI.
+/// trips for every class, run discovery, write `graph.bin`.
+/// Counterpart to `--refresh` on the one-shot CLI.
 fn run_full_rebuild(
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
     snapshot_bytes: &SnapshotBytes,
+    snapshot_state: &SnapshotState,
 ) -> Result<()> {
     let discovery_config = LocalDiscoveryConfig::from_env();
     let snapshot = discover_local_warm_with(
@@ -702,27 +737,39 @@ fn run_full_rebuild(
         intervals,
     )?;
     let snapshot = resolve_snapshot(snapshot);
-    persist_snapshot(&snapshot, None)?;
-    dual_write_artifact(&snapshot, snapshot_bytes);
+    publish_snapshot(snapshot, snapshot_bytes, snapshot_state);
     Ok(())
 }
 
-/// Serialize `snapshot` to its on-disk byte layout per ADR 0083,
-/// write the artifact atomically to [`snapshot::graph_bin_path`],
-/// and refresh the in-memory bytes cache so the upcoming P11-006
-/// socket `snapshot` command can serve verbatim.
+/// Promote a freshly-resolved snapshot to the daemon's two
+/// canonical caches per ADR 0082:
 ///
-/// **Best-effort.** A serialization or write failure logs a
-/// single warning and returns without an error so the parent
-/// cycle keeps its SQLite-side durability guarantee. The
-/// `graph.bin` artifact is a *secondary* writer during the
-/// dual-write window; the legacy `graph.sqlite` path stays
-/// durable until P11-011 removes it.
-fn dual_write_artifact(snap: &GraphSnapshot, snapshot_bytes: &SnapshotBytes) {
-    let bytes = match snapshot::serialize_to_bytes(snap) {
+/// * The on-disk `graph.bin` artifact (atomic rename) so
+///   daemonless one-shot CLIs and a future daemon warm-restart
+///   (P11-009) can see it.
+/// * The in-memory [`SnapshotBytes`] cache so the socket
+///   `snapshot` command serves verbatim bytes without
+///   re-serializing per connection.
+/// * The in-memory [`SnapshotState`] cache so the next
+///   per-class cycle's prior comes from RAM rather than disk
+///   (replaces the previous "read prior from `graph.sqlite`"
+///   pattern; P11-011a).
+///
+/// **Best-effort on disk, durable in memory.** Serialize / write
+/// failures log a single warning and continue so a transient
+/// disk problem does not stall the daemon's in-memory state —
+/// socket readers still see the latest snapshot, and the next
+/// cycle's prior is still warm.
+fn publish_snapshot(
+    snapshot: GraphSnapshot,
+    snapshot_bytes: &SnapshotBytes,
+    snapshot_state: &SnapshotState,
+) {
+    let bytes = match snapshot::serialize_to_bytes(&snapshot) {
         Ok(bytes) => bytes,
         Err(err) => {
             eprintln!("conspectus serve: snapshot serialize failed (graph.bin skipped): {err:#}");
+            store_snapshot_state(snapshot_state, snapshot);
             return;
         }
     };
@@ -743,6 +790,104 @@ fn dual_write_artifact(snap: &GraphSnapshot, snapshot_bytes: &SnapshotBytes) {
         }
         Err(poisoned) => {
             *poisoned.into_inner() = Some(arc);
+        }
+    }
+    store_snapshot_state(snapshot_state, snapshot);
+}
+
+fn store_snapshot_state(snapshot_state: &SnapshotState, snapshot: GraphSnapshot) {
+    match snapshot_state.lock() {
+        Ok(mut guard) => {
+            *guard = Some(snapshot);
+        }
+        Err(poisoned) => {
+            *poisoned.into_inner() = Some(snapshot);
+        }
+    }
+}
+
+/// Best-effort daemon warm-restart (P11-009): on startup, try
+/// to load `graph.bin` so the first class cycle's prior is the
+/// snapshot the previous daemon process left behind. The first
+/// cycle then runs as a normal per-class refresh (evict its
+/// slice, re-discover) instead of paying the full cold-rebuild
+/// cost. Returns `None` for missing-file, version-mismatch,
+/// validation-failure, or any other unhappy path — the daemon
+/// falls through to first-cycle cold-rebuild semantics.
+fn warm_start_from_disk() -> Option<GraphSnapshot> {
+    let path = snapshot::graph_bin_path();
+    let handle = match snapshot::open_mmap(&path) {
+        Ok(handle) => handle,
+        Err(snapshot::SnapshotError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => {
+            // First run on this machine, or the operator wiped the
+            // cache; not an error worth surfacing.
+            return None;
+        }
+        Err(err) => {
+            eprintln!("conspectus serve: warm-start skipped (graph.bin unreadable): {err:#}");
+            return None;
+        }
+    };
+    match snapshot::deserialize_owned(&handle) {
+        Ok(snapshot) => {
+            eprintln!(
+                "conspectus serve: warm-start loaded prior snapshot from {}",
+                path.display()
+            );
+            Some(snapshot)
+        }
+        Err(err) => {
+            eprintln!("conspectus serve: warm-start skipped (deserialize failed): {err:#}");
+            None
+        }
+    }
+}
+
+/// One-shot cleanup of legacy `graph.sqlite*` artifacts left
+/// behind by pre-P11-011a daemon runs. The daemon no longer
+/// reads or writes them — `graph.bin` is the canonical
+/// persistence artifact. The cleanup is best-effort: filesystem
+/// errors log and continue; the files are harmless if left
+/// behind (they just consume disk).
+fn cleanup_legacy_sqlite_artifacts() {
+    let bin_path = snapshot::graph_bin_path();
+    let Some(dir) = bin_path.parent() else {
+        return;
+    };
+    for name in ["graph.sqlite", "graph.sqlite-wal", "graph.sqlite-shm"] {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            match std::fs::remove_file(&candidate) {
+                Ok(()) => {
+                    eprintln!(
+                        "conspectus serve: removed legacy artifact {}",
+                        candidate.display()
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "conspectus serve: failed to remove legacy artifact {}: {err:#}",
+                        candidate.display()
+                    );
+                }
+            }
+        }
+    }
+    let backups = dir.join("backups");
+    if backups.exists() {
+        match std::fs::remove_dir_all(&backups) {
+            Ok(()) => {
+                eprintln!(
+                    "conspectus serve: removed legacy backups dir {}",
+                    backups.display()
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "conspectus serve: failed to remove legacy backups dir {}: {err:#}",
+                    backups.display()
+                );
+            }
         }
     }
 }
@@ -809,11 +954,23 @@ pub fn run(config: ServeConfig) -> Result<()> {
     // to snapshot.
     let state = Arc::new(Mutex::new(SchedulerState::default()));
 
-    // Cached serialized snapshot bytes for the upcoming P11-006
-    // socket `snapshot` command. The daemon updates this after
-    // every successful cycle via [`dual_write_artifact`]; `None`
-    // before the first cycle.
+    // Cached serialized snapshot bytes for the P11-006 socket
+    // `snapshot` command. The daemon updates this after every
+    // successful cycle via [`publish_snapshot`]; `None` before
+    // the first cycle.
     let snapshot_bytes: SnapshotBytes = Arc::new(Mutex::new(None));
+
+    // Live in-memory snapshot the per-class scheduler reads as
+    // its prior (P11-011a). Optionally seeded from `graph.bin`
+    // on startup so a warm-restart skips the cold-rebuild cost
+    // (P11-009).
+    let snapshot_state: SnapshotState = Arc::new(Mutex::new(warm_start_from_disk()));
+
+    // Best-effort cleanup of legacy `graph.sqlite*` artifacts
+    // (P11-011a). The daemon has no consumer for them anymore.
+    // Failures (read-only data dir, missing parent, etc.) log
+    // and continue; the files are harmless if left behind.
+    cleanup_legacy_sqlite_artifacts();
 
     let scan_roots = Arc::new(config.scan_roots);
     let intervals = Arc::new(config.intervals);
@@ -833,6 +990,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         let shutdown = Arc::clone(&shutdown);
         let state = Arc::clone(&state);
         let snapshot_bytes = Arc::clone(&snapshot_bytes);
+        let snapshot_state = Arc::clone(&snapshot_state);
         let class = *class;
         let watcher = build_watcher_for(class);
         handles.push(thread::spawn(move || {
@@ -843,6 +1001,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
                 &writer_lock,
                 &state,
                 &snapshot_bytes,
+                &snapshot_state,
                 watcher,
                 &shutdown,
             );
@@ -856,6 +1015,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         writer_lock: Arc::clone(&writer_lock),
         state: Arc::clone(&state),
         snapshot_bytes: Arc::clone(&snapshot_bytes),
+        snapshot_state: Arc::clone(&snapshot_state),
     };
     handles.push(thread::spawn(move || {
         socket_listener_loop(listener, listener_ctx, &listener_shutdown);
@@ -949,6 +1109,7 @@ fn class_loop(
     writer_lock: &Mutex<()>,
     state: &Mutex<SchedulerState>,
     snapshot_bytes: &SnapshotBytes,
+    snapshot_state: &SnapshotState,
     mut watcher: Box<dyn Watcher>,
     shutdown: &AtomicBool,
 ) {
@@ -965,6 +1126,7 @@ fn class_loop(
         writer_lock,
         state,
         snapshot_bytes,
+        snapshot_state,
     );
     while !shutdown.load(Ordering::Relaxed) {
         match wait_for_class_signal(watcher.as_mut(), interval, shutdown) {
@@ -984,6 +1146,7 @@ fn class_loop(
                     writer_lock,
                     state,
                     snapshot_bytes,
+                    snapshot_state,
                 );
             }
         }
@@ -1028,6 +1191,7 @@ fn wait_for_class_signal(
 /// the cycle outcome (started_epoch, completed_epoch, success
 /// / error + message) into the shared [`SchedulerState`] for
 /// `conspectus status` to observe.
+#[allow(clippy::too_many_arguments)]
 fn run_cycle(
     class: ProviderClass,
     scan_roots: &[PathBuf],
@@ -1035,19 +1199,20 @@ fn run_cycle(
     writer_lock: &Mutex<()>,
     state: &Mutex<SchedulerState>,
     snapshot_bytes: &SnapshotBytes,
+    snapshot_state: &SnapshotState,
 ) {
     let started = wall_clock_epoch();
     record_state_started(state, class, started);
     // Poisoned-mutex recovery: a panic in a peer class while it
-    // held the lock taints it, but the on-disk graph is durable
-    // and re-reading prior on the next acquisition heals any
-    // half-finished state. Carry on rather than aborting the
-    // daemon.
+    // held the lock taints it, but the in-memory snapshot cache
+    // is durable across the lock take-over and a stale entry
+    // self-heals on the next successful cycle. Carry on rather
+    // than aborting the daemon.
     let _guard = match writer_lock.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let outcome = try_class_cycle(class, scan_roots, intervals, snapshot_bytes);
+    let outcome = try_class_cycle(class, scan_roots, intervals, snapshot_bytes, snapshot_state);
     let completed = wall_clock_epoch();
     match outcome {
         Ok(()) => record_state_completed(state, class, completed, Ok(())),
@@ -1103,23 +1268,30 @@ fn record_state_completed(
 /// is still fresh), merge + resolve + persist. The shared writer
 /// lock around `run_cycle` ensures no peer thread reads-old +
 /// writes between our load and write.
+/// Read the prior cache from the in-memory [`SnapshotState`],
+/// evict this class's slice so the freshness gate marks it as
+/// untested, run discovery (which then runs only this class's
+/// providers since every other class is still fresh), merge +
+/// resolve, and publish the result to both caches plus
+/// `graph.bin`. The shared writer lock around `run_cycle`
+/// ensures no peer thread reads-old + writes between our load
+/// and write.
+///
+/// P11-011a: the prior used to come from
+/// `query::load_cached_snapshot(None)` (a read of the on-disk
+/// `graph.sqlite`). It now comes from the in-memory
+/// [`SnapshotState`] the previous cycle populated. A daemon
+/// restart with no warm-start path arrives at the first cycle
+/// with `None` — the cycle runs as a cold rebuild (since every
+/// provider's "prior slice" is empty) and seeds the cache.
 fn try_class_cycle(
     class: ProviderClass,
     scan_roots: &[PathBuf],
     intervals: &ServerIntervals,
     snapshot_bytes: &SnapshotBytes,
+    snapshot_state: &SnapshotState,
 ) -> Result<()> {
-    let mut prior = match load_cached_snapshot(None) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => GraphSnapshot::empty(),
-        Err(err) => {
-            eprintln!(
-                "conspectus serve: {} failed to read graph cache: {err:#}",
-                class.name()
-            );
-            GraphSnapshot::empty()
-        }
-    };
+    let mut prior = load_snapshot_state(snapshot_state).unwrap_or_else(GraphSnapshot::empty);
     for provider in class.providers() {
         prior.evict_provider(provider);
     }
@@ -1127,9 +1299,21 @@ fn try_class_cycle(
     let snapshot =
         discover_local_warm_with(scan_roots.to_vec(), discovery_config, prior, intervals)?;
     let snapshot = resolve_snapshot(snapshot);
-    persist_snapshot(&snapshot, None)?;
-    dual_write_artifact(&snapshot, snapshot_bytes);
+    publish_snapshot(snapshot, snapshot_bytes, snapshot_state);
     Ok(())
+}
+
+/// Clone the live snapshot out of the in-memory cache so the
+/// caller can mutate it (typically by evicting a class's slice).
+/// Returns `None` before the first successful cycle or when a
+/// daemon warm-start path has not yet seeded the cache from
+/// `graph.bin`.
+fn load_snapshot_state(snapshot_state: &SnapshotState) -> Option<GraphSnapshot> {
+    let guard = match snapshot_state.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.clone()
 }
 
 #[cfg(test)]

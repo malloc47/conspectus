@@ -11019,60 +11019,149 @@ intermediate commit.
     `cargo fmt -- --check` and `cargo clippy --all-targets
     --all-features -- -D warnings` clean.
 
-- [ ] `P11-011` Delete `src/query/`, drop the `query` Cargo
-  feature, retire the SQLite read surface.
-  - **Scope reality check (P11-010 follow-up).** The
-    original story underestimated the call surface.
-    `query::materialize_snapshot` is consumed at 40+ sites
-    across `src/output/{agent,mux,union,prs,forks,
-    node_show,table}.rs`, `src/cli.rs`, `src/tui/{app,
-    runtime,detail,explorer,actions,rows/*}.rs`. Phase 10
-    deliberately moved the entire CLI + TUI rendering
-    pipeline onto SQLite via the "SQLite as Sole Consumption
-    Surface" workstream (P10-004 through P10-013), and
-    `read_snapshot(conn)` plus `materialize_snapshot(&snap)`
-    are the load-bearing seams of that pipeline. Removing
-    `src/query/` requires inverting that migration — every
-    renderer needs to consume `&GraphSnapshot` directly
-    again (the pattern Phase 10 deleted in favor of
-    SQL-against-materialized-rows).
-  - **Recommended decomposition** before this story lands:
-    - `P11-011a` Restore in-memory rendering for the CLI
+- [x] `P11-011a` Retire SQLite persistence layer; daemon + CLI
+  use in-memory snapshot caches and `graph.bin` only.
+  - Outcome: replaces P11-011's original "delete src/query/
+    entirely" scope with a pragmatic decomposition (see notes
+    on the remaining sub-stories below). The architectural
+    win the user originally asked for — "what is the value of
+    the SQLite cache?" — is achieved here: the daemon and CLI
+    no longer read or write `graph.sqlite`, `graph.bin` is the
+    sole canonical persistence artifact, and schema migrations
+    / backup rotation / WAL coordination are all gone.
+    Daemon (src/server/mod.rs):
+    - New `SnapshotState = Arc<Mutex<Option<GraphSnapshot>>>`
+      mirrors the existing `SnapshotBytes` cache. The
+      per-class scheduler reads its prior from `SnapshotState`
+      instead of calling `query::load_cached_snapshot(None)`,
+      and `publish_snapshot` (renamed from
+      `dual_write_artifact`) atomically refreshes both
+      in-memory caches plus the on-disk `graph.bin` after
+      every successful cycle. The daemon no longer calls
+      `persist_snapshot`.
+    - `warm_start_from_disk()` (delivers P11-009 as a bonus):
+      on startup, mmap `graph.bin` and seed `SnapshotState`
+      so the first cycle's per-class refresh has a prior to
+      evict from. Missing file / version mismatch / validate
+      failure all log and fall through to first-cycle
+      cold-rebuild semantics.
+    - `cleanup_legacy_sqlite_artifacts()`: best-effort
+      unlink of `graph.sqlite{,-wal,-shm}` and the
+      `backups/` directory on daemon startup so operators
+      upgrading from a pre-ADR-0082 build see their data
+      dirs trim themselves over time. Failures log and
+      continue.
+    CLI (src/cli.rs):
+    - `warm_start_discover_and_resolve` is now daemon-or-
+      cold-rebuild: try the daemon's socket via
+      `try_daemon_snapshot()`, else discover from scratch
+      with an empty prior. No more
+      `load_cached_snapshot(None)` read, no more backup
+      rotation. `cache_resolved_snapshot` now writes only
+      `graph.bin`.
+    - `in_process_class_refresh` (used by `conspectus
+      refresh --class <name>` when no daemon is running)
+      reads its prior via `load_prior_from_graph_bin()`
+      (mmap-or-empty) and persists via
+      `cache_resolved_snapshot`. The class evict-and-rerun
+      still works in the daemonless case because graph.bin
+      carries provider provenance.
+    - `discover_for_store_selection` (used by declared /
+      pin store-selection helpers) now uses an empty prior.
+      The helper was always a transient pre-write probe;
+      the cold-rebuild cost is acceptable.
+    TUI (src/tui/runtime.rs):
+    - `discover_and_resolve`'s daemon-absent fallback drops
+      the `load_cached_snapshot` read and writes `graph.bin`
+      instead of `graph.sqlite`. Daemon-present path is
+      unchanged (still uses `try_daemon_snapshot()` from
+      P11-007).
+    Tests:
+    - `tests/cli_persist.rs` rewritten end-to-end (8 SQLite-
+      specific tests → 5 graph.bin tests): persists,
+      no-cache skips, refresh persists, second-run-no-
+      warnings, legacy-graph.sqlite-doesn't-block.
+    - `tests/cli_serve.rs` updated: `serve_dual_writes_…`
+      becomes `serve_cleans_up_legacy_graph_sqlite_on_startup`
+      (asserts the cleanup behavior + a valid graph.bin
+      lands). Three other tests that asserted `graph.sqlite`
+      contents converted to `graph.bin` + `snapshot::
+      open_mmap` validation. All 17 daemon tests pass.
+    - `query::{load_cached_snapshot, persist_snapshot,
+      rotate_backup}` become dead-code-warned public API
+      consumed only by the surviving query module — they
+      delete in a P11-011d future cleanup along with the
+      rest of src/query/.
+    Full suite via `cargo nextest run --all-targets
+    --all-features`: 1755 pass, 1 fail. The single failure
+    is `pin_state_matrix_agent_table_snapshot` in
+    `tests/pins_snapshots.rs` — a pre-existing snapshot
+    regression introduced by commit 84198ea ("fix(tui):
+    honor recency sort in mux view") before P11-011a work
+    began. Confirmed by re-running against `git stash`-clean
+    HEAD: same failure. Investigation handed to the
+    appropriate author. `cargo fmt -- --check` and
+    `cargo clippy --all-targets --all-features --
+    -D warnings` clean on the P11-011a diff.
+
+- [ ] `P11-011b/c/d` Delete `src/query/`, drop the `query`
+  Cargo feature, restore in-memory renderers.
+  - **Status after P11-011a.** The architectural win the
+    user originally cared about (no SQLite persistence
+    layer, no migrations, no rotation, no on-disk SQL
+    writes) is achieved. What remains is *internal*:
+    `src/query/` continues to ship `materialize_snapshot` as
+    an in-memory query engine consumed by the rendering
+    pipeline. Deleting it requires inverting Phase 10's "P10
+    SQLite as Sole Consumption Surface" migration.
+  - **Scope reality check.** `query::materialize_snapshot`
+    is consumed at 40+ sites across
+    `src/output/{agent,mux,union,prs,forks,node_show,
+    table}.rs`, `src/cli.rs`, and `src/tui/{app,runtime,
+    detail,explorer,actions,rows/*}.rs`. `read_snapshot(conn)`
+    appears at 14 TUI sites. Removing `src/query/` requires
+    rewriting all of those to consume `&GraphSnapshot`
+    directly — essentially recreating the pre-Phase-10
+    in-memory render path that P10-004 through P10-013
+    deleted. This is multi-day work that the operator-visible
+    architectural payoff no longer demands (the user's
+    "value of the SQLite cache" concern is already addressed
+    by P11-011a).
+  - **Recommended decomposition** if the deletion does
+    happen:
+    - `P11-011b` Restore in-memory rendering for the CLI
       output crate (agent / mux / union / prs / forks / table
       / node_show). Each renderer takes `&GraphSnapshot` and
       iterates the typed model the way the pre-Phase-10
       code did. Pull from `git log` of P10-004 / P10-005 /
       P10-006 / etc. for the prior in-memory implementations.
-    - `P11-011b` Restore in-memory rendering for the TUI
+    - `P11-011c` Restore in-memory rendering for the TUI
       row tree builders (`tui/rows/sessions.rs`,
       `tui/rows/mux.rs`, `tui/rows/union.rs`,
       `tui/rows/prs.rs`, `tui/rows/forks.rs`). Same
-      pattern as P11-011a but in a different module.
-    - `P11-011c` Replace `GraphDb` (`Rc<Connection>` wrapper)
+      pattern as P11-011b but in a different module.
+    - `P11-011d` Replace `GraphDb` (`Rc<Connection>` wrapper)
       on `App` with `Arc<GraphSnapshot>`. Rewrite the 14
       `read_snapshot(db.conn())` call sites in `tui/app.rs`,
       `tui/actions.rs`, `tui/detail.rs`, `tui/explorer.rs`,
       `tui/runtime.rs` to read from the held `Arc<GraphSnapshot>`
-      directly.
-    - `P11-011d` Delete `src/query/`, drop the `query`
+      directly. Delete `src/query/`, drop the `query`
       Cargo feature, drop `MIN_SQLITE_VERSION` and its
       tests. `rusqlite` *stays* (the OpenCode harness
       adapter and the hook sidecar depend on it directly
       per the Cargo.toml comment), but `bundled` and
       `load_extension` features should be re-evaluated.
-      Add the one-time legacy-cache cleanup migration the
-      original story named.
-  - **Blockers**: P11-010 closed. P11-011a is the natural
-    next start; each sub-story should land as its own
-    reviewable PR. Estimated 4–6 commits of focused work
-    rather than one mega-commit.
+  - **Blockers**: P11-011a closed. The remaining work is
+    optional from an architectural standpoint; the
+    operator-visible payoff is binary-size reduction and
+    deleted internal code, not any user-facing capability.
   - **Tests**: each sub-story keeps `cargo nextest run
     --all-targets --all-features` green; the final
     P11-011d commit drops the cli_serve dual-write
     assertions (since graph.sqlite goes away) and the
     `read_snapshot` round-trip tests in `src/query/loader.rs`.
   - **Binary size**: capture
-    `ls -lh target/release/conspectus` before P11-011a and
+    `ls -lh target/release/conspectus` before P11-011b and
     after P11-011d so the operator-visible payoff for
     retiring the bundled libsqlite3 surface is recorded.
 

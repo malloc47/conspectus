@@ -490,24 +490,18 @@ impl RefreshArgs {
 }
 
 /// In-process per-class refresh used by `conspectus refresh
-/// --class <name>` when no daemon is available. Mirrors the
-/// daemon-side `try_class_cycle`: load prior cache, evict the
-/// class's slice so the freshness gate marks it untested, run
-/// discovery (which then runs only this class because every
-/// other class is still TTL-fresh), resolve, persist.
+/// --class <name>` when no daemon is available. P11-011a: the
+/// prior is mmap'd from `graph.bin` when the file exists (so a
+/// peer daemon's recent snapshot still seeds the per-class
+/// evict-and-rerun); otherwise empty. Resolved snapshot lands
+/// in `graph.bin` via `cache_resolved_snapshot` so a subsequent
+/// invocation can warm-start the same way.
 fn in_process_class_refresh(
     class: conspectus::discovery::cache::ProviderClass,
     roots: Vec<PathBuf>,
     intervals: &conspectus::config::ServerIntervals,
 ) -> Result<()> {
-    let mut prior = match conspectus::query::load_cached_snapshot(None) {
-        Ok(Some(snap)) => snap,
-        Ok(None) => conspectus::model::GraphSnapshot::empty(),
-        Err(err) => {
-            eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
-            conspectus::model::GraphSnapshot::empty()
-        }
-    };
+    let mut prior = load_prior_from_graph_bin();
     for provider in class.providers() {
         prior.evict_provider(provider);
     }
@@ -515,10 +509,41 @@ fn in_process_class_refresh(
     let snapshot =
         conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
     let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
-    if let Err(err) = conspectus::query::persist_snapshot(&snapshot, None) {
-        eprintln!("conspectus: warning: failed to persist graph cache: {err:#}");
-    }
+    cache_resolved_snapshot(&snapshot, false);
     Ok(())
+}
+
+/// Try to mmap the on-disk `graph.bin` snapshot as the
+/// warm-start prior for an in-process refresh. Returns an empty
+/// snapshot on missing-file, version-mismatch, validation
+/// failure, or any other unhappy path — the caller falls
+/// through to cold rebuild semantics.
+fn load_prior_from_graph_bin() -> conspectus::model::GraphSnapshot {
+    let path = conspectus::snapshot::graph_bin_path();
+    match conspectus::snapshot::open_mmap(&path) {
+        Ok(handle) => match conspectus::snapshot::deserialize_owned(&handle) {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                eprintln!(
+                    "conspectus: warning: failed to deserialize {}: {err:#}",
+                    path.display()
+                );
+                conspectus::model::GraphSnapshot::empty()
+            }
+        },
+        Err(conspectus::snapshot::SnapshotError::Io(err))
+            if err.kind() == std::io::ErrorKind::NotFound =>
+        {
+            conspectus::model::GraphSnapshot::empty()
+        }
+        Err(err) => {
+            eprintln!(
+                "conspectus: warning: failed to read {}: {err:#}",
+                path.display()
+            );
+            conspectus::model::GraphSnapshot::empty()
+        }
+    }
 }
 
 #[derive(Debug, Args, Default)]
@@ -1767,73 +1792,25 @@ fn current_unix_epoch_for_table() -> Option<i64> {
         .and_then(|d| i64::try_from(d.as_secs()).ok())
 }
 
-/// P7-003 phase 3: load the persisted `graph.sqlite` cache as
-/// the warm-start `prior` for [`conspectus::discovery::
-/// discover_local_warm_with`]. `refresh = true` returns an empty
-/// snapshot so the discovery driver's freshness gate sees no
-/// cached slices and runs every provider cold. A corrupted or
-/// unreadable cache emits a `conspectus: warning:` line and
-/// falls back to empty rather than aborting — the writer side
-/// still runs at the end of the invocation and will heal the
-/// file on the next attempt.
-///
-/// Returns `(prior, prior_was_cache_hit)`. The boolean tracks
-/// whether the prior came from an actual cache hit vs a
-/// cache miss / refresh / corruption fallback — phase-3
-/// rotation logic uses the latter as the "this was a cold
-/// rebuild" signal so an empty-but-cached snapshot (e.g. a
-/// freshly persisted run from an empty workspace) does not
-/// falsely trigger a backup rotate.
-fn load_warm_start_prior(refresh: bool) -> (conspectus::model::GraphSnapshot, bool) {
-    if refresh {
-        return (conspectus::model::GraphSnapshot::empty(), false);
-    }
-    match conspectus::query::load_cached_snapshot(None) {
-        Ok(Some(prior)) => (prior, true),
-        Ok(None) => (conspectus::model::GraphSnapshot::empty(), false),
-        Err(err) => {
-            eprintln!("conspectus: warning: failed to read graph cache: {err:#}");
-            (conspectus::model::GraphSnapshot::empty(), false)
-        }
-    }
-}
-
-/// P11-008 resolution chain for every one-shot CLI command
+/// P11-011a resolution chain for every one-shot CLI command
 /// that renders a resolved graph (`table`, `node show`,
-/// `graph`, and `query` until it retires in P11-010). The order
-/// is:
+/// `graph`). The order is:
 ///
 /// 1. **Daemon snapshot**: when `conspectus serve` is reachable
 ///    on the socket, request the freshly-resolved snapshot via
 ///    `client_snapshot()`, decode it, and return. Skips
-///    discovery + resolve + persist entirely.
-/// 2. **Cold rebuild**: the existing P7-003 phase 4 path —
-///    load warm-start prior from SQLite, run
-///    `discover_local_warm_with` with the per-class TTL gates,
-///    resolve, dual-write graph.sqlite + graph.bin so the next
-///    daemon cycle (or a future mmap-fresh path) can serve it.
-///    Backup rotation fires here when this run is a true cold
-///    rebuild.
+///    discovery + resolve + write entirely.
+/// 2. **Cold rebuild**: run `discover_local_warm_with` with an
+///    empty prior (no on-disk warm-start anymore — see ADR
+///    0082's "daemonless cold rebuild is fine at seconds")
+///    and write the resulting snapshot to `graph.bin` so the
+///    next daemon cycle (or a future mmap-fresh revival) has
+///    the file ready.
 ///
 /// `refresh` (operator-forced cold scan via `--refresh`)
-/// bypasses (1) so the flag semantic — "ignore caches,
+/// bypasses (1) so the flag semantic — "ignore the daemon and
 /// rebuild from disk" — is preserved. `no_cache` skips the
-/// dual-write at the end of (2).
-///
-/// The "mmap fresh `graph.bin`" branch named in P11-008's
-/// original scope is **deferred**: TOML-rooted mutator
-/// providers (declared, aliases, pins per
-/// `cache::MUTATOR_PROVIDERS`) edit files in the workspace
-/// that the wall-clock TTL freshness gate cannot reason about,
-/// so a sub-second TOML edit between two CLI invocations
-/// would silently shadow a real change. A proper revival
-/// either tracks input mtimes against the artifact or re-runs
-/// mutator-class providers after the mmap; either is bigger
-/// than the daemonless cold-rebuild cost (single-digit seconds
-/// per ADR 0082) justifies. The CLI still **writes**
-/// `graph.bin` on every cold rebuild so the daemon-resident
-/// flow and future mmap-fresh revival both have the artifact
-/// ready.
+/// `graph.bin` write at the end of (2).
 fn warm_start_discover_and_resolve(
     roots: Vec<PathBuf>,
     refresh: bool,
@@ -1843,16 +1820,15 @@ fn warm_start_discover_and_resolve(
     if !refresh && let Some(snapshot) = try_daemon_snapshot() {
         return Ok(snapshot);
     }
-    let (prior, prior_was_cache_hit) = load_warm_start_prior(refresh);
-    let cold_rebuild = !prior_was_cache_hit;
     let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
-    let snapshot =
-        conspectus::discovery::discover_local_warm_with(roots, discovery_config, prior, intervals)?;
+    let snapshot = conspectus::discovery::discover_local_warm_with(
+        roots,
+        discovery_config,
+        conspectus::model::GraphSnapshot::empty(),
+        intervals,
+    )?;
     let snapshot = conspectus::resolve::resolve_snapshot(snapshot);
     cache_resolved_snapshot(&snapshot, no_cache);
-    if cold_rebuild && !no_cache {
-        rotate_backup_best_effort();
-    }
     Ok(snapshot)
 }
 
@@ -1872,36 +1848,17 @@ fn try_daemon_snapshot() -> Option<conspectus::model::GraphSnapshot> {
     conspectus::snapshot::from_bytes(&bytes).ok()
 }
 
-/// Best-effort wrapper around [`conspectus::query::rotate_backup`]
-/// that swallows failures into a one-line warning. Backups are
-/// debugging artifacts per ADR 0037; a failed rotate must not
-/// abort the run.
-fn rotate_backup_best_effort() {
-    if let Err(err) = conspectus::query::rotate_backup(None) {
-        eprintln!("conspectus: warning: failed to rotate graph cache backup: {err:#}");
-    }
-}
-
-/// P7-003 + P11-008: dual-write a freshly resolved snapshot to
-/// the canonical `graph.sqlite` and `graph.bin` locations.
-/// Best-effort: each writer failure prints a `conspectus:
-/// warning:` line to stderr but never aborts the command — the
-/// rendered output the operator just saw is the primary
-/// product. `no_cache` lets the operator opt out for a single
-/// invocation (e.g. when running against a non-writable `$HOME`
-/// or wanting an in-memory-only render).
-///
-/// The graph.bin write mirrors the daemon's dual-write
-/// (P11-005) so a daemonless one-shot CLI populates the cache
-/// the *next* invocation's mmap-or-rebuild path (P11-008
-/// branch 2) reads from. The daemon's own writes still take
-/// priority when it is running.
+/// P11-011a: write the resolved snapshot to `graph.bin` (the
+/// canonical persistence artifact post-ADR-0082). Best-effort:
+/// a write failure prints a `conspectus: warning:` line to
+/// stderr but never aborts the command — the rendered output
+/// the operator just saw is the primary product. `no_cache`
+/// lets the operator opt out for a single invocation (e.g.
+/// when running against a non-writable `$HOME` or wanting an
+/// in-memory-only render).
 fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapshot, no_cache: bool) {
     if no_cache {
         return;
-    }
-    if let Err(err) = conspectus::query::persist_snapshot(snapshot, None) {
-        eprintln!("conspectus: warning: failed to persist graph cache: {err:#}");
     }
     let bin_path = conspectus::snapshot::graph_bin_path();
     if let Err(err) = conspectus::snapshot::write_atomic(&bin_path, snapshot) {
@@ -5890,24 +5847,25 @@ fn effective_scan_roots(scan_roots: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
     }
 }
 
-/// P7-003 phase 4: read-only warm-start variant of discovery used
-/// by the declared/pin store-selection helpers. We deliberately
-/// skip the writer here: this helper is a transient pre-write
-/// probe, not the user's primary artifact, and rewriting the
-/// cache from a CRUD-adjacent code path would surprise operators
-/// who expected the cache to track their last render. Reading the
-/// prior is still safe and saves the cold-rebuild cost.
+/// Read-only variant of discovery used by the declared/pin
+/// store-selection helpers. Pre-P11-011a this loaded the
+/// previous graph.sqlite as the warm-start prior; with
+/// graph.sqlite retired it falls through to a cold rebuild.
+/// The helper deliberately skips the writer side regardless —
+/// this is a transient pre-write probe, not the user's primary
+/// artifact, and rewriting the cache from a CRUD-adjacent code
+/// path would surprise operators who expected the cache to
+/// track their last render.
 fn discover_for_store_selection(scan_roots: &[PathBuf]) -> Result<GraphSnapshot> {
     let cwd = std::env::current_dir()?;
     let roots = effective_scan_roots(scan_roots, &cwd);
     let loader = ConfigLoader::from_env();
     let outcome = loader.load_from(&cwd);
-    let (prior, _was_cache_hit) = load_warm_start_prior(false);
     let discovery_config = conspectus::discovery::LocalDiscoveryConfig::from_env();
     conspectus::discovery::discover_local_warm_with(
         roots,
         discovery_config,
-        prior,
+        GraphSnapshot::empty(),
         &outcome.config.server.intervals,
     )
 }

@@ -1,7 +1,7 @@
 //! Integration tests for `conspectus serve` (P7-006).
 //!
 //! The daemon is process-scoped: tests spawn the binary as a
-//! subprocess, observe its side effects on `graph.sqlite`, and
+//! subprocess, observe its side effects on `graph.bin`, and
 //! signal-kill it before asserting. Each test uses a fresh
 //! `$XDG_DATA_HOME` so the cache it inspects is unambiguously
 //! the one this run produced.
@@ -74,9 +74,9 @@ fn conspectus_bin() -> std::path::PathBuf {
 #[test]
 fn serve_populates_graph_cache_within_first_tick() {
     // Layer A daemon: spawn `conspectus serve`, wait a few
-    // seconds for the first warm-start cycle to land, kill the
-    // process, then confirm the cache file exists and carries a
-    // valid `user_version` set by the writer.
+    // seconds for the first cycle to land, kill the process,
+    // then confirm `graph.bin` exists and parses cleanly via
+    // the snapshot module.
     //
     // The default shortest interval is 5s (harness/mux), but the
     // *first* cycle runs immediately on startup before the first
@@ -95,26 +95,18 @@ fn serve_populates_graph_cache_within_first_tick() {
 
     let mut child = cmd.spawn().expect("spawn conspectus serve");
 
-    // Poll for a valid schema, not just file existence: the
-    // writer creates the SQLite file inside open() and only
-    // *then* applies the schema, so a naive existence check
-    // races against the in-flight first persist. Reading
-    // `user_version > 0` is the cheap "schema has been applied"
-    // signal that callers (other daemon ticks, peer one-shot
-    // CLIs) use too.
-    let cache_path = data.path().join("conspectus").join("graph.sqlite");
+    // Poll for a validated graph.bin rather than naked file
+    // existence: the writer creates the tmp file first and
+    // renames over the target, but a check that runs
+    // mid-rename could see a partial file. `open_mmap` runs
+    // bytecheck end-to-end, so a successful open means the
+    // bytes are structurally sound.
+    let cache_path = data.path().join("conspectus").join("graph.bin");
     let deadline = Instant::now() + Duration::from_secs(10);
-    let mut observed_version: u32 = 0;
+    let mut observed_ok = false;
     while Instant::now() < deadline {
-        if cache_path.exists()
-            && let Ok(conn) = rusqlite::Connection::open_with_flags(
-                &cache_path,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )
-            && let Ok(v) = conn.query_row::<u32, _, _>("PRAGMA user_version", [], |row| row.get(0))
-            && v > 0
-        {
-            observed_version = v;
+        if cache_path.exists() && conspectus::snapshot::open_mmap(&cache_path).is_ok() {
+            observed_ok = true;
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -126,9 +118,9 @@ fn serve_populates_graph_cache_within_first_tick() {
     let _ = child.wait();
 
     assert!(
-        observed_version > 0,
-        "daemon writer should set user_version within the deadline; \
-         cache exists={}, observed={observed_version}",
+        observed_ok,
+        "daemon writer should land a valid graph.bin within the deadline; \
+         cache exists={}",
         cache_path.exists()
     );
 }
@@ -194,7 +186,7 @@ fn serve_socket_echoes_a_ping_request() {
 fn serve_socket_refresh_command_writes_a_fresh_snapshot() {
     // The `refresh` socket command forces a full cold rebuild on
     // the daemon side: empty prior + every adapter runs + the
-    // result lands in `graph.sqlite`. Useful for "I just did
+    // result lands in `graph.bin`. Useful for "I just did
     // something on disk, refresh now" without waiting for the
     // next forge tick.
     let home = tempfile::TempDir::new().expect("home temp");
@@ -213,26 +205,14 @@ fn serve_socket_refresh_command_writes_a_fresh_snapshot() {
     let socket = socket_path_under(runtime.path());
     assert!(wait_for_socket(&socket, Duration::from_secs(5)));
 
-    let cache_path = data.path().join("conspectus").join("graph.sqlite");
-    // Wait until the daemon has finished its initial cycle so we
-    // know any user_version change after the refresh is the
-    // refresh's doing rather than the startup write's. We use a
-    // valid-schema poll since file existence races against
-    // first-write per the earlier test's note.
+    let cache_path = data.path().join("conspectus").join("graph.bin");
+    // Wait until the daemon's first cycle has produced a
+    // validated graph.bin so we know the post-refresh mtime
+    // change is attributable to the refresh, not a racy
+    // first-write.
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if cache_path.exists()
-            && rusqlite::Connection::open_with_flags(
-                &cache_path,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )
-            .ok()
-            .and_then(|c| {
-                c.query_row::<u32, _, _>("PRAGMA user_version", [], |row| row.get(0))
-                    .ok()
-            })
-            .is_some_and(|v| v > 0)
-        {
+        if cache_path.exists() && conspectus::snapshot::open_mmap(&cache_path).is_ok() {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -279,18 +259,30 @@ fn serve_socket_refresh_command_writes_a_fresh_snapshot() {
 }
 
 #[test]
-fn serve_dual_writes_graph_bin_alongside_graph_sqlite() {
-    // P11-005 contract: every successful per-class cycle calls
-    // both `persist_snapshot` (writes graph.sqlite) and
-    // `snapshot::write_atomic` (writes graph.bin). Spawn the
-    // daemon, wait for both artifacts to appear under
-    // $XDG_DATA_HOME/conspectus/, then validate graph.bin via
-    // `snapshot::open_mmap` — that asserts the header magic +
-    // version + payload pass bytecheck end-to-end.
+fn serve_cleans_up_legacy_graph_sqlite_on_startup() {
+    // P11-011a: pre-rkyv daemon runs left a graph.sqlite (plus
+    // its -wal / -shm sidecars and the backups/ dir). The
+    // new daemon has no consumer for any of them and unlinks
+    // them on startup. The cleanup is best-effort but the
+    // happy-path test pins the behavior so a regression that
+    // forgets the cleanup surfaces as leftover legacy
+    // artifacts in operator data dirs.
     let home = tempfile::TempDir::new().expect("home temp");
     let data = tempfile::TempDir::new().expect("data temp");
     let cwd = tempfile::TempDir::new().expect("cwd temp");
     let runtime = tempfile::TempDir::new().expect("runtime temp");
+
+    let dir = data.path().join("conspectus");
+    std::fs::create_dir_all(&dir).expect("create dir");
+    let sqlite_path = dir.join("graph.sqlite");
+    let wal_path = dir.join("graph.sqlite-wal");
+    let shm_path = dir.join("graph.sqlite-shm");
+    let backups_path = dir.join("backups");
+    std::fs::write(&sqlite_path, b"legacy bytes").expect("write legacy sqlite");
+    std::fs::write(&wal_path, b"").expect("write legacy wal");
+    std::fs::write(&shm_path, b"").expect("write legacy shm");
+    std::fs::create_dir_all(&backups_path).expect("create legacy backups dir");
+    std::fs::write(backups_path.join("graph-1.sqlite"), b"old backup").expect("write old backup");
 
     let mut cmd = Command::new(conspectus_bin());
     isolated_serve_env_args(&mut cmd, home.path(), data.path(), runtime.path());
@@ -301,11 +293,12 @@ fn serve_dual_writes_graph_bin_alongside_graph_sqlite() {
 
     let mut child = cmd.spawn().expect("spawn serve");
 
-    let bin_path = data.path().join("conspectus").join("graph.bin");
-    let sqlite_path = data.path().join("conspectus").join("graph.sqlite");
+    // Wait until the daemon publishes its first graph.bin —
+    // by that point the startup cleanup has definitely run.
+    let bin_path = dir.join("graph.bin");
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        if bin_path.exists() && sqlite_path.exists() {
+        if bin_path.exists() && conspectus::snapshot::open_mmap(&bin_path).is_ok() {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -315,31 +308,29 @@ fn serve_dual_writes_graph_bin_alongside_graph_sqlite() {
     let _ = child.wait();
 
     assert!(
-        sqlite_path.exists(),
-        "graph.sqlite should land under {}",
-        data.path().display()
-    );
-    assert!(
         bin_path.exists(),
-        "graph.bin should land alongside graph.sqlite under {}",
-        data.path().display()
+        "daemon should write a valid graph.bin under {}",
+        dir.display()
     );
-
-    // `open_mmap` runs the bytecheck validation pass; surviving
-    // that is the assertion the on-disk file is structurally
-    // sound from header through every archived field. The
-    // deserialize_owned call is the secondary check the archive
-    // round-trips back to a real `GraphSnapshot`.
-    let handle = conspectus::snapshot::open_mmap(&bin_path).expect("graph.bin must validate");
-    assert_eq!(handle.header().format_version, 1);
-    let owned = conspectus::snapshot::deserialize_owned(&handle).expect("deserialize graph.bin");
-    // Cold-discovery against an empty $HOME yields an empty
-    // graph; the round-trip itself is the regression net we
-    // care about here, not the snapshot's content shape.
     assert!(
-        owned.nodes.is_empty(),
-        "discovery against an empty home should produce an empty snapshot, got {} nodes",
-        owned.nodes.len()
+        !sqlite_path.exists(),
+        "legacy {} should be unlinked on daemon startup",
+        sqlite_path.display()
+    );
+    assert!(
+        !wal_path.exists(),
+        "legacy {} should be unlinked on daemon startup",
+        wal_path.display()
+    );
+    assert!(
+        !shm_path.exists(),
+        "legacy {} should be unlinked on daemon startup",
+        shm_path.display()
+    );
+    assert!(
+        !backups_path.exists(),
+        "legacy backups dir {} should be removed on daemon startup",
+        backups_path.display()
     );
 }
 
@@ -671,7 +662,7 @@ fn cli_refresh_command_falls_back_to_local_when_no_daemon() {
         "expected in-process fallback line; stdout=\n{stdout}"
     );
 
-    let cache = data.path().join("conspectus").join("graph.sqlite");
+    let cache = data.path().join("conspectus").join("graph.bin");
     assert!(
         cache.exists(),
         "in-process fallback should populate {}",
@@ -768,7 +759,7 @@ fn cli_refresh_class_runs_in_process_when_no_daemon() {
         stdout.contains("refreshed git via in-process per-class refresh"),
         "expected per-class in-process line; stdout=\n{stdout}"
     );
-    assert!(data.path().join("conspectus").join("graph.sqlite").exists());
+    assert!(data.path().join("conspectus").join("graph.bin").exists());
 }
 
 #[test]
