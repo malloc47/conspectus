@@ -4479,6 +4479,7 @@ mod tests {
             home: Some(std::path::Path::new("/home/op")),
             filter: RowFilter::default(),
             grouping: crate::tui::MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
         });
 
         let mut config = RunConfig::defaults();
@@ -4584,6 +4585,7 @@ mod tests {
             home: Some(std::path::Path::new("/home/op")),
             filter: RowFilter::default(),
             grouping: crate::tui::MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
         });
 
         let mut config = RunConfig::defaults();

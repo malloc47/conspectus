@@ -792,6 +792,7 @@ mod tests {
                 now: None,
                 filter: RowFilter::default(),
                 grouping: crate::tui::MuxGrouping::Session,
+                sort: crate::tui::Sort::Hierarchy,
             },
         )
         .expect("build mux tree");
@@ -820,6 +821,7 @@ mod tests {
                 now: None,
                 filter: RowFilter::default(),
                 grouping: crate::tui::MuxGrouping::Session,
+                sort: crate::tui::Sort::Hierarchy,
             },
         )
         .expect("build mux tree");

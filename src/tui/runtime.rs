@@ -1300,6 +1300,7 @@ fn build_tree_for_view(conn: &rusqlite::Connection, config: &RunConfig) -> Resul
                 now: current_unix_epoch(),
                 filter: config.initial_filter.clone(),
                 grouping: config.mux_grouping,
+                sort: config.default_sort,
             },
         )?,
         View::Union => crate::tui::rows::union::build_union_tree_from_conn(
@@ -3559,6 +3560,7 @@ mod tests {
                     now: None,
                     filter: RowFilter::default(),
                     grouping: crate::tui::MuxGrouping::Session,
+                    sort: crate::tui::Sort::Hierarchy,
                 },
             )
             .expect("build mux tree");

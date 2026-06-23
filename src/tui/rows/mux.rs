@@ -16,17 +16,18 @@ use crate::model::{
     path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
-use crate::tui::MuxGrouping;
 use crate::tui::rows::{
     AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PinRow, Row, RowId, RowKind, RowTree,
     ViewLabel, format_recency, harness_label, shorten_home,
 };
+use crate::tui::{MuxGrouping, Sort};
 
 pub struct MuxBuildInputs<'a> {
     pub snapshot: &'a crate::model::GraphSnapshot,
     pub home: Option<&'a Path>,
     pub filter: RowFilter,
     pub grouping: MuxGrouping,
+    pub sort: Sort,
 }
 
 pub struct MuxBuildInputsFromConn<'a> {
@@ -35,6 +36,7 @@ pub struct MuxBuildInputsFromConn<'a> {
     pub now: Option<i64>,
     pub filter: RowFilter,
     pub grouping: MuxGrouping,
+    pub sort: Sort,
 }
 
 #[derive(Clone, Debug)]
@@ -71,6 +73,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
         now: None,
         filter: inputs.filter,
         grouping: inputs.grouping,
+        sort: inputs.sort,
     })
     .expect("build mux TUI tree from materialized snapshot")
 }
@@ -354,11 +357,7 @@ fn emit_flat(
     inputs: &MuxBuildInputsFromConn<'_>,
     short_ids: &HashMap<&str, String>,
 ) {
-    if inputs.filter.float_attached_muxes_top {
-        // Stable so the SQL `ORDER BY node_id` baseline is preserved
-        // inside each of the two resulting halves.
-        groups.sort_by_key(|group| usize::from(group.attached_count == 0));
-    }
+    sort_mux_groups(&mut groups, inputs);
     for group in groups {
         group.push_into(tree, 0, short_ids, inputs);
     }
@@ -391,17 +390,13 @@ fn emit_repo_grouped(
         }
     }
 
-    let float = inputs.filter.float_attached_muxes_top;
-
     for (key, mut groups) in buckets {
         let RepoBucketKey {
             repo_id,
             display_path,
         } = key;
         push_repo_header(tree, 0, &repo_id, &display_path, inputs.home);
-        if float {
-            groups.sort_by_key(|group| usize::from(group.attached_count == 0));
-        }
+        sort_mux_groups(&mut groups, inputs);
         for group in groups {
             group.push_into(tree, 1, short_ids, inputs);
         }
@@ -418,13 +413,32 @@ fn emit_repo_grouped(
                 is_launch_context: false,
             }),
         });
-        if float {
-            ungrouped.sort_by_key(|group| usize::from(group.attached_count == 0));
-        }
+        sort_mux_groups(&mut ungrouped, inputs);
         for group in ungrouped {
             group.push_into(tree, 1, short_ids, inputs);
         }
     }
+}
+
+fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputsFromConn<'_>) {
+    groups.sort_by(|left, right| {
+        let left_float = usize::from(left.attached_count == 0);
+        let right_float = usize::from(right.attached_count == 0);
+        let float_order = if inputs.filter.float_attached_muxes_top {
+            left_float.cmp(&right_float)
+        } else {
+            std::cmp::Ordering::Equal
+        };
+        float_order.then_with(|| match inputs.sort {
+            Sort::Hierarchy => std::cmp::Ordering::Equal,
+            Sort::Recency => right
+                .parent_row
+                .activity_epoch
+                .cmp(&left.parent_row.activity_epoch)
+                .then_with(|| left.parent_row.native_id.cmp(&right.parent_row.native_id))
+                .then_with(|| left.parent_node_id.cmp(&right.parent_node_id)),
+        })
+    });
 }
 
 fn push_repo_header(
@@ -795,6 +809,14 @@ mod tests {
         mux_node_with_paths(native, Some(format!("/p/{native}")), None)
     }
 
+    fn mux_node_with_activity(native: &str, activity_epoch: i64) -> GraphNode {
+        let mut node = mux_node(native);
+        if let GraphNode::MuxSession(mux) = &mut node {
+            mux.activity_epoch = Some(activity_epoch);
+        }
+        node
+    }
+
     fn mux_node_with_paths(
         native: &str,
         cwd: Option<String>,
@@ -824,13 +846,22 @@ mod tests {
         cwd: &str,
         last_message_preview: Option<String>,
     ) -> GraphNode {
+        session_node_with_activity(key, cwd, last_message_preview, 1_700_000_100)
+    }
+
+    fn session_node_with_activity(
+        key: &str,
+        cwd: &str,
+        last_message_preview: Option<String>,
+        last_active_epoch: i64,
+    ) -> GraphNode {
         GraphNode::AgentSession(AgentSessionNode {
             id: AgentSessionId::new("codex", "/state", key),
             harness_key: "codex".to_string(),
             cwd: Some(cwd.to_string()),
             title: None,
             last_message_preview,
-            last_active_epoch: Some(1_700_000_100),
+            last_active_epoch: Some(last_active_epoch),
             session_kind: None,
         })
     }
@@ -870,6 +901,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -908,6 +940,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -952,6 +985,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -1018,6 +1052,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -1078,6 +1113,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -1105,6 +1141,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -1148,6 +1185,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -1203,6 +1241,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("baseline mux tree");
         assert_eq!(
@@ -1220,6 +1259,7 @@ mod tests {
                 ..RowFilter::default()
             },
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("floated mux tree");
         assert_eq!(
@@ -1227,6 +1267,82 @@ mod tests {
             vec!["beta", "alpha", "gamma"],
             "beta rises and alpha/gamma keep their relative order"
         );
+    }
+
+    #[test]
+    fn recency_sort_orders_muxes_by_latest_attached_agent_activity() {
+        let now = 1_700_000_000;
+        let old = now - 3 * 86_400;
+        let fresh = now - 60;
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node_with_activity("alpha", old));
+        snapshot.nodes.push(mux_node_with_activity("beta", fresh));
+        snapshot.nodes.push(session_node_with_activity(
+            "old-agent",
+            "/p/alpha",
+            None,
+            old,
+        ));
+        snapshot.nodes.push(session_node_with_activity(
+            "fresh-agent",
+            "/p/beta",
+            None,
+            fresh,
+        ));
+        for (key, mux_native) in [("old-agent", "alpha"), ("fresh-agent", "beta")] {
+            snapshot.candidate_links.push(GraphLink {
+                id: format!("session-{mux_native}"),
+                source: crate::model::NodeId::AgentSession(AgentSessionId::new(
+                    "codex", "/state", key,
+                )),
+                target: LinkEndpoint::Node {
+                    id: crate::model::NodeId::MuxSession(MuxSessionId::new(format!(
+                        "tmux:{mux_native}"
+                    ))),
+                },
+                relation: RelationKind::LinkedToMux,
+                provenance: Provenance::Discovered,
+                confidence: Confidence::Medium,
+                freshness: Freshness::Fresh,
+                source_metadata: SourceMetadata::default(),
+                state: LinkState::Active,
+            });
+        }
+
+        let snapshot = resolve_snapshot(snapshot);
+        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
+        let native_ids = |tree: &RowTree| -> Vec<String> {
+            tree.rows
+                .iter()
+                .filter_map(|row| match &row.kind {
+                    RowKind::MuxSession(mux) => Some(mux.native_id.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        let hierarchy = build_mux_tree_from_conn(MuxBuildInputsFromConn {
+            conn: &conn,
+            home: None,
+            now: Some(now),
+            filter: RowFilter::default(),
+            grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
+        })
+        .expect("hierarchy mux tree");
+        assert_eq!(native_ids(&hierarchy), vec!["alpha", "beta"]);
+
+        let recency = build_mux_tree_from_conn(MuxBuildInputsFromConn {
+            conn: &conn,
+            home: None,
+            now: Some(now),
+            filter: RowFilter::default(),
+            grouping: MuxGrouping::Session,
+            sort: Sort::Recency,
+        })
+        .expect("recency mux tree");
+        assert_eq!(native_ids(&recency), vec!["beta", "alpha"]);
     }
 
     #[test]
@@ -1292,6 +1408,7 @@ mod tests {
             now: Some(1_700_000_160),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Repo,
+            sort: Sort::Hierarchy,
         })
         .expect("repo-grouped mux tree");
 
@@ -1370,6 +1487,7 @@ mod tests {
             now: Some(1_700_000_000),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("mux tree");
 
@@ -1443,6 +1561,7 @@ mod tests {
             now: Some(1_700_000_000),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Repo,
+            sort: Sort::Hierarchy,
         })
         .expect("repo-grouped mux tree");
 
@@ -1501,6 +1620,7 @@ mod tests {
             now: Some(1_700_000_000),
             filter: RowFilter::default(),
             grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
         })
         .expect("session-grouped mux tree");
 

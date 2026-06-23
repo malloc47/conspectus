@@ -2330,6 +2330,7 @@ mod tests {
             home: None,
             filter: crate::tui::RowFilter::default(),
             grouping: crate::tui::MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
         });
         let mut app = App::new(RunConfig::defaults());
         app.update(Msg::SetData {

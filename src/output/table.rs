@@ -2810,6 +2810,7 @@ mod tests {
             now: Some(1_000_000),
             filter,
             grouping: MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
         })
         .expect("mux tree");
         let tree_mux_rows = tree
