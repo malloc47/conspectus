@@ -11019,33 +11019,62 @@ intermediate commit.
     `cargo fmt -- --check` and `cargo clippy --all-targets
     --all-features -- -D warnings` clean.
 
-- [ ] `P11-011` Delete `src/query/`, drop `rusqlite`, drop the
-  `query` Cargo feature.
-  - Scope: remove `src/query/` in its entirety, the `query`
-    feature from `Cargo.toml` and every `cfg(feature =
-    "query")` gate that referenced it, `rusqlite` and the
-    bundled-sqlite features, the `MIN_SQLITE_VERSION` floor
-    and its tests, `query::materialize_snapshot` and its call
-    sites in `src/cli.rs` (every `materialize_snapshot` call
-    that survived the reader cutover was a query-feature
-    consumer and goes with it), and the `graph.sqlite` /
-    `backups/` / `graph.sqlite-wal` / `graph.sqlite-shm`
-    paths from the cache layout. Add a one-time migration
-    helper at daemon startup that unlinks any legacy
-    `graph.sqlite*` files in the cache directory after
-    successful first cycle — single-shot cleanup, removable
-    after one release. The SQLite read fallback in
-    `P11-007` / `P11-008` deletes here.
-  - Tests: full suite green after deletion. Build matrix
-    confirms no `cfg(feature = "query")` references remain
-    (`rg "feature = \"query\""` clean). Lockfile diff
-    confirms `rusqlite` and `libsqlite3-sys` are gone.
-    Binary size measurement (`ls -lh target/release/
-    conspectus` before/after) captured in the story outcome.
-  - Manual checks: clean-build wall-clock measurement
-    before/after; confirm `conspectus` runs end-to-end with
-    no missing-dep crash.
-  - Blockers: `P11-010`.
+- [ ] `P11-011` Delete `src/query/`, drop the `query` Cargo
+  feature, retire the SQLite read surface.
+  - **Scope reality check (P11-010 follow-up).** The
+    original story underestimated the call surface.
+    `query::materialize_snapshot` is consumed at 40+ sites
+    across `src/output/{agent,mux,union,prs,forks,
+    node_show,table}.rs`, `src/cli.rs`, `src/tui/{app,
+    runtime,detail,explorer,actions,rows/*}.rs`. Phase 10
+    deliberately moved the entire CLI + TUI rendering
+    pipeline onto SQLite via the "SQLite as Sole Consumption
+    Surface" workstream (P10-004 through P10-013), and
+    `read_snapshot(conn)` plus `materialize_snapshot(&snap)`
+    are the load-bearing seams of that pipeline. Removing
+    `src/query/` requires inverting that migration — every
+    renderer needs to consume `&GraphSnapshot` directly
+    again (the pattern Phase 10 deleted in favor of
+    SQL-against-materialized-rows).
+  - **Recommended decomposition** before this story lands:
+    - `P11-011a` Restore in-memory rendering for the CLI
+      output crate (agent / mux / union / prs / forks / table
+      / node_show). Each renderer takes `&GraphSnapshot` and
+      iterates the typed model the way the pre-Phase-10
+      code did. Pull from `git log` of P10-004 / P10-005 /
+      P10-006 / etc. for the prior in-memory implementations.
+    - `P11-011b` Restore in-memory rendering for the TUI
+      row tree builders (`tui/rows/sessions.rs`,
+      `tui/rows/mux.rs`, `tui/rows/union.rs`,
+      `tui/rows/prs.rs`, `tui/rows/forks.rs`). Same
+      pattern as P11-011a but in a different module.
+    - `P11-011c` Replace `GraphDb` (`Rc<Connection>` wrapper)
+      on `App` with `Arc<GraphSnapshot>`. Rewrite the 14
+      `read_snapshot(db.conn())` call sites in `tui/app.rs`,
+      `tui/actions.rs`, `tui/detail.rs`, `tui/explorer.rs`,
+      `tui/runtime.rs` to read from the held `Arc<GraphSnapshot>`
+      directly.
+    - `P11-011d` Delete `src/query/`, drop the `query`
+      Cargo feature, drop `MIN_SQLITE_VERSION` and its
+      tests. `rusqlite` *stays* (the OpenCode harness
+      adapter and the hook sidecar depend on it directly
+      per the Cargo.toml comment), but `bundled` and
+      `load_extension` features should be re-evaluated.
+      Add the one-time legacy-cache cleanup migration the
+      original story named.
+  - **Blockers**: P11-010 closed. P11-011a is the natural
+    next start; each sub-story should land as its own
+    reviewable PR. Estimated 4–6 commits of focused work
+    rather than one mega-commit.
+  - **Tests**: each sub-story keeps `cargo nextest run
+    --all-targets --all-features` green; the final
+    P11-011d commit drops the cli_serve dual-write
+    assertions (since graph.sqlite goes away) and the
+    `read_snapshot` round-trip tests in `src/query/loader.rs`.
+  - **Binary size**: capture
+    `ls -lh target/release/conspectus` before P11-011a and
+    after P11-011d so the operator-visible payoff for
+    retiring the bundled libsqlite3 surface is recorded.
 
 - [ ] `P11-012` Supersede the SQLite ADR cluster and rewrite
   design.md.
