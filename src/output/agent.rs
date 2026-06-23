@@ -1,34 +1,4 @@
-//! SQLite-backed agent projection renderer (P10-004 / ADR 0043).
-//!
-//! Replaces the in-memory `build_agent_rows` path for
-//! [`Projection::Agent`]. Reads everything from a
-//! [`rusqlite::Connection`] populated by the loader; consumers
-//! never see a `GraphSnapshot` here. Parity with the in-memory
-//! renderer is enforced by the existing `output::table` snapshot
-//! test corpus.
-//!
-//! Query strategy:
-//!
-//! - One **primary** query joins agent sessions to
-//!   `v_sessions_with_repo` (for checkout/repo) and to `aliases` for
-//!   the title overlay.
-//! - **Side-lookups** per cell category fetch the structured candidate-
-//!   link data once and index it by session key (or checkout id) in
-//!   Rust. Each lookup is small and bounded; rendering walks the
-//!   indexed maps in constant time per session. Cells covered:
-//!   `branch` (via `fetch_branch_lookup`), `mux` / `mux-conf`,
-//!   `lineage`, `workspace`, `fork`, `declared`, and the global
-//!   preferred `pr` / `pr-conf`.
-//!
-//! All JOINs to `node_<kind>` tables use Display-form reconstruction
-//! from the endpoint JSON (`'mux_session:' || json_extract(…)`) and
-//! compare against `node_<kind>.node_id`, not against the structural
-//! columns. The reason: production discovery (e.g. `tmux` adapter)
-//! routinely sets `MuxSessionNode.native_id = "<name>"` while the
-//! corresponding `MuxSessionId.native_id = "tmux:<name>"`; the
-//! structural columns can differ from the typed-ID fields embedded
-//! in the JSON. The Display-form match goes through the canonical
-//! `node_id` PK that both sides agree on.
+//! In-memory agent projection renderer (P11-011b / ADR 0082).
 //!
 //! Cells from ADR 0006:
 //! `id` `agent` `cwd` `mux` `mux-conf` `pr` `pr-conf` `lineage`
@@ -36,54 +6,45 @@
 //! `preview` `title` `activity`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use rusqlite::Connection;
+use std::path::Path;
 
 use super::render::{
     self, RenderOptions, SESSIONS_COLUMNS, current_epoch, format_relative_age, header_label,
-    pick_strongest, strip_branch_prefix,
+    strip_branch_prefix,
 };
 use super::table::{agent_session_key_for_label, short_session_id};
 use crate::filter::{MuxStateKey, SessionMatchInputs};
+use crate::model::{
+    AgentSessionId, AgentSessionNode, CheckoutNode, ForgePrNode, ForkNode, GraphLink, GraphNode,
+    GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind,
+    WorkspaceNode, path_is_ancestor_of, pick_preferred,
+};
 
-/// Triple identifying an agent session structurally. Matches the
-/// `(harness_key, state_scope, session_key)` tuple in
-/// `AgentSessionId`. Used as the HashMap key for per-session
-/// lookups so cell rendering doesn't have to reconstruct typed
-/// `NodeId` values.
 type SessionKey = (String, String, String);
 
-fn session_key(harness_key: &str, state_scope: &str, session_key: &str) -> SessionKey {
+fn session_key_of(agent: &AgentSessionId) -> SessionKey {
     (
-        harness_key.to_string(),
-        state_scope.to_string(),
-        session_key.to_string(),
+        agent.harness_key.clone(),
+        agent.state_scope.clone(),
+        agent.session_key.clone(),
     )
 }
 
-/// One row's worth of base session data. Filled in by
-/// [`fetch_session_rows`] and consumed by the cell extractors.
 #[derive(Debug, Clone)]
-struct SessionRow {
-    harness_key: String,
-    state_scope: String,
-    session_key: String,
-    cwd: Option<String>,
-    title: Option<String>,
+struct SessionRow<'a> {
+    agent: &'a AgentSessionNode,
     alias_display_name: Option<String>,
-    preview: Option<String>,
-    last_active_epoch: Option<i64>,
     /// Display-form `NodeId` of the deepest checkout whose root
-    /// contains the session's cwd (from `v_sessions_with_repo`).
-    /// Used to key the [`branch`] lookup below.
-    checkout_node_id: Option<String>,
+    /// contains the session's cwd. `None` when the session has no
+    /// cwd or no matching checkout.
+    checkout_node_id: Option<NodeId>,
     checkout_root: Option<String>,
     repo_common_dir: Option<String>,
 }
 
-impl SessionRow {
+impl SessionRow<'_> {
     fn key(&self) -> SessionKey {
-        session_key(&self.harness_key, &self.state_scope, &self.session_key)
+        session_key_of(&self.agent.id)
     }
 }
 
@@ -100,7 +61,7 @@ struct MuxInfo {
 struct PrInfo {
     owner: String,
     repo: String,
-    number: i64,
+    number: u64,
     state: Option<String>,
     is_draft: bool,
     provenance: String,
@@ -110,25 +71,17 @@ struct PrInfo {
 
 #[derive(Debug, Clone)]
 struct LineageInfo {
-    /// Label to render: either the parent agent_session's session_key
-    /// (typically truncated via [`short_session_id`]), or `?<native_id>`
-    /// when the preferred parent_session candidate is unresolved.
     label: String,
-    /// Set when the parent itself has a preferred `parent_session`
-    /// link — triggers the trailing `←` to flag a chain depth > 1.
     has_grandparent: bool,
 }
 
 #[derive(Debug, Clone)]
 struct DeclaredInfo {
-    /// Rendered state label: `"declared"`, `"ignored"`, or
-    /// `"overridden"` per `LinkState`.
     state_label: String,
 }
 
 #[derive(Debug, Clone)]
 struct ForkInfo {
-    /// Pre-formatted fork label as `<provider>:<name_or_psk>`.
     label: String,
 }
 
@@ -136,23 +89,21 @@ struct ForkInfo {
 // Entry point
 // -----------------------------------------------------------------------------
 
-/// Build the projection rows for `conn` and `options`. Returned vector
-/// is `[header, body…]`, the same shape `render_rows` consumes.
-pub fn build_agent_rows_from_conn(
-    conn: &Connection,
+pub fn build_agent_rows_from_snapshot(
+    snapshot: &GraphSnapshot,
     columns: &[&'static str],
     options: &RenderOptions,
-) -> rusqlite::Result<Vec<Vec<String>>> {
-    let sessions = fetch_session_rows(conn)?;
-    let mux_lookup = fetch_mux_lookup(conn)?;
-    let branch_lookup = fetch_branch_lookup(conn)?;
-    let lineage_lookup = fetch_lineage_lookup(conn)?;
-    let workspace_lookup = fetch_workspace_lookup(conn)?;
-    let fork_lookup = fetch_fork_lookup(conn)?;
-    let declared_lookup = fetch_declared_lookup(conn)?;
-    let pr_global = fetch_global_pr(conn)?;
+) -> Vec<Vec<String>> {
+    let sessions = collect_session_rows(snapshot);
+    let mux_lookup = collect_mux_lookup(snapshot);
+    let branch_lookup = collect_branch_lookup(snapshot);
+    let lineage_lookup = collect_lineage_lookup(snapshot);
+    let workspace_lookup = collect_workspace_lookup(snapshot);
+    let fork_lookup = collect_fork_lookup(snapshot);
+    let declared_lookup = collect_declared_lookup(snapshot);
+    let pr_global = collect_global_pr(snapshot);
 
-    let filtered: Vec<&SessionRow> = sessions
+    let filtered: Vec<&SessionRow<'_>> = sessions
         .iter()
         .filter(|row| row_matches(options, row, &mux_lookup))
         .collect();
@@ -168,7 +119,7 @@ pub fn build_agent_rows_from_conn(
     for row in filtered {
         let branch_refname = row
             .checkout_node_id
-            .as_deref()
+            .as_ref()
             .and_then(|id| branch_lookup.get(id));
         let ctx = CellCtx {
             row,
@@ -178,44 +129,36 @@ pub fn build_agent_rows_from_conn(
             workspace: workspace_lookup.get(&row.key()),
             fork: fork_lookup.get(&row.key()),
             declared: declared_lookup.get(&row.key()),
-            pr: pr_global.as_ref().filter(|_| row.cwd.is_some()),
+            pr: pr_global.as_ref().filter(|_| row.agent.cwd.is_some()),
         };
         rows.push(columns.iter().map(|key| cell(key, &ctx)).collect());
     }
 
-    Ok(rows)
+    rows
 }
 
 struct CellCtx<'a> {
-    row: &'a SessionRow,
+    row: &'a SessionRow<'a>,
     mux: Option<&'a MuxInfo>,
-    /// Preferred `checked_out_branch` candidate's refname for the
-    /// session's checkout (already deduped against the session row's
-    /// `checkout_node_id`). `None` when the session has no checkout
-    /// or its checkout has no active branch link.
     branch_refname: Option<&'a String>,
     lineage: Option<&'a LineageInfo>,
     workspace: Option<&'a String>,
     fork: Option<&'a ForkInfo>,
     declared: Option<&'a DeclaredInfo>,
-    /// Global preferred PR (the in-memory renderer is intentionally
-    /// loose here per `preferred_pr_for_session`'s in-code TODO; it
-    /// applies the first BranchHasForgePr regardless of which
-    /// session's checkout the branch belongs to). Set to `None` when
-    /// the session has no cwd, matching the existing early-return.
     pr: Option<&'a PrInfo>,
 }
 
 fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
     let dash = || "—".to_string();
+    let agent = ctx.row.agent;
     match key {
-        "id" => agent_session_key_for_label(&ctx.row.session_key),
+        "id" => agent_session_key_for_label(&agent.id.session_key),
         "agent" => format!(
             "{}:{}",
-            ctx.row.harness_key,
-            agent_session_key_for_label(&ctx.row.session_key)
+            agent.harness_key,
+            agent_session_key_for_label(&agent.id.session_key)
         ),
-        "cwd" => ctx.row.cwd.clone().unwrap_or_else(dash),
+        "cwd" => agent.cwd.clone().unwrap_or_else(dash),
         "mux" => match ctx.mux {
             Some(m) => format!("{}:{}", m.backend, m.native_id),
             None => dash(),
@@ -253,15 +196,14 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             .declared
             .map(|d| d.state_label.clone())
             .unwrap_or_else(dash),
-        "preview" => ctx.row.preview.clone().unwrap_or_else(dash),
+        "preview" => agent.last_message_preview.clone().unwrap_or_else(dash),
         "title" => ctx
             .row
             .alias_display_name
             .clone()
-            .or_else(|| ctx.row.title.clone())
+            .or_else(|| agent.title.clone())
             .unwrap_or_else(dash),
-        "activity" => ctx
-            .row
+        "activity" => agent
             .last_active_epoch
             .map(|epoch| format_relative_age(epoch, current_epoch()))
             .unwrap_or_else(dash),
@@ -277,7 +219,7 @@ fn forge_pr_label(pr: &PrInfo) -> String {
 
 fn row_matches(
     options: &RenderOptions,
-    row: &SessionRow,
+    row: &SessionRow<'_>,
     mux_lookup: &HashMap<SessionKey, MuxInfo>,
 ) -> bool {
     if !options.filter.has_narrowing_predicates() {
@@ -288,384 +230,320 @@ fn row_matches(
         .map(|m| m.candidate_count)
         .unwrap_or(0);
     let inputs = SessionMatchInputs {
-        harness_key: &row.harness_key,
+        harness_key: &row.agent.harness_key,
         now_epoch: options.now_epoch,
-        last_active_epoch: row.last_active_epoch,
+        last_active_epoch: row.agent.last_active_epoch,
         mux_state: MuxStateKey::from_candidate_count(candidate_count),
     };
     options.filter.matches_session(&inputs)
 }
 
 // -----------------------------------------------------------------------------
-// Queries
+// In-memory collectors
 // -----------------------------------------------------------------------------
 
-fn fetch_session_rows(conn: &Connection) -> rusqlite::Result<Vec<SessionRow>> {
-    // Primary query. The aliases JOIN uses the JSON-encoded `node`
-    // column (ADR 0044) — we reconstruct a synthetic JSON shape from
-    // the structural session columns and match it against the alias
-    // table. The shape mirrors `NodeId::AgentSession`'s serde derive
-    // exactly: `{"type":"agent_session","harness_key":...,
-    // "state_scope":...,"session_key":...}`.
-    let mut stmt = conn.prepare(
-        "SELECT a.harness_key, a.state_scope, a.session_key, \
-                a.cwd, a.title, a.last_message_preview, a.last_active_epoch, \
-                s.checkout_node_id, s.checkout_root, s.repo_common_dir, \
-                al.display_name AS alias_display_name \
-         FROM node_agent_sessions a \
-         LEFT JOIN v_sessions_with_repo s ON s.session_node_id = a.node_id \
-         LEFT JOIN aliases al \
-           ON al.node_kind = 'agent_session' \
-           AND json_extract(al.node, '$.harness_key') = a.harness_key \
-           AND json_extract(al.node, '$.state_scope') = a.state_scope \
-           AND json_extract(al.node, '$.session_key') = a.session_key \
-         ORDER BY a.harness_key, a.state_scope, a.session_key",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(SessionRow {
-            harness_key: row.get(0)?,
-            state_scope: row.get(1)?,
-            session_key: row.get(2)?,
-            cwd: row.get(3)?,
-            title: row.get(4)?,
-            preview: row.get(5)?,
-            last_active_epoch: row.get(6)?,
-            checkout_node_id: row.get(7)?,
-            checkout_root: row.get(8)?,
-            repo_common_dir: row.get(9)?,
-            alias_display_name: row.get(10)?,
+fn collect_session_rows(snapshot: &GraphSnapshot) -> Vec<SessionRow<'_>> {
+    // Pre-index checkouts so we can find the deepest matching one for
+    // each session's cwd in O(C) per session. Same logic as the
+    // `v_sessions_with_repo` view.
+    let checkouts: Vec<&CheckoutNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Checkout(checkout) => Some(checkout),
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+
+    let mut rows: Vec<SessionRow<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) => {
+                let alias = snapshot
+                    .aliases
+                    .get(&NodeId::AgentSession(agent.id.clone()))
+                    .map(|s| s.to_string());
+                let (checkout_node_id, checkout_root, repo_common_dir) =
+                    deepest_checkout_for(&checkouts, agent.cwd.as_deref());
+                Some(SessionRow {
+                    agent,
+                    alias_display_name: alias,
+                    checkout_node_id,
+                    checkout_root,
+                    repo_common_dir,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        a.agent
+            .id
+            .harness_key
+            .cmp(&b.agent.id.harness_key)
+            .then_with(|| a.agent.id.state_scope.cmp(&b.agent.id.state_scope))
+            .then_with(|| a.agent.id.session_key.cmp(&b.agent.id.session_key))
+    });
+    rows
 }
 
-/// Active `checked_out_branch` candidate links keyed by the source
-/// checkout's Display-form `node_id`. Mirrors
-/// `session_branch_label`'s "walk by_source_relation for the
-/// session's checkout" lookup. The session's checkout id is captured
-/// in [`SessionRow::checkout_node_id`].
-fn fetch_branch_lookup(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('checkout:repo:' || \
-                 json_extract(cl.source, '$.repo.common_dir') || '@' || \
-                 json_extract(cl.source, '$.root')) AS checkout_node_id, \
-                json_extract(cl.target_node, '$.refname') AS refname, \
-                cl.link_id, cl.provenance, cl.confidence \
-         FROM candidate_links cl \
-         WHERE cl.source_kind = 'checkout' \
-           AND cl.target_node_kind = 'branch' \
-           AND cl.relation = 'checked_out_branch' \
-           AND cl.state = 'active'",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)]
-    struct Raw {
-        refname: String,
-        link_id: String,
-        provenance: String,
-        confidence: String,
+/// Deepest checkout whose root is `cwd` or an ancestor of `cwd`,
+/// mirroring `v_sessions_with_repo`'s SELECT ... ORDER BY
+/// length(c2.root) DESC LIMIT 1. Returns the Display-form NodeId,
+/// the checkout's root, and the underlying repo's common_dir.
+fn deepest_checkout_for(
+    checkouts: &[&CheckoutNode],
+    cwd: Option<&str>,
+) -> (Option<NodeId>, Option<String>, Option<String>) {
+    let Some(cwd) = cwd else {
+        return (None, None, None);
+    };
+    let cwd_path = Path::new(cwd);
+    let mut best: Option<&CheckoutNode> = None;
+    for candidate in checkouts {
+        let root_path = Path::new(&candidate.root);
+        if root_path == cwd_path || path_is_ancestor_of(root_path, cwd_path) {
+            best = match best {
+                None => Some(candidate),
+                Some(current) if candidate.root.len() > current.root.len() => Some(candidate),
+                Some(current) => Some(current),
+            };
+        }
     }
-    let mut per_checkout: HashMap<String, Vec<Raw>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            Raw {
-                refname: row.get(1)?,
-                link_id: row.get(2)?,
-                provenance: row.get(3)?,
-                confidence: row.get(4)?,
-            },
-        ))
-    })?;
-    for entry in rows {
-        let (key, raw) = entry?;
-        per_checkout.entry(key).or_default().push(raw);
+    match best {
+        Some(checkout) => (
+            Some(NodeId::Checkout(checkout.id.clone())),
+            Some(checkout.root.clone()),
+            Some(checkout.id.repo.common_dir.clone()),
+        ),
+        None => (None, None, None),
     }
-    let mut out = HashMap::new();
-    for (key, candidates) in per_checkout {
-        let Some(best) = pick_strongest(candidates, |r: &Raw| {
-            (&r.provenance, &r.confidence, &r.link_id)
-        }) else {
+}
+
+/// Per-checkout preferred `checked_out_branch` refname.
+fn collect_branch_lookup(snapshot: &GraphSnapshot) -> HashMap<NodeId, String> {
+    let mut per_checkout: HashMap<NodeId, Vec<&GraphLink>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::CheckedOutBranch) {
+            continue;
+        }
+        let NodeId::Checkout(_) = &link.source else {
             continue;
         };
-        out.insert(key, best.refname);
-    }
-    Ok(out)
-}
-
-/// Active `linked_to_mux` candidate links keyed by source session.
-/// For each session we keep the preferred candidate (provenance →
-/// confidence → link_id ordering) plus the count of distinct active
-/// mux targets (for the ambiguity marker in `mux-conf`).
-fn fetch_mux_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, MuxInfo>> {
-    // Pull all active linked_to_mux candidates whose source is an
-    // agent_session and whose target is a known mux node. Group by
-    // session in Rust, run pick_preferred there.
-    // The JOIN reconstructs the mux's NodeId Display form
-    // (`mux_session:<MuxSessionId.native_id>`) from the link's
-    // target JSON. Joining on the structural `m.native_id` column
-    // would be wrong: discovery (and test fixtures) routinely sets
-    // `MuxSessionNode.native_id` to a value distinct from
-    // `MuxSessionId.native_id` (e.g. id is `tmux:editor` while the
-    // structural field is just `editor`). Same pattern for the fork
-    // and PR joins below.
-    let mut stmt = conn.prepare(
-        "SELECT json_extract(cl.source, '$.harness_key') AS h, \
-                json_extract(cl.source, '$.state_scope') AS s, \
-                json_extract(cl.source, '$.session_key') AS k, \
-                cl.link_id, cl.target_node, cl.provenance, cl.confidence, \
-                m.backend, m.native_id \
-         FROM candidate_links cl \
-         JOIN node_mux_sessions m \
-           ON cl.target_node_kind = 'mux_session' \
-           AND ('mux_session:' || json_extract(cl.target_node, '$.native_id')) = m.node_id \
-         WHERE cl.source_kind = 'agent_session' \
-           AND cl.relation = 'linked_to_mux' \
-           AND cl.state = 'active'",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)] // link_id is read via the pick_strongest tiebreak accessor
-    struct Raw {
-        link_id: String,
-        target_node: String,
-        provenance: String,
-        confidence: String,
-        backend: String,
-        native_id: String,
-    }
-    let mut per_session: HashMap<SessionKey, Vec<Raw>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let h: String = row.get(0)?;
-        let s: String = row.get(1)?;
-        let k: String = row.get(2)?;
-        Ok((
-            session_key(&h, &s, &k),
-            Raw {
-                link_id: row.get(3)?,
-                target_node: row.get(4)?,
-                provenance: row.get(5)?,
-                confidence: row.get(6)?,
-                backend: row.get(7)?,
-                native_id: row.get(8)?,
-            },
-        ))
-    })?;
-    for entry in rows {
-        let (key, raw) = entry?;
-        per_session.entry(key).or_default().push(raw);
-    }
-    let mut out = HashMap::new();
-    for (key, candidates) in per_session {
-        let candidate_count = candidates
-            .iter()
-            .map(|candidate| candidate.target_node.as_str())
-            .collect::<BTreeSet<_>>()
-            .len();
-        let Some(best) = pick_strongest(candidates, |r| (&r.provenance, &r.confidence, &r.link_id))
+        let LinkEndpoint::Node {
+            id: NodeId::Branch(_),
+        } = &link.target
         else {
             continue;
         };
+        per_checkout
+            .entry(link.source.clone())
+            .or_default()
+            .push(link);
+    }
+    let mut out = HashMap::new();
+    for (checkout_id, candidates) in per_checkout {
+        let Some(best) = pick_preferred(&candidates) else {
+            continue;
+        };
+        if let LinkEndpoint::Node {
+            id: NodeId::Branch(branch_id),
+        } = &best.target
+        {
+            out.insert(checkout_id, branch_id.refname.clone());
+        }
+    }
+    out
+}
+
+/// Per-agent preferred `linked_to_mux` candidate's mux info plus
+/// the count of distinct active mux targets (for the ambiguity
+/// `*` marker).
+fn collect_mux_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, MuxInfo> {
+    let mux_lookup: HashMap<NodeId, &MuxSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some((NodeId::MuxSession(mux.id.clone()), mux)),
+            _ => None,
+        })
+        .collect();
+    let mut per_session: HashMap<NodeId, Vec<&GraphLink>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: NodeId::MuxSession(_),
+        } = &link.target
+        else {
+            continue;
+        };
+        per_session
+            .entry(link.source.clone())
+            .or_default()
+            .push(link);
+    }
+    let mut out = HashMap::new();
+    for (source, candidates) in per_session {
+        let NodeId::AgentSession(agent_id) = &source else {
+            continue;
+        };
+        let candidate_count = candidates
+            .iter()
+            .filter_map(|link| match &link.target {
+                LinkEndpoint::Node { id } => Some(id.to_string()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .len();
+        let Some(best) = pick_preferred(&candidates) else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: target_id @ NodeId::MuxSession(_),
+        } = &best.target
+        else {
+            continue;
+        };
+        let Some(mux) = mux_lookup.get(target_id) else {
+            continue;
+        };
         out.insert(
-            key,
+            session_key_of(agent_id),
             MuxInfo {
-                backend: best.backend,
-                native_id: best.native_id,
-                provenance: best.provenance,
-                confidence: best.confidence,
+                backend: mux.backend.clone(),
+                native_id: mux.native_id.clone(),
+                provenance: best.provenance.snake_case().to_string(),
+                confidence: best.confidence.snake_case().to_string(),
                 candidate_count,
             },
         );
     }
-    Ok(out)
+    out
 }
 
-/// Mirrors `preferred_pr_for_session`'s intentionally loose behavior:
-/// find the first preferred `branch_has_forge_pr` candidate across
-/// the snapshot and use its target PR. The in-memory implementation
-/// has a TODO calling this out as conservative; we match it for
-/// parity.
-fn fetch_global_pr(conn: &Connection) -> rusqlite::Result<Option<PrInfo>> {
-    // `branch_has_forge_pr` is stored with source=ForgePr,
-    // target=Branch in production (see `discovery::forge::github`)
-    // and in the in-memory `preferred_pr_for_session`. Despite the
-    // relation name reading "branch has forge pr", the link points
-    // PR → branch, so we JOIN to `node_forge_prs` via `cl.source`
-    // and pull branch keys from `cl.target_node`.
-    let mut stmt = conn.prepare(
-        "SELECT cl.link_id, cl.provenance, cl.confidence, \
-                pr.owner, pr.repo, pr.number, pr.state, pr.is_draft, \
-                json_extract(cl.target_node, '$.repo.common_dir') AS branch_repo, \
-                json_extract(cl.target_node, '$.refname') AS branch_refname \
-         FROM candidate_links cl \
-         JOIN node_forge_prs pr \
-           ON cl.source_kind = 'forge_pr' \
-           AND ('forge_pr:' || \
-                json_extract(cl.source, '$.provider') || ':' || \
-                json_extract(cl.source, '$.host') || '/' || \
-                json_extract(cl.source, '$.owner') || '/' || \
-                json_extract(cl.source, '$.repo') || '#' || \
-                json_extract(cl.source, '$.number')) = pr.node_id \
-         WHERE cl.relation = 'branch_has_forge_pr' \
-           AND cl.state = 'active' \
-         ORDER BY branch_repo, branch_refname",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)] // link_id is read via the pick_strongest tiebreak accessor
-    struct Raw {
-        link_id: String,
-        provenance: String,
-        confidence: String,
-        owner: String,
-        repo: String,
-        number: i64,
-        state: Option<String>,
-        is_draft: i64,
-        branch_repo: String,
-        branch_refname: String,
-    }
-    let rows = stmt.query_map([], |row| {
-        Ok(Raw {
-            link_id: row.get(0)?,
-            provenance: row.get(1)?,
-            confidence: row.get(2)?,
-            owner: row.get(3)?,
-            repo: row.get(4)?,
-            number: row.get(5)?,
-            state: row.get(6)?,
-            is_draft: row.get(7)?,
-            branch_repo: row.get(8)?,
-            branch_refname: row.get(9)?,
+/// Global preferred PR. Mirrors `preferred_pr_for_session`'s
+/// intentionally loose behavior: find the first preferred
+/// `branch_has_forge_pr` candidate (BTreeMap-by-branch order)
+/// and use its source PR. Production discovery emits these with
+/// source=ForgePr, target=Branch.
+fn collect_global_pr(snapshot: &GraphSnapshot) -> Option<PrInfo> {
+    let pr_lookup: HashMap<NodeId, &ForgePrNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::ForgePr(pr) => Some((NodeId::ForgePr(pr.id.clone()), pr)),
+            _ => None,
         })
-    })?;
-    let all: Vec<Raw> = rows.collect::<rusqlite::Result<_>>()?;
-    if all.is_empty() {
-        return Ok(None);
-    }
-    // Group by branch (matches the in-memory walk's per-source
-    // grouping in `by_source_relation`); the FIRST branch's preferred
-    // candidate wins (BTreeMap iteration order in the in-memory
-    // version, source-column lex order here).
-    let mut by_branch: BTreeMap<(String, String), Vec<Raw>> = BTreeMap::new();
-    for raw in all {
-        by_branch
-            .entry((raw.branch_repo.clone(), raw.branch_refname.clone()))
-            .or_default()
-            .push(raw);
-    }
-    let (_, first_branch_candidates) = by_branch.into_iter().next().expect("non-empty");
-    let candidate_count = first_branch_candidates.len();
-    let best = pick_strongest(first_branch_candidates, |r: &Raw| {
-        (&r.provenance, &r.confidence, &r.link_id)
-    })
-    .expect("group non-empty");
-    Ok(Some(PrInfo {
-        owner: best.owner,
-        repo: best.repo,
-        number: best.number,
-        state: best.state,
-        is_draft: best.is_draft != 0,
-        provenance: best.provenance,
-        confidence: best.confidence,
-        candidate_count,
-    }))
-}
-
-/// Active `parent_session` candidate links from each agent session.
-/// Builds the `label` + `has_grandparent` flag that the `lineage`
-/// cell formats.
-fn fetch_lineage_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, LineageInfo>> {
-    // Pull every active parent_session candidate; we'll pick preferred
-    // per source and look up grandparents in a second pass.
-    let mut stmt = conn.prepare(
-        "SELECT json_extract(cl.source, '$.harness_key') AS h, \
-                json_extract(cl.source, '$.state_scope') AS s, \
-                json_extract(cl.source, '$.session_key') AS k, \
-                cl.link_id, cl.provenance, cl.confidence, \
-                cl.target_kind, cl.target_node_kind, \
-                cl.target_node, cl.target_native_id \
-         FROM candidate_links cl \
-         WHERE cl.source_kind = 'agent_session' \
-           AND cl.relation = 'parent_session' \
-           AND cl.state = 'active'",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)] // link_id is read via the pick_strongest tiebreak accessor
-    struct Raw {
-        link_id: String,
-        provenance: String,
-        confidence: String,
-        target_kind: String,
-        target_node_kind: Option<String>,
-        target_node: Option<String>,
-        target_native_id: Option<String>,
-    }
-    let mut per_session: HashMap<SessionKey, Vec<Raw>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let h: String = row.get(0)?;
-        let s: String = row.get(1)?;
-        let k: String = row.get(2)?;
-        Ok((
-            session_key(&h, &s, &k),
-            Raw {
-                link_id: row.get(3)?,
-                provenance: row.get(4)?,
-                confidence: row.get(5)?,
-                target_kind: row.get(6)?,
-                target_node_kind: row.get(7)?,
-                target_node: row.get(8)?,
-                target_native_id: row.get(9)?,
-            },
-        ))
-    })?;
-    for entry in rows {
-        let (key, raw) = entry?;
-        per_session.entry(key).or_default().push(raw);
-    }
-
-    // First pass: pick preferred per source, capture the parent's
-    // SessionKey when the target is a known agent_session.
-    fn parent_key_of(raw: &Raw) -> Option<SessionKey> {
-        if raw.target_kind != "node" || raw.target_node_kind.as_deref() != Some("agent_session") {
-            return None;
+        .collect();
+    // Group active branch_has_forge_pr links by target branch
+    // key. Take the first branch's candidates (BTreeMap order on
+    // (repo_common_dir, refname)).
+    let mut by_branch: BTreeMap<(String, String), Vec<&GraphLink>> = BTreeMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
         }
-        let value: serde_json::Value = serde_json::from_str(raw.target_node.as_deref()?).ok()?;
-        Some(session_key(
-            value.get("harness_key")?.as_str()?,
-            value.get("state_scope")?.as_str()?,
-            value.get("session_key")?.as_str()?,
-        ))
-    }
-    let mut preferred: HashMap<SessionKey, (Raw, Option<SessionKey>)> = HashMap::new();
-    for (key, candidates) in per_session {
-        let Some(best) = pick_strongest(candidates, |r| (&r.provenance, &r.confidence, &r.link_id))
+        if !matches!(link.relation, RelationKind::BranchHasForgePr) {
+            continue;
+        }
+        let NodeId::ForgePr(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: NodeId::Branch(branch_id),
+        } = &link.target
         else {
             continue;
         };
-        let parent_key = parent_key_of(&best);
-        preferred.insert(key, (best, parent_key));
+        by_branch
+            .entry((branch_id.repo.common_dir.clone(), branch_id.refname.clone()))
+            .or_default()
+            .push(link);
+    }
+    let (_, first_branch_candidates) = by_branch.into_iter().next()?;
+    let candidate_count = first_branch_candidates.len();
+    let best = pick_preferred(&first_branch_candidates)?;
+    let NodeId::ForgePr(_) = &best.source else {
+        return None;
+    };
+    let pr = pr_lookup.get(&best.source)?;
+    Some(PrInfo {
+        owner: pr.owner.clone(),
+        repo: pr.repo.clone(),
+        number: pr.number,
+        state: pr.state.clone(),
+        is_draft: pr.is_draft,
+        provenance: best.provenance.snake_case().to_string(),
+        confidence: best.confidence.snake_case().to_string(),
+        candidate_count,
+    })
+}
+
+/// Per-session lineage info: `label` from the preferred
+/// `parent_session` candidate, plus `has_grandparent` when the
+/// parent itself has a preferred `parent_session`.
+fn collect_lineage_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, LineageInfo> {
+    // First pass: pick preferred parent_session per source agent.
+    let mut per_session: HashMap<NodeId, Vec<&GraphLink>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::ParentSession) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        per_session
+            .entry(link.source.clone())
+            .or_default()
+            .push(link);
+    }
+    // For each source, identify the preferred candidate and the
+    // target's session key (when the target is a known
+    // agent_session).
+    let mut preferred: HashMap<SessionKey, (&GraphLink, Option<SessionKey>)> = HashMap::new();
+    for (source, candidates) in &per_session {
+        let NodeId::AgentSession(source_id) = source else {
+            continue;
+        };
+        let Some(best) = pick_preferred(candidates) else {
+            continue;
+        };
+        let parent_key = match &best.target {
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent_id),
+            } => Some(session_key_of(parent_id)),
+            _ => None,
+        };
+        preferred.insert(session_key_of(source_id), (best, parent_key));
     }
 
-    // Second pass: which preferred parents themselves have a
-    // preferred parent? That's the `←` flag.
     let mut out = HashMap::new();
-    for (key, (raw, parent_key)) in &preferred {
-        let label = match raw.target_kind.as_str() {
-            "node" if raw.target_node_kind.as_deref() == Some("agent_session") => parent_key
-                .as_ref()
-                .map(|(_, _, sk)| short_session_id(sk))
-                .unwrap_or_else(|| "?".to_string()),
-            "node" => {
-                // Resolved target but not an agent_session — the
-                // in-memory renderer returns `—` in this case (the
-                // `_ => return` fallthrough).
-                continue;
-            }
-            "unresolved" => raw
-                .target_native_id
+    for (key, (link, parent_key)) in &preferred {
+        let label = match &link.target {
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent_id),
+            } => short_session_id(&parent_id.session_key),
+            LinkEndpoint::Node { .. } => continue,
+            LinkEndpoint::Unresolved { evidence } => evidence
+                .native_id
                 .as_deref()
                 .map(|native| format!("?{}", short_session_id(native)))
                 .unwrap_or_else(|| "?".to_string()),
-            _ => continue,
         };
         let has_grandparent = parent_key
             .as_ref()
@@ -679,54 +557,114 @@ fn fetch_lineage_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKe
             },
         );
     }
-    Ok(out)
+    out
 }
 
-/// Resolved `associated_with` relationships whose target is a
-/// workspace, mirroring `session_workspace_identifier`. For each
-/// workspace, if the resolver picked ≥2 distinct `workspace_contains_repo`
-/// members, the display becomes a `+`-joined list of member names
-/// (basename of each member link's `logical_path`); otherwise the
-/// workspace root is used. Multiple workspaces per session join with
-/// commas.
-fn fetch_workspace_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, String>> {
-    let mut stmt = conn.prepare(
-        "SELECT json_extract(r.source, '$.harness_key') AS h, \
-                json_extract(r.source, '$.state_scope') AS s, \
-                json_extract(r.source, '$.session_key') AS k, \
-                r.target AS workspace_node, \
-                json_extract(r.target, '$.root') AS workspace_root \
-         FROM resolved_relationships r \
-         WHERE r.source_kind = 'agent_session' \
-           AND r.target_kind = 'workspace' \
-           AND r.relation = 'associated_with' \
-         ORDER BY workspace_root",
-    )?;
-    let mut per_session: HashMap<SessionKey, Vec<(String, String)>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let h: String = row.get(0)?;
-        let s: String = row.get(1)?;
-        let k: String = row.get(2)?;
-        let workspace_node: String = row.get(3)?;
-        let workspace_root: String = row.get(4)?;
-        Ok((session_key(&h, &s, &k), workspace_node, workspace_root))
-    })?;
-    for entry in rows {
-        let (key, ws_node, ws_root) = entry?;
-        per_session.entry(key).or_default().push((ws_node, ws_root));
+/// Per-session workspace label. Reads
+/// `resolved_relationships(associated_with, agent_session ->
+/// workspace)`. When the workspace has ≥2 selected
+/// `workspace_contains_repo` members, the label is `+`-joined
+/// basenames; otherwise the workspace root.
+fn collect_workspace_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, String> {
+    let workspace_lookup: HashMap<NodeId, &WorkspaceNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Workspace(workspace) => {
+                Some((NodeId::Workspace(workspace.id.clone()), workspace))
+            }
+            _ => None,
+        })
+        .collect();
+    let link_by_id: HashMap<&str, &GraphLink> = snapshot
+        .candidate_links
+        .iter()
+        .map(|link| (link.id.as_str(), link))
+        .collect();
+    // Per workspace: list of basenames extracted from each
+    // selected workspace_contains_repo link's source_metadata
+    // logical_path field.
+    let mut members: HashMap<NodeId, Vec<String>> = HashMap::new();
+    let mut sorted_resolved: Vec<&crate::model::ResolvedRelationship> = snapshot
+        .resolved_relationships
+        .iter()
+        .filter(|r| matches!(r.relation, RelationKind::WorkspaceContainsRepo))
+        .filter(|r| matches!(r.source, NodeId::Workspace(_)))
+        .filter(|r| r.selected_link_id.is_some())
+        .collect();
+    sorted_resolved.sort_by(|a, b| {
+        a.source
+            .to_string()
+            .cmp(&b.source.to_string())
+            .then_with(|| a.target.to_string().cmp(&b.target.to_string()))
+    });
+    for resolved in sorted_resolved {
+        let Some(link_id) = resolved.selected_link_id.as_deref() else {
+            continue;
+        };
+        let Some(link) = link_by_id.get(link_id) else {
+            continue;
+        };
+        if let Some(display) = link
+            .source_metadata
+            .fields
+            .get("logical_path")
+            .and_then(|v| v.as_str())
+            .and_then(|p| {
+                Path::new(p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+            })
+        {
+            members
+                .entry(resolved.source.clone())
+                .or_default()
+                .push(display);
+        }
+    }
+    for displays in members.values_mut() {
+        displays.sort();
+        displays.dedup();
     }
 
-    let members = fetch_workspace_member_displays(conn)?;
-
+    // Per session: each `associated_with` resolved relationship
+    // pointing to a workspace contributes one entry. Multi-entry
+    // sessions render as comma-joined; per-workspace display is
+    // members.join('+') when ≥2, else workspace.root. The
+    // workspace's root is read from the WorkspaceNode when one
+    // exists (mirroring the SQL JOIN onto node_workspaces); when
+    // it doesn't, fall back to the WorkspaceId's structural
+    // `root` (the JSON-encoded `$.root` the SQL query
+    // alternatively read via json_extract).
+    let mut per_session: HashMap<SessionKey, Vec<(NodeId, String)>> = HashMap::new();
+    for resolved in &snapshot.resolved_relationships {
+        if !matches!(resolved.relation, RelationKind::AssociatedWith) {
+            continue;
+        }
+        let NodeId::AgentSession(source_id) = &resolved.source else {
+            continue;
+        };
+        let NodeId::Workspace(workspace_id) = &resolved.target else {
+            continue;
+        };
+        let root = workspace_lookup
+            .get(&resolved.target)
+            .map(|w| w.root.clone())
+            .unwrap_or_else(|| workspace_id.root.clone());
+        per_session
+            .entry(session_key_of(source_id))
+            .or_default()
+            .push((resolved.target.clone(), root));
+    }
     let mut out = HashMap::new();
-    for (key, mut workspaces) in per_session {
-        workspaces.sort();
-        workspaces.dedup();
-        let displays: Vec<String> = workspaces
+    for (key, mut entries) in per_session {
+        entries.sort_by(|a, b| a.1.cmp(&b.1));
+        entries.dedup();
+        let displays: Vec<String> = entries
             .into_iter()
-            .map(|(ws_node, ws_root)| {
+            .map(|(ws_id, ws_root)| {
                 members
-                    .get(&ws_node)
+                    .get(&ws_id)
                     .filter(|names| names.len() >= 2)
                     .map(|names| names.join("+"))
                     .unwrap_or(ws_root)
@@ -734,157 +672,94 @@ fn fetch_workspace_lookup(conn: &Connection) -> rusqlite::Result<HashMap<Session
             .collect();
         out.insert(key, displays.join(","));
     }
-    Ok(out)
+    out
 }
 
-/// Index workspace member display names by workspace NodeId JSON.
-/// Reads the resolver's chosen `workspace_contains_repo` selections
-/// and extracts the basename of each link's `logical_path` source
-/// field — atelier's `repo.name` directory and generic workspace
-/// symlink/dir children both surface that way. Members without a
-/// `logical_path` (no provider sets that today, but defensive) are
-/// skipped silently; the threshold check in the caller treats a
-/// short list as "single-repo workspace" and falls back to the
-/// root path.
-fn fetch_workspace_member_displays(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, Vec<String>>> {
-    let mut stmt = conn.prepare(
-        "SELECT r.source AS workspace_node, cl.source_fields \
-         FROM resolved_relationships r \
-         JOIN candidate_links cl ON cl.link_id = r.selected_link_id \
-         WHERE r.relation = 'workspace_contains_repo' \
-           AND r.source_kind = 'workspace' \
-         ORDER BY r.source, r.target",
-    )?;
-    let mut per_workspace: HashMap<String, Vec<String>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let ws_node: String = row.get(0)?;
-        let source_fields: String = row.get(1)?;
-        Ok((ws_node, source_fields))
-    })?;
-    for entry in rows {
-        let (ws_node, source_fields_json) = entry?;
-        if let Some(display) = repo_display_from_fields(&source_fields_json) {
-            per_workspace.entry(ws_node).or_default().push(display);
-        }
-    }
-    for displays in per_workspace.values_mut() {
-        displays.sort();
-        displays.dedup();
-    }
-    Ok(per_workspace)
-}
-
-fn repo_display_from_fields(json: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(json).ok()?;
-    let logical_path = value.get("logical_path")?.as_str()?;
-    std::path::Path::new(logical_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-}
-
-/// Active `child_session` candidate links from forks to agent
-/// sessions; resolves the fork's display label and keys by target
-/// session. Mirrors `session_owning_fork_label`.
-fn fetch_fork_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, ForkInfo>> {
-    // Same Display-form JOIN pattern: `ForkId.provider_source_key`
-    // (in the JSON) may differ from the structural `ForkNode.
-    // provider_source_key` column on `node_forks`, so we
-    // reconstruct `fork:<psk>` and compare against `f.node_id`.
-    let mut stmt = conn.prepare(
-        "SELECT json_extract(cl.target_node, '$.harness_key') AS h, \
-                json_extract(cl.target_node, '$.state_scope') AS s, \
-                json_extract(cl.target_node, '$.session_key') AS k, \
-                f.provider_name, f.name, f.provider_source_key, \
-                cl.link_id \
-         FROM candidate_links cl \
-         JOIN node_forks f \
-           ON cl.source_kind = 'fork' \
-           AND ('fork:' || json_extract(cl.source, '$.provider_source_key')) = f.node_id \
-         WHERE cl.target_node_kind = 'agent_session' \
-           AND cl.relation = 'child_session' \
-           AND cl.state = 'active' \
-         ORDER BY cl.link_id",
-    )?;
+/// Per-session fork label from `child_session` candidates whose
+/// source is a fork and target is the agent. First-wins.
+fn collect_fork_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, ForkInfo> {
+    let fork_lookup: HashMap<NodeId, &ForkNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Fork(fork) => Some((NodeId::Fork(fork.id.clone()), fork)),
+            _ => None,
+        })
+        .collect();
+    let mut sorted_links: Vec<&GraphLink> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| matches!(link.relation, RelationKind::ChildSession))
+        .filter(|link| matches!(link.source, NodeId::Fork(_)))
+        .filter(|link| {
+            matches!(
+                link.target,
+                LinkEndpoint::Node {
+                    id: NodeId::AgentSession(_)
+                }
+            )
+        })
+        .collect();
+    sorted_links.sort_by(|a, b| a.id.cmp(&b.id));
     let mut out: HashMap<SessionKey, ForkInfo> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let h: String = row.get(0)?;
-        let s: String = row.get(1)?;
-        let k: String = row.get(2)?;
-        let provider: String = row.get(3)?;
-        let name: Option<String> = row.get(4)?;
-        let psk: String = row.get(5)?;
-        let display = name.unwrap_or(psk);
-        Ok((
-            session_key(&h, &s, &k),
-            ForkInfo {
-                label: format!("{provider}:{display}"),
-            },
-        ))
-    })?;
-    for entry in rows {
-        let (key, info) = entry?;
-        // First-wins matches the in-memory iteration's early return.
-        out.entry(key).or_insert(info);
+    for link in sorted_links {
+        let Some(fork) = fork_lookup.get(&link.source) else {
+            continue;
+        };
+        let LinkEndpoint::Node {
+            id: NodeId::AgentSession(target_id),
+        } = &link.target
+        else {
+            continue;
+        };
+        let display = fork
+            .name
+            .clone()
+            .unwrap_or_else(|| fork.provider_source_key.clone());
+        let info = ForkInfo {
+            label: format!("{}:{}", fork.provider, display),
+        };
+        // First-wins.
+        out.entry(session_key_of(target_id)).or_insert(info);
     }
-    Ok(out)
+    out
 }
 
-/// Strongest LocalDeclared or GlobalDeclared candidate per agent
-/// session; surfaces its `LinkState` as a `"declared"`/`"ignored"`/
-/// `"overridden"` label per the in-memory `session_declared_state`.
-fn fetch_declared_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, DeclaredInfo>> {
-    let mut stmt = conn.prepare(
-        "SELECT json_extract(cl.source, '$.harness_key') AS h, \
-                json_extract(cl.source, '$.state_scope') AS s, \
-                json_extract(cl.source, '$.session_key') AS k, \
-                cl.link_id, cl.provenance, cl.state \
-         FROM candidate_links cl \
-         WHERE cl.source_kind = 'agent_session' \
-           AND cl.provenance IN ('local_declared', 'global_declared')",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)] // link_id is materialized even though declared selection ignores it
-    struct Raw {
-        link_id: String,
-        provenance: String,
-        state: String,
-    }
-    let mut per_session: HashMap<SessionKey, Vec<Raw>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let h: String = row.get(0)?;
-        let s: String = row.get(1)?;
-        let k: String = row.get(2)?;
-        Ok((
-            session_key(&h, &s, &k),
-            Raw {
-                link_id: row.get(3)?,
-                provenance: row.get(4)?,
-                state: row.get(5)?,
-            },
-        ))
-    })?;
-    for entry in rows {
-        let (key, raw) = entry?;
-        per_session.entry(key).or_default().push(raw);
+/// Strongest LocalDeclared / GlobalDeclared candidate per agent
+/// session; surfaces its `LinkState` as a label.
+fn collect_declared_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, DeclaredInfo> {
+    let mut per_session: HashMap<SessionKey, Vec<&GraphLink>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        let NodeId::AgentSession(source_id) = &link.source else {
+            continue;
+        };
+        if !matches!(
+            link.provenance,
+            Provenance::LocalDeclared | Provenance::GlobalDeclared
+        ) {
+            continue;
+        }
+        per_session
+            .entry(session_key_of(source_id))
+            .or_default()
+            .push(link);
     }
     let mut out = HashMap::new();
     for (key, candidates) in per_session {
-        // The in-memory version ranks by provenance precedence only
-        // (`local_declared` beats `global_declared`), with no
-        // confidence/id tiebreak. Replicate.
-        let Some(best) = candidates.into_iter().max_by(|a, b| {
-            render::provenance_precedence(&a.provenance)
-                .cmp(&render::provenance_precedence(&b.provenance))
-        }) else {
+        // Rank by provenance precedence only (matches the
+        // pre-P11-011b SQL renderer, which used no
+        // confidence/id tiebreak for declared selection).
+        let Some(best) = candidates
+            .into_iter()
+            .max_by(|a, b| a.provenance.precedence().cmp(&b.provenance.precedence()))
+        else {
             continue;
         };
-        let label = match best.state.as_str() {
-            "active" => "declared",
-            "ignored" => "ignored",
-            "overridden" => "overridden",
-            _ => continue,
+        let label = match &best.state {
+            LinkState::Active => "declared",
+            LinkState::Ignored { .. } => "ignored",
+            LinkState::Overridden { .. } => "overridden",
         };
         out.insert(
             key,
@@ -893,25 +768,5 @@ fn fetch_declared_lookup(conn: &Connection) -> rusqlite::Result<HashMap<SessionK
             },
         );
     }
-    Ok(out)
-}
-
-// -----------------------------------------------------------------------------
-// Public re-routing
-// -----------------------------------------------------------------------------
-
-/// Convenience wrapper used by `output::table::render_with` for
-/// [`Projection::Agent`]: materializes the snapshot to an in-memory
-/// SQLite connection, runs [`build_agent_rows_from_conn`], and
-/// hands the rows back. The materialization step is the bridge until
-/// P10-014 demotes `GraphSnapshot` from the public render surface.
-pub fn build_agent_rows_from_snapshot(
-    snapshot: &crate::model::GraphSnapshot,
-    columns: &[&'static str],
-    options: &RenderOptions,
-) -> Vec<Vec<String>> {
-    let conn = crate::query::materialize_snapshot(snapshot)
-        .expect("materialize GraphSnapshot to in-memory SQLite for agent projection");
-    build_agent_rows_from_conn(&conn, columns, options)
-        .expect("SQLite-backed agent projection should not fail against a freshly loaded snapshot")
+    out
 }

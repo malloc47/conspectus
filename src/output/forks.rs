@@ -1,67 +1,56 @@
-//! SQLite-backed forks projection renderer (P10-008 / ADR 0043).
+//! In-memory forks projection renderer (P11-011b / ADR 0082).
 //!
-//! Replaces the in-memory `build_fork_rows` path for
-//! [`Projection::Fork`]. Emits one row per `fork` node.
-//!
-//! Query strategy:
-//!
-//! - Primary query against `node_forks`, ordered by `node_id`.
-//! - Side-lookup for the `parent` cell: pick_strongest over
-//!   `parent_session` candidates whose source is the fork, then
-//!   render either the parent agent session's session_key (short
-//!   form) or `?<native_id>` when the candidate target is
-//!   unresolved.
-//! - Side-lookup for the `children` cell: count active
-//!   `child_session` candidates whose source is the fork and whose
-//!   target is either an `agent_session` node or an unresolved
-//!   endpoint (matching the in-memory `fork_child_session_count`).
+//! Emits one row per `fork` node. Iterates `snapshot.nodes`
+//! and `snapshot.candidate_links` directly — no SQLite
+//! materialization. The cell-level output shape matches the
+//! pre-P11-011b SQLite-backed renderer byte-for-byte so the
+//! existing `output::table` snapshot tests stay green.
 
 use std::collections::HashMap;
 
-use rusqlite::Connection;
-
 use super::render::{
-    FORKS_COLUMNS, RenderOptions, header_label, node_short_id_from_display, pick_strongest,
-    unique_prefix_len,
+    FORKS_COLUMNS, RenderOptions, header_label, node_short_id_from_display, unique_prefix_len,
 };
 use super::table::short_session_id;
 use crate::filter::{MuxStateKey, SessionMatchInputs};
+use crate::model::{
+    ForkNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, NodeId, RelationKind,
+    pick_preferred,
+};
 
 #[derive(Debug, Clone)]
-struct ForkRow {
+struct ForkRow<'a> {
     /// Display-form `NodeId` of the fork — keys the parent and
     /// children lookups and feeds the short id hash.
     node_id_display: String,
-    /// Structural `ForkNode.provider_source_key` (NOT the ID's
-    /// psk; the two can diverge). Used by `fork_label` as the
-    /// fallback when `name` is `None`, mirroring the in-memory
-    /// renderer which reads `fork.provider_source_key`.
-    structural_provider_source_key: String,
-    provider: String,
-    name: Option<String>,
-    scope: Option<String>,
-    capabilities_json: String,
+    node: &'a ForkNode,
 }
 
 #[derive(Debug, Clone)]
 struct ParentInfo {
-    /// Pre-formatted label as it should appear in the `parent`
-    /// cell (e.g. `abc123` or `?native-id-short`).
     label: String,
+}
+
+#[derive(Debug, Clone)]
+struct ChildAgent {
+    /// Display-form `NodeId` of the child agent.
+    node_id: String,
+    harness_key: String,
+    last_active_epoch: Option<i64>,
 }
 
 // -----------------------------------------------------------------------------
 // Entry point
 // -----------------------------------------------------------------------------
 
-pub fn build_fork_rows_from_conn(
-    conn: &Connection,
+pub fn build_fork_rows_from_snapshot(
+    snapshot: &GraphSnapshot,
     columns: &[&'static str],
     options: &RenderOptions,
-) -> rusqlite::Result<Vec<Vec<String>>> {
-    let forks = fetch_fork_rows(conn)?;
-    let parents = fetch_parent_session_per_fork(conn)?;
-    let child_counts = fetch_child_session_counts_per_fork(conn)?;
+) -> Vec<Vec<String>> {
+    let forks = collect_fork_rows(snapshot);
+    let parents = collect_parent_session_per_fork(snapshot);
+    let child_counts = collect_child_session_counts_per_fork(snapshot);
 
     let body_full_ids: Vec<String> = forks
         .iter()
@@ -78,17 +67,17 @@ pub fn build_fork_rows_from_conn(
     );
 
     let filter_active = options.filter.has_narrowing_predicates();
-    // Resolved child-agent metadata is only needed when filter is
-    // active — without a narrowing predicate the fork row keeps the
-    // total `children` count (which includes unresolved-target
-    // candidates) and never drops.
+    // Resolved child-agent metadata is only needed when filter
+    // is active — without a narrowing predicate the fork row
+    // keeps the total `children` count (which includes
+    // unresolved-target candidates) and never drops.
     let resolved_children = if filter_active {
-        Some(fetch_resolved_child_agents_per_fork(conn)?)
+        Some(collect_resolved_child_agents_per_fork(snapshot))
     } else {
         None
     };
     let candidate_counts = if filter_active {
-        Some(fetch_agent_mux_candidate_counts(conn)?)
+        Some(collect_agent_mux_candidate_counts(snapshot))
     } else {
         None
     };
@@ -122,11 +111,11 @@ pub fn build_fork_rows_from_conn(
         rows.push(columns.iter().map(|key| cell(key, &ctx)).collect());
     }
 
-    Ok(rows)
+    rows
 }
 
 fn visible_child_count(
-    fork: &ForkRow,
+    fork: &ForkRow<'_>,
     resolved: &HashMap<String, Vec<ChildAgent>>,
     candidate_counts: &HashMap<String, usize>,
     options: &RenderOptions,
@@ -148,15 +137,8 @@ fn visible_child_count(
         .count()
 }
 
-#[derive(Debug, Clone)]
-struct ChildAgent {
-    node_id: String,
-    harness_key: String,
-    last_active_epoch: Option<i64>,
-}
-
 struct CellCtx<'a> {
-    row: &'a ForkRow,
+    row: &'a ForkRow<'a>,
     short_id: &'a str,
     parent: Option<&'a ParentInfo>,
     child_count: usize,
@@ -166,12 +148,12 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
     let dash = || "—".to_string();
     match key {
         "id" => ctx.short_id.to_string(),
-        "fork" => match &ctx.row.name {
-            Some(name) => format!("{}:{}", ctx.row.provider, name),
-            None => ctx.row.structural_provider_source_key.clone(),
+        "fork" => match &ctx.row.node.name {
+            Some(name) => format!("{}:{}", ctx.row.node.provider, name),
+            None => ctx.row.node.provider_source_key.clone(),
         },
-        "provider" => ctx.row.provider.clone(),
-        "scope" => ctx.row.scope.clone().unwrap_or_else(dash),
+        "provider" => ctx.row.node.provider.clone(),
+        "scope" => ctx.row.node.scope.clone().unwrap_or_else(dash),
         "parent" => ctx.parent.map(|p| p.label.clone()).unwrap_or_else(dash),
         "children" => {
             if ctx.child_count == 0 {
@@ -181,118 +163,64 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             }
         }
         "capabilities" => {
-            let caps: Vec<String> =
-                serde_json::from_str(&ctx.row.capabilities_json).unwrap_or_default();
-            if caps.is_empty() {
+            if ctx.row.node.capabilities.is_empty() {
                 dash()
             } else {
-                caps.join(", ")
+                ctx.row.node.capabilities.join(", ")
             }
         }
         _ => dash(),
     }
 }
 
-pub fn build_fork_rows_from_snapshot(
-    snapshot: &crate::model::GraphSnapshot,
-    columns: &[&'static str],
-    options: &RenderOptions,
-) -> Vec<Vec<String>> {
-    let conn = crate::query::materialize_snapshot(snapshot)
-        .expect("materialize GraphSnapshot to in-memory SQLite for forks projection");
-    build_fork_rows_from_conn(&conn, columns, options)
-        .expect("SQLite-backed forks projection should not fail against a freshly loaded snapshot")
-}
-
 // -----------------------------------------------------------------------------
-// Queries
+// In-memory collectors (replace the prior SQL fetches)
 // -----------------------------------------------------------------------------
 
-fn fetch_fork_rows(conn: &Connection) -> rusqlite::Result<Vec<ForkRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT node_id, provider_source_key, provider_name, name, scope, capabilities \
-         FROM node_forks \
-         ORDER BY node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(ForkRow {
-            node_id_display: row.get(0)?,
-            structural_provider_source_key: row.get(1)?,
-            provider: row.get(2)?,
-            name: row.get(3)?,
-            scope: row.get(4)?,
-            capabilities_json: row.get(5)?,
+fn collect_fork_rows(snapshot: &GraphSnapshot) -> Vec<ForkRow<'_>> {
+    let mut rows: Vec<ForkRow<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::Fork(fork) => Some(ForkRow {
+                node_id_display: NodeId::Fork(fork.id.clone()).to_string(),
+                node: fork,
+            }),
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+    rows.sort_by(|a, b| a.node_id_display.cmp(&b.node_id_display));
+    rows
 }
 
 /// Per-fork preferred `parent_session` candidate's rendered label.
-/// Mirrors `fork_parent_session_label` — resolved agent_session
-/// targets render as the short session_key; unresolved targets
-/// render as `?<short native_id>`; anything else yields no entry.
-fn fetch_parent_session_per_fork(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, ParentInfo>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
-                cl.link_id, cl.provenance, cl.confidence, \
-                cl.target_kind, cl.target_node_kind, \
-                cl.target_node, cl.target_native_id \
-         FROM candidate_links cl \
-         WHERE cl.source_kind = 'fork' \
-           AND cl.relation = 'parent_session' \
-           AND cl.state = 'active'",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)] // link_id is read via pick_strongest's tiebreak accessor
-    struct Raw {
-        fork_node_id: String,
-        link_id: String,
-        provenance: String,
-        confidence: String,
-        target_kind: String,
-        target_node_kind: Option<String>,
-        target_node: Option<String>,
-        target_native_id: Option<String>,
-    }
-    let mut per_fork: HashMap<String, Vec<Raw>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        Ok(Raw {
-            fork_node_id: row.get(0)?,
-            link_id: row.get(1)?,
-            provenance: row.get(2)?,
-            confidence: row.get(3)?,
-            target_kind: row.get(4)?,
-            target_node_kind: row.get(5)?,
-            target_node: row.get(6)?,
-            target_native_id: row.get(7)?,
-        })
-    })?;
-    for entry in rows {
-        let raw = entry?;
+/// Mirrors the SQL `fork_parent_session_label` behavior: resolved
+/// agent_session targets render as the short session_key;
+/// unresolved targets render as `?<short native_id>`; anything
+/// else yields no entry.
+fn collect_parent_session_per_fork(snapshot: &GraphSnapshot) -> HashMap<String, ParentInfo> {
+    let mut per_fork: HashMap<String, Vec<&GraphLink>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !is_active_fork_link(link, RelationKind::ParentSession) {
+            continue;
+        }
         per_fork
-            .entry(raw.fork_node_id.clone())
+            .entry(link.source.to_string())
             .or_default()
-            .push(raw);
+            .push(link);
     }
     let mut out = HashMap::new();
-    for (fork_node_id, candidates) in per_fork {
-        let Some(best) = pick_strongest(candidates, |r: &Raw| {
-            (&r.provenance, &r.confidence, &r.link_id)
-        }) else {
+    for (fork_id, candidates) in per_fork {
+        let Some(best) = pick_preferred(&candidates) else {
             continue;
         };
-        let agent_label = || -> Option<String> {
-            let target_json = best.target_node.as_deref()?;
-            let v: serde_json::Value = serde_json::from_str(target_json).ok()?;
-            let sk = v.get("session_key").and_then(|x| x.as_str())?;
-            Some(short_session_id(sk))
-        };
-        let label = match best.target_kind.as_str() {
-            "node" if best.target_node_kind.as_deref() == Some("agent_session") => agent_label(),
-            "unresolved" => Some(
-                best.target_native_id
+        let label = match &best.target {
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(agent_id),
+            } => Some(short_session_id(&agent_id.session_key)),
+            LinkEndpoint::Unresolved { evidence } => Some(
+                evidence
+                    .native_id
                     .as_deref()
                     .map(|native| format!("?{}", short_session_id(native)))
                     .unwrap_or_else(|| "?".to_string()),
@@ -300,108 +228,113 @@ fn fetch_parent_session_per_fork(
             _ => None,
         };
         if let Some(label) = label {
-            out.insert(fork_node_id, ParentInfo { label });
+            out.insert(fork_id, ParentInfo { label });
         }
     }
-    Ok(out)
+    out
 }
 
 /// Per-fork list of resolved child agent sessions — the subset of
 /// `child_session` candidates whose target is a known
-/// `agent_session` node. Used only when a `RowFilter` is active so
-/// the filter has a per-session row to evaluate; unresolved-target
-/// children are intentionally excluded (a `RowFilter`'s predicates
-/// all need session-level metadata that isn't available for those).
-fn fetch_resolved_child_agents_per_fork(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, Vec<ChildAgent>>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
-                a.node_id, a.harness_key, a.last_active_epoch \
-         FROM candidate_links cl \
-         JOIN node_agent_sessions a \
-           ON cl.target_node_kind = 'agent_session' \
-           AND ('agent_session:' || \
-                json_extract(cl.target_node, '$.harness_key') || ':' || \
-                json_extract(cl.target_node, '$.state_scope') || ':' || \
-                json_extract(cl.target_node, '$.session_key')) = a.node_id \
-         WHERE cl.source_kind = 'fork' \
-           AND cl.relation = 'child_session' \
-           AND cl.state = 'active' \
-         ORDER BY fork_node_id, a.node_id",
-    )?;
-    let mut out: HashMap<String, Vec<ChildAgent>> = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let fork_node_id: String = row.get(0)?;
-        Ok((
-            fork_node_id,
-            ChildAgent {
-                node_id: row.get(1)?,
-                harness_key: row.get(2)?,
-                last_active_epoch: row.get(3)?,
-            },
-        ))
-    })?;
-    for entry in rows {
-        let (fork_node_id, child) = entry?;
-        out.entry(fork_node_id).or_default().push(child);
+/// `agent_session` node. Used only when a `RowFilter` is active;
+/// unresolved-target children are intentionally excluded (a
+/// `RowFilter`'s predicates all need session-level metadata that
+/// isn't available for those).
+fn collect_resolved_child_agents_per_fork(
+    snapshot: &GraphSnapshot,
+) -> HashMap<String, Vec<ChildAgent>> {
+    let agent_lookup: HashMap<String, &crate::model::AgentSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) => {
+                Some((NodeId::AgentSession(agent.id.clone()).to_string(), agent))
+            }
+            _ => None,
+        })
+        .collect();
+    let mut per_fork: HashMap<String, Vec<ChildAgent>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !is_active_fork_link(link, RelationKind::ChildSession) {
+            continue;
+        }
+        let LinkEndpoint::Node {
+            id: target_id @ NodeId::AgentSession(_),
+        } = &link.target
+        else {
+            continue;
+        };
+        let target_display = target_id.to_string();
+        let Some(agent) = agent_lookup.get(&target_display) else {
+            continue;
+        };
+        per_fork
+            .entry(link.source.to_string())
+            .or_default()
+            .push(ChildAgent {
+                node_id: target_display,
+                harness_key: agent.harness_key.clone(),
+                last_active_epoch: agent.last_active_epoch,
+            });
     }
-    Ok(out)
+    for children in per_fork.values_mut() {
+        children.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+    }
+    per_fork
 }
 
-/// Per-agent count of distinct active `linked_to_mux` mux targets.
-/// Same shape as `output::prs::fetch_agent_mux_candidate_counts` —
-/// the two callers will collapse into a shared helper when a third
-/// surface arrives.
-fn fetch_agent_mux_candidate_counts(conn: &Connection) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('agent_session:' || json_extract(source, '$.harness_key') || ':' || \
-                 json_extract(source, '$.state_scope') || ':' || \
-                 json_extract(source, '$.session_key')) AS agent_node_id, \
-                COUNT(DISTINCT target_node) \
-         FROM candidate_links \
-         WHERE source_kind = 'agent_session' \
-           AND relation = 'linked_to_mux' \
-           AND state = 'active' \
-         GROUP BY source",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let count: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, count as usize))
-    })?;
-    let mut out = HashMap::new();
-    for entry in rows {
-        let (node_id, count) = entry?;
-        out.insert(node_id, count);
+/// Per-agent count of distinct active `linked_to_mux` mux
+/// targets. Mirrors the SQL helper of the same name; collapses
+/// links with `LinkEndpoint::Unresolved` targets out (the SQL
+/// `COUNT(DISTINCT target_node)` is over the JSON-encoded node
+/// id, which only existed for `LinkEndpoint::Node` rows).
+fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut per_agent: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.to_string())
+            .or_default()
+            .insert(target_id.to_string());
     }
-    Ok(out)
+    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }
 
 /// Per-fork count of active `child_session` candidates targeting
 /// an `agent_session` node OR an unresolved endpoint. Mirrors
 /// `fork_child_session_count`'s filter.
-fn fetch_child_session_counts_per_fork(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('fork:' || json_extract(cl.source, '$.provider_source_key')) AS fork_node_id, \
-                COUNT(*) AS cnt \
-         FROM candidate_links cl \
-         WHERE cl.source_kind = 'fork' \
-           AND cl.relation = 'child_session' \
-           AND cl.state = 'active' \
-           AND (cl.target_node_kind = 'agent_session' OR cl.target_kind = 'unresolved') \
-         GROUP BY fork_node_id",
-    )?;
-    let mut out = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let fork_node_id: String = row.get(0)?;
-        let cnt: i64 = row.get(1)?;
-        Ok((fork_node_id, cnt as usize))
-    })?;
-    for entry in rows {
-        let (k, v) = entry?;
-        out.insert(k, v);
+fn collect_child_session_counts_per_fork(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
+    let mut out: HashMap<String, usize> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !is_active_fork_link(link, RelationKind::ChildSession) {
+            continue;
+        }
+        let counts = matches!(
+            &link.target,
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(_)
+            } | LinkEndpoint::Unresolved { .. }
+        );
+        if counts {
+            *out.entry(link.source.to_string()).or_insert(0) += 1;
+        }
     }
-    Ok(out)
+    out
+}
+
+fn is_active_fork_link(link: &GraphLink, relation: RelationKind) -> bool {
+    matches!(link.state, LinkState::Active)
+        && link.relation == relation
+        && matches!(link.source, NodeId::Fork(_))
 }

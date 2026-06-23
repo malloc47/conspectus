@@ -1,81 +1,43 @@
-//! SQLite-backed mux projection renderer (P10-005 / ADR 0043).
-//!
-//! Replaces the in-memory `build_mux_rows` path for
-//! [`Projection::Mux`]. Reads everything from a
-//! [`rusqlite::Connection`] populated by the loader. Parity with the
-//! in-memory renderer is enforced by the existing `output::table`
-//! snapshot test corpus.
-//!
-//! Query strategy:
-//!
-//! - Primary query: `SELECT … FROM node_mux_sessions ORDER BY node_id`
-//!   — drives row iteration.
-//! - Side-lookups for the `agents` / `preview` / `attached-count`
-//!   cells: fetch every active `linked_to_mux` candidate whose
-//!   source agent session is present in `node_agent_sessions`,
-//!   group by mux `node_id` in Rust, and remember each attached
-//!   agent's label, provenance/confidence, and `last_message_preview`.
-//! - Side-lookup for the per-agent ambiguity count that feeds the
-//!   `*` marker in the per-attachment indicator: count distinct
-//!   active mux targets per source session.
-//!
-//! All JOINs to typed `node_<kind>` tables go through Display-form
-//! reconstruction from the endpoint JSON (`'mux_session:' || …`)
-//! and compare against `node_<kind>.node_id`, for the reason
-//! captured in `output::agent`'s module doc.
+//! In-memory mux projection renderer (P11-011b / ADR 0082).
 
-use std::collections::HashMap;
-
-use rusqlite::Connection;
+use std::collections::{HashMap, HashSet};
 
 use super::render::{
     self, MUX_COLUMNS, RenderOptions, current_epoch, format_relative_age, header_label,
-    node_short_id_from_display, pick_strongest, unique_prefix_len,
+    node_short_id_from_display, unique_prefix_len,
 };
 use super::table::agent_session_key_for_label;
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
+use crate::model::{
+    AgentSessionNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode,
+    NodeId, RelationKind, pick_preferred,
+};
 
 /// `(harness_key, state_scope, session_key)` triple identifying an
-/// attached agent session — same shape as in `output::agent`.
+/// attached agent session.
 type SessionKey = (String, String, String);
 
-fn session_key(harness_key: &str, state_scope: &str, session_key: &str) -> SessionKey {
+fn session_key_of(agent: &AgentSessionNode) -> SessionKey {
     (
-        harness_key.to_string(),
-        state_scope.to_string(),
-        session_key.to_string(),
+        agent.id.harness_key.clone(),
+        agent.id.state_scope.clone(),
+        agent.id.session_key.clone(),
     )
 }
 
 #[derive(Debug, Clone)]
-struct MuxRow {
-    /// `NodeId::Display` of the mux — used for the `id` column hash
-    /// and as the join key into the attachments lookup.
+struct MuxRow<'a> {
     node_id_display: String,
-    backend: String,
-    native_id: String,
-    cwd: Option<String>,
-    activity_epoch: Option<i64>,
-    created_epoch: Option<i64>,
+    node: &'a MuxSessionNode,
 }
 
-/// One attached-agent entry, captured in iteration order matching
-/// the former in-memory mux attachment build.
 #[derive(Debug, Clone)]
 struct AttachedAgent {
-    /// Pre-formatted `<harness>:<session_key>` label.
     label: String,
-    /// Provenance / confidence of the preferred `linked_to_mux`
-    /// candidate that ties this agent to the mux.
     provenance: String,
     confidence: String,
-    /// `last_message_preview` of the agent session, when set.
     preview: Option<String>,
-    /// Triple of the source agent session, used to look up the
-    /// per-agent ambiguity count (`*` marker in the indicator).
     session_key: SessionKey,
-    /// Source agent's last-active epoch (Unix seconds) — feeds
-    /// `RowFilter::max_age` evaluation when filtering mux rows.
     last_active_epoch: Option<i64>,
 }
 
@@ -83,16 +45,14 @@ struct AttachedAgent {
 // Entry point
 // -----------------------------------------------------------------------------
 
-/// Build the projection rows for `conn` and `options`. Returned vector
-/// is `[header, body…]`, the same shape `render_rows` consumes.
-pub fn build_mux_rows_from_conn(
-    conn: &Connection,
+pub fn build_mux_rows_from_snapshot(
+    snapshot: &GraphSnapshot,
     columns: &[&'static str],
     options: &RenderOptions,
-) -> rusqlite::Result<Vec<Vec<String>>> {
-    let muxes = fetch_mux_rows(conn)?;
-    let attachments = fetch_attachment_lookup(conn)?;
-    let ambiguity = fetch_per_agent_ambiguity(conn)?;
+) -> Vec<Vec<String>> {
+    let muxes = collect_mux_rows(snapshot);
+    let attachments = collect_attachment_lookup(snapshot);
+    let ambiguity = collect_per_agent_ambiguity(snapshot);
 
     let body_full_ids: Vec<String> = muxes
         .iter()
@@ -135,7 +95,7 @@ pub fn build_mux_rows_from_conn(
         rows.push(columns.iter().map(|key| cell(key, &ctx)).collect());
     }
 
-    Ok(rows)
+    rows
 }
 
 fn agent_matches_filter(
@@ -167,11 +127,6 @@ fn mux_matches_filter(
     if !visible_attached.is_empty() {
         return true;
     }
-    // No attached agents survive the filter. Mirror the mux row-tree
-    // rule in `src/tui/rows/mux.rs:550`: keep the mux only when the
-    // operator explicitly asked for `mux_state=unmuxed` (and no other
-    // narrowing dimension is active) and the mux truly has no
-    // attached agents to begin with.
     let RowFilter {
         harness,
         max_age,
@@ -188,21 +143,19 @@ fn mux_matches_filter(
 }
 
 struct CellCtx<'a> {
-    row: &'a MuxRow,
+    row: &'a MuxRow<'a>,
     short_id: &'a str,
-    /// `None` when no `linked_to_mux` candidate ties an agent to
-    /// this mux; `Some(&[])` is not produced (the lookup skips the
-    /// entry).
     attached: Option<&'a [AttachedAgent]>,
     ambiguity: &'a HashMap<SessionKey, usize>,
 }
 
 fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
     let dash = || "—".to_string();
+    let mux = ctx.row.node;
     match key {
         "id" => ctx.short_id.to_string(),
-        "mux" => format!("{}:{}", ctx.row.backend, ctx.row.native_id),
-        "cwd" => ctx.row.cwd.clone().unwrap_or_else(dash),
+        "mux" => format!("{}:{}", mux.backend, mux.native_id),
+        "cwd" => mux.cwd.clone().unwrap_or_else(dash),
         "agents" => match ctx.attached {
             Some(entries) if !entries.is_empty() => entries
                 .iter()
@@ -222,13 +175,11 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             Some(entries) if !entries.is_empty() => entries.len().to_string(),
             _ => dash(),
         },
-        "activity" => ctx
-            .row
+        "activity" => mux
             .activity_epoch
             .map(|epoch| format_relative_age(epoch, current_epoch()))
             .unwrap_or_else(dash),
-        "created" => ctx
-            .row
+        "created" => mux
             .created_epoch
             .map(|epoch| format_relative_age(epoch, current_epoch()))
             .unwrap_or_else(dash),
@@ -240,173 +191,162 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
     }
 }
 
-/// Snapshot → in-memory-SQLite bridge for callers that still pass a
-/// `GraphSnapshot` (CLI today; tests). P10-014 retires the bridge.
-pub fn build_mux_rows_from_snapshot(
-    snapshot: &crate::model::GraphSnapshot,
-    columns: &[&'static str],
-    options: &RenderOptions,
-) -> Vec<Vec<String>> {
-    let conn = crate::query::materialize_snapshot(snapshot)
-        .expect("materialize GraphSnapshot to in-memory SQLite for mux projection");
-    build_mux_rows_from_conn(&conn, columns, options)
-        .expect("SQLite-backed mux projection should not fail against a freshly loaded snapshot")
-}
-
 // -----------------------------------------------------------------------------
-// Queries
+// In-memory collectors
 // -----------------------------------------------------------------------------
 
-fn fetch_mux_rows(conn: &Connection) -> rusqlite::Result<Vec<MuxRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT node_id, backend, native_id, cwd, activity_epoch, created_epoch \
-         FROM node_mux_sessions \
-         ORDER BY node_id",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(MuxRow {
-            node_id_display: row.get(0)?,
-            backend: row.get(1)?,
-            native_id: row.get(2)?,
-            cwd: row.get(3)?,
-            activity_epoch: row.get(4)?,
-            created_epoch: row.get(5)?,
+fn collect_mux_rows(snapshot: &GraphSnapshot) -> Vec<MuxRow<'_>> {
+    let mut rows: Vec<MuxRow<'_>> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::MuxSession(mux) => Some(MuxRow {
+                node_id_display: NodeId::MuxSession(mux.id.clone()).to_string(),
+                node: mux,
+            }),
+            _ => None,
         })
-    })?;
-    rows.collect()
+        .collect();
+    rows.sort_by(|a, b| a.node_id_display.cmp(&b.node_id_display));
+    rows
 }
 
 /// Active `linked_to_mux` candidate links joined to their source
-/// agent session, grouped by mux `node_id`. Mirrors
-/// the former in-memory attachment selector: include only attachments whose
-/// source agent session is present in `node_agent_sessions`, keep
-/// the iteration order the BTreeMap-keyed in-memory walk produces
-/// (sorted by source agent NodeId, i.e. by AgentSessionId tuple),
-/// and remember per-entry data the renderer needs for the `agents`,
-/// `attached-count`, and `preview` cells.
-fn fetch_attachment_lookup(
-    conn: &Connection,
-) -> rusqlite::Result<HashMap<String, Vec<AttachedAgent>>> {
-    let mut stmt = conn.prepare(
-        "SELECT ('mux_session:' || json_extract(cl.target_node, '$.native_id')) AS mux_node_id, \
-                a.harness_key, a.state_scope, a.session_key, \
-                cl.provenance, cl.confidence, cl.link_id, \
-                a.last_message_preview, a.last_active_epoch \
-         FROM candidate_links cl \
-         JOIN node_agent_sessions a \
-           ON cl.source_kind = 'agent_session' \
-           AND ('agent_session:' || \
-                json_extract(cl.source, '$.harness_key') || ':' || \
-                json_extract(cl.source, '$.state_scope') || ':' || \
-                json_extract(cl.source, '$.session_key')) = a.node_id \
-         WHERE cl.target_node_kind = 'mux_session' \
-           AND cl.relation = 'linked_to_mux' \
-           AND cl.state = 'active' \
-         ORDER BY a.harness_key, a.state_scope, a.session_key, cl.link_id",
-    )?;
-    #[derive(Clone)]
-    #[allow(dead_code)] // link_id is read via pick_strongest's tiebreak accessor
-    struct Raw {
-        mux_node_id: String,
-        harness_key: String,
-        state_scope: String,
-        session_key: String,
-        provenance: String,
-        confidence: String,
-        link_id: String,
-        preview: Option<String>,
-        last_active_epoch: Option<i64>,
-    }
-    let rows = stmt.query_map([], |row| {
-        Ok(Raw {
-            mux_node_id: row.get(0)?,
-            harness_key: row.get(1)?,
-            state_scope: row.get(2)?,
-            session_key: row.get(3)?,
-            provenance: row.get(4)?,
-            confidence: row.get(5)?,
-            link_id: row.get(6)?,
-            preview: row.get(7)?,
-            last_active_epoch: row.get(8)?,
+/// agent session, grouped by mux `node_id`. Per source session we
+/// keep the `pick_preferred` winner.
+fn collect_attachment_lookup(snapshot: &GraphSnapshot) -> HashMap<String, Vec<AttachedAgent>> {
+    let agent_lookup: HashMap<NodeId, &AgentSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) => Some((NodeId::AgentSession(agent.id.clone()), agent)),
+            _ => None,
         })
-    })?;
+        .collect();
 
-    // First pass: group all candidates per (mux_node_id, source
-    // session) so we can pick_strongest per source — the in-memory
-    // attached_to_mux stores the preferred candidate per source.
-    type Key = (String, SessionKey);
-    let mut per_source: HashMap<Key, Vec<Raw>> = HashMap::new();
+    // Group all active linked_to_mux candidates by (mux_id, source_session).
+    type Key = (String, NodeId);
+    let mut per_source: HashMap<Key, Vec<&GraphLink>> = HashMap::new();
+    // Preserve first-seen ordering so the rendered `agents` cell
+    // emits attached agents in BTreeMap-by-source-NodeId order.
     let mut order: Vec<Key> = Vec::new();
-    for entry in rows {
-        let raw = entry?;
-        let key = (
-            raw.mux_node_id.clone(),
-            session_key(&raw.harness_key, &raw.state_scope, &raw.session_key),
-        );
+    // Pre-sort the candidates by (source, link_id) so the
+    // first-seen ordering matches the SQL `ORDER BY harness_key,
+    // state_scope, session_key, link_id` the previous SQL renderer
+    // produced.
+    let mut active_links: Vec<&GraphLink> = snapshot
+        .candidate_links
+        .iter()
+        .filter(|link| matches!(link.state, LinkState::Active))
+        .filter(|link| matches!(link.relation, RelationKind::LinkedToMux))
+        .filter(|link| matches!(link.source, NodeId::AgentSession(_)))
+        .filter(|link| {
+            matches!(
+                link.target,
+                LinkEndpoint::Node {
+                    id: NodeId::MuxSession(_)
+                }
+            )
+        })
+        .collect();
+    active_links.sort_by(|a, b| {
+        let NodeId::AgentSession(ai) = &a.source else {
+            unreachable!()
+        };
+        let NodeId::AgentSession(bi) = &b.source else {
+            unreachable!()
+        };
+        ai.harness_key
+            .cmp(&bi.harness_key)
+            .then_with(|| ai.state_scope.cmp(&bi.state_scope))
+            .then_with(|| ai.session_key.cmp(&bi.session_key))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    for link in active_links {
+        // Only include attachments whose source agent session is
+        // present in the snapshot (mirror the SQL JOIN on
+        // node_agent_sessions).
+        if !agent_lookup.contains_key(&link.source) {
+            continue;
+        }
+        let LinkEndpoint::Node {
+            id: target_id @ NodeId::MuxSession(_),
+        } = &link.target
+        else {
+            continue;
+        };
+        let key = (target_id.to_string(), link.source.clone());
         if !per_source.contains_key(&key) {
             order.push(key.clone());
         }
-        per_source.entry(key).or_default().push(raw);
+        per_source.entry(key).or_default().push(link);
     }
 
-    // Second pass: emit one AttachedAgent per (mux, source) in
-    // first-seen order (which matches the SQL ORDER BY harness/scope/
-    // session order = BTreeMap-by-source-NodeId in the in-memory
-    // walk).
     let mut out: HashMap<String, Vec<AttachedAgent>> = HashMap::new();
     for key in order {
         let candidates = per_source.remove(&key).expect("filled in first pass");
-        let mux_node_id = key.0.clone();
-        let session = key.1.clone();
-        let Some(best) = pick_strongest(candidates, |r: &Raw| {
-            (&r.provenance, &r.confidence, &r.link_id)
-        }) else {
+        let Some(best) = pick_preferred(&candidates) else {
             continue;
         };
+        let NodeId::AgentSession(agent_id) = &best.source else {
+            continue;
+        };
+        let agent = agent_lookup
+            .get(&best.source)
+            .expect("agent present per JOIN check above");
         let label = format!(
             "{}:{}",
-            best.harness_key,
-            agent_session_key_for_label(&best.session_key)
+            agent_id.harness_key,
+            agent_session_key_for_label(&agent_id.session_key)
         );
-        out.entry(mux_node_id).or_default().push(AttachedAgent {
+        out.entry(key.0).or_default().push(AttachedAgent {
             label,
-            provenance: best.provenance,
-            confidence: best.confidence,
-            preview: best.preview,
-            session_key: session,
-            last_active_epoch: best.last_active_epoch,
+            provenance: best.provenance.snake_case().to_string(),
+            confidence: best.confidence.snake_case().to_string(),
+            preview: agent.last_message_preview.clone(),
+            session_key: session_key_of(agent),
+            last_active_epoch: agent.last_active_epoch,
         });
     }
-    Ok(out)
+    out
 }
 
-/// Per-source counts of distinct active `linked_to_mux` mux targets.
-/// Feeds the ambiguity `*` marker on the `agents` cell's
-/// per-attachment indicator. Multiple evidence links to the same mux
-/// are corroboration, not ambiguity.
-fn fetch_per_agent_ambiguity(conn: &Connection) -> rusqlite::Result<HashMap<SessionKey, usize>> {
-    let mut stmt = conn.prepare(
-        "SELECT json_extract(source, '$.harness_key') AS h, \
-                json_extract(source, '$.state_scope') AS s, \
-                json_extract(source, '$.session_key') AS k, \
-                COUNT(DISTINCT target_node) AS cnt \
-         FROM candidate_links \
-         WHERE source_kind = 'agent_session' \
-           AND relation = 'linked_to_mux' \
-           AND state = 'active' \
-         GROUP BY source",
-    )?;
-    let mut out = HashMap::new();
-    let rows = stmt.query_map([], |row| {
-        let h: String = row.get(0)?;
-        let s: String = row.get(1)?;
-        let k: String = row.get(2)?;
-        let cnt: i64 = row.get(3)?;
-        Ok((session_key(&h, &s, &k), cnt as usize))
-    })?;
-    for entry in rows {
-        let (key, cnt) = entry?;
-        out.insert(key, cnt);
+/// Per-source counts of distinct active `linked_to_mux` mux
+/// targets. Multiple evidence links to the same mux are
+/// corroboration, not ambiguity.
+fn collect_per_agent_ambiguity(snapshot: &GraphSnapshot) -> HashMap<SessionKey, usize> {
+    let agent_lookup: HashMap<NodeId, &AgentSessionNode> = snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            GraphNode::AgentSession(agent) => Some((NodeId::AgentSession(agent.id.clone()), agent)),
+            _ => None,
+        })
+        .collect();
+    let mut per_agent: HashMap<NodeId, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.clone())
+            .or_default()
+            .insert(target_id.to_string());
     }
-    Ok(out)
+    let mut out = HashMap::new();
+    for (source, targets) in per_agent {
+        if let Some(agent) = agent_lookup.get(&source) {
+            out.insert(session_key_of(agent), targets.len());
+        }
+    }
+    out
 }

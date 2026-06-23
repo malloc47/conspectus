@@ -22,11 +22,8 @@
 //! Shared rendering primitives — [`RenderOptions`], the column
 //! registry, [`render_rows`], the ADR 0022 color palette — live in
 //! [`super::render`] (P10-003 / ADR 0043). This module re-exports the
-//! public ones so external callers (`cli`, `node_show`, `tui`,
-//! `query::runner`) keep compiling unchanged while the consumer-side
-//! migration proceeds.
-
-use rusqlite::Connection;
+//! public ones so external callers (`cli`, `node_show`, `tui`) keep
+//! compiling against the same surface.
 
 use crate::model::{Confidence, GraphSnapshot, NodeId, Provenance};
 
@@ -44,58 +41,39 @@ pub use super::render::{
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
 /// a stable short row identifier for table output (H-TBL-002).
-/// `node show` (H-TBL-005) reads the same hash through this entry
-/// point; the SQLite-backed renderer goes through
-/// [`node_short_id_from_display`] when it already has the `Display`
-/// form as `TEXT`.
 pub fn node_short_id(node_id: &NodeId) -> String {
     node_short_id_from_display(&node_id.to_string())
 }
 
-/// Render `conn` as an untruncated plain-text table using `projection`.
-///
-/// Convenience wrapper for [`render_with_conn`] with [`RenderOptions::wide`].
-/// Callers that need width-aware truncation should use [`render_with_conn`].
-pub fn render_conn(conn: &Connection, projection: Projection) -> rusqlite::Result<String> {
-    render_with_conn(conn, projection, &RenderOptions::wide())
-}
-
-/// Render `conn` as a plain-text table using `projection` and `options`.
-pub fn render_with_conn(
-    conn: &Connection,
-    projection: Projection,
-    options: &RenderOptions,
-) -> rusqlite::Result<String> {
-    let columns: Vec<&'static str> = options
-        .columns
-        .clone()
-        .unwrap_or_else(|| default_columns(projection));
-    let rows = match projection {
-        Projection::Agent => super::agent::build_agent_rows_from_conn(conn, &columns, options)?,
-        Projection::Mux => super::mux::build_mux_rows_from_conn(conn, &columns, options)?,
-        Projection::Union => super::union::build_union_rows_from_conn(conn, &columns, options)?,
-        Projection::Pr => super::prs::build_pr_rows_from_conn(conn, &columns, options)?,
-        Projection::Fork => super::forks::build_fork_rows_from_conn(conn, &columns, options)?,
-    };
-    Ok(render_rows(rows, &columns, options))
-}
-
-/// Compatibility bridge for fixture-heavy tests and producer-side callers that
-/// still start from a freshly resolved snapshot.
+/// Render `snapshot` as an untruncated plain-text table using `projection`.
 pub fn render(snapshot: &GraphSnapshot, projection: Projection) -> String {
     render_with(snapshot, projection, &RenderOptions::wide())
 }
 
-/// Compatibility bridge for fixture-heavy tests and producer-side callers that
-/// still start from a freshly resolved snapshot.
+/// Render `snapshot` as a plain-text table using `projection` and `options`.
 pub fn render_with(
     snapshot: &GraphSnapshot,
     projection: Projection,
     options: &RenderOptions,
 ) -> String {
-    let conn = crate::query::materialize_snapshot(snapshot)
-        .expect("materialize GraphSnapshot to in-memory SQLite for table rendering");
-    render_with_conn(&conn, projection, options).expect("SQLite-backed table render")
+    let columns: Vec<&'static str> = options
+        .columns
+        .clone()
+        .unwrap_or_else(|| default_columns(projection));
+    let rows = match projection {
+        Projection::Agent => {
+            super::agent::build_agent_rows_from_snapshot(snapshot, &columns, options)
+        }
+        Projection::Mux => super::mux::build_mux_rows_from_snapshot(snapshot, &columns, options),
+        Projection::Union => {
+            super::union::build_union_rows_from_snapshot(snapshot, &columns, options)
+        }
+        Projection::Pr => super::prs::build_pr_rows_from_snapshot(snapshot, &columns, options),
+        Projection::Fork => {
+            super::forks::build_fork_rows_from_snapshot(snapshot, &columns, options)
+        }
+    };
+    render_rows(rows, &columns, options)
 }
 
 /// Compact `provenance/confidence[*]` cell, e.g. `LD/H*`. Used in

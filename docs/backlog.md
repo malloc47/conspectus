@@ -11104,8 +11104,48 @@ intermediate commit.
     `cargo clippy --all-targets --all-features --
     -D warnings` clean on the P11-011a diff.
 
-- [ ] `P11-011b/c/d` Delete `src/query/`, drop the `query`
-  Cargo feature, restore in-memory renderers.
+- [x] `P11-011b` Restore in-memory rendering for the output crate.
+  - Outcome: every output renderer
+    (`src/output/{agent,mux,union,prs,forks,node_show,table}.rs`)
+    now consumes `&GraphSnapshot` directly via typed iteration.
+    `query::materialize_snapshot` and the SQL helpers (`fetch_*`
+    SELECT/JOIN against an in-memory connection) are gone from
+    the output crate. `model::pick_preferred` does the candidate
+    ranking that the previous SQL renderers reproduced with
+    `pick_strongest` over string-encoded tags.
+    `table::render_with(&snapshot, projection, &options)` is
+    the sole entry; `render_with_conn` / `render_conn` are
+    deleted. `node_show::render_node_show` and `resolve_node_id`
+    iterate the snapshot directly; `*_from_conn` variants and
+    the SQL JOINs they wrapped (`v_sessions_with_repo` ancestor-
+    of-cwd lookup, JSON `target_node` extracts, alias-overlay
+    JOIN) all retire — the rewritten functions inline the same
+    semantics against the typed model.
+    CLI sites in `src/cli.rs` (`node show`, `rename session`,
+    `rename mux`, the table render path) drop their
+    `materialize_snapshot` + `_from_conn` chains and call the
+    snapshot-based APIs directly.
+    `src/query/` survives this story because the TUI row
+    builders (P11-011c) and the App's `GraphDb` (P11-011d) are
+    still consumers. `dev_scenarios::sessions_tree()` keeps its
+    `_from_conn` path for the same reason.
+  - Tests: full output unit-test suite green (122 tests). One
+    behavior detail surfaced and was fixed: the agent
+    renderer's workspace lookup must fall back to the
+    `WorkspaceId`'s structural `root` when no `WorkspaceNode`
+    is present in the snapshot — the old SQL JOIN read
+    `json_extract(r.target, '$.root')` from the resolved
+    relationship's target JSON, which works without a matching
+    node table row.
+    Full suite via `cargo nextest run --all-targets
+    --all-features` green at 1755 tests (the one failure
+    remains the pre-existing `pin_state_matrix_agent_table_snapshot`
+    regression from commit 84198ea). `cargo fmt -- --check`
+    and `cargo clippy --all-targets --all-features --
+    -D warnings` clean.
+
+- [ ] `P11-011c/d` Delete `src/query/`, drop the `query` Cargo
+  feature, restore in-memory TUI rendering.
   - **Status after P11-011a.** The architectural win the
     user originally cared about (no SQLite persistence
     layer, no migrations, no rotation, no on-disk SQL

@@ -190,20 +190,18 @@ impl ScenarioWorld {
         options = options
             .with_filter(RowFilter::default())
             .with_now_epoch(Some(1_700_000_600));
-        let conn = crate::query::materialize_snapshot(&snapshot)?;
-        Ok(table::render_with_conn(&conn, projection, &options)?)
+        Ok(table::render_with(&snapshot, projection, &options))
     }
 
     pub fn render_node_show(&self, id: &str, color: bool) -> Result<String> {
         let snapshot = self.snapshot()?;
-        let conn = crate::query::materialize_snapshot(&snapshot)?;
-        let id = match crate::output::node_show::resolve_node_id_from_conn(&conn, id)? {
+        let id = match crate::output::node_show::resolve_node_id(id, &snapshot) {
             Ok(id) => id,
             Err(err) => bail!("{err}"),
         };
-        Ok(crate::output::node_show::render_node_show_from_conn(
-            &conn, &id, color,
-        )?)
+        Ok(crate::output::node_show::render_node_show(
+            &snapshot, &id, color,
+        ))
     }
 
     pub fn sessions_tree(&self) -> Result<RowTree> {
