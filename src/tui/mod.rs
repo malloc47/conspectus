@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use crate::filter::RowFilter;
 
@@ -73,6 +74,17 @@ pub struct RunConfig {
     /// in v1; F8-003 generalizes to per-view state. Empty filter
     /// admits every row.
     pub initial_filter: RowFilter,
+    /// Whether the operator explicitly set a filter via CLI flags
+    /// (`--harness`, `--max-age`, `--mux-state`). When `false`,
+    /// persisted state may override the initial filter.
+    pub explicit_filter: bool,
+    /// Whether the operator explicitly set the sort via `--sort`.
+    /// When `false`, persisted state may override.
+    pub explicit_sort: bool,
+    /// Whether the operator explicitly set the grouping via
+    /// `--grouping` or `--sessions-grouping`. When `false`, persisted
+    /// state may override.
+    pub explicit_grouping: bool,
     /// Background graph refresh cadence.
     pub refresh_interval: Duration,
     /// Selected mux pane capture cadence.
@@ -128,6 +140,9 @@ impl RunConfig {
             sessions_grouping: SessionsGrouping::Graph,
             mux_grouping: MuxGrouping::Session,
             initial_filter: RowFilter::default(),
+            explicit_filter: false,
+            explicit_sort: false,
+            explicit_grouping: false,
             refresh_interval: Duration::from_secs(30),
             mux_preview_interval: Duration::from_secs(2),
             live_preview_enabled: true,
@@ -146,7 +161,8 @@ impl RunConfig {
 /// Which of the registered row-tree views to render initially.
 /// Mirrors `Projection` from `conspectus table <ROWS>` so the
 /// terminology stays consistent across CLI and TUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum View {
     Sessions,
     Mux,
@@ -156,14 +172,16 @@ pub enum View {
 }
 
 /// Row sort within each group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Sort {
     Hierarchy,
     Recency,
 }
 
 /// Top-level grouping in the sessions tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionsGrouping {
     Graph,
     Workspace,
@@ -177,7 +195,8 @@ pub enum SessionsGrouping {
 /// with P8-004; the enum is defined here so the controls overlay
 /// and CLI surface can carry a consistent dispatch type from day
 /// one (ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MuxGrouping {
     Session,
     Host,
@@ -185,21 +204,24 @@ pub enum MuxGrouping {
 }
 
 /// Top-level grouping in the union view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UnionGrouping {
     Kind,
     Repo,
 }
 
 /// Top-level grouping in the PRs view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PrsGrouping {
     Repo,
     State,
 }
 
 /// Top-level grouping in the forks view (per ADR 0031).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ForksGrouping {
     Provider,
     Parent,
@@ -216,7 +238,7 @@ pub enum ForksGrouping {
 /// dispatch is constructed against an active [`View`] so the
 /// controls overlay never lands on a grouping that doesn't belong
 /// to the visible view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Grouping {
     Sessions(SessionsGrouping),
     Mux(MuxGrouping),

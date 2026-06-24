@@ -1,5 +1,6 @@
-//! TUI state file (F8-013) — persists the last-active view across
-//! `conspectus tui` restarts.
+//! TUI state file (F8-013) — persists the last-active view, sort
+//! order, and per-view filter/grouping state across `conspectus tui`
+//! restarts.
 //!
 //! Lives at `$XDG_STATE_HOME/conspectus/tui-state.json` (sibling to
 //! the hook state-root at `$XDG_STATE_HOME/conspectus/hooks/`). The
@@ -13,17 +14,28 @@
 //! ```json
 //! {
 //!   "schema_version": 1,
-//!   "last_view": "sessions"
+//!   "last_view": "sessions",
+//!   "sort": "recency",
+//!   "view_states": {
+//!     "sessions": {
+//!       "filter": { "harness": { "any": ["claude-code"] } },
+//!       "grouping": { "Sessions": "workspace" }
+//!     },
+//!     "mux": {
+//!       "filter": {},
+//!       "grouping": { "Mux": "host" }
+//!     }
+//!   }
 //! }
 //! ```
 //!
 //! Forward-compat rule: read parses into a struct with a flattened
 //! `extra` map so unknown fields round-trip through a write
-//! unchanged. Future schema bumps that add fields will not strand
-//! old writes on downgrade.
+//! unchanged. Missing `sort` / `view_states` keys on old files
+//! default to `None` / empty so v1 schema files remain readable.
 //!
 //! Write semantics: skip-on-unchanged via parse-and-compare so quiet
-//! `conspectus tui` runs that never switch views produce no mtime
+//! `conspectus tui` runs that never change state produce no mtime
 //! churn. Atomic via the shared `write_atomic` helper (tempfile +
 //! rename).
 //!
@@ -40,7 +52,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::declared::write_atomic;
-use crate::tui::View;
+use crate::filter::RowFilter;
+use crate::tui::{Grouping, Sort, View};
 
 /// Schema version baked into every write. Forward-compat reads
 /// accept any value but only act on the values they understand.
@@ -54,8 +67,41 @@ struct RawState {
     schema_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_view: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sort: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    view_states: BTreeMap<String, ViewStateRaw>,
     #[serde(flatten)]
     extra: BTreeMap<String, serde_json::Value>,
+}
+
+/// Per-view persisted state: filter and grouping. Expanded-set,
+/// selection, and scroll are intentionally not persisted — they
+/// reference per-session graph structure and are meaningless after
+/// a restart.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ViewStateRaw {
+    #[serde(default, skip_serializing_if = "RowFilter::is_empty")]
+    filter: RowFilter,
+    grouping: Option<Grouping>,
+}
+
+/// Snapshot of the full TUI state suitable for serialisation.
+/// Carried from `App` → write, and deserialised → `App` on restart.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PersistedState {
+    pub last_view: Option<View>,
+    pub sort: Option<Sort>,
+    pub view_states: BTreeMap<View, PersistedViewSlot>,
+}
+
+/// Per-view saved filter and grouping recovered from the state file.
+/// Expanded-set, selection, and scroll are intentionally not persisted
+/// — they reference per-session graph structure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedViewSlot {
+    pub filter: RowFilter,
+    pub grouping: Option<Grouping>,
 }
 
 /// Resolver for the `tui-state.json` file path. Mirrors the
@@ -118,13 +164,10 @@ fn env_path(key: &str) -> Option<PathBuf> {
 /// Best-effort read of the last-active view. Returns `None` when:
 /// - The state file is absent.
 /// - The file exists but is malformed JSON.
-/// - The `last_view` value is missing or unknown to this build (a
-///   future Conspectus might write `"settings"`; we'd treat that as
-///   absent and let the configured default win).
+/// - The `last_view` value is missing or unknown to this build.
 ///
 /// Never panics; never returns `Err`. Failures collapse to `None` so
-/// the caller can fall through to the next precedence rule
-/// (`[tui] default_view` then `View::Sessions`).
+/// the caller can fall through to the next precedence rule.
 pub fn read_last_view(cache: &TuiStateCache) -> Option<View> {
     let path = cache.path()?;
     let text = fs::read_to_string(&path).ok()?;
@@ -132,36 +175,110 @@ pub fn read_last_view(cache: &TuiStateCache) -> Option<View> {
     raw.last_view.as_deref().and_then(view_from_snake_case)
 }
 
-/// Best-effort write of the last-active view. Skip-on-unchanged so
-/// quiet runs do not churn mtime; atomic via tempfile + rename.
+/// Best-effort read of the full TUI state from disk. Returns `None`
+/// when the file is absent or malformed. Individual fields that are
+/// unknown to this build (future sort/view names) silently default.
+///
+/// Persisted view_states whose view name is unknown to this build
+/// are skipped — a future Conspectus may write a `"settings"` view;
+/// we'd ignore it and let the default view prevail.
+pub fn read_tui_state(cache: &TuiStateCache) -> Option<PersistedState> {
+    let path = cache.path()?;
+    let text = fs::read_to_string(&path).ok()?;
+    let raw: RawState = serde_json::from_str(&text).ok()?;
+    let sort = raw.sort.as_deref().and_then(sort_from_str);
+    let mut view_states = BTreeMap::new();
+    for (view_name, vs_raw) in raw.view_states {
+        if let Some(view) = view_from_snake_case(&view_name) {
+            let grouping = vs_raw
+                .grouping
+                .or_else(|| Some(Grouping::default_for(view)));
+            view_states.insert(
+                view,
+                PersistedViewSlot {
+                    filter: vs_raw.filter,
+                    grouping,
+                },
+            );
+        }
+    }
+    Some(PersistedState {
+        last_view: raw.last_view.as_deref().and_then(view_from_snake_case),
+        sort,
+        view_states,
+    })
+}
+
+/// Best-effort write of the last-active view. Kept for backward
+/// compatibility with the view-switch code path; delegates to
+/// [`write_tui_state`] when the caller only has a [`View`] and no
+/// other state to write.
 ///
 /// Returns `Ok(())` on a successful write OR a successful skip.
-/// Returns `Err(io::Error)` only when the I/O genuinely failed; the
-/// caller (`App::switch_view`) logs at debug and continues — losing
-/// the persisted view is not a fatal condition.
+/// Returns `Err(io::Error)` only when the I/O genuinely failed.
 pub fn write_last_view(cache: &TuiStateCache, view: View) -> io::Result<()> {
+    // Merge with any existing payload so unknown fields round-trip
+    // and in-memory-only sort/view_states are preserved.
+    let mut raw = load_raw_state(cache)?;
+    raw.schema_version = SCHEMA_VERSION;
+    raw.last_view = Some(view_to_snake_case(view).to_string());
+
+    write_raw_state(cache, &raw)
+}
+
+/// Best-effort write of the full TUI state: last view, sort, and
+/// per-view filter/grouping. Skip-on-unchanged so quiet runs do not
+/// churn mtime; atomic via tempfile + rename.
+///
+/// Callers that only know the view can call [`write_last_view`]
+/// instead; that function merges with the existing file so the
+/// other state fields are preserved.
+pub fn write_tui_state(cache: &TuiStateCache, state: &PersistedState) -> io::Result<()> {
+    let mut raw = load_raw_state(cache)?;
+    raw.schema_version = SCHEMA_VERSION;
+    raw.last_view = state.last_view.map(|v| view_to_snake_case(v).to_string());
+    raw.sort = state.sort.map(|s| sort_to_str(s).to_string());
+    raw.view_states.clear();
+    for (view, slot) in &state.view_states {
+        raw.view_states.insert(
+            view_to_snake_case(*view).to_string(),
+            ViewStateRaw {
+                filter: slot.filter.clone(),
+                grouping: slot.grouping,
+            },
+        );
+    }
+
+    write_raw_state(cache, &raw)
+}
+
+fn load_raw_state(cache: &TuiStateCache) -> io::Result<RawState> {
+    let path = cache.path().ok_or_else(|| {
+        io::Error::other("no state directory resolved (neither $XDG_STATE_HOME nor $HOME set)")
+    })?;
+    match fs::read_to_string(&path) {
+        Ok(text) => {
+            Ok(serde_json::from_str::<RawState>(&text).unwrap_or_else(|_| RawState::default()))
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(RawState::default()),
+        Err(err) => Err(err),
+    }
+}
+
+fn write_raw_state(cache: &TuiStateCache, raw: &RawState) -> io::Result<()> {
     let path = cache.path().ok_or_else(|| {
         io::Error::other("no state directory resolved (neither $XDG_STATE_HOME nor $HOME set)")
     })?;
 
-    // Merge with any existing payload so unknown fields round-trip.
-    let mut raw = match fs::read_to_string(&path) {
-        Ok(text) => serde_json::from_str::<RawState>(&text).unwrap_or_else(|_| RawState::default()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => RawState::default(),
-        Err(err) => return Err(err),
-    };
-    raw.schema_version = SCHEMA_VERSION;
-    raw.last_view = Some(view_to_snake_case(view).to_string());
-
     let new_json =
-        serde_json::to_string_pretty(&raw).map_err(|err| io::Error::other(err.to_string()))?;
+        serde_json::to_string_pretty(raw).map_err(|err| io::Error::other(err.to_string()))?;
 
     // Skip-on-unchanged: parse-and-compare lets us treat semantically
     // equal records (different field orderings, whitespace) as
     // matches.
     if let Ok(existing) = fs::read_to_string(&path)
         && let Ok(existing_raw) = serde_json::from_str::<RawState>(&existing)
-        && existing_raw == raw
+        && existing_raw == *raw
     {
         return Ok(());
     }
@@ -174,6 +291,8 @@ impl Default for RawState {
         Self {
             schema_version: SCHEMA_VERSION,
             last_view: None,
+            sort: None,
+            view_states: BTreeMap::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -196,6 +315,21 @@ fn view_from_snake_case(value: &str) -> Option<View> {
         "union" => Some(View::Union),
         "prs" => Some(View::Prs),
         "forks" => Some(View::Forks),
+        _ => None,
+    }
+}
+
+fn sort_to_str(sort: Sort) -> &'static str {
+    match sort {
+        Sort::Hierarchy => "hierarchy",
+        Sort::Recency => "recency",
+    }
+}
+
+fn sort_from_str(value: &str) -> Option<Sort> {
+    match value {
+        "hierarchy" => Some(Sort::Hierarchy),
+        "recency" => Some(Sort::Recency),
         _ => None,
     }
 }
@@ -281,6 +415,92 @@ mod tests {
         assert!(
             after.contains("\"sessions\""),
             "new view must persist: {after}",
+        );
+    }
+
+    #[test]
+    fn full_state_round_trips_sort_filter_and_view_slots() {
+        let dir = TempDir::new().expect("tempdir");
+        let cache = cache_in(&dir);
+        let mut state = PersistedState {
+            last_view: Some(View::Mux),
+            sort: Some(Sort::Recency),
+            view_states: BTreeMap::new(),
+        };
+        state.view_states.insert(
+            View::Sessions,
+            PersistedViewSlot {
+                filter: RowFilter {
+                    harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+                    max_age: Some(std::time::Duration::from_secs(60)),
+                    mux_state: None,
+                    ..RowFilter::default()
+                },
+                grouping: Some(Grouping::Sessions(crate::tui::SessionsGrouping::Workspace)),
+            },
+        );
+
+        write_tui_state(&cache, &state).expect("write full state");
+        let read = read_tui_state(&cache).expect("read full state");
+
+        assert_eq!(read.last_view, Some(View::Mux));
+        assert_eq!(read.sort, Some(Sort::Recency));
+        let sessions = read
+            .view_states
+            .get(&View::Sessions)
+            .expect("sessions slot");
+        assert_eq!(
+            sessions.grouping,
+            Some(Grouping::Sessions(crate::tui::SessionsGrouping::Workspace))
+        );
+        assert_eq!(
+            sessions.filter.max_age,
+            Some(std::time::Duration::from_secs(60))
+        );
+        assert_eq!(
+            sessions.filter.harness,
+            Some(crate::filter::HarnessFilter::from_values(["codex"]))
+        );
+    }
+
+    #[test]
+    fn read_tui_state_accepts_compact_filter_objects() {
+        let dir = TempDir::new().expect("tempdir");
+        let cache = cache_in(&dir);
+        let path = cache.path().expect("path");
+        fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+        fs::write(
+            &path,
+            r#"{
+              "schema_version": 1,
+              "last_view": "sessions",
+              "sort": "recency",
+              "view_states": {
+                "sessions": {
+                  "filter": { "harness": { "any": ["codex"] } },
+                  "grouping": { "Sessions": "workspace" }
+                }
+              }
+            }"#,
+        )
+        .expect("seed compact state");
+
+        let read = read_tui_state(&cache).expect("read compact state");
+        let sessions = read
+            .view_states
+            .get(&View::Sessions)
+            .expect("sessions slot");
+
+        assert_eq!(read.sort, Some(Sort::Recency));
+        assert_eq!(
+            sessions.filter.harness,
+            Some(crate::filter::HarnessFilter::from_values(["codex"]))
+        );
+        assert!(sessions.filter.max_age.is_none());
+        assert!(!sessions.filter.float_muxed_sessions_top);
+        assert_eq!(
+            sessions.grouping,
+            Some(Grouping::Sessions(crate::tui::SessionsGrouping::Workspace))
         );
     }
 

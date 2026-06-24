@@ -17,6 +17,8 @@
 
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 /// Set of independent dimension constraints. Each `None` field means
 /// "no constraint on this dimension"; multiple fields AND together at
 /// evaluation time.
@@ -28,18 +30,28 @@ use std::time::Duration;
 /// [`Self::matches_session`]. They are included in [`Self::is_empty`]
 /// so the modal's "Clear all" affordance resets them alongside the
 /// narrowing dimensions.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RowFilter {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub harness: Option<HarnessFilter>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "duration_secs"
+    )]
     pub max_age: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mux_state: Option<MuxStateFilter>,
     /// Sessions view: float agent sessions resolved to a mux above
     /// sessions that aren't. Within each of the two resulting groups
     /// the existing within-group sort order is preserved.
+    #[serde(skip_serializing_if = "is_false")]
     pub float_muxed_sessions_top: bool,
     /// Mux view: float mux sessions with at least one attached agent
     /// session above muxes with none. Within each group the existing
     /// within-group sort order is preserved.
+    #[serde(skip_serializing_if = "is_false")]
     pub float_attached_muxes_top: bool,
 }
 
@@ -87,7 +99,8 @@ impl RowFilter {
 
 /// Set membership over harness keys. An empty set matches nothing
 /// (callers should pass `None` instead to express "no constraint").
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HarnessFilter {
     Any(Vec<String>),
 }
@@ -129,7 +142,8 @@ impl HarnessFilter {
 }
 
 /// Set membership over derived mux states. Empty set matches nothing.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MuxStateFilter {
     Any(Vec<MuxStateKey>),
 }
@@ -162,7 +176,8 @@ impl MuxStateFilter {
 /// count. Mirrors `MuxIndicator` in the TUI row tree but lives in the
 /// shared crate so non-TUI callers can use it without pulling in the
 /// TUI module.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MuxStateKey {
     Attached,
     Ambiguous,
@@ -234,6 +249,36 @@ fn matches_max_age(
     let age_secs = (now - last) as u64;
     let max_secs = max_age.as_secs();
     age_secs <= max_secs
+}
+
+/// Serde helper that serializes `Option<Duration>` as optional u64
+/// seconds for human-readable state files.
+mod duration_secs {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(dur: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match dur {
+            Some(d) => d.as_secs().serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let secs: Option<u64> = Option::deserialize(deserializer)?;
+        Ok(secs.map(Duration::from_secs))
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[cfg(test)]

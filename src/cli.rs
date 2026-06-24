@@ -2164,8 +2164,8 @@ struct TuiArgs {
     #[arg(long = "sessions-grouping", value_enum)]
     sessions_grouping: Option<SessionsGroupingFlag>,
     /// Row sort within each group.
-    #[arg(long, value_enum, default_value_t = SortFlag::Hierarchy)]
-    sort: SortFlag,
+    #[arg(long, value_enum)]
+    sort: Option<SortFlag>,
     #[command(flatten)]
     filter_args: FilterArgs,
     /// Background graph refresh cadence (e.g. `30s`, `1m`, `500ms`).
@@ -2303,7 +2303,7 @@ impl Default for TuiArgs {
             view: None,
             no_resume_view: false,
             sessions_grouping: None,
-            sort: SortFlag::Hierarchy,
+            sort: None,
             filter_args: FilterArgs::default(),
             refresh_interval: "30s".to_string(),
             mux_preview_interval: "2s".to_string(),
@@ -2621,7 +2621,8 @@ impl TuiArgs {
             _ => conspectus::tui::MuxGrouping::Session,
         };
 
-        let default_sort = match self.sort {
+        let explicit_sort = self.sort.is_some();
+        let default_sort = match self.sort.unwrap_or(SortFlag::Hierarchy) {
             SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
             SortFlag::Recency => conspectus::tui::Sort::Recency,
         };
@@ -2639,6 +2640,12 @@ impl TuiArgs {
             sessions_grouping,
             mux_grouping,
             initial_filter,
+            explicit_filter: !self.filter_args.harness.is_empty()
+                || self.filter_args.max_age.is_some()
+                || !self.filter_args.mux_state.is_empty(),
+            explicit_sort,
+            explicit_grouping: self.filter_args.grouping.is_some()
+                || self.sessions_grouping.is_some(),
             refresh_interval,
             mux_preview_interval,
             live_preview_enabled: !self.no_live_preview,

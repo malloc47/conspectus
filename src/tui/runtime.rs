@@ -109,6 +109,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     // (or skip this branch) so the file only ever moves under
     // genuine interactive runs.
     app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
+    app.restore_persisted_state();
     let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
 
     // Initial synchronous discovery.
@@ -331,6 +332,11 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
         }
     }
 
+    // Persist final state on clean shutdown so in-session changes
+    // (sort, filter, grouping) that didn't trigger a view switch
+    // are saved.
+    app.persist_state();
+
     Ok(())
 }
 
@@ -349,6 +355,7 @@ fn static_event_loop(
     // deliberately skips this so the on-disk file stays
     // unconditionally unmoved when the snapshot tooling runs.
     app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
+    app.restore_persisted_state();
     set_static_data(&mut app, &config, &snapshot)?;
     let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
     refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);
@@ -531,6 +538,9 @@ fn static_event_loop(
             refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
         }
     }
+
+    // Persist final state on clean shutdown.
+    app.persist_state();
 
     Ok(())
 }

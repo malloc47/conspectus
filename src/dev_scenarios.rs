@@ -224,6 +224,9 @@ impl ScenarioWorld {
             sessions_grouping: SessionsGrouping::Graph,
             mux_grouping: crate::tui::MuxGrouping::Session,
             initial_filter: RowFilter::default(),
+            explicit_filter: false,
+            explicit_sort: false,
+            explicit_grouping: false,
             refresh_interval: Duration::from_secs(24 * 60 * 60),
             mux_preview_interval: Duration::from_secs(24 * 60 * 60),
             live_preview_enabled: false,
@@ -644,22 +647,32 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
 
     world.write_claude_code_session(session_a, &work)?;
     world.write_claude_code_session(session_b, &work)?;
-    world.add_tmux_row(TmuxReplayRow::new("pair-a").with_cwd(&work).with_active_pane(
-        "claude",
-        live_pids[0],
-        &work,
-        "claude",
-    ));
-    world.add_tmux_row(TmuxReplayRow::new("pair-b").with_cwd(&work).with_active_pane(
-        "claude",
-        live_pids[1],
-        &work,
-        "claude",
-    ));
+    world.add_tmux_row(
+        TmuxReplayRow::new("pair-a")
+            .with_cwd(&work)
+            .with_active_pane("claude", live_pids[0], &work, "claude"),
+    );
+    world.add_tmux_row(
+        TmuxReplayRow::new("pair-b")
+            .with_cwd(&work)
+            .with_active_pane("claude", live_pids[1], &work, "claude"),
+    );
 
     for (session_key, pid, ppid, mux_name, observed_epoch) in [
-        (session_a, live_pids[0], live_pids[1], "pair-a", 1_700_000_500),
-        (session_b, live_pids[1], live_pids[0], "pair-b", 1_700_000_540),
+        (
+            session_a,
+            live_pids[0],
+            live_pids[1],
+            "pair-a",
+            1_700_000_500,
+        ),
+        (
+            session_b,
+            live_pids[1],
+            live_pids[0],
+            "pair-b",
+            1_700_000_540,
+        ),
     ] {
         world.write_hook_record(HookRecord {
             schema_version: SCHEMA_VERSION,

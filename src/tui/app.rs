@@ -580,14 +580,12 @@ impl App {
             .unwrap_or_else(|| ViewStateSlot::defaults_for(target));
         self.restore_active_state(loaded);
         self.config.default_view = target;
-        // F8-013: persist the new active view best-effort. When the
+        // F8-013: persist the full UI state best-effort. When the
         // runtime hasn't enabled persistence (snapshot mode,
         // `--no-resume-view`, or any test path), the cache is `None`
         // and the call is a no-op. Failures here never abort the
         // switch.
-        if let Some(cache) = &self.tui_state_cache {
-            let _ = crate::tui_state::write_last_view(cache, target);
-        }
+        self.persist_state();
         // Keep `config.sessions_grouping` in sync for the sessions
         // row-tree builder. Other views read their grouping from
         // `self.grouping` once their builders land.
@@ -1227,6 +1225,123 @@ impl App {
     /// so view switches never touch the on-disk file.
     pub fn enable_view_persistence(&mut self, cache: crate::tui_state::TuiStateCache) {
         self.tui_state_cache = Some(cache);
+    }
+
+    /// Restore persisted sort, filter, and grouping from the state
+    /// file. Called once at startup after [`Self::enable_view_persistence`].
+    ///
+    /// Fields explicitly set via CLI flags (`--sort`, `--grouping`,
+    /// `--harness`, `--max-age`, `--mux-state`) are not overridden.
+    pub fn restore_persisted_state(&mut self) {
+        let Some(cache) = &self.tui_state_cache else {
+            return;
+        };
+        let Some(persisted) = crate::tui_state::read_tui_state(cache) else {
+            return;
+        };
+
+        // Global sort: win unless CLI explicitly set it.
+        if !self.config.explicit_sort
+            && let Some(sort) = persisted.sort
+        {
+            self.sort = sort;
+            self.config.default_sort = sort;
+        }
+
+        // Pre-populate view_states from persisted state.
+        for (view, slot) in persisted.view_states {
+            let is_active = view == self.config.default_view;
+            let filter = if is_active && self.config.explicit_filter {
+                self.filter.clone()
+            } else {
+                slot.filter.clone()
+            };
+            let grouping = if is_active && self.config.explicit_grouping {
+                self.grouping
+            } else {
+                slot.grouping
+                    .unwrap_or_else(|| super::Grouping::default_for(view))
+            };
+            self.view_states
+                .entry(view)
+                .or_insert_with(|| ViewStateSlot {
+                    filter,
+                    grouping,
+                    expanded: BTreeSet::new(),
+                    selection: None,
+                    left_scroll: 0,
+                });
+
+            // Apply to active fields for the current view.
+            if is_active {
+                if !self.config.explicit_filter {
+                    self.filter = slot.filter.clone();
+                    self.config.initial_filter = self.filter.clone();
+                }
+                if !self.config.explicit_grouping
+                    && let Some(g) = slot.grouping
+                {
+                    self.grouping = g;
+                    self.apply_grouping_to_config(g);
+                }
+            }
+        }
+        self.force_recency_for_flat_sessions();
+    }
+
+    /// Build a [`PersistedState`] snapshot of the current app state
+    /// for writing to the state file. Captures the last-active view,
+    /// global sort, and per-view filter/grouping from `view_states`
+    /// (plus the active view's current state, which may not yet be
+    /// in `view_states`).
+    pub fn build_persisted_state(&self) -> crate::tui_state::PersistedState {
+        let mut view_states: BTreeMap<View, crate::tui_state::PersistedViewSlot> = BTreeMap::new();
+        let active_view = self.config.default_view;
+        // Add the active view's current state.
+        view_states.insert(
+            active_view,
+            crate::tui_state::PersistedViewSlot {
+                filter: self.filter.clone(),
+                grouping: Some(self.grouping),
+            },
+        );
+        // Merge other views from saved slots (skip the active one).
+        for (&view, slot) in &self.view_states {
+            if view != active_view {
+                view_states
+                    .entry(view)
+                    .or_insert_with(|| crate::tui_state::PersistedViewSlot {
+                        filter: slot.filter.clone(),
+                        grouping: Some(slot.grouping),
+                    });
+            }
+        }
+        crate::tui_state::PersistedState {
+            last_view: Some(self.config.default_view),
+            sort: Some(self.sort),
+            view_states,
+        }
+    }
+
+    /// Write the current TUI state to disk. Best-effort; failures are
+    /// silently swallowed.
+    pub(crate) fn persist_state(&self) {
+        if let Some(cache) = &self.tui_state_cache {
+            let state = self.build_persisted_state();
+            let _ = crate::tui_state::write_tui_state(cache, &state);
+        }
+    }
+
+    fn apply_grouping_to_config(&mut self, grouping: super::Grouping) {
+        match grouping {
+            super::Grouping::Sessions(g) => {
+                self.config.sessions_grouping = g;
+            }
+            super::Grouping::Mux(g) => {
+                self.config.mux_grouping = g;
+            }
+            super::Grouping::Union(_) | super::Grouping::Prs(_) | super::Grouping::Forks(_) => {}
+        }
     }
 
     /// Resolved color theme (ADR 0032). Renderer reads from this in
@@ -4104,7 +4219,7 @@ mod tests {
     #[test]
     fn switch_to_view_persists_through_enabled_cache() {
         // F8-013: when persistence is enabled, every view switch must
-        // funnel through `crate::tui_state::write_last_view`. We pin
+        // funnel through `crate::tui_state::write_tui_state`. We pin
         // the seam by enabling a cache pointed at a tempdir and
         // asserting the on-disk file appears with the new view.
         let dir = tempfile::TempDir::new().expect("tempdir");
@@ -4119,6 +4234,102 @@ mod tests {
             crate::tui_state::read_last_view(&cache_for_assert),
             Some(View::Mux),
             "switch_to_view must persist through the enabled cache",
+        );
+    }
+
+    #[test]
+    fn restore_persisted_state_applies_state_and_mirrors_config() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
+        let mut persisted = crate::tui_state::PersistedState {
+            last_view: Some(View::Sessions),
+            sort: Some(crate::tui::Sort::Recency),
+            view_states: BTreeMap::new(),
+        };
+        let filter = crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+            ..crate::filter::RowFilter::default()
+        };
+        persisted.view_states.insert(
+            View::Sessions,
+            crate::tui_state::PersistedViewSlot {
+                filter: filter.clone(),
+                grouping: Some(crate::tui::Grouping::Sessions(
+                    crate::tui::SessionsGrouping::Repo,
+                )),
+            },
+        );
+        crate::tui_state::write_tui_state(&cache, &persisted).expect("seed state");
+
+        let mut app = App::new(RunConfig::defaults());
+        app.enable_view_persistence(cache);
+        app.restore_persisted_state();
+
+        assert_eq!(app.sort(), crate::tui::Sort::Recency);
+        assert_eq!(app.config().default_sort, crate::tui::Sort::Recency);
+        assert_eq!(app.filter(), &filter);
+        assert_eq!(app.config().initial_filter, filter);
+        assert_eq!(
+            app.grouping(),
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Repo)
+        );
+        assert_eq!(
+            app.config().sessions_grouping,
+            crate::tui::SessionsGrouping::Repo
+        );
+    }
+
+    #[test]
+    fn restore_persisted_state_preserves_explicit_cli_overrides() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
+        let persisted_filter = crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+            ..crate::filter::RowFilter::default()
+        };
+        let mut persisted = crate::tui_state::PersistedState {
+            last_view: Some(View::Sessions),
+            sort: Some(crate::tui::Sort::Recency),
+            view_states: BTreeMap::new(),
+        };
+        persisted.view_states.insert(
+            View::Sessions,
+            crate::tui_state::PersistedViewSlot {
+                filter: persisted_filter,
+                grouping: Some(crate::tui::Grouping::Sessions(
+                    crate::tui::SessionsGrouping::Repo,
+                )),
+            },
+        );
+        crate::tui_state::write_tui_state(&cache, &persisted).expect("seed state");
+
+        let cli_filter = crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["claude-code"])),
+            ..crate::filter::RowFilter::default()
+        };
+        let mut config = RunConfig::defaults();
+        config.default_sort = crate::tui::Sort::Hierarchy;
+        config.initial_filter = cli_filter.clone();
+        config.sessions_grouping = crate::tui::SessionsGrouping::Workspace;
+        config.explicit_sort = true;
+        config.explicit_filter = true;
+        config.explicit_grouping = true;
+
+        let mut app = App::new(config);
+        app.enable_view_persistence(cache);
+        app.restore_persisted_state();
+
+        assert_eq!(app.sort(), crate::tui::Sort::Hierarchy);
+        assert_eq!(app.config().default_sort, crate::tui::Sort::Hierarchy);
+        assert_eq!(app.filter(), &cli_filter);
+        assert_eq!(app.config().initial_filter, cli_filter);
+        assert_eq!(
+            app.grouping(),
+            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Workspace)
+        );
+        assert_eq!(
+            app.config().sessions_grouping,
+            crate::tui::SessionsGrouping::Workspace
         );
     }
 
