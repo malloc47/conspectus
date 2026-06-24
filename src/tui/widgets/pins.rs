@@ -3,7 +3,7 @@
 //! Dedicated modal — separate from the view/grouping/filter
 //! [`controls`](super::controls) overlay — that fronts every pin
 //! CRUD flow: create, rename, remove, bind (PinAmbiguous override),
-//! rebind (external-rename recovery), adopt (agent-deck migration).
+//! and rebind (external-rename recovery).
 //!
 //! ## Architecture
 //!
@@ -36,26 +36,49 @@ use crate::tui::widgets::popup_frame::themed_popup;
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
 /// presentation of the underlying surface.
-pub const PIN_ACTION_OPTIONS: &[&str] = &[
-    "create", "launch", "rename", "remove", "bind", "rebind", "adopt",
-];
+pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "launch", "rename", "remove", "bind", "rebind"];
 
 /// Read-only snapshot the pins overlay renders against. Borrowed
 /// each frame so the overlay never holds a stale copy.
 #[derive(Debug, Clone, Default)]
 pub struct PinsContext {
     pub pin_create_defaults: PinCreateDefaults,
+    pub pin_adopt_defaults: Option<PinCreateDefaults>,
     pub pin_target: Option<PinMutationTarget>,
     pub pin_bind_options: Vec<PinBindOption>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PinCreateDefaults {
+    pub mode: PinCreateMode,
     pub id: String,
     pub display_name: String,
     pub harness: String,
     pub cwd: String,
     pub mux_name: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PinCreateMode {
+    #[default]
+    NewVariation,
+    AdoptSelected,
+}
+
+impl PinCreateMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::NewVariation => "new variation",
+            Self::AdoptSelected => "adopt selected",
+        }
+    }
+
+    fn help(self) -> &'static str {
+        match self {
+            Self::NewVariation => "fresh mux/session from selected context",
+            Self::AdoptSelected => "pin the selected running mux/session",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,11 +111,11 @@ pub enum PinsCursor {
 /// suspends its own bindings until the sub-editor commits or cancels.
 #[derive(Debug, Clone)]
 pub enum PinsSubEditor {
-    Create(PinCreateState),
-    Edit(PinEditState),
-    Rebind(PinRebindState),
+    Create(Box<PinCreateState>),
+    Edit(Box<PinEditState>),
+    Rebind(Box<PinRebindState>),
     Bind(PinBindState),
-    Remove(PinRemoveState),
+    Remove(Box<PinRemoveState>),
 }
 
 /// What the pins overlay returned from a single key event.
@@ -182,7 +205,11 @@ impl PinCreateStore {
 
 #[derive(Debug, Clone)]
 pub struct PinCreateState {
+    mode: PinCreateMode,
     cursor: usize,
+    new_defaults: PinCreateDefaults,
+    adopt_defaults: Option<PinCreateDefaults>,
+    name: TextInputState,
     id: TextInputState,
     display_name: TextInputState,
     harness: TextInputState,
@@ -191,6 +218,9 @@ pub struct PinCreateState {
     mux_socket: TextInputState,
     launch_argv: TextInputState,
     store: PinCreateStore,
+    id_overridden: bool,
+    display_overridden: bool,
+    mux_overridden: bool,
     error: Option<String>,
 }
 
@@ -252,9 +282,37 @@ impl PinsOverlayState {
     /// `defaults`. Used by the direct shortcut so the operator
     /// skips the menu step.
     pub fn open_with_create(defaults: PinCreateDefaults) -> Self {
+        Self::open_with_create_options(defaults, None)
+    }
+
+    pub fn open_with_create_options(
+        defaults: PinCreateDefaults,
+        adopt_defaults: Option<PinCreateDefaults>,
+    ) -> Self {
+        let initial = defaults.clone();
+        Self::open_with_create_initial(initial, defaults, adopt_defaults)
+    }
+
+    pub fn open_with_adopt_options(
+        defaults: PinCreateDefaults,
+        adopt_defaults: Option<PinCreateDefaults>,
+    ) -> Self {
+        let initial = adopt_defaults.clone().unwrap_or_else(|| defaults.clone());
+        Self::open_with_create_initial(initial, defaults, adopt_defaults)
+    }
+
+    fn open_with_create_initial(
+        initial: PinCreateDefaults,
+        defaults: PinCreateDefaults,
+        adopt_defaults: Option<PinCreateDefaults>,
+    ) -> Self {
         Self {
             cursor: PinsCursor::Action(0),
-            sub_editor: Some(PinsSubEditor::Create(PinCreateState::new(defaults))),
+            sub_editor: Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
+                initial,
+                defaults,
+                adopt_defaults,
+            )))),
         }
     }
 
@@ -276,7 +334,7 @@ impl PinsOverlayState {
         Self {
             // "remove" is index 3 in PIN_ACTION_OPTIONS.
             cursor: PinsCursor::Action(3),
-            sub_editor: Some(PinsSubEditor::Remove(PinRemoveState::new(target))),
+            sub_editor: Some(PinsSubEditor::Remove(Box::new(PinRemoveState::new(target)))),
         }
     }
 
@@ -286,7 +344,7 @@ impl PinsOverlayState {
         Self {
             // "rename" is index 2 in PIN_ACTION_OPTIONS.
             cursor: PinsCursor::Action(2),
-            sub_editor: Some(PinsSubEditor::Edit(PinEditState::new(target))),
+            sub_editor: Some(PinsSubEditor::Edit(Box::new(PinEditState::new(target)))),
         }
     }
 
@@ -297,7 +355,7 @@ impl PinsOverlayState {
         Self {
             // "rebind" is index 5 in PIN_ACTION_OPTIONS.
             cursor: PinsCursor::Action(5),
-            sub_editor: Some(PinsSubEditor::Rebind(PinRebindState::new(target))),
+            sub_editor: Some(PinsSubEditor::Rebind(Box::new(PinRebindState::new(target)))),
         }
     }
 
@@ -340,10 +398,12 @@ impl PinsOverlayState {
     fn activate(&mut self, ctx: &PinsContext) -> PinsOutcome {
         let PinsCursor::Action(idx) = self.cursor;
         let label = PIN_ACTION_OPTIONS.get(idx).copied().unwrap_or("help");
-        if label == "create" || label == "adopt" {
-            self.sub_editor = Some(PinsSubEditor::Create(PinCreateState::new(
+        if label == "create" {
+            self.sub_editor = Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
                 ctx.pin_create_defaults.clone(),
-            )));
+                ctx.pin_create_defaults.clone(),
+                ctx.pin_adopt_defaults.clone(),
+            ))));
             PinsOutcome::Continue
         } else if label == "launch" {
             // Launch has no sub-editor — the runtime takes the
@@ -357,21 +417,23 @@ impl PinsOverlayState {
             }
         } else if label == "rename" {
             if let Some(target) = ctx.pin_target.clone() {
-                self.sub_editor = Some(PinsSubEditor::Edit(PinEditState::new(target)));
+                self.sub_editor = Some(PinsSubEditor::Edit(Box::new(PinEditState::new(target))));
                 PinsOutcome::Continue
             } else {
                 PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
             }
         } else if label == "rebind" {
             if let Some(target) = ctx.pin_target.clone() {
-                self.sub_editor = Some(PinsSubEditor::Rebind(PinRebindState::new(target)));
+                self.sub_editor =
+                    Some(PinsSubEditor::Rebind(Box::new(PinRebindState::new(target))));
                 PinsOutcome::Continue
             } else {
                 PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
             }
         } else if label == "remove" {
             if let Some(target) = ctx.pin_target.clone() {
-                self.sub_editor = Some(PinsSubEditor::Remove(PinRemoveState::new(target)));
+                self.sub_editor =
+                    Some(PinsSubEditor::Remove(Box::new(PinRemoveState::new(target))));
                 PinsOutcome::Continue
             } else {
                 PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
@@ -497,26 +559,46 @@ enum PinRemoveOutcome {
 }
 
 impl PinCreateState {
-    const FIELD_COUNT: usize = 8;
+    const LOGICAL_STORE_FIELD: usize = 9;
 
-    fn new(defaults: PinCreateDefaults) -> Self {
+    fn new(
+        defaults: PinCreateDefaults,
+        new_defaults: PinCreateDefaults,
+        adopt_defaults: Option<PinCreateDefaults>,
+    ) -> Self {
+        let name = if !defaults.display_name.is_empty() {
+            defaults.display_name.clone()
+        } else if !defaults.id.is_empty() {
+            defaults.id.clone()
+        } else {
+            "new pin".to_string()
+        };
+        let derived_id = pin_id_candidate(&name);
         let id = if defaults.id.is_empty() {
-            "new-pin".to_string()
+            derived_id.clone()
         } else {
             defaults.id
         };
         let display_name = if defaults.display_name.is_empty() {
-            id.clone()
+            name.clone()
         } else {
             defaults.display_name
         };
+        let derived_mux_name = derived_id.clone();
         let mux_name = if defaults.mux_name.is_empty() {
-            display_name.clone()
+            derived_mux_name.clone()
         } else {
             defaults.mux_name
         };
+        let id_overridden = id != derived_id;
+        let display_overridden = display_name != name;
+        let mux_overridden = mux_name != derived_mux_name;
         Self {
+            mode: defaults.mode,
             cursor: 0,
+            new_defaults,
+            adopt_defaults,
+            name: TextInputState::new(" name ", name),
             id: TextInputState::new(" id ", id),
             display_name: TextInputState::new(" display ", display_name),
             harness: TextInputState::new(" harness ", defaults.harness),
@@ -525,6 +607,9 @@ impl PinCreateState {
             mux_socket: TextInputState::new(" socket ", String::new()),
             launch_argv: TextInputState::new(" launch argv ", String::new()),
             store: PinCreateStore::Auto,
+            id_overridden,
+            display_overridden,
+            mux_overridden,
             error: None,
         }
     }
@@ -532,6 +617,10 @@ impl PinCreateState {
     fn handle_key(&mut self, event: KeyEvent) -> PinCreateOutcome {
         match event.code {
             KeyCode::Esc => PinCreateOutcome::Cancel,
+            KeyCode::Enter if self.logical_cursor() == 1 && self.can_toggle_mode() => {
+                self.toggle_mode();
+                PinCreateOutcome::Continue
+            }
             KeyCode::Enter => match self.request() {
                 Ok(request) => PinCreateOutcome::Confirm(request),
                 Err(err) => {
@@ -548,7 +637,13 @@ impl PinCreateState {
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                if self.cursor == Self::FIELD_COUNT - 1 =>
+                if self.logical_cursor() == 1 && self.can_toggle_mode() =>
+            {
+                self.toggle_mode();
+                PinCreateOutcome::Continue
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                if self.logical_cursor() == Self::LOGICAL_STORE_FIELD =>
             {
                 self.cycle_store(if matches!(event.code, KeyCode::Left) {
                     -1
@@ -563,8 +658,17 @@ impl PinCreateState {
                 {
                     return PinCreateOutcome::Cancel;
                 }
+                let before = self
+                    .active_input()
+                    .map(|input| input.value().to_string())
+                    .unwrap_or_default();
+                let active = self.cursor;
                 if let Some(input) = self.active_input_mut() {
                     let _ = input.handle_key(event);
+                    let changed = input.value() != before;
+                    if changed {
+                        self.after_active_input_changed(active);
+                    }
                     self.error = None;
                 }
                 PinCreateOutcome::Continue
@@ -573,9 +677,45 @@ impl PinCreateState {
     }
 
     fn move_cursor(&mut self, delta: i32) {
-        let len = Self::FIELD_COUNT as i32;
+        let len = self.field_count() as i32;
         let next = ((self.cursor as i32 + delta) % len + len) % len;
         self.cursor = next as usize;
+    }
+
+    fn field_count(&self) -> usize {
+        if self.can_toggle_mode() { 10 } else { 9 }
+    }
+
+    fn can_toggle_mode(&self) -> bool {
+        self.adopt_defaults.is_some()
+    }
+
+    fn logical_cursor(&self) -> usize {
+        if self.can_toggle_mode() || self.cursor == 0 {
+            self.cursor
+        } else {
+            self.cursor + 1
+        }
+    }
+
+    fn render_cursor(&self) -> usize {
+        self.logical_cursor()
+    }
+
+    fn toggle_mode(&mut self) {
+        let target = match self.mode {
+            PinCreateMode::NewVariation => self.adopt_defaults.clone(),
+            PinCreateMode::AdoptSelected => Some(self.new_defaults.clone()),
+        };
+        if let Some(defaults) = target {
+            let store = self.store;
+            let cursor = self.cursor;
+            let new_defaults = self.new_defaults.clone();
+            let adopt_defaults = self.adopt_defaults.clone();
+            *self = Self::new(defaults, new_defaults, adopt_defaults);
+            self.store = store;
+            self.cursor = cursor.min(self.field_count().saturating_sub(1));
+        }
     }
 
     fn cycle_store(&mut self, delta: i32) {
@@ -592,15 +732,58 @@ impl PinCreateState {
     }
 
     fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
-        match self.cursor {
-            0 => Some(&mut self.id),
-            1 => Some(&mut self.display_name),
-            2 => Some(&mut self.harness),
-            3 => Some(&mut self.cwd),
-            4 => Some(&mut self.mux_name),
-            5 => Some(&mut self.mux_socket),
-            6 => Some(&mut self.launch_argv),
+        match self.logical_cursor() {
+            0 => Some(&mut self.name),
+            2 => Some(&mut self.cwd),
+            3 => Some(&mut self.harness),
+            4 => Some(&mut self.launch_argv),
+            5 => Some(&mut self.id),
+            6 => Some(&mut self.display_name),
+            7 => Some(&mut self.mux_name),
+            8 => Some(&mut self.mux_socket),
             _ => None,
+        }
+    }
+
+    fn active_input(&self) -> Option<&TextInputState> {
+        match self.logical_cursor() {
+            0 => Some(&self.name),
+            2 => Some(&self.cwd),
+            3 => Some(&self.harness),
+            4 => Some(&self.launch_argv),
+            5 => Some(&self.id),
+            6 => Some(&self.display_name),
+            7 => Some(&self.mux_name),
+            8 => Some(&self.mux_socket),
+            _ => None,
+        }
+    }
+
+    fn after_active_input_changed(&mut self, active: usize) {
+        match if self.can_toggle_mode() || active == 0 {
+            active
+        } else {
+            active + 1
+        } {
+            0 => self.sync_from_name(),
+            5 => self.id_overridden = !self.id.value().is_empty(),
+            6 => self.display_overridden = !self.display_name.value().is_empty(),
+            7 => self.mux_overridden = !self.mux_name.value().is_empty(),
+            _ => {}
+        }
+    }
+
+    fn sync_from_name(&mut self) {
+        let name = self.name.value().to_string();
+        let derived_id = pin_id_candidate(&name);
+        if !self.id_overridden {
+            self.id = TextInputState::new(" id ", derived_id.clone());
+        }
+        if !self.display_overridden {
+            self.display_name = TextInputState::new(" display ", name);
+        }
+        if !self.mux_overridden {
+            self.mux_name = TextInputState::new(" mux ", derived_id);
         }
     }
 
@@ -624,6 +807,26 @@ impl PinCreateState {
             launch_argv,
             store: self.store,
         })
+    }
+}
+
+fn pin_id_candidate(raw: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "new-pin".to_string()
+    } else {
+        trimmed
     }
 }
 
@@ -954,35 +1157,35 @@ impl<'a> PinCreateWidget<'a> {
 impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
+        let cursor = self.state.render_cursor();
+        let mode_marker = if self.state.can_toggle_mode() {
+            if self.state.mode == PinCreateMode::AdoptSelected {
+                "[x]"
+            } else {
+                "[ ]"
+            }
+        } else {
+            " - "
+        };
         let mut lines = vec![
-            pin_create_field(0, "id", self.state.id.value(), self.state.cursor),
-            pin_create_field(
-                1,
-                "display",
-                self.state.display_name.value(),
-                self.state.cursor,
-            ),
-            pin_create_field(2, "harness", self.state.harness.value(), self.state.cursor),
-            pin_create_field(3, "cwd", self.state.cwd.value(), self.state.cursor),
-            pin_create_field(
-                4,
-                "mux.name",
-                self.state.mux_name.value(),
-                self.state.cursor,
-            ),
-            pin_create_field(
-                5,
-                "mux.socket",
-                self.state.mux_socket.value(),
-                self.state.cursor,
-            ),
-            pin_create_field(
-                6,
-                "launch argv",
-                self.state.launch_argv.value(),
-                self.state.cursor,
-            ),
-            pin_create_field(7, "store", self.state.store.label(), self.state.cursor),
+            pin_create_field(0, "name", self.state.name.value(), cursor),
+            line![format!(
+                "{} mode        {} {} ({})",
+                if cursor == 1 { ">" } else { " " },
+                mode_marker,
+                self.state.mode.label(),
+                self.state.mode.help()
+            )],
+            pin_create_field(2, "cwd", self.state.cwd.value(), cursor),
+            pin_create_field(3, "harness", self.state.harness.value(), cursor),
+            pin_create_field(4, "launch argv", self.state.launch_argv.value(), cursor),
+            line![""],
+            line![span!(Modifier::DIM; "Advanced identity")],
+            pin_create_field(5, "id", self.state.id.value(), cursor),
+            pin_create_field(6, "display", self.state.display_name.value(), cursor),
+            pin_create_field(7, "mux.name", self.state.mux_name.value(), cursor),
+            pin_create_field(8, "mux.socket", self.state.mux_socket.value(), cursor),
+            pin_create_field(9, "store", self.state.store.label(), cursor),
         ];
         if let Some(error) = &self.state.error {
             lines.push(line![""]);
@@ -991,13 +1194,13 @@ impl Widget for PinCreateWidget<'_> {
         lines.push(line![""]);
         lines.push(line![span!(
             Modifier::DIM;
-            "Up/Down field · type to edit · Space cycles store · Enter create · Esc cancel"
+            "Up/Down field · type to edit · Space toggles mode/store · Enter create · Esc cancel"
         )]);
         let modal = pin_create_modal_rect(area, lines.len());
 
         let body = ScrollLinesBody {
             scroll_offset: scroll_offset_for_cursor(
-                Some(self.state.cursor),
+                Some(cursor),
                 modal.height.saturating_sub(2) as usize,
                 lines.len(),
             ),
@@ -1400,6 +1603,12 @@ mod tests {
     }
 
     #[test]
+    fn pins_menu_has_single_create_entry_without_adopt_peer() {
+        assert!(PIN_ACTION_OPTIONS.contains(&"create"));
+        assert!(!PIN_ACTION_OPTIONS.contains(&"adopt"));
+    }
+
+    #[test]
     fn selected_last_pin_action_scrolls_into_short_menu_body() {
         let cursor_line = pins_menu_cursor_line(PinsCursor::Action(PIN_ACTION_OPTIONS.len() - 1));
         let inner_height = 4;
@@ -1427,6 +1636,7 @@ mod tests {
                 harness: "codex".to_string(),
                 cwd: "/workspace/project".to_string(),
                 mux_name: "ingest".to_string(),
+                ..PinCreateDefaults::default()
             },
             ..PinsContext::default()
         };
@@ -1434,6 +1644,82 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(outcome, PinsOutcome::Continue);
         assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Create(_))));
+    }
+
+    #[test]
+    fn create_form_toggles_to_adopt_defaults_when_available() {
+        let ctx = PinsContext {
+            pin_create_defaults: PinCreateDefaults {
+                id: "work-2".to_string(),
+                display_name: "work-2".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "work-2".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            pin_adopt_defaults: Some(PinCreateDefaults {
+                id: "work".to_string(),
+                display_name: "work".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "work".to_string(),
+                mode: PinCreateMode::AdoptSelected,
+            }),
+            ..PinsContext::default()
+        };
+        let mut state = PinsOverlayState::new();
+        state.handle_key(&ctx, key(KeyCode::Enter));
+        state.handle_key(&ctx, key(KeyCode::Down));
+        state.handle_key(&ctx, key(KeyCode::Char(' ')));
+
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+                assert_eq!(editor.id.value(), "work");
+                assert_eq!(editor.display_name.value(), "work");
+                assert_eq!(editor.mux_name.value(), "work");
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn direct_adopt_opens_create_form_with_adopt_selected_and_toggleable() {
+        let defaults = PinCreateDefaults {
+            id: "work-2".to_string(),
+            display_name: "work-2".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "work-2".to_string(),
+            mode: PinCreateMode::NewVariation,
+        };
+        let adopt = PinCreateDefaults {
+            id: "work".to_string(),
+            display_name: "work".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "work".to_string(),
+            mode: PinCreateMode::AdoptSelected,
+        };
+        let mut state = PinsOverlayState::open_with_adopt_options(defaults, Some(adopt));
+
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+                assert!(editor.can_toggle_mode());
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+
+        state.handle_key(&PinsContext::default(), key(KeyCode::Down));
+        state.handle_key(&PinsContext::default(), key(KeyCode::Enter));
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mode, PinCreateMode::NewVariation);
+                assert_eq!(editor.mux_name.value(), "work-2");
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
     }
 
     #[test]
@@ -1615,6 +1901,7 @@ mod tests {
                 harness: "codex".to_string(),
                 cwd: "/workspace/project".to_string(),
                 mux_name: "ingest-mux".to_string(),
+                ..PinCreateDefaults::default()
             },
             ..PinsContext::default()
         };
@@ -1635,6 +1922,107 @@ mod tests {
                 store: PinCreateStore::Auto,
             }))
         );
+    }
+
+    #[test]
+    fn create_form_name_drives_default_identity_fields() {
+        let ctx = PinsContext::default();
+        let mut state = PinsOverlayState::open_with_create(PinCreateDefaults::default());
+
+        // Cursor starts on the primary name field. Replace the
+        // default name; id/display/mux stay synchronized because the
+        // operator has not edited the advanced identity fields.
+        for _ in 0.."new pin".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "Client Sandbox".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.name.value(), "Client Sandbox");
+                assert_eq!(editor.id.value(), "client-sandbox");
+                assert_eq!(editor.display_name.value(), "Client Sandbox");
+                assert_eq!(editor.mux_name.value(), "client-sandbox");
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_form_preserves_explicit_identity_overrides_after_name_edit() {
+        let ctx = PinsContext::default();
+        let mut state = PinsOverlayState::open_with_create(PinCreateDefaults::default());
+
+        // Move to mux.name, edit it, then return to name and change
+        // the primary value. The explicit mux override must survive.
+        for _ in 0..6 {
+            state.handle_key(&ctx, key(KeyCode::Down));
+        }
+        for _ in 0.."new-pin".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "kept-mux".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+        for _ in 0..6 {
+            state.handle_key(&ctx, key(KeyCode::Up));
+        }
+        for _ in 0.."new pin".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "Renamed Pin".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.id.value(), "renamed-pin");
+                assert_eq!(editor.display_name.value(), "Renamed Pin");
+                assert_eq!(editor.mux_name.value(), "kept-mux");
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_form_cleared_identity_field_rejoins_name_derivation() {
+        let ctx = PinsContext::default();
+        let mut state = PinsOverlayState::open_with_create(PinCreateDefaults::default());
+
+        // Override mux.name first.
+        for _ in 0..6 {
+            state.handle_key(&ctx, key(KeyCode::Down));
+        }
+        for _ in 0.."new-pin".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "kept-mux".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+
+        // Clearing the field entirely makes it derived again. The
+        // next name edit should fill it from the new name.
+        for _ in 0.."kept-mux".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for _ in 0..6 {
+            state.handle_key(&ctx, key(KeyCode::Up));
+        }
+        for _ in 0.."new pin".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "Client Sandbox".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mux_name.value(), "client-sandbox");
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
     }
 
     #[test]
@@ -1672,6 +2060,7 @@ mod tests {
             harness: "codex".to_string(),
             cwd: "/workspace/project".to_string(),
             mux_name: "ingest-mux".to_string(),
+            ..PinCreateDefaults::default()
         };
         let state = PinsOverlayState::open_with_create(defaults);
         assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Create(_))));

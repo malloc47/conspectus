@@ -26,7 +26,9 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::pins::{PinBindOption, PinCreateDefaults, PinMutationTarget};
+use crate::tui::widgets::pins::{
+    PinBindOption, PinCreateDefaults, PinCreateMode, PinMutationTarget,
+};
 use crate::tui::{RunConfig, View};
 
 /// Reference-counted handle to the App's resolved
@@ -686,6 +688,7 @@ impl App {
     pub fn pins_context(&self) -> crate::tui::widgets::pins::PinsContext {
         crate::tui::widgets::pins::PinsContext {
             pin_create_defaults: self.pin_create_defaults(),
+            pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
             pin_target: self.pin_mutation_target(),
             pin_bind_options: self.pin_bind_options(),
         }
@@ -1008,12 +1011,14 @@ impl App {
                     .map(str::to_string)
                     .unwrap_or_else(|| session.session.session_key.clone());
                 let id = pin_id_candidate(&display);
+                let mux_name = self.unique_pin_mux_name(&id);
                 PinCreateDefaults {
                     id: id.clone(),
                     display_name: display,
                     harness: session.session.harness_key.clone(),
                     cwd,
-                    mux_name: id,
+                    mux_name,
+                    mode: PinCreateMode::NewVariation,
                 }
             }
             RowKind::Group(group) => group
@@ -1026,8 +1031,8 @@ impl App {
                 })
                 .unwrap_or_default(),
             RowKind::MuxSession(mux) => PinCreateDefaults {
-                id: pin_id_candidate(&mux.native_id),
-                display_name: mux.native_id.clone(),
+                id: self.unique_pin_mux_name(&pin_id_candidate(&mux.native_id)),
+                display_name: self.unique_pin_mux_name(&pin_id_candidate(&mux.native_id)),
                 // Mirror the CLI `pin adopt` harness inference
                 // (`src/cli.rs:3883-3902`): the first active
                 // `LinkedToMux` candidate whose source is an
@@ -1039,10 +1044,60 @@ impl App {
                 // rendering and would be rejected by the pin
                 // validator's `is_absolute` check on commit.
                 cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
-                mux_name: mux.native_id.clone(),
+                mux_name: self.unique_pin_mux_name(&pin_id_candidate(&mux.native_id)),
+                mode: PinCreateMode::NewVariation,
             },
             _ => PinCreateDefaults::default(),
         }
+    }
+
+    pub fn pin_adopt_defaults(&self) -> PinCreateDefaults {
+        let mut defaults = self.pin_create_defaults();
+        defaults.mode = PinCreateMode::AdoptSelected;
+        if let Some(selection) = self.selection.as_ref()
+            && let Some(row) = self.tree.rows.iter().find(|row| &row.id == selection)
+            && let RowKind::MuxSession(mux) = &row.kind
+        {
+            defaults.id = pin_id_candidate(&mux.native_id);
+            defaults.display_name = mux.native_id.clone();
+            defaults.mux_name = mux.native_id.clone();
+        }
+        defaults
+    }
+
+    fn pin_adopt_defaults_if_available(&self) -> Option<PinCreateDefaults> {
+        self.selection_is_live_mux()
+            .then(|| self.pin_adopt_defaults())
+    }
+
+    fn unique_pin_mux_name(&self, base: &str) -> String {
+        let base = pin_id_candidate(base);
+        let used = self.used_pin_mux_names();
+        if !used.contains(&base) {
+            return base;
+        }
+        for idx in 2.. {
+            let candidate = format!("{base}-{idx}");
+            if !used.contains(&candidate) {
+                return candidate;
+            }
+        }
+        unreachable!("unbounded suffix search must find a free mux name")
+    }
+
+    fn used_pin_mux_names(&self) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        if let Some(database) = self.database.as_ref() {
+            for node in &database.snapshot().nodes {
+                if let crate::model::GraphNode::MuxSession(mux) = node {
+                    names.insert(mux.native_id.clone());
+                }
+            }
+            for pin in &database.snapshot().pins {
+                names.insert(pin.mux.name.clone());
+            }
+        }
+        names
     }
 
     /// Walk active `LinkedToMux` candidates whose target is `mux` and
@@ -2483,11 +2538,49 @@ mod tests {
 
         let defaults = app.pins_context().pin_create_defaults;
         assert_eq!(defaults.cwd, "/p/proj");
+        assert_eq!(defaults.mode, PinCreateMode::NewVariation);
+        assert_eq!(defaults.mux_name, "work-2");
+        assert_eq!(defaults.display_name, "work-2");
         assert!(
             std::path::Path::new(&defaults.cwd).is_absolute(),
             "pin create cwd must be absolute: {:?}",
             defaults.cwd,
         );
+    }
+
+    #[test]
+    fn pin_adopt_defaults_preserve_selected_live_mux_name() {
+        let snap = snapshot_session_with_mux();
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snap,
+            home: None,
+            now: None,
+            filter: crate::tui::RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
+        });
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let mux_row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::MuxSession(_) => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("mux row in tree");
+        app.set_selection(mux_row_id);
+
+        let defaults = app.pin_adopt_defaults();
+        assert_eq!(defaults.mode, PinCreateMode::AdoptSelected);
+        assert_eq!(defaults.id, "work");
+        assert_eq!(defaults.display_name, "work");
+        assert_eq!(defaults.mux_name, "work");
     }
 
     #[test]

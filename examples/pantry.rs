@@ -800,6 +800,7 @@ fn main() -> std::io::Result<()> {
                 harness: "codex".to_string(),
                 cwd: "/home/malloc47/work/ingest".to_string(),
                 mux_name: "ingest-refactor".to_string(),
+                ..PinCreateDefaults::default()
             }),
             variant_name: "Create form (seeded)",
             description_text:

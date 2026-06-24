@@ -1064,8 +1064,11 @@ fn pin_bind_hint_action(app: &mut App) {
 }
 
 fn open_pin_create_action(app: &mut App) {
-    let defaults = app.pins_context().pin_create_defaults;
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create(defaults);
+    let ctx = app.pins_context();
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create_options(
+        ctx.pin_create_defaults,
+        ctx.pin_adopt_defaults,
+    );
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
         "pins: new pin · Up/Down field · Enter create · Esc cancel".to_string(),
@@ -1097,11 +1100,14 @@ fn open_pin_adopt_action(app: &mut App) {
         )));
         return;
     }
-    let defaults = app.pins_context().pin_create_defaults;
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create(defaults);
+    let ctx = app.pins_context();
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_options(
+        ctx.pin_create_defaults,
+        ctx.pin_adopt_defaults,
+    );
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
-        "pins: adopt mux · Enter create · Esc cancel".to_string(),
+        "pins: new pin · adopt enabled · Enter create · Esc cancel".to_string(),
     )));
 }
 
@@ -1352,8 +1358,8 @@ pub(super) enum Action {
     /// `B` opens the mux-only rebind form for the selected pin.
     /// Refuses with a status hint when no pin row is selected.
     OpenPinRebind,
-    /// `A` adopts the selected live mux row as a new pin. Refuses
-    /// with a status hint on any other row kind.
+    /// `A` opens the create form with adopt selected for a live mux
+    /// row. Refuses with a status hint on any other row kind.
     OpenPinAdopt,
     /// `L` launches the selected pin via `conspectus pin launch
     /// <id>`. Sibling of `Enter` on a `RowKind::Pin`; refuses with

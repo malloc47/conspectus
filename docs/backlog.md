@@ -5841,10 +5841,11 @@ once everything else has landed.
     the selected row's `PinAmbiguous` diagnostic and writes the same
     `pin:<id>:bound` declared override as the CLI. `Pins > rebind`
     routes through the edit modal's mux-name/socket fields with the
-    duplicate-mux preflight from `H-PIN-023`. `Pins > adopt` opens
-    the create form with selection-derived defaults, so adopting a
-    live mux uses the same validated create/write path instead of a
-    separate mutation implementation.
+    duplicate-mux preflight from `H-PIN-023`. The initial
+    implementation exposed `Pins > adopt`; `H-PIN-TUI-002` later
+    folded this into one create form with an adopt toggle while
+    preserving the same selection-derived defaults and validated
+    create/write path.
 
 - [x] `H-PIN-019` Read-only invariant audit.
   - Scope: explicit CLI integration tests proving `graph`,
@@ -5902,6 +5903,179 @@ once everything else has landed.
   - Blockers: none for the initial docs slice. Final closeout waits
     on `H-PIN-012`, `H-PIN-017`, `H-PIN-018`, `H-PIN-022`,
     `H-PIN-023`, `H-PIN-024`.
+
+#### Pinning TUI improvements (H-PIN-TUI-*)
+
+The v1 pin surface reached CLI parity, but operator feedback from
+using the TUI create form shows the modal is still too raw to be a
+good daily workflow. The common creation cases are:
+
+1. pin the selected live entry exactly, which may be better framed as
+   `adopt`;
+2. create a minor variation of the selected entry, usually same
+   harness + cwd/workspace but a fresh mux/session;
+3. start from a mostly blank slate, which is the least common case.
+
+The first improvement pass should keep the implementation grounded in
+those workflows: selected-row context drives defaults, one user-facing
+"name" drives derived ids/mux names until the operator overrides them,
+long fields remain inspectable while editing, path and harness fields
+offer live choices without forbidding free-form input, launch argv is
+previewed as the command that will actually run, and successful create
+flows move focus to the resulting pin row with a toast that
+clarifies whether anything was launched. Pinning has not seen active
+operator adoption yet, so this workstream should optimize for the
+right TUI workflow rather than preserving the old schema-shaped form
+layout or awkward key semantics.
+
+- [x] `H-PIN-TUI-001` Pin create usability map and terminology pass.
+  - Scope: review the current TUI pin create form as an operator
+    workflow, not a schema editor. Decide the user-facing labels and
+    field order for the create modal: replace or visually subordinate
+    implementation-facing `id` with a primary `name` field; group
+    derived identity fields (`display_name`, `mux.name`, persisted
+    id) behind the name-sync behavior in `H-PIN-TUI-002`; make the
+    launch command and target store visible before confirmation.
+    Record any copy/keybinding changes in `docs/operations.md` and
+    the TUI help text.
+  - Tests: docs-only for the first slice; `git diff --check`.
+  - Outcome: product target recorded for the remaining
+    `H-PIN-TUI-*` stories. The create flow should be framed around a
+    primary `name`, selected-row context, and an explicit mode toggle
+    inside one create flow: `adopt selected` for pinning a running
+    mux/session exactly, or `new variation` for creating a fresh
+    session/mux from the same cwd/workspace. Target field order:
+    `name`, mode/context summary, cwd, harness, launch command
+    preview, advanced identity fields (persisted id, display name,
+    mux name/socket), store, then confirm. `id` remains a persisted
+    schema field but should no
+    longer be the first user-facing concept. Runtime copy/help changes
+    are intentionally left to `H-PIN-TUI-002` and
+    `H-PIN-TUI-003`, where the form state and key behavior actually
+    change.
+  - Blockers: none.
+
+- [x] `H-PIN-TUI-002` Name-driven defaults and override tracking for
+  pin create.
+  - Scope: in the create form, seed a single primary name from the
+    selected row and derive the persisted pin id, display name, and
+    mux name from it until the operator edits one of those fields
+    directly. Preserve explicit overrides after later name edits.
+    Defaults should distinguish "pin/adopt this selected live entry"
+    from "create a fresh variation": exact adoption should preserve
+    the selected mux name, while fresh-session creation should propose
+    a non-conflicting mux name derived from the selected cwd/workspace
+    and name. Keep the underlying TOML schema unchanged.
+  - Tests: reducer tests for selected session, selected mux, selected
+    repo/checkout/workspace, blank launch, name edits before and
+    after an explicit field override, duplicate-id / duplicate-mux
+    preflight, and static-scenario no-write behavior.
+  - Outcome: the create form now starts with `name`, derives
+    persisted id, display name, and mux name from it, and preserves
+    explicit advanced-field overrides after later name edits. Clearing
+    a derived advanced field returns it to automatic derivation on the
+    next name edit. The Pins menu exposes one `create` flow; when the
+    selected row is adoptable, the create form includes an `adopt
+    selected` toggle that preserves the selected live mux name exactly.
+    The default `new variation` mode proposes a non-conflicting mux
+    name when the selected context's mux name is already live or
+    pinned. `A` remains a direct accelerator into the same create form
+    with adopt selected, not a separate menu-level command.
+  - Blockers: `H-PIN-TUI-001`.
+
+- [ ] `H-PIN-TUI-003` Make pin form fields editable at real-world
+  lengths.
+  - Scope: fix the current text-entry ergonomics for long cwd,
+    display, mux, and launch-argv values. Fields must horizontally
+    scroll to keep the cursor visible, expose the hidden left/right
+    content with stable indicators, and support conventional editing
+    keys (`Left`/`Right`, `Home`/`End`, word movement where already
+    available, `Tab` / `Shift-Tab` field navigation). `Enter` should
+    have one unambiguous meaning per form state; dropdown-like fields
+    such as store selection must render and behave like option sets,
+    not ordinary text rows.
+  - Tests: widget/reducer tests for cursor visibility, horizontal
+    offset updates, field navigation, store option toggling, confirm
+    behavior, and narrow-modal rendering. Ratatui snapshots for long
+    cwd and long launch argv fields.
+  - Blockers: `H-PIN-TUI-001`.
+
+- [ ] `H-PIN-TUI-004` Hybrid cwd omnibox for pin create/adopt.
+  - Scope: replace bare cwd text entry with a composable path
+    omnibox. It should accept free-form typing, rank known graph
+    paths from the selected row and recent/current workspace before
+    filesystem matches, show live existence feedback, and let `Tab`
+    complete the highlighted candidate. The widget may incorporate
+    `H-WIDG-010`'s `ratatui-explorer` directory picker as an
+    alternate browse mode, but the primary flow should work as an
+    inline omnibox so create remains keyboard-fast.
+  - Tests: unit tests for graph-path ranking, filesystem candidate
+    matching, tab completion, nonexistent-path validation, selected
+    row seeding, and browse-mode handoff if `ratatui-explorer` lands.
+    Snapshot tests for empty, matching, no-match, and invalid-path
+    states.
+  - Blockers: `H-PIN-TUI-003`, `H-WIDG-010` if the implementation
+    chooses the browse-mode dependency for this slice.
+
+- [ ] `H-PIN-TUI-005` Harness picker with free-form escape hatch.
+  - Scope: make the harness field choose from known harness keys
+    discovered in the snapshot plus registered adapter defaults, while
+    still allowing an explicit free-form value for future/custom
+    harnesses. The selected entry should prefill the harness; blank
+    forms should prefer the last-used or most common harness only
+    when that choice is visible as a suggestion, not silently hidden.
+  - Tests: reducer/widget tests for selected-session prefill,
+    suggestion navigation, free-form input, unknown-harness warning,
+    and confirmation behavior.
+  - Blockers: `H-PIN-TUI-003`.
+
+- [ ] `H-PIN-TUI-006` Launch argv editor with resolved command
+  preview.
+  - Scope: make launch customization usable for sandbox/wrapper
+    workflows. The create form should let the operator edit argv as a
+    structured command, show the effective command that will run
+    after harness defaults or per-pin overrides are applied, and make
+    it obvious when the default adapter command is being used versus
+    a pin-specific override. Do not add lifecycle hooks here; richer
+    before/after hooks remain `H-PIN-F-002`.
+  - Tests: reducer/widget tests for default command preview,
+    override editing, shell-like display escaping without shell-based
+    execution, clearing back to default, and validation errors for an
+    empty argv override.
+  - Blockers: `H-PIN-TUI-003`.
+
+- [ ] `H-PIN-TUI-006a` Harness launch option mappings for pin create.
+  - Scope: define a data model for harness-specific launch options
+    that the TUI can render as controls such as `skip permissions`
+    checkboxes while applying the correct argv fragments for the
+    selected harness. The structure should live outside the widget
+    reducer, be keyed by harness identity/version where available,
+    and support evolving argument names such as `--yolo`,
+    `--dangerously-skip-permissions`, wrapper prefixes, mutually
+    exclusive options, default-on/default-off state, and free-form
+    custom argv edits. Selecting a known harness should expose its
+    known launch options and keep the structured option state in sync
+    with the launch argv field without preventing manual argv
+    overrides.
+  - Tests: unit tests for option-to-argv rendering for at least two
+    harnesses, round-tripping from checkbox changes into launch argv,
+    preserving unknown/manual argv tokens, switching harnesses without
+    leaking incompatible flags, and fallback behavior for unknown
+    harness keys or versions.
+  - Blockers: `H-PIN-TUI-005`, `H-PIN-TUI-006`.
+
+- [ ] `H-PIN-TUI-007` Post-create/adopt focus and toast behavior.
+  - Scope: after a successful create or adopt, refresh the graph,
+    expand the synthetic Pins group in the current view when present,
+    select the new pin row, and show a toast/status message that
+    distinguishes "pin created, not started" from "pin adopted; mux
+    already running". Preserve this behavior across sessions, mux,
+    and union views where pin rows or pinned sessions can appear.
+  - Tests: reducer/runtime tests for create success, adopt success,
+    current-view row selection, Pins-group expansion, launch-state
+    wording, and failure paths that leave the prior selection intact.
+    Snapshot tests for the post-create toast and selected pin row.
+  - Blockers: `H-PIN-TUI-002`.
 
 #### Deferred follow-ups (post-v1)
 
@@ -7102,7 +7276,8 @@ Cross-cutting expectations across every Tier A swap:
   - Scope: deferred until the pin-form UX is on the agenda.
     Verify event-loop ownership (this crate's `handle()` API may
     couple more tightly than the others); flag during impl.
-  - Blockers: a downstream story that decides the picker UX.
+  - Blockers: `H-PIN-TUI-004` if that story chooses a browse-mode
+    picker instead of an inline-only omnibox.
 
 - [ ] `H-WIDG-011` `tui-tree-widget` extraction for the explorer.
   - Motivation: `src/tui/explorer.rs` (3272 LOC) carries an
@@ -8350,6 +8525,27 @@ than recursive inline detail panes.
     sparse vs richly-populated unresolved endpoints.
   - Blockers: `T8-030`, declared-link CRUD landing in the TUI
     surface (currently CLI-only).
+
+- [ ] `T8-032a` Surface resolver explanations in the TUI detail
+  explorer.
+  - Scope: expose the `H-OBS-004` explanation model from the right-pane
+    graph explorer so an operator can inspect why a selected resolved
+    relationship won. The focused relationship preview and/or `o`
+    full-value modal should show the selected candidate score axes,
+    nearest competing candidate axes, and the decisive differing axis
+    when the resolver produced an explanation. This is TUI parity with
+    `graph --explain` and `node show`; it must consume the typed
+    explanation attached to resolved relationships instead of
+    reimplementing score calculation in the renderer. Relationships
+    without explanation data should render normally with a clear
+    no-explanation fallback. Link writes and promotion remain owned by
+    `T8-032`.
+  - Tests: reducer/keymap coverage for opening and closing explanation
+    inspection from a selected relationship; Ratatui buffer snapshots
+    for explained, ambiguous, and no-explanation relationship rows;
+    scenario coverage using an ambiguity fixture such as `ambiguous-mux`
+    or an equivalent resolver fixture.
+  - Blockers: `H-OBS-004`, `T8-030`.
 
 - [ ] `T8-033` TUI responsive-layout design and breakpoints.
   - Scope: codify the layout breakpoints the TUI uses across all
