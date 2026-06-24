@@ -3597,6 +3597,31 @@ overlay rather than persistent state).
     the surviving evidence set in an ADR (or an extension of ADR
     0013) before introducing the read code.
 
+- [ ] `H-AGENTMUX-008` Route agent-deck mux renames through agent-deck.
+  - Scope: when a mux session is managed by agent-deck (detected via
+    agent-deck's `state.db` profile state), the `rename` TUI shortcut
+    (`R`) and `conspectus rename mux` should use agent-deck's native
+    rename mechanism instead of `tmux rename-session`. Agent-deck is
+    the source of truth for these sessions, and a direct tmux rename
+    would desynchronize agent-deck's internal mapping. This requires
+    (i) understanding agent-deck's rename interface (SQLite write,
+    CLI subprocess, or HTTP endpoint — to be determined during
+    implementation), (ii) adding a mutation seam to
+    `discovery::agent_deck` mirroring the existing
+    `TmuxRunner::rename_session` pattern, and (iii) extending
+    `rename::plan_session_rename` / `rename::plan_mux_rename` so the
+    lockstep path selects the agent-deck mutation when the mux
+    session is agent-deck-managed rather than a bare tmux session.
+    The existing lockstep rename contract (ADR 0029) continues to
+    apply: agent-session alias writes happen concurrently with the
+    mux-native rename. If the agent-deck rename fails, the alias is
+    already written and the operator sees a status message.
+  - Blockers: `H-AGENTMUX-004` (must read agent-deck profile state
+    first to identify which mux sessions agent-deck manages).
+  - Related: `H-RENAME-003` (tmux rename seam), `H-RENAME-006`
+    (lockstep contract), ADR 0029 (alias + rename), ADR 0060
+    (agent-deck workspace composition).
+
 - [ ] `H-AGENTMUX-005` Add a dmux orchestrator adapter (audit-gated).
   - Scope: **placeholder — may be closed as won't-do.** dmux's
     on-disk state layout is not surfaced in its README, so the audit
