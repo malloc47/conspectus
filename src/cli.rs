@@ -2491,6 +2491,7 @@ fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
     }
 }
 
+#[cfg(debug_assertions)]
 fn apply_grouping_to_tui_config(
     config: &mut conspectus::tui::RunConfig,
     grouping: conspectus::tui::Grouping,
