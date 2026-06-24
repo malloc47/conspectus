@@ -1,13 +1,12 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 836
 expression: snapshot_string(&buf)
 ---
  claude-code:0b34e59c · /p/proj · 2 turns
 ──┌ viewer keybindings ────────────────────────────────────────────┐──
-  │ q / Esc / Ctrl-C   Close viewer                                │
+ y│ q / Esc / Ctrl-C   Close viewer                                │
   │         j / Down   Scroll one line down                        │
- a│           k / Up   Scroll one line up                          │
+  │           k / Up   Scroll one line up                          │
   │     Space / PgDn   Page down                                   │
   │             PgUp   Page up                                     │
   │  Ctrl-D / Ctrl-U   Half-page down / up                         │

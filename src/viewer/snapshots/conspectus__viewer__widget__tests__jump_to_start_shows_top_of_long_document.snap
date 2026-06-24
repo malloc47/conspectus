@@ -1,15 +1,14 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 616
 expression: snapshot_string(&buf)
 ---
  claude-code:long · /p · 30 turns
 ────────────────────────────────────────────────────────────
-       you  │ turn 0
+ you  │ turn 0
 
-       you  │ turn 1
+ you  │ turn 1
 
-       you  │ turn 2
+ you  │ turn 2
 
 ────────────────────────────────────────────────────────────
 [ 1/60 ] · tools·off   (t) · think·off (T) · (q) close

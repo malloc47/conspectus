@@ -1,13 +1,12 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 672
 expression: snapshot_string(&buf)
 ---
  claude-code:wrap · /p · 1 turn
 ────────────────────────────────────────
-       you  │ one two three four five
-            │ six seven eight nine ten
-            │ eleven twelve thirteen
+ you  │ one two three four five six
+      │ seven eight nine ten eleven
+      │ twelve thirteen
 
 
 

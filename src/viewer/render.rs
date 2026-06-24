@@ -1,8 +1,8 @@
 //! Gutter-and-chip per-turn rendering (H-VIEWER-NATIVE-011).
 //!
 //! Inspired by `claude-history`: a right-aligned colored "chip" in
-//! a fixed-width left gutter identifies the turn (you / assistant /
-//! Thinking / Tool / ↳ Result / compaction), separated from the
+//! a left gutter identifies the turn (you / ai /
+//! thinking / tool / ↳ result / compact), separated from the
 //! body by a vertical rule. Wrapped body lines repeat the gutter
 //! width (blank) + separator on each visual line so the body's
 //! left edge is always at the same column.
@@ -19,14 +19,11 @@ use crate::viewer::model::{TranscriptTurn, TurnKind, TurnRole};
 use crate::viewer::state::ToolDetail;
 use crate::viewer::theme::Theme;
 
-/// Inner label width inside the chip pill. Wide enough for
-/// `assistant` (9 chars); shorter labels right-justify inside it
-/// so the colored pill is uniform.
-const CHIP_INNER_WIDTH: usize = 9;
-
 /// Total chip pill width in cells: 1 lead space + inner label +
 /// 1 trail space.
-pub const GUTTER_WIDTH: u16 = (CHIP_INNER_WIDTH + 2) as u16;
+pub fn gutter_width(inner: usize) -> u16 {
+    (inner + 2) as u16
+}
 
 /// The separator between gutter and body. Three cells:
 /// ` │ ` — leading space, rule, trailing space. On the chip line
@@ -36,7 +33,9 @@ pub const GUTTER_WIDTH: u16 = (CHIP_INNER_WIDTH + 2) as u16;
 pub const SEPARATOR_WIDTH: u16 = 3;
 
 /// Total leader cells consumed before the body content begins.
-pub const LEADER_WIDTH: u16 = GUTTER_WIDTH + SEPARATOR_WIDTH;
+pub fn leader_width(inner: usize) -> u16 {
+    gutter_width(inner) + SEPARATOR_WIDTH
+}
 
 /// Convert a borrowed [`Line`] into an owned `Line<'static>` by
 /// cloning every span's content. Used by the widget when it caches
@@ -67,17 +66,32 @@ pub fn render_turn<'a>(
     theme: &Theme,
     content_width: u16,
     tool_detail: ToolDetail,
+    gutter_inner_width: usize,
 ) -> Vec<Line<'a>> {
     let chip_color = chip_color(turn, theme);
     let body_lines = build_body_lines(turn, theme, content_width, tool_detail);
     if body_lines.is_empty() {
         // Even an empty turn deserves its chip — render the chip
         // alone so the operator sees the role marker.
-        return vec![compose_line(turn, theme, chip_color, Line::raw(""), true)];
+        return vec![compose_line(
+            turn,
+            theme,
+            chip_color,
+            Line::raw(""),
+            true,
+            gutter_inner_width,
+        )];
     }
     let mut out = Vec::with_capacity(body_lines.len() + 1);
     for (i, body) in body_lines.into_iter().enumerate() {
-        out.push(compose_line(turn, theme, chip_color, body, i == 0));
+        out.push(compose_line(
+            turn,
+            theme,
+            chip_color,
+            body,
+            i == 0,
+            gutter_inner_width,
+        ));
     }
     // Spacer between turns. The blank line is intentionally blank
     // (no separator) so adjacent turns don't look like the same
@@ -183,6 +197,7 @@ pub fn render_aggregated_tool_summary(
     phrase: &str,
     theme: &Theme,
     content_width: u16,
+    gutter_inner_width: usize,
 ) -> Vec<Line<'static>> {
     let synthetic = TranscriptTurn {
         role: TurnRole::Assistant,
@@ -191,10 +206,16 @@ pub fn render_aggregated_tool_summary(
         timestamp: None,
         aborted: false,
     };
-    render_turn(&synthetic, theme, content_width, ToolDetail::Summary)
-        .into_iter()
-        .map(into_owned_line)
-        .collect()
+    render_turn(
+        &synthetic,
+        theme,
+        content_width,
+        ToolDetail::Summary,
+        gutter_inner_width,
+    )
+    .into_iter()
+    .map(into_owned_line)
+    .collect()
 }
 
 /// Build a `gutter + separator + body` line. The chip is drawn
@@ -207,21 +228,19 @@ fn compose_line<'a>(
     chip_color: ratatui::style::Color,
     body: Line<'a>,
     show_chip: bool,
+    gutter_inner_width: usize,
 ) -> Line<'a> {
+    let gutter = gutter_width(gutter_inner_width);
     let mut spans: Vec<Span<'a>> = Vec::with_capacity(3 + body.spans.len());
     if show_chip {
-        // Filled pill: fixed-width ` <label:>9> ` (11 cells)
-        // rendered with `theme.badge` (REVERSED+BOLD by default)
-        // over the chip's foreground color. Matches the session-
-        // list badge primitive (`crate::tui::widgets::badge`).
         let label = chip_label(turn);
-        let pill = format!(" {label:>CHIP_INNER_WIDTH$} ");
+        let pill = format!(" {label:>width$} ", width = gutter_inner_width);
         spans.push(Span::styled(
             pill,
             Style::new().fg(chip_color).add_modifier(theme.badge),
         ));
     } else {
-        spans.push(Span::raw(" ".repeat(GUTTER_WIDTH as usize)));
+        spans.push(Span::raw(" ".repeat(gutter as usize)));
     }
     spans.push(Span::styled(" │ ", Style::new().fg(chip_color)));
     spans.extend(body.spans);
@@ -230,16 +249,22 @@ fn compose_line<'a>(
 
 /// The chip label as it appears in the gutter. Tool-result has a
 /// leading `↳` so the call/result pair reads as connected.
-fn chip_label(turn: &TranscriptTurn) -> &'static str {
+pub fn chip_label(turn: &TranscriptTurn) -> &'static str {
     match (turn.role, turn.kind) {
         (_, TurnKind::CompactionSummary) => "compact",
-        (_, TurnKind::Thinking) => "Thinking",
-        (_, TurnKind::ToolUse) => "Tool",
-        (_, TurnKind::ToolResult) => "↳ Result",
+        (_, TurnKind::Thinking) => "thinking",
+        (_, TurnKind::ToolUse) => "tool",
+        (_, TurnKind::ToolResult) => "↳ result",
         (TurnRole::User, _) => "you",
-        (TurnRole::Assistant, _) => "assistant",
+        (TurnRole::Assistant, _) => "ai",
         (TurnRole::System, _) => "system",
     }
+}
+
+/// Display width of a chip label in terminal cells.
+/// Uses char count to match Rust's `{:>width$}` format alignment.
+pub fn chip_label_width(label: &str) -> usize {
+    label.chars().count()
 }
 
 /// Color associated with a turn's chip (and therefore its
@@ -648,12 +673,12 @@ mod tests {
     }
 
     /// Visible-text expectation of the chip pill for a given label,
-    /// matching `format!(" {label:>CHIP_INNER_WIDTH$} ")`. The pill
+    /// matching `format!(" {label:>width$} ")`. The pill
     /// is followed by ` │ ` (no extra space — the pill's trailing
     /// space + separator's leading space give two cells between
     /// the label and the rule).
-    fn chip_pill(label: &str) -> String {
-        format!(" {label:>CHIP_INNER_WIDTH$} ")
+    fn chip_pill(label: &str, inner_width: usize) -> String {
+        format!(" {label:>width$} ", width = inner_width)
     }
 
     #[test]
@@ -663,14 +688,12 @@ mod tests {
         // CommonMark soft break and collapses to a space.
         let t = turn(TurnRole::User, TurnKind::Message, "hello\n\nworld");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full, inner);
         let texts = flat_text(&out);
-        // First content line: ` <you right-aligned in 9> ` + ` │ ` + body.
-        let expected_first = format!("{} │ hello", chip_pill("you"));
+        let expected_first = format!("{} │ hello", chip_pill("you", inner));
         assert_eq!(texts[0], expected_first);
-        // A "world" line shows up with blank-gutter prefix
-        // (GUTTER_WIDTH spaces + ` │ ` + body).
-        let blank_pad = " ".repeat(GUTTER_WIDTH as usize);
+        let blank_pad = " ".repeat(gutter_width(inner) as usize);
         assert!(
             texts.iter().any(|l| l == &format!("{blank_pad} │ world")),
             "expected blank-gutter `world` line, got {texts:?}"
@@ -680,13 +703,14 @@ mod tests {
     }
 
     #[test]
-    fn assistant_role_uses_assistant_chip() {
+    fn assistant_role_uses_ai_chip() {
         let t = turn(TurnRole::Assistant, TurnKind::Message, "hi");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full, inner);
         let texts = flat_text(&out);
         assert!(
-            texts[0].contains(&format!("{} │ hi", chip_pill("assistant"))),
+            texts[0].contains(&format!("{} │ hi", chip_pill("ai", inner))),
             "got {:?}",
             texts[0]
         );
@@ -696,9 +720,10 @@ mod tests {
     fn thinking_chip_label() {
         let t = turn(TurnRole::Assistant, TurnKind::Thinking, "musing");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full, inner);
         assert!(
-            flat_text(&out)[0].contains(&format!("{} │", chip_pill("Thinking"))),
+            flat_text(&out)[0].contains(&format!("{} │", chip_pill("thinking", inner))),
             "got {:?}",
             flat_text(&out)[0]
         );
@@ -707,18 +732,19 @@ mod tests {
     #[test]
     fn tool_use_and_tool_result_chips() {
         let theme = Theme::default();
+        let inner = 8;
         let call_turn = turn(TurnRole::Assistant, TurnKind::ToolUse, "ls");
-        let call = render_turn(&call_turn, &theme, 40, ToolDetail::Full);
+        let call = render_turn(&call_turn, &theme, 40, ToolDetail::Full, inner);
         assert!(
-            flat_text(&call)[0].contains(&format!("{} │ ls", chip_pill("Tool"))),
+            flat_text(&call)[0].contains(&format!("{} │ ls", chip_pill("tool", inner))),
             "got {:?}",
             flat_text(&call)[0]
         );
         let res_turn = turn(TurnRole::Assistant, TurnKind::ToolResult, "ok");
-        let res = render_turn(&res_turn, &theme, 40, ToolDetail::Full);
+        let res = render_turn(&res_turn, &theme, 40, ToolDetail::Full, inner);
         // Tool result uses the corner-arrow glyph.
         assert!(
-            flat_text(&res)[0].contains(&format!("{} │ ok", chip_pill("↳ Result"))),
+            flat_text(&res)[0].contains(&format!("{} │ ok", chip_pill("↳ result", inner))),
             "got {:?}",
             flat_text(&res)[0]
         );
@@ -728,9 +754,10 @@ mod tests {
     fn compaction_summary_uses_compact_chip() {
         let t = turn(TurnRole::User, TurnKind::CompactionSummary, "summary");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full, inner);
         assert!(
-            flat_text(&out)[0].contains(&format!("{} │ summary", chip_pill("compact"))),
+            flat_text(&out)[0].contains(&format!("{} │ summary", chip_pill("compact", inner))),
             "got {:?}",
             flat_text(&out)[0]
         );
@@ -742,7 +769,8 @@ mod tests {
         let body = "one two three four five six seven eight nine ten";
         let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 20, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 20, ToolDetail::Full, inner);
         let texts = flat_text(&out);
         // Drop the spacer line.
         let body_lines: Vec<&String> = texts.iter().take(texts.len() - 1).collect();
@@ -750,11 +778,10 @@ mod tests {
             body_lines.len() >= 3,
             "expected wrapped lines, got {body_lines:?}"
         );
-        // Every line begins with the leader (GUTTER_WIDTH + " │ ").
         for line in &body_lines {
-            let leader_cells = LEADER_WIDTH as usize;
+            let leader = leader_width(inner) as usize;
             assert!(
-                line.chars().count() >= leader_cells,
+                line.chars().count() >= leader,
                 "line shorter than leader: {line:?}"
             );
         }
@@ -766,7 +793,8 @@ mod tests {
         let body = "abcdefghijklmnopqrstuvwxyz1234";
         let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 10, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 10, ToolDetail::Full, inner);
         let texts = flat_text(&out);
         // Should produce ≥ 3 body lines (30/10 = 3). +1 spacer = 4.
         assert!(texts.len() >= 4, "got {texts:?}");
@@ -783,7 +811,8 @@ mod tests {
         let body = "leading prefix that takes most of the line ccview tail";
         let t = turn(TurnRole::Assistant, TurnKind::ToolResult, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 50, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 50, ToolDetail::Full, inner);
         let texts = flat_text(&out);
         // The word "ccview" should appear intact on a single line
         // somewhere in the wrapped output (without inter-character
@@ -818,7 +847,8 @@ mod tests {
         let body = "1. some text that is just long enough to need wrapping";
         let t = turn(TurnRole::Assistant, TurnKind::Message, body);
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 30, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 30, ToolDetail::Full, inner);
         let texts = flat_text(&out);
         // The list marker must share a line with at least the
         // first body word — no `"        you │ 1."` then
@@ -896,13 +926,14 @@ mod tests {
     fn empty_body_still_renders_the_chip() {
         let t = turn(TurnRole::User, TurnKind::Message, "");
         let theme = Theme::default();
-        let out = render_turn(&t, &theme, 40, ToolDetail::Full);
+        let inner = 8;
+        let out = render_turn(&t, &theme, 40, ToolDetail::Full, inner);
         // Empty body yields just the chip line; no spacer (the
         // alternative would waste vertical space for what is
         // already a degenerate turn).
         assert_eq!(out.len(), 1);
         assert!(
-            flat_text(&out)[0].contains(&format!("{} │", chip_pill("you"))),
+            flat_text(&out)[0].contains(&format!("{} │", chip_pill("you", inner))),
             "got {:?}",
             flat_text(&out)[0]
         );

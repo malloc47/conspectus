@@ -1,19 +1,18 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 789
 expression: snapshot_string(&buf)
 ---
  claude-code:tbl · /proj · 1 turn
 ────────────────────────────────────────────────────────────────────────────────
- assistant  │ Three-way comparison:
-            │  Option ┆ Effort ┆ Risk
-            │ ════════╪════════╪════════
-            │  A      ┆ Small  ┆ Low
-            │ ╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌
-            │  B      ┆ Medium ┆ Medium
-            │ ╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌
-            │  C      ┆ Large  ┆ High
-            │ Recommend B.
+ ai  │ Three-way comparison:
+     │  Option ┆ Effort ┆ Risk
+     │ ════════╪════════╪════════
+     │  A      ┆ Small  ┆ Low
+     │ ╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌
+     │  B      ┆ Medium ┆ Medium
+     │ ╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌
+     │  C      ┆ Large  ┆ High
+     │ Recommend B.
 
 
 

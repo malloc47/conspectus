@@ -10,7 +10,7 @@
 //! │                                                             │
 //! │       you │ what's up?                                      │  body
 //! │           │                                                 │
-//! │ assistant │ Not much.                                       │
+//! │       ai │ Not much.                                       │
 //! │           │                                                 │
 //! │  Thinking │ <italic dim thinking text>                      │
 //! │      Tool │ Read: /path                                     │
@@ -33,8 +33,9 @@ use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::viewer::model::{TranscriptDocument, TurnKind};
 use crate::viewer::render::{
-    LEADER_WIDTH, ToolCategory, aggregate_tool_phrase, categorize_tool_name, into_owned_line,
-    render_aggregated_tool_summary, render_turn, tool_name_from_body,
+    ToolCategory, aggregate_tool_phrase, categorize_tool_name, chip_label, chip_label_width,
+    into_owned_line, leader_width, render_aggregated_tool_summary, render_turn,
+    tool_name_from_body,
 };
 use crate::viewer::state::{RenderCache, ToolDetail, ViewerState};
 use crate::viewer::theme::Theme;
@@ -149,7 +150,8 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
         return;
     }
 
-    let content_width = area.width.saturating_sub(LEADER_WIDTH);
+    let gutter_inner_width = compute_gutter_inner_width(state);
+    let content_width = area.width.saturating_sub(leader_width(gutter_inner_width));
 
     // Cache hit: reuse the previously composed body. Cache key is
     // (content_width, show_tools, show_thinking); the reducer
@@ -167,7 +169,7 @@ fn draw_body(state: &mut ViewerState, theme: &Theme, frame: &mut Frame<'_>, area
     };
     if need_rebuild {
         let owned: Vec<ratatui::text::Line<'static>> =
-            build_body_lines(state, theme, content_width)
+            build_body_lines(state, theme, content_width, gutter_inner_width)
                 .into_iter()
                 .map(into_owned_line)
                 .collect();
@@ -440,6 +442,21 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(paragraph, panel_area);
 }
 
+/// Compute the inner gutter chip-label width from the widest
+/// label among visible turns. This allows the gutter to shrink
+/// when wider labels (e.g. `thinking`) are toggled off.
+fn compute_gutter_inner_width(state: &ViewerState) -> usize {
+    let mut max_width = 0usize;
+    for turn in &state.document.turns {
+        if !passes_abort_filter(turn, state) || !is_visible(turn.kind, state) {
+            continue;
+        }
+        let label = chip_label(turn);
+        max_width = max_width.max(chip_label_width(label));
+    }
+    max_width.max(1)
+}
+
 /// Build the flat body line list. Filters out tool turns at
 /// `ToolDetail::Hidden` and thinking turns when `show_thinking`
 /// is off. At `ToolDetail::Summary` consecutive runs of tool
@@ -451,6 +468,7 @@ fn build_body_lines<'a>(
     state: &'a ViewerState,
     theme: &Theme,
     content_width: u16,
+    gutter_inner_width: usize,
 ) -> Vec<Line<'a>> {
     let mut lines: Vec<Line<'a>> = Vec::new();
     let turns = &state.document.turns;
@@ -467,14 +485,24 @@ fn build_body_lines<'a>(
             let (counts, run_len) = collect_tool_run(&turns[i..], state);
             if !counts.is_empty() {
                 let phrase = aggregate_tool_phrase(&counts);
-                let owned: Vec<Line<'static>> =
-                    render_aggregated_tool_summary(&phrase, theme, content_width);
+                let owned: Vec<Line<'static>> = render_aggregated_tool_summary(
+                    &phrase,
+                    theme,
+                    content_width,
+                    gutter_inner_width,
+                );
                 lines.extend(owned);
             }
             i += run_len.max(1);
             continue;
         }
-        lines.extend(render_turn(turn, theme, content_width, state.tool_detail));
+        lines.extend(render_turn(
+            turn,
+            theme,
+            content_width,
+            state.tool_detail,
+            gutter_inner_width,
+        ));
         i += 1;
     }
     lines
@@ -952,7 +980,8 @@ mod tests {
         let lines_at_80 = state.rendered.as_ref().unwrap().lines.len();
         let _ = render_to_buffer(&mut state, &theme, 40, 12);
         let cache = state.rendered.as_ref().unwrap();
-        let content_width_at_40 = 40u16 - LEADER_WIDTH;
+        let inner = compute_gutter_inner_width(&state);
+        let content_width_at_40 = 40u16 - leader_width(inner);
         assert_eq!(
             cache.content_width, content_width_at_40,
             "cache reports the latest content_width"
@@ -991,7 +1020,7 @@ mod tests {
             crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
         let after = buffer_to_string(&render_to_buffer(&mut state, &theme, 60, 14));
         assert!(after.contains("Glob:"), "tool turns visible at Full detail");
-        assert!(after.contains("Tool"), "tool chip label visible");
+        assert!(after.contains("tool  │"), "tool chip label visible");
     }
 
     #[test]
@@ -1160,7 +1189,7 @@ mod tests {
             crate::viewer::input::reduce(state, crate::viewer::input::ViewerMsg::CycleToolDetail);
         assert_eq!(state.tool_detail, ToolDetail::Summary);
         let s = buffer_to_string(&render_to_buffer(&mut state, &theme, 100, 14));
-        assert!(s.contains("Tool"), "tool chip present at Summary");
+        assert!(s.contains("tool  │"), "tool chip present at Summary");
         // The aggregated phrase replaces 16 per-turn lines.
         assert!(
             s.contains("Read 2 files, ran 4 shell commands, edited 2 files"),
@@ -1168,7 +1197,7 @@ mod tests {
         );
         // Surrounding non-tool turns still render normally.
         assert!(s.contains("do the thing"), "user message stays");
-        assert!(s.contains("done"), "assistant closing message stays");
+        assert!(s.contains("done"), "ai closing message stays");
         // No per-call chip body should leak through Summary —
         // operator wouldn't see individual "Bash: arg0" lines.
         assert!(

@@ -1,13 +1,12 @@
 ---
 source: src/viewer/widget.rs
-assertion_line: 605
 expression: snapshot_string(&buf)
 ---
  claude-code:0b34e59c · /p/proj · 2 turns
 ────────────────────────────────────────────────────────────
-       you  │ what's up?
+ you  │ what's up?
 
- assistant  │ not much
+  ai  │ not much
 
 
 
