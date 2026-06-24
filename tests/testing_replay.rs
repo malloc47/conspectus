@@ -227,8 +227,8 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
         harness_version: Some("1.0.0".to_string()),
     };
 
-    world.write_hook_record(make_hook(session_a, 1_700_000_500));
-    world.write_hook_record(make_hook(session_b, 1_700_000_600));
+    world.write_legacy_hook_record("older", &make_hook(session_a, 1_700_000_500));
+    world.write_legacy_hook_record("newer", &make_hook(session_b, 1_700_000_600));
 
     let result = world.run();
 
@@ -533,25 +533,31 @@ fn hook_supersession_world() -> ReplayWorld {
             .with_active_pane("claude", 123, &work, "claude"),
     );
 
-    for (session_key, observed_epoch) in [(session_a, 1_700_000_500), (session_b, 1_700_000_600)] {
-        world.write_hook_record(HookRecord {
-            schema_version: SCHEMA_VERSION,
-            harness_key: "claude-code".to_string(),
-            session_key: session_key.to_string(),
-            cwd: Some(work.to_string_lossy().to_string()),
-            pid: Some(123),
-            ppid: Some(456),
-            tmux: Some(HookTmuxRecord {
-                session_name: Some("editor".to_string()),
-                native_id: None,
-                pane_id: Some("%1".to_string()),
-                socket_path: None,
-            }),
-            transcript_path: None,
-            hook_event_name: Some("SessionStart".to_string()),
-            observed_epoch,
-            harness_version: Some("1.0.0".to_string()),
-        });
+    for (name, session_key, observed_epoch) in [
+        ("older", session_a, 1_700_000_500),
+        ("newer", session_b, 1_700_000_600),
+    ] {
+        world.write_legacy_hook_record(
+            name,
+            &HookRecord {
+                schema_version: SCHEMA_VERSION,
+                harness_key: "claude-code".to_string(),
+                session_key: session_key.to_string(),
+                cwd: Some(work.to_string_lossy().to_string()),
+                pid: Some(123),
+                ppid: Some(456),
+                tmux: Some(HookTmuxRecord {
+                    session_name: Some("editor".to_string()),
+                    native_id: None,
+                    pane_id: Some("%1".to_string()),
+                    socket_path: None,
+                }),
+                transcript_path: None,
+                hook_event_name: Some("SessionStart".to_string()),
+                observed_epoch,
+                harness_version: Some("1.0.0".to_string()),
+            },
+        );
     }
 
     world

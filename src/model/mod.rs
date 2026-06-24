@@ -1112,6 +1112,71 @@ pub struct ResolvedRelationship {
     /// the full candidate set without a parallel inference path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub competing_link_ids: Vec<String>,
+    /// Optional resolver score breakdown. Populated by
+    /// `resolve::explain_resolved_relationships` for explainer
+    /// surfaces; omitted from default graph JSON so the baseline
+    /// machine-readable shape remains compact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<ResolutionExplanation>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ResolutionExplanation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<CandidateScore>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub competing: Vec<CandidateScore>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decisive_axis: Option<String>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CandidateScore {
+    pub link_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axes: Vec<ScoreAxis>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ScoreAxis {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(
@@ -1847,6 +1912,7 @@ mod tests {
             relation: RelationKind::CreatedCheckout,
             selected_link_id: Some("git-link".to_string()),
             competing_link_ids: Vec::new(),
+            explanation: None,
         });
 
         snap.evict_provider("git");
@@ -1999,6 +2065,7 @@ mod tests {
             relation: RelationKind::LinkedToMux,
             selected_link_id: Some("link-1".to_string()),
             competing_link_ids: vec!["link-2".to_string()],
+            explanation: None,
         });
 
         snap.diagnostics.push(Diagnostic::UnresolvedEndpoint {

@@ -78,6 +78,13 @@ impl ReplayWorld {
             .expect("write replay hook record");
     }
 
+    pub fn write_legacy_hook_record(&self, name: &str, record: &HookRecord) {
+        fs::create_dir_all(&self.hook_root).expect("create replay hook root");
+        let path = self.hook_root.join(format!("{name}.json"));
+        let body = serde_json::to_vec_pretty(record).expect("serialize replay hook record");
+        fs::write(path, body).expect("write legacy replay hook record");
+    }
+
     pub fn add_tmux_row(&mut self, row: TmuxReplayRow) {
         self.tmux_rows.push(row);
     }

@@ -26,9 +26,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use crate::model::{
-    AgentSessionId, AgentSessionNode, BranchId, CheckoutNode, Diagnostic, ForgePrNode, ForkNode,
-    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
-    ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
+    AgentSessionId, AgentSessionNode, BranchId, CandidateScore, CheckoutNode, Diagnostic,
+    ForgePrNode, ForkNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
+    MuxSessionNode, NodeId, ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
 };
 use crate::output::render::{self, header_style, node_short_id_from_display, push_styled};
 
@@ -643,6 +643,24 @@ fn write_resolved(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId, color
                 rel.competing_link_ids.join(", ")
             );
         }
+        if let Some(explanation) = &rel.explanation {
+            if let Some(axis) = &explanation.decisive_axis {
+                let _ = writeln!(out, "      decisive axis: {axis}");
+            }
+            if let Some(selected) = &explanation.selected {
+                write_candidate_score(out, "selected score", selected);
+            }
+            for candidate in &explanation.competing {
+                write_candidate_score(out, "competing score", candidate);
+            }
+        }
+    }
+}
+
+fn write_candidate_score(out: &mut String, label: &str, score: &CandidateScore) {
+    let _ = writeln!(out, "      {label}: {}", score.link_id);
+    for axis in &score.axes {
+        let _ = writeln!(out, "        {}: {}", axis.name, axis.value);
     }
 }
 
@@ -1086,6 +1104,7 @@ mod tests {
                 relation: RelationKind::LinkedToMux,
                 selected_link_id: Some("link-1".to_string()),
                 competing_link_ids: vec![],
+                explanation: None,
             }],
             ..GraphSnapshot::empty()
         };

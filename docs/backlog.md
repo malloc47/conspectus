@@ -1495,17 +1495,27 @@ area is already being touched. Group prefixes:
     forces consumers to do their own filtering on JSON.
   - Tests: CLI integration tests against existing snapshots.
   - Blockers: none.
-- [ ] `H-OBS-004` Add a `--explain` mode for resolved relationships.
+- [x] `H-OBS-004` Add a `--explain` mode for resolved relationships.
   - Scope: surface why the resolver picked a given winning candidate
     (provenance tier, recency, state, conflict diagnostics). Both for the
     JSON output and `session` table cells with the `*` ambiguity marker.
   - Tests: snapshot tests for ambiguous mux and PR fixtures.
   - Blockers: `H-REF-003` is friendlier to do first because the
     explanation depends on a stable scoring shape.
-  - Related: ADR 0059 (Proposed) frames this as the immediate work and
+  - Related: ADR 0059 (Accepted) frames this as the immediate work and
     defers the rules-engine question behind it; review and accept/reject
     via `H-ADR-0059-REVIEW` before scoping `--explain` implementation.
-- [ ] `H-ADR-0059-REVIEW` Review and resolve ADR 0059 (resolver
+  - Outcome: added `resolve::explain_resolved_relationships`, which
+    annotates each `ResolvedRelationship` with the selected candidate's
+    score axes, competing candidates' score axes, and the first axis
+    that differs from the nearest competitor. `graph --explain` emits
+    those annotations in JSON, while default graph JSON remains compact.
+    `node show` annotates before rendering and prints the same score
+    breakdown for relationships touching the node. The first scoring
+    surface covers generic precedence/confidence, `linked_to_mux`, and
+    `branch_has_forge_pr`; future comparator-specific axes can extend
+    the same carrier.
+- [x] `H-ADR-0059-REVIEW` Review and resolve ADR 0059 (resolver
   rules-engine evaluation).
   - Scope: read `docs/adr/0059-resolver-rules-engine-evaluation.md`,
     decide accept / amend / reject. Key knobs to tune if accepting:
@@ -1517,6 +1527,10 @@ area is already being touched. Group prefixes:
     without an explicit re-trigger.
   - Tests: none (ADR-only).
   - Blockers: none.
+  - Outcome: ADR 0059 accepted as drafted. The resolver stays in Rust;
+    `H-OBS-004` implements typed score breakdowns rather than adopting a
+    rules engine. The Ascent re-trigger remains "three or more
+    derivation-pass bugs after `H-OBS-004` ships."
 - [ ] `H-OBS-005` Improve discovery diagnostics for missing providers.
   - Scope: when `gh` is unavailable, `tmux` is not installed, declared
     config is malformed, or a harness state root is missing, surface a

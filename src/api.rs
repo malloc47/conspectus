@@ -44,14 +44,16 @@ pub use crate::discovery::{
     discover_local_at_roots, discover_local_with, empty_graph, merge_fragments,
 };
 pub use crate::model::{
-    AgentSessionId, AgentSessionNode, BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence,
-    Diagnostic, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness, GraphLink, GraphNode,
-    LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId, Provenance, RelationKind,
-    RepoId, RepoNode, ResolvedRelationship, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
-    WorkspaceNode,
+    AgentSessionId, AgentSessionNode, BranchId, BranchNode, CandidateScore, CheckoutId,
+    CheckoutNode, Confidence, Diagnostic, ForgePrId, ForgePrNode, ForkId, ForkNode, Freshness,
+    GraphLink, GraphNode, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
+    Provenance, RelationKind, RepoId, RepoNode, ResolutionExplanation, ResolvedRelationship,
+    ScoreAxis, SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
 };
 pub use crate::output::{render_graph_json, table};
 pub use crate::rename::{
     AgentAliasWrite, MuxNativeRename, RenamePlan, RenamePlanError, plan_session_rename,
 };
-pub use crate::resolve::{ResolveOutput, resolve_links, resolve_snapshot};
+pub use crate::resolve::{
+    ResolveOutput, explain_resolved_relationships, resolve_links, resolve_snapshot,
+};

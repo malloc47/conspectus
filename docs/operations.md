@@ -200,6 +200,7 @@ errors. The `[table]` palette (ADR 0022) is **not** affected by
 conspectus graph --format {json|dot|html} [--scan-root PATH]...
                                           [--candidates {include|exclude}]
                                           [--diagnostic-nodes {include|exclude}]
+                                          [--explain]
 conspectus table {sessions|mux|union|prs|forks} [--layout {columnar|card}]
                                                  [--wide | --width N]
                                                  [--columns LIST]
@@ -352,7 +353,17 @@ default flags), so paged output retains color.
 
 The command prints the node itself plus every candidate link (outgoing
 and incoming), resolved relationship, source metadata, and diagnostic
-that touches the resolved node.
+that touches the resolved node. Resolved relationships include the
+same resolver score breakdown exposed by `conspectus graph --explain`:
+the selected link's score axes, competing links' score axes, and the
+first axis that decided the winner when there is a competitor.
+
+`conspectus graph --explain` keeps the normal graph JSON shape but
+adds an `explanation` object to each resolved relationship. The field
+is opt-in so existing JSON consumers do not pay for verbose resolver
+internals unless they ask for them. The current score axes cover the
+generic resolver ordering plus the specialized `linked_to_mux` and
+`branch_has_forge_pr` comparators.
 
 All commands run from the current working directory by default;
 passing one or more `--scan-root` flags overrides that with explicit

@@ -12,11 +12,12 @@ Most consumers should start with the curated API facade:
 ```rust
 use conspectus::api::{
     LocalDiscoveryConfig, discover_local_with, render_graph_json,
-    resolve_snapshot,
+    explain_resolved_relationships, resolve_snapshot,
 };
 
 let graph = discover_local_with(["/workspace"], LocalDiscoveryConfig::empty())?;
-let graph = resolve_snapshot(graph);
+let mut graph = resolve_snapshot(graph);
+explain_resolved_relationships(&mut graph); // optional, for resolver score details
 let json = render_graph_json(&graph)?;
 # anyhow::Ok(())
 ```
@@ -36,7 +37,7 @@ inputs.
 | Module | Classification | Stable entry points |
 | --- | --- | --- |
 | `model` | pure data model | `GraphSnapshot`, `GraphNode`, `GraphLink`, typed IDs, relation/provenance/confidence enums |
-| `resolve` | pure resolver | `resolve_snapshot`, `resolve_links` |
+| `resolve` | pure resolver | `resolve_snapshot`, `resolve_links`, `explain_resolved_relationships` |
 | `output` | pure renderer | `render_graph_json` |
 | `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export |
 | `discovery::cross_link` | pure graph enrichment | `infer` |
@@ -79,8 +80,8 @@ where possible.
   `atelier::fork_records_fragment`, and harness adapters under
   `discovery::harness`.
 - Resolution and rendering:
-  `resolve_snapshot`, `resolve_links`, `render_graph_json`,
-  `output::table::render`, `output::table::render_with`.
+  `resolve_snapshot`, `resolve_links`, `explain_resolved_relationships`,
+  `render_graph_json`, `output::table::render`, `output::table::render_with`.
 - Configuration and declarations:
   `ConfigLoader`, `load_from_cwd`, `parse_declared_document`, `to_toml`,
   `select_store_for_declaration`, `load_declared_link_by_id`,

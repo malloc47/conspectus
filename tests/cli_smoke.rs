@@ -64,6 +64,59 @@ fn graph_json_prints_empty_graph_document() {
 }
 
 #[test]
+fn graph_json_explain_adds_resolver_score_breakdowns() {
+    let home = tempfile::TempDir::new().expect("home temp");
+    let repo = temp_git_repo();
+
+    let default_assert = isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .assert()
+        .success();
+    let default_output =
+        String::from_utf8(default_assert.get_output().stdout.clone()).expect("utf8 stdout");
+    let default_json: serde_json::Value =
+        serde_json::from_str(&default_output).expect("valid json output");
+    let default_relationship = default_json["resolved_relationships"]
+        .as_array()
+        .expect("relationships")
+        .first()
+        .expect("at least one resolved relationship");
+    assert!(
+        default_relationship.get("explanation").is_none(),
+        "default graph JSON should stay compact: {default_relationship:?}"
+    );
+
+    let explain_assert = isolated_cmd(home.path())
+        .current_dir(repo.path())
+        .arg("graph")
+        .arg("--format")
+        .arg("json")
+        .arg("--explain")
+        .assert()
+        .success();
+    let explain_output =
+        String::from_utf8(explain_assert.get_output().stdout.clone()).expect("utf8 stdout");
+    let explain_json: serde_json::Value =
+        serde_json::from_str(&explain_output).expect("valid json output");
+    let explained_relationship = explain_json["resolved_relationships"]
+        .as_array()
+        .expect("relationships")
+        .first()
+        .expect("at least one resolved relationship");
+    assert!(
+        explained_relationship["explanation"]["selected"]["axes"]
+            .as_array()
+            .expect("score axes")
+            .iter()
+            .any(|axis| axis["name"] == "provenance"),
+        "explain JSON should include selected score axes: {explained_relationship:?}"
+    );
+}
+
+#[test]
 fn graph_json_output_is_deterministic() {
     let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");

@@ -3,9 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
-    Confidence, Diagnostic, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, NodeId, Provenance, RelationKind, ResolvedRelationship, RuntimeProcessRole,
-    SourceMetadata,
+    CandidateScore, Confidence, Diagnostic, Freshness, GraphLink, GraphNode, GraphSnapshot,
+    LinkEndpoint, LinkState, NodeId, Provenance, RelationKind, ResolutionExplanation,
+    ResolvedRelationship, RuntimeProcessRole, ScoreAxis, SourceMetadata,
 };
 
 pub mod pins;
@@ -28,6 +28,74 @@ pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     snapshot.diagnostics.extend(pin_diagnostics);
     snapshot.canonicalize();
     snapshot
+}
+
+/// Populate resolver score explanations for every resolved relationship.
+///
+/// The default resolver keeps snapshots compact and leaves this field empty.
+/// CLI/TUI surfaces that need an explainer can call this after
+/// [`resolve_snapshot`] has produced the selected relationships.
+pub fn explain_resolved_relationships(snapshot: &mut GraphSnapshot) {
+    let links_by_id: BTreeMap<&str, &GraphLink> = snapshot
+        .candidate_links
+        .iter()
+        .map(|link| (link.id.as_str(), link))
+        .collect();
+
+    for relationship in &mut snapshot.resolved_relationships {
+        let selected = relationship
+            .selected_link_id
+            .as_deref()
+            .and_then(|id| links_by_id.get(id).copied())
+            .map(candidate_score);
+
+        let competing: Vec<CandidateScore> = relationship
+            .competing_link_ids
+            .iter()
+            .filter_map(|id| links_by_id.get(id.as_str()).copied())
+            .map(candidate_score)
+            .collect();
+
+        let decisive_axis = selected.as_ref().and_then(|score| {
+            competing
+                .first()
+                .and_then(|competitor| first_different_axis(score, competitor))
+        });
+
+        relationship.explanation = Some(ResolutionExplanation {
+            selected,
+            competing,
+            decisive_axis,
+        });
+    }
+}
+
+fn candidate_score(link: &GraphLink) -> CandidateScore {
+    let axes = match link.relation {
+        RelationKind::LinkedToMux => mux_score_axes(link),
+        RelationKind::BranchHasForgePr => pr_score_axes(link),
+        _ => generic_score_axes(link),
+    };
+    CandidateScore {
+        link_id: link.id.clone(),
+        axes,
+    }
+}
+
+fn first_different_axis(selected: &CandidateScore, competitor: &CandidateScore) -> Option<String> {
+    selected
+        .axes
+        .iter()
+        .zip(&competitor.axes)
+        .find(|(left, right)| left.name == right.name && left.value != right.value)
+        .map(|(axis, _)| axis.name.clone())
+}
+
+fn score_axis(name: &str, value: impl ToString) -> ScoreAxis {
+    ScoreAxis {
+        name: name.to_string(),
+        value: value.to_string(),
+    }
 }
 
 /// Window (in seconds) within which a candidate's source session must
@@ -488,6 +556,7 @@ pub fn resolve_links(candidates: &[GraphLink]) -> ResolveOutput {
             relation,
             selected_link_id: Some(selected.id.clone()),
             competing_link_ids,
+            explanation: None,
         });
     }
 
@@ -615,6 +684,15 @@ fn compare_generic(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
         .then_with(|| left.id.cmp(&right.id))
 }
 
+fn generic_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
+    vec![
+        score_axis("provenance", link.provenance.snake_case()),
+        score_axis("provenance_rank", link.provenance.precedence()),
+        score_axis("confidence", link.confidence.snake_case()),
+        score_axis("link_id", &link.id),
+    ]
+}
+
 fn compare_process_identity_links(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering {
     let l = process_identity_score(left);
     let r = process_identity_score(right);
@@ -703,6 +781,21 @@ enum MuxTier {
     LocalDeclared = 7,
 }
 
+impl MuxTier {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Cached => "cached",
+            Self::Convention => "convention",
+            Self::Discovered => "discovered",
+            Self::StrongDiscovered => "strong_discovered",
+            Self::GlobalPin => "global_pin",
+            Self::GlobalDeclared => "global_declared",
+            Self::LocalPin => "local_pin",
+            Self::LocalDeclared => "local_declared",
+        }
+    }
+}
+
 fn mux_score(link: &GraphLink) -> MuxScore {
     let match_kind = link
         .source_metadata
@@ -722,6 +815,18 @@ fn mux_score(link: &GraphLink) -> MuxScore {
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(i64::MIN),
     }
+}
+
+fn mux_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
+    let score = mux_score(link);
+    vec![
+        score_axis("tier", score.tier.label()),
+        score_axis("tier_rank", score.tier as u8),
+        score_axis("evidence_rank", score.evidence_rank),
+        score_axis("confidence", score.confidence.snake_case()),
+        score_axis("activity_epoch", score.activity_epoch),
+        score_axis("link_id", &link.id),
+    ]
 }
 
 fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
@@ -800,12 +905,38 @@ enum PrProvenanceTier {
     LocalDeclared = 7,
 }
 
+impl PrProvenanceTier {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Cached => "cached",
+            Self::Convention => "convention",
+            Self::Discovered => "discovered",
+            Self::StrongDiscovered => "strong_discovered",
+            Self::GlobalPin => "global_pin",
+            Self::GlobalDeclared => "global_declared",
+            Self::LocalPin => "local_pin",
+            Self::LocalDeclared => "local_declared",
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum PrStateRank {
     Other = 0,
     Closed = 1,
     Merged = 2,
     Open = 3,
+}
+
+impl PrStateRank {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Other => "other",
+            Self::Closed => "closed",
+            Self::Merged => "merged",
+            Self::Open => "open",
+        }
+    }
 }
 
 fn pr_score(link: &GraphLink) -> PrScore {
@@ -831,6 +962,20 @@ fn pr_score(link: &GraphLink) -> PrScore {
             .unwrap_or(i64::MIN),
         confidence: link.confidence,
     }
+}
+
+fn pr_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
+    let score = pr_score(link);
+    vec![
+        score_axis("provenance", score.provenance_tier.label()),
+        score_axis("provenance_rank", score.provenance_tier as u8),
+        score_axis("state_rank", score.state_rank.label()),
+        score_axis("state_rank_value", score.state_rank as u8),
+        score_axis("is_draft", score.is_draft),
+        score_axis("updated_epoch", score.updated_epoch),
+        score_axis("confidence", score.confidence.snake_case()),
+        score_axis("link_id", &link.id),
+    ]
 }
 
 fn pr_provenance_tier(provenance: Provenance) -> PrProvenanceTier {
@@ -1097,6 +1242,57 @@ mod tests {
         }
 
         link
+    }
+
+    fn score_axis_value<'a>(score: &'a CandidateScore, name: &str) -> Option<&'a str> {
+        score
+            .axes
+            .iter()
+            .find(|axis| axis.name == name)
+            .map(|axis| axis.value.as_str())
+    }
+
+    #[test]
+    fn explain_resolved_relationships_adds_mux_score_breakdown() {
+        let discovered = linked_to_mux_link(
+            "discovered",
+            session("a"),
+            mux("tmux:1"),
+            Provenance::StrongDiscovered,
+            Confidence::High,
+            Some(100),
+            Some("active_pane_process_match"),
+        );
+        let declared = linked_to_mux_link(
+            "declared",
+            session("a"),
+            mux("tmux:2"),
+            Provenance::LocalDeclared,
+            Confidence::Medium,
+            None,
+            None,
+        );
+        let mut snapshot = GraphSnapshot {
+            candidate_links: vec![discovered, declared],
+            ..GraphSnapshot::empty()
+        };
+        snapshot = resolve_snapshot(snapshot);
+        explain_resolved_relationships(&mut snapshot);
+
+        let explanation = snapshot.resolved_relationships[0]
+            .explanation
+            .as_ref()
+            .expect("explanation");
+        assert_eq!(explanation.decisive_axis.as_deref(), Some("tier"));
+        let selected = explanation.selected.as_ref().expect("selected score");
+        assert_eq!(selected.link_id, "declared");
+        assert_eq!(score_axis_value(selected, "tier"), Some("local_declared"));
+        assert_eq!(score_axis_value(selected, "tier_rank"), Some("7"));
+        assert_eq!(explanation.competing[0].link_id, "discovered");
+        assert_eq!(
+            score_axis_value(&explanation.competing[0], "evidence_rank"),
+            Some("35")
+        );
     }
 
     fn mux_contains_process_link(id: &str, mux: NodeId, process: NodeId) -> GraphLink {
@@ -1836,6 +2032,45 @@ mod tests {
             );
         }
         link
+    }
+
+    #[test]
+    fn explain_resolved_relationships_adds_pr_score_breakdown() {
+        let older_open = branch_pr_link(
+            "older-open",
+            branch_node("refs/heads/main"),
+            forge_pr(1),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(100),
+        );
+        let newer_open = branch_pr_link(
+            "newer-open",
+            branch_node("refs/heads/main"),
+            forge_pr(2),
+            Provenance::StrongDiscovered,
+            "open",
+            false,
+            Some(200),
+        );
+        let mut snapshot = GraphSnapshot {
+            candidate_links: vec![older_open, newer_open],
+            ..GraphSnapshot::empty()
+        };
+        snapshot = resolve_snapshot(snapshot);
+        explain_resolved_relationships(&mut snapshot);
+
+        let explanation = snapshot.resolved_relationships[0]
+            .explanation
+            .as_ref()
+            .expect("explanation");
+        assert_eq!(explanation.decisive_axis.as_deref(), Some("updated_epoch"));
+        let selected = explanation.selected.as_ref().expect("selected score");
+        assert_eq!(selected.link_id, "newer-open");
+        assert_eq!(score_axis_value(selected, "state_rank"), Some("open"));
+        assert_eq!(score_axis_value(selected, "updated_epoch"), Some("200"));
+        assert_eq!(explanation.competing[0].link_id, "older-open");
     }
 
     #[test]

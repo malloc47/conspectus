@@ -1537,12 +1537,13 @@ impl NodeShowArgs {
         } else {
             self.scan_roots.clone()
         };
-        let snapshot = warm_start_discover_and_resolve(
+        let mut snapshot = warm_start_discover_and_resolve(
             roots,
             self.refresh,
             self.no_cache,
             &outcome.config.server.intervals,
         )?;
+        conspectus::resolve::explain_resolved_relationships(&mut snapshot);
         let id = match conspectus::output::node_show::resolve_node_id(&self.id, &snapshot) {
             Ok(id) => id,
             Err(err) => {
@@ -1575,6 +1576,9 @@ struct GraphArgs {
     /// nodes. Defaults to include (ADR 0050).
     #[arg(long = "diagnostic-nodes", value_enum, default_value_t = InclusionFlag::Include)]
     diagnostic_nodes: InclusionFlag,
+    /// Include resolver score breakdowns on resolved relationships.
+    #[arg(long)]
+    explain: bool,
     /// P7-003 phase 4: suppress the writer for this invocation.
     #[arg(long = "no-cache")]
     no_cache: bool,
@@ -1591,6 +1595,7 @@ impl Default for GraphArgs {
             scan_roots: Vec::new(),
             candidates: InclusionFlag::Include,
             diagnostic_nodes: InclusionFlag::Include,
+            explain: false,
             no_cache: false,
             refresh: false,
         }
@@ -1614,12 +1619,15 @@ impl GraphArgs {
         } else {
             self.scan_roots.clone()
         };
-        let snapshot = warm_start_discover_and_resolve(
+        let mut snapshot = warm_start_discover_and_resolve(
             roots,
             self.refresh,
             self.no_cache,
             &outcome.config.server.intervals,
         )?;
+        if self.explain {
+            conspectus::resolve::explain_resolved_relationships(&mut snapshot);
+        }
 
         match self.format {
             OutputFormat::Json => {
