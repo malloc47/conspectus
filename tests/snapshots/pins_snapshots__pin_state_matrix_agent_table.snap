@@ -5,8 +5,8 @@ expression: rendered
 ---
 ID            AGENT               CWD                     MUX                 MUX/CONF  PR  PR/CONF  LINEAGE
 ------------  ------------------  ----------------------  ------------------  --------  --  -------  -------
-ambig-strong  codex:ambig-strong  /home/op/src/work       tmux:ambig          SD/H*     —   —        —
+ambig-strong  codex:ambig-strong  /home/op/src/work       tmux:ambig          LP/H      —   —        —
 ambig-weak    codex:ambig-weak    /home/op/src/work       tmux:ambig          D/H       —   —        —
-bound-alpha   codex:bound-alpha   /home/op/src/work       tmux:bound          D/H*      —   —        —
-drift-alpha   codex:drift-alpha   /home/op/src/elsewhere  tmux:drift          D/H*      —   —        —
-socket-alpha  codex:socket-alpha  /home/op/src/work       tmux:work:socketed  D/H*      —   —        —
+bound-alpha   codex:bound-alpha   /home/op/src/work       tmux:bound          LP/H      —   —        —
+drift-alpha   codex:drift-alpha   /home/op/src/elsewhere  tmux:drift          LP/H      —   —        —
+socket-alpha  codex:socket-alpha  /home/op/src/work       tmux:work:socketed  LP/H      —   —        —

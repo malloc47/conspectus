@@ -1205,13 +1205,14 @@ pub fn strip_branch_prefix(refname: &str) -> &str {
 
 /// Numeric precedence for a provenance serde tag, mirroring the
 /// `Provenance::precedence` mapping in `crate::model`. Higher beats
-/// lower; ties on `LocalDeclared` `>` `GlobalDeclared` `>`
-/// `StrongDiscovered` `>` `Discovered` = `Convention` `>` `Cached`
-/// are resolved by the caller. Substrate-safe (no model dep).
+/// lower; ties are resolved by the caller. Substrate-safe (no model
+/// dep).
 pub fn provenance_precedence(tag: &str) -> u8 {
     match tag {
-        "local_declared" => 5,
-        "global_declared" => 4,
+        "local_declared" => 7,
+        "local_pin" => 6,
+        "global_declared" => 5,
+        "global_pin" => 4,
         "strong_discovered" => 3,
         "discovered" | "convention" => 2,
         "cached" => 1,
@@ -1252,7 +1253,9 @@ pub fn pick_strongest<T>(
 pub fn provenance_code_from_tag(tag: &str) -> &'static str {
     match tag {
         "local_declared" => "LD",
+        "local_pin" => "LP",
         "global_declared" => "GD",
+        "global_pin" => "GP",
         "strong_discovered" => "SD",
         "discovered" => "D",
         "convention" => "C",
@@ -1289,6 +1292,8 @@ pub fn current_epoch() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use super::{indicator_from_tags, pick_strongest, provenance_precedence};
+
     /// Module-boundary invariant: the rendering substrate must not
     /// import anything from `crate::model`. A violation here means a
     /// renderer-backend coupling has leaked into the shared layer.
@@ -1309,5 +1314,43 @@ mod tests {
                 line_no + 1,
             );
         }
+    }
+
+    #[test]
+    fn tag_indicator_renders_pin_provenance_codes() {
+        assert_eq!(indicator_from_tags("local_pin", "high", false), "LP/H");
+        assert_eq!(indicator_from_tags("global_pin", "medium", true), "GP/M*");
+    }
+
+    #[test]
+    fn string_precedence_matches_pin_ordering() {
+        assert!(provenance_precedence("local_pin") > provenance_precedence("global_declared"));
+        assert!(provenance_precedence("global_pin") > provenance_precedence("strong_discovered"));
+
+        #[derive(Debug)]
+        struct Candidate {
+            provenance: String,
+            confidence: String,
+            id: String,
+        }
+
+        let selected = pick_strongest(
+            vec![
+                Candidate {
+                    provenance: "strong_discovered".to_string(),
+                    confidence: "high".to_string(),
+                    id: "discovered".to_string(),
+                },
+                Candidate {
+                    provenance: "local_pin".to_string(),
+                    confidence: "high".to_string(),
+                    id: "pin".to_string(),
+                },
+            ],
+            |candidate| (&candidate.provenance, &candidate.confidence, &candidate.id),
+        )
+        .expect("candidate selected");
+
+        assert_eq!(selected.id, "pin");
     }
 }
