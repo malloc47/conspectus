@@ -494,25 +494,21 @@ fn view_label(view: View) -> &'static str {
 }
 
 fn snapshot_counts(database: Option<&GraphDb>) -> (usize, usize) {
+    use crate::model::GraphNode;
     let Some(database) = database else {
         return (0, 0);
     };
-    let agents = database
-        .conn()
-        .query_row("SELECT COUNT(*) FROM node_agent_sessions", [], |row| {
-            row.get::<_, i64>(0)
-        })
-        .ok()
-        .and_then(|n| usize::try_from(n).ok())
-        .unwrap_or(0);
-    let mux = database
-        .conn()
-        .query_row("SELECT COUNT(*) FROM node_mux_sessions", [], |row| {
-            row.get::<_, i64>(0)
-        })
-        .ok()
-        .and_then(|n| usize::try_from(n).ok())
-        .unwrap_or(0);
+    let snapshot = database.snapshot();
+    let agents = snapshot
+        .nodes
+        .iter()
+        .filter(|node| matches!(node, GraphNode::AgentSession(_)))
+        .count();
+    let mux = snapshot
+        .nodes
+        .iter()
+        .filter(|node| matches!(node, GraphNode::MuxSession(_)))
+        .count();
     (agents, mux)
 }
 

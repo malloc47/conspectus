@@ -70,10 +70,7 @@ const MAX_PAYLOAD_LEN: usize = 1 << 30; // 1 GiB
 /// Canonical on-disk location for the zero-copy snapshot artifact
 /// per ADR 0083. Resolves under `$XDG_DATA_HOME/conspectus/` when
 /// set, otherwise `$HOME/.local/share/conspectus/`, otherwise the
-/// current directory — same lookup order as
-/// [`crate::query::persist::graph_db_path`] so the daemon's two
-/// artifacts (the legacy `graph.sqlite` and the new `graph.bin`)
-/// live side-by-side during the P11 dual-write window.
+/// current directory.
 pub fn graph_bin_path() -> PathBuf {
     let base = env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)

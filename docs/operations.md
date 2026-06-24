@@ -50,8 +50,11 @@ environment variable.
 Hook sidecar records are optional, local observations written by
 harness hooks through `conspectus hook write`. They refine
 session-to-mux attribution when a harness can report the current
-session id without terminal input. Conspectus stores them in a local
-SQLite database under:
+session id without terminal input. With `conspectus serve` running,
+the hook writer sends observations to the daemon, which updates the
+in-memory graph and persists the result through `graph.bin`. When no
+daemon snapshot is available, Conspectus writes a minimal latest-only
+spool at `hooks-latest.json` under:
 
 1. `$CONSPECTUS_HOOK_SIDECAR_STATE`, when set.
 2. `$XDG_STATE_HOME/conspectus/hooks`.

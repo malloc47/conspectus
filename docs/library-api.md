@@ -21,9 +21,9 @@ let json = render_graph_json(&graph)?;
 # anyhow::Ok(())
 ```
 
-For table output, materialize or open SQLite and call
-`output::table::render_conn` / `render_with_conn` with a
-`rusqlite::Connection` and a `config::Projection`. For declared-link
+For table output, pass a `GraphSnapshot` to
+`output::table::render` / `render_with` with a
+`config::Projection`. For declared-link
 mutations, use the helpers in `declared`; read-only graph and session
 commands should not call those write helpers.
 
@@ -38,7 +38,7 @@ inputs.
 | `model` | pure data model | `GraphSnapshot`, `GraphNode`, `GraphLink`, typed IDs, relation/provenance/confidence enums |
 | `resolve` | pure resolver | `resolve_snapshot`, `resolve_links` |
 | `output` | pure renderer | `render_graph_json` |
-| `output::table` | SQLite-backed renderer | `render_conn`, `render_with_conn`, `Projection` re-export |
+| `output::table` | pure renderer | `render`, `render_with`, `Projection` re-export |
 | `discovery::cross_link` | pure graph enrichment | `infer` |
 | `discovery::declared` | pure graph enrichment when loader is injected | `apply_declared_links` |
 | `discovery::forge::github` | pure parser/fragment builder except tests | `GhPullRequestParser`, `RepoContext`, `fragment_for_repo`, `parse_github_remote` |
@@ -80,8 +80,7 @@ where possible.
   `discovery::harness`.
 - Resolution and rendering:
   `resolve_snapshot`, `resolve_links`, `render_graph_json`,
-  `query::materialize_snapshot`, `output::table::render_conn`,
-  `output::table::render_with_conn`.
+  `output::table::render`, `output::table::render_with`.
 - Configuration and declarations:
   `ConfigLoader`, `load_from_cwd`, `parse_declared_document`, `to_toml`,
   `select_store_for_declaration`, `load_declared_link_by_id`,

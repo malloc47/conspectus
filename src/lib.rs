@@ -13,11 +13,8 @@ pub mod model;
 pub mod output;
 pub mod pin_bindings;
 pub mod pins;
-#[cfg(feature = "query")]
-pub mod query;
 pub mod rename;
 pub mod resolve;
-#[cfg(feature = "query")]
 pub mod server;
 pub mod snapshot;
 pub mod tui;

@@ -30,7 +30,7 @@ use crate::model::GraphSnapshot;
 use crate::output::table::{self, RenderOptions};
 use crate::resolve::resolve_snapshot;
 use crate::tui::rows::RowTree;
-use crate::tui::rows::sessions::{SessionsBuildInputsFromConn, build_sessions_tree_from_conn};
+use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, SessionsGrouping, Sort, View};
 
 #[derive(Clone, Copy, Debug)]
@@ -167,8 +167,7 @@ impl ScenarioWorld {
             // `discover_local_with` already ran `cross_link::infer*`, and
             // `infer_with_fd_paths` re-runs the cwd-based pass. The
             // re-emitted links are byte-identical to the first pass; dedupe
-            // by link id so SQLite materialization doesn't trip on the
-            // `candidate_links.link_id` UNIQUE constraint.
+            // by link id so downstream row builders see a canonical graph.
             let mut seen = std::collections::BTreeSet::new();
             snapshot
                 .candidate_links
@@ -206,17 +205,14 @@ impl ScenarioWorld {
 
     pub fn sessions_tree(&self) -> Result<RowTree> {
         let snapshot = self.snapshot()?;
-        let conn = crate::query::materialize_snapshot(&snapshot)?;
-        Ok(build_sessions_tree_from_conn(
-            SessionsBuildInputsFromConn {
-                conn: &conn,
-                grouping: SessionsGrouping::Graph,
-                home: Some(&self.root),
-                now: Some(1_700_000_600),
-                cwd: None,
-                filter: RowFilter::default(),
-            },
-        )?)
+        Ok(build_sessions_tree(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::Graph,
+            home: Some(&self.root),
+            now: Some(1_700_000_600),
+            cwd: None,
+            filter: RowFilter::default(),
+        }))
     }
 
     pub fn tui_config(&self, view: View, color: bool) -> RunConfig {
@@ -648,16 +644,22 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
 
     world.write_claude_code_session(session_a, &work)?;
     world.write_claude_code_session(session_b, &work)?;
-    world.add_tmux_row(TmuxReplayRow::new("pair").with_cwd(&work).with_active_pane(
+    world.add_tmux_row(TmuxReplayRow::new("pair-a").with_cwd(&work).with_active_pane(
         "claude",
         live_pids[0],
         &work,
         "claude",
     ));
+    world.add_tmux_row(TmuxReplayRow::new("pair-b").with_cwd(&work).with_active_pane(
+        "claude",
+        live_pids[1],
+        &work,
+        "claude",
+    ));
 
-    for (session_key, pid, ppid, pane_id, observed_epoch) in [
-        (session_a, live_pids[0], live_pids[1], "%1", 1_700_000_500),
-        (session_b, live_pids[1], live_pids[0], "%2", 1_700_000_540),
+    for (session_key, pid, ppid, mux_name, observed_epoch) in [
+        (session_a, live_pids[0], live_pids[1], "pair-a", 1_700_000_500),
+        (session_b, live_pids[1], live_pids[0], "pair-b", 1_700_000_540),
     ] {
         world.write_hook_record(HookRecord {
             schema_version: SCHEMA_VERSION,
@@ -667,9 +669,9 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
             pid: Some(pid),
             ppid: Some(ppid),
             tmux: Some(HookTmuxRecord {
-                session_name: Some("pair".to_string()),
+                session_name: Some(mux_name.to_string()),
                 native_id: None,
-                pane_id: Some(pane_id.to_string()),
+                pane_id: Some("%1".to_string()),
                 socket_path: None,
             }),
             transcript_path: None,

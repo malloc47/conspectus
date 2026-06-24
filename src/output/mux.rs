@@ -230,10 +230,8 @@ fn collect_attachment_lookup(snapshot: &GraphSnapshot) -> HashMap<String, Vec<At
     // Preserve first-seen ordering so the rendered `agents` cell
     // emits attached agents in BTreeMap-by-source-NodeId order.
     let mut order: Vec<Key> = Vec::new();
-    // Pre-sort the candidates by (source, link_id) so the
-    // first-seen ordering matches the SQL `ORDER BY harness_key,
-    // state_scope, session_key, link_id` the previous SQL renderer
-    // produced.
+    // Pre-sort the candidates by (source, link_id) so first-seen
+    // ordering is stable across snapshots.
     let mut active_links: Vec<&GraphLink> = snapshot
         .candidate_links
         .iter()
@@ -264,7 +262,7 @@ fn collect_attachment_lookup(snapshot: &GraphSnapshot) -> HashMap<String, Vec<At
     });
     for link in active_links {
         // Only include attachments whose source agent session is
-        // present in the snapshot (mirror the SQL JOIN on
+        // present in the snapshot (mirror the resolved graph join on
         // node_agent_sessions).
         if !agent_lookup.contains_key(&link.source) {
             continue;

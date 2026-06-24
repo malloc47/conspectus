@@ -379,7 +379,7 @@ fn declared_help_lists_subcommands() {
 }
 
 #[test]
-fn hook_write_claude_code_writes_sqlite_observation() {
+fn hook_write_claude_code_writes_latest_observation() {
     let home = tempfile::TempDir::new().expect("home temp");
     let state = tempfile::TempDir::new().expect("state temp");
 
@@ -401,20 +401,14 @@ fn hook_write_claude_code_writes_sqlite_observation() {
         .success()
         .stdout(predicate::str::is_empty());
 
-    let database = state.path().join("hooks.sqlite3");
-    assert!(database.is_file());
-    let connection = rusqlite::Connection::open(database).expect("open sqlite");
-    let body: String = connection
-        .query_row("SELECT record_json FROM hook_records", [], |row| row.get(0))
-        .expect("record json");
-    let record: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let record = read_only_hook_record(state.path());
     assert_eq!(record["harness_key"], "claude-code");
     assert_eq!(record["session_key"], "session-1");
     assert_eq!(record["transcript_path"], "/tmp/transcript.jsonl");
 }
 
 #[test]
-fn hook_write_codex_writes_sqlite_observation() {
+fn hook_write_codex_writes_latest_observation() {
     let home = tempfile::TempDir::new().expect("home temp");
     let state = tempfile::TempDir::new().expect("state temp");
 
@@ -436,13 +430,7 @@ fn hook_write_codex_writes_sqlite_observation() {
         .success()
         .stdout(predicate::str::is_empty());
 
-    let database = state.path().join("hooks.sqlite3");
-    assert!(database.is_file());
-    let connection = rusqlite::Connection::open(database).expect("open sqlite");
-    let body: String = connection
-        .query_row("SELECT record_json FROM hook_records", [], |row| row.get(0))
-        .expect("record json");
-    let record: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let record = read_only_hook_record(state.path());
     assert_eq!(record["harness_key"], "codex");
     assert_eq!(
         record["session_key"],
@@ -452,7 +440,7 @@ fn hook_write_codex_writes_sqlite_observation() {
 }
 
 #[test]
-fn hook_write_opencode_writes_sqlite_observation() {
+fn hook_write_opencode_writes_latest_observation() {
     let home = tempfile::TempDir::new().expect("home temp");
     let state = tempfile::TempDir::new().expect("state temp");
 
@@ -473,17 +461,25 @@ fn hook_write_opencode_writes_sqlite_observation() {
         .success()
         .stdout(predicate::str::is_empty());
 
-    let database = state.path().join("hooks.sqlite3");
-    assert!(database.is_file());
-    let connection = rusqlite::Connection::open(database).expect("open sqlite");
-    let body: String = connection
-        .query_row("SELECT record_json FROM hook_records", [], |row| row.get(0))
-        .expect("record json");
-    let record: serde_json::Value = serde_json::from_str(&body).expect("json");
+    let record = read_only_hook_record(state.path());
     assert_eq!(record["harness_key"], "opencode");
     assert_eq!(record["session_key"], "ses_01HZX2J5Y");
     assert_eq!(record["cwd"], "/home/me/src/proj");
     assert_eq!(record["hook_event_name"], "session.updated");
+}
+
+fn read_only_hook_record(root: &std::path::Path) -> serde_json::Value {
+    let path = root.join("hooks-latest.json");
+    assert!(path.is_file(), "{} missing", path.display());
+    let body = std::fs::read_to_string(path).expect("read latest hook spool");
+    let value: serde_json::Value = serde_json::from_str(&body).expect("json");
+    value["records"]
+        .as_object()
+        .expect("records map")
+        .values()
+        .next()
+        .expect("one record")
+        .clone()
 }
 
 #[test]

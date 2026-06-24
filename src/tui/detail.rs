@@ -6,28 +6,6 @@
 //! [`crate::output::table::node_short_id`] for stable internal row
 //! identity) while exposing the locked mockup-review behavior:
 //!
-//! SQLite consumer surface (P10-010 / ADR 0043).
-//! [`build_node_detail_from_conn`] is the production entry point —
-//! it consumes from SQLite via [`crate::query::read_snapshot`]
-//! per-call, then runs the typed-Rust view-model assembly below.
-//! [`build_node_detail`] survives for fixture-heavy tests and
-//! producer-side callers that still start from a typed snapshot.
-//!
-//! The trade-off vs. per-section SQL: the detail builder's typed
-//! view-model assembly (header fields with kind dispatch, mux/pr/
-//! lineage subqueries with ambiguity counts, link summaries) is
-//! complex enough that rewriting each helper as SQL doubles the
-//! line count for no observable behavior change. Routing through
-//! `read_snapshot` keeps the assembly in one place and still
-//! satisfies the consumer-side contract: the function takes a
-//! `Connection`, returns a `NodeDetail`, and never persists a
-//! `GraphSnapshot`. (Compare `output::node_show` and the projection
-//! renderers, where the per-section SQL form was cheap because the
-//! per-cell formatting is trivial — there the trade-off tipped the
-//! other way.) When the TUI's refresh cadence makes the per-call
-//! `read_snapshot` cost worth optimizing, a follow-up story can
-//! split the helpers below into filtered queries.
-//!
 //! - For agent sessions, the header shows `harness`, `cwd`, `title`
 //!   (when set), `mux`, `pr`, and `lineage` rows in that order.
 //!   Sessions without a `title` omit the row rather than render a
@@ -66,29 +44,9 @@ pub struct DetailInputs<'a> {
     pub home: Option<&'a Path>,
 }
 
-/// SQLite-backed detail builder (P10-010 / ADR 0043). Materializes
-/// a fresh typed snapshot from `conn` via
-/// [`crate::query::read_snapshot`] and runs the typed-Rust assembly
-/// below.
-pub fn build_node_detail_from_conn(
-    conn: &rusqlite::Connection,
-    target: &NodeId,
-    home: Option<&Path>,
-) -> rusqlite::Result<Option<NodeDetail>> {
-    let snapshot = crate::query::read_snapshot(conn)?;
-    Ok(build_node_detail(DetailInputs {
-        snapshot: &snapshot,
-        target,
-        home,
-    }))
-}
-
 /// Build the detail view-model for the given node id. Returns
 /// `None` when the node isn't in the snapshot (e.g. selection
 /// pointed at a row that was just removed by a refresh).
-///
-/// This remains useful for fixture-heavy tests and producer-side
-/// callers. Runtime TUI code uses [`build_node_detail_from_conn`].
 pub fn build_node_detail(inputs: DetailInputs<'_>) -> Option<NodeDetail> {
     let node = inputs
         .snapshot
@@ -1511,33 +1469,6 @@ mod tests {
             })
             .is_none()
         );
-    }
-
-    /// Parity guard for the bridge entry point: the SQLite-backed
-    /// builder should produce the same `NodeDetail` as the in-memory
-    /// one for the same input. Catches drift if a future story
-    /// refactors only one path.
-    #[test]
-    fn from_conn_matches_snapshot_path_for_agent_session() {
-        let snapshot = GraphSnapshot {
-            nodes: vec![agent(
-                "codex",
-                "alpha",
-                Some("/home/op/work"),
-                Some("title"),
-            )],
-            ..GraphSnapshot::empty()
-        };
-        let target = snapshot.nodes[0].id();
-        let direct = build_node_detail(DetailInputs {
-            snapshot: &snapshot,
-            target: &target,
-            home: Some(home().as_path()),
-        });
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let via_conn = build_node_detail_from_conn(&conn, &target, Some(home().as_path()))
-            .expect("from_conn ok");
-        assert_eq!(direct, via_conn);
     }
 
     #[test]

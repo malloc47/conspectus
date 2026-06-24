@@ -72,10 +72,12 @@ boundaries land in `[Unreleased]` until a tag is cut."
   and pins, user-level config for aliases) keeps its existing
   shape and location. Phase 11 changed *how the resolved
   graph is cached*, not *what the operator authors*.
-- The hook sidecar's SQLite usage (`src/hook.rs`) and the
-  OpenCode harness adapter's read-only access to OpenCode's
-  own SQLite databases are independent of the retired
-  `src/query/` persistence layer; both continue to work.
+- Provider-owned SQLite stores, including the OpenCode
+  harness adapter's read-only access to OpenCode's own
+  databases, are independent of the retired `src/query/`
+  persistence layer and continue to work. Hook-sidecar
+  fallback storage now uses `hooks-latest.json` rather than
+  Conspectus-owned SQLite.
 
 ### Migration notes
 

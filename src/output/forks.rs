@@ -3,7 +3,7 @@
 //! Emits one row per `fork` node. Iterates `snapshot.nodes`
 //! and `snapshot.candidate_links` directly — no SQLite
 //! materialization. The cell-level output shape matches the
-//! pre-P11-011b SQLite-backed renderer byte-for-byte so the
+//! deleted pre-P11-011b SQL renderer byte-for-byte so the
 //! existing `output::table` snapshot tests stay green.
 
 use std::collections::HashMap;
@@ -174,7 +174,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
 }
 
 // -----------------------------------------------------------------------------
-// In-memory collectors (replace the prior SQL fetches)
+// In-memory collectors
 // -----------------------------------------------------------------------------
 
 fn collect_fork_rows(snapshot: &GraphSnapshot) -> Vec<ForkRow<'_>> {
@@ -194,8 +194,7 @@ fn collect_fork_rows(snapshot: &GraphSnapshot) -> Vec<ForkRow<'_>> {
 }
 
 /// Per-fork preferred `parent_session` candidate's rendered label.
-/// Mirrors the SQL `fork_parent_session_label` behavior: resolved
-/// agent_session targets render as the short session_key;
+/// Resolved agent_session targets render as the short session_key;
 /// unresolved targets render as `?<short native_id>`; anything
 /// else yields no entry.
 fn collect_parent_session_per_fork(snapshot: &GraphSnapshot) -> HashMap<String, ParentInfo> {
@@ -284,10 +283,9 @@ fn collect_resolved_child_agents_per_fork(
 }
 
 /// Per-agent count of distinct active `linked_to_mux` mux
-/// targets. Mirrors the SQL helper of the same name; collapses
-/// links with `LinkEndpoint::Unresolved` targets out (the SQL
-/// `COUNT(DISTINCT target_node)` is over the JSON-encoded node
-/// id, which only existed for `LinkEndpoint::Node` rows).
+/// targets. Links with `LinkEndpoint::Unresolved` targets are
+/// excluded because only concrete node targets can contribute to
+/// the count.
 fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
     let mut per_agent: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
     for link in &snapshot.candidate_links {

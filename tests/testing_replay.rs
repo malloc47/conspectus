@@ -85,7 +85,7 @@ fn replay_links_harness_session_to_fake_tmux_and_projects_rows() {
 }
 
 #[test]
-fn replay_writes_hook_sqlite_records_into_discovery_pipeline() {
+fn replay_writes_hook_spool_records_into_discovery_pipeline() {
     let mut world = ReplayWorld::new();
     let work = world.mkdir("work");
     world.write_claude_code_session("current", &work);

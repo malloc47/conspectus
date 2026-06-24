@@ -35,7 +35,7 @@ move, not a refactor.
 | `syntect` | transitive via `tui-markdown[highlight-code]` | (default) | Syntax highlighter for fenced code blocks. Pulls in bundled grammar/theme data (single-digit MB compiled). Adopted under H-VIEWER-NATIVE-011 after operator feedback that the un-highlighted code was hard to scan. ADR 0051 amended. |
 | `ansi-to-tui` | `8.0.1` | `default-features = false` | Render tool-output ANSI styling when the operator opts in (tool blocks are hidden by default). ADR 0025. |
 | `comfy-table` | `7` | `default-features = false` | Markdown table rendering inside message bodies. `ContentArrangement::Dynamic` + `set_width(content_width)` gives column-aware wrap-to-fit. Adopted under H-VIEWER-NATIVE-017. ADR 0054. |
-| `rusqlite` | `0.39` | `bundled`, `load_extension` | OpenCode session reader; SQLite is OpenCode's record store. ADR 0013. `bundled` keeps the extracted binary single-file. |
+| `rusqlite` | `0.39` | `bundled` | OpenCode session reader; SQLite is OpenCode's record store. ADR 0013. `bundled` keeps the extracted binary single-file. |
 | `serde` | `1.0` | `derive` | JSONL record types for Claude Code + Codex parsers. |
 | `serde_json` | `1.0` | — | JSONL line parsing. |
 | `anyhow` | `1.0` | — | Errors at the parser/widget seam. |

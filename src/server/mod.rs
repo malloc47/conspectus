@@ -61,7 +61,8 @@ pub mod watcher;
 
 use crate::config::ServerIntervals;
 use crate::discovery::cache::ProviderClass;
-use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with};
+use crate::discovery::{LocalDiscoveryConfig, discover_local_warm_with, hook_sidecar};
+use crate::hook::HookRecord;
 use crate::model::GraphSnapshot;
 use crate::resolve::resolve_snapshot;
 use crate::server::watcher::{NotifyWatcher, NullWatcher, Watcher, WatcherEvent};
@@ -314,6 +315,7 @@ struct DispatchCtx {
     state: Arc<Mutex<SchedulerState>>,
     snapshot_bytes: SnapshotBytes,
     snapshot_state: SnapshotState,
+    snapshot_path: Arc<PathBuf>,
 }
 
 /// Outcome of a client-side socket call.
@@ -393,6 +395,26 @@ pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
             ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
             ClientOutcome::Ok(_) => unreachable!(),
         },
+    }
+}
+
+/// Send a hook observation to the daemon so it can update the
+/// live in-memory graph and persist the result via `graph.bin`.
+/// If the daemon has not completed its first snapshot cycle, it
+/// returns `snapshot_unavailable`; callers should fall back to
+/// the daemonless latest-hook spool.
+pub fn client_hook_ingest(record: &HookRecord) -> ClientOutcome<()> {
+    let args = match serde_json::to_value(record) {
+        Ok(record) => serde_json::json!({ "record": record }),
+        Err(err) => return ClientOutcome::Transport(anyhow!(err).context("serialize hook record")),
+    };
+    match call_command("hook_ingest", args, "hook-ingest") {
+        ClientOutcome::Ok(_) => ClientOutcome::Ok(()),
+        ClientOutcome::DaemonError { code, message } => {
+            ClientOutcome::DaemonError { code, message }
+        }
+        ClientOutcome::NoDaemon => ClientOutcome::NoDaemon,
+        ClientOutcome::Transport(err) => ClientOutcome::Transport(err),
     }
 }
 
@@ -542,13 +564,16 @@ fn try_handle_connection(stream: &mut UnixStream, ctx: &DispatchCtx) -> Result<(
 ///   rebuild) consume this command. Returns
 ///   `snapshot_unavailable` when the daemon has not yet
 ///   completed its first cycle.
+/// * `hook_ingest` — applies one harness hook observation to the
+///   live in-memory graph, re-resolves, and republishes through
+///   the normal `graph.bin` path. Hook writers use their compact
+///   on-disk spool only when this command is unavailable.
 ///
 /// The rename / declare-link / ignore-link mutation commands
 /// remain operator-callable through one-shot CLI; they bypass
-/// the daemon's writer lock and serialize against the daemon's
-/// scheduled writes via SQLite's `busy_timeout`. Routing those
-/// through the socket is a future cleanup once the daemon owns
-/// a long-lived writer connection per ADR 0038.
+/// the daemon's writer lock and mutate their own config/state
+/// files directly. Routing those through the socket is a future
+/// cleanup once the daemon owns the full mutation surface.
 fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
     match request.command.as_str() {
         "ping" => Response {
@@ -560,6 +585,7 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
         "refresh" => handle_refresh(request, ctx),
         "status" => handle_status(request, ctx),
         "snapshot" => handle_snapshot(request, ctx),
+        "hook_ingest" => handle_hook_ingest(request, ctx),
         unknown => Response {
             id: request.id.clone(),
             result: "error",
@@ -569,6 +595,71 @@ fn dispatch(request: &Request, ctx: &DispatchCtx) -> Response {
                 message: format!("unknown command `{unknown}`"),
             }),
         },
+    }
+}
+
+/// `hook_ingest` command handler. This is the daemon-owned fast path for
+/// hook observations: mutate the live graph, re-resolve, and persist through
+/// `publish_snapshot` so `graph.bin` remains the only Conspectus-owned graph
+/// persistence artifact.
+fn handle_hook_ingest(request: &Request, ctx: &DispatchCtx) -> Response {
+    let record = match request.args.get("record").cloned() {
+        Some(value) => match serde_json::from_value::<HookRecord>(value) {
+            Ok(record) => record,
+            Err(err) => {
+                return Response {
+                    id: request.id.clone(),
+                    result: "error",
+                    data: None,
+                    error: Some(ErrorBody {
+                        code: "invalid_hook_record".to_string(),
+                        message: format!("{err:#}"),
+                    }),
+                };
+            }
+        },
+        None => {
+            return Response {
+                id: request.id.clone(),
+                result: "error",
+                data: None,
+                error: Some(ErrorBody {
+                    code: "missing_hook_record".to_string(),
+                    message: "hook_ingest requires args.record".to_string(),
+                }),
+            };
+        }
+    };
+
+    let guard_result = ctx.writer_lock.lock();
+    let _guard = match guard_result {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let Some(mut snapshot) = load_snapshot_state(&ctx.snapshot_state) else {
+        return Response {
+            id: request.id.clone(),
+            result: "error",
+            data: None,
+            error: Some(ErrorBody {
+                code: "snapshot_unavailable".to_string(),
+                message: "daemon has not completed its first cycle".to_string(),
+            }),
+        };
+    };
+    hook_sidecar::apply_hook_records(&mut snapshot, vec![record], wall_clock_epoch());
+    let snapshot = resolve_snapshot(snapshot);
+    publish_snapshot_to_path(
+        snapshot,
+        &ctx.snapshot_path,
+        &ctx.snapshot_bytes,
+        &ctx.snapshot_state,
+    );
+    Response {
+        id: request.id.clone(),
+        result: "ok",
+        data: Some(serde_json::json!({ "ingested": true })),
+        error: None,
     }
 }
 
@@ -765,6 +856,20 @@ fn publish_snapshot(
     snapshot_bytes: &SnapshotBytes,
     snapshot_state: &SnapshotState,
 ) {
+    publish_snapshot_to_path(
+        snapshot,
+        &snapshot::graph_bin_path(),
+        snapshot_bytes,
+        snapshot_state,
+    );
+}
+
+fn publish_snapshot_to_path(
+    snapshot: GraphSnapshot,
+    path: &Path,
+    snapshot_bytes: &SnapshotBytes,
+    snapshot_state: &SnapshotState,
+) {
     let bytes = match snapshot::serialize_to_bytes(&snapshot) {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -773,8 +878,7 @@ fn publish_snapshot(
             return;
         }
     };
-    let path = snapshot::graph_bin_path();
-    if let Err(err) = snapshot::write_atomic_bytes(&path, &bytes) {
+    if let Err(err) = snapshot::write_atomic_bytes(path, &bytes) {
         eprintln!(
             "conspectus serve: snapshot write to {} failed (cache still updated): {err:#}",
             path.display()
@@ -1016,6 +1120,7 @@ pub fn run(config: ServeConfig) -> Result<()> {
         state: Arc::clone(&state),
         snapshot_bytes: Arc::clone(&snapshot_bytes),
         snapshot_state: Arc::clone(&snapshot_state),
+        snapshot_path: Arc::new(snapshot::graph_bin_path()),
     };
     handles.push(thread::spawn(move || {
         socket_listener_loop(listener, listener_ctx, &listener_shutdown);
@@ -1239,8 +1344,7 @@ fn wall_clock_epoch() -> i64 {
 
 /// Write a `started_epoch` to the shared state. Poisoned-mutex
 /// recovery follows the same pattern as the writer lock; the
-/// in-memory observability is best-effort and durability lives
-/// in SQLite.
+/// in-memory observability is best-effort.
 fn record_state_started(state: &Mutex<SchedulerState>, class: ProviderClass, epoch: i64) {
     let mut guard = match state.lock() {
         Ok(g) => g,
@@ -1319,6 +1423,10 @@ fn load_snapshot_state(snapshot_state: &SnapshotState) -> Option<GraphSnapshot> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hook::{HookRecord, HookTmuxRecord, SCHEMA_VERSION};
+    use crate::model::{
+        AgentSessionId, AgentSessionNode, GraphNode, MuxSessionId, MuxSessionNode, RelationKind,
+    };
     use std::time::Duration;
 
     #[test]
@@ -1326,8 +1434,8 @@ mod tests {
         // Simulates the per-class panic case: a thread panics
         // while holding the lock, leaving it poisoned. Subsequent
         // acquisitions must still succeed so the surviving class
-        // threads can keep ticking — the on-disk SQLite cache is
-        // the durable state, not the in-process lock.
+        // threads can keep ticking; the in-process lock is only
+        // a coordination primitive.
         let lock = Arc::new(Mutex::new(()));
         let panicker = {
             let lock = Arc::clone(&lock);
@@ -1367,5 +1475,85 @@ mod tests {
             ProviderClass::Forge.ttl_duration(&intervals),
             Duration::from_secs(300)
         );
+    }
+
+    #[test]
+    fn hook_ingest_updates_snapshot_state_and_published_bytes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let snapshot_bytes: SnapshotBytes = Arc::new(Mutex::new(None));
+        let snapshot_state: SnapshotState = Arc::new(Mutex::new(Some(GraphSnapshot {
+            nodes: vec![agent_session("current"), mux_session("editor")],
+            ..GraphSnapshot::empty()
+        })));
+        let ctx = DispatchCtx {
+            scan_roots: Arc::new(Vec::new()),
+            intervals: Arc::new(ServerIntervals::default()),
+            writer_lock: Arc::new(Mutex::new(())),
+            state: Arc::new(Mutex::new(SchedulerState::default())),
+            snapshot_bytes: Arc::clone(&snapshot_bytes),
+            snapshot_state: Arc::clone(&snapshot_state),
+            snapshot_path: Arc::new(temp.path().join("graph.bin")),
+        };
+        let record = HookRecord {
+            schema_version: SCHEMA_VERSION,
+            harness_key: "claude-code".to_string(),
+            session_key: "current".to_string(),
+            cwd: Some("/work".to_string()),
+            pid: None,
+            ppid: None,
+            tmux: Some(HookTmuxRecord {
+                session_name: Some("editor".to_string()),
+                native_id: None,
+                pane_id: Some("%1".to_string()),
+                socket_path: None,
+            }),
+            transcript_path: None,
+            hook_event_name: Some("SessionStart".to_string()),
+            observed_epoch: 1_700_000_000,
+            harness_version: None,
+        };
+        let request = Request {
+            command: "hook_ingest".to_string(),
+            args: serde_json::json!({ "record": record }),
+            id: "test-hook".to_string(),
+        };
+
+        let response = handle_hook_ingest(&request, &ctx);
+
+        assert_eq!(response.result, "ok");
+        assert!(snapshot_bytes.lock().unwrap().is_some());
+        let snapshot = snapshot_state.lock().unwrap().clone().expect("snapshot");
+        assert!(snapshot.candidate_links.iter().any(|link| {
+            link.relation == RelationKind::LinkedToMux
+                && link.source_metadata.adapter == crate::discovery::providers::HOOK_SIDECAR
+        }));
+    }
+
+    fn agent_session(session_key: &str) -> GraphNode {
+        GraphNode::AgentSession(AgentSessionNode {
+            id: AgentSessionId::new("claude-code", "/state", session_key),
+            harness_key: "claude-code".to_string(),
+            cwd: Some("/work".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: Some(1_700_000_000),
+            session_kind: None,
+        })
+    }
+
+    fn mux_session(native_id: &str) -> GraphNode {
+        GraphNode::MuxSession(MuxSessionNode {
+            id: MuxSessionId::new(format!("tmux:{native_id}")),
+            backend: "tmux".to_string(),
+            native_id: native_id.to_string(),
+            cwd: Some("/work".to_string()),
+            active_pane_command: Some("claude".to_string()),
+            active_pane_pid: None,
+            active_pane_current_path: Some("/work".to_string()),
+            active_pane_start_command: None,
+            client_attached: Some(true),
+            activity_epoch: None,
+            created_epoch: None,
+        })
     }
 }

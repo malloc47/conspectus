@@ -9,8 +9,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use rusqlite::Connection;
-
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphNode, GraphSnapshot, LinkEndpoint,
@@ -31,31 +29,6 @@ pub struct MuxBuildInputs<'a> {
     pub filter: RowFilter,
     pub grouping: MuxGrouping,
     pub sort: Sort,
-}
-
-/// Connection-based inputs surviving until the App refactor
-/// removes the last `read_snapshot(conn)` consumers. Thin
-/// wrapper that reads the snapshot back out of SQLite then
-/// delegates to [`build_mux_tree`].
-pub struct MuxBuildInputsFromConn<'a> {
-    pub conn: &'a Connection,
-    pub home: Option<&'a Path>,
-    pub now: Option<i64>,
-    pub filter: RowFilter,
-    pub grouping: MuxGrouping,
-    pub sort: Sort,
-}
-
-pub fn build_mux_tree_from_conn(inputs: MuxBuildInputsFromConn<'_>) -> rusqlite::Result<RowTree> {
-    let snapshot = crate::query::read_snapshot(inputs.conn)?;
-    Ok(build_mux_tree(MuxBuildInputs {
-        snapshot: &snapshot,
-        home: inputs.home,
-        now: inputs.now,
-        filter: inputs.filter,
-        grouping: inputs.grouping,
-        sort: inputs.sort,
-    }))
 }
 
 #[derive(Clone, Debug)]
@@ -651,7 +624,7 @@ fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<Atta
         ));
     }
 
-    // Dedupe + group + sort to match the SQL `ORDER BY mux_node_id, a.node_id`.
+    // Dedupe + group + sort by mux id, then attached agent id.
     let mut out: HashMap<String, Vec<AttachedAgent>> = HashMap::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
     for (mux_id, agent) in collected {
@@ -1118,7 +1091,7 @@ mod tests {
     #[test]
     fn float_attached_muxes_top_lifts_attached_above_unattached() {
         // Three muxes: alpha and gamma are unattached, beta has one
-        // agent session linked to it. Default SQL order is by
+        // agent session linked to it. Default row order is by
         // node_id (alpha, beta, gamma); with the bool set we expect
         // beta first and the alpha/gamma order preserved after it.
         let mut snapshot = GraphSnapshot::empty();

@@ -357,9 +357,10 @@ The sane default is:
 - read home-global agent-specific state/config directories for supported
   harnesses
 - read mux sessions from the configured mux backend
-- read fresh harness hook sidecar records from the user's Conspectus state
-  directory when present, using them as current-session evidence rather than
-  durable user intent
+- read fresh daemonless harness hook spool records from the user's Conspectus
+  state directory when present, using them as current-session evidence rather
+  than durable user intent; when the daemon is available, hook evidence is
+  ingested directly into the in-memory graph and persisted via `graph.bin`
 - read read-only harness state and log databases when the harness maintains
   them, using stable indexed fields to discover sessions and to derive live
   mux attribution; for Codex this is the `state_*.sqlite` threads/lineage
@@ -773,17 +774,14 @@ the daemon's serialized cache (`client_snapshot` → rkyv
 deserialize per ADRs 0082/0083). Daemonless consumers cold-
 rebuild the same snapshot in process.
 
-The output renderers (`src/output/{agent,mux,union,prs,forks,
-node_show,table}.rs`) still materialize the snapshot into a
-transient in-memory SQLite database via
-`query::materialize_snapshot` and run SQL against it. That's
-an internal implementation choice surviving from ADR 0043's
-"SQLite as Sole Consumption Surface" migration — inverting it
-to in-memory iteration is queued under P11-011b/c/d but
-delivers no user-visible architectural change beyond what
-P11-011a already shipped, so the timing is driven by
-binary-size / dependency-cleanup priorities rather than by
-load-bearing demand.
+The output renderers
+(`src/output/{agent,mux,union,prs,forks,node_show,table}.rs`)
+and the TUI row builders (`src/tui/rows/*.rs`,
+`src/tui/{detail,explorer}.rs`) consume `&GraphSnapshot`
+directly and iterate the typed model. `src/query/` and the
+internal `materialize_snapshot` SQLite engine are gone
+(P11-011b/c/d, ADR 0082); `rusqlite` survives only for
+provider-owned state such as OpenCode's on-disk read path.
 
 Filter, grouping, selection, and row-view-model assembly stay
 in Rust. The Rust resolver remains the source of truth for
@@ -1132,8 +1130,10 @@ migration helper and harmless if it fails.
   provider granularity using node/link provenance and per-provider freshness
   timestamps; both the server and the one-shot CLI use the same format.
 - Hook sidecar records are local rebuildable observations written through
-  `conspectus hook write` to `hooks.sqlite3` under
-  `$XDG_STATE_HOME/conspectus/hooks` or
+  `conspectus hook write`. When the daemon is available, hook evidence is
+  ingested into `SnapshotState` and persisted through `graph.bin`. When no
+  daemon snapshot is available, the hook writer stores only the latest record
+  per mux in `hooks-latest.json` under `$XDG_STATE_HOME/conspectus/hooks` or
   `$HOME/.local/state/conspectus/hooks`, with
   `$CONSPECTUS_HOOK_SIDECAR_STATE` as an override.
 

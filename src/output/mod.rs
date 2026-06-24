@@ -4,20 +4,15 @@ use anyhow::Result;
 
 use crate::model::GraphSnapshot;
 
-#[cfg(feature = "query")]
 pub mod agent;
 pub mod dot;
-#[cfg(feature = "query")]
 pub mod forks;
 pub mod html;
-#[cfg(feature = "query")]
 pub mod mux;
 pub mod node_show;
-#[cfg(feature = "query")]
 pub mod prs;
 pub mod render;
 pub mod table;
-#[cfg(feature = "query")]
 pub mod union;
 
 pub fn render_graph_json(snapshot: &GraphSnapshot) -> Result<String> {

@@ -56,7 +56,7 @@ CWD matching fires for **all** harnesses at the discovery layer — a mux sessio
 
 `src/discovery/hook_sidecar.rs` — `apply_hook_sidecars()`
 
-Harness hooks write small per-invocation records to a SQLite store. This post-merge pass reads those records and adjusts candidate links:
+Harness hooks send observations to the daemon when available. If no daemon snapshot is ready, they write a compact latest-only `hooks-latest.json` spool. This post-merge pass reads the daemonless spool and adjusts candidate links:
 
 ```mermaid
 flowchart TD

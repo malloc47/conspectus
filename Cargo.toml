@@ -6,15 +6,6 @@ license = "MIT"
 description = "AI work graph status tool"
 
 [features]
-# The user-facing SQLite query surface (ADR 0036, 0037, 0038, 0039).
-# Default-on so the shipped binary always exposes `conspectus query`.
-# Library consumers who do not want the engine surface use
-# `default-features = false`. Note that rusqlite itself is unconditional
-# (the hook sidecar in src/hook.rs and the OpenCode adapter in
-# src/discovery/harness/opencode.rs depend on it independently); the
-# feature gate covers only the new query-engine code in src/query/.
-default = ["query"]
-query = []
 # Dev-only `conspectus tui --snapshot` mode (ADR 0067). Renders one
 # TUI frame to stdout with ANSI styling preserved so agents can
 # iterate on renderer changes without a manual screenshot loop.
@@ -69,7 +60,7 @@ base64 = "0.22"
 ratatui-cheese = "0.7"
 ratatui-comfy-toaster = { version = "0.4", default-features = false }
 tui-popup = "0.7"
-rusqlite = { version = "0.39", features = ["bundled", "load_extension"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # `conspectus serve` graceful shutdown (ADR 0080). Registers

@@ -20,29 +20,33 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::model::{MuxSessionId, NodeId};
-use crate::tui::detail::{NodeDetail, build_node_detail_from_conn};
+use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
-    BreadcrumbHop, ExplorerRow, ExplorerRowKey, NodeView, build_node_view_from_conn,
+    BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::widgets::pins::{PinBindOption, PinCreateDefaults, PinMutationTarget};
 use crate::tui::{RunConfig, View};
 
-pub struct GraphDb(Rc<rusqlite::Connection>);
+/// Reference-counted handle to the App's resolved
+/// [`GraphSnapshot`]. Replaces the previous
+/// `Rc<rusqlite::Connection>` wrapper (P11-011d) — the App now
+/// holds the snapshot directly and every read consumer borrows
+/// it via [`Self::snapshot`].
+pub struct GraphDb(Rc<crate::model::GraphSnapshot>);
 
 impl GraphDb {
-    pub(crate) fn new(conn: rusqlite::Connection) -> Self {
-        Self(Rc::new(conn))
+    pub(crate) fn new(snapshot: crate::model::GraphSnapshot) -> Self {
+        Self(Rc::new(snapshot))
     }
 
     #[cfg(test)]
     pub(crate) fn from_snapshot(snapshot: &crate::model::GraphSnapshot) -> Self {
-        let conn = crate::query::materialize_snapshot(snapshot).expect("materialize TUI snapshot");
-        Self(Rc::new(conn))
+        Self(Rc::new(snapshot.clone()))
     }
 
-    pub(crate) fn conn(&self) -> &rusqlite::Connection {
+    pub(crate) fn snapshot(&self) -> &crate::model::GraphSnapshot {
         &self.0
     }
 }
@@ -55,7 +59,7 @@ impl Clone for GraphDb {
 
 impl fmt::Debug for GraphDb {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("GraphDb").field(&"<sqlite>").finish()
+        f.debug_tuple("GraphDb").field(&"<snapshot>").finish()
     }
 }
 
@@ -375,7 +379,7 @@ pub enum Msg {
     /// Operator asked to exit (`q`, Ctrl-C, fatal-error
     /// translations).
     Quit,
-    /// Background data loader produced a new SQLite graph + row tree.
+    /// Background data loader produced a new graph snapshot + row tree.
     /// The reducer retains current selection by `RowId` when the
     /// same id is present in the new tree, otherwise it snaps to
     /// the nearest visible row by index. `loaded_at_epoch` is the
@@ -960,25 +964,22 @@ impl App {
             RowKind::AgentSession(session) => session.pin_id.clone()?,
             _ => return None,
         };
-        self.database
-            .as_ref()
-            .and_then(|db| crate::query::read_snapshot(db.conn()).ok())
-            .and_then(|snapshot| {
-                snapshot
-                    .pins
-                    .into_iter()
-                    .find(|pin| pin.id == id)
-                    .map(|pin| PinMutationTarget {
-                        id: pin.id,
-                        display_name: pin.display_name,
-                        harness: pin.harness,
-                        cwd: pin.cwd,
-                        mux_name: pin.mux.name,
-                        mux_socket: pin.mux.socket_name,
-                        launch_argv: pin.launch_argv.unwrap_or_default(),
-                        store_path: pin.store_path,
-                    })
-            })
+        self.database.as_ref().and_then(|db| {
+            db.snapshot()
+                .pins
+                .iter()
+                .find(|pin| pin.id == id)
+                .map(|pin| PinMutationTarget {
+                    id: pin.id.clone(),
+                    display_name: pin.display_name.clone(),
+                    harness: pin.harness.clone(),
+                    cwd: pin.cwd.clone(),
+                    mux_name: pin.mux.name.clone(),
+                    mux_socket: pin.mux.socket_name.clone(),
+                    launch_argv: pin.launch_argv.clone().unwrap_or_default(),
+                    store_path: pin.store_path.clone(),
+                })
+        })
     }
 
     fn pin_create_defaults(&self) -> PinCreateDefaults {
@@ -993,13 +994,12 @@ impl App {
                 let cwd = self
                     .database
                     .as_ref()
-                    .and_then(|db| crate::query::read_snapshot(db.conn()).ok())
-                    .and_then(|snapshot| {
-                        snapshot.nodes.into_iter().find_map(|node| match node {
+                    .and_then(|db| {
+                        db.snapshot().nodes.iter().find_map(|node| match node {
                             crate::model::GraphNode::AgentSession(node)
                                 if node.id == session.session =>
                             {
-                                node.cwd
+                                node.cwd.clone()
                             }
                             _ => None,
                         })
@@ -1055,7 +1055,7 @@ impl App {
     /// attributes a harness to the mux.
     fn infer_harness_for_mux(&self, mux: &MuxSessionId) -> Option<String> {
         let db = self.database.as_ref()?;
-        let snapshot = crate::query::read_snapshot(db.conn()).ok()?;
+        let snapshot = db.snapshot();
         let target = NodeId::MuxSession(mux.clone());
         snapshot
             .candidate_links
@@ -1077,9 +1077,8 @@ impl App {
     /// `pins::validate_entry`.
     fn mux_cwd_for(&self, mux: &MuxSessionId) -> Option<String> {
         let db = self.database.as_ref()?;
-        let snapshot = crate::query::read_snapshot(db.conn()).ok()?;
-        snapshot.nodes.into_iter().find_map(|node| match node {
-            crate::model::GraphNode::MuxSession(node) if &node.id == mux => node.cwd,
+        db.snapshot().nodes.iter().find_map(|node| match node {
+            crate::model::GraphNode::MuxSession(node) if &node.id == mux => node.cwd.clone(),
             _ => None,
         })
     }
@@ -1753,8 +1752,11 @@ impl App {
             return;
         };
         let home = home_for_config(&self.config);
-        self.detail = build_node_detail_from_conn(database.conn(), &target, home.as_deref())
-            .expect("detail builder should read current TUI database");
+        self.detail = build_node_detail(DetailInputs {
+            snapshot: database.snapshot(),
+            target: &target,
+            home: home.as_deref(),
+        });
         self.recompute_explorer_for(target, home.as_deref());
     }
 
@@ -1764,8 +1766,11 @@ impl App {
             self.explorer = None;
             return;
         };
-        let view = build_node_view_from_conn(database.conn(), &target, home)
-            .expect("explorer view builder should read current TUI database");
+        let view = build_node_view(ExplorerInputs {
+            snapshot: database.snapshot(),
+            target: &target,
+            home,
+        });
         match view {
             None => self.explorer = None,
             Some(view) => {
@@ -1947,8 +1952,11 @@ impl App {
         let Some(database) = database else {
             return;
         };
-        let next = build_node_view_from_conn(database.conn(), &target, home.as_deref())
-            .expect("explorer view builder should read current TUI database");
+        let next = build_node_view(ExplorerInputs {
+            snapshot: database.snapshot(),
+            target: &target,
+            home: home.as_deref(),
+        });
         match next {
             None => {
                 self.status_message = Some(format!(
@@ -1965,9 +1973,11 @@ impl App {
                 // Recompute the legacy detail too so the renderer
                 // surfaces consistent info during the renderer
                 // transition (T8-029).
-                self.detail =
-                    build_node_detail_from_conn(database.conn(), &target, home.as_deref())
-                        .expect("detail builder should read current TUI database");
+                self.detail = build_node_detail(DetailInputs {
+                    snapshot: database.snapshot(),
+                    target: &target,
+                    home: home.as_deref(),
+                });
                 self.preview_scroll = 0;
                 self.status_message = None;
                 // T8-035: mirror sync — when the drilled neighbor
@@ -2048,8 +2058,11 @@ impl App {
         let Some(database) = database else {
             return;
         };
-        let view = build_node_view_from_conn(database.conn(), &hop.focused, home.as_deref())
-            .expect("explorer view builder should read current TUI database");
+        let view = build_node_view(ExplorerInputs {
+            snapshot: database.snapshot(),
+            target: &hop.focused,
+            home: home.as_deref(),
+        });
         let Some(view) = view else {
             self.status_message = Some(
                 "explorer: cannot restore breadcrumb hop — node missing from snapshot".to_string(),
@@ -2062,8 +2075,11 @@ impl App {
         restored.breadcrumb = breadcrumb_remaining;
         restored.full_detail_expanded = hop.full_detail_expanded;
         restored.reseat_cursor(hop.cursor_key);
-        self.detail = build_node_detail_from_conn(database.conn(), &hop.focused, home.as_deref())
-            .expect("detail builder should read current TUI database");
+        self.detail = build_node_detail(DetailInputs {
+            snapshot: database.snapshot(),
+            target: &hop.focused,
+            home: home.as_deref(),
+        });
         self.explorer = Some(restored);
         self.preview_scroll = 0;
         self.status_message = None;
@@ -2551,7 +2567,7 @@ mod tests {
         app.update(Msg::End); // move selection to the last row
         let kept = app.selection().cloned().expect("selection present");
 
-        let snap = crate::query::read_snapshot(app.graph_db().unwrap().conn()).unwrap();
+        let snap = app.graph_db().unwrap().snapshot().clone();
         let tree = build_tree(&snap);
         // Pick *some* other row id as the hint.
         let hint = tree
@@ -2604,7 +2620,7 @@ mod tests {
         // occurrence. With the tiebreaker, the cursor advances to
         // the row *immediately following* the second copy as
         // expected. Use a hand-built RowTree so the test does not
-        // depend on the mux SQL view.
+        // depend on mux row-builder details.
         use crate::tui::rows::{GroupRow, Row, RowId, RowKind};
 
         let group_row = |id: NodeId, label: &str| Row {
@@ -2944,7 +2960,7 @@ mod tests {
 
         // Rebuild from the same snapshot; the row tree is
         // deterministic, so RowId equality should retain selection.
-        let snap = crate::query::read_snapshot(app.graph_db().unwrap().conn()).unwrap();
+        let snap = app.graph_db().unwrap().snapshot().clone();
         let tree = build_tree(&snap);
         app.update(Msg::SetData {
             snapshot: GraphDb::from_snapshot(&snap),

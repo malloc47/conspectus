@@ -1,7 +1,7 @@
 //! Backend-agnostic rendering substrate (P10-003 / ADR 0043).
 //!
-//! Pulled out of [`super::table`] so the in-memory renderer and the
-//! SQLite-backed renderer can share the same column registries,
+//! Pulled out of [`super::table`] so the in-memory renderers and the
+//! former SQL renderer could share the same column registries,
 //! [`RenderOptions`] surface, style palette, and width-aware
 //! columnar/card layouts without duplicating code.
 //!
@@ -31,10 +31,9 @@
 //!   [`unique_prefix_len`])
 //!
 //! Backend-specific code that depends on `GraphSnapshot` or typed
-//! `*Node` structs stays in [`super::table`] (in-memory) or
-//! [`super::agent_sqlite`] (SQLite spike). Each backend calls into
-//! the substrate's primitives to assemble the cell strings, then
-//! delegates final rendering to [`render_rows`].
+//! `*Node` structs stays in the projection modules. Each projection
+//! calls into the substrate's primitives to assemble the cell strings,
+//! then delegates final rendering to [`render_rows`].
 
 use std::fmt::Write as _;
 
@@ -184,10 +183,8 @@ pub enum Layout {
 pub const SHORT_ID_FLOOR: usize = 6;
 
 /// FNV-1a 64-bit over a `NodeId`'s `Display` form, as a string.
-/// Used by both the in-memory renderer (which holds a typed `NodeId`
-/// and calls [`super::table::node_short_id`]) and the SQLite-backed
-/// renderer (which holds the `Display` form as `TEXT` and calls this
-/// directly).
+/// Shared with callers that already have a display-form id and do not
+/// need to construct a typed [`NodeId`].
 pub fn node_short_id_from_display(node_id_text: &str) -> String {
     const OFFSET: u64 = 0xcbf29ce484222325;
     const PRIME: u64 = 0x100000001b3;
@@ -1185,10 +1182,9 @@ pub fn format_relative_age(then_epoch: i64, now_epoch: i64) -> String {
 /// Compact `provenance/confidence[*]` cell, given the serde tag
 /// strings (e.g. `"strong_discovered"`, `"high"`). String-driven so
 /// the substrate stays free of `crate::model::{Provenance,
-/// Confidence}` dependencies; SQL-backed renderers in
-/// [`super::agent`] read the tag columns directly. The typed-enum
-/// variant lives at `super::table::indicator` for callers that
-/// already hold typed values.
+/// Confidence}` dependencies. The typed-enum variant lives at
+/// `super::table::indicator` for callers that already hold typed
+/// values.
 pub fn indicator_from_tags(provenance_tag: &str, confidence_tag: &str, ambiguous: bool) -> String {
     let mut buf = String::with_capacity(6);
     buf.push_str(provenance_code_from_tag(provenance_tag));
@@ -1237,9 +1233,8 @@ pub fn confidence_precedence(tag: &str) -> u8 {
 /// Pick the strongest candidate by (provenance precedence,
 /// confidence precedence, link id ascending) — the same comparator
 /// `crate::model::pick_preferred` applies to typed `GraphLink`
-/// values. String-driven so SQL-backed renderers can rank candidate
-/// rows pulled from `candidate_links` without round-tripping through
-/// typed `GraphLink`.
+/// values. String-driven so row builders can rank candidate rows
+/// without round-tripping through typed `GraphLink`.
 pub fn pick_strongest<T>(
     candidates: Vec<T>,
     accessor: impl Fn(&T) -> (&String, &String, &String),

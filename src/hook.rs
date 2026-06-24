@@ -1,18 +1,18 @@
 //! Hook observation storage and payload conversion.
 //!
 //! Harness hooks call `conspectus hook write ...`; this module owns the
-//! provider-neutral observation schema and storage backend.
+//! provider-neutral observation schema and daemonless spool.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: u16 = 1;
 pub const ACTIVE_TTL_SECONDS: i64 = 15 * 60;
-pub const SQLITE_FILENAME: &str = "hooks.sqlite3";
+pub const LATEST_FILENAME: &str = "hooks-latest.json";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HookRecord {
@@ -50,8 +50,8 @@ pub struct HookTmuxRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HookWriteOutcome {
-    pub database_path: PathBuf,
-    pub record_id: i64,
+    pub path: PathBuf,
+    pub replaced_existing: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,8 +72,8 @@ impl HookStore {
         &self.root
     }
 
-    pub fn database_path(&self) -> PathBuf {
-        self.root.join(SQLITE_FILENAME)
+    pub fn latest_path(&self) -> PathBuf {
+        self.root.join(LATEST_FILENAME)
     }
 
     pub fn write_record(&self, record: &HookRecord) -> Result<HookWriteOutcome> {
@@ -87,35 +87,28 @@ impl HookStore {
             .with_context(|| format!("failed to create hook state dir {}", self.root.display()))?;
         set_user_only_dir(&self.root)?;
 
-        let database_path = self.database_path();
-        let connection = Connection::open(&database_path)
-            .with_context(|| format!("failed to open hook store {}", database_path.display()))?;
-        connection.busy_timeout(std::time::Duration::from_millis(250))?;
-        init_database(&connection)?;
-
-        let body = serde_json::to_string(record)?;
-        connection.execute(
-            "INSERT INTO hook_records (
-                schema_version, harness_key, session_key, observed_epoch, record_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                record.schema_version,
-                record.harness_key,
-                record.session_key,
-                record.observed_epoch,
-                body
-            ],
-        )?;
+        let path = self.latest_path();
+        let mut store = LatestHookStore::read(&path);
+        let key = mux_record_key(record);
+        let replaced_existing = store.records.contains_key(&key);
+        let should_write = store
+            .records
+            .get(&key)
+            .is_none_or(|existing| record.observed_epoch >= existing.observed_epoch);
+        if should_write {
+            store.records.insert(key, record.clone());
+            store.write_atomic(&path)?;
+            set_user_only_file(&path)?;
+        }
         let outcome = HookWriteOutcome {
-            database_path,
-            record_id: connection.last_insert_rowid(),
+            path,
+            replaced_existing,
         };
-        set_user_only_file(&outcome.database_path)?;
         Ok(outcome)
     }
 
     pub fn read_records(&self) -> Vec<HookRecord> {
-        let mut records = read_sqlite_records(&self.database_path());
+        let mut records = LatestHookStore::read(&self.latest_path()).into_records();
         records.extend(read_json_records(&self.root));
         records
     }
@@ -274,45 +267,64 @@ fn optional_string(payload: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn init_database(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS hook_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            schema_version INTEGER NOT NULL,
-            harness_key TEXT NOT NULL,
-            session_key TEXT NOT NULL,
-            observed_epoch INTEGER NOT NULL,
-            record_json TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_hook_records_fresh
-            ON hook_records(harness_key, session_key, observed_epoch DESC);
-        ",
-    )
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct LatestHookStore {
+    schema_version: u16,
+    records: BTreeMap<String, HookRecord>,
 }
 
-fn read_sqlite_records(path: &Path) -> Vec<HookRecord> {
-    if !path.is_file() {
-        return Vec::new();
+impl LatestHookStore {
+    fn read(path: &Path) -> Self {
+        if !path.is_file() {
+            return Self::default_for_write();
+        }
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|body| serde_json::from_str::<Self>(&body).ok())
+            .filter(|store| store.schema_version == SCHEMA_VERSION)
+            .unwrap_or_else(Self::default_for_write)
     }
-    let Ok(connection) = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) else {
-        return Vec::new();
-    };
-    let Ok(mut statement) = connection
-        .prepare("SELECT record_json FROM hook_records ORDER BY observed_epoch ASC, id ASC")
-    else {
-        return Vec::new();
-    };
-    let Ok(rows) = statement.query_map([], |row| row.get::<_, String>(0)) else {
-        return Vec::new();
-    };
 
-    rows.filter_map(std::result::Result::ok)
-        .filter_map(|body| serde_json::from_str(&body).ok())
-        .collect()
+    fn default_for_write() -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            records: BTreeMap::new(),
+        }
+    }
+
+    fn into_records(self) -> Vec<HookRecord> {
+        self.records.into_values().collect()
+    }
+
+    fn write_atomic(&self, path: &Path) -> Result<()> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create hook state dir {}", parent.display()))?;
+        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        let body = serde_json::to_vec_pretty(self)?;
+        fs::write(&tmp, body).with_context(|| format!("failed to write {}", tmp.display()))?;
+        set_user_only_file(&tmp)?;
+        fs::rename(&tmp, path)
+            .with_context(|| format!("failed to rename {} to {}", tmp.display(), path.display()))
+    }
+}
+
+fn mux_record_key(record: &HookRecord) -> String {
+    if let Some(tmux) = &record.tmux {
+        let mux = tmux
+            .native_id
+            .as_deref()
+            .or(tmux.session_name.as_deref())
+            .filter(|value| !value.is_empty());
+        if let Some(mux) = mux {
+            let socket = tmux.socket_path.as_deref().unwrap_or("default");
+            return format!("tmux:{socket}:{mux}");
+        }
+    }
+    if let Some(cwd) = record.cwd.as_deref() {
+        return format!("cwd:{cwd}");
+    }
+    format!("session:{}:{}", record.harness_key, record.session_key)
 }
 
 fn read_json_records(root: &Path) -> Vec<HookRecord> {
@@ -324,6 +336,7 @@ fn read_json_records(root: &Path) -> Vec<HookRecord> {
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .filter(|path| path.file_name().is_none_or(|name| name != LATEST_FILENAME))
         .filter_map(|path| fs::read_to_string(path).ok())
         .filter_map(|body| serde_json::from_str(&body).ok())
         .collect()
@@ -360,7 +373,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sqlite_store_round_trips_hook_record() {
+    fn latest_store_round_trips_hook_record() {
         let temp = tempfile::tempdir().expect("tempdir");
         let store = HookStore::new(temp.path());
         let record = HookRecord {
@@ -384,9 +397,42 @@ mod tests {
 
         let outcome = store.write_record(&record).expect("write record");
 
-        assert_eq!(outcome.record_id, 1);
-        assert!(outcome.database_path.is_file());
+        assert!(!outcome.replaced_existing);
+        assert!(outcome.path.is_file());
         assert_eq!(store.read_records(), vec![record]);
+    }
+
+    #[test]
+    fn latest_store_keeps_only_newest_record_for_mux() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = HookStore::new(temp.path());
+        let mut older = HookRecord {
+            schema_version: SCHEMA_VERSION,
+            harness_key: "claude-code".to_string(),
+            session_key: "old".to_string(),
+            cwd: Some("/work".to_string()),
+            pid: None,
+            ppid: None,
+            tmux: Some(HookTmuxRecord {
+                session_name: Some("editor".to_string()),
+                native_id: None,
+                pane_id: Some("%1".to_string()),
+                socket_path: None,
+            }),
+            transcript_path: None,
+            hook_event_name: Some("SessionStart".to_string()),
+            observed_epoch: 100,
+            harness_version: None,
+        };
+        let mut newer = older.clone();
+        newer.session_key = "new".to_string();
+        newer.observed_epoch = 200;
+
+        store.write_record(&newer).expect("write newer");
+        older.session_key = "older-late-arrival".to_string();
+        store.write_record(&older).expect("write older");
+
+        assert_eq!(store.read_records(), vec![newer]);
     }
 
     #[test]

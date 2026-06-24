@@ -1029,12 +1029,9 @@ pub struct SourceMetadata {
     #[rkyv(with = MetadataAsJson)]
     pub fields: Metadata,
     /// Unix epoch (seconds) captured when the producing adapter ran
-    /// against the live world. Feeds the SQL
-    /// `candidate_links.discovery_freshness_epoch` column and the
-    /// per-provider TTL comparison in `P7-003` / `P7-006`. `None`
-    /// when the adapter did not record a timestamp (the loader then
-    /// writes `0`, the schema default, so existing snapshots stay
-    /// round-trippable).
+    /// against the live world. Feeds the per-provider TTL comparison
+    /// in `P7-003` / `P7-006`. `None` when the adapter did not record
+    /// a timestamp.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freshness_epoch: Option<i64>,
 }
@@ -1043,12 +1040,7 @@ pub struct SourceMetadata {
 /// sidecar lives on [`GraphSnapshot`] keyed by `NodeId` so node
 /// structs themselves remain provider-agnostic and the producers
 /// have a single place to record their origin alongside whatever
-/// they were already going to push into the snapshot. The loader
-/// fills the SQL `discovery_provider` / `discovery_freshness_epoch`
-/// columns from this map; nodes without an entry land in SQL with
-/// the schema's `'unknown'` / `0` defaults so legacy snapshots
-/// (and any provider that has not yet been instrumented) keep
-/// round-tripping.
+/// they were already going to push into the snapshot.
 #[derive(
     Clone,
     Debug,
@@ -1107,11 +1099,8 @@ pub struct ResolvedRelationship {
     /// time of writing the only producer is
     /// `suppress_ambiguous_cwd_mux_links`, which fires when a mux
     /// is claimed by multiple sessions via cwd evidence alone.
-    /// SQL joins on `selected_link_id = candidate_links.link_id`
-    /// naturally exclude these rows (NULL doesn't equal anything),
-    /// which is the H-UI-008 tree-view invariant. Rust consumers
-    /// pattern-match on `Option` before reading the slot as "the
-    /// answer." See ADR 0077.
+    /// Rust consumers pattern-match on `Option` before reading the slot
+    /// as "the answer." See ADR 0077.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_link_id: Option<String>,
     /// Candidates that competed for this slot. When

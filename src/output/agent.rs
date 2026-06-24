@@ -632,10 +632,8 @@ fn collect_workspace_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, Str
     // sessions render as comma-joined; per-workspace display is
     // members.join('+') when ≥2, else workspace.root. The
     // workspace's root is read from the WorkspaceNode when one
-    // exists (mirroring the SQL JOIN onto node_workspaces); when
-    // it doesn't, fall back to the WorkspaceId's structural
-    // `root` (the JSON-encoded `$.root` the SQL query
-    // alternatively read via json_extract).
+    // exists; when it doesn't, fall back to the WorkspaceId's
+    // structural `root`.
     let mut per_session: HashMap<SessionKey, Vec<(NodeId, String)>> = HashMap::new();
     for resolved in &snapshot.resolved_relationships {
         if !matches!(resolved.relation, RelationKind::AssociatedWith) {
@@ -747,9 +745,8 @@ fn collect_declared_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, Decl
     }
     let mut out = HashMap::new();
     for (key, candidates) in per_session {
-        // Rank by provenance precedence only (matches the
-        // pre-P11-011b SQL renderer, which used no
-        // confidence/id tiebreak for declared selection).
+        // Rank by provenance precedence only; declared selection has
+        // no confidence/id tiebreak here.
         let Some(best) = candidates
             .into_iter()
             .max_by(|a, b| a.provenance.precedence().cmp(&b.provenance.precedence()))

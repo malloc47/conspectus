@@ -56,22 +56,6 @@ pub struct ExplorerInputs<'a> {
     pub home: Option<&'a Path>,
 }
 
-/// SQLite-backed entry point. Materializes a typed snapshot from
-/// `conn` and runs the typed-Rust assembly below. Mirrors
-/// [`crate::tui::detail::build_node_detail_from_conn`].
-pub fn build_node_view_from_conn(
-    conn: &rusqlite::Connection,
-    target: &NodeId,
-    home: Option<&Path>,
-) -> rusqlite::Result<Option<NodeView>> {
-    let snapshot = crate::query::read_snapshot(conn)?;
-    Ok(build_node_view(ExplorerInputs {
-        snapshot: &snapshot,
-        target,
-        home,
-    }))
-}
-
 /// Build the explorer view model for the given node id. Returns
 /// `None` when the node isn't in the snapshot.
 pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
@@ -3241,32 +3225,5 @@ mod tests {
             cwd.kind_chip.is_none(),
             "unresolved cwd should leave kind_chip empty: {cwd:?}",
         );
-    }
-
-    #[test]
-    fn from_conn_matches_snapshot_path() {
-        let mut snapshot = GraphSnapshot::empty();
-        snapshot
-            .nodes
-            .push(agent("claude-code", "abc", Some("/home/op/src/x"), None));
-        snapshot.nodes.push(mux("tmux", "work-claude", None));
-        let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
-        let mux_id = NodeId::MuxSession(MuxSessionId::new("work-claude"));
-        snapshot.candidate_links.push(link(
-            "l1",
-            session_id.clone(),
-            mux_id,
-            RelationKind::LinkedToMux,
-        ));
-        let snapshot = resolve_snapshot(snapshot);
-        let direct = build_node_view(ExplorerInputs {
-            snapshot: &snapshot,
-            target: &session_id,
-            home: Some(home().as_path()),
-        });
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let via_conn =
-            build_node_view_from_conn(&conn, &session_id, Some(home().as_path())).expect("ok");
-        assert_eq!(direct, via_conn);
     }
 }

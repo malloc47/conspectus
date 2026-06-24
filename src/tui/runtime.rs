@@ -20,7 +20,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui::layout::Rect;
 
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
-use crate::model::MuxSessionId;
+use crate::model::{GraphSnapshot, MuxSessionId};
 use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
 use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{
@@ -33,15 +33,15 @@ use crate::tui::resume::{
 };
 use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
-use crate::tui::rows::sessions::{SessionsBuildInputsFromConn, build_sessions_tree_from_conn};
+use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::viewer::{
     LaunchPlan, PathBinaryProbe, ViewerTarget, resolve_viewer_target, viewer_disabled_reason,
 };
 use crate::tui::{RunConfig, View, ui};
 
 /// Result of a completed background discovery run. The worker returns
-/// only the resolved snapshot; the main thread materializes SQLite and
-/// builds the row tree from the app's current view config.
+/// only the resolved snapshot; the main thread builds the row tree from
+/// the app's current view config.
 type DiscoveryResult = Result<crate::model::GraphSnapshot>;
 
 /// Run the TUI to completion. Restores the terminal on normal exit,
@@ -146,34 +146,19 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
         while let Ok(result) = result_rx.try_recv() {
             pending_refresh = false;
             match result {
-                Ok(snapshot) => match crate::query::materialize_snapshot(&snapshot) {
-                    Ok(conn) => {
-                        let live_config = app.config().clone();
-                        match build_tree_for_view(&conn, &live_config) {
-                            Ok(tree) => {
-                                let database = GraphDb::new(conn);
-                                let initial_selection_hint = launch_context_row_id(&tree);
-                                app.update(Msg::SetData {
-                                    snapshot: database,
-                                    tree,
-                                    loaded_at_epoch: current_unix_epoch().unwrap_or(0),
-                                    initial_selection_hint,
-                                });
-                                populate_provider_status(&mut app, &live_config);
-                            }
-                            Err(err) => {
-                                app.update(Msg::SetRefreshFailure(format!(
-                                    "last refresh failed; {err}"
-                                )));
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        app.update(Msg::SetRefreshFailure(format!(
-                            "last refresh failed; {err}"
-                        )));
-                    }
-                },
+                Ok(snapshot) => {
+                    let live_config = app.config().clone();
+                    let tree = build_tree_for_view(&snapshot, &live_config);
+                    let database = GraphDb::new(snapshot);
+                    let initial_selection_hint = launch_context_row_id(&tree);
+                    app.update(Msg::SetData {
+                        snapshot: database,
+                        tree,
+                        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+                        initial_selection_hint,
+                    });
+                    populate_provider_status(&mut app, &live_config);
+                }
                 Err(err) => {
                     app.update(Msg::SetRefreshFailure(format!(
                         "last refresh failed; {err}"
@@ -630,9 +615,8 @@ fn set_static_data(
     config: &RunConfig,
     snapshot: &crate::model::GraphSnapshot,
 ) -> Result<()> {
-    let conn = crate::query::materialize_snapshot(snapshot)?;
-    let tree = build_tree_for_view(&conn, app.config())?;
-    let database = GraphDb::new(conn);
+    let tree = build_tree_for_view(snapshot, app.config());
+    let database = GraphDb::new(snapshot.clone());
     let initial_selection_hint = launch_context_row_id(&tree);
     app.update(Msg::SetData {
         snapshot: database,
@@ -700,8 +684,8 @@ fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Act
 }
 
 /// Spawn a background thread that runs discovery and sends the resolved
-/// snapshot through `tx`. SQLite materialization and row-tree building
-/// stay on the main thread so they can use the app's current view state.
+/// snapshot through `tx`. Row-tree building stays on the main thread so
+/// it can use the app's current view state.
 fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>) {
     let config = config.clone();
     let tx = tx.clone();
@@ -712,7 +696,7 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
 }
 
 /// Run discovery and resolver on the calling thread, returning the
-/// resolved snapshot (no SQLite materialization).
+/// resolved snapshot.
 ///
 /// P11-007 cutover: when `conspectus serve` is reachable on the
 /// socket, this short-circuits and pulls the already-resolved
@@ -888,16 +872,10 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
             return;
         }
     };
-    let snapshot = match crate::query::read_snapshot(database.conn()) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
-            return;
-        }
-    };
+    let snapshot = database.snapshot();
 
     let plan = match crate::rename::plan_session_rename(
-        &snapshot,
+        snapshot,
         &session_id,
         new_display_name.clone(),
         false,
@@ -914,7 +892,7 @@ fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value
     );
     let loader = crate::config::ConfigLoader::from_env();
     let store_path = match crate::declared::select_store_for_declaration(
-        &endpoint, &endpoint, &snapshot, &loader,
+        &endpoint, &endpoint, snapshot, &loader,
     ) {
         Some(selection) => selection.path,
         None => match loader.user_config_path() {
@@ -1242,8 +1220,8 @@ fn launch_context_row_id(tree: &RowTree) -> Option<crate::tui::rows::RowId> {
 
 fn discover_and_build(config: &RunConfig) -> Result<(GraphDb, RowTree)> {
     let snapshot = discover_and_resolve(config)?;
-    let database = GraphDb::new(crate::query::materialize_snapshot(&snapshot)?);
-    let tree = build_tree_for_view(database.conn(), config)?;
+    let tree = build_tree_for_view(&snapshot, config);
+    let database = GraphDb::new(snapshot);
     Ok((database, tree))
 }
 
@@ -1253,6 +1231,7 @@ fn discover_and_build(config: &RunConfig) -> Result<(GraphDb, RowTree)> {
 /// fixtures missing resolved relationships still render correctly;
 /// the resolver is idempotent for snapshots that already carry
 /// them.
+#[cfg(feature = "snapshot")]
 pub(super) fn refresh_from_snapshot(
     app: &mut App,
     config: &RunConfig,
@@ -1260,8 +1239,8 @@ pub(super) fn refresh_from_snapshot(
 ) -> Result<()> {
     populate_provider_status(app, config);
     let resolved = resolve_snapshot(snapshot);
-    let database = GraphDb::new(crate::query::materialize_snapshot(&resolved)?);
-    let tree = build_tree_for_view(database.conn(), config)?;
+    let tree = build_tree_for_view(&resolved, config);
+    let database = GraphDb::new(resolved);
     let initial_selection_hint = launch_context_row_id(&tree);
     app.update(Msg::SetData {
         snapshot: database,
@@ -1272,53 +1251,43 @@ pub(super) fn refresh_from_snapshot(
     Ok(())
 }
 
-fn build_tree_for_view(conn: &rusqlite::Connection, config: &RunConfig) -> Result<RowTree> {
+fn build_tree_for_view(snapshot: &GraphSnapshot, config: &RunConfig) -> RowTree {
     let home = home_dir();
-    let tree = match config.default_view {
-        View::Sessions => build_sessions_tree_from_conn(SessionsBuildInputsFromConn {
-            conn,
+    match config.default_view {
+        View::Sessions => build_sessions_tree(SessionsBuildInputs {
+            snapshot,
             grouping: config.sessions_grouping,
             home: home.as_deref(),
             now: current_unix_epoch(),
             cwd: config.cwd.as_deref(),
             filter: config.initial_filter.clone(),
-        })?,
-        View::Mux => crate::tui::rows::mux::build_mux_tree_from_conn(
-            crate::tui::rows::mux::MuxBuildInputsFromConn {
-                conn,
+        }),
+        View::Mux => crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            now: current_unix_epoch(),
+            filter: config.initial_filter.clone(),
+            grouping: config.mux_grouping,
+            sort: config.default_sort,
+        }),
+        View::Union => {
+            crate::tui::rows::union::build_union_tree(crate::tui::rows::union::UnionBuildInputs {
+                snapshot,
                 home: home.as_deref(),
-                now: current_unix_epoch(),
                 filter: config.initial_filter.clone(),
-                grouping: config.mux_grouping,
-                sort: config.default_sort,
-            },
-        )?,
-        View::Union => crate::tui::rows::union::build_union_tree_from_conn(
-            crate::tui::rows::union::UnionBuildInputsFromConn {
-                conn,
+            })
+        }
+        View::Prs => crate::tui::rows::prs::build_prs_tree(crate::tui::rows::prs::PrsBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+        }),
+        View::Forks => {
+            crate::tui::rows::forks::build_forks_tree(crate::tui::rows::forks::ForksBuildInputs {
+                snapshot,
                 home: home.as_deref(),
-                now: current_unix_epoch(),
-                filter: config.initial_filter.clone(),
-            },
-        )?,
-        View::Prs => crate::tui::rows::prs::build_prs_tree_from_conn(
-            crate::tui::rows::prs::PrsBuildInputsFromConn {
-                conn,
-                home: home.as_deref(),
-                now: current_unix_epoch(),
-                filter: config.initial_filter.clone(),
-            },
-        )?,
-        View::Forks => crate::tui::rows::forks::build_forks_tree_from_conn(
-            crate::tui::rows::forks::ForksBuildInputsFromConn {
-                conn,
-                home: home.as_deref(),
-                now: current_unix_epoch(),
-                filter: config.initial_filter.clone(),
-            },
-        )?,
-    };
-    Ok(tree)
+            })
+        }
+    }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -1770,18 +1739,8 @@ fn bind_pin_action(
         )));
         return;
     };
-    let snapshot = match crate::query::read_snapshot(database.conn()) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("pin bind failed: {err}"))));
-            return;
-        }
-    };
-    match write_pin_bind(
-        &request,
-        &snapshot,
-        &crate::config::ConfigLoader::from_env(),
-    ) {
+    let snapshot = database.snapshot();
+    match write_pin_bind(&request, snapshot, &crate::config::ConfigLoader::from_env()) {
         Ok(outcome) => {
             let verb = if outcome.changed {
                 "bound"
@@ -3542,23 +3501,20 @@ mod tests {
             let mut snapshot = GraphSnapshot::empty();
             snapshot.nodes.push(mux_node("tmux", "editor"));
             let snapshot = resolve_snapshot(snapshot);
-            let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize snapshot");
-            let tree = crate::tui::rows::mux::build_mux_tree_from_conn(
-                crate::tui::rows::mux::MuxBuildInputsFromConn {
-                    conn: &conn,
+            let tree =
+                crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+                    snapshot: &snapshot,
                     home: None,
                     now: None,
                     filter: RowFilter::default(),
                     grouping: crate::tui::MuxGrouping::Session,
                     sort: crate::tui::Sort::Hierarchy,
-                },
-            )
-            .expect("build mux tree");
+                });
             let mut cfg = RunConfig::defaults();
             cfg.default_view = View::Mux;
             let mut app = App::new(cfg);
             app.update(Msg::SetData {
-                snapshot: GraphDb::new(conn),
+                snapshot: GraphDb::new(snapshot),
                 tree,
                 loaded_at_epoch: 1_700_000_000,
                 initial_selection_hint: None,

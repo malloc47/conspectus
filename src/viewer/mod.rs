@@ -2,8 +2,8 @@
 //!
 //! This module is designed to be **extractable** as a standalone
 //! crate. It MUST NOT import from `crate::model`, `crate::resolve`,
-//! `crate::query`, `crate::discovery`, or `crate::tui::*` outside
-//! its own subtree. (`crate::tui::theme` is the one tracked
+//! `crate::discovery`, or `crate::tui::*` outside its own subtree.
+//! (`crate::tui::theme` is the one tracked
 //! exception, see ADR 0052; until extraction it's wrapped here in
 //! [`theme`].) Adding a new external crate dep without updating
 //! [`ALLOWED_EXTERNAL_DEPS`] and `docs/transcript-viewer-deps.md`

@@ -109,8 +109,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
     let Some(database) = app.graph_db().cloned() else {
         return Err(AttachDisabled::NoSelection);
     };
-    let snapshot =
-        crate::query::read_snapshot(database.conn()).map_err(|_| AttachDisabled::MuxNodeMissing)?;
+    let snapshot = database.snapshot();
     let Some(selection) = app.selection() else {
         return Err(AttachDisabled::NoSelection);
     };
@@ -125,7 +124,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         (RowKind::AgentSessionMuxCandidate(candidate), _) => candidate.mux.clone(),
         (RowKind::AgentSession(session), _) => {
             let session_node = NodeId::AgentSession(session.session.clone());
-            match preferred_mux_for_session(&snapshot, &session_node) {
+            match preferred_mux_for_session(snapshot, &session_node) {
                 Some(id) => id,
                 None => return Err(AttachDisabled::UnmuxedSession),
             }
@@ -149,7 +148,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
             RowKind::Group(_),
             RowId::Group(node @ (NodeId::Workspace(_) | NodeId::Repo(_) | NodeId::Checkout(_))),
         ) => {
-            let muxes = crate::tui::detail::ambiguous_muxes_for_group(&snapshot, node);
+            let muxes = crate::tui::detail::ambiguous_muxes_for_group(snapshot, node);
             match muxes.len() {
                 0 => return Err(AttachDisabled::UnmuxedSession),
                 1 => match &muxes[0] {
@@ -217,10 +216,9 @@ pub fn resolve_view_session(app: &App) -> Result<AgentSessionId, ViewerDisabled>
         RowKind::AgentSession(session) => Ok(session.session.clone()),
         RowKind::MuxSession(mux_row) => {
             let database = app.graph_db().ok_or(ViewerDisabled::UnsupportedRow)?;
-            let snapshot = crate::query::read_snapshot(database.conn())
-                .map_err(|_| ViewerDisabled::UnsupportedRow)?;
+            let snapshot = database.snapshot();
             let mux_node_id = NodeId::MuxSession(mux_row.mux.clone());
-            preferred_session_for_mux(&snapshot, &mux_node_id).ok_or(ViewerDisabled::UnsupportedRow)
+            preferred_session_for_mux(snapshot, &mux_node_id).ok_or(ViewerDisabled::UnsupportedRow)
         }
         _ => Err(ViewerDisabled::UnsupportedRow),
     }
@@ -247,10 +245,7 @@ pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
     let Some(database) = app.graph_db() else {
         return Vec::new();
     };
-    let Ok(snapshot) = crate::query::read_snapshot(database.conn()) else {
-        return Vec::new();
-    };
-    pin_diagnostics_for_id(&snapshot, pin_id)
+    pin_diagnostics_for_id(database.snapshot(), pin_id)
 }
 
 pub fn pin_diagnostics_for_id(snapshot: &GraphSnapshot, pin_id: &str) -> Vec<PinDiagnosticView> {
@@ -784,23 +779,19 @@ mod tests {
         let mut snapshot = GraphSnapshot::empty();
         snapshot.nodes.push(mux_node("tmux", "editor"));
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize snapshot");
-        let tree = crate::tui::rows::mux::build_mux_tree_from_conn(
-            crate::tui::rows::mux::MuxBuildInputsFromConn {
-                conn: &conn,
-                home: None,
-                now: None,
-                filter: RowFilter::default(),
-                grouping: crate::tui::MuxGrouping::Session,
-                sort: crate::tui::Sort::Hierarchy,
-            },
-        )
-        .expect("build mux tree");
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snapshot,
+            home: None,
+            now: None,
+            filter: RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
+        });
         let mut cfg = RunConfig::defaults();
         cfg.default_view = View::Mux;
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: GraphDb::new(conn),
+            snapshot: GraphDb::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
@@ -813,23 +804,19 @@ mod tests {
 
     fn build_mux_view_app_with_attachments(snapshot: GraphSnapshot) -> App {
         let snapshot = resolve_snapshot(snapshot);
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize snapshot");
-        let tree = crate::tui::rows::mux::build_mux_tree_from_conn(
-            crate::tui::rows::mux::MuxBuildInputsFromConn {
-                conn: &conn,
-                home: None,
-                now: None,
-                filter: RowFilter::default(),
-                grouping: crate::tui::MuxGrouping::Session,
-                sort: crate::tui::Sort::Hierarchy,
-            },
-        )
-        .expect("build mux tree");
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snapshot,
+            home: None,
+            now: None,
+            filter: RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Session,
+            sort: crate::tui::Sort::Hierarchy,
+        });
         let mut cfg = RunConfig::defaults();
         cfg.default_view = View::Mux;
         let mut app = App::new(cfg);
         app.update(Msg::SetData {
-            snapshot: GraphDb::new(conn),
+            snapshot: GraphDb::new(snapshot),
             tree,
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,

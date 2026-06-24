@@ -3,8 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use rusqlite::Connection;
-
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
@@ -20,26 +18,6 @@ pub struct UnionBuildInputs<'a> {
     pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
     pub filter: RowFilter,
-}
-
-/// Connection-based inputs surviving until P11-011d.
-pub struct UnionBuildInputsFromConn<'a> {
-    pub conn: &'a Connection,
-    pub home: Option<&'a Path>,
-    pub now: Option<i64>,
-    pub filter: RowFilter,
-}
-
-pub fn build_union_tree_from_conn(
-    inputs: UnionBuildInputsFromConn<'_>,
-) -> rusqlite::Result<RowTree> {
-    let snapshot = crate::query::read_snapshot(inputs.conn)?;
-    let _ = inputs.now;
-    Ok(build_union_tree(UnionBuildInputs {
-        snapshot: &snapshot,
-        home: inputs.home,
-        filter: inputs.filter,
-    }))
 }
 
 #[derive(Clone, Debug)]
@@ -219,9 +197,7 @@ fn session_matches_filter(
 // In-memory collectors
 // -----------------------------------------------------------------------------
 
-/// Sort key matches the SQL `ORDER BY COALESCE(last_active_epoch, 0)
-/// DESC, kind, node_id` so the row order is stable across the
-/// migration.
+/// Sort key keeps rows stable by recency, kind, then node id.
 fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionData<'_>> {
     let attached_counts = collect_mux_attached_counts(snapshot);
     let mut rows: Vec<UnionData<'_>> = Vec::new();

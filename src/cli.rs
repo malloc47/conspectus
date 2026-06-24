@@ -89,9 +89,9 @@ enum Command {
     Alias(AliasArgs),
     /// Author or inspect session pins (ADR 0057).
     Pin(Box<PinArgs>),
-    /// Run the long-lived background daemon that keeps
-    /// `graph.sqlite` warm between one-shot CLI invocations
-    /// (ADR 0038 / P7-006).
+    /// Run the long-lived background daemon that keeps the
+    /// resolved graph snapshot warm between one-shot CLI
+    /// invocations (ADR 0038 / P7-006).
     Serve(ServeArgs),
     /// Force a full cold rebuild of the graph cache. Talks to a
     /// running `conspectus serve` daemon over the mutation
@@ -445,13 +445,11 @@ impl RefreshArgs {
         }
 
         // Fallback: in-process refresh. For a full refresh, do
-        // the same warm-start cold-rebuild path the table
+        // the same cold-rebuild path the table
         // command runs with `--refresh`. For a per-class refresh
         // we load the prior, evict the class, re-run discovery,
-        // resolve, persist — mirroring the daemon's
-        // try_class_cycle except without the writer Mutex (the
-        // SQLite busy_timeout coordinates against any peer
-        // writer including a fresh daemon).
+        // resolve, and persist, mirroring the daemon's
+        // try_class_cycle.
         let cwd = std::env::current_dir()?;
         let loader = config::ConfigLoader::from_env();
         let outcome = loader.load_from(&cwd);
@@ -686,7 +684,7 @@ impl ClaudeHookWriteArgs {
         }
         let payload: serde_json::Value =
             serde_json::from_str(&input).context("failed to parse Claude Code hook JSON")?;
-        let root = resolve_hook_state_root(self.state_root)?;
+        let state_root = self.state_root;
         let (pid, ppid) = harness_pid_pair("claude-code");
         let record = conspectus::hook::claude_code_record_from_payload(
             &payload,
@@ -696,7 +694,7 @@ impl ClaudeHookWriteArgs {
             std::env::var("CLAUDE_CODE_VERSION").ok(),
             conspectus::hook::current_epoch(),
         )?;
-        HookStore::new(root).write_record(&record)?;
+        write_or_ingest_hook_record(&record, state_root)?;
         Ok(())
     }
 }
@@ -717,7 +715,7 @@ impl CodexHookWriteArgs {
         }
         let payload: serde_json::Value =
             serde_json::from_str(&input).context("failed to parse Codex hook JSON")?;
-        let root = resolve_hook_state_root(self.state_root)?;
+        let state_root = self.state_root;
         let (pid, ppid) = harness_pid_pair("codex");
         let record = conspectus::hook::codex_record_from_payload(
             &payload,
@@ -727,7 +725,7 @@ impl CodexHookWriteArgs {
             None,
             conspectus::hook::current_epoch(),
         )?;
-        HookStore::new(root).write_record(&record)?;
+        write_or_ingest_hook_record(&record, state_root)?;
         Ok(())
     }
 }
@@ -748,7 +746,7 @@ impl OpenCodeHookWriteArgs {
         }
         let payload: serde_json::Value =
             serde_json::from_str(&input).context("failed to parse opencode hook JSON")?;
-        let root = resolve_hook_state_root(self.state_root)?;
+        let state_root = self.state_root;
         let (pid, ppid) = harness_pid_pair("opencode");
         let record = conspectus::hook::opencode_record_from_payload(
             &payload,
@@ -758,7 +756,7 @@ impl OpenCodeHookWriteArgs {
             std::env::var("CONSPECTUS_OPENCODE_HOOK_VERSION").ok(),
             conspectus::hook::current_epoch(),
         )?;
-        HookStore::new(root).write_record(&record)?;
+        write_or_ingest_hook_record(&record, state_root)?;
         Ok(())
     }
 }
@@ -970,6 +968,41 @@ fn resolve_hook_state_root(override_root: Option<PathBuf>) -> Result<PathBuf> {
         .ok_or_else(|| {
             anyhow!("no hook state root available; set HOME or CONSPECTUS_HOOK_SIDECAR_STATE")
         })
+}
+
+fn write_or_ingest_hook_record(
+    record: &conspectus::hook::HookRecord,
+    override_root: Option<PathBuf>,
+) -> Result<()> {
+    if let Some(root) = override_root {
+        HookStore::new(root).write_record(record)?;
+        return Ok(());
+    }
+
+    match conspectus::server::client_hook_ingest(record) {
+        conspectus::server::ClientOutcome::Ok(()) => Ok(()),
+        conspectus::server::ClientOutcome::NoDaemon => {
+            let root = resolve_hook_state_root(None)?;
+            HookStore::new(root).write_record(record)?;
+            Ok(())
+        }
+        conspectus::server::ClientOutcome::DaemonError { code, message } => {
+            if code != "snapshot_unavailable" {
+                eprintln!("conspectus: warning: daemon refused hook ingest ({code}): {message}");
+            }
+            let root = resolve_hook_state_root(None)?;
+            HookStore::new(root).write_record(record)?;
+            Ok(())
+        }
+        conspectus::server::ClientOutcome::Transport(err) => {
+            eprintln!(
+                "conspectus: warning: daemon hook ingest failed, writing local hook spool: {err:#}"
+            );
+            let root = resolve_hook_state_root(None)?;
+            HookStore::new(root).write_record(record)?;
+            Ok(())
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1691,7 +1724,7 @@ struct TableRowsArgs {
     #[command(flatten)]
     filter_args: FilterArgs,
     /// P7-003: skip writing the resolved snapshot to the canonical
-    /// `graph.sqlite` cache after this invocation. Useful for
+    /// `graph.bin` cache after this invocation. Useful for
     /// debugging or when running against a non-writable `$HOME`.
     /// Does not affect the rendered output.
     #[arg(long = "no-cache")]

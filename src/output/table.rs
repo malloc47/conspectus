@@ -1,4 +1,4 @@
-//! Plain-text table renderer over the SQLite graph read surface.
+//! Plain-text table renderer over a [`GraphSnapshot`].
 //!
 //! See ADR 0006 for the projection vocabulary. Three projections are
 //! supported:
@@ -2768,7 +2768,7 @@ mod tests {
     #[test]
     fn filter_parity_with_tui_mux_row_tree() {
         use crate::tui::MuxGrouping;
-        use crate::tui::rows::mux::{MuxBuildInputsFromConn, build_mux_tree_from_conn};
+        use crate::tui::rows::mux::{MuxBuildInputs, build_mux_tree};
 
         let snapshot = three_session_snapshot();
         let filter = crate::filter::RowFilter {
@@ -2781,16 +2781,14 @@ mod tests {
             .with_now_epoch(Some(1_000_000));
         let table = render_with(&snapshot, Projection::Mux, &table_options);
 
-        let conn = crate::query::materialize_snapshot(&snapshot).expect("materialize");
-        let tree = build_mux_tree_from_conn(MuxBuildInputsFromConn {
-            conn: &conn,
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
             home: None,
             now: Some(1_000_000),
             filter,
             grouping: MuxGrouping::Session,
             sort: crate::tui::Sort::Hierarchy,
-        })
-        .expect("mux tree");
+        });
         let tree_mux_rows = tree
             .rows
             .iter()

@@ -6,8 +6,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-use rusqlite::Connection;
-
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, ForkId, ForkNode, GraphNode, GraphSnapshot, LinkEndpoint,
@@ -22,27 +20,6 @@ use crate::tui::rows::{
 pub struct ForksBuildInputs<'a> {
     pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
-}
-
-/// Connection-based inputs surviving until P11-011d retires
-/// `App::database`. Thin wrapper that reads the snapshot back
-/// out of SQLite then delegates to [`build_forks_tree`].
-pub struct ForksBuildInputsFromConn<'a> {
-    pub conn: &'a Connection,
-    pub home: Option<&'a Path>,
-    pub now: Option<i64>,
-    pub filter: RowFilter,
-}
-
-pub fn build_forks_tree_from_conn(
-    inputs: ForksBuildInputsFromConn<'_>,
-) -> rusqlite::Result<RowTree> {
-    let snapshot = crate::query::read_snapshot(inputs.conn)?;
-    let _ = (inputs.now, inputs.filter); // Sessions filter doesn't apply in the forks default render.
-    Ok(build_forks_tree(ForksBuildInputs {
-        snapshot: &snapshot,
-        home: inputs.home,
-    }))
 }
 
 #[derive(Clone, Debug)]

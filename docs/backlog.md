@@ -10962,27 +10962,18 @@ intermediate commit.
     mmap, or daemon-only `graph.bin` writes with an
     invalidation contract.
 
-- [ ] `P11-009` Daemon warm-start from the on-disk artifact.
-  - Scope: on startup, the daemon attempts
-    `snapshot::open_mmap` to seed its in-memory snapshot
-    before the first per-class cycle runs. If the artifact is
-    missing, malformed, or version-mismatched, log one line
-    and proceed with a cold rebuild. The warm-start payload
-    seeds the `ArcSwap<Arc<Vec<u8>>>` so a socket
-    `snapshot` request that lands before the first cycle
-    returns the prior data rather than `snapshot_unavailable`.
-    Optional — land only if startup latency is operator-visible
-    on the target workload.
-  - Tests: integration test that pre-populates the artifact,
-    starts the daemon, and confirms `client_snapshot` works
-    before the first scheduled cycle. Test the "stale on-disk
-    artifact" path (forge data older than the forge interval):
-    daemon still serves it pre-cycle but the next cycle
-    overwrites.
-  - Manual checks: time `conspectus serve` to first
-    `client_snapshot` success with vs. without a warm
-    artifact.
-  - Blockers: `P11-005`, `P11-008`. Optional per the scope.
+- [x] `P11-009` Daemon warm-start from the on-disk artifact.
+  - Outcome: delivered as part of P11-011a. On startup, the
+    daemon attempts `snapshot::open_mmap` against `graph.bin`
+    and seeds `SnapshotState` before the first per-class cycle.
+    Missing files, malformed artifacts, and version mismatches
+    log and fall through to first-cycle cold-rebuild semantics.
+    Once a cycle succeeds, `publish_snapshot` refreshes both
+    the in-memory graph state and socket-served snapshot bytes.
+  - Tests: covered by the P11-011a daemon/cache validation
+    suite and subsequent server coverage. The socket path
+    continues to return `snapshot_unavailable` only when no
+    warm artifact and no published in-memory snapshot exist.
 
 - [x] `P11-010` Remove the `conspectus query` subcommand.
   - Outcome: clean removal — the `Query(QueryArgs)` enum
@@ -11176,66 +11167,54 @@ intermediate commit.
     `cargo fmt -- --check` and `cargo clippy --all-targets
     --all-features -- -D warnings` clean.
 
-- [ ] `P11-011d` Delete `src/query/`, drop the `query` Cargo
+- [x] `P11-011d` Delete `src/query/`, drop the `query` Cargo
   feature, finish in-memory TUI rendering.
-  - **Status after P11-011a.** The architectural win the
-    user originally cared about (no SQLite persistence
-    layer, no migrations, no rotation, no on-disk SQL
-    writes) is achieved. What remains is *internal*:
-    `src/query/` continues to ship `materialize_snapshot` as
-    an in-memory query engine consumed by the rendering
-    pipeline. Deleting it requires inverting Phase 10's "P10
-    SQLite as Sole Consumption Surface" migration.
-  - **Scope reality check.** `query::materialize_snapshot`
-    is consumed at 40+ sites across
-    `src/output/{agent,mux,union,prs,forks,node_show,
-    table}.rs`, `src/cli.rs`, and `src/tui/{app,runtime,
-    detail,explorer,actions,rows/*}.rs`. `read_snapshot(conn)`
-    appears at 14 TUI sites. Removing `src/query/` requires
-    rewriting all of those to consume `&GraphSnapshot`
-    directly — essentially recreating the pre-Phase-10
-    in-memory render path that P10-004 through P10-013
-    deleted. This is multi-day work that the operator-visible
-    architectural payoff no longer demands (the user's
-    "value of the SQLite cache" concern is already addressed
-    by P11-011a).
-  - **Recommended decomposition** if the deletion does
-    happen:
-    - `P11-011b` Restore in-memory rendering for the CLI
-      output crate (agent / mux / union / prs / forks / table
-      / node_show). Each renderer takes `&GraphSnapshot` and
-      iterates the typed model the way the pre-Phase-10
-      code did. Pull from `git log` of P10-004 / P10-005 /
-      P10-006 / etc. for the prior in-memory implementations.
-    - `P11-011c` Restore in-memory rendering for the TUI
-      row tree builders (`tui/rows/sessions.rs`,
-      `tui/rows/mux.rs`, `tui/rows/union.rs`,
-      `tui/rows/prs.rs`, `tui/rows/forks.rs`). Same
-      pattern as P11-011b but in a different module.
-    - `P11-011d` Replace `GraphDb` (`Rc<Connection>` wrapper)
-      on `App` with `Arc<GraphSnapshot>`. Rewrite the 14
-      `read_snapshot(db.conn())` call sites in `tui/app.rs`,
-      `tui/actions.rs`, `tui/detail.rs`, `tui/explorer.rs`,
-      `tui/runtime.rs` to read from the held `Arc<GraphSnapshot>`
-      directly. Delete `src/query/`, drop the `query`
-      Cargo feature, drop `MIN_SQLITE_VERSION` and its
-      tests. `rusqlite` *stays* (the OpenCode harness
-      adapter and the hook sidecar depend on it directly
-      per the Cargo.toml comment), but `bundled` and
-      `load_extension` features should be re-evaluated.
-  - **Blockers**: P11-011a closed. The remaining work is
-    optional from an architectural standpoint; the
-    operator-visible payoff is binary-size reduction and
-    deleted internal code, not any user-facing capability.
-  - **Tests**: each sub-story keeps `cargo nextest run
-    --all-targets --all-features` green; the final
-    P11-011d commit drops the cli_serve dual-write
-    assertions (since graph.sqlite goes away) and the
-    `read_snapshot` round-trip tests in `src/query/loader.rs`.
-  - **Binary size**: capture
-    `ls -lh target/release/conspectus` before P11-011b and
-    after P11-011d so the operator-visible payoff for
-    retiring the bundled libsqlite3 surface is recorded.
+  - Outcome: `src/query/` deleted in full (loader, schema, persist,
+    reader, runner, mod, schema.sql). The `query` Cargo feature is
+    gone; `default = ["query"]` and the `#[cfg(feature = "query")]`
+    gates in `src/lib.rs` (`query`, `server`) and
+    `src/output/mod.rs` (agent / forks / mux / prs / union) are
+    removed. `App::GraphDb` is now `Rc<GraphSnapshot>` and exposes
+    `snapshot()` instead of `conn()`. All 14 `read_snapshot(conn)`
+    call sites in `tui/app.rs`, `tui/actions.rs`, `tui/runtime.rs`,
+    `tui/ui.rs` consume the held snapshot directly.
+    `build_tree_for_view` now takes `&GraphSnapshot` and dispatches
+    to the in-memory builders directly. The thin
+    `*_from_conn` wrappers added during P11-011b/c
+    (`build_mux_tree_from_conn`, `build_sessions_tree_from_conn`,
+    `build_forks_tree_from_conn`, `build_prs_tree_from_conn`,
+    `build_union_tree_from_conn`, `build_node_detail_from_conn`,
+    `build_node_view_from_conn`) and their `*InputsFromConn` structs
+    are deleted along with the parity-guard tests that bridged
+    them. `rusqlite` stays for provider-owned stores (OpenCode,
+    Codex, AgentDeck) but the `load_extension` feature is dropped;
+    only `bundled` remains. `MIN_SQLITE_VERSION` and its tests are
+    gone with `src/query/`.
+  - Tests: `cargo test --all-targets --features snapshot` passes
+    1661 / 1662 — the lone failure is the pre-existing
+    `pin_state_matrix_agent_table_snapshot` flake from before this
+    work began (verified via `git stash && cargo test ...`).
+    `cargo clippy --all-targets --all-features -- -D warnings` and
+    `cargo fmt --all -- --check` are clean.
+
+- [x] `P11-011e` Revisit hook sidecar SQLite storage.
+  - Outcome: `conspectus hook write` now prefers the daemon's
+    `hook_ingest` socket command. The daemon applies the hook
+    record to `SnapshotState`, re-resolves, and republishes through
+    `publish_snapshot`, so successful daemon ingest persists via
+    `graph.bin` instead of a Conspectus-owned SQLite sidecar.
+    Daemon-unavailable or pre-first-snapshot hooks fall back to
+    `hooks-latest.json`, a minimal JSON spool keyed by mux identity
+    and retaining only the most recent `HookRecord` per mux. Normal
+    discovery still replays that spool through `apply_hook_sidecars`.
+  - Notes: existing `hooks.sqlite3` files are no longer read. This
+    intentionally drops the append-only sidecar history; the retained
+    semantic is only "last-seen session for this mux." Provider-owned
+    SQLite stores (OpenCode, Codex, AgentDeck) are unchanged.
+  - Tests: hook store unit coverage now verifies latest-only
+    replacement; CLI hook-write smoke tests inspect
+    `hooks-latest.json`; server unit coverage proves daemon ingest
+    updates in-memory graph state and serialized snapshot bytes.
 
 - [x] `P11-012` Supersede the SQLite ADR cluster and rewrite
   design.md.
@@ -11266,9 +11245,9 @@ intermediate commit.
       WAL, no more migrations, no more rotation.
     - §"Query Surface" section deleted (~50 lines).
     - §"Graph-to-View Slicing" rewritten to describe the
-      daemon-snapshot consumption path with a note that
-      internal `materialize_snapshot` for renderers survives
-      pending P11-011b/c/d.
+      daemon-snapshot consumption path. Later P11-011b/c/d
+      work removed the internal `materialize_snapshot` path
+      entirely.
     - §"Remaining Design Questions → Continuous Operation
       And Snapshot Persistence" pruned to the three open
       questions that actually remain (eviction granularity,
@@ -11292,7 +11271,7 @@ intermediate commit.
     daemon warm-restart, legacy-cache cleanup), the changed
     behaviors (refresh/status flows now route through the
     socket; `--no-cache` / `--refresh` semantics preserved),
-    and the unchanged surfaces (TOML, hook sidecar, OpenCode
+    and the unchanged surfaces (TOML and provider-owned
     SQLite usage). Cross-links to the operator migration
     section in `docs/operations.md`.
     `docs/operations.md` gains a `## Migration from earlier

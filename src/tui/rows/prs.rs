@@ -3,8 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use rusqlite::Connection;
-
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, ForgePrId, ForgePrNode, GraphNode, GraphSnapshot,
@@ -19,23 +17,6 @@ use crate::tui::rows::{
 pub struct PrsBuildInputs<'a> {
     pub snapshot: &'a GraphSnapshot,
     pub home: Option<&'a Path>,
-}
-
-/// Connection-based inputs surviving until P11-011d.
-pub struct PrsBuildInputsFromConn<'a> {
-    pub conn: &'a Connection,
-    pub home: Option<&'a Path>,
-    pub now: Option<i64>,
-    pub filter: RowFilter,
-}
-
-pub fn build_prs_tree_from_conn(inputs: PrsBuildInputsFromConn<'_>) -> rusqlite::Result<RowTree> {
-    let snapshot = crate::query::read_snapshot(inputs.conn)?;
-    let _ = (inputs.now, inputs.filter);
-    Ok(build_prs_tree(PrsBuildInputs {
-        snapshot: &snapshot,
-        home: inputs.home,
-    }))
 }
 
 #[derive(Clone, Debug)]

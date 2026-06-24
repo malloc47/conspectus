@@ -16,16 +16,26 @@ use crate::model::{
 
 const ADAPTER_NAME: &str = crate::discovery::providers::HOOK_SIDECAR;
 
-pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch: i64) {
-    let mut records: Vec<HookRecord> = hook::HookStore::new(root)
+pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, now_epoch: i64) {
+    let records: Vec<HookRecord> = hook::HookStore::new(root)
         .read_records()
         .into_iter()
         .filter(|record| record.schema_version == hook::SCHEMA_VERSION)
         .collect();
+    apply_hook_records(snapshot, records, now_epoch);
+}
+
+pub fn apply_hook_records(
+    snapshot: &mut GraphSnapshot,
+    mut records: Vec<HookRecord>,
+    now_epoch: i64,
+) {
     // Freshest first so the dedupe map keeps the winner per pane.
     records.sort_by(|a, b| b.observed_epoch.cmp(&a.observed_epoch));
 
     let mut winners: HashMap<(MuxSessionId, Option<String>), String> = HashMap::new();
+    let node_count_before = snapshot.nodes.len();
+    let link_count_before = snapshot.candidate_links.len();
 
     for record in records {
         let Some(mux) = find_mux(snapshot, &record) else {
@@ -105,7 +115,11 @@ pub fn apply_hook_sidecars(snapshot: &mut GraphSnapshot, root: &Path, _now_epoch
     // Stamp any nodes/links the hook-sidecar pass added with the
     // `hook_sidecar` provider; first-write-wins so prior entries (the
     // harness adapters' sessions, tmux's mux nodes, etc.) survive.
-    crate::discovery::stamp_snapshot_mutations(snapshot, ADAPTER_NAME, current_epoch());
+    if snapshot.nodes.len() != node_count_before
+        || snapshot.candidate_links.len() != link_count_before
+    {
+        crate::discovery::stamp_snapshot_mutations(snapshot, ADAPTER_NAME, now_epoch);
+    }
 }
 
 /// Maps the mux's active pane command back to the harness key when the
@@ -670,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_sqlite_hook_record_links_session_to_mux() {
+    fn fresh_spooled_hook_record_links_session_to_mux() {
         let temp = tempdir().expect("tempdir");
         let pid = i64::from(std::process::id());
         hook::HookStore::new(temp.path())
