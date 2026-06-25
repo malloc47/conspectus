@@ -561,12 +561,17 @@ rebind`, `pin adopt`); ambiguity overrides reuse the ADR 0014
 declared-link surface rather than introducing a new persisted binding
 type.
 
-Planned follow-up: pins should graduate from a snapshot sidecar into
-first-class graph entities with stable detail views, links to their
-related mux/session/context, and lineage back to the owning
-`.conspectus.toml` or user config. Until that model lands, the TUI
-maps bound/stale synthetic pin rows to the realizing session or mux
-detail and keeps fully unbound pins as synthetic rows.
+Per ADR 0084, pins also project into the graph as first-class
+`PinNode`s with stable `pin:<id>` node ids. The TOML entry remains the
+source of truth and `GraphSnapshot::pins` remains the CRUD sidecar, but
+each resolved snapshot rebuilds a pin node carrying declaration fields,
+store lineage (`provenance`, `store_path`), and the current binding.
+Pin-specific candidate links connect the node to its intended mux
+(`pin_targets_mux`, unresolved when the mux is absent) and to the
+realizing agent session when bound (`pin_realized_by_session`). TUI pin
+rows select the pin node itself; bound/stale detail fields link onward
+to the related session or mux rather than pretending the pin row is that
+entity.
 
 Pins declare the *next* logical session; the H-AGENTMUX adapter
 workstream extracts evidence from *existing* agent-mux orchestrators
@@ -1103,6 +1108,12 @@ migration helper and harmless if it fails.
     Operator escape hatches (`pin bind` / `pin rebind` / `pin adopt`)
     handle ambiguity, external renames, and migration from existing
     tmux sessions.
+  - ADR 0084 (Accepted): project effective session pins into the graph
+    as first-class `PinNode`s with stable `pin:<id>` identities,
+    store-lineage fields, and pin-specific relation kinds
+    (`pin_targets_mux`, `pin_realized_by_session`). The TOML pin entry
+    remains authoritative; graph nodes and binding fields are rebuilt
+    from the pin sidecar and resolver output.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

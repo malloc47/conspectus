@@ -26,6 +26,7 @@ pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
     snapshot.resolved_relationships = output.resolved_relationships;
     snapshot.diagnostics = output.diagnostics;
     snapshot.diagnostics.extend(pin_diagnostics);
+    snapshot.sync_pin_nodes();
     snapshot.canonicalize();
     snapshot
 }

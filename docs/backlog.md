@@ -6150,7 +6150,7 @@ layout or awkward key semantics.
     not have graph node identity yet.
   - Blockers: `H-PIN-TUI-002`.
 
-- [ ] `H-PIN-TUI-009` Promote pins to first-class graph entities.
+- [x] `H-PIN-TUI-009` Promote pins to first-class graph entities.
   - Scope: replace the sidecar-only `GraphSnapshot::pins` projection
     with a first-class graph entity for each declared pin while
     preserving the TOML schema as the persistence source. Pin nodes
@@ -6168,6 +6168,17 @@ layout or awkward key semantics.
     detail tests for pin fields and store lineage, TUI row tests for
     selecting bound/stale/unbound pins, search tests, and graph JSON
     snapshots that expose pins as nodes plus links.
+  - Outcome: added ADR 0084 and promoted effective pin declarations
+    into derived `PinNode` graph entities with stable `pin:<id>` node
+    ids, store lineage fields, and resolver-copied binding state.
+    Resolved snapshots now synthesize `pin_targets_mux` links
+    (unresolved when the mux is absent) and `pin_realized_by_session`
+    links for bound pins. TUI pin rows now select `NodeId::Pin`, render
+    a pin detail pane with launch/store/binding fields, use the pin
+    glyph in rows/search/help, and link onward to the realizing session
+    or mux. Graph JSON snapshots expose pin nodes, pin links, and pin
+    node provenance; the rkyv snapshot cache format version was bumped
+    for the new enum variants.
   - Blockers: ADR/model decision for pin node identity and relation
     kinds.
 

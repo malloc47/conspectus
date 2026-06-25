@@ -26,7 +26,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::model::{GraphNode, NodeId};
 use crate::tui::theme::Theme;
 
-/// The nine `GraphNode` variants, lifted to a flat enum so call
+/// The `GraphNode` variants, lifted to a flat enum so call
 /// sites don't pattern-match on the full `GraphNode` tree just to
 /// pick a glyph or color. Conversions are provided from both
 /// [`GraphNode`] and [`NodeId`].
@@ -37,6 +37,7 @@ pub enum NodeKind {
     Checkout,
     AgentSession,
     MuxSession,
+    Pin,
     RuntimeProcess,
     Branch,
     Fork,
@@ -47,12 +48,13 @@ impl NodeKind {
     /// Every kind, in canonical display order. Used by the catalog
     /// test and by config-loader iteration so new variants are
     /// caught at compile time via exhaustive matches.
-    pub const ALL: [NodeKind; 9] = [
+    pub const ALL: [NodeKind; 10] = [
         NodeKind::Workspace,
         NodeKind::Repo,
         NodeKind::Checkout,
         NodeKind::AgentSession,
         NodeKind::MuxSession,
+        NodeKind::Pin,
         NodeKind::RuntimeProcess,
         NodeKind::Branch,
         NodeKind::Fork,
@@ -71,6 +73,7 @@ impl NodeKind {
             NodeKind::Checkout => "checkout",
             NodeKind::AgentSession => "agent_session",
             NodeKind::MuxSession => "mux_session",
+            NodeKind::Pin => "pin",
             NodeKind::RuntimeProcess => "runtime_process",
             NodeKind::Branch => "branch",
             NodeKind::Fork => "fork",
@@ -89,6 +92,7 @@ impl NodeKind {
             NodeKind::Checkout => "node_checkout",
             NodeKind::AgentSession => "node_agent_session",
             NodeKind::MuxSession => "node_mux_session",
+            NodeKind::Pin => "node_pin",
             NodeKind::RuntimeProcess => "node_runtime_process",
             NodeKind::Branch => "node_branch",
             NodeKind::Fork => "node_fork",
@@ -126,6 +130,7 @@ impl NodeKind {
             NodeKind::Checkout => "◇",
             NodeKind::AgentSession => "●",
             NodeKind::MuxSession => "▣",
+            NodeKind::Pin => "◉",
             NodeKind::RuntimeProcess => "⚙",
             NodeKind::Branch => "⎇",
             NodeKind::Fork => "⑂",
@@ -142,6 +147,7 @@ impl From<&GraphNode> for NodeKind {
             GraphNode::Checkout(_) => NodeKind::Checkout,
             GraphNode::AgentSession(_) => NodeKind::AgentSession,
             GraphNode::MuxSession(_) => NodeKind::MuxSession,
+            GraphNode::Pin(_) => NodeKind::Pin,
             GraphNode::RuntimeProcess(_) => NodeKind::RuntimeProcess,
             GraphNode::Branch(_) => NodeKind::Branch,
             GraphNode::Fork(_) => NodeKind::Fork,
@@ -158,6 +164,7 @@ impl From<&NodeId> for NodeKind {
             NodeId::Checkout(_) => NodeKind::Checkout,
             NodeId::AgentSession(_) => NodeKind::AgentSession,
             NodeId::MuxSession(_) => NodeKind::MuxSession,
+            NodeId::Pin(_) => NodeKind::Pin,
             NodeId::RuntimeProcess(_) => NodeKind::RuntimeProcess,
             NodeId::Branch(_) => NodeKind::Branch,
             NodeId::Fork(_) => NodeKind::Fork,
@@ -209,6 +216,7 @@ fn theme_color(kind: NodeKind, theme: &Theme) -> Color {
         NodeKind::Checkout => theme.node_checkout,
         NodeKind::AgentSession => theme.node_agent_session,
         NodeKind::MuxSession => theme.node_mux_session,
+        NodeKind::Pin => theme.node_mux_session,
         NodeKind::RuntimeProcess => theme.node_runtime_process,
         NodeKind::Branch => theme.node_branch,
         NodeKind::Fork => theme.node_fork,

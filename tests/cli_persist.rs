@@ -50,7 +50,10 @@ fn table_sessions_persists_graph_bin_at_the_canonical_path() {
         bin.display()
     );
     let handle = conspectus::snapshot::open_mmap(&bin).expect("graph.bin must validate");
-    assert_eq!(handle.header().format_version, 1);
+    assert_eq!(
+        handle.header().format_version,
+        conspectus::snapshot::FORMAT_VERSION
+    );
     let owned = conspectus::snapshot::deserialize_owned(&handle).expect("deserialize");
     assert!(
         owned.nodes.is_empty(),
@@ -186,5 +189,8 @@ fn legacy_graph_sqlite_artifacts_do_not_block_a_fresh_run() {
         bin.display()
     );
     let handle = conspectus::snapshot::open_mmap(&bin).expect("graph.bin must validate");
-    assert_eq!(handle.header().format_version, 1);
+    assert_eq!(
+        handle.header().format_version,
+        conspectus::snapshot::FORMAT_VERSION
+    );
 }

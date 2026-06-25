@@ -16,7 +16,7 @@ use crate::declared::DeclaredEndpoint;
 use crate::discovery::DiscoveryContext;
 use crate::model::{
     AgentSessionId, BranchId, CheckoutId, Diagnostic, ForgePrId, ForkId, GraphSnapshot,
-    MuxSessionId, NodeId, RepoId, WorkspaceId,
+    MuxSessionId, NodeId, PinId, RepoId, WorkspaceId,
 };
 
 pub fn apply_aliases(
@@ -126,6 +126,7 @@ fn node_id(endpoint: &DeclaredEndpoint) -> NodeId {
         DeclaredEndpoint::MuxSession { native_id } => {
             NodeId::MuxSession(MuxSessionId::new(native_id.clone()))
         }
+        DeclaredEndpoint::Pin { id } => NodeId::Pin(PinId::new(id.clone())),
         DeclaredEndpoint::RuntimeProcess { observation_key } => {
             NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(observation_key.clone()))
         }

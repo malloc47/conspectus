@@ -271,6 +271,37 @@ impl fmt::Display for ForgePrId {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
+pub struct PinId {
+    pub id: String,
+}
+
+impl PinId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
+    }
+}
+
+impl fmt::Display for PinId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "pin:{}", self.id)
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 pub enum NodeId {
@@ -279,6 +310,7 @@ pub enum NodeId {
     Workspace(WorkspaceId),
     AgentSession(AgentSessionId),
     MuxSession(MuxSessionId),
+    Pin(PinId),
     RuntimeProcess(RuntimeProcessId),
     Branch(BranchId),
     Fork(ForkId),
@@ -306,6 +338,7 @@ impl fmt::Display for NodeId {
             Self::Workspace(id) => id.fmt(f),
             Self::AgentSession(id) => id.fmt(f),
             Self::MuxSession(id) => id.fmt(f),
+            Self::Pin(id) => id.fmt(f),
             Self::RuntimeProcess(id) => id.fmt(f),
             Self::Branch(id) => id.fmt(f),
             Self::Fork(id) => id.fmt(f),
@@ -334,6 +367,7 @@ pub enum GraphNode {
     Workspace(WorkspaceNode),
     AgentSession(AgentSessionNode),
     MuxSession(MuxSessionNode),
+    Pin(PinNode),
     RuntimeProcess(RuntimeProcessNode),
     Branch(BranchNode),
     Fork(ForkNode),
@@ -352,6 +386,7 @@ impl GraphNode {
             Self::Workspace(node) => NodeId::Workspace(node.id.clone()),
             Self::AgentSession(node) => NodeId::AgentSession(node.id.clone()),
             Self::MuxSession(node) => NodeId::MuxSession(node.id.clone()),
+            Self::Pin(node) => NodeId::Pin(node.id.clone()),
             Self::RuntimeProcess(node) => NodeId::RuntimeProcess(node.id.clone()),
             Self::Branch(node) => NodeId::Branch(node.id.clone()),
             Self::Fork(node) => NodeId::Fork(node.id.clone()),
@@ -650,6 +685,58 @@ pub struct ForgePrNode {
     pub is_draft: bool,
 }
 
+/// First-class graph representation of a session pin declaration.
+///
+/// The persisted TOML entry remains the source of truth; this node is
+/// rebuilt from [`PinCandidate`] so graph consumers can address pins by
+/// stable [`NodeId`] and inspect their store lineage, target mux, and
+/// current binding without consulting a private sidecar.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct PinNode {
+    pub id: PinId,
+    pub display_name: String,
+    pub harness: String,
+    pub cwd: String,
+    pub mux: PinMuxRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_argv: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub provenance: Provenance,
+    pub store_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<PinBinding>,
+}
+
+impl From<&PinCandidate> for PinNode {
+    fn from(pin: &PinCandidate) -> Self {
+        Self {
+            id: PinId::new(pin.id.clone()),
+            display_name: pin.display_name.clone(),
+            harness: pin.harness.clone(),
+            cwd: pin.cwd.clone(),
+            mux: pin.mux.clone(),
+            launch_argv: pin.launch_argv.clone(),
+            reason: pin.reason.clone(),
+            provenance: pin.provenance,
+            store_path: pin.store_path.clone(),
+            binding: pin.binding.clone(),
+        }
+    }
+}
+
 /// Harness-level classification for agent sessions. Harnesses that spawn
 /// subordinate worker sessions (openCode `@explore` / `@general` subagents)
 /// set `Subagent` so the TUI and resolver can distinguish human-driven work
@@ -736,6 +823,8 @@ pub enum RelationKind {
     MuxContainsProcess,
     ProcessIdentifiesSession,
     ProcessCandidatesSession,
+    PinTargetsMux,
+    PinRealizedBySession,
 }
 
 impl RelationKind {
@@ -763,6 +852,8 @@ impl RelationKind {
             Self::MuxContainsProcess => "mux_contains_process",
             Self::ProcessIdentifiesSession => "process_identifies_session",
             Self::ProcessCandidatesSession => "process_candidates_session",
+            Self::PinTargetsMux => "pin_targets_mux",
+            Self::PinRealizedBySession => "pin_realized_by_session",
         }
     }
 }
@@ -1385,6 +1476,28 @@ impl GraphSnapshot {
                 .then_with(|| a.id.cmp(&b.id))
                 .then_with(|| a.store_path.cmp(&b.store_path))
         });
+    }
+
+    /// Rebuild the first-class pin-node projection from the current
+    /// pin sidecar. The sidecar remains the TOML-backed source of
+    /// truth; graph nodes are derived so consumers can select and link
+    /// pins like every other node kind.
+    pub fn sync_pin_nodes(&mut self) {
+        self.nodes.retain(|node| !matches!(node, GraphNode::Pin(_)));
+        self.node_provenance
+            .retain(|id, _| !matches!(id, NodeId::Pin(_)));
+        for pin in &self.pins {
+            let node = PinNode::from(pin);
+            let id = NodeId::Pin(node.id.clone());
+            self.node_provenance.insert(
+                id,
+                NodeProvenance {
+                    provider: "pins".to_string(),
+                    freshness_epoch: None,
+                },
+            );
+            self.nodes.push(GraphNode::Pin(node));
+        }
     }
 
     /// Remove every node, candidate link, and provenance entry
@@ -2111,6 +2224,7 @@ mod tests {
             },
         );
 
+        snap.sync_pin_nodes();
         snap.canonicalize();
         snap
     }
@@ -2177,6 +2291,7 @@ mod tests {
             NodeId::Workspace(WorkspaceId::new("/ws")),
             NodeId::AgentSession(AgentSessionId::new("codex", "/h", "sess")),
             NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
+            NodeId::Pin(PinId::new("pin-1")),
             NodeId::RuntimeProcess(RuntimeProcessId::new("proc-1")),
             NodeId::Branch(BranchId::new(repo.clone(), "refs/heads/main")),
             NodeId::Fork(ForkId::new("github:owner:repo")),

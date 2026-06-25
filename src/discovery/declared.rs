@@ -16,8 +16,8 @@ use crate::declared::{
 use crate::discovery::DiscoveryContext;
 use crate::model::{
     AgentSessionId, BranchId, CheckoutId, Confidence, Diagnostic, ForgePrId, ForkId, Freshness,
-    GraphLink, GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, Provenance,
-    RepoId, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
+    GraphLink, GraphSnapshot, LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, PinId,
+    Provenance, RepoId, SourceMetadata, UnresolvedEndpoint, WorkspaceId,
 };
 
 pub fn apply_declared_links(
@@ -170,6 +170,7 @@ fn node_id(endpoint: &DeclaredEndpoint) -> NodeId {
         DeclaredEndpoint::MuxSession { native_id } => {
             NodeId::MuxSession(MuxSessionId::new(native_id.clone()))
         }
+        DeclaredEndpoint::Pin { id } => NodeId::Pin(PinId::new(id.clone())),
         DeclaredEndpoint::RuntimeProcess { observation_key } => {
             NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(observation_key.clone()))
         }
@@ -251,6 +252,14 @@ fn unresolved_endpoint(endpoint: &DeclaredEndpoint) -> UnresolvedEndpoint {
             node_type: "mux_session".to_string(),
             harness_key: None,
             native_id: Some(native_id.clone()),
+            state_scope: None,
+            path: None,
+            metadata,
+        },
+        DeclaredEndpoint::Pin { id } => UnresolvedEndpoint {
+            node_type: "pin".to_string(),
+            harness_key: None,
+            native_id: Some(id.clone()),
             state_scope: None,
             path: None,
             metadata,

@@ -381,7 +381,8 @@ fn search_row_node_kind(id: &RowId) -> Option<NodeKind> {
         RowId::AgentSessionMuxCandidate { .. } => Some(NodeKind::MuxSession),
         RowId::Pr(_) => Some(NodeKind::ForgePr),
         RowId::Fork(_) => Some(NodeKind::Fork),
-        RowId::Pin { .. } | RowId::Synthetic(_) => None,
+        RowId::Pin { .. } => Some(NodeKind::Pin),
+        RowId::Synthetic(_) => None,
     }
 }
 
@@ -691,11 +692,7 @@ mod tests {
 
     #[test]
     fn search_glyph_span_falls_back_to_two_spaces_for_kindless_rows() {
-        // Pin and Synthetic ids aren't graph nodes — they get two
-        // blank cells so the label column lines up with the rows
-        // that do carry a glyph. Without this the operator would
-        // see the label column jiggle by one cell as the cursor
-        // moved between glyph-bearing and kindless rows.
+        // Pin ids are graph-backed and carry the pin glyph.
         let theme = Theme::default();
         let pin_span = search_kind_glyph_span(
             &RowId::Pin {
@@ -704,9 +701,11 @@ mod tests {
             &theme,
             false,
         );
-        assert_eq!(pin_span.content, "  ");
-        assert_eq!(pin_span.style.fg, None);
+        assert_eq!(pin_span.content, "◉ ");
+        assert_eq!(pin_span.style.fg, Some(theme.node_mux_session));
 
+        // Synthetic ids aren't graph nodes — they get two blank
+        // cells so the label column lines up with glyph-bearing rows.
         let synthetic_span = search_kind_glyph_span(&RowId::Synthetic("ungrouped"), &theme, false);
         assert_eq!(synthetic_span.content, "  ");
         assert_eq!(synthetic_span.style.fg, None);

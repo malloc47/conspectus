@@ -73,6 +73,7 @@ pub fn apply_pins(snapshot: &mut GraphSnapshot, context: &DiscoveryContext, load
         }
     }
 
+    snapshot.sync_pin_nodes();
     snapshot.canonicalize();
 }
 
@@ -140,6 +141,7 @@ fn project_config_search_roots(
                     push_search_root(&mut roots, &mut seen, Path::new(cwd));
                 }
             }
+            GraphNode::Pin(_) => {}
             GraphNode::Branch(_) | GraphNode::ForgePr(_) | GraphNode::Fork(_) => {}
         }
     }

@@ -28,7 +28,7 @@ use std::fmt::Write as _;
 use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, CandidateScore, CheckoutNode, Diagnostic,
     ForgePrNode, ForkNode, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
-    MuxSessionNode, NodeId, ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
+    MuxSessionNode, NodeId, PinNode, ResolvedRelationship, RuntimeProcessNode, WorkspaceNode,
 };
 use crate::output::render::{self, header_style, node_short_id_from_display, push_styled};
 
@@ -110,6 +110,11 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
                     matches.insert(NodeId::MuxSession(mux.id.clone()), ());
                 }
             }
+            GraphNode::Pin(pin) => {
+                if pin.id.id == trimmed || pin.display_name == trimmed {
+                    matches.insert(NodeId::Pin(pin.id.clone()), ());
+                }
+            }
             _ => {}
         }
     }
@@ -158,6 +163,7 @@ fn node_kind_label(id: &NodeId) -> &'static str {
         NodeId::Workspace(_) => "workspace",
         NodeId::AgentSession(_) => "agent_session",
         NodeId::MuxSession(_) => "mux_session",
+        NodeId::Pin(_) => "pin",
         NodeId::RuntimeProcess(_) => "runtime_process",
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
@@ -180,6 +186,7 @@ fn node_reference_label(snapshot: &GraphSnapshot, id: &NodeId) -> String {
         (NodeId::MuxSession(_), GraphNode::MuxSession(mux)) => {
             format!("{}:{}", mux.backend, mux.native_id)
         }
+        (NodeId::Pin(_), GraphNode::Pin(pin)) => format!("pin:{}", pin.display_name),
         (NodeId::RuntimeProcess(_), GraphNode::RuntimeProcess(proc)) => {
             match (proc.pid, proc.command.as_deref()) {
                 (Some(pid), Some(command)) => format!("pid {pid}: {command}"),
@@ -246,6 +253,10 @@ fn write_node_summary(
         }
         (NodeId::MuxSession(_), Some(GraphNode::MuxSession(mux))) => {
             write_mux_summary(out, mux);
+            true
+        }
+        (NodeId::Pin(_), Some(GraphNode::Pin(pin))) => {
+            write_pin_summary(out, pin);
             true
         }
         (NodeId::RuntimeProcess(_), Some(GraphNode::RuntimeProcess(proc))) => {
@@ -438,6 +449,35 @@ fn write_mux_summary(out: &mut String, mux: &MuxSessionNode) {
     if let Some(cwd) = &mux.cwd {
         let _ = writeln!(out, "  cwd:       {cwd}");
     }
+}
+
+fn write_pin_summary(out: &mut String, pin: &PinNode) {
+    let _ = writeln!(out, "  name:     {}", pin.display_name);
+    let _ = writeln!(out, "  harness:  {}", pin.harness);
+    let _ = writeln!(out, "  cwd:      {}", pin.cwd);
+    let _ = writeln!(out, "  mux:      {}", pin.mux.native_id());
+    let _ = writeln!(out, "  store:    {}", pin.store_path);
+    let _ = writeln!(out, "  source:   {}", pin.provenance.snake_case());
+    if let Some(argv) = &pin.launch_argv {
+        let _ = writeln!(out, "  launch:   {}", argv.join(" "));
+    }
+    if let Some(reason) = &pin.reason {
+        let _ = writeln!(out, "  reason:   {reason}");
+    }
+    let binding = match &pin.binding {
+        Some(crate::model::PinBinding::Bound { mux, session }) => {
+            format!(
+                "bound to {} via {}:{}",
+                mux.native_id, session.harness_key, session.session_key
+            )
+        }
+        Some(crate::model::PinBinding::StaleMux { mux }) => {
+            format!("stale mux {}", mux.native_id)
+        }
+        Some(crate::model::PinBinding::Unbound) => "unbound".to_string(),
+        None => "unresolved".to_string(),
+    };
+    let _ = writeln!(out, "  binding:  {binding}");
 }
 
 fn write_runtime_process_summary(out: &mut String, proc: &RuntimeProcessNode) {

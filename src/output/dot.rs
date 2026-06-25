@@ -257,6 +257,7 @@ const NODE_KIND_ORDER: &[&str] = &[
     "mux_session",
     "runtime_process",
     "forge_pr",
+    "pin",
 ];
 
 fn node_kind_tag(node: &GraphNode) -> &'static str {
@@ -266,6 +267,7 @@ fn node_kind_tag(node: &GraphNode) -> &'static str {
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
+        GraphNode::Pin(_) => "pin",
         GraphNode::RuntimeProcess(_) => "runtime_process",
         GraphNode::Branch(_) => "branch",
         GraphNode::Fork(_) => "fork",
@@ -280,6 +282,7 @@ fn kind_display(tag: &str) -> &'static str {
         "workspace" => "Workspaces",
         "agent_session" => "Agent Sessions",
         "mux_session" => "Mux Sessions",
+        "pin" => "Pins",
         "runtime_process" => "Runtime Processes",
         "branch" => "Branches",
         "fork" => "Forks",
@@ -325,6 +328,11 @@ fn node_style(node: &GraphNode) -> NodeStyle {
             shape: "box3d",
             fill: "#d1c4e9",
             extra_attrs: "",
+        },
+        GraphNode::Pin(_) => NodeStyle {
+            shape: "box",
+            fill: "#b2dfdb",
+            extra_attrs: ", penwidth=2",
         },
         GraphNode::Fork(_) => NodeStyle {
             shape: "octagon",
@@ -380,6 +388,13 @@ fn node_label(node: &GraphNode) -> String {
                 "{}:{}\\n{}",
                 n.backend,
                 truncate(&n.native_id, 20),
+                short_id(&n.id.to_string()),
+            )
+        }
+        GraphNode::Pin(n) => {
+            format!(
+                "pin:{}\\n{}",
+                truncate(&n.display_name, 24),
                 short_id(&n.id.to_string()),
             )
         }
@@ -523,7 +538,9 @@ fn relation_arrowhead(rel: &RelationKind) -> &'static str {
         | RelationKind::ReferencedCheckout
         | RelationKind::RootedIn
         | RelationKind::RootedAtPath
-        | RelationKind::BranchHasForgePr => "vee",
+        | RelationKind::BranchHasForgePr
+        | RelationKind::PinTargetsMux
+        | RelationKind::PinRealizedBySession => "vee",
         // Lineage / parent-child: normal arrow.
         RelationKind::ParentFork
         | RelationKind::ParentSession

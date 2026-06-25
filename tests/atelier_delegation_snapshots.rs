@@ -195,6 +195,10 @@ impl AtelierDelegationFixture {
                 GraphNode::MuxSession(node) => {
                     node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));
                 }
+                GraphNode::Pin(node) => {
+                    node.cwd = self.normalize(&node.cwd);
+                    node.store_path = self.normalize(&node.store_path);
+                }
                 GraphNode::RuntimeProcess(node) => {
                     node.cwd = node.cwd.as_ref().map(|path| self.normalize(path));
                 }

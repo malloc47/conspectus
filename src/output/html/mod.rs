@@ -422,6 +422,7 @@ fn node_kind_tag(node: &GraphNode) -> &'static str {
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
+        GraphNode::Pin(_) => "pin",
         GraphNode::RuntimeProcess(_) => "runtime_process",
         GraphNode::Branch(_) => "branch",
         GraphNode::Fork(_) => "fork",
@@ -440,7 +441,8 @@ fn kind_order(kind: &str) -> u8 {
         "mux_session" => 6,
         "runtime_process" => 7,
         "forge_pr" => 8,
-        _ => 9,
+        "pin" => 9,
+        _ => 10,
     }
 }
 
@@ -494,6 +496,10 @@ fn node_labels(node: &GraphNode) -> (String, String) {
         GraphNode::MuxSession(n) => (
             format!("{}:{}", n.backend, truncate(&n.native_id, 18)),
             "mux session".to_string(),
+        ),
+        GraphNode::Pin(n) => (
+            format!("pin:{}", truncate(&n.display_name, 24)),
+            format!("{} · {}", n.harness, n.mux.native_id()),
         ),
         GraphNode::Fork(n) => {
             let name = n
@@ -603,10 +609,11 @@ mod tests {
             "fork",
             "agent_session",
             "mux_session",
+            "pin",
             "runtime_process",
             "forge_pr",
         ] {
-            assert!(kind_order(kind) < 9, "kind {kind} should be in ordering");
+            assert!(kind_order(kind) < 10, "kind {kind} should be in ordering");
         }
     }
 }

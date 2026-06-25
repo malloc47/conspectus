@@ -28,7 +28,7 @@ use std::path::Path;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
     GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
-    PinBinding, PinCandidate, Provenance, RelationKind, RepoNode, ResolvedRelationship,
+    PinBinding, PinCandidate, PinNode, Provenance, RelationKind, RepoNode, ResolvedRelationship,
     RuntimeProcessNode, RuntimeProcessRole, WorkspaceNode,
 };
 use crate::output::table::node_short_id;
@@ -230,6 +230,9 @@ fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
         ("agent_session", "process") => Process,
         ("agent_session", "pr") => Pr,
         ("agent_session", "lineage") => Lineage,
+        ("pin", "store" | "source") => Lineage,
+        ("pin", "mux" | "binding") => Mux,
+        ("pin", "session") => Session,
         ("mux_session", "name" | "backend" | "cwd" | "attached" | "pin") => Mux,
         ("mux_session", "session" | "id" | "harness" | "alias" | "title") => Session,
         ("mux_session", "process") => Process,
@@ -323,6 +326,7 @@ fn kind_label(node: &GraphNode) -> &'static str {
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
+        GraphNode::Pin(_) => "pin",
         GraphNode::RuntimeProcess(_) => "runtime_process",
         GraphNode::Branch(_) => "branch",
         GraphNode::Fork(_) => "fork",
@@ -334,6 +338,7 @@ fn title_line(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
         GraphNode::MuxSession(mux) => mux_display_label(mux),
+        GraphNode::Pin(pin) => format!("pin:{}", pin.display_name),
         GraphNode::RuntimeProcess(process) => format!("process:{}", process.observation_key),
         GraphNode::ForgePr(pr) => format!("forge_pr:{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => match &fork.name {
@@ -368,6 +373,7 @@ fn header_fields_inner(
         GraphNode::MuxSession(mux) => {
             mux_session_fields(snapshot, mux, home, include_linked_details)
         }
+        GraphNode::Pin(pin) => pin_fields(snapshot, pin, home, include_linked_details),
         GraphNode::RuntimeProcess(process) => runtime_process_fields(snapshot, process, home),
         GraphNode::ForgePr(pr) => forge_pr_fields(pr),
         GraphNode::Fork(fork) => fork_fields(fork),
@@ -711,6 +717,63 @@ fn mux_session_fields(
             agent_session_link_label(snapshot, session).unwrap_or_else(|| format!("{}", session)),
             Some(session.clone()),
         ));
+    }
+    if include_linked_details {
+        attach_linked_details(snapshot, &mut fields, home);
+    }
+    fields
+}
+
+fn pin_fields(
+    snapshot: &GraphSnapshot,
+    pin: &PinNode,
+    home: Option<&Path>,
+    include_linked_details: bool,
+) -> Vec<HeaderField> {
+    let mut fields = vec![
+        plain("id", pin.id.id.clone()),
+        plain("name", pin.display_name.clone()),
+        plain("harness", pin.harness.clone()),
+        plain("cwd", shorten_home(&pin.cwd, home)),
+        plain("mux", pin.mux.native_id()),
+        plain("store", shorten_home(&pin.store_path, home)),
+        plain("source", pin.provenance.snake_case().to_string()),
+    ];
+    if let Some(argv) = &pin.launch_argv
+        && !argv.is_empty()
+    {
+        fields.push(plain("launch", argv.join(" ")));
+    }
+    if let Some(reason) = &pin.reason {
+        fields.push(plain("reason", reason.clone()));
+    }
+    match &pin.binding {
+        Some(PinBinding::Bound { mux, session }) => {
+            fields.push(linked(
+                "binding",
+                format!("bound · {}", mux.native_id),
+                Some(NodeId::MuxSession(mux.clone())),
+            ));
+            fields.push(linked(
+                "session",
+                agent_session_link_label(snapshot, &NodeId::AgentSession(session.clone()))
+                    .unwrap_or_else(|| format!("{}:{}", session.harness_key, session.session_key)),
+                Some(NodeId::AgentSession(session.clone())),
+            ));
+        }
+        Some(PinBinding::StaleMux { mux }) => {
+            fields.push(linked(
+                "binding",
+                format!("stale-mux · {}", mux.native_id),
+                Some(NodeId::MuxSession(mux.clone())),
+            ));
+        }
+        Some(PinBinding::Unbound) => {
+            fields.push(placeholder("binding", "unbound"));
+        }
+        None => {
+            fields.push(placeholder("binding", "unresolved"));
+        }
     }
     if include_linked_details {
         attach_linked_details(snapshot, &mut fields, home);
@@ -1154,6 +1217,7 @@ fn link_target_label_by_id(snapshot: &GraphSnapshot, target: &NodeId) -> Option<
     let node = snapshot.nodes.iter().find(|n| n.id() == *target)?;
     match node {
         GraphNode::MuxSession(mux) => Some(mux_display_label(mux)),
+        GraphNode::Pin(pin) => Some(format!("pin:{}", pin.display_name)),
         GraphNode::AgentSession(session) => Some(format!(
             "{}:{}",
             session.harness_key, session.id.session_key
@@ -1311,6 +1375,7 @@ fn node_reference_label(node: &GraphNode) -> String {
     match node {
         GraphNode::AgentSession(session) => agent_session_display_id(session),
         GraphNode::MuxSession(mux) => mux_display_label(mux),
+        GraphNode::Pin(pin) => format!("pin:{}", pin.display_name),
         GraphNode::RuntimeProcess(process) => runtime_process_display_label(process),
         GraphNode::ForgePr(pr) => format!("{}/{}#{}", pr.owner, pr.repo, pr.number),
         GraphNode::Fork(fork) => fork

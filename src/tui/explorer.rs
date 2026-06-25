@@ -33,7 +33,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, ForgePrNode, ForkNode, GraphLink,
-    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance,
+    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, PinNode, Provenance,
     RelationKind, RepoNode, ResolvedRelationship, RuntimeProcessNode, RuntimeProcessRole,
     UnresolvedEndpoint, WorkspaceNode,
 };
@@ -287,6 +287,10 @@ pub fn directional_verb(relation: &RelationKind, direction: Direction) -> &'stat
         (ProcessIdentifiesSession, Upstream) => "identified by",
         (ProcessCandidatesSession, Downstream) => "candidate for",
         (ProcessCandidatesSession, Upstream) => "candidate process",
+        (PinTargetsMux, Downstream) => "targets mux",
+        (PinTargetsMux, Upstream) => "targeted by pin",
+        (PinRealizedBySession, Downstream) => "realized by",
+        (PinRealizedBySession, Upstream) => "realizes pin",
     }
 }
 
@@ -1001,6 +1005,7 @@ fn kind_label(node: &GraphNode) -> &'static str {
         GraphNode::Workspace(_) => "workspace",
         GraphNode::AgentSession(_) => "agent_session",
         GraphNode::MuxSession(_) => "mux_session",
+        GraphNode::Pin(_) => "pin",
         GraphNode::RuntimeProcess(_) => "runtime_process",
         GraphNode::Branch(_) => "branch",
         GraphNode::Fork(_) => "fork",
@@ -1076,6 +1081,7 @@ pub fn short_node_label(node: &GraphNode) -> String {
             format!("session:{tag}")
         }
         GraphNode::MuxSession(m) => format!("mux:{}", m.native_id),
+        GraphNode::Pin(p) => format!("pin:{}", truncate(&p.display_name, 16)),
         GraphNode::RuntimeProcess(p) => {
             let head = p
                 .command
@@ -1115,6 +1121,7 @@ fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
             }
         }
         GraphNode::MuxSession(m) => format!("{}:{}", m.backend, m.native_id),
+        GraphNode::Pin(p) => format!("pin:{}", p.display_name),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
             (Some(pid), Some(cmd)) => format!("pid {pid}: {}", truncate(cmd, 48)),
             (Some(pid), None) => format!("pid {pid}"),
@@ -1140,6 +1147,7 @@ fn core_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) 
         GraphNode::Workspace(w) => workspace_core(w, home),
         GraphNode::AgentSession(s) => agent_session_core(snapshot, s, home),
         GraphNode::MuxSession(m) => mux_session_core(snapshot, m, home),
+        GraphNode::Pin(p) => pin_core(p, home),
         GraphNode::RuntimeProcess(p) => runtime_process_core(p, home),
         GraphNode::Branch(b) => branch_core(b),
         GraphNode::Fork(f) => fork_core(f),
@@ -1163,6 +1171,7 @@ fn extra_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>)
     match node {
         GraphNode::AgentSession(s) => agent_session_extras(snapshot, s, home),
         GraphNode::MuxSession(m) => mux_session_extras(m),
+        GraphNode::Pin(p) => pin_extras(p, home),
         GraphNode::RuntimeProcess(p) => runtime_process_extras(snapshot, p, home),
         GraphNode::Fork(f) => fork_extras(f),
         GraphNode::ForgePr(pr) => forge_pr_extras(pr),
@@ -1399,6 +1408,36 @@ fn mux_session_extras(m: &MuxSessionNode) -> Vec<CoreField> {
         }
         fields.push(field);
     }
+    fields
+}
+
+fn pin_core(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
+    vec![
+        CoreField::plain("id", p.id.id.clone()),
+        CoreField::plain("name", p.display_name.clone()),
+        CoreField::plain("harness", p.harness.clone()),
+        CoreField::plain("cwd", shorten_home(&p.cwd, home)),
+        CoreField::plain("mux", p.mux.native_id()),
+    ]
+}
+
+fn pin_extras(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
+    let mut fields = vec![
+        CoreField::plain("store", shorten_home(&p.store_path, home)),
+        CoreField::plain("source", p.provenance.snake_case().to_string()),
+    ];
+    if let Some(argv) = &p.launch_argv
+        && !argv.is_empty()
+    {
+        fields.push(CoreField::plain("launch", argv.join(" ")));
+    }
+    if let Some(reason) = &p.reason {
+        fields.push(CoreField::plain("reason", reason.clone()));
+    }
+    fields.push(CoreField::plain(
+        "full_id",
+        format!("{}", NodeId::Pin(p.id.clone())),
+    ));
     fields
 }
 
@@ -1862,6 +1901,7 @@ fn neighbor_display_label(node: &GraphNode, home: Option<&Path>) -> String {
     match node {
         GraphNode::AgentSession(s) => format!("{}:{}", s.harness_key, s.id.session_key),
         GraphNode::MuxSession(m) => format!("{}:{}", m.backend, m.native_id),
+        GraphNode::Pin(p) => format!("pin:{}", p.display_name),
         GraphNode::RuntimeProcess(p) => match (p.pid, p.command.as_deref()) {
             (Some(pid), Some(cmd)) => format!("{} · pid {pid}", truncate(cmd, 24)),
             (Some(pid), None) => format!("pid {pid}"),

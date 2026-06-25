@@ -1,6 +1,5 @@
 ---
 source: tests/pins_snapshots.rs
-assertion_line: 361
 expression: rendered
 ---
 {
@@ -33,6 +32,32 @@ expression: rendered
       "backend": "tmux",
       "native_id": "bound-by-declared",
       "cwd": "/home/op/src/work"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "override-local"
+      },
+      "display_name": "override-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "bound-by-declared"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "bound",
+        "mux": {
+          "native_id": "tmux:bound-by-declared"
+        },
+        "session": {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "chosen-by-declared"
+        }
+      }
     }
   ],
   "candidate_links": [
@@ -60,6 +85,71 @@ expression: rendered
         "evidence": "pin bind override",
         "fields": {
           "label": "pin:override-local"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:override-local:realized-by-session",
+      "source": {
+        "type": "pin",
+        "id": "override-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "agent_session",
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "chosen-by-declared"
+        }
+      },
+      "relation": "pin_realized_by_session",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `override-local` is realized by a live session",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "override-local",
+          "pin_id": "override-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:override-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "override-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:bound-by-declared"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `override-local` targets mux `bound-by-declared`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "override-local",
+          "pin_id": "override-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:bound-by-declared"
         }
       },
       "state": {
@@ -157,6 +247,32 @@ expression: rendered
       },
       "relation": "linked_to_mux",
       "selected_link_id": "strong-discovered"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "override-local"
+      },
+      "target": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "chosen-by-declared"
+      },
+      "relation": "pin_realized_by_session",
+      "selected_link_id": "pin-node:local_pin:override-local:realized-by-session"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "override-local"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:bound-by-declared"
+      },
+      "relation": "pin_targets_mux",
+      "selected_link_id": "pin-node:local_pin:override-local:targets-mux"
     }
   ],
   "diagnostics": [
@@ -214,6 +330,15 @@ expression: rendered
           "session_key": "chosen-by-declared"
         }
       }
+    }
+  ],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "override-local"
+      },
+      "provider": "pins"
     }
   ]
 }

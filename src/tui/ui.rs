@@ -1492,7 +1492,7 @@ fn group_node_kind(group: &GroupRow) -> Option<NodeKind> {
 /// Compute the per-row node-kind glyph span for any [`RowKind`], or
 /// `None` when the row already carries an identity signal (the
 /// colored harness pill on `AgentSession`) or when no graph node
-/// kind backs it (synthetic group buckets, sentinel `Pin` rows).
+/// kind backs it (synthetic group buckets).
 /// Folds the per-row dispatch the `render_left_row` body and the
 /// `group_row_body_width` pre-pass both rely on through a single
 /// helper so the two paths agree on row widths.
@@ -1511,7 +1511,7 @@ fn row_kind_glyph_span(kind: &RowKind, theme: &Theme) -> Option<Span<'static>> {
         RowKind::MuxSession(_) => NodeKind::MuxSession,
         RowKind::Pr(pr) => return Some(forge_pr_glyph_span(pr, theme)),
         RowKind::Fork(_) => NodeKind::Fork,
-        RowKind::Pin(_) => return None,
+        RowKind::Pin(_) => NodeKind::Pin,
         RowKind::Repo(_) => NodeKind::Repo,
     };
     Some(node_kind_glyph_span(node_kind, theme))
@@ -4790,7 +4790,7 @@ mod tests {
             "synthetic group buckets have no NodeKind",
         );
 
-        // Pin rows are sentinels (📌 in the row body); no kind glyph.
+        // Pin rows are graph-backed and carry the pin node glyph.
         let pin = RowKind::Pin(PinRow {
             pin_id: "p".into(),
             display_name: "Pinned".into(),
@@ -4805,7 +4805,12 @@ mod tests {
             mux_label: "m".into(),
             state_label: "unbound",
         });
-        assert!(row_kind_glyph_span(&pin, &theme).is_none());
+        assert_eq!(
+            row_kind_glyph_span(&pin, &theme)
+                .map(|s| s.content.to_string())
+                .as_deref(),
+            Some("◉ "),
+        );
 
         // AgentSession rows skip the kind glyph in row contexts —
         // the colored harness pill already carries the identity

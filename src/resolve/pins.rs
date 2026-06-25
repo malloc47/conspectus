@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use crate::model::{
     AgentSessionId, Confidence, Diagnostic, Freshness, GraphLink, GraphNode, GraphSnapshot,
     LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, PinBinding,
-    PinCandidate, RelationKind, SourceMetadata,
+    PinCandidate, PinId, RelationKind, SourceMetadata, UnresolvedEndpoint,
 };
 use serde_json::Value;
 
@@ -55,6 +55,7 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
     let mut binding_updates: Vec<(usize, PinBinding)> = Vec::new();
 
     for (idx, pin) in snapshot.pins.iter().enumerate() {
+        synthesized_links.push(synthesize_pin_target_link(pin, &mux_by_native_id));
         let target_native_id = pin.mux.native_id();
         let Some(mux) = mux_by_native_id.get(target_native_id.as_str()) else {
             diagnostics.push(Diagnostic::PinUnbound {
@@ -147,6 +148,7 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
         }
 
         synthesized_links.push(synthesize_pin_link(pin, &chosen_session_id, &mux.id));
+        synthesized_links.push(synthesize_pin_realized_by_link(pin, &chosen_session_id));
         alias_inserts.push((
             NodeId::AgentSession(chosen_session_id.clone()),
             pin.display_name.clone(),
@@ -272,6 +274,93 @@ fn synthesize_pin_link(
         },
         state: LinkState::Active,
     }
+}
+
+fn synthesize_pin_target_link(
+    pin: &PinCandidate,
+    mux_by_native_id: &BTreeMap<String, &MuxSessionNode>,
+) -> GraphLink {
+    let target_native_id = pin.mux.native_id();
+    let target = match mux_by_native_id.get(&target_native_id) {
+        Some(mux) => LinkEndpoint::Node {
+            id: NodeId::MuxSession(mux.id.clone()),
+        },
+        None => LinkEndpoint::Unresolved {
+            evidence: UnresolvedEndpoint {
+                node_type: "mux_session".to_string(),
+                harness_key: None,
+                native_id: Some(target_native_id.clone()),
+                state_scope: None,
+                path: None,
+                metadata: Metadata::new(),
+            },
+        },
+    };
+    let mut fields = pin_link_metadata(pin);
+    fields.insert(
+        "target_mux_native_id".to_string(),
+        Value::String(target_native_id),
+    );
+    GraphLink {
+        id: format!(
+            "pin-node:{}:{}:targets-mux",
+            pin.provenance.snake_case(),
+            pin.id
+        ),
+        source: NodeId::Pin(PinId::new(pin.id.clone())),
+        target,
+        relation: RelationKind::PinTargetsMux,
+        provenance: pin.provenance,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "pin".to_string(),
+            evidence: Some(format!("pin `{}` targets mux `{}`", pin.id, pin.mux.name)),
+            fields,
+            freshness_epoch: None,
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn synthesize_pin_realized_by_link(pin: &PinCandidate, session: &AgentSessionId) -> GraphLink {
+    GraphLink {
+        id: format!(
+            "pin-node:{}:{}:realized-by-session",
+            pin.provenance.snake_case(),
+            pin.id
+        ),
+        source: NodeId::Pin(PinId::new(pin.id.clone())),
+        target: LinkEndpoint::Node {
+            id: NodeId::AgentSession(session.clone()),
+        },
+        relation: RelationKind::PinRealizedBySession,
+        provenance: pin.provenance,
+        confidence: Confidence::High,
+        freshness: Freshness::Fresh,
+        source_metadata: SourceMetadata {
+            adapter: "pin".to_string(),
+            evidence: Some(format!("pin `{}` is realized by a live session", pin.id)),
+            fields: pin_link_metadata(pin),
+            freshness_epoch: None,
+        },
+        state: LinkState::Active,
+    }
+}
+
+fn pin_link_metadata(pin: &PinCandidate) -> Metadata {
+    let mut fields = Metadata::new();
+    fields.insert("pin_id".to_string(), Value::String(pin.id.clone()));
+    fields.insert(
+        "pin_display_name".to_string(),
+        Value::String(pin.display_name.clone()),
+    );
+    fields.insert("pin_cwd".to_string(), Value::String(pin.cwd.clone()));
+    fields.insert(
+        "pin_store_path".to_string(),
+        Value::String(pin.store_path.clone()),
+    );
+    fields
 }
 
 /// Map [`Freshness`] to a rank used by the pin tiebreaker. Lower wins
@@ -403,7 +492,17 @@ mod tests {
         let diagnostics = apply_pin_bindings(&mut snap);
 
         assert_eq!(snap.pins[0].binding, Some(PinBinding::Unbound));
-        assert!(snap.candidate_links.is_empty());
+        assert_eq!(snap.candidate_links.len(), 1);
+        let link = &snap.candidate_links[0];
+        assert_eq!(link.source, NodeId::Pin(PinId::new("ingest")));
+        assert_eq!(link.relation, RelationKind::PinTargetsMux);
+        match &link.target {
+            LinkEndpoint::Unresolved { evidence } => {
+                assert_eq!(evidence.node_type, "mux_session");
+                assert_eq!(evidence.native_id.as_deref(), Some("tmux:ingest"));
+            }
+            other => panic!("expected unresolved mux target, got {other:?}"),
+        }
         assert!(snap.aliases.is_empty());
         assert_eq!(diagnostics.len(), 1);
         match &diagnostics[0] {

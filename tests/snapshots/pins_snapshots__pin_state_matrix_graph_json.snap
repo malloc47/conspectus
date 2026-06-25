@@ -1,6 +1,5 @@
 ---
 source: tests/pins_snapshots.rs
-assertion_line: 316
 expression: rendered
 ---
 {
@@ -99,6 +98,150 @@ expression: rendered
       "backend": "tmux",
       "native_id": "work:socketed",
       "cwd": "/home/op/src/work"
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "ambig-local"
+      },
+      "display_name": "ambig-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "ambig"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "bound",
+        "mux": {
+          "native_id": "tmux:ambig"
+        },
+        "session": {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "ambig-strong"
+        }
+      }
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "bound-local"
+      },
+      "display_name": "bound-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "bound"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "bound",
+        "mux": {
+          "native_id": "tmux:bound"
+        },
+        "session": {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "bound-alpha"
+        }
+      }
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "drift-local"
+      },
+      "display_name": "drift-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "drift"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "bound",
+        "mux": {
+          "native_id": "tmux:drift"
+        },
+        "session": {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "drift-alpha"
+        }
+      }
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "socket-local"
+      },
+      "display_name": "socket-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "socketed",
+        "socket_name": "work"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "bound",
+        "mux": {
+          "native_id": "tmux:work:socketed"
+        },
+        "session": {
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "socket-alpha"
+        }
+      }
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "stale-local"
+      },
+      "display_name": "stale-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "stale"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "stale_mux",
+        "mux": {
+          "native_id": "tmux:stale"
+        }
+      }
+    },
+    {
+      "type": "pin",
+      "id": {
+        "id": "unbound-local"
+      },
+      "display_name": "unbound-local",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "missing"
+      },
+      "provenance": "local_pin",
+      "store_path": "/home/op/src/work/.conspectus.toml",
+      "binding": {
+        "kind": "unbound"
+      }
     }
   ],
   "candidate_links": [
@@ -201,6 +344,330 @@ expression: rendered
       "freshness": "fresh",
       "source_metadata": {
         "adapter": ""
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:ambig-local:realized-by-session",
+      "source": {
+        "type": "pin",
+        "id": "ambig-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "agent_session",
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "ambig-strong"
+        }
+      },
+      "relation": "pin_realized_by_session",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `ambig-local` is realized by a live session",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "ambig-local",
+          "pin_id": "ambig-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:ambig-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "ambig-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:ambig"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `ambig-local` targets mux `ambig`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "ambig-local",
+          "pin_id": "ambig-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:ambig"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:bound-local:realized-by-session",
+      "source": {
+        "type": "pin",
+        "id": "bound-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "agent_session",
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "bound-alpha"
+        }
+      },
+      "relation": "pin_realized_by_session",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `bound-local` is realized by a live session",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "bound-local",
+          "pin_id": "bound-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:bound-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "bound-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:bound"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `bound-local` targets mux `bound`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "bound-local",
+          "pin_id": "bound-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:bound"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:drift-local:realized-by-session",
+      "source": {
+        "type": "pin",
+        "id": "drift-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "agent_session",
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "drift-alpha"
+        }
+      },
+      "relation": "pin_realized_by_session",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `drift-local` is realized by a live session",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "drift-local",
+          "pin_id": "drift-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:drift-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "drift-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:drift"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `drift-local` targets mux `drift`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "drift-local",
+          "pin_id": "drift-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:drift"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:socket-local:realized-by-session",
+      "source": {
+        "type": "pin",
+        "id": "socket-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "agent_session",
+          "harness_key": "codex",
+          "state_scope": "/state",
+          "session_key": "socket-alpha"
+        }
+      },
+      "relation": "pin_realized_by_session",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `socket-local` is realized by a live session",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "socket-local",
+          "pin_id": "socket-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:socket-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "socket-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:work:socketed"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `socket-local` targets mux `socketed`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "socket-local",
+          "pin_id": "socket-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:work:socketed"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:stale-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "stale-local"
+      },
+      "target": {
+        "kind": "node",
+        "id": {
+          "type": "mux_session",
+          "native_id": "tmux:stale"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `stale-local` targets mux `stale`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "stale-local",
+          "pin_id": "stale-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:stale"
+        }
+      },
+      "state": {
+        "state": "active"
+      }
+    },
+    {
+      "id": "pin-node:local_pin:unbound-local:targets-mux",
+      "source": {
+        "type": "pin",
+        "id": "unbound-local"
+      },
+      "target": {
+        "kind": "unresolved",
+        "evidence": {
+          "node_type": "mux_session",
+          "native_id": "tmux:missing"
+        }
+      },
+      "relation": "pin_targets_mux",
+      "provenance": "local_pin",
+      "confidence": "high",
+      "freshness": "fresh",
+      "source_metadata": {
+        "adapter": "pin",
+        "evidence": "pin `unbound-local` targets mux `missing`",
+        "fields": {
+          "pin_cwd": "/home/op/src/work",
+          "pin_display_name": "unbound-local",
+          "pin_id": "unbound-local",
+          "pin_store_path": "/home/op/src/work/.conspectus.toml",
+          "target_mux_native_id": "tmux:missing"
+        }
       },
       "state": {
         "state": "active"
@@ -447,9 +914,130 @@ expression: rendered
       "competing_link_ids": [
         "socket-discovered"
       ]
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "ambig-local"
+      },
+      "target": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "ambig-strong"
+      },
+      "relation": "pin_realized_by_session",
+      "selected_link_id": "pin-node:local_pin:ambig-local:realized-by-session"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "ambig-local"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:ambig"
+      },
+      "relation": "pin_targets_mux",
+      "selected_link_id": "pin-node:local_pin:ambig-local:targets-mux"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "bound-local"
+      },
+      "target": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "bound-alpha"
+      },
+      "relation": "pin_realized_by_session",
+      "selected_link_id": "pin-node:local_pin:bound-local:realized-by-session"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "bound-local"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:bound"
+      },
+      "relation": "pin_targets_mux",
+      "selected_link_id": "pin-node:local_pin:bound-local:targets-mux"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "drift-local"
+      },
+      "target": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "drift-alpha"
+      },
+      "relation": "pin_realized_by_session",
+      "selected_link_id": "pin-node:local_pin:drift-local:realized-by-session"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "drift-local"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:drift"
+      },
+      "relation": "pin_targets_mux",
+      "selected_link_id": "pin-node:local_pin:drift-local:targets-mux"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "socket-local"
+      },
+      "target": {
+        "type": "agent_session",
+        "harness_key": "codex",
+        "state_scope": "/state",
+        "session_key": "socket-alpha"
+      },
+      "relation": "pin_realized_by_session",
+      "selected_link_id": "pin-node:local_pin:socket-local:realized-by-session"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "socket-local"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:work:socketed"
+      },
+      "relation": "pin_targets_mux",
+      "selected_link_id": "pin-node:local_pin:socket-local:targets-mux"
+    },
+    {
+      "source": {
+        "type": "pin",
+        "id": "stale-local"
+      },
+      "target": {
+        "type": "mux_session",
+        "native_id": "tmux:stale"
+      },
+      "relation": "pin_targets_mux",
+      "selected_link_id": "pin-node:local_pin:stale-local:targets-mux"
     }
   ],
   "diagnostics": [
+    {
+      "kind": "unresolved_endpoint",
+      "link_id": "pin-node:local_pin:unbound-local:targets-mux",
+      "relation": "pin_targets_mux"
+    },
     {
       "kind": "conflict",
       "source": {
@@ -667,6 +1255,50 @@ expression: rendered
       "binding": {
         "kind": "unbound"
       }
+    }
+  ],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "ambig-local"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "bound-local"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "drift-local"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "socket-local"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "stale-local"
+      },
+      "provider": "pins"
+    },
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "unbound-local"
+      },
+      "provider": "pins"
     }
   ]
 }

@@ -4141,6 +4141,7 @@ fn node_kind_label(id: &NodeId) -> &'static str {
         NodeId::Workspace(_) => "workspace",
         NodeId::AgentSession(_) => "agent_session",
         NodeId::MuxSession(_) => "mux_session",
+        NodeId::Pin(_) => "pin",
         NodeId::RuntimeProcess(_) => "runtime_process",
         NodeId::Branch(_) => "branch",
         NodeId::Fork(_) => "fork",
@@ -4339,6 +4340,7 @@ fn format_alias_endpoint(endpoint: &DeclaredEndpoint) -> String {
             session_key,
         } => format!("agent_session:{harness_key}:{state_scope}:{session_key}"),
         DeclaredEndpoint::MuxSession { native_id } => format!("mux_session:{native_id}"),
+        DeclaredEndpoint::Pin { id } => format!("pin:{id}"),
         DeclaredEndpoint::RuntimeProcess { observation_key } => {
             format!("runtime_process:{observation_key}")
         }
@@ -5712,6 +5714,9 @@ fn parse_endpoint(raw: &str) -> std::result::Result<DeclaredEndpoint, String> {
         "mux_session" => Ok(DeclaredEndpoint::MuxSession {
             native_id: required_field(&fields, "native_id")?,
         }),
+        "pin" => Ok(DeclaredEndpoint::Pin {
+            id: required_field(&fields, "id")?,
+        }),
         "runtime_process" => Ok(DeclaredEndpoint::RuntimeProcess {
             observation_key: required_field(&fields, "observation_key")?,
         }),
@@ -5760,6 +5765,9 @@ fn endpoint_label(endpoint: &DeclaredEndpoint) -> String {
         }
         DeclaredEndpoint::MuxSession { native_id } => {
             format!("mux_session:native_id={native_id}")
+        }
+        DeclaredEndpoint::Pin { id } => {
+            format!("pin:id={id}")
         }
         DeclaredEndpoint::RuntimeProcess { observation_key } => {
             format!("runtime_process:observation_key={observation_key}")

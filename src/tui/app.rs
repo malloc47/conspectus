@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 
-use crate::model::{GraphSnapshot, MuxSessionId, NodeId};
+use crate::model::{MuxSessionId, NodeId, PinId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
@@ -1925,10 +1925,7 @@ impl App {
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
             RowId::Fork(node) => Some(node.clone()),
-            RowId::Pin { pin_id } => self
-                .database
-                .as_ref()
-                .and_then(|db| pin_detail_target(db.snapshot(), pin_id)),
+            RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Synthetic(_) => None,
         };
         let Some(target) = target else {
@@ -2281,22 +2278,6 @@ impl App {
             self.selection = Some(prev_selection);
         }
     }
-}
-
-fn pin_detail_target(snapshot: &GraphSnapshot, pin_id: &str) -> Option<NodeId> {
-    snapshot
-        .pins
-        .iter()
-        .find(|pin| pin.id == pin_id)
-        .and_then(|pin| match &pin.binding {
-            Some(crate::model::PinBinding::Bound { session, .. }) => {
-                Some(NodeId::AgentSession(session.clone()))
-            }
-            Some(crate::model::PinBinding::StaleMux { mux }) => {
-                Some(NodeId::MuxSession(mux.clone()))
-            }
-            Some(crate::model::PinBinding::Unbound) | None => None,
-        })
 }
 
 fn pin_cwd_from_node(id: &NodeId) -> Option<String> {
@@ -2831,6 +2812,7 @@ mod tests {
                 session: session_id,
             }),
         });
+        snap.sync_pin_nodes();
         let tree = build_tree(&snap);
         let mut app = App::new(RunConfig::defaults());
         app.update(Msg::SetData {
@@ -2844,12 +2826,12 @@ mod tests {
         });
 
         let detail = app.detail().expect("bound pin should resolve detail");
-        assert_eq!(detail.kind_label, "agent_session");
+        assert_eq!(detail.kind_label, "pin");
         assert!(
             detail
                 .header_fields
                 .iter()
-                .any(|field| { field.label == "pin" && field.value.contains("ingest") })
+                .any(|field| { field.label == "session" && field.value.contains("codex:alpha") })
         );
     }
 

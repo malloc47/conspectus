@@ -94,6 +94,9 @@ pub enum DeclaredEndpoint {
     MuxSession {
         native_id: String,
     },
+    Pin {
+        id: String,
+    },
     RuntimeProcess {
         observation_key: String,
     },
@@ -194,6 +197,7 @@ pub fn declared_endpoint_from_node_id(id: &NodeId) -> DeclaredEndpoint {
         NodeId::MuxSession(mux) => DeclaredEndpoint::MuxSession {
             native_id: mux.native_id.clone(),
         },
+        NodeId::Pin(pin) => DeclaredEndpoint::Pin { id: pin.id.clone() },
         NodeId::RuntimeProcess(process) => DeclaredEndpoint::RuntimeProcess {
             observation_key: process.observation_key.clone(),
         },
@@ -471,6 +475,11 @@ fn endpoint_project_root(endpoint: &DeclaredEndpoint, snapshot: &GraphSnapshot) 
             let id = NodeId::MuxSession(crate::model::MuxSessionId::new(native_id.clone()));
             node_cwd(&id, snapshot).and_then(|cwd| nearest_known_root(Path::new(&cwd), snapshot))
         }
+        DeclaredEndpoint::Pin { id } => snapshot
+            .pins
+            .iter()
+            .find(|pin| pin.id == *id)
+            .and_then(|pin| nearest_known_root(Path::new(&pin.cwd), snapshot)),
         DeclaredEndpoint::RuntimeProcess { observation_key } => {
             let id = NodeId::RuntimeProcess(crate::model::RuntimeProcessId::new(
                 observation_key.clone(),

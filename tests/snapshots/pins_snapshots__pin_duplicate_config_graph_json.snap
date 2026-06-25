@@ -3,7 +3,23 @@ source: tests/pins_snapshots.rs
 expression: fixture.run_discovered_graph_json()
 ---
 {
-  "nodes": [],
+  "nodes": [
+    {
+      "type": "pin",
+      "id": {
+        "id": "global-only"
+      },
+      "display_name": "global only",
+      "harness": "codex",
+      "cwd": "/home/op/src/work",
+      "mux": {
+        "backend": "tmux",
+        "name": "global-mux"
+      },
+      "provenance": "global_pin",
+      "store_path": "/fixture/.config/conspectus/config.toml"
+    }
+  ],
   "candidate_links": [],
   "resolved_relationships": [],
   "diagnostics": [
@@ -25,6 +41,15 @@ expression: fixture.run_discovered_graph_json()
       },
       "provenance": "global_pin",
       "store_path": "/fixture/.config/conspectus/config.toml"
+    }
+  ],
+  "node_provenance": [
+    {
+      "node_id": {
+        "type": "pin",
+        "id": "global-only"
+      },
+      "provider": "pins"
     }
   ]
 }
