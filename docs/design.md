@@ -561,6 +561,13 @@ rebind`, `pin adopt`); ambiguity overrides reuse the ADR 0014
 declared-link surface rather than introducing a new persisted binding
 type.
 
+Planned follow-up: pins should graduate from a snapshot sidecar into
+first-class graph entities with stable detail views, links to their
+related mux/session/context, and lineage back to the owning
+`.conspectus.toml` or user config. Until that model lands, the TUI
+maps bound/stale synthetic pin rows to the realizing session or mux
+detail and keeps fully unbound pins as synthetic rows.
+
 Pins declare the *next* logical session; the H-AGENTMUX adapter
 workstream extracts evidence from *existing* agent-mux orchestrators
 (agent-deck, dmux, workmux, agent-of-empires). The two surfaces are

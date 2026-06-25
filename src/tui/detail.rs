@@ -28,8 +28,8 @@ use std::path::Path;
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
     GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
-    Provenance, RelationKind, RepoNode, ResolvedRelationship, RuntimeProcessNode,
-    RuntimeProcessRole, WorkspaceNode,
+    PinBinding, PinCandidate, Provenance, RelationKind, RepoNode, ResolvedRelationship,
+    RuntimeProcessNode, RuntimeProcessRole, WorkspaceNode,
 };
 use crate::output::table::node_short_id;
 use crate::tui::rows::shorten_home;
@@ -230,7 +230,7 @@ fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
         ("agent_session", "process") => Process,
         ("agent_session", "pr") => Pr,
         ("agent_session", "lineage") => Lineage,
-        ("mux_session", "name" | "backend" | "cwd" | "attached") => Mux,
+        ("mux_session", "name" | "backend" | "cwd" | "attached" | "pin") => Mux,
         ("mux_session", "session" | "id" | "harness" | "alias" | "title") => Session,
         ("mux_session", "process") => Process,
         ("runtime_process", "mux") => Mux,
@@ -418,7 +418,7 @@ fn agent_session_fields(
         fields.push(plain("title", title.to_string()));
     }
 
-    fields.extend(pin_diagnostic_fields(snapshot, session));
+    fields.extend(pin_fields_for_session(snapshot, session));
 
     fields.push(session_mux_field(snapshot, &session_id));
     fields.extend(session_process_fields(snapshot, &session_id));
@@ -432,80 +432,119 @@ fn agent_session_fields(
     fields
 }
 
-fn pin_diagnostic_fields(snapshot: &GraphSnapshot, session: &AgentSessionNode) -> Vec<HeaderField> {
-    let pin_id = snapshot.pins.iter().find_map(|pin| match &pin.binding {
-        Some(crate::model::PinBinding::Bound { session: bound, .. }) if bound == &session.id => {
-            Some(pin.id.as_str())
-        }
-        _ => None,
+fn pin_fields_for_session(
+    snapshot: &GraphSnapshot,
+    session: &AgentSessionNode,
+) -> Vec<HeaderField> {
+    let pin = snapshot.pins.iter().find(|pin| match &pin.binding {
+        Some(PinBinding::Bound { session: bound, .. }) => bound == &session.id,
+        _ => false,
     });
-    let Some(pin_id) = pin_id else {
+    let Some(pin) = pin else {
         return Vec::new();
     };
-    crate::tui::actions::pin_diagnostics_for_id(snapshot, pin_id)
-        .into_iter()
-        .map(|diagnostic| match diagnostic {
-            crate::tui::actions::PinDiagnosticView::Ambiguous {
-                pin_id,
-                chosen,
-                competing,
-            } => {
-                let competitors = competing
-                    .iter()
-                    .map(|id| format!("{}:{}", id.harness_key, id.session_key))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut field = plain(
-                    "pin",
+    let diagnostics: Vec<HeaderField> = crate::tui::actions::pin_diagnostics_for_id(
+        snapshot, &pin.id,
+    )
+    .into_iter()
+    .map(|diagnostic| match diagnostic {
+        crate::tui::actions::PinDiagnosticView::Ambiguous {
+            pin_id,
+            chosen,
+            competing,
+        } => {
+            let competitors = competing
+                .iter()
+                .map(|id| format!("{}:{}", id.harness_key, id.session_key))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut field = plain(
+                "pin",
+                format!(
+                    "{pin_id} ambiguous: chosen {}:{}; competing {competitors}",
+                    chosen.harness_key, chosen.session_key
+                ),
+            );
+            field.annotation = Some("b to bind");
+            field
+        }
+        crate::tui::actions::PinDiagnosticView::Drift {
+            pin_id,
+            declared_cwd,
+            observed_cwd,
+        } => {
+            let mut field = plain(
+                "pin",
+                format!("{pin_id} cwd drift: declared {declared_cwd}; observed {observed_cwd}"),
+            );
+            field.annotation = Some("advisory");
+            field
+        }
+        crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => {
+            let mut field = plain("pin", format!("{pin_id} stale mux {}", mux.native_id));
+            field.annotation = Some("Enter relaunch");
+            field
+        }
+        crate::tui::actions::PinDiagnosticView::Unbound {
+            pin_id,
+            expected_mux_native_id,
+            last_session,
+        } => {
+            let (value, annotation) = match last_session {
+                Some(last) => (
                     format!(
-                        "{pin_id} ambiguous: chosen {}:{}; competing {competitors}",
-                        chosen.harness_key, chosen.session_key
+                        "{pin_id} unbound: expected {expected_mux_native_id} · last session {}",
+                        last.session_id
                     ),
-                );
-                field.annotation = Some("b to bind");
-                field
-            }
-            crate::tui::actions::PinDiagnosticView::Drift {
-                pin_id,
-                declared_cwd,
-                observed_cwd,
-            } => {
-                let mut field = plain(
-                    "pin",
-                    format!("{pin_id} cwd drift: declared {declared_cwd}; observed {observed_cwd}"),
-                );
-                field.annotation = Some("advisory");
-                field
-            }
-            crate::tui::actions::PinDiagnosticView::StaleMux { pin_id, mux } => {
-                let mut field = plain("pin", format!("{pin_id} stale mux {}", mux.native_id));
-                field.annotation = Some("Enter relaunch");
-                field
-            }
-            crate::tui::actions::PinDiagnosticView::Unbound {
-                pin_id,
-                expected_mux_native_id,
-                last_session,
-            } => {
-                let (value, annotation) = match last_session {
-                    Some(last) => (
-                        format!(
-                            "{pin_id} unbound: expected {expected_mux_native_id} · last session {}",
-                            last.session_id
-                        ),
-                        "Enter resume",
-                    ),
-                    None => (
-                        format!("{pin_id} unbound: expected {expected_mux_native_id}"),
-                        "Enter launch",
-                    ),
-                };
-                let mut field = plain("pin", value);
-                field.annotation = Some(annotation);
-                field
-            }
+                    "Enter resume",
+                ),
+                None => (
+                    format!("{pin_id} unbound: expected {expected_mux_native_id}"),
+                    "Enter launch",
+                ),
+            };
+            let mut field = plain("pin", value);
+            field.annotation = Some(annotation);
+            field
+        }
+    })
+    .collect();
+    if diagnostics.is_empty() {
+        vec![pin_summary_field(pin)]
+    } else {
+        diagnostics
+    }
+}
+
+fn pin_fields_for_mux(snapshot: &GraphSnapshot, mux: &MuxSessionNode) -> Vec<HeaderField> {
+    snapshot
+        .pins
+        .iter()
+        .filter(|pin| match &pin.binding {
+            Some(PinBinding::Bound { mux: bound, .. })
+            | Some(PinBinding::StaleMux { mux: bound }) => bound == &mux.id,
+            Some(PinBinding::Unbound) | None => false,
         })
+        .map(pin_summary_field)
         .collect()
+}
+
+fn pin_summary_field(pin: &PinCandidate) -> HeaderField {
+    let scope = match pin.provenance {
+        Provenance::LocalPin => "project",
+        Provenance::GlobalPin => "user",
+        _ => "pin",
+    };
+    let state = match pin.binding {
+        Some(PinBinding::Bound { .. }) => "bound",
+        Some(PinBinding::StaleMux { .. }) => "stale-mux",
+        Some(PinBinding::Unbound) => "unbound",
+        None => "unresolved",
+    };
+    plain(
+        "pin",
+        format!("{} ({state} · {scope} · {})", pin.id, pin.store_path),
+    )
 }
 
 fn session_mux_field(snapshot: &GraphSnapshot, session: &NodeId) -> HeaderField {
@@ -655,6 +694,7 @@ fn mux_session_fields(
         fields.push(plain("cwd", shorten_home(cwd, home)));
     }
     let mux_id = NodeId::MuxSession(mux.id.clone());
+    fields.extend(pin_fields_for_mux(snapshot, mux));
     let attached_sessions = attached_sessions_for_mux(snapshot, &mux_id);
     let attached_count = attached_sessions.len();
     fields.push(plain("attached", format!("{attached_count}")));
@@ -1567,6 +1607,94 @@ mod tests {
         assert!(pin.value.contains("chosen codex:alpha"));
         assert!(pin.value.contains("competing codex:beta"));
         assert_eq!(pin.annotation, Some("b to bind"));
+    }
+
+    #[test]
+    fn agent_session_bound_to_healthy_pin_shows_pin_summary() {
+        let mut snapshot = GraphSnapshot::empty();
+        let session = AgentSessionId::new("codex", "/state", "alpha");
+        snapshot
+            .nodes
+            .push(agent("codex", "alpha", Some("/home/op/src/x"), None));
+        snapshot.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/home/op/src/x".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/home/op/src/x/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::Bound {
+                mux: MuxSessionId::new("tmux:ingest"),
+                session: session.clone(),
+            }),
+        });
+
+        let detail = build(
+            &snapshot,
+            &NodeId::AgentSession(session),
+            Some(home().as_path()),
+        );
+        let pin = detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "pin")
+            .expect("pin summary field");
+
+        assert!(pin.value.contains("ingest"));
+        assert!(pin.value.contains("bound"));
+        assert!(pin.value.contains(".conspectus.toml"));
+    }
+
+    #[test]
+    fn mux_targeted_by_stale_pin_shows_pin_summary() {
+        let mut snapshot = GraphSnapshot::empty();
+        let mux = MuxSessionId::new("tmux:ingest");
+        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
+            id: mux.clone(),
+            backend: "tmux".to_string(),
+            native_id: "ingest".to_string(),
+            cwd: Some("/home/op/src/x".to_string()),
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }));
+        snapshot.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/home/op/src/x".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/home/op/src/x/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::StaleMux { mux: mux.clone() }),
+        });
+
+        let detail = build(&snapshot, &NodeId::MuxSession(mux), Some(home().as_path()));
+        let pin = detail
+            .header_fields
+            .iter()
+            .find(|field| field.label == "pin")
+            .expect("pin summary field");
+
+        assert!(pin.value.contains("ingest"));
+        assert!(pin.value.contains("stale-mux"));
     }
 
     #[test]

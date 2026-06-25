@@ -90,6 +90,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
                     id: session_id.clone(),
                     node: session,
                     mux_state,
+                    pinned: data.is_pinned_session(session_id),
                 })
             })
             .collect();
@@ -142,6 +143,7 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
             id: session_id.clone(),
             node: session,
             mux_state,
+            pinned: data.is_pinned_session(session_id),
         };
         match resolve_group_key(&entry, &data, inputs.grouping) {
             Some(key) => buckets.entry(key).or_default().push(entry),
@@ -558,6 +560,10 @@ impl<'a> SessionsData<'a> {
             .find(|link| link.id == link_id)
     }
 
+    fn is_pinned_session(&self, session: &NodeId) -> bool {
+        self.pin_id_by_bound_session.contains_key(session)
+    }
+
     fn checkout_for_path(
         &self,
         path: &str,
@@ -721,6 +727,9 @@ struct SessionEntry<'a> {
     /// is consistent across all call sites without re-walking the
     /// graph at compare time.
     mux_state: MuxStateKey,
+    /// True when this session is the live realization of a declared
+    /// pin. Flat views float these entities above non-pinned rows.
+    pinned: bool,
 }
 
 fn resolve_group_key(
@@ -1083,6 +1092,7 @@ fn visible_lineage_children<'snap>(
                 id: child_id.clone(),
                 node: child_node,
                 mux_state,
+                pinned: ctx.data.is_pinned_session(child_id),
             })
         })
         .collect()
@@ -1113,8 +1123,8 @@ fn project_name_from_path(path: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Sessions within a group sort by recency desc (None last), then
-/// alphabetical by harness then short id for a stable tie-breaker.
+/// Sessions sort pinned rows first, then by recency desc (None last),
+/// then alphabetical by harness then short id for a stable tie-breaker.
 /// When `float_muxed_top` is set, sessions with an attached mux
 /// candidate sort before sessions without one, with the existing
 /// within-group order preserved inside each of the two resulting
@@ -1124,6 +1134,10 @@ fn compare_sessions(
     b: &SessionEntry<'_>,
     float_muxed_top: bool,
 ) -> std::cmp::Ordering {
+    let pinned = usize::from(!a.pinned).cmp(&usize::from(!b.pinned));
+    if pinned != std::cmp::Ordering::Equal {
+        return pinned;
+    }
     if float_muxed_top {
         let muxed_priority = |state: MuxStateKey| match state {
             MuxStateKey::Attached | MuxStateKey::Ambiguous => 0,
@@ -3568,6 +3582,60 @@ mod tests {
             cwd: None,
             filter: RowFilter::default(),
         })
+    }
+
+    #[test]
+    fn none_grouping_floats_bound_pinned_session_rows_to_top() {
+        let session_id = AgentSessionId::new("codex", "/state", "older");
+        let mux_id = MuxSessionId::new("tmux:older");
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "older",
+            Some("/home/op/work/repo"),
+            100,
+        ));
+        snapshot.nodes.push(agent_session_with_activity(
+            "codex",
+            "/state",
+            "newer",
+            Some("/home/op/work/repo"),
+            200,
+        ));
+        snapshot.pins.push(pin_candidate(
+            "older-pin",
+            "codex",
+            "/home/op/work/repo",
+            "older",
+            Provenance::LocalPin,
+            Some(PinBinding::Bound {
+                mux: mux_id,
+                session: session_id,
+            }),
+        ));
+
+        let tree = build(SessionsBuildInputs {
+            snapshot: &snapshot,
+            grouping: SessionsGrouping::None,
+            home: Some(home().as_path()),
+            now: Some(300),
+            cwd: None,
+            filter: RowFilter::default(),
+        });
+
+        let sessions: Vec<_> = tree
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::AgentSession(session) => Some(session),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sessions.len(), 2, "{:#?}", tree.rows);
+        assert_eq!(sessions[0].session.session_key, "older");
+        assert_eq!(sessions[0].pin_id.as_deref(), Some("older-pin"));
+        assert_eq!(sessions[1].session.session_key, "newer");
     }
 
     #[test]

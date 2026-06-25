@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 
-use crate::model::{MuxSessionId, NodeId};
+use crate::model::{GraphSnapshot, MuxSessionId, NodeId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
@@ -1925,11 +1925,10 @@ impl App {
             RowId::MuxSession(node) => Some(node.clone()),
             RowId::Pr(node) => Some(node.clone()),
             RowId::Fork(node) => Some(node.clone()),
-            // Pin rows are not graph nodes — the detail pane for a
-            // selected unbound pin row is wired in a follow-up
-            // (H-PIN-018); for v1 we clear the detail and let the
-            // status bar surface the binding hint.
-            RowId::Pin { .. } => None,
+            RowId::Pin { pin_id } => self
+                .database
+                .as_ref()
+                .and_then(|db| pin_detail_target(db.snapshot(), pin_id)),
             RowId::Synthetic(_) => None,
         };
         let Some(target) = target else {
@@ -2284,6 +2283,22 @@ impl App {
     }
 }
 
+fn pin_detail_target(snapshot: &GraphSnapshot, pin_id: &str) -> Option<NodeId> {
+    snapshot
+        .pins
+        .iter()
+        .find(|pin| pin.id == pin_id)
+        .and_then(|pin| match &pin.binding {
+            Some(crate::model::PinBinding::Bound { session, .. }) => {
+                Some(NodeId::AgentSession(session.clone()))
+            }
+            Some(crate::model::PinBinding::StaleMux { mux }) => {
+                Some(NodeId::MuxSession(mux.clone()))
+            }
+            Some(crate::model::PinBinding::Unbound) | None => None,
+        })
+}
+
 fn pin_cwd_from_node(id: &NodeId) -> Option<String> {
     match id {
         NodeId::Checkout(checkout) => Some(checkout.root.clone()),
@@ -2369,6 +2384,11 @@ fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
 
 fn initial_expanded_rows(tree: &RowTree) -> BTreeSet<RowId> {
     let mut expanded = BTreeSet::new();
+    for row in &tree.rows {
+        if matches!(row.id, RowId::Synthetic("pins")) {
+            add_expandable_group(&mut expanded, row);
+        }
+    }
     let mut launch_indices: Vec<usize> = tree
         .rows
         .iter()
@@ -2748,6 +2768,89 @@ mod tests {
         assert_eq!(target.mux_socket, None);
         assert_eq!(target.launch_argv, Vec::<String>::new());
         assert_eq!(target.store_path, "/p/project/.conspectus.toml");
+    }
+
+    #[test]
+    fn set_data_keeps_pins_group_expanded_by_default() {
+        let mut snap = GraphSnapshot::empty();
+        snap.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/project".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/project/.conspectus.toml".to_string(),
+            binding: None,
+        });
+        let snap = resolve_snapshot(snap);
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        assert!(app.expanded.contains(&RowId::Synthetic("pins")));
+        assert!(
+            app.visible_rows()
+                .iter()
+                .any(|row| matches!(row.id, RowId::Pin { .. })),
+            "pin child should be visible without manually expanding Pins"
+        );
+    }
+
+    #[test]
+    fn selected_bound_pin_row_shows_realizing_session_detail() {
+        let session_id = AgentSessionId::new("codex", "/state", "alpha");
+        let mut snap = make_snapshot_with(&[("codex", "alpha", "/p/project")]);
+        snap.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/project".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/project/.conspectus.toml".to_string(),
+            binding: Some(crate::model::PinBinding::Bound {
+                mux: crate::model::MuxSessionId::new("tmux:ingest"),
+                session: session_id,
+            }),
+        });
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.set_selection(RowId::Pin {
+            pin_id: "ingest".to_string(),
+        });
+
+        let detail = app.detail().expect("bound pin should resolve detail");
+        assert_eq!(detail.kind_label, "agent_session");
+        assert!(
+            detail
+                .header_fields
+                .iter()
+                .any(|field| { field.label == "pin" && field.value.contains("ingest") })
+        );
     }
 
     #[test]

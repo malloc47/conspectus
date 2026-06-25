@@ -68,13 +68,13 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     let attachments = collect_attached_agents(snapshot);
     let pins: Vec<&PinCandidate> = snapshot.pins.iter().collect();
 
-    let mut pin_id_by_bound_mux: HashMap<String, String> = HashMap::new();
+    let mut pin_id_by_mux: HashMap<NodeId, String> = HashMap::new();
     for pin in &pins {
-        if !matches!(pin.binding, Some(PinBinding::Bound { .. })) {
-            continue;
-        }
-        if let Some(bare) = bare_tmux_name(&pin.mux.native_id()) {
-            pin_id_by_bound_mux.insert(bare.to_string(), pin.id.clone());
+        match &pin.binding {
+            Some(PinBinding::Bound { mux, .. }) | Some(PinBinding::StaleMux { mux }) => {
+                pin_id_by_mux.insert(NodeId::MuxSession(mux.clone()), pin.id.clone());
+            }
+            Some(PinBinding::Unbound) | None => {}
         }
     }
 
@@ -148,7 +148,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             activity_epoch,
             agent_labels: agent_labels(&visible_attached),
             single_session_preview,
-            pin_id: pin_id_by_bound_mux.get(&mux.node.native_id).cloned(),
+            pin_id: pin_id_by_mux.get(&node_id).cloned(),
             primary_node: node_id.clone(),
         };
 
@@ -374,6 +374,11 @@ fn emit_repo_grouped(
 
 fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
     groups.sort_by(|left, right| {
+        let pinned = usize::from(left.parent_row.pin_id.is_none())
+            .cmp(&usize::from(right.parent_row.pin_id.is_none()));
+        if pinned != std::cmp::Ordering::Equal {
+            return pinned;
+        }
         let left_float = usize::from(left.attached_count == 0);
         let right_float = usize::from(right.attached_count == 0);
         let float_order = if inputs.filter.float_attached_muxes_top {
@@ -1394,6 +1399,54 @@ mod tests {
     }
 
     #[test]
+    fn mux_view_flat_grouping_floats_pinned_mux_rows_to_top() {
+        use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(mux_node("newer"));
+        snapshot.nodes.push(mux_node("older"));
+        snapshot.pins.push(PinCandidate {
+            id: "old-pin".to_string(),
+            display_name: "Old Pin".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/older".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "older".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/older/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::StaleMux {
+                mux: MuxSessionId::new("tmux:older"),
+            }),
+        });
+
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
+            home: None,
+            now: Some(1_700_000_000),
+            filter: RowFilter::default(),
+            grouping: MuxGrouping::Session,
+            sort: Sort::Hierarchy,
+        });
+
+        let muxes: Vec<_> = tree
+            .rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::MuxSession(mux) => Some(mux),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(muxes.len(), 2, "{:#?}", tree.rows);
+        assert_eq!(muxes[0].native_id, "older");
+        assert_eq!(muxes[0].pin_id.as_deref(), Some("old-pin"));
+        assert_eq!(muxes[1].native_id, "newer");
+    }
+
+    #[test]
     fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
         // Repo grouping introduces header rows. The Pins group
         // should sit above every repo bucket so the operator sees
@@ -1470,11 +1523,8 @@ mod tests {
 
     #[test]
     fn mux_view_skips_pins_group_under_flat_groupings() {
-        // The non-Repo groupings (Session / Host) flow
-        // through `emit_flat` without header rows; adding a Pins
-        // group on its own would feel like an unmotivated heading.
-        // Pin glyphs still appear on bound mux rows, but the
-        // synthetic group is gated on Repo grouping.
+        // Flat groupings float pinned mux entities directly rather
+        // than inserting a synthetic Pins group header.
         use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
         let mut snapshot = GraphSnapshot::empty();
         snapshot.nodes.push(mux_node("editor"));

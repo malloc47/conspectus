@@ -6126,6 +6126,51 @@ layout or awkward key semantics.
     Snapshot tests for the post-create toast and selected pin row.
   - Blockers: `H-PIN-TUI-002`.
 
+- [x] `H-PIN-TUI-008` Float pinned entities and keep Pins groups open.
+  - Scope: in grouped session/mux views, keep the synthetic Pins
+    group at the top and expand it by default even when the launch
+    context is elsewhere. In flat session/mux views, float entities
+    with resolved pin bindings directly to the top without adding a
+    synthetic group header. Bound pins float their agent-session row;
+    bound and stale pins float their mux row. Unbound pins remain
+    represented by the synthetic pin row until `H-PIN-TUI-009`
+    introduces first-class pin graph nodes.
+  - Tests: sessions and mux row-builder tests for grouped ordering,
+    default expansion, flat pinned-row sort priority, stale-mux sort
+    priority, and unbound behavior.
+  - Outcome: synthetic Pins groups remain top-level and are expanded
+    by default when present. Flat sessions sort bound pinned session
+    rows before non-pinned sessions, and flat mux views sort muxes
+    targeted by bound/stale pins before ordinary muxes while keeping
+    the flat list free of a synthetic Pins header. Session and mux
+    detail panes now include a `pin` field for healthy bound/stale
+    pin associations, and selecting a bound/stale synthetic pin row
+    resolves the right pane to the realizing session or mux detail.
+    Fully unbound pins still require `H-PIN-TUI-009` because they do
+    not have graph node identity yet.
+  - Blockers: `H-PIN-TUI-002`.
+
+- [ ] `H-PIN-TUI-009` Promote pins to first-class graph entities.
+  - Scope: replace the sidecar-only `GraphSnapshot::pins` projection
+    with a first-class graph entity for each declared pin while
+    preserving the TOML schema as the persistence source. Pin nodes
+    should have stable node ids, detail panes, searchable identity,
+    source/store lineage back to the owning `.conspectus.toml` or
+    user config, and graph relationships to the related mux,
+    attributed agent session, cwd/workspace/repo context, and any
+    launch/resume sidecar state. The Sessions view Pins tree should
+    select a real graph entity, not a detail-less synthetic row; when
+    a pin is bound, the pin detail should link to the realizing
+    session rather than pretending the pin row is itself that
+    session.
+  - Tests: model round-trip coverage for the new pin node/id,
+    resolver tests for pin-to-mux/session/context relationships,
+    detail tests for pin fields and store lineage, TUI row tests for
+    selecting bound/stale/unbound pins, search tests, and graph JSON
+    snapshots that expose pins as nodes plus links.
+  - Blockers: ADR/model decision for pin node identity and relation
+    kinds.
+
 #### Deferred follow-ups (post-v1)
 
 These are explicitly out of v1 scope but recorded so the design
