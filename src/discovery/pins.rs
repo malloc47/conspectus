@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigLoader;
 use crate::discovery::DiscoveryContext;
-use crate::model::{Diagnostic, GraphSnapshot, PinCandidate, PinMuxRef, Provenance};
+use crate::model::{Diagnostic, GraphNode, GraphSnapshot, PinCandidate, PinMuxRef, Provenance};
 use crate::pins::{PinEntry, PinsDocument, parse_pins_document};
 
 pub fn apply_pins(snapshot: &mut GraphSnapshot, context: &DiscoveryContext, loader: &ConfigLoader) {
@@ -37,16 +37,11 @@ pub fn apply_pins(snapshot: &mut GraphSnapshot, context: &DiscoveryContext, load
         });
     }
 
-    let mut seen_project_paths = BTreeSet::new();
-    for root in context.roots() {
-        if let Some(path) = loader.locate_project_config(root)
-            && seen_project_paths.insert(path.clone())
-        {
-            stores.push(PinStore {
-                path,
-                provenance: Provenance::LocalPin,
-            });
-        }
+    for path in local_pin_store_paths(snapshot, context, loader) {
+        stores.push(PinStore {
+            path,
+            provenance: Provenance::LocalPin,
+        });
     }
 
     // Local-pin entries shadow global-pin entries with the same id.
@@ -79,6 +74,91 @@ pub fn apply_pins(snapshot: &mut GraphSnapshot, context: &DiscoveryContext, load
     }
 
     snapshot.canonicalize();
+}
+
+fn local_pin_store_paths(
+    snapshot: &GraphSnapshot,
+    context: &DiscoveryContext,
+    loader: &ConfigLoader,
+) -> Vec<PathBuf> {
+    let mut seen_project_paths = BTreeSet::new();
+    let mut paths = Vec::new();
+    for root in project_config_search_roots(snapshot, context) {
+        if let Some(path) = loader.locate_project_config(&root)
+            && seen_project_paths.insert(path.clone())
+        {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+fn project_config_search_roots(
+    snapshot: &GraphSnapshot,
+    context: &DiscoveryContext,
+) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut seen = BTreeSet::new();
+    for root in context.roots() {
+        push_search_root(&mut roots, &mut seen, root);
+    }
+    for node in &snapshot.nodes {
+        match node {
+            GraphNode::Repo(repo) => {
+                for path in &repo.source_paths {
+                    push_search_root(&mut roots, &mut seen, Path::new(path));
+                }
+                if let Some(parent) = Path::new(&repo.common_dir).parent()
+                    && Path::new(&repo.common_dir)
+                        .file_name()
+                        .is_some_and(|name| name == ".git")
+                {
+                    push_search_root(&mut roots, &mut seen, parent);
+                }
+            }
+            GraphNode::Checkout(checkout) => {
+                push_search_root(&mut roots, &mut seen, Path::new(&checkout.root));
+            }
+            GraphNode::Workspace(workspace) => {
+                push_search_root(&mut roots, &mut seen, Path::new(&workspace.root));
+            }
+            GraphNode::AgentSession(session) => {
+                if let Some(cwd) = &session.cwd {
+                    push_search_root(&mut roots, &mut seen, Path::new(cwd));
+                }
+            }
+            GraphNode::MuxSession(mux) => {
+                if let Some(cwd) = &mux.cwd {
+                    push_search_root(&mut roots, &mut seen, Path::new(cwd));
+                }
+                if let Some(cwd) = &mux.active_pane_current_path {
+                    push_search_root(&mut roots, &mut seen, Path::new(cwd));
+                }
+            }
+            GraphNode::RuntimeProcess(process) => {
+                if let Some(cwd) = &process.cwd {
+                    push_search_root(&mut roots, &mut seen, Path::new(cwd));
+                }
+            }
+            GraphNode::Branch(_) | GraphNode::ForgePr(_) | GraphNode::Fork(_) => {}
+        }
+    }
+    roots
+}
+
+fn push_search_root(
+    roots: &mut Vec<PathBuf>,
+    seen: &mut BTreeSet<PathBuf>,
+    root: impl AsRef<Path>,
+) {
+    let root = root.as_ref();
+    if root.as_os_str().is_empty() || !root.is_absolute() {
+        return;
+    }
+    let root = root.to_path_buf();
+    if seen.insert(root.clone()) {
+        roots.push(root);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -158,6 +238,7 @@ fn shadowed_pin_diagnostic(store: &PinStore, id: &str) -> Diagnostic {
 mod tests {
     use super::*;
     use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME, USER_CONFIG_RELATIVE};
+    use crate::model::{AgentSessionId, AgentSessionNode};
     use tempfile::TempDir;
 
     fn project_pin_toml(id: &str, mux_name: &str) -> String {
@@ -250,6 +331,46 @@ mux = {mux_table}
         assert_eq!(pin.harness, "codex");
         assert_eq!(pin.mux.native_id(), "tmux:ingest");
         assert_eq!(pin.provenance, Provenance::LocalPin);
+        assert!(snapshot.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn loads_project_pin_from_observed_session_cwd_outside_scan_root() {
+        let tmp = TempDir::new().expect("tmp");
+        let home = tmp.path().join("home");
+        let xdg = tmp.path().join("xdg");
+        let scan_root = tmp.path().join("scan");
+        let project = tmp.path().join("project");
+        let nested = project.join("subdir");
+        fs::create_dir_all(&scan_root).expect("mkdir scan root");
+        fs::create_dir_all(&nested).expect("mkdir nested project dir");
+        fs::write(
+            project.join(PROJECT_CONFIG_FILENAME),
+            project_pin_toml("observed", "observed"),
+        )
+        .expect("write project config");
+
+        let loader = loader_with(&home, &xdg);
+        let context = context_at(&[&scan_root]);
+
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot
+            .nodes
+            .push(GraphNode::AgentSession(AgentSessionNode {
+                id: AgentSessionId::new("codex", "/state", "s1"),
+                harness_key: "codex".to_string(),
+                cwd: Some(nested.to_string_lossy().into_owned()),
+                title: None,
+                last_message_preview: None,
+                last_active_epoch: None,
+                session_kind: None,
+            }));
+
+        apply_pins(&mut snapshot, &context, &loader);
+
+        assert_eq!(snapshot.pins.len(), 1);
+        assert_eq!(snapshot.pins[0].id, "observed");
+        assert_eq!(snapshot.pins[0].provenance, Provenance::LocalPin);
         assert!(snapshot.diagnostics.is_empty());
     }
 

@@ -1345,4 +1345,57 @@ mod tests {
             "declared project config should contribute a local declared candidate"
         );
     }
+
+    #[test]
+    fn discover_local_with_loads_project_pins_from_observed_session_cwd() {
+        use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME};
+        use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
+        use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let scan_root = temp.path().join("scan");
+        let project = temp.path().join("project");
+        std::fs::create_dir(&scan_root).expect("scan dir");
+        std::fs::create_dir(&project).expect("project dir");
+        std::fs::write(
+            project.join(PROJECT_CONFIG_FILENAME),
+            format!(
+                r#"
+                [pins]
+                schema_version = 1
+
+                [[pins.entries]]
+                id = "observed"
+                display_name = "observed"
+                harness = "codex"
+                cwd = "{}"
+                mux = {{ backend = "tmux", name = "observed" }}
+                "#,
+                project.display()
+            ),
+        )
+        .expect("write project config");
+
+        let fixture = HarnessFixture::at(temp.path().join("state"));
+        fixture
+            .write_codex_session(
+                &CodexSessionRecord::new("session-observed")
+                    .with_cwd(project.to_string_lossy().into_owned()),
+            )
+            .expect("write codex session");
+
+        let config = LocalDiscoveryConfig::empty()
+            .with_harness_state_root(CODEX_KEY, fixture.codex_state_root())
+            .with_declared_config_loader(ConfigLoader::new().with_home(temp.path()));
+
+        let snapshot = discover_local_with([scan_root.as_path()], config).expect("discover");
+
+        assert!(
+            snapshot
+                .pins
+                .iter()
+                .any(|pin| pin.id == "observed" && pin.provenance == Provenance::LocalPin),
+            "project pin should load from the observed session cwd, not only the scan root"
+        );
+    }
 }

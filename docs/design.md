@@ -512,7 +512,9 @@ declared `(harness, cwd, display_name, mux)` tuple that
 
 - persists in a sibling `[[pins.entries]]` TOML table alongside
   `[declared]` (ADR 0014) and `[aliases]` (ADR 0029), in the same
-  local/global config files,
+  local/global config files. Local pin stores are aggregated from the
+  startup scan roots and from observed graph CWD/root paths so project
+  pins remain visible regardless of the operator's launch directory,
 - renders as a first-class row in the sessions and mux views whether or
   not a live session currently realizes it,
 - binds 1:1 at resolve time on the **mux native name**

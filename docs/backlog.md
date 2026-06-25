@@ -5522,11 +5522,14 @@ once everything else has landed.
     Local beats global on `id` collision. Emit a diagnostic when both
     stores claim the same id with conflicting fields.
   - Tests: unit tests for local-only, global-only, local-over-global,
-    malformed-file diagnostic isolation, empty stores, and config
-    paths matching ADR 0012.
+    malformed-file diagnostic isolation, empty stores, config paths
+    matching ADR 0012, and project configs discovered from observed
+    session CWDs outside the startup scan roots.
   - Outcome: `discovery::pins` loads local and global pins into
     `PinCandidate` evidence, preserves sparse/malformed-store
-    behavior, and reports duplicate/local-over-global diagnostics.
+    behavior, reports duplicate/local-over-global diagnostics, and
+    aggregates project-local pin stores from scan roots plus observed
+    graph roots so pins stay stable across launch CWDs.
   - Blockers: `H-PIN-002`.
 
 - [x] `H-PIN-004` Resolver binding pass.
