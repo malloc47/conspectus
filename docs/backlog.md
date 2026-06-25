@@ -5943,8 +5943,8 @@ layout or awkward key semantics.
     `H-PIN-TUI-*` stories. The create flow should be framed around a
     primary `name`, selected-row context, and an explicit mode toggle
     inside one create flow: `adopt selected` for pinning a running
-    mux/session exactly, or `new variation` for creating a fresh
-    session/mux from the same cwd/workspace. Target field order:
+    mux/session exactly, or `new` for creating a fresh session/mux
+    from the same cwd/workspace. Target field order:
     `name`, mode/context summary, cwd, harness, launch command
     preview, advanced identity fields (persisted id, display name,
     mux name/socket), store, then confirm. `id` remains a persisted
@@ -5962,7 +5962,7 @@ layout or awkward key semantics.
     mux name from it until the operator edits one of those fields
     directly. Preserve explicit overrides after later name edits.
     Defaults should distinguish "pin/adopt this selected live entry"
-    from "create a fresh variation": exact adoption should preserve
+    from "create a fresh pin": exact adoption should preserve
     the selected mux name, while fresh-session creation should propose
     a non-conflicting mux name derived from the selected cwd/workspace
     and name. Keep the underlying TOML schema unchanged.
@@ -5978,7 +5978,7 @@ layout or awkward key semantics.
     selected row is adoptable, the create form opens with `adopt
     selected` checked and the selected mux's original name populated.
     The first operator edit to the primary name automatically unchecks
-    adopt and turns the form into a new variation; if the operator
+    adopt and turns the form into `new` mode; if the operator
     manually checks adopt again, later name edits keep it checked. In
     that opt-in state, the editable `mux.name` stays aligned with the
     new pin name and previews the operation as
@@ -5988,15 +5988,15 @@ layout or awkward key semantics.
     the primary name or directly edited, the form automatically
     re-checks adopt to avoid creating a pin that shadows a tmux
     session name; when that automatic collision check no longer
-    applies, the form automatically returns to new-variation mode
-    unless the operator manually intervened. The default `new
-    variation` alternative still proposes a non-conflicting mux name
-    when the selected context's mux name is already live or pinned.
+    applies, the form automatically returns to `new` mode unless the
+    operator manually intervened. The default `new` alternative still
+    proposes a non-conflicting mux name when the selected context's
+    mux name is already live or pinned.
     `A` remains a direct accelerator into the same create form with
     adopt selected, not a separate menu-level command.
   - Blockers: `H-PIN-TUI-001`.
 
-- [ ] `H-PIN-TUI-003` Make pin form fields editable at real-world
+- [x] `H-PIN-TUI-003` Make pin form fields editable at real-world
   lengths.
   - Scope: fix the current text-entry ergonomics for long cwd,
     display, mux, and launch-argv values. Fields must horizontally
@@ -6011,6 +6011,20 @@ layout or awkward key semantics.
     offset updates, field navigation, store option toggling, confirm
     behavior, and narrow-modal rendering. Ratatui snapshots for long
     cwd and long launch argv fields.
+  - Outcome: the create form now renders text fields through a
+    width-aware horizontal window that keeps the cursor visible and
+    shows stable hidden-left / hidden-right indicators for long
+    values with colored, spaced markers. Generated default names are
+    capped so selected-session titles do not seed a horizontally
+    scrolling primary name, while exact adopt defaults still preserve
+    live mux names. `Left`/`Right`, `Home`/`End`, and word movement
+    continue through the underlying text input; `Tab` advances fields
+    and `Shift-Tab` moves backward. `Enter` consistently submits the
+    create form, while mode and store are rendered as option controls
+    and changed with `Space` / arrow keys. The visible fresh-create
+    mode label is `new`; the explicit row/edit focus model that would
+    preserve `j`/`k` navigation is recorded separately in
+    `H-PIN-TUI-004a`.
   - Blockers: `H-PIN-TUI-001`.
 
 - [ ] `H-PIN-TUI-004` Hybrid cwd omnibox for pin create/adopt.
@@ -6029,6 +6043,25 @@ layout or awkward key semantics.
     states.
   - Blockers: `H-PIN-TUI-003`, `H-WIDG-010` if the implementation
     chooses the browse-mode dependency for this slice.
+
+- [ ] `H-PIN-TUI-004a` Explicit row/edit focus for pin create
+  navigation.
+  - Scope: evaluate whether the create form should preserve the
+    TUI-wide `j`/`k` navigation convention by separating row focus
+    from field edit focus. In that model, `j`/`k` would move between
+    rows while a row is focused, `Enter` would enter or leave editing
+    for editable fields, and submit would likely move to an explicit
+    `Create` button row instead of letting `Enter` submit from any
+    selection. Compare this against the Controls modal interaction
+    model and record any decisions from `H-PIN-TUI-003` through
+    `H-PIN-TUI-006` that make this direction easier, harder, or
+    unnecessary.
+  - Tests: widget/reducer tests for focus/edit state transitions,
+    `j`/`k` row navigation, editing text that contains `j`/`k`,
+    `Enter` behavior on editable rows versus the `Create` button,
+    cancellation, and narrow-modal rendering. Snapshot tests for
+    focused-row, editing-row, and explicit-submit states.
+  - Blockers: `H-PIN-TUI-003`.
 
 - [ ] `H-PIN-TUI-005` Harness picker with free-form escape hatch.
   - Scope: make the harness field choose from known harness keys

@@ -1011,6 +1011,7 @@ impl App {
                     .display_label()
                     .map(str::to_string)
                     .unwrap_or_else(|| session.session.session_key.clone());
+                let display = pin_create_default_name_candidate(&display);
                 let id = pin_id_candidate(&display);
                 let mux_name = self.unique_pin_mux_name(&id);
                 PinCreateDefaults {
@@ -1031,23 +1032,28 @@ impl App {
                     ..PinCreateDefaults::default()
                 })
                 .unwrap_or_default(),
-            RowKind::MuxSession(mux) => PinCreateDefaults {
-                id: self.unique_pin_mux_name(&pin_id_candidate(&mux.native_id)),
-                display_name: self.unique_pin_mux_name(&pin_id_candidate(&mux.native_id)),
-                // Mirror the CLI `pin adopt` harness inference
-                // (`src/cli.rs:3883-3902`): the first active
-                // `LinkedToMux` candidate whose source is an
-                // AgentSession wins. Seeded as a default — the
-                // operator can still edit the field before commit.
-                harness: self.infer_harness_for_mux(&mux.mux).unwrap_or_default(),
-                // Read the raw cwd from the snapshot rather than
-                // `cwd_display`, which is tilde-shortened for
-                // rendering and would be rejected by the pin
-                // validator's `is_absolute` check on commit.
-                cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
-                mux_name: self.unique_pin_mux_name(&pin_id_candidate(&mux.native_id)),
-                mode: PinCreateMode::NewVariation,
-            },
+            RowKind::MuxSession(mux) => {
+                let base_name =
+                    pin_create_default_name_candidate(&pin_id_candidate(&mux.native_id));
+                let mux_name = self.unique_pin_mux_name(&base_name);
+                PinCreateDefaults {
+                    id: mux_name.clone(),
+                    display_name: mux_name.clone(),
+                    // Mirror the CLI `pin adopt` harness inference
+                    // (`src/cli.rs:3883-3902`): the first active
+                    // `LinkedToMux` candidate whose source is an
+                    // AgentSession wins. Seeded as a default — the
+                    // operator can still edit the field before commit.
+                    harness: self.infer_harness_for_mux(&mux.mux).unwrap_or_default(),
+                    // Read the raw cwd from the snapshot rather than
+                    // `cwd_display`, which is tilde-shortened for
+                    // rendering and would be rejected by the pin
+                    // validator's `is_absolute` check on commit.
+                    cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
+                    mux_name,
+                    mode: PinCreateMode::NewVariation,
+                }
+            }
             _ => PinCreateDefaults::default(),
         }
     }
@@ -2310,6 +2316,39 @@ fn pin_id_candidate(raw: &str) -> String {
     }
 }
 
+const PIN_CREATE_DEFAULT_NAME_MAX_CHARS: usize = 48;
+
+fn pin_create_default_name_candidate(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.chars().count() <= PIN_CREATE_DEFAULT_NAME_MAX_CHARS {
+        return trimmed.to_string();
+    }
+    let capped: String = trimmed
+        .chars()
+        .take(PIN_CREATE_DEFAULT_NAME_MAX_CHARS)
+        .collect();
+    let capped = if trimmed
+        .chars()
+        .nth(PIN_CREATE_DEFAULT_NAME_MAX_CHARS)
+        .is_some_and(|ch| !ch.is_whitespace())
+    {
+        capped
+            .rfind(char::is_whitespace)
+            .map(|idx| capped[..idx].to_string())
+            .unwrap_or(capped)
+    } else {
+        capped
+    };
+    let capped = capped
+        .trim_end_matches(|ch: char| ch.is_whitespace() || ch == '-' || ch == '_')
+        .to_string();
+    if capped.is_empty() {
+        "new pin".to_string()
+    } else {
+        capped
+    }
+}
+
 /// Does `row` represent `target` in the left-pane tree (T8-035)?
 /// Group rows match when their `primary_node` (when set) equals
 /// `target`; mux candidate rows match their parent mux's node id.
@@ -2490,6 +2529,23 @@ mod tests {
         assert_eq!(defaults.harness, "codex");
         assert_eq!(defaults.cwd, "/p/project");
         assert_eq!(defaults.mux_name, "session-one");
+    }
+
+    #[test]
+    fn pin_create_defaults_cap_long_selected_session_titles() {
+        let long_title =
+            "Investigate the customer workspace regression with the unusually verbose summary";
+        let mut app = seeded_app(&[("codex", long_title, "/p/project")]);
+        select_session(&mut app, long_title);
+
+        let defaults = app.pins_context().pin_create_defaults;
+        assert!(defaults.display_name.chars().count() <= 48);
+        assert_eq!(
+            defaults.display_name,
+            "Investigate the customer workspace regression"
+        );
+        assert_eq!(defaults.id, "investigate-the-customer-workspace-regression");
+        assert_eq!(defaults.mux_name, defaults.id);
     }
 
     #[test]

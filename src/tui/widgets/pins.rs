@@ -24,7 +24,7 @@ use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
@@ -69,15 +69,8 @@ pub enum PinCreateMode {
 impl PinCreateMode {
     fn label(self) -> &'static str {
         match self {
-            Self::NewVariation => "new variation",
+            Self::NewVariation => "new",
             Self::AdoptSelected => "adopt selected",
-        }
-    }
-
-    fn help(self) -> &'static str {
-        match self {
-            Self::NewVariation => "fresh mux/session from selected context",
-            Self::AdoptSelected => "pin the selected running mux/session",
         }
     }
 }
@@ -629,10 +622,6 @@ impl PinCreateState {
     fn handle_key(&mut self, event: KeyEvent) -> PinCreateOutcome {
         match event.code {
             KeyCode::Esc => PinCreateOutcome::Cancel,
-            KeyCode::Enter if self.logical_cursor() == 1 && self.can_toggle_mode() => {
-                self.toggle_mode();
-                PinCreateOutcome::Continue
-            }
             KeyCode::Enter => match self.request() {
                 Ok(request) => PinCreateOutcome::Confirm(request),
                 Err(err) => {
@@ -646,6 +635,10 @@ impl PinCreateState {
             }
             KeyCode::Down | KeyCode::Tab => {
                 self.move_cursor(1);
+                PinCreateOutcome::Continue
+            }
+            KeyCode::BackTab => {
+                self.move_cursor(-1);
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
@@ -976,6 +969,10 @@ impl PinEditState {
                 self.move_cursor(1);
                 PinEditOutcome::Continue
             }
+            KeyCode::BackTab => {
+                self.move_cursor(-1);
+                PinEditOutcome::Continue
+            }
             _ => {
                 if event.modifiers.contains(KeyModifiers::CONTROL)
                     && matches!(event.code, KeyCode::Char('c'))
@@ -1055,6 +1052,10 @@ impl PinBindState {
                 self.move_cursor(1);
                 PinBindOutcome::Continue
             }
+            KeyCode::BackTab => {
+                self.move_cursor(-1);
+                PinBindOutcome::Continue
+            }
             _ if event.modifiers.contains(KeyModifiers::CONTROL)
                 && matches!(event.code, KeyCode::Char('c')) =>
             {
@@ -1129,6 +1130,10 @@ impl PinRebindState {
             }
             KeyCode::Down | KeyCode::Tab => {
                 self.move_cursor(1);
+                PinEditOutcome::Continue
+            }
+            KeyCode::BackTab => {
+                self.move_cursor(-1);
                 PinEditOutcome::Continue
             }
             _ => {
@@ -1210,7 +1215,6 @@ impl Widget for PinsOverlayWidget<'_> {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let cursor = self.state.cursor();
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(section_header("Pins"));
         for (idx, label) in PIN_ACTION_OPTIONS.iter().enumerate() {
             let row = PinsCursor::Action(idx);
             lines.push(row_line((*label).to_string(), cursor == row));
@@ -1267,34 +1271,35 @@ impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let cursor = self.state.render_cursor();
-        let mode_marker = if self.state.can_toggle_mode() {
-            if self.state.mode == PinCreateMode::AdoptSelected {
-                "[x]"
-            } else {
-                "[ ]"
-            }
-        } else {
-            " - "
-        };
+        let content_lines = 14 + usize::from(self.state.error.is_some()) * 2;
+        let modal = pin_create_modal_rect(area, content_lines);
+        let inner_width = modal.width.saturating_sub(2) as usize;
         let mut lines = vec![
-            pin_create_field(0, "name", self.state.name.value(), cursor),
-            line![format!(
-                "{} mode        {} {} ({})",
-                if cursor == 1 { ">" } else { " " },
-                mode_marker,
-                self.state.mode.label(),
-                self.state.mode.help()
-            )],
-            pin_create_field(2, "cwd", self.state.cwd.value(), cursor),
-            pin_create_field(3, "harness", self.state.harness.value(), cursor),
-            pin_create_field(4, "launch argv", self.state.launch_argv.value(), cursor),
+            pin_create_input_field(0, "name", &self.state.name, cursor, inner_width),
+            pin_create_mode_field(self.state, cursor, inner_width),
+            pin_create_input_field(2, "cwd", &self.state.cwd, cursor, inner_width),
+            pin_create_input_field(3, "harness", &self.state.harness, cursor, inner_width),
+            pin_create_input_field(
+                4,
+                "launch argv",
+                &self.state.launch_argv,
+                cursor,
+                inner_width,
+            ),
             line![""],
             line![span!(Modifier::DIM; "Advanced identity")],
-            pin_create_field(5, "id", self.state.id.value(), cursor),
-            pin_create_field(6, "display", self.state.display_name.value(), cursor),
-            pin_create_field(7, "mux.name", &self.state.mux_name_display(), cursor),
-            pin_create_field(8, "mux.socket", self.state.mux_socket.value(), cursor),
-            pin_create_field(9, "store", self.state.store.label(), cursor),
+            pin_create_input_field(5, "id", &self.state.id, cursor, inner_width),
+            pin_create_input_field(6, "display", &self.state.display_name, cursor, inner_width),
+            pin_create_value_field(
+                7,
+                "mux.name",
+                &self.state.mux_name_display(),
+                self.state.mux_name.cursor(),
+                cursor,
+                inner_width,
+            ),
+            pin_create_input_field(8, "mux.socket", &self.state.mux_socket, cursor, inner_width),
+            pin_create_store_field(self.state.store, cursor, inner_width),
         ];
         if let Some(error) = &self.state.error {
             lines.push(line![""]);
@@ -1303,9 +1308,8 @@ impl Widget for PinCreateWidget<'_> {
         lines.push(line![""]);
         lines.push(line![span!(
             Modifier::DIM;
-            "Up/Down field · type to edit · Space toggles mode/store · Enter create · Esc cancel"
+            "↑/↓/Tab move · S-Tab back · ←/→/Space option · Enter create · Esc cancel"
         )]);
-        let modal = pin_create_modal_rect(area, lines.len());
 
         let body = ScrollLinesBody {
             scroll_offset: scroll_offset_for_cursor(
@@ -1321,15 +1325,231 @@ impl Widget for PinCreateWidget<'_> {
     }
 }
 
-fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize) -> Line<'static> {
+fn pin_create_input_field(
+    idx: usize,
+    label: &'static str,
+    input: &TextInputState,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    pin_create_value_field(
+        idx,
+        label,
+        input.value(),
+        input.cursor(),
+        cursor,
+        inner_width,
+    )
+}
+
+fn pin_create_value_field(
+    idx: usize,
+    label: &'static str,
+    value: &str,
+    value_cursor: usize,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    let active = cursor == idx;
+    let marker = if active { "> " } else { "  " };
+    let label_style = if active {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let prefix = format!("{marker}{label:11} ");
+    let value_width = inner_width.saturating_sub(prefix.chars().count()).max(1);
+    let display = pin_field_visible_window(value, value_cursor, value_width, active);
+    line![
+        span!(label_style; "{prefix}"),
+        span!(display.edge_style; "{}", display.left_indicator),
+        span!("{}", display.before_cursor),
+        span!(display.cursor_style; "{}", display.cursor_text),
+        span!("{}", display.after_cursor),
+        span!(display.edge_style; "{}", display.right_indicator),
+    ]
+}
+
+fn pin_create_mode_field(
+    state: &PinCreateState,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    if state.can_toggle_mode() {
+        option_pair_line(
+            cursor == 1,
+            "mode",
+            "new",
+            state.mode == PinCreateMode::NewVariation,
+            "adopt selected",
+            state.mode == PinCreateMode::AdoptSelected,
+            inner_width,
+        )
+    } else {
+        pin_create_static_field(1, "mode", state.mode.label(), cursor, inner_width)
+    }
+}
+
+fn pin_create_store_field(
+    store: PinCreateStore,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    let marker = if cursor == 9 { "> " } else { "  " };
+    let label_style = if cursor == 9 {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let raw = format!(
+        "{marker}{:11} {} {} {}",
+        "store",
+        option_token("auto", store == PinCreateStore::Auto),
+        option_token("project", store == PinCreateStore::Project),
+        option_token("user", store == PinCreateStore::User),
+    );
+    line![span!(label_style; "{}", truncate_chars(&raw, inner_width))]
+}
+
+fn pin_create_static_field(
+    idx: usize,
+    label: &'static str,
+    value: &str,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
     let marker = if cursor == idx { "> " } else { "  " };
     let style = if cursor == idx {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let value = if value.trim().is_empty() { "-" } else { value };
+    let raw = format!("{marker}{label:11} {value}");
+    line![span!(style; "{}", truncate_chars(&raw, inner_width))]
+}
+
+fn option_pair_line(
+    active: bool,
+    label: &'static str,
+    left: &'static str,
+    left_selected: bool,
+    right: &'static str,
+    right_selected: bool,
+    inner_width: usize,
+) -> Line<'static> {
+    let marker = if active { "> " } else { "  " };
+    let style = if active {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let raw = format!(
+        "{marker}{label:11} {} {}",
+        option_token(left, left_selected),
+        option_token(right, right_selected)
+    );
+    line![span!(style; "{}", truncate_chars(&raw, inner_width))]
+}
+
+fn option_token(label: &str, selected: bool) -> String {
+    if selected {
+        format!("[x] {label}")
+    } else {
+        format!("[ ] {label}")
+    }
+}
+
+fn pin_create_field(idx: usize, label: &'static str, value: &str, cursor: usize) -> Line<'static> {
+    pin_create_static_field(idx, label, value, cursor, usize::MAX / 2)
+}
+
+struct PinFieldVisibleWindow {
+    left_indicator: &'static str,
+    before_cursor: String,
+    cursor_text: String,
+    after_cursor: String,
+    right_indicator: &'static str,
+    edge_style: Style,
+    cursor_style: Style,
+}
+
+fn pin_field_visible_window(
+    value: &str,
+    cursor: usize,
+    width: usize,
+    active: bool,
+) -> PinFieldVisibleWindow {
+    let width = width.max(1);
+    let edge_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let cursor_style = if active {
         Style::default().add_modifier(Modifier::REVERSED)
     } else {
         Style::default()
     };
     let value = if value.trim().is_empty() { "-" } else { value };
-    line![span!(style; "{marker}{label:11} {value}")]
+    let chars: Vec<char> = value.chars().collect();
+    let total = chars.len();
+    let cursor = cursor.min(total);
+
+    if width == 1 {
+        let ch = chars.get(cursor).copied().unwrap_or(' ');
+        return PinFieldVisibleWindow {
+            left_indicator: if cursor > 0 { "<" } else { " " },
+            before_cursor: String::new(),
+            cursor_text: ch.to_string(),
+            after_cursor: String::new(),
+            right_indicator: if cursor + usize::from(cursor < total) < total {
+                ">"
+            } else {
+                " "
+            },
+            edge_style,
+            cursor_style,
+        };
+    }
+
+    let content_width = width.saturating_sub(4).max(1);
+    let start = if total <= content_width {
+        0
+    } else if cursor >= content_width {
+        cursor.saturating_sub(content_width.saturating_sub(1))
+    } else {
+        0
+    };
+    let end = (start + content_width).min(total);
+    let cursor_offset = cursor.saturating_sub(start).min(content_width);
+    let before_cursor: String = chars[start..(start + cursor_offset).min(end)]
+        .iter()
+        .collect();
+    let cursor_text = if cursor < end {
+        chars[start + cursor_offset].to_string()
+    } else if active {
+        " ".to_string()
+    } else {
+        String::new()
+    };
+    let after_start = (start + cursor_offset + usize::from(cursor < end)).min(end);
+    let after_cursor: String = chars[after_start..end].iter().collect();
+
+    PinFieldVisibleWindow {
+        left_indicator: if start > 0 { "< " } else { "  " },
+        before_cursor,
+        cursor_text,
+        after_cursor,
+        right_indicator: if end < total { " >" } else { "  " },
+        edge_style,
+        cursor_style,
+    }
+}
+
+fn truncate_chars(value: &str, width: usize) -> String {
+    if width == usize::MAX / 2 {
+        return value.to_string();
+    }
+    value.chars().take(width).collect()
 }
 
 fn pin_create_modal_rect(area: Rect, content_lines: usize) -> Rect {
@@ -1566,10 +1786,6 @@ fn pin_remove_modal_rect(area: Rect, content_lines: usize) -> Rect {
     modal_rect_for_content(area, width, content_lines, 7)
 }
 
-fn section_header(label: &str) -> Line<'static> {
-    line![span!(Modifier::BOLD; "{label}")]
-}
-
 fn row_line(label: String, cursored: bool) -> Line<'static> {
     let marker = if cursored { "> " } else { "  " };
     let mut style = Style::default();
@@ -1603,12 +1819,12 @@ fn modal_rect_for_content(area: Rect, width: u16, content_lines: usize, min_heig
 }
 
 fn pins_menu_content_lines() -> usize {
-    1 + PIN_ACTION_OPTIONS.len() + 2
+    PIN_ACTION_OPTIONS.len() + 2
 }
 
 fn pins_menu_cursor_line(cursor: PinsCursor) -> Option<usize> {
     let PinsCursor::Action(idx) = cursor;
-    Some(1 + idx)
+    Some(idx)
 }
 
 struct ScrollLinesBody {
@@ -1667,6 +1883,15 @@ mod tests {
         }
     }
 
+    fn shift_key(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
     fn pin_target() -> PinMutationTarget {
         PinMutationTarget {
             id: "ingest".to_string(),
@@ -1699,7 +1924,6 @@ mod tests {
     #[test]
     fn pins_menu_content_count_tracks_rendered_body() {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(section_header("Pins"));
         for label in PIN_ACTION_OPTIONS {
             lines.push(row_line((*label).to_string(), false));
         }
@@ -1883,7 +2107,7 @@ mod tests {
         }
 
         state.handle_key(&PinsContext::default(), key(KeyCode::Down));
-        state.handle_key(&PinsContext::default(), key(KeyCode::Enter));
+        state.handle_key(&PinsContext::default(), key(KeyCode::Char(' ')));
         match state.sub_editor() {
             Some(PinsSubEditor::Create(editor)) => {
                 assert_eq!(editor.mode, PinCreateMode::NewVariation);
@@ -1891,6 +2115,76 @@ mod tests {
             }
             other => panic!("unexpected editor: {other:?}"),
         }
+
+        let outcome = state.handle_key(&PinsContext::default(), key(KeyCode::Enter));
+        assert!(matches!(
+            outcome,
+            PinsOutcome::ApplyAndClose(PinsAction::CreatePin(_))
+        ));
+    }
+
+    #[test]
+    fn create_form_backtab_moves_to_previous_field() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+        );
+
+        editor.handle_key(key(KeyCode::Down));
+        assert_eq!(editor.render_cursor(), 2);
+        editor.handle_key(key(KeyCode::BackTab));
+        assert_eq!(editor.render_cursor(), 0);
+        editor.handle_key(shift_key(KeyCode::BackTab));
+        assert_eq!(editor.render_cursor(), 9);
+    }
+
+    #[test]
+    fn create_form_forwards_home_and_end_to_active_text_field() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+        );
+
+        editor.handle_key(key(KeyCode::Home));
+        editor.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(editor.name.value(), "xscratch");
+        editor.handle_key(key(KeyCode::End));
+        editor.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(editor.name.value(), "xscratchy");
+    }
+
+    #[test]
+    fn create_form_visible_window_marks_hidden_text_and_keeps_cursor_visible() {
+        let display = pin_field_visible_window("abcdefghijklmnopqrstuvwxyz", 25, 12, true);
+        assert_eq!(display.left_indicator, "< ");
+        assert_eq!(display.right_indicator, "  ");
+        assert_eq!(display.cursor_text, "z");
+        let rendered = format!(
+            "{}{}{}",
+            display.before_cursor, display.cursor_text, display.after_cursor
+        );
+        assert!(rendered.len() <= 8);
+
+        let display = pin_field_visible_window("abcdefghijklmnopqrstuvwxyz", 2, 12, true);
+        assert_eq!(display.left_indicator, "  ");
+        assert_eq!(display.right_indicator, " >");
+        assert_eq!(display.cursor_text, "c");
     }
 
     #[test]
