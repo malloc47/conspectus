@@ -5975,12 +5975,25 @@ layout or awkward key semantics.
     explicit advanced-field overrides after later name edits. Clearing
     a derived advanced field returns it to automatic derivation on the
     next name edit. The Pins menu exposes one `create` flow; when the
-    selected row is adoptable, the create form includes an `adopt
-    selected` toggle that preserves the selected live mux name exactly.
-    The default `new variation` mode proposes a non-conflicting mux
-    name when the selected context's mux name is already live or
-    pinned. `A` remains a direct accelerator into the same create form
-    with adopt selected, not a separate menu-level command.
+    selected row is adoptable, the create form opens with `adopt
+    selected` checked and the selected mux's original name populated.
+    The first operator edit to the primary name automatically unchecks
+    adopt and turns the form into a new variation; if the operator
+    manually checks adopt again, later name edits keep it checked. In
+    that opt-in state, the editable `mux.name` stays aligned with the
+    new pin name and previews the operation as
+    `<new-name> (rename of: <old-name>)`; on commit the TUI asks tmux
+    to rename the adopted mux to that target. If the effective
+    `mux.name` exactly matches a known live mux, whether derived from
+    the primary name or directly edited, the form automatically
+    re-checks adopt to avoid creating a pin that shadows a tmux
+    session name; when that automatic collision check no longer
+    applies, the form automatically returns to new-variation mode
+    unless the operator manually intervened. The default `new
+    variation` alternative still proposes a non-conflicting mux name
+    when the selected context's mux name is already live or pinned.
+    `A` remains a direct accelerator into the same create form with
+    adopt selected, not a separate menu-level command.
   - Blockers: `H-PIN-TUI-001`.
 
 - [ ] `H-PIN-TUI-003` Make pin form fields editable at real-world

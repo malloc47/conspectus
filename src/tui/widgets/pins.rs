@@ -44,6 +44,7 @@ pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "launch", "rename", "remove"
 pub struct PinsContext {
     pub pin_create_defaults: PinCreateDefaults,
     pub pin_adopt_defaults: Option<PinCreateDefaults>,
+    pub known_mux_names: Vec<String>,
     pub pin_target: Option<PinMutationTarget>,
     pub pin_bind_options: Vec<PinBindOption>,
 }
@@ -156,6 +157,7 @@ pub struct PinCreateRequest {
     pub cwd: String,
     pub mux_name: String,
     pub mux_socket: Option<String>,
+    pub adopt_source_mux_name: Option<String>,
     pub launch_argv: Vec<String>,
     pub store: PinCreateStore,
 }
@@ -207,7 +209,6 @@ impl PinCreateStore {
 pub struct PinCreateState {
     mode: PinCreateMode,
     cursor: usize,
-    new_defaults: PinCreateDefaults,
     adopt_defaults: Option<PinCreateDefaults>,
     name: TextInputState,
     id: TextInputState,
@@ -221,6 +222,9 @@ pub struct PinCreateState {
     id_overridden: bool,
     display_overridden: bool,
     mux_overridden: bool,
+    known_mux_names: Vec<String>,
+    adopt_auto_uncheck_armed: bool,
+    adopt_auto_checked_by_collision: bool,
     error: Option<String>,
 }
 
@@ -282,36 +286,38 @@ impl PinsOverlayState {
     /// `defaults`. Used by the direct shortcut so the operator
     /// skips the menu step.
     pub fn open_with_create(defaults: PinCreateDefaults) -> Self {
-        Self::open_with_create_options(defaults, None)
+        Self::open_with_create_options(defaults, None, Vec::new())
     }
 
     pub fn open_with_create_options(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_mux_names: Vec<String>,
     ) -> Self {
-        let initial = defaults.clone();
-        Self::open_with_create_initial(initial, defaults, adopt_defaults)
+        let initial = adopt_defaults.clone().unwrap_or(defaults);
+        Self::open_with_create_initial(initial, adopt_defaults, known_mux_names)
     }
 
     pub fn open_with_adopt_options(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_mux_names: Vec<String>,
     ) -> Self {
         let initial = adopt_defaults.clone().unwrap_or_else(|| defaults.clone());
-        Self::open_with_create_initial(initial, defaults, adopt_defaults)
+        Self::open_with_create_initial(initial, adopt_defaults, known_mux_names)
     }
 
     fn open_with_create_initial(
         initial: PinCreateDefaults,
-        defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_mux_names: Vec<String>,
     ) -> Self {
         Self {
             cursor: PinsCursor::Action(0),
             sub_editor: Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
                 initial,
-                defaults,
                 adopt_defaults,
+                known_mux_names,
             )))),
         }
     }
@@ -399,10 +405,14 @@ impl PinsOverlayState {
         let PinsCursor::Action(idx) = self.cursor;
         let label = PIN_ACTION_OPTIONS.get(idx).copied().unwrap_or("help");
         if label == "create" {
+            let initial = ctx
+                .pin_adopt_defaults
+                .clone()
+                .unwrap_or_else(|| ctx.pin_create_defaults.clone());
             self.sub_editor = Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
-                ctx.pin_create_defaults.clone(),
-                ctx.pin_create_defaults.clone(),
+                initial,
                 ctx.pin_adopt_defaults.clone(),
+                ctx.known_mux_names.clone(),
             ))));
             PinsOutcome::Continue
         } else if label == "launch" {
@@ -563,8 +573,8 @@ impl PinCreateState {
 
     fn new(
         defaults: PinCreateDefaults,
-        new_defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_mux_names: Vec<String>,
     ) -> Self {
         let name = if !defaults.display_name.is_empty() {
             defaults.display_name.clone()
@@ -584,7 +594,7 @@ impl PinCreateState {
         } else {
             defaults.display_name
         };
-        let derived_mux_name = derived_id.clone();
+        let derived_mux_name = derived_mux_name_for_mode(defaults.mode, &name, &derived_id);
         let mux_name = if defaults.mux_name.is_empty() {
             derived_mux_name.clone()
         } else {
@@ -596,7 +606,6 @@ impl PinCreateState {
         Self {
             mode: defaults.mode,
             cursor: 0,
-            new_defaults,
             adopt_defaults,
             name: TextInputState::new(" name ", name),
             id: TextInputState::new(" id ", id),
@@ -610,6 +619,9 @@ impl PinCreateState {
             id_overridden,
             display_overridden,
             mux_overridden,
+            known_mux_names,
+            adopt_auto_uncheck_armed: defaults.mode == PinCreateMode::AdoptSelected,
+            adopt_auto_checked_by_collision: false,
             error: None,
         }
     }
@@ -703,18 +715,40 @@ impl PinCreateState {
     }
 
     fn toggle_mode(&mut self) {
-        let target = match self.mode {
-            PinCreateMode::NewVariation => self.adopt_defaults.clone(),
-            PinCreateMode::AdoptSelected => Some(self.new_defaults.clone()),
-        };
-        if let Some(defaults) = target {
-            let store = self.store;
-            let cursor = self.cursor;
-            let new_defaults = self.new_defaults.clone();
-            let adopt_defaults = self.adopt_defaults.clone();
-            *self = Self::new(defaults, new_defaults, adopt_defaults);
-            self.store = store;
-            self.cursor = cursor.min(self.field_count().saturating_sub(1));
+        match self.mode {
+            PinCreateMode::NewVariation => {
+                if self.adopt_defaults.is_none() {
+                    return;
+                }
+                self.mode = PinCreateMode::AdoptSelected;
+                self.adopt_auto_uncheck_armed = false;
+                self.adopt_auto_checked_by_collision = false;
+                if !self.mux_overridden {
+                    self.mux_name = TextInputState::new(
+                        " mux ",
+                        derived_mux_name_for_mode(
+                            self.mode,
+                            self.name.value(),
+                            &pin_id_candidate(self.name.value()),
+                        ),
+                    );
+                }
+            }
+            PinCreateMode::AdoptSelected => {
+                self.mode = PinCreateMode::NewVariation;
+                self.adopt_auto_uncheck_armed = false;
+                self.adopt_auto_checked_by_collision = false;
+                if !self.mux_overridden {
+                    self.mux_name = TextInputState::new(
+                        " mux ",
+                        derived_mux_name_for_mode(
+                            self.mode,
+                            self.name.value(),
+                            &pin_id_candidate(self.name.value()),
+                        ),
+                    );
+                }
+            }
         }
     }
 
@@ -765,11 +799,43 @@ impl PinCreateState {
         } else {
             active + 1
         } {
-            0 => self.sync_from_name(),
+            0 => {
+                if self.mode == PinCreateMode::AdoptSelected && self.adopt_auto_uncheck_armed {
+                    self.mode = PinCreateMode::NewVariation;
+                    self.adopt_auto_uncheck_armed = false;
+                }
+                self.sync_from_name();
+                self.sync_mode_from_mux_collision();
+            }
             5 => self.id_overridden = !self.id.value().is_empty(),
             6 => self.display_overridden = !self.display_name.value().is_empty(),
-            7 => self.mux_overridden = !self.mux_name.value().is_empty(),
+            7 => {
+                self.mux_overridden = !self.mux_name.value().is_empty();
+                self.sync_mode_from_mux_collision();
+            }
             _ => {}
+        }
+    }
+
+    fn sync_mode_from_mux_collision(&mut self) {
+        let matches_known_mux = self.matching_known_mux_name().is_some();
+        if matches_known_mux {
+            self.mode = PinCreateMode::AdoptSelected;
+            self.adopt_auto_uncheck_armed = false;
+            self.adopt_auto_checked_by_collision = true;
+        } else if self.adopt_auto_checked_by_collision {
+            self.mode = PinCreateMode::NewVariation;
+            self.adopt_auto_checked_by_collision = false;
+            if !self.mux_overridden {
+                self.mux_name = TextInputState::new(
+                    " mux ",
+                    derived_mux_name_for_mode(
+                        self.mode,
+                        self.name.value(),
+                        &pin_id_candidate(self.name.value()),
+                    ),
+                );
+            }
         }
     }
 
@@ -783,7 +849,10 @@ impl PinCreateState {
             self.display_name = TextInputState::new(" display ", name);
         }
         if !self.mux_overridden {
-            self.mux_name = TextInputState::new(" mux ", derived_id);
+            self.mux_name = TextInputState::new(
+                " mux ",
+                derived_mux_name_for_mode(self.mode, self.name.value(), &derived_id),
+            );
         }
     }
 
@@ -804,9 +873,42 @@ impl PinCreateState {
             cwd,
             mux_name,
             mux_socket,
+            adopt_source_mux_name: self.adopt_source_mux_name(),
             launch_argv,
             store: self.store,
         })
+    }
+
+    fn adopt_source_mux_name(&self) -> Option<String> {
+        if self.mode != PinCreateMode::AdoptSelected {
+            return None;
+        }
+        if let Some(mux_name) = self.matching_known_mux_name() {
+            return Some(mux_name.to_string());
+        }
+        self.adopt_defaults
+            .as_ref()
+            .map(|defaults| defaults.mux_name.clone())
+            .filter(|source| !source.trim().is_empty())
+    }
+
+    fn matching_known_mux_name(&self) -> Option<&str> {
+        let mux_name = self.mux_name.value().trim();
+        if mux_name.is_empty() {
+            return None;
+        }
+        self.known_mux_names
+            .iter()
+            .find(|known| known.as_str() == mux_name)
+            .map(String::as_str)
+    }
+
+    fn mux_name_display(&self) -> String {
+        let value = self.mux_name.value();
+        match self.adopt_source_mux_name() {
+            Some(source) if source != value => format!("{value} (rename of: {source})"),
+            _ => value.to_string(),
+        }
     }
 }
 
@@ -827,6 +929,13 @@ fn pin_id_candidate(raw: &str) -> String {
         "new-pin".to_string()
     } else {
         trimmed
+    }
+}
+
+fn derived_mux_name_for_mode(mode: PinCreateMode, name: &str, derived_id: &str) -> String {
+    match mode {
+        PinCreateMode::NewVariation => derived_id.to_string(),
+        PinCreateMode::AdoptSelected => name.to_string(),
     }
 }
 
@@ -1183,7 +1292,7 @@ impl Widget for PinCreateWidget<'_> {
             line![span!(Modifier::DIM; "Advanced identity")],
             pin_create_field(5, "id", self.state.id.value(), cursor),
             pin_create_field(6, "display", self.state.display_name.value(), cursor),
-            pin_create_field(7, "mux.name", self.state.mux_name.value(), cursor),
+            pin_create_field(7, "mux.name", &self.state.mux_name_display(), cursor),
             pin_create_field(8, "mux.socket", self.state.mux_socket.value(), cursor),
             pin_create_field(9, "store", self.state.store.label(), cursor),
         ];
@@ -1647,37 +1756,99 @@ mod tests {
     }
 
     #[test]
-    fn create_form_toggles_to_adopt_defaults_when_available() {
+    fn create_form_starts_adopt_checked_then_auto_unchecks_on_first_name_edit() {
         let ctx = PinsContext {
             pin_create_defaults: PinCreateDefaults {
-                id: "work-2".to_string(),
-                display_name: "work-2".to_string(),
+                id: "agentdeck-conspectus-2".to_string(),
+                display_name: "agentdeck-conspectus-2".to_string(),
                 harness: "codex".to_string(),
                 cwd: "/workspace/project".to_string(),
-                mux_name: "work-2".to_string(),
+                mux_name: "agentdeck-conspectus-2".to_string(),
                 mode: PinCreateMode::NewVariation,
             },
             pin_adopt_defaults: Some(PinCreateDefaults {
-                id: "work".to_string(),
-                display_name: "work".to_string(),
+                id: "agentdeck-conspectus".to_string(),
+                display_name: "agentdeck_conspectus".to_string(),
                 harness: "codex".to_string(),
                 cwd: "/workspace/project".to_string(),
-                mux_name: "work".to_string(),
+                mux_name: "agentdeck_conspectus".to_string(),
                 mode: PinCreateMode::AdoptSelected,
             }),
+            known_mux_names: vec!["agentdeck_conspectus".to_string()],
             ..PinsContext::default()
         };
         let mut state = PinsOverlayState::new();
         state.handle_key(&ctx, key(KeyCode::Enter));
-        state.handle_key(&ctx, key(KeyCode::Down));
-        state.handle_key(&ctx, key(KeyCode::Char(' ')));
 
         match state.sub_editor() {
             Some(PinsSubEditor::Create(editor)) => {
                 assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
-                assert_eq!(editor.id.value(), "work");
-                assert_eq!(editor.display_name.value(), "work");
-                assert_eq!(editor.mux_name.value(), "work");
+                assert_eq!(editor.name.value(), "agentdeck_conspectus");
+                assert_eq!(editor.mux_name.value(), "agentdeck_conspectus");
+                assert_eq!(editor.mux_name_display(), "agentdeck_conspectus");
+                let request = editor.request().expect("valid create request");
+                assert_eq!(request.mux_name, "agentdeck_conspectus");
+                assert_eq!(
+                    request.adopt_source_mux_name.as_deref(),
+                    Some("agentdeck_conspectus")
+                );
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+
+        for _ in 0.."agentdeck_conspectus".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "agentdeck-conspectus-v2".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mode, PinCreateMode::NewVariation);
+                assert_eq!(editor.name.value(), "agentdeck-conspectus-v2");
+                assert_eq!(editor.id.value(), "agentdeck-conspectus-v2");
+                assert_eq!(editor.display_name.value(), "agentdeck-conspectus-v2");
+                assert_eq!(editor.mux_name.value(), "agentdeck-conspectus-v2");
+                assert_eq!(editor.mux_name_display(), "agentdeck-conspectus-v2");
+                assert_eq!(
+                    editor
+                        .request()
+                        .expect("valid request")
+                        .adopt_source_mux_name,
+                    None
+                );
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+
+        state.handle_key(&ctx, key(KeyCode::Down));
+        state.handle_key(&ctx, key(KeyCode::Char(' ')));
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+                assert_eq!(
+                    editor.mux_name_display(),
+                    "agentdeck-conspectus-v2 (rename of: agentdeck_conspectus)"
+                );
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+
+        state.handle_key(&ctx, key(KeyCode::Up));
+        for _ in 0.."agentdeck-conspectus-v2".len() {
+            state.handle_key(&ctx, key(KeyCode::Backspace));
+        }
+        for ch in "agentdeck-conspectus-v3".chars() {
+            state.handle_key(&ctx, key(KeyCode::Char(ch)));
+        }
+        match state.sub_editor() {
+            Some(PinsSubEditor::Create(editor)) => {
+                assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+                assert_eq!(
+                    editor.mux_name_display(),
+                    "agentdeck-conspectus-v3 (rename of: agentdeck_conspectus)"
+                );
             }
             other => panic!("unexpected editor: {other:?}"),
         }
@@ -1701,7 +1872,7 @@ mod tests {
             mux_name: "work".to_string(),
             mode: PinCreateMode::AdoptSelected,
         };
-        let mut state = PinsOverlayState::open_with_adopt_options(defaults, Some(adopt));
+        let mut state = PinsOverlayState::open_with_adopt_options(defaults, Some(adopt), vec![]);
 
         match state.sub_editor() {
             Some(PinsSubEditor::Create(editor)) => {
@@ -1716,10 +1887,165 @@ mod tests {
         match state.sub_editor() {
             Some(PinsSubEditor::Create(editor)) => {
                 assert_eq!(editor.mode, PinCreateMode::NewVariation);
-                assert_eq!(editor.mux_name.value(), "work-2");
+                assert_eq!(editor.mux_name.value(), "work");
             }
             other => panic!("unexpected editor: {other:?}"),
         }
+    }
+
+    #[test]
+    fn create_form_auto_checks_adopt_for_known_mux_name_collisions() {
+        let ctx = PinsContext {
+            pin_create_defaults: PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            pin_adopt_defaults: Some(PinCreateDefaults {
+                id: "selected".to_string(),
+                display_name: "selected".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "selected".to_string(),
+                mode: PinCreateMode::AdoptSelected,
+            }),
+            known_mux_names: vec!["selected".to_string(), "busy-mux".to_string()],
+            ..PinsContext::default()
+        };
+        let mut editor = PinCreateState::new(
+            ctx.pin_create_defaults.clone(),
+            ctx.pin_adopt_defaults.clone(),
+            ctx.known_mux_names.clone(),
+        );
+
+        for _ in 0.."scratch".len() {
+            editor.handle_key(key(KeyCode::Backspace));
+        }
+        for ch in "busy_mux".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+        assert_eq!(editor.mux_name.value(), "busy-mux");
+        assert_eq!(editor.mux_name_display(), "busy-mux");
+        assert_eq!(
+            editor
+                .request()
+                .expect("valid request")
+                .adopt_source_mux_name
+                .as_deref(),
+            Some("busy-mux")
+        );
+
+        editor.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(editor.mode, PinCreateMode::NewVariation);
+        assert_eq!(editor.name.value(), "busy_muxx");
+        assert_eq!(editor.mux_name.value(), "busy-muxx");
+        assert_eq!(
+            editor
+                .request()
+                .expect("valid request")
+                .adopt_source_mux_name,
+            None
+        );
+
+        editor.handle_key(key(KeyCode::Down));
+        editor.handle_key(key(KeyCode::Char(' ')));
+        editor.handle_key(key(KeyCode::Up));
+        editor.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+        assert_eq!(editor.name.value(), "busy_muxxy");
+        assert_eq!(
+            editor.mux_name_display(),
+            "busy_muxxy (rename of: selected)"
+        );
+
+        for _ in 0.."busy_muxxy".len() {
+            editor.handle_key(key(KeyCode::Backspace));
+        }
+        for ch in "busy-mux".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+        assert_eq!(editor.mux_name_display(), "busy-mux");
+
+        editor.handle_key(key(KeyCode::Char('z')));
+        assert_eq!(editor.mode, PinCreateMode::NewVariation);
+        assert_eq!(editor.name.value(), "busy-muxz");
+    }
+
+    #[test]
+    fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
+        let ctx = PinsContext {
+            pin_create_defaults: PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            pin_adopt_defaults: Some(PinCreateDefaults {
+                id: "selected".to_string(),
+                display_name: "selected".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "selected".to_string(),
+                mode: PinCreateMode::AdoptSelected,
+            }),
+            known_mux_names: vec!["live-mux".to_string()],
+            ..PinsContext::default()
+        };
+        let mut editor = PinCreateState::new(
+            ctx.pin_create_defaults.clone(),
+            ctx.pin_adopt_defaults.clone(),
+            ctx.known_mux_names.clone(),
+        );
+
+        for _ in 0.."scratch".len() {
+            editor.handle_key(key(KeyCode::Backspace));
+        }
+        for ch in "live_mux".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.name.value(), "live_mux");
+        assert_eq!(editor.mux_name.value(), "live-mux");
+        assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+
+        editor.handle_key(key(KeyCode::Down));
+        editor.handle_key(key(KeyCode::Char(' ')));
+        for _ in 0..6 {
+            editor.handle_key(key(KeyCode::Down));
+        }
+        for _ in 0.."live_mux".len() {
+            editor.handle_key(key(KeyCode::Backspace));
+        }
+        for ch in "not-live".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.name.value(), "live_mux");
+        assert_eq!(editor.mux_name.value(), "not-live");
+        assert_eq!(editor.mode, PinCreateMode::NewVariation);
+
+        for _ in 0.."not-live".len() {
+            editor.handle_key(key(KeyCode::Backspace));
+        }
+        for ch in "live-mux".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.name.value(), "live_mux");
+        assert_eq!(editor.mux_name.value(), "live-mux");
+        assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
+        assert_eq!(
+            editor
+                .request()
+                .expect("valid request")
+                .adopt_source_mux_name
+                .as_deref(),
+            Some("live-mux")
+        );
     }
 
     #[test]
@@ -1918,6 +2244,7 @@ mod tests {
                 cwd: "/workspace/project".to_string(),
                 mux_name: "ingest-mux".to_string(),
                 mux_socket: None,
+                adopt_source_mux_name: None,
                 launch_argv: Vec::new(),
                 store: PinCreateStore::Auto,
             }))

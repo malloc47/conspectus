@@ -689,6 +689,7 @@ impl App {
         crate::tui::widgets::pins::PinsContext {
             pin_create_defaults: self.pin_create_defaults(),
             pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
+            known_mux_names: self.used_mux_names().into_iter().collect(),
             pin_target: self.pin_mutation_target(),
             pin_bind_options: self.pin_bind_options(),
         }
@@ -1095,6 +1096,18 @@ impl App {
             }
             for pin in &database.snapshot().pins {
                 names.insert(pin.mux.name.clone());
+            }
+        }
+        names
+    }
+
+    fn used_mux_names(&self) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        if let Some(database) = self.database.as_ref() {
+            for node in &database.snapshot().nodes {
+                if let crate::model::GraphNode::MuxSession(mux) = node {
+                    names.insert(mux.native_id.clone());
+                }
             }
         }
         names
@@ -2581,6 +2594,22 @@ mod tests {
         assert_eq!(defaults.id, "work");
         assert_eq!(defaults.display_name, "work");
         assert_eq!(defaults.mux_name, "work");
+    }
+
+    #[test]
+    fn pins_context_exposes_known_live_mux_names() {
+        let snap = snapshot_session_with_mux();
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        let ctx = app.pins_context();
+        assert_eq!(ctx.known_mux_names, vec!["work".to_string()]);
     }
 
     #[test]

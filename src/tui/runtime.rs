@@ -271,7 +271,7 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     )));
                 }
                 Some(Action::PinsOverlayKey(key)) => {
-                    handle_pins_overlay_key(terminal, &mut app, &config, key)
+                    handle_pins_overlay_key(terminal, &mut app, &config, tmux.as_ref(), key)
                 }
                 Some(Action::SwitchView(view)) => apply_view_switch(&mut app, &config, view),
                 Some(Action::CycleView(delta)) => {
@@ -1068,6 +1068,7 @@ fn open_pin_create_action(app: &mut App) {
     let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create_options(
         ctx.pin_create_defaults,
         ctx.pin_adopt_defaults,
+        ctx.known_mux_names,
     );
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
@@ -1104,6 +1105,7 @@ fn open_pin_adopt_action(app: &mut App) {
     let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_options(
         ctx.pin_create_defaults,
         ctx.pin_adopt_defaults,
+        ctx.known_mux_names,
     );
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
@@ -1579,6 +1581,7 @@ fn handle_pins_overlay_key(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
+    tmux: &dyn TmuxRunner,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
     use crate::tui::widgets::pins::PinsOutcome;
@@ -1593,11 +1596,11 @@ fn handle_pins_overlay_key(
             app.close_pins_overlay();
         }
         PinsOutcome::ApplyAndStay(action) => {
-            apply_pins_action_and_refresh(terminal, app, config, action);
+            apply_pins_action_and_refresh(terminal, app, config, tmux, action);
         }
         PinsOutcome::ApplyAndClose(action) => {
             app.close_pins_overlay();
-            apply_pins_action_and_refresh(terminal, app, config, action);
+            apply_pins_action_and_refresh(terminal, app, config, tmux, action);
         }
     }
 }
@@ -1614,11 +1617,12 @@ fn apply_pins_action_and_refresh(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
+    tmux: &dyn TmuxRunner,
     action: crate::tui::widgets::pins::PinsAction,
 ) {
     use crate::tui::widgets::pins::PinsAction;
     match action {
-        PinsAction::CreatePin(request) => create_pin_action(app, config, request),
+        PinsAction::CreatePin(request) => create_pin_action(app, config, tmux, request),
         PinsAction::EditPin(request) => edit_pin_action(app, config, request),
         PinsAction::BindPin(request) => bind_pin_action(app, config, request),
         PinsAction::RemovePin(request) => remove_pin_controls_action(app, config, request),
@@ -1675,6 +1679,7 @@ pub(super) fn apply_controls_action_and_refresh(
 fn create_pin_action(
     app: &mut App,
     config: &RunConfig,
+    tmux: &dyn TmuxRunner,
     request: crate::tui::widgets::pins::PinCreateRequest,
 ) {
     match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
@@ -1688,17 +1693,47 @@ fn create_pin_action(
             } else {
                 "unchanged"
             };
+            let rename_status = apply_pin_adopt_mux_rename(tmux, &request);
             refresh(app, config);
-            app.update(Msg::SetStatus(Some(format!(
+            let mut message = format!(
                 "{verb} pin `{}` in {} ({})",
                 entry.id,
                 outcome.path.display(),
                 pin_store_label(store_kind)
-            ))));
+            );
+            if let Some(rename_status) = rename_status {
+                message.push_str("; ");
+                message.push_str(&rename_status);
+            }
+            app.update(Msg::SetStatus(Some(message)));
         }
         Err(err) => {
             app.update(Msg::SetStatus(Some(format!("pin create failed: {err}"))));
         }
+    }
+}
+
+fn apply_pin_adopt_mux_rename(
+    tmux: &dyn TmuxRunner,
+    request: &crate::tui::widgets::pins::PinCreateRequest,
+) -> Option<String> {
+    let source = request.adopt_source_mux_name.as_deref()?;
+    if source == request.mux_name {
+        return Some(format!("adopted existing mux `{source}`"));
+    }
+    match tmux.rename_session(request.mux_socket.as_deref(), source, &request.mux_name) {
+        Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => Some(format!(
+            "renamed adopted mux `{source}` to `{}`",
+            request.mux_name
+        )),
+        Ok(other) => Some(format!(
+            "pin written, but adopted mux rename `{source}` -> `{}` failed: {other:?}",
+            request.mux_name
+        )),
+        Err(err) => Some(format!(
+            "pin written, but adopted mux rename `{source}` -> `{}` errored: {err}",
+            request.mux_name
+        )),
     }
 }
 
@@ -2793,6 +2828,7 @@ mod tests {
             cwd: project.path().display().to_string(),
             mux_name: "ingest-mux".to_string(),
             mux_socket: Some("scratch".to_string()),
+            adopt_source_mux_name: None,
             launch_argv: vec!["codex".to_string(), "--resume".to_string()],
             store: PinCreateStore::Project,
         };
@@ -2831,6 +2867,7 @@ mod tests {
             cwd: project.path().display().to_string(),
             mux_name: "scratch".to_string(),
             mux_socket: None,
+            adopt_source_mux_name: None,
             launch_argv: Vec::new(),
             store: PinCreateStore::User,
         };
@@ -2840,6 +2877,58 @@ mod tests {
         assert_eq!(outcome.path, xdg.join(crate::config::USER_CONFIG_RELATIVE));
         assert!(outcome.path.exists());
         assert!(!project.path().join(".conspectus.toml").exists());
+    }
+
+    #[test]
+    fn pin_adopt_mux_rename_renames_source_mux_to_requested_mux_name() {
+        let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
+        let request = PinCreateRequest {
+            id: "agentdeck-conspectus-2".to_string(),
+            display_name: "agentdeck-conspectus-2".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "agentdeck-conspectus-2".to_string(),
+            mux_socket: Some("scratch".to_string()),
+            adopt_source_mux_name: Some("agentdeck_conspectus".to_string()),
+            launch_argv: Vec::new(),
+            store: PinCreateStore::Project,
+        };
+
+        let status = apply_pin_adopt_mux_rename(&tmux, &request).expect("rename status");
+
+        assert_eq!(
+            status,
+            "renamed adopted mux `agentdeck_conspectus` to `agentdeck-conspectus-2`"
+        );
+        assert_eq!(
+            tmux.rename_calls(),
+            vec![(
+                Some("scratch".to_string()),
+                "agentdeck_conspectus".to_string(),
+                "agentdeck-conspectus-2".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn pin_adopt_mux_rename_skips_when_source_already_matches_target() {
+        let tmux = crate::discovery::tmux::FakeTmux::with_sessions("");
+        let request = PinCreateRequest {
+            id: "work".to_string(),
+            display_name: "work".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "work".to_string(),
+            mux_socket: None,
+            adopt_source_mux_name: Some("work".to_string()),
+            launch_argv: Vec::new(),
+            store: PinCreateStore::Project,
+        };
+
+        let status = apply_pin_adopt_mux_rename(&tmux, &request).expect("rename status");
+
+        assert_eq!(status, "adopted existing mux `work`");
+        assert!(tmux.rename_calls().is_empty());
     }
 
     #[test]
