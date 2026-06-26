@@ -29,9 +29,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
+use crate::discovery::harness::launch_argv_for;
 use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
 use crate::tui::widgets::popup_frame::themed_popup;
+
+const PIN_CREATE_LABEL_WIDTH: usize = 11;
+const PIN_CREATE_VALUE_GAP: &str = "  ";
+const PIN_CREATE_TEXT_GUTTER: &str = "  ";
 
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
@@ -46,6 +51,9 @@ pub struct PinsContext {
     pub pin_adopt_defaults: Option<PinCreateDefaults>,
     pub known_harness_keys: Vec<String>,
     pub known_mux_names: Vec<String>,
+    pub known_pin_ids: Vec<String>,
+    pub known_pin_mux_names: Vec<String>,
+    pub selected_pin_id: Option<String>,
     pub pin_target: Option<PinMutationTarget>,
     pub pin_bind_options: Vec<PinBindOption>,
 }
@@ -218,6 +226,9 @@ pub struct PinCreateState {
     mux_overridden: bool,
     known_harness_keys: Vec<String>,
     known_mux_names: Vec<String>,
+    known_pin_ids: Vec<String>,
+    known_pin_mux_names: Vec<String>,
+    selected_pin_id: Option<String>,
     adopt_auto_uncheck_armed: bool,
     adopt_auto_checked_by_collision: bool,
     error: Option<String>,
@@ -281,7 +292,15 @@ impl PinsOverlayState {
     /// `defaults`. Used by the direct shortcut so the operator
     /// skips the menu step.
     pub fn open_with_create(defaults: PinCreateDefaults) -> Self {
-        Self::open_with_create_options(defaults, None, Vec::new(), Vec::new())
+        Self::open_with_create_options(
+            defaults,
+            None,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
     }
 
     pub fn open_with_create_options(
@@ -289,9 +308,20 @@ impl PinsOverlayState {
         adopt_defaults: Option<PinCreateDefaults>,
         known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
+        known_pin_ids: Vec<String>,
+        known_pin_mux_names: Vec<String>,
+        selected_pin_id: Option<String>,
     ) -> Self {
         let initial = adopt_defaults.clone().unwrap_or(defaults);
-        Self::open_with_create_initial(initial, adopt_defaults, known_harness_keys, known_mux_names)
+        Self::open_with_create_initial(
+            initial,
+            adopt_defaults,
+            known_harness_keys,
+            known_mux_names,
+            known_pin_ids,
+            known_pin_mux_names,
+            selected_pin_id,
+        )
     }
 
     pub fn open_with_adopt_options(
@@ -299,9 +329,20 @@ impl PinsOverlayState {
         adopt_defaults: Option<PinCreateDefaults>,
         known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
+        known_pin_ids: Vec<String>,
+        known_pin_mux_names: Vec<String>,
+        selected_pin_id: Option<String>,
     ) -> Self {
         let initial = adopt_defaults.clone().unwrap_or_else(|| defaults.clone());
-        Self::open_with_create_initial(initial, adopt_defaults, known_harness_keys, known_mux_names)
+        Self::open_with_create_initial(
+            initial,
+            adopt_defaults,
+            known_harness_keys,
+            known_mux_names,
+            known_pin_ids,
+            known_pin_mux_names,
+            selected_pin_id,
+        )
     }
 
     fn open_with_create_initial(
@@ -309,15 +350,23 @@ impl PinsOverlayState {
         adopt_defaults: Option<PinCreateDefaults>,
         known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
+        known_pin_ids: Vec<String>,
+        known_pin_mux_names: Vec<String>,
+        selected_pin_id: Option<String>,
     ) -> Self {
         Self {
             cursor: PinsCursor::Action(0),
-            sub_editor: Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
-                initial,
-                adopt_defaults,
-                known_harness_keys,
-                known_mux_names,
-            )))),
+            sub_editor: Some(PinsSubEditor::Create(Box::new(
+                PinCreateState::new_with_guards(
+                    initial,
+                    adopt_defaults,
+                    known_harness_keys,
+                    known_mux_names,
+                    known_pin_ids,
+                    known_pin_mux_names,
+                    selected_pin_id,
+                ),
+            ))),
         }
     }
 
@@ -408,12 +457,17 @@ impl PinsOverlayState {
                 .pin_adopt_defaults
                 .clone()
                 .unwrap_or_else(|| ctx.pin_create_defaults.clone());
-            self.sub_editor = Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
-                initial,
-                ctx.pin_adopt_defaults.clone(),
-                ctx.known_harness_keys.clone(),
-                ctx.known_mux_names.clone(),
-            ))));
+            self.sub_editor = Some(PinsSubEditor::Create(Box::new(
+                PinCreateState::new_with_guards(
+                    initial,
+                    ctx.pin_adopt_defaults.clone(),
+                    ctx.known_harness_keys.clone(),
+                    ctx.known_mux_names.clone(),
+                    ctx.known_pin_ids.clone(),
+                    ctx.known_pin_mux_names.clone(),
+                    ctx.selected_pin_id.clone(),
+                ),
+            )));
             PinsOutcome::Continue
         } else if label == "launch" {
             // Launch has no sub-editor — the runtime takes the
@@ -571,11 +625,32 @@ enum PinRemoveOutcome {
 impl PinCreateState {
     const LOGICAL_STORE_FIELD: usize = 9;
 
+    #[cfg(test)]
     fn new(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
         known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
+    ) -> Self {
+        Self::new_with_guards(
+            defaults,
+            adopt_defaults,
+            known_harness_keys,
+            known_mux_names,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+    }
+
+    fn new_with_guards(
+        defaults: PinCreateDefaults,
+        adopt_defaults: Option<PinCreateDefaults>,
+        known_harness_keys: Vec<String>,
+        known_mux_names: Vec<String>,
+        known_pin_ids: Vec<String>,
+        known_pin_mux_names: Vec<String>,
+        selected_pin_id: Option<String>,
     ) -> Self {
         let name = if !defaults.display_name.is_empty() {
             defaults.display_name.clone()
@@ -623,6 +698,9 @@ impl PinCreateState {
             mux_overridden,
             known_harness_keys,
             known_mux_names,
+            known_pin_ids,
+            known_pin_mux_names,
+            selected_pin_id,
             adopt_auto_uncheck_armed: defaults.mode == PinCreateMode::AdoptSelected,
             adopt_auto_checked_by_collision: false,
             error: None,
@@ -895,9 +973,24 @@ impl PinCreateState {
         let display_name = optional(self.display_name.value()).unwrap_or_else(|| id.clone());
         let mux_name = optional(self.mux_name.value()).unwrap_or_else(|| display_name.clone());
         let mux_socket = optional(self.mux_socket.value());
-        let launch_argv = optional(self.launch_argv.value())
-            .map(|raw| raw.split_whitespace().map(str::to_string).collect())
-            .unwrap_or_default();
+        if self.known_pin_ids.iter().any(|known| known == &id) {
+            return Err(format!("pin create: pin `{id}` already exists"));
+        }
+        if self.mode == PinCreateMode::AdoptSelected && self.selected_pin_id.is_some() {
+            let pin_id = self.selected_pin_id.as_deref().unwrap_or_default();
+            return Err(format!("pin create: `{pin_id}` is already pinned"));
+        }
+        if self.mode == PinCreateMode::NewVariation && self.mux_name_collides(&mux_name) {
+            return Err(format!(
+                "pin create: mux name `{mux_name}` is already used; choose a new name or edit the existing pin"
+            ));
+        }
+        let launch_argv = self.launch_argv_override()?;
+        if launch_argv.is_empty() && self.default_launch_argv().is_empty() {
+            return Err(format!(
+                "pin create: launch argv is required for unknown harness `{harness}`"
+            ));
+        }
         Ok(PinCreateRequest {
             id,
             display_name,
@@ -908,6 +1001,36 @@ impl PinCreateState {
             adopt_source_mux_name: self.adopt_source_mux_name(),
             launch_argv,
             store: self.store,
+        })
+    }
+
+    fn launch_argv_override(&self) -> Result<Vec<String>, String> {
+        let raw = self.launch_argv.value().trim();
+        if raw.is_empty() {
+            Ok(Vec::new())
+        } else {
+            parse_launch_argv(raw)
+        }
+    }
+
+    fn default_launch_argv(&self) -> Vec<String> {
+        launch_argv_for(self.harness.value().trim())
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn effective_launch_argv(&self) -> Result<LaunchArgvPreview, String> {
+        let override_argv = self.launch_argv_override()?;
+        if !override_argv.is_empty() {
+            return Ok(LaunchArgvPreview {
+                source: LaunchArgvSource::Override,
+                argv: override_argv,
+            });
+        }
+        Ok(LaunchArgvPreview {
+            source: LaunchArgvSource::Default,
+            argv: self.default_launch_argv(),
         })
     }
 
@@ -935,6 +1058,14 @@ impl PinCreateState {
             .map(String::as_str)
     }
 
+    fn mux_name_collides(&self, mux_name: &str) -> bool {
+        self.known_mux_names.iter().any(|known| known == mux_name)
+            || self
+                .known_pin_mux_names
+                .iter()
+                .any(|known| known == mux_name)
+    }
+
     fn mux_name_display(&self) -> String {
         let value = self.mux_name.value();
         match self.adopt_source_mux_name() {
@@ -953,6 +1084,18 @@ impl PinCreateState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchArgvSource {
+    Default,
+    Override,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LaunchArgvPreview {
+    source: LaunchArgvSource,
+    argv: Vec<String>,
+}
+
 fn normalized_harness_keys<'a>(
     known_harness_keys: Vec<String>,
     extra_keys: impl IntoIterator<Item = &'a String>,
@@ -968,6 +1111,92 @@ fn normalized_harness_keys<'a>(
     keys.sort();
     keys.dedup();
     keys
+}
+
+fn parse_launch_argv(raw: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut chars = raw.chars().peekable();
+    let mut quote: Option<char> = None;
+    let mut in_arg = false;
+
+    while let Some(ch) = chars.next() {
+        match (quote, ch) {
+            (Some(q), c) if c == q => {
+                quote = None;
+                in_arg = true;
+            }
+            (Some('"'), '\\') => match chars.next() {
+                Some(next @ ('"' | '\\' | '$' | '`')) => {
+                    current.push(next);
+                    in_arg = true;
+                }
+                Some(next) => {
+                    current.push('\\');
+                    current.push(next);
+                    in_arg = true;
+                }
+                None => {
+                    current.push('\\');
+                    in_arg = true;
+                }
+            },
+            (Some(_), c) => {
+                current.push(c);
+                in_arg = true;
+            }
+            (None, '\'' | '"') => {
+                quote = Some(ch);
+                in_arg = true;
+            }
+            (None, '\\') => match chars.next() {
+                Some(next) => {
+                    current.push(next);
+                    in_arg = true;
+                }
+                None => return Err("pin create: launch argv has a trailing escape".to_string()),
+            },
+            (None, c) if c.is_whitespace() => {
+                if in_arg {
+                    args.push(std::mem::take(&mut current));
+                    in_arg = false;
+                }
+            }
+            (None, c) => {
+                current.push(c);
+                in_arg = true;
+            }
+        }
+    }
+
+    if let Some(q) = quote {
+        return Err(format!(
+            "pin create: launch argv has an unclosed `{q}` quote"
+        ));
+    }
+    if in_arg {
+        args.push(current);
+    }
+    Ok(args)
+}
+
+fn display_launch_argv(argv: &[String]) -> String {
+    argv.iter()
+        .map(|arg| shell_display_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_display_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "''".to_string();
+    }
+    if arg.chars().all(|ch| {
+        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | ':' | '=' | '+')
+    }) {
+        return arg.to_string();
+    }
+    format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
 fn pin_id_candidate(raw: &str) -> String {
@@ -1336,7 +1565,7 @@ impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let cursor = self.state.render_cursor();
-        let content_lines = 14 + usize::from(self.state.error.is_some()) * 2;
+        let content_lines = 15 + usize::from(self.state.error.is_some()) * 2;
         let modal = pin_create_modal_rect(area, content_lines);
         let inner_width = modal.width.saturating_sub(2) as usize;
         let mut lines = vec![
@@ -1351,6 +1580,7 @@ impl Widget for PinCreateWidget<'_> {
                 cursor,
                 inner_width,
             ),
+            pin_create_launch_preview_field(self.state, inner_width),
             line![""],
             line![span!(Modifier::DIM; "Advanced identity")],
             pin_create_input_field(5, "id", &self.state.id, cursor, inner_width),
@@ -1416,23 +1646,49 @@ fn pin_create_value_field(
     inner_width: usize,
 ) -> Line<'static> {
     let active = cursor == idx;
+    let (prefix, label_style) = pin_create_prefix(label, active);
+    let value_width = inner_width.saturating_sub(prefix.chars().count()).max(1);
+    let display = pin_field_visible_window(value, value_cursor, value_width, active);
+    let value_style = pin_create_entry_style(active);
+    let left_style = pin_field_edge_style(display.left_indicator, display.edge_style);
+    let right_style = pin_field_edge_style(display.right_indicator, display.edge_style);
+    line![
+        span!(label_style; "{prefix}"),
+        span!(left_style; "{}", display.left_indicator),
+        span!(value_style; "{}", display.before_cursor),
+        span!(display.cursor_style; "{}", display.cursor_text),
+        span!(value_style; "{}", display.after_cursor),
+        span!(right_style; "{}", display.right_indicator),
+    ]
+}
+
+fn pin_create_prefix(label: &'static str, active: bool) -> (String, Style) {
     let marker = if active { "> " } else { "  " };
     let label_style = if active {
         Style::default().add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     };
-    let prefix = format!("{marker}{label:11} ");
-    let value_width = inner_width.saturating_sub(prefix.chars().count()).max(1);
-    let display = pin_field_visible_window(value, value_cursor, value_width, active);
-    line![
-        span!(label_style; "{prefix}"),
-        span!(display.edge_style; "{}", display.left_indicator),
-        span!("{}", display.before_cursor),
-        span!(display.cursor_style; "{}", display.cursor_text),
-        span!("{}", display.after_cursor),
-        span!(display.edge_style; "{}", display.right_indicator),
-    ]
+    (
+        format!("{marker}{label:PIN_CREATE_LABEL_WIDTH$}{PIN_CREATE_VALUE_GAP}"),
+        label_style,
+    )
+}
+
+fn pin_create_entry_style(active: bool) -> Style {
+    if active {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Gray)
+    }
+}
+
+fn pin_field_edge_style(indicator: &str, edge_style: Style) -> Style {
+    if indicator.trim().is_empty() {
+        Style::default()
+    } else {
+        edge_style
+    }
 }
 
 fn pin_create_mode_field(
@@ -1463,13 +1719,7 @@ fn pin_create_harness_field(
     const HARNESS_VALUE_SLOT_WIDTH: usize = 18;
 
     let active = cursor == 3;
-    let marker = if active { "> " } else { "  " };
-    let label_style = if active {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    let prefix = format!("{marker}{:11} ", "harness");
+    let (prefix, label_style) = pin_create_prefix("harness", active);
     let available = inner_width.saturating_sub(prefix.chars().count());
     if state.harness_warning().is_some() {
         return pin_create_harness_custom_field(state, active, label_style, prefix, available);
@@ -1486,22 +1736,29 @@ fn pin_create_harness_field(
         value_width,
         active,
     );
-    let mut spans = vec![
-        span!(label_style; "{prefix}"),
-        span!(display.edge_style; "{}", display.left_indicator),
-        span!("{}", display.before_cursor),
-        span!(display.cursor_style; "{}", display.cursor_text),
-        span!("{}", display.after_cursor),
-        span!(display.edge_style; "{}", display.right_indicator),
-    ];
+    let value_style = pin_create_entry_style(active);
+    let left_style = pin_field_edge_style(display.left_indicator, display.edge_style);
     let display_width = display.left_indicator.chars().count()
         + display.before_cursor.chars().count()
         + display.cursor_text.chars().count()
         + display.after_cursor.chars().count()
         + display.right_indicator.chars().count();
     let padding = value_width.saturating_sub(display_width);
+    let right_style = if active && padding > 0 && display.right_indicator.trim().is_empty() {
+        value_style
+    } else {
+        pin_field_edge_style(display.right_indicator, display.edge_style)
+    };
+    let mut spans = vec![
+        span!(label_style; "{prefix}"),
+        span!(left_style; "{}", display.left_indicator),
+        span!(value_style; "{}", display.before_cursor),
+        span!(display.cursor_style; "{}", display.cursor_text),
+        span!(value_style; "{}", display.after_cursor),
+        span!(right_style; "{}", display.right_indicator),
+    ];
     if padding > 0 {
-        spans.push(span!("{}", " ".repeat(padding)));
+        spans.push(span!(value_style; "{}", " ".repeat(padding)));
     }
     spans.extend(suffix);
     Line::from(spans)
@@ -1523,13 +1780,16 @@ fn pin_create_harness_custom_field(
         value_width,
         active,
     );
+    let value_style = pin_create_entry_style(active);
+    let left_style = pin_field_edge_style(display.left_indicator, display.edge_style);
+    let right_style = pin_field_edge_style(display.right_indicator, display.edge_style);
     let mut spans = vec![
         span!(label_style; "{prefix}"),
-        span!(display.edge_style; "{}", display.left_indicator),
-        span!("{}", display.before_cursor),
+        span!(left_style; "{}", display.left_indicator),
+        span!(value_style; "{}", display.before_cursor),
         span!(display.cursor_style; "{}", display.cursor_text),
-        span!("{}", display.after_cursor),
-        span!(display.edge_style; "{}", display.right_indicator),
+        span!(value_style; "{}", display.after_cursor),
+        span!(right_style; "{}", display.right_indicator),
     ];
     spans.extend(suffix);
     Line::from(spans)
@@ -1570,25 +1830,58 @@ fn span_width(spans: &[Span<'_>]) -> usize {
     spans.iter().map(|span| span.content.chars().count()).sum()
 }
 
+fn pin_create_launch_preview_field(state: &PinCreateState, inner_width: usize) -> Line<'static> {
+    let (prefix, _) = pin_create_prefix("command", false);
+    let value_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(PIN_CREATE_TEXT_GUTTER.chars().count())
+        .max(1);
+    let mut spans = vec![span!(Modifier::DIM; "{prefix}")];
+    match state.effective_launch_argv() {
+        Ok(LaunchArgvPreview { source: _, argv }) if argv.is_empty() => {
+            spans.push(span!("{}", PIN_CREATE_TEXT_GUTTER));
+            spans.push(span!(Style::default().fg(Color::Yellow); "no default for harness"));
+        }
+        Ok(LaunchArgvPreview { source, argv }) => {
+            let source_label = match source {
+                LaunchArgvSource::Default => "default",
+                LaunchArgvSource::Override => "override",
+            };
+            let raw = format!("{source_label}: {}", display_launch_argv(&argv));
+            spans.push(span!("{}", PIN_CREATE_TEXT_GUTTER));
+            spans.push(span!(Modifier::DIM; "{}", truncate_chars(&raw, value_width)));
+        }
+        Err(err) => {
+            spans.push(span!("{}", PIN_CREATE_TEXT_GUTTER));
+            spans.push(
+                span!(Style::default().fg(Color::Yellow); "{}", truncate_chars(&err, value_width)),
+            );
+        }
+    }
+    Line::from(spans)
+}
+
 fn pin_create_store_field(
     store: PinCreateStore,
     cursor: usize,
     inner_width: usize,
 ) -> Line<'static> {
-    let marker = if cursor == 9 { "> " } else { "  " };
-    let label_style = if cursor == 9 {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    let raw = format!(
-        "{marker}{:11} {} {} {}",
-        "store",
+    let active = cursor == 9;
+    let (prefix, label_style) = pin_create_prefix("store", active);
+    let value = format!(
+        "{} {} {}",
         option_token("auto", store == PinCreateStore::Auto),
         option_token("project", store == PinCreateStore::Project),
         option_token("user", store == PinCreateStore::User),
     );
-    line![span!(label_style; "{}", truncate_chars(&raw, inner_width))]
+    let value_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(PIN_CREATE_TEXT_GUTTER.chars().count());
+    line![
+        span!(label_style; "{prefix}"),
+        span!("{}", PIN_CREATE_TEXT_GUTTER),
+        span!(pin_create_entry_style(active); "{}", truncate_chars(&value, value_width))
+    ]
 }
 
 fn pin_create_static_field(
@@ -1598,14 +1891,9 @@ fn pin_create_static_field(
     cursor: usize,
     inner_width: usize,
 ) -> Line<'static> {
-    let marker = if cursor == idx { "> " } else { "  " };
-    let style = if cursor == idx {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
+    let (prefix, style) = pin_create_prefix(label, cursor == idx);
     let value = if value.trim().is_empty() { "-" } else { value };
-    let raw = format!("{marker}{label:11} {value}");
+    let raw = format!("{prefix}{PIN_CREATE_TEXT_GUTTER}{value}");
     line![span!(style; "{}", truncate_chars(&raw, inner_width))]
 }
 
@@ -1618,18 +1906,20 @@ fn option_pair_line(
     right_selected: bool,
     inner_width: usize,
 ) -> Line<'static> {
-    let marker = if active { "> " } else { "  " };
-    let style = if active {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-    let raw = format!(
-        "{marker}{label:11} {} {}",
+    let (prefix, style) = pin_create_prefix(label, active);
+    let value = format!(
+        "{} {}",
         option_token(left, left_selected),
         option_token(right, right_selected)
     );
-    line![span!(style; "{}", truncate_chars(&raw, inner_width))]
+    let value_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(PIN_CREATE_TEXT_GUTTER.chars().count());
+    line![
+        span!(style; "{prefix}"),
+        span!("{}", PIN_CREATE_TEXT_GUTTER),
+        span!(pin_create_entry_style(active); "{}", truncate_chars(&value, value_width))
+    ]
 }
 
 fn option_token(label: &str, selected: bool) -> String {
@@ -1661,11 +1951,18 @@ fn pin_field_visible_window(
     active: bool,
 ) -> PinFieldVisibleWindow {
     let width = width.max(1);
-    let edge_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
+    let edge_style = if active {
+        Style::default()
+            .fg(Color::Cyan)
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    };
     let cursor_style = if active {
-        Style::default().add_modifier(Modifier::REVERSED)
+        Style::default().fg(Color::Black).bg(Color::White)
     } else {
         Style::default()
     };
@@ -2276,8 +2573,15 @@ mod tests {
             mux_name: "work".to_string(),
             mode: PinCreateMode::AdoptSelected,
         };
-        let mut state =
-            PinsOverlayState::open_with_adopt_options(defaults, Some(adopt), vec![], vec![]);
+        let mut state = PinsOverlayState::open_with_adopt_options(
+            defaults,
+            Some(adopt),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            None,
+        );
 
         match state.sub_editor() {
             Some(PinsSubEditor::Create(editor)) => {
@@ -2420,6 +2724,242 @@ mod tests {
     }
 
     #[test]
+    fn create_form_launch_preview_uses_default_when_override_is_blank() {
+        let editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["codex".to_string()],
+            vec![],
+        );
+
+        let preview = editor.effective_launch_argv().expect("preview");
+        assert_eq!(preview.source, LaunchArgvSource::Default);
+        assert_eq!(preview.argv, vec!["codex".to_string()]);
+        assert!(
+            line_content(pin_create_launch_preview_field(&editor, 74)).contains("default: codex")
+        );
+    }
+
+    #[test]
+    fn create_form_launch_preview_uses_shell_parsed_override() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["codex".to_string()],
+            vec![],
+        );
+
+        editor.launch_argv =
+            TextInputState::new(" launch argv ", "sandbox --name 'two words'".to_string());
+
+        let preview = editor.effective_launch_argv().expect("preview");
+        assert_eq!(preview.source, LaunchArgvSource::Override);
+        assert_eq!(
+            preview.argv,
+            vec![
+                "sandbox".to_string(),
+                "--name".to_string(),
+                "two words".to_string()
+            ]
+        );
+        assert!(
+            line_content(pin_create_launch_preview_field(&editor, 74))
+                .contains("override: sandbox --name 'two words'")
+        );
+        assert_eq!(
+            editor.request().expect("valid request").launch_argv,
+            preview.argv
+        );
+    }
+
+    #[test]
+    fn create_form_clearing_launch_override_returns_to_default() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["codex".to_string()],
+            vec![],
+        );
+
+        editor.launch_argv = TextInputState::new(" launch argv ", "sandbox codex".to_string());
+        assert_eq!(
+            editor.effective_launch_argv().expect("preview").source,
+            LaunchArgvSource::Override
+        );
+        editor.launch_argv = TextInputState::new(" launch argv ", String::new());
+        let preview = editor.effective_launch_argv().expect("preview");
+        assert_eq!(preview.source, LaunchArgvSource::Default);
+        assert_eq!(preview.argv, vec!["codex".to_string()]);
+        assert_eq!(
+            editor.request().expect("valid request").launch_argv,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn create_form_requires_launch_override_for_unknown_harness() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "custom-harness".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["custom-harness".to_string()],
+            vec![],
+        );
+
+        assert_eq!(
+            editor.request().expect_err("missing launch argv"),
+            "pin create: launch argv is required for unknown harness `custom-harness`"
+        );
+        editor.launch_argv = TextInputState::new(" launch argv ", "custom run".to_string());
+        assert_eq!(
+            editor.request().expect("valid request").launch_argv,
+            vec!["custom".to_string(), "run".to_string()]
+        );
+    }
+
+    #[test]
+    fn create_form_rejects_existing_pin_id() {
+        let editor = PinCreateState::new_with_guards(
+            PinCreateDefaults {
+                id: "ingest".to_string(),
+                display_name: "Ingest".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "ingest-new".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+            vec![],
+            vec!["ingest".to_string()],
+            vec![],
+            None,
+        );
+
+        assert_eq!(
+            editor.request().expect_err("duplicate id should fail"),
+            "pin create: pin `ingest` already exists"
+        );
+    }
+
+    #[test]
+    fn create_form_rejects_non_adopt_mux_name_collisions() {
+        let editor = PinCreateState::new_with_guards(
+            PinCreateDefaults {
+                id: "ingest-copy".to_string(),
+                display_name: "Ingest Copy".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "ingest".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+            vec![],
+            vec![],
+            vec!["ingest".to_string()],
+            None,
+        );
+
+        assert_eq!(
+            editor
+                .request()
+                .expect_err("duplicate mux name should fail"),
+            "pin create: mux name `ingest` is already used; choose a new name or edit the existing pin"
+        );
+    }
+
+    #[test]
+    fn create_form_rejects_adopt_when_selected_row_is_already_pinned() {
+        let editor = PinCreateState::new_with_guards(
+            PinCreateDefaults {
+                id: "ingest-copy".to_string(),
+                display_name: "Ingest Copy".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "ingest".to_string(),
+                mode: PinCreateMode::AdoptSelected,
+            },
+            Some(PinCreateDefaults {
+                id: "ingest-copy".to_string(),
+                display_name: "Ingest Copy".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "ingest".to_string(),
+                mode: PinCreateMode::AdoptSelected,
+            }),
+            vec![],
+            vec!["ingest".to_string()],
+            vec![],
+            vec!["ingest".to_string()],
+            Some("ingest".to_string()),
+        );
+
+        assert_eq!(
+            editor
+                .request()
+                .expect_err("already-pinned adopt should fail"),
+            "pin create: `ingest` is already pinned"
+        );
+    }
+
+    #[test]
+    fn create_form_reports_invalid_launch_argv_quotes() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["codex".to_string()],
+            vec![],
+        );
+
+        editor.launch_argv =
+            TextInputState::new(" launch argv ", "codex 'unterminated".to_string());
+
+        assert_eq!(
+            editor.request().expect_err("invalid argv"),
+            "pin create: launch argv has an unclosed `'` quote"
+        );
+        assert!(
+            line_content(pin_create_launch_preview_field(&editor, 74))
+                .contains("unclosed `'` quote")
+        );
+    }
+
+    #[test]
     fn create_form_allows_freeform_harness_with_warning() {
         let mut editor = PinCreateState::new(
             PinCreateDefaults {
@@ -2443,6 +2983,7 @@ mod tests {
         for ch in "custom-harness".chars() {
             editor.handle_key(key(KeyCode::Char(ch)));
         }
+        editor.launch_argv = TextInputState::new(" launch argv ", "custom run".to_string());
 
         assert_eq!(
             editor.harness_warning().as_deref(),

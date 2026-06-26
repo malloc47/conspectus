@@ -692,6 +692,9 @@ impl App {
             pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
             known_harness_keys: self.known_harness_keys().into_iter().collect(),
             known_mux_names: self.used_mux_names().into_iter().collect(),
+            known_pin_ids: self.used_pin_ids().into_iter().collect(),
+            known_pin_mux_names: self.used_pin_mux_names().into_iter().collect(),
+            selected_pin_id: self.selected_pin_id(),
             pin_target: self.pin_mutation_target(),
             pin_bind_options: self.pin_bind_options(),
         }
@@ -1122,8 +1125,18 @@ impl App {
     }
 
     fn pin_adopt_defaults_if_available(&self) -> Option<PinCreateDefaults> {
-        self.selection_is_live_mux()
+        (self.selection_is_live_mux() && self.selected_pin_id().is_none())
             .then(|| self.pin_adopt_defaults())
+    }
+
+    fn used_pin_ids(&self) -> BTreeSet<String> {
+        let mut ids = BTreeSet::new();
+        if let Some(database) = self.database.as_ref() {
+            for pin in &database.snapshot().pins {
+                ids.insert(pin.id.clone());
+            }
+        }
+        ids
     }
 
     fn unique_pin_mux_name(&self, base: &str) -> String {
@@ -1166,6 +1179,12 @@ impl App {
             }
         }
         names
+    }
+
+    fn selected_pin_id(&self) -> Option<String> {
+        let selection = self.selection.as_ref()?;
+        let row = self.tree.rows.iter().find(|row| &row.id == selection)?;
+        row_pin_id(row).map(str::to_string)
     }
 
     fn known_harness_keys(&self) -> BTreeSet<String> {
@@ -2745,6 +2764,63 @@ mod tests {
 
         let ctx = app.pins_context();
         assert_eq!(ctx.known_mux_names, vec!["work".to_string()]);
+    }
+
+    #[test]
+    fn pins_context_does_not_offer_adopt_for_already_pinned_mux() {
+        let mut snap = snapshot_session_with_mux();
+        snap.pins.push(PinCandidate {
+            id: "work-pin".to_string(),
+            display_name: "Work".to_string(),
+            harness: "claude-code".to_string(),
+            cwd: "/p/proj".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "work".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/proj/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::StaleMux {
+                mux: crate::model::MuxSessionId::new("work"),
+            }),
+        });
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snap,
+            home: None,
+            now: None,
+            filter: crate::tui::RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Repo,
+            sort: crate::tui::Sort::Hierarchy,
+        });
+        let mut app = App::new(RunConfig {
+            default_view: View::Mux,
+            mux_grouping: crate::tui::MuxGrouping::Repo,
+            ..RunConfig::defaults()
+        });
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let mux_row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::MuxSession(mux) if mux.native_id == "work" => Some(row.id.clone()),
+                _ => None,
+            })
+            .expect("pinned mux row");
+        app.set_selection(mux_row_id);
+
+        let ctx = app.pins_context();
+        assert_eq!(ctx.selected_pin_id.as_deref(), Some("work-pin"));
+        assert_eq!(ctx.known_pin_ids, vec!["work-pin".to_string()]);
+        assert_eq!(ctx.known_pin_mux_names, vec!["work".to_string()]);
+        assert_eq!(ctx.pin_adopt_defaults, None);
     }
 
     #[test]

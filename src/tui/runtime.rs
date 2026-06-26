@@ -1070,6 +1070,9 @@ fn open_pin_create_action(app: &mut App) {
         ctx.pin_adopt_defaults,
         ctx.known_harness_keys,
         ctx.known_mux_names,
+        ctx.known_pin_ids,
+        ctx.known_pin_mux_names,
+        ctx.selected_pin_id,
     );
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
@@ -1096,18 +1099,21 @@ fn open_pin_adopt_action(app: &mut App) {
     // seeded from the mux's name, observed cwd, and current
     // attribution. Refuse on any other selection so the operator
     // doesn't have to type those fields from scratch.
-    if !app.selection_is_live_mux() {
+    let ctx = app.pins_context();
+    if ctx.pin_adopt_defaults.is_none() {
         app.update(Msg::SetStatus(Some(
             "pin adopt: select a live mux row first".to_string(),
         )));
         return;
     }
-    let ctx = app.pins_context();
     let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_options(
         ctx.pin_create_defaults,
         ctx.pin_adopt_defaults,
         ctx.known_harness_keys,
         ctx.known_mux_names,
+        ctx.known_pin_ids,
+        ctx.known_pin_mux_names,
+        ctx.selected_pin_id,
     );
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(

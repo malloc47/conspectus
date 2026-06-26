@@ -6087,7 +6087,7 @@ layout or awkward key semantics.
     the editable field, `Space` cycles known choices, and custom typed
     values remain valid with an explicit warning.
 
-- [ ] `H-PIN-TUI-006` Launch argv editor with resolved command
+- [x] `H-PIN-TUI-006` Launch argv editor with resolved command
   preview.
   - Scope: make launch customization usable for sandbox/wrapper
     workflows. The create form should let the operator edit argv as a
@@ -6101,6 +6101,15 @@ layout or awkward key semantics.
     execution, clearing back to default, and validation errors for an
     empty argv override.
   - Blockers: `H-PIN-TUI-003`.
+  - Outcome: the create form now previews the effective command below
+    the `launch argv` editor. A blank editor means "use the selected
+    harness adapter default" and renders as `default: <command>`;
+    nonblank input is parsed as a small shell-style argv override and
+    renders as `override: <command>`. Clearing the field returns to
+    the adapter default. Unknown/custom harnesses without an explicit
+    launch argv are rejected before commit so `pin launch` will not
+    later fail with no command. Preview display quotes whitespace
+    arguments without shell execution.
 
 - [ ] `H-PIN-TUI-006a` Harness launch option mappings for pin create.
   - Scope: define a data model for harness-specific launch options
