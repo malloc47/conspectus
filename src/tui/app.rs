@@ -27,6 +27,7 @@ use crate::tui::explorer::{
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
 use crate::tui::widgets::controls::HARNESS_OPTIONS;
+use crate::tui::widgets::path_omnibox::PathCandidate;
 use crate::tui::widgets::pins::{
     PinBindOption, PinCreateDefaults, PinCreateMode, PinMutationTarget,
 };
@@ -690,6 +691,7 @@ impl App {
         crate::tui::widgets::pins::PinsContext {
             pin_create_defaults: self.pin_create_defaults(),
             pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
+            known_cwd_candidates: self.known_pin_cwd_candidates(),
             known_harness_keys: self.known_harness_keys().into_iter().collect(),
             known_mux_names: self.used_mux_names().into_iter().collect(),
             known_pin_ids: self.used_pin_ids().into_iter().collect(),
@@ -1127,6 +1129,68 @@ impl App {
     fn pin_adopt_defaults_if_available(&self) -> Option<PinCreateDefaults> {
         (self.selection_is_live_mux() && self.selected_pin_id().is_none())
             .then(|| self.pin_adopt_defaults())
+    }
+
+    fn known_pin_cwd_candidates(&self) -> Vec<PathCandidate> {
+        let mut candidates = Vec::new();
+        let mut push = |path: &str, source: &str, rank: i32| {
+            let path = path.trim();
+            if !path.is_empty() {
+                candidates.push(PathCandidate::new(path, source, rank));
+            }
+        };
+        let defaults = self.pin_create_defaults();
+        push(&defaults.cwd, "selected", 1_000);
+        if let Some(adopt) = self.pin_adopt_defaults_if_available() {
+            push(&adopt.cwd, "adopt", 900);
+        }
+        if let Some(database) = self.database.as_ref() {
+            for pin in &database.snapshot().pins {
+                push(&pin.cwd, "pin", 500);
+            }
+            for node in &database.snapshot().nodes {
+                match node {
+                    crate::model::GraphNode::AgentSession(node) => {
+                        if let Some(cwd) = node.cwd.as_deref() {
+                            push(cwd, "agent", 450);
+                        }
+                    }
+                    crate::model::GraphNode::MuxSession(node) => {
+                        if let Some(cwd) = node.cwd.as_deref() {
+                            push(cwd, "mux", 440);
+                        }
+                        if let Some(cwd) = node.active_pane_current_path.as_deref() {
+                            push(cwd, "mux", 430);
+                        }
+                    }
+                    crate::model::GraphNode::RuntimeProcess(node) => {
+                        if let Some(cwd) = node.cwd.as_deref() {
+                            push(cwd, "process", 400);
+                        }
+                    }
+                    crate::model::GraphNode::Checkout(node) => {
+                        push(&node.root, "checkout", 350);
+                    }
+                    crate::model::GraphNode::Repo(node) => {
+                        let root = node
+                            .common_dir
+                            .strip_suffix("/.git")
+                            .unwrap_or(&node.common_dir);
+                        push(root, "repo", 320);
+                    }
+                    crate::model::GraphNode::Workspace(node) => {
+                        push(&node.root, "workspace", 300);
+                    }
+                    crate::model::GraphNode::Pin(node) => {
+                        push(&node.cwd, "pin", 500);
+                    }
+                    crate::model::GraphNode::Branch(_)
+                    | crate::model::GraphNode::Fork(_)
+                    | crate::model::GraphNode::ForgePr(_) => {}
+                }
+            }
+        }
+        candidates
     }
 
     fn used_pin_ids(&self) -> BTreeSet<String> {

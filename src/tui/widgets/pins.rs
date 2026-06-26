@@ -35,11 +35,15 @@ use crate::discovery::harness::{
 };
 use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
+use crate::tui::widgets::path_omnibox::{
+    PathCandidate, PathOmniboxOutcome, PathOmniboxState, PathValidation,
+};
 use crate::tui::widgets::popup_frame::themed_popup;
 
 const PIN_CREATE_LABEL_WIDTH: usize = 11;
 const PIN_CREATE_VALUE_GAP: &str = "  ";
 const PIN_CREATE_TEXT_GUTTER: &str = "  ";
+const PIN_CREATE_CWD_SUFFIX_WIDTH: usize = 32;
 
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
@@ -52,6 +56,7 @@ pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "launch", "rename", "remove"
 pub struct PinsContext {
     pub pin_create_defaults: PinCreateDefaults,
     pub pin_adopt_defaults: Option<PinCreateDefaults>,
+    pub known_cwd_candidates: Vec<PathCandidate>,
     pub known_harness_keys: Vec<String>,
     pub known_mux_names: Vec<String>,
     pub known_pin_ids: Vec<String>,
@@ -104,6 +109,17 @@ pub struct PinBindOption {
     pub pin_id: String,
     pub session_key: String,
     pub label: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PinCreateOptions {
+    adopt_defaults: Option<PinCreateDefaults>,
+    known_cwd_candidates: Vec<PathCandidate>,
+    known_harness_keys: Vec<String>,
+    known_mux_names: Vec<String>,
+    known_pin_ids: Vec<String>,
+    known_pin_mux_names: Vec<String>,
+    selected_pin_id: Option<String>,
 }
 
 /// One landable row in the pins overlay. Only the action list rows
@@ -219,7 +235,7 @@ pub struct PinCreateState {
     id: TextInputState,
     display_name: TextInputState,
     harness: TextInputState,
-    cwd: TextInputState,
+    cwd: PathOmniboxState,
     mux_name: TextInputState,
     mux_socket: TextInputState,
     launch_argv: TextInputState,
@@ -315,15 +331,32 @@ impl PinsOverlayState {
         known_pin_mux_names: Vec<String>,
         selected_pin_id: Option<String>,
     ) -> Self {
-        let initial = adopt_defaults.clone().unwrap_or(defaults);
         Self::open_with_create_initial(
-            initial,
-            adopt_defaults,
-            known_harness_keys,
-            known_mux_names,
-            known_pin_ids,
-            known_pin_mux_names,
-            selected_pin_id,
+            defaults,
+            PinCreateOptions {
+                adopt_defaults,
+                known_harness_keys,
+                known_mux_names,
+                known_pin_ids,
+                known_pin_mux_names,
+                selected_pin_id,
+                ..PinCreateOptions::default()
+            },
+        )
+    }
+
+    pub fn open_with_create_context(ctx: &PinsContext) -> Self {
+        Self::open_with_create_initial(
+            ctx.pin_create_defaults.clone(),
+            PinCreateOptions {
+                adopt_defaults: ctx.pin_adopt_defaults.clone(),
+                known_cwd_candidates: ctx.known_cwd_candidates.clone(),
+                known_harness_keys: ctx.known_harness_keys.clone(),
+                known_mux_names: ctx.known_mux_names.clone(),
+                known_pin_ids: ctx.known_pin_ids.clone(),
+                known_pin_mux_names: ctx.known_pin_mux_names.clone(),
+                selected_pin_id: ctx.selected_pin_id.clone(),
+            },
         )
     }
 
@@ -336,39 +369,48 @@ impl PinsOverlayState {
         known_pin_mux_names: Vec<String>,
         selected_pin_id: Option<String>,
     ) -> Self {
-        let initial = adopt_defaults.clone().unwrap_or_else(|| defaults.clone());
-        Self::open_with_create_initial(
-            initial,
-            adopt_defaults,
-            known_harness_keys,
-            known_mux_names,
-            known_pin_ids,
-            known_pin_mux_names,
-            selected_pin_id,
+        Self::open_with_adopt_initial(
+            defaults,
+            PinCreateOptions {
+                adopt_defaults,
+                known_harness_keys,
+                known_mux_names,
+                known_pin_ids,
+                known_pin_mux_names,
+                selected_pin_id,
+                ..PinCreateOptions::default()
+            },
         )
     }
 
-    fn open_with_create_initial(
-        initial: PinCreateDefaults,
-        adopt_defaults: Option<PinCreateDefaults>,
-        known_harness_keys: Vec<String>,
-        known_mux_names: Vec<String>,
-        known_pin_ids: Vec<String>,
-        known_pin_mux_names: Vec<String>,
-        selected_pin_id: Option<String>,
-    ) -> Self {
+    pub fn open_with_adopt_context(ctx: &PinsContext) -> Self {
+        Self::open_with_adopt_initial(
+            ctx.pin_create_defaults.clone(),
+            PinCreateOptions {
+                adopt_defaults: ctx.pin_adopt_defaults.clone(),
+                known_cwd_candidates: ctx.known_cwd_candidates.clone(),
+                known_harness_keys: ctx.known_harness_keys.clone(),
+                known_mux_names: ctx.known_mux_names.clone(),
+                known_pin_ids: ctx.known_pin_ids.clone(),
+                known_pin_mux_names: ctx.known_pin_mux_names.clone(),
+                selected_pin_id: ctx.selected_pin_id.clone(),
+            },
+        )
+    }
+
+    fn open_with_adopt_initial(defaults: PinCreateDefaults, options: PinCreateOptions) -> Self {
+        Self::open_with_create_initial(defaults, options)
+    }
+
+    fn open_with_create_initial(defaults: PinCreateDefaults, options: PinCreateOptions) -> Self {
+        let initial = options
+            .adopt_defaults
+            .clone()
+            .unwrap_or_else(|| defaults.clone());
         Self {
             cursor: PinsCursor::Action(0),
             sub_editor: Some(PinsSubEditor::Create(Box::new(
-                PinCreateState::new_with_guards(
-                    initial,
-                    adopt_defaults,
-                    known_harness_keys,
-                    known_mux_names,
-                    known_pin_ids,
-                    known_pin_mux_names,
-                    selected_pin_id,
-                ),
+                PinCreateState::new_with_options(initial, options),
             ))),
         }
     }
@@ -461,14 +503,17 @@ impl PinsOverlayState {
                 .clone()
                 .unwrap_or_else(|| ctx.pin_create_defaults.clone());
             self.sub_editor = Some(PinsSubEditor::Create(Box::new(
-                PinCreateState::new_with_guards(
+                PinCreateState::new_with_options(
                     initial,
-                    ctx.pin_adopt_defaults.clone(),
-                    ctx.known_harness_keys.clone(),
-                    ctx.known_mux_names.clone(),
-                    ctx.known_pin_ids.clone(),
-                    ctx.known_pin_mux_names.clone(),
-                    ctx.selected_pin_id.clone(),
+                    PinCreateOptions {
+                        adopt_defaults: ctx.pin_adopt_defaults.clone(),
+                        known_cwd_candidates: ctx.known_cwd_candidates.clone(),
+                        known_harness_keys: ctx.known_harness_keys.clone(),
+                        known_mux_names: ctx.known_mux_names.clone(),
+                        known_pin_ids: ctx.known_pin_ids.clone(),
+                        known_pin_mux_names: ctx.known_pin_mux_names.clone(),
+                        selected_pin_id: ctx.selected_pin_id.clone(),
+                    },
                 ),
             )));
             PinsOutcome::Continue
@@ -656,6 +701,7 @@ impl PinCreateState {
         )
     }
 
+    #[cfg(test)]
     fn new_with_guards(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
@@ -665,6 +711,21 @@ impl PinCreateState {
         known_pin_mux_names: Vec<String>,
         selected_pin_id: Option<String>,
     ) -> Self {
+        Self::new_with_options(
+            defaults,
+            PinCreateOptions {
+                adopt_defaults,
+                known_harness_keys,
+                known_mux_names,
+                known_pin_ids,
+                known_pin_mux_names,
+                selected_pin_id,
+                ..PinCreateOptions::default()
+            },
+        )
+    }
+
+    fn new_with_options(defaults: PinCreateDefaults, options: PinCreateOptions) -> Self {
         let name = if !defaults.display_name.is_empty() {
             defaults.display_name.clone()
         } else if !defaults.id.is_empty() {
@@ -676,32 +737,39 @@ impl PinCreateState {
         let id = if defaults.id.is_empty() {
             derived_id.clone()
         } else {
-            defaults.id
+            defaults.id.clone()
         };
         let display_name = if defaults.display_name.is_empty() {
             name.clone()
         } else {
-            defaults.display_name
+            defaults.display_name.clone()
         };
         let derived_mux_name = derived_mux_name_for_mode(defaults.mode, &name, &derived_id);
         let mux_name = if defaults.mux_name.is_empty() {
             derived_mux_name.clone()
         } else {
-            defaults.mux_name
+            defaults.mux_name.clone()
         };
         let id_overridden = id != derived_id;
         let display_overridden = display_name != name;
         let mux_overridden = mux_name != derived_mux_name;
-        let known_harness_keys = normalized_harness_keys(known_harness_keys, [&defaults.harness]);
+        let known_harness_keys =
+            normalized_harness_keys(options.known_harness_keys, [&defaults.harness]);
+        let mut cwd = PathOmniboxState::new(" cwd ", defaults.cwd.clone());
+        cwd.set_known_candidates(pin_create_cwd_candidates(
+            &defaults,
+            options.adopt_defaults.as_ref(),
+            options.known_cwd_candidates,
+        ));
         Self {
             mode: defaults.mode,
             cursor: 0,
-            adopt_defaults,
+            adopt_defaults: options.adopt_defaults,
             name: TextInputState::new(" name ", name),
             id: TextInputState::new(" id ", id),
             display_name: TextInputState::new(" display ", display_name),
             harness: TextInputState::new(" harness ", defaults.harness),
-            cwd: TextInputState::new(" cwd ", defaults.cwd),
+            cwd,
             mux_name: TextInputState::new(" mux ", mux_name),
             mux_socket: TextInputState::new(" socket ", String::new()),
             launch_argv: TextInputState::new(" launch argv ", String::new()),
@@ -710,10 +778,10 @@ impl PinCreateState {
             display_overridden,
             mux_overridden,
             known_harness_keys,
-            known_mux_names,
-            known_pin_ids,
-            known_pin_mux_names,
-            selected_pin_id,
+            known_mux_names: options.known_mux_names,
+            known_pin_ids: options.known_pin_ids,
+            known_pin_mux_names: options.known_pin_mux_names,
+            selected_pin_id: options.selected_pin_id,
             adopt_auto_uncheck_armed: defaults.mode == PinCreateMode::AdoptSelected,
             adopt_auto_checked_by_collision: false,
             error: None,
@@ -732,6 +800,15 @@ impl PinCreateState {
             },
             KeyCode::Up => {
                 self.move_cursor(-1);
+                PinCreateOutcome::Continue
+            }
+            KeyCode::Tab if self.logical_cursor() == Self::FIELD_CWD => {
+                match self.cwd.handle_key(event) {
+                    PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed => {
+                        self.error = None;
+                    }
+                    PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
+                }
                 PinCreateOutcome::Continue
             }
             KeyCode::Down | KeyCode::Tab => {
@@ -791,7 +868,15 @@ impl PinCreateState {
                     .map(|input| input.value().to_string())
                     .unwrap_or_default();
                 let active = self.logical_cursor();
-                if let Some(input) = self.active_input_mut() {
+                if active == Self::FIELD_CWD {
+                    let outcome = self.cwd.handle_key(event);
+                    if matches!(
+                        outcome,
+                        PathOmniboxOutcome::Changed | PathOmniboxOutcome::Completed
+                    ) {
+                        self.error = None;
+                    }
+                } else if let Some(input) = self.active_input_mut() {
                     let _ = input.handle_key(event);
                     let changed = input.value() != before;
                     if changed {
@@ -1002,7 +1087,6 @@ impl PinCreateState {
     fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
         match self.logical_cursor() {
             Self::FIELD_NAME => Some(&mut self.name),
-            Self::FIELD_CWD => Some(&mut self.cwd),
             Self::FIELD_HARNESS => Some(&mut self.harness),
             Self::FIELD_LAUNCH_ARGV => Some(&mut self.launch_argv),
             Self::FIELD_ID => Some(&mut self.id),
@@ -1016,7 +1100,6 @@ impl PinCreateState {
     fn active_input(&self) -> Option<&TextInputState> {
         match self.logical_cursor() {
             Self::FIELD_NAME => Some(&self.name),
-            Self::FIELD_CWD => Some(&self.cwd),
             Self::FIELD_HARNESS => Some(&self.harness),
             Self::FIELD_LAUNCH_ARGV => Some(&self.launch_argv),
             Self::FIELD_ID => Some(&self.id),
@@ -1089,7 +1172,7 @@ impl PinCreateState {
     fn request(&self) -> Result<PinCreateRequest, String> {
         let id = required(self.id.value(), "id")?;
         let harness = required(self.harness.value(), "harness")?;
-        let cwd = required(self.cwd.value(), "cwd")?;
+        let cwd = required(&self.cwd.expanded_value(), "cwd")?;
         let display_name = optional(self.display_name.value()).unwrap_or_else(|| id.clone());
         let mux_name = optional(self.mux_name.value()).unwrap_or_else(|| display_name.clone());
         let mux_socket = optional(self.mux_socket.value());
@@ -1202,6 +1285,46 @@ impl PinCreateState {
             Some(format!("custom harness `{value}` will be saved as typed"))
         }
     }
+
+    fn cwd_status_symbol(&self) -> (&'static str, Style) {
+        match self.cwd.validation() {
+            PathValidation::Empty => ("?", Style::default().fg(Color::DarkGray)),
+            PathValidation::Exists => ("✓", Style::default().fg(Color::Green)),
+            PathValidation::Missing => ("!", Style::default().fg(Color::Yellow)),
+        }
+    }
+
+    fn cwd_completion_hint(&self) -> Option<String> {
+        if self.logical_cursor() != Self::FIELD_CWD {
+            return None;
+        }
+        let value = self.cwd.value().trim();
+        self.cwd
+            .suggestions()
+            .into_iter()
+            .find(|suggestion| suggestion.path.as_str() != value)
+            .and_then(|suggestion| completion_remainder(value, &suggestion.path))
+            .map(|remainder| format!("Tab: {remainder}"))
+    }
+}
+
+fn completion_remainder(typed: &str, suggestion: &str) -> Option<String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Some(suggestion.to_string());
+    }
+    suggestion
+        .strip_prefix(typed)
+        .filter(|remainder| !remainder.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            let typed_basename = typed.rsplit('/').next().unwrap_or(typed);
+            let suggestion_basename = suggestion.rsplit('/').next().unwrap_or(suggestion);
+            suggestion_basename
+                .strip_prefix(typed_basename)
+                .filter(|remainder| !remainder.is_empty())
+                .map(str::to_string)
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1231,6 +1354,25 @@ fn normalized_harness_keys<'a>(
     keys.sort();
     keys.dedup();
     keys
+}
+
+fn pin_create_cwd_candidates(
+    defaults: &PinCreateDefaults,
+    adopt_defaults: Option<&PinCreateDefaults>,
+    known: Vec<PathCandidate>,
+) -> Vec<PathCandidate> {
+    let mut candidates = Vec::new();
+    if !defaults.cwd.trim().is_empty() {
+        candidates.push(PathCandidate::new(defaults.cwd.clone(), "selected", 1_000));
+    }
+    if let Some(adopt) = adopt_defaults
+        && !adopt.cwd.trim().is_empty()
+        && adopt.cwd != defaults.cwd
+    {
+        candidates.push(PathCandidate::new(adopt.cwd.clone(), "adopt", 900));
+    }
+    candidates.extend(known);
+    candidates
 }
 
 fn parse_launch_argv(raw: &str) -> Result<Vec<String>, String> {
@@ -1699,15 +1841,9 @@ impl Widget for PinCreateWidget<'_> {
                 inner_width,
             ),
             pin_create_mode_field(self.state, cursor, inner_width),
-            pin_create_input_field(
-                PinCreateState::FIELD_CWD,
-                "cwd",
-                &self.state.cwd,
-                cursor,
-                inner_width,
-            ),
-            pin_create_harness_field(self.state, cursor, inner_width),
+            pin_create_path_omnibox_field(self.state, cursor, inner_width),
         ];
+        lines.push(pin_create_harness_field(self.state, cursor, inner_width));
         if self.state.has_launch_options() {
             lines.push(pin_create_launch_options_field(
                 self.state,
@@ -1769,7 +1905,7 @@ impl Widget for PinCreateWidget<'_> {
 
         let body = ScrollLinesBody {
             scroll_offset: scroll_offset_for_cursor(
-                Some(cursor),
+                pin_create_cursor_line(self.state),
                 modal.height.saturating_sub(2) as usize,
                 lines.len(),
             ),
@@ -1798,6 +1934,27 @@ fn pin_create_input_field(
     )
 }
 
+fn pin_create_path_omnibox_field(
+    state: &PinCreateState,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    pin_create_value_field_with_suffix(
+        PinCreateState::FIELD_CWD,
+        "cwd",
+        state.cwd.value(),
+        state.cwd.cursor(),
+        cursor,
+        inner_width,
+        Some(pin_create_cwd_suffix(state)),
+    )
+}
+
+struct PinFieldSuffix {
+    width: usize,
+    spans: Vec<Span<'static>>,
+}
+
 fn pin_create_value_field(
     idx: usize,
     label: &'static str,
@@ -1806,21 +1963,69 @@ fn pin_create_value_field(
     cursor: usize,
     inner_width: usize,
 ) -> Line<'static> {
+    pin_create_value_field_with_suffix(idx, label, value, value_cursor, cursor, inner_width, None)
+}
+
+fn pin_create_value_field_with_suffix(
+    idx: usize,
+    label: &'static str,
+    value: &str,
+    value_cursor: usize,
+    cursor: usize,
+    inner_width: usize,
+    suffix: Option<PinFieldSuffix>,
+) -> Line<'static> {
     let active = cursor == idx;
     let (prefix, label_style) = pin_create_prefix(label, active);
-    let value_width = inner_width.saturating_sub(prefix.chars().count()).max(1);
+    let suffix_width = suffix
+        .as_ref()
+        .map(|suffix| suffix.width)
+        .unwrap_or_default();
+    let value_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(suffix_width)
+        .max(1);
     let display = pin_field_visible_window(value, value_cursor, value_width, active);
     let value_style = pin_create_entry_style(active);
     let left_style = pin_field_edge_style(display.left_indicator, display.edge_style);
     let right_style = pin_field_edge_style(display.right_indicator, display.edge_style);
-    line![
+    let mut spans = vec![
         span!(label_style; "{prefix}"),
         span!(left_style; "{}", display.left_indicator),
         span!(value_style; "{}", display.before_cursor),
         span!(display.cursor_style; "{}", display.cursor_text),
         span!(value_style; "{}", display.after_cursor),
         span!(right_style; "{}", display.right_indicator),
-    ]
+    ];
+    if let Some(suffix) = suffix {
+        spans.extend(suffix.spans);
+    }
+    Line::from(spans)
+}
+
+fn pin_create_cwd_suffix(state: &PinCreateState) -> PinFieldSuffix {
+    let (symbol, symbol_style) = state.cwd_status_symbol();
+    let mut spans = vec![span!(" "), span!(symbol_style; "{symbol}")];
+    let used = 1 + symbol.chars().count();
+    let remaining = PIN_CREATE_CWD_SUFFIX_WIDTH.saturating_sub(used);
+    if remaining > 1 {
+        if let Some(hint) = state.cwd_completion_hint() {
+            let hint = truncate_chars(&hint, remaining.saturating_sub(1));
+            spans.push(span!(" "));
+            spans.push(span!(Style::default().fg(Color::Cyan); "{hint}"));
+            let used = used + 1 + hint.chars().count();
+            let pad = PIN_CREATE_CWD_SUFFIX_WIDTH.saturating_sub(used);
+            if pad > 0 {
+                spans.push(span!("{}", " ".repeat(pad)));
+            }
+        } else {
+            spans.push(span!("{}", " ".repeat(remaining)));
+        }
+    }
+    PinFieldSuffix {
+        width: PIN_CREATE_CWD_SUFFIX_WIDTH,
+        spans,
+    }
 }
 
 fn pin_create_prefix(label: &'static str, active: bool) -> (String, Style) {
@@ -2222,6 +2427,18 @@ fn truncate_chars(value: &str, width: usize) -> String {
 fn pin_create_modal_rect(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(76, area.width.saturating_sub(4)).max(44);
     modal_rect_for_content(area, width, content_lines, 10)
+}
+
+fn pin_create_cursor_line(state: &PinCreateState) -> Option<usize> {
+    let cursor = state.logical_cursor();
+    let mut line_idx = 0;
+    for field in state.visible_fields() {
+        if field == cursor {
+            return Some(line_idx);
+        }
+        line_idx += 1;
+    }
+    Some(line_idx)
 }
 
 struct PinEditWidget<'a> {
@@ -3159,6 +3376,102 @@ mod tests {
         assert_eq!(
             editor.request().expect("valid request").launch_argv,
             vec!["custom".to_string(), "run".to_string()]
+        );
+    }
+
+    #[test]
+    fn create_form_cwd_tab_completes_ranked_path_candidate() {
+        let mut editor = PinCreateState::new_with_options(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: String::new(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            PinCreateOptions {
+                known_cwd_candidates: vec![
+                    PathCandidate::new("/workspace/low", "agent", 20),
+                    PathCandidate::new("/workspace/high", "selected", 100),
+                ],
+                ..PinCreateOptions::default()
+            },
+        );
+
+        move_to_create_field(&mut editor, PinCreateState::FIELD_CWD);
+        for ch in "/work".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+        assert_eq!(editor.render_cursor(), PinCreateState::FIELD_CWD);
+        assert_eq!(
+            line_content(pin_create_path_omnibox_field(&editor, 2, 74)),
+            "> cwd            /work    ! Tab: space/high              "
+        );
+
+        editor.handle_key(key(KeyCode::Tab));
+
+        assert_eq!(editor.render_cursor(), PinCreateState::FIELD_CWD);
+        assert_eq!(editor.cwd.value(), "/workspace/high");
+    }
+
+    #[test]
+    fn completion_remainder_shows_only_untyped_suffix() {
+        assert_eq!(
+            completion_remainder("/work", "/workspace/high").as_deref(),
+            Some("space/high")
+        );
+        assert_eq!(
+            completion_remainder("~/src/co", "~/src/conspectus").as_deref(),
+            Some("nspectus")
+        );
+        assert_eq!(
+            completion_remainder("co", "/home/op/src/conspectus").as_deref(),
+            Some("nspectus")
+        );
+    }
+
+    #[test]
+    fn create_form_cwd_tab_without_completion_stays_on_cwd_field() {
+        let mut editor = PinCreateState::new_with_options(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/no/completion".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            PinCreateOptions::default(),
+        );
+
+        move_to_create_field(&mut editor, PinCreateState::FIELD_CWD);
+        editor.handle_key(key(KeyCode::Tab));
+
+        assert_eq!(editor.render_cursor(), PinCreateState::FIELD_CWD);
+        assert_eq!(editor.cwd.value(), "/no/completion");
+    }
+
+    #[test]
+    fn create_form_expands_tilde_cwd_in_request() {
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .expect("HOME must be set for tilde request test");
+        let editor = PinCreateState::new_with_options(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "~/src/conspectus".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            PinCreateOptions::default(),
+        );
+
+        assert_eq!(
+            editor.request().expect("valid request").cwd,
+            home.join("src/conspectus").to_string_lossy()
         );
     }
 

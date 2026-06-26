@@ -1065,15 +1065,7 @@ fn pin_bind_hint_action(app: &mut App) {
 
 fn open_pin_create_action(app: &mut App) {
     let ctx = app.pins_context();
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create_options(
-        ctx.pin_create_defaults,
-        ctx.pin_adopt_defaults,
-        ctx.known_harness_keys,
-        ctx.known_mux_names,
-        ctx.known_pin_ids,
-        ctx.known_pin_mux_names,
-        ctx.selected_pin_id,
-    );
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create_context(&ctx);
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
         "pins: new pin · Up/Down field · Enter create · Esc cancel".to_string(),
@@ -1106,15 +1098,7 @@ fn open_pin_adopt_action(app: &mut App) {
         )));
         return;
     }
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_options(
-        ctx.pin_create_defaults,
-        ctx.pin_adopt_defaults,
-        ctx.known_harness_keys,
-        ctx.known_mux_names,
-        ctx.known_pin_ids,
-        ctx.known_pin_mux_names,
-        ctx.selected_pin_id,
-    );
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_context(&ctx);
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
         "pins: new pin · adopt enabled · Enter create · Esc cancel".to_string(),

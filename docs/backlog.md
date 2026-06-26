@@ -6046,6 +6046,17 @@ layout or awkward key semantics.
     states.
   - Blockers: `H-PIN-TUI-003`, `H-WIDG-010` if the implementation
     chooses the browse-mode dependency for this slice.
+  - Outcome: added a reusable inline `PathOmniboxState` widget module
+    with ranked known-path candidates, filesystem prefix matches,
+    live existence status, and `Tab` completion. Wired the pin create
+    cwd row to graph-derived candidates from selected/default cwd,
+    pins, agent sessions, mux sessions, runtime processes, checkouts,
+    repos, and workspaces. Deferred the `ratatui-explorer` import to
+    `H-WIDG-010` as an optional browse submode rather than making it a
+    dependency of the fast inline path.
+  - Follow-up: keep this story open to show multiple ranked
+    completions inline or in a stable sidecar area; the first slice
+    only shows the best completion remainder next to the cwd field.
 
 - [ ] `H-PIN-TUI-004a` Explicit row/edit focus for pin create
   navigation.
