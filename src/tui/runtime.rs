@@ -1684,6 +1684,7 @@ fn create_pin_action(
 ) {
     match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
         Ok((outcome, entry, store_kind)) => {
+            let is_adopt = request.adopt_source_mux_name.is_some();
             let verb = if outcome.changed {
                 if outcome.entry_count == 1 {
                     "wrote"
@@ -1694,7 +1695,10 @@ fn create_pin_action(
                 "unchanged"
             };
             let rename_status = apply_pin_adopt_mux_rename(tmux, &request);
+            let pin_id = entry.id.clone();
             refresh(app, config);
+            let selected = app.select_pin_after_mutation(&pin_id);
+            app.post_toast(pin_create_success_toast(is_adopt, &pin_id));
             let mut message = format!(
                 "{verb} pin `{}` in {} ({})",
                 entry.id,
@@ -1705,11 +1709,22 @@ fn create_pin_action(
                 message.push_str("; ");
                 message.push_str(&rename_status);
             }
+            if !selected {
+                message.push_str("; no visible row matched the new pin");
+            }
             app.update(Msg::SetStatus(Some(message)));
         }
         Err(err) => {
             app.update(Msg::SetStatus(Some(format!("pin create failed: {err}"))));
         }
+    }
+}
+
+fn pin_create_success_toast(is_adopt: bool, pin_id: &str) -> String {
+    if is_adopt {
+        format!("pin adopted; mux already running: `{pin_id}`")
+    } else {
+        format!("pin created, not started: `{pin_id}`")
     }
 }
 
@@ -2929,6 +2944,18 @@ mod tests {
 
         assert_eq!(status, "adopted existing mux `work`");
         assert!(tmux.rename_calls().is_empty());
+    }
+
+    #[test]
+    fn pin_create_success_toast_distinguishes_new_and_adopted_pins() {
+        assert_eq!(
+            pin_create_success_toast(false, "ingest"),
+            "pin created, not started: `ingest`"
+        );
+        assert_eq!(
+            pin_create_success_toast(true, "ingest"),
+            "pin adopted; mux already running: `ingest`"
+        );
     }
 
     #[test]

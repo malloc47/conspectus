@@ -912,6 +912,53 @@ impl App {
         self.recompute_detail();
     }
 
+    /// After a successful pin create/adopt mutation and refresh,
+    /// focus the row that represents `pin_id` in the current view.
+    /// Grouped sessions/mux views prefer the synthetic Pins bucket;
+    /// flat and union views fall back to the visible pinned entity
+    /// row. Returns `false` when the refreshed view has no row for
+    /// the pin (for example, an active filter hides it).
+    pub fn select_pin_after_mutation(&mut self, pin_id: &str) -> bool {
+        if self
+            .tree
+            .rows
+            .iter()
+            .any(|row| matches!(row.id, RowId::Synthetic("pins")) && row.expandable)
+        {
+            self.expanded.insert(RowId::Synthetic("pins"));
+        }
+
+        let visible = self.visible_rows();
+        let pins_group_idx = visible
+            .iter()
+            .position(|row| matches!(row.id, RowId::Synthetic("pins")));
+        let target = pins_group_idx
+            .and_then(|idx| {
+                let depth = visible[idx].depth;
+                visible
+                    .iter()
+                    .enumerate()
+                    .skip(idx + 1)
+                    .take_while(|(_, row)| row.depth > depth)
+                    .find_map(|(idx, row)| (row_pin_id(row) == Some(pin_id)).then_some(idx))
+            })
+            .or_else(|| {
+                visible
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, row)| (row_pin_id(row) == Some(pin_id)).then_some(idx))
+            });
+        let Some(idx) = target else {
+            return false;
+        };
+        let row_id = visible[idx].id.clone();
+        self.last_visible_index.set(Some(idx));
+        self.selection = Some(row_id);
+        self.status_message = None;
+        self.recompute_detail();
+        true
+    }
+
     /// Snapshot of the live state the controls overlay renders
     /// against. Borrowed each frame so the overlay never lags
     /// behind the app.
@@ -2363,6 +2410,15 @@ fn row_matches(row: &crate::tui::rows::Row, target: &NodeId) -> bool {
     }
 }
 
+fn row_pin_id(row: &crate::tui::rows::Row) -> Option<&str> {
+    match &row.kind {
+        RowKind::AgentSession(session) => session.pin_id.as_deref(),
+        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+        RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
+        _ => None,
+    }
+}
+
 fn initial_expanded_rows(tree: &RowTree) -> BTreeSet<RowId> {
     let mut expanded = BTreeSet::new();
     for row in &tree.rows {
@@ -2434,7 +2490,7 @@ mod tests {
     use crate::filter::RowFilter;
     use crate::model::{
         AgentSessionId, AgentSessionNode, CheckoutId, CheckoutNode, GraphNode, GraphSnapshot,
-        PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode, WorkspaceId,
+        PinBinding, PinCandidate, PinMuxRef, Provenance, RepoId, RepoNode, WorkspaceId,
     };
     use crate::resolve::resolve_snapshot;
     use crate::tui::SessionsGrouping;
@@ -2843,6 +2899,109 @@ mod tests {
                 .iter()
                 .any(|field| { field.label == "harness" && field.value.contains("codex") })
         );
+    }
+
+    #[test]
+    fn select_pin_after_mutation_expands_pins_and_selects_session_row() {
+        let session_id = AgentSessionId::new("codex", "/state", "alpha");
+        let mut snap = make_snapshot_with(&[("codex", "alpha", "/p/project")]);
+        snap.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/project".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/project/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::Bound {
+                mux: crate::model::MuxSessionId::new("tmux:ingest"),
+                session: session_id.clone(),
+            }),
+        });
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.expanded.remove(&RowId::Synthetic("pins"));
+
+        assert!(app.select_pin_after_mutation("ingest"));
+        assert!(app.expanded.contains(&RowId::Synthetic("pins")));
+        let selected = app.selection().expect("selection");
+        assert!(
+            matches!(selected, RowId::AgentSession(NodeId::AgentSession(id)) if id == &session_id)
+        );
+        let first_visible_pin_row = app
+            .visible_rows()
+            .into_iter()
+            .find(|row| row_pin_id(row) == Some("ingest"))
+            .expect("visible pinned row");
+        assert_eq!(&first_visible_pin_row.id, selected);
+    }
+
+    #[test]
+    fn select_pin_after_mutation_selects_mux_row_in_mux_pins_group() {
+        let mut snap = snapshot_session_with_mux();
+        snap.pins.push(PinCandidate {
+            id: "work-pin".to_string(),
+            display_name: "Work".to_string(),
+            harness: "claude-code".to_string(),
+            cwd: "/p/proj".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "work".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/proj/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::StaleMux {
+                mux: crate::model::MuxSessionId::new("work"),
+            }),
+        });
+        let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+            snapshot: &snap,
+            home: None,
+            now: None,
+            filter: crate::tui::RowFilter::default(),
+            grouping: crate::tui::MuxGrouping::Repo,
+            sort: crate::tui::Sort::Hierarchy,
+        });
+        let mut app = App::new(RunConfig {
+            default_view: View::Mux,
+            mux_grouping: crate::tui::MuxGrouping::Repo,
+            ..RunConfig::defaults()
+        });
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        app.expanded.remove(&RowId::Synthetic("pins"));
+
+        assert!(app.select_pin_after_mutation("work-pin"));
+        assert!(app.expanded.contains(&RowId::Synthetic("pins")));
+        assert!(matches!(
+            app.selection(),
+            Some(RowId::MuxSession(NodeId::MuxSession(id))) if id.native_id == "work"
+        ));
+        let first_visible_pin_row = app
+            .visible_rows()
+            .into_iter()
+            .find(|row| row_pin_id(row) == Some("work-pin"))
+            .expect("visible pinned mux row");
+        assert_eq!(Some(&first_visible_pin_row.id), app.selection());
     }
 
     #[test]

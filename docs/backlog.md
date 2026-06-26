@@ -6113,7 +6113,7 @@ layout or awkward key semantics.
     harness keys or versions.
   - Blockers: `H-PIN-TUI-005`, `H-PIN-TUI-006`.
 
-- [ ] `H-PIN-TUI-007` Post-create/adopt focus and toast behavior.
+- [x] `H-PIN-TUI-007` Post-create/adopt focus and toast behavior.
   - Scope: after a successful create or adopt, refresh the graph,
     expand the synthetic Pins group in the current view when present,
     select the new pin row, and show a toast/status message that
@@ -6124,6 +6124,15 @@ layout or awkward key semantics.
     current-view row selection, Pins-group expansion, launch-state
     wording, and failure paths that leave the prior selection intact.
     Snapshot tests for the post-create toast and selected pin row.
+  - Outcome: successful TUI create/adopt writes now refresh the graph,
+    expand the current view's synthetic Pins group when present, and
+    select the row that represents the affected pin. Grouped sessions
+    and mux views prefer the row inside Pins; flat/union views fall
+    back to the visible pinned entity row. The runtime posts a toast
+    that distinguishes `pin created, not started` from
+    `pin adopted; mux already running`, while the status line keeps
+    the existing store/write detail and reports when filters prevent a
+    visible row match.
   - Blockers: `H-PIN-TUI-002`.
 
 - [x] `H-PIN-TUI-008` Float pinned entities and keep Pins groups open.
