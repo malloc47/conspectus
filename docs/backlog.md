@@ -6066,7 +6066,7 @@ layout or awkward key semantics.
     focused-row, editing-row, and explicit-submit states.
   - Blockers: `H-PIN-TUI-003`.
 
-- [ ] `H-PIN-TUI-005` Harness picker with free-form escape hatch.
+- [x] `H-PIN-TUI-005` Harness picker with free-form escape hatch.
   - Scope: make the harness field choose from known harness keys
     discovered in the snapshot plus registered adapter defaults, while
     still allowing an explicit free-form value for future/custom
@@ -6077,6 +6077,15 @@ layout or awkward key semantics.
     suggestion navigation, free-form input, unknown-harness warning,
     and confirmation behavior.
   - Blockers: `H-PIN-TUI-003`.
+  - Outcome: researched the Ratatui picker ecosystem before
+    implementation. No focused single-select/free-form picker was
+    mature enough to justify a new dependency under the project
+    dependency policy: the available options were either namespace
+    placeholders, multi-select-specific, or broader interaction
+    frameworks. Implemented a scoped in-tree harness picker affordance
+    instead: registered and discovered harness keys are shown under
+    the editable field, `Space` cycles known choices, and custom typed
+    values remain valid with an explicit warning.
 
 - [ ] `H-PIN-TUI-006` Launch argv editor with resolved command
   preview.

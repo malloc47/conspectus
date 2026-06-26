@@ -25,7 +25,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::macros::{line, span};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
@@ -44,6 +44,7 @@ pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "launch", "rename", "remove"
 pub struct PinsContext {
     pub pin_create_defaults: PinCreateDefaults,
     pub pin_adopt_defaults: Option<PinCreateDefaults>,
+    pub known_harness_keys: Vec<String>,
     pub known_mux_names: Vec<String>,
     pub pin_target: Option<PinMutationTarget>,
     pub pin_bind_options: Vec<PinBindOption>,
@@ -215,6 +216,7 @@ pub struct PinCreateState {
     id_overridden: bool,
     display_overridden: bool,
     mux_overridden: bool,
+    known_harness_keys: Vec<String>,
     known_mux_names: Vec<String>,
     adopt_auto_uncheck_armed: bool,
     adopt_auto_checked_by_collision: bool,
@@ -279,30 +281,33 @@ impl PinsOverlayState {
     /// `defaults`. Used by the direct shortcut so the operator
     /// skips the menu step.
     pub fn open_with_create(defaults: PinCreateDefaults) -> Self {
-        Self::open_with_create_options(defaults, None, Vec::new())
+        Self::open_with_create_options(defaults, None, Vec::new(), Vec::new())
     }
 
     pub fn open_with_create_options(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
     ) -> Self {
         let initial = adopt_defaults.clone().unwrap_or(defaults);
-        Self::open_with_create_initial(initial, adopt_defaults, known_mux_names)
+        Self::open_with_create_initial(initial, adopt_defaults, known_harness_keys, known_mux_names)
     }
 
     pub fn open_with_adopt_options(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
     ) -> Self {
         let initial = adopt_defaults.clone().unwrap_or_else(|| defaults.clone());
-        Self::open_with_create_initial(initial, adopt_defaults, known_mux_names)
+        Self::open_with_create_initial(initial, adopt_defaults, known_harness_keys, known_mux_names)
     }
 
     fn open_with_create_initial(
         initial: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
     ) -> Self {
         Self {
@@ -310,6 +315,7 @@ impl PinsOverlayState {
             sub_editor: Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
                 initial,
                 adopt_defaults,
+                known_harness_keys,
                 known_mux_names,
             )))),
         }
@@ -405,6 +411,7 @@ impl PinsOverlayState {
             self.sub_editor = Some(PinsSubEditor::Create(Box::new(PinCreateState::new(
                 initial,
                 ctx.pin_adopt_defaults.clone(),
+                ctx.known_harness_keys.clone(),
                 ctx.known_mux_names.clone(),
             ))));
             PinsOutcome::Continue
@@ -567,6 +574,7 @@ impl PinCreateState {
     fn new(
         defaults: PinCreateDefaults,
         adopt_defaults: Option<PinCreateDefaults>,
+        known_harness_keys: Vec<String>,
         known_mux_names: Vec<String>,
     ) -> Self {
         let name = if !defaults.display_name.is_empty() {
@@ -596,6 +604,7 @@ impl PinCreateState {
         let id_overridden = id != derived_id;
         let display_overridden = display_name != name;
         let mux_overridden = mux_name != derived_mux_name;
+        let known_harness_keys = normalized_harness_keys(known_harness_keys, [&defaults.harness]);
         Self {
             mode: defaults.mode,
             cursor: 0,
@@ -612,6 +621,7 @@ impl PinCreateState {
             id_overridden,
             display_overridden,
             mux_overridden,
+            known_harness_keys,
             known_mux_names,
             adopt_auto_uncheck_armed: defaults.mode == PinCreateMode::AdoptSelected,
             adopt_auto_checked_by_collision: false,
@@ -645,6 +655,15 @@ impl PinCreateState {
                 if self.logical_cursor() == 1 && self.can_toggle_mode() =>
             {
                 self.toggle_mode();
+                PinCreateOutcome::Continue
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if self.logical_cursor() == 3 => {
+                self.cycle_harness(if matches!(event.code, KeyCode::Left) {
+                    -1
+                } else {
+                    1
+                });
+                self.error = None;
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
@@ -756,6 +775,26 @@ impl PinCreateState {
             1 => PinCreateStore::Project,
             _ => PinCreateStore::User,
         };
+    }
+
+    fn cycle_harness(&mut self, delta: i32) {
+        if self.known_harness_keys.is_empty() {
+            return;
+        }
+        let value = self.harness.value().trim();
+        let idx = match self
+            .known_harness_keys
+            .iter()
+            .position(|known| known == value)
+        {
+            Some(idx) => {
+                let len = self.known_harness_keys.len() as i32;
+                ((idx as i32 + delta) % len + len) % len
+            }
+            None if delta < 0 => self.known_harness_keys.len().saturating_sub(1) as i32,
+            None => 0,
+        } as usize;
+        self.harness = TextInputState::new(" harness ", self.known_harness_keys[idx].clone());
     }
 
     fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
@@ -903,6 +942,32 @@ impl PinCreateState {
             _ => value.to_string(),
         }
     }
+
+    fn harness_warning(&self) -> Option<String> {
+        let value = self.harness.value().trim();
+        if value.is_empty() || self.known_harness_keys.iter().any(|known| known == value) {
+            None
+        } else {
+            Some(format!("custom harness `{value}` will be saved as typed"))
+        }
+    }
+}
+
+fn normalized_harness_keys<'a>(
+    known_harness_keys: Vec<String>,
+    extra_keys: impl IntoIterator<Item = &'a String>,
+) -> Vec<String> {
+    let mut keys: Vec<String> = known_harness_keys
+        .into_iter()
+        .chain(extra_keys.into_iter().cloned())
+        .filter_map(|key| {
+            let key = key.trim();
+            (!key.is_empty()).then(|| key.to_string())
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
 }
 
 fn pin_id_candidate(raw: &str) -> String {
@@ -1278,7 +1343,7 @@ impl Widget for PinCreateWidget<'_> {
             pin_create_input_field(0, "name", &self.state.name, cursor, inner_width),
             pin_create_mode_field(self.state, cursor, inner_width),
             pin_create_input_field(2, "cwd", &self.state.cwd, cursor, inner_width),
-            pin_create_input_field(3, "harness", &self.state.harness, cursor, inner_width),
+            pin_create_harness_field(self.state, cursor, inner_width),
             pin_create_input_field(
                 4,
                 "launch argv",
@@ -1388,6 +1453,121 @@ fn pin_create_mode_field(
     } else {
         pin_create_static_field(1, "mode", state.mode.label(), cursor, inner_width)
     }
+}
+
+fn pin_create_harness_field(
+    state: &PinCreateState,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    const HARNESS_VALUE_SLOT_WIDTH: usize = 18;
+
+    let active = cursor == 3;
+    let marker = if active { "> " } else { "  " };
+    let label_style = if active {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let prefix = format!("{marker}{:11} ", "harness");
+    let available = inner_width.saturating_sub(prefix.chars().count());
+    if state.harness_warning().is_some() {
+        return pin_create_harness_custom_field(state, active, label_style, prefix, available);
+    }
+    let value_width = HARNESS_VALUE_SLOT_WIDTH.min(available).max(1);
+    let suffix_budget = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(value_width)
+        .min(48);
+    let suffix = pin_create_harness_suffix(state, suffix_budget);
+    let display = pin_field_visible_window(
+        state.harness.value(),
+        state.harness.cursor(),
+        value_width,
+        active,
+    );
+    let mut spans = vec![
+        span!(label_style; "{prefix}"),
+        span!(display.edge_style; "{}", display.left_indicator),
+        span!("{}", display.before_cursor),
+        span!(display.cursor_style; "{}", display.cursor_text),
+        span!("{}", display.after_cursor),
+        span!(display.edge_style; "{}", display.right_indicator),
+    ];
+    let display_width = display.left_indicator.chars().count()
+        + display.before_cursor.chars().count()
+        + display.cursor_text.chars().count()
+        + display.after_cursor.chars().count()
+        + display.right_indicator.chars().count();
+    let padding = value_width.saturating_sub(display_width);
+    if padding > 0 {
+        spans.push(span!("{}", " ".repeat(padding)));
+    }
+    spans.extend(suffix);
+    Line::from(spans)
+}
+
+fn pin_create_harness_custom_field(
+    state: &PinCreateState,
+    active: bool,
+    label_style: Style,
+    prefix: String,
+    available: usize,
+) -> Line<'static> {
+    let suffix = vec![span!(Style::default().fg(Color::Yellow); " [custom]")];
+    let suffix_width = span_width(&suffix);
+    let value_width = available.saturating_sub(suffix_width).max(1);
+    let display = pin_field_visible_window(
+        state.harness.value(),
+        state.harness.cursor(),
+        value_width,
+        active,
+    );
+    let mut spans = vec![
+        span!(label_style; "{prefix}"),
+        span!(display.edge_style; "{}", display.left_indicator),
+        span!("{}", display.before_cursor),
+        span!(display.cursor_style; "{}", display.cursor_text),
+        span!("{}", display.after_cursor),
+        span!(display.edge_style; "{}", display.right_indicator),
+    ];
+    spans.extend(suffix);
+    Line::from(spans)
+}
+
+fn pin_create_harness_suffix(state: &PinCreateState, width: usize) -> Vec<Span<'static>> {
+    if width < 3 {
+        return Vec::new();
+    }
+    if state.known_harness_keys.is_empty() {
+        return Vec::new();
+    }
+    let selected = state.harness.value().trim();
+    let mut spans = Vec::new();
+    let mut remaining = width;
+    for key in &state.known_harness_keys {
+        let token = format!(" [{key}]");
+        let needed = token.chars().count();
+        if needed > remaining {
+            if remaining >= 2 {
+                spans.push(span!(Modifier::DIM; " …"));
+            }
+            break;
+        }
+        if key == selected {
+            spans.push(
+                span!(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD); "{}", token),
+            );
+        } else {
+            spans.push(span!(Modifier::DIM; "{}", token));
+        }
+        remaining = remaining.saturating_sub(needed);
+    }
+    spans
+}
+
+fn span_width(spans: &[Span<'_>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
 }
 
 fn pin_create_store_field(
@@ -2096,7 +2276,8 @@ mod tests {
             mux_name: "work".to_string(),
             mode: PinCreateMode::AdoptSelected,
         };
-        let mut state = PinsOverlayState::open_with_adopt_options(defaults, Some(adopt), vec![]);
+        let mut state =
+            PinsOverlayState::open_with_adopt_options(defaults, Some(adopt), vec![], vec![]);
 
         match state.sub_editor() {
             Some(PinsSubEditor::Create(editor)) => {
@@ -2136,6 +2317,7 @@ mod tests {
             },
             None,
             vec![],
+            vec![],
         );
 
         editor.handle_key(key(KeyCode::Down));
@@ -2158,6 +2340,7 @@ mod tests {
                 mode: PinCreateMode::NewVariation,
             },
             None,
+            vec![],
             vec![],
         );
 
@@ -2188,6 +2371,97 @@ mod tests {
     }
 
     #[test]
+    fn create_form_cycles_known_harness_choices_from_harness_field() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["claude-code".to_string(), "codex".to_string()],
+            vec![],
+        );
+
+        editor.handle_key(key(KeyCode::Down));
+        editor.handle_key(key(KeyCode::Down));
+        assert_eq!(editor.render_cursor(), 3);
+        editor.handle_key(key(KeyCode::Right));
+        assert_eq!(editor.harness.value(), "claude-code");
+        editor.handle_key(key(KeyCode::Left));
+        assert_eq!(editor.harness.value(), "codex");
+        editor.handle_key(key(KeyCode::Char(' ')));
+        assert_eq!(editor.harness.value(), "claude-code");
+    }
+
+    #[test]
+    fn create_form_harness_choices_keep_stable_column_when_focused() {
+        let editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["claude-code".to_string(), "codex".to_string()],
+            vec![],
+        );
+
+        let inactive = line_content(pin_create_harness_field(&editor, 0, 74));
+        let active = line_content(pin_create_harness_field(&editor, 3, 74));
+        assert_eq!(inactive.find("[claude-code]"), active.find("[claude-code]"));
+        assert_eq!(inactive.find("[codex]"), active.find("[codex]"));
+    }
+
+    #[test]
+    fn create_form_allows_freeform_harness_with_warning() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["codex".to_string()],
+            vec![],
+        );
+
+        editor.handle_key(key(KeyCode::Down));
+        editor.handle_key(key(KeyCode::Down));
+        for _ in 0.."codex".len() {
+            editor.handle_key(key(KeyCode::Backspace));
+        }
+        for ch in "custom-harness".chars() {
+            editor.handle_key(key(KeyCode::Char(ch)));
+        }
+
+        assert_eq!(
+            editor.harness_warning().as_deref(),
+            Some("custom harness `custom-harness` will be saved as typed")
+        );
+        assert_eq!(
+            editor.request().expect("valid request").harness,
+            "custom-harness"
+        );
+    }
+
+    fn line_content(line: Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    #[test]
     fn create_form_auto_checks_adopt_for_known_mux_name_collisions() {
         let ctx = PinsContext {
             pin_create_defaults: PinCreateDefaults {
@@ -2212,6 +2486,7 @@ mod tests {
         let mut editor = PinCreateState::new(
             ctx.pin_create_defaults.clone(),
             ctx.pin_adopt_defaults.clone(),
+            ctx.known_harness_keys.clone(),
             ctx.known_mux_names.clone(),
         );
 
@@ -2295,6 +2570,7 @@ mod tests {
         let mut editor = PinCreateState::new(
             ctx.pin_create_defaults.clone(),
             ctx.pin_adopt_defaults.clone(),
+            ctx.known_harness_keys.clone(),
             ctx.known_mux_names.clone(),
         );
 

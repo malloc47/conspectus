@@ -26,6 +26,7 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
+use crate::tui::widgets::controls::HARNESS_OPTIONS;
 use crate::tui::widgets::pins::{
     PinBindOption, PinCreateDefaults, PinCreateMode, PinMutationTarget,
 };
@@ -689,6 +690,7 @@ impl App {
         crate::tui::widgets::pins::PinsContext {
             pin_create_defaults: self.pin_create_defaults(),
             pin_adopt_defaults: self.pin_adopt_defaults_if_available(),
+            known_harness_keys: self.known_harness_keys().into_iter().collect(),
             known_mux_names: self.used_mux_names().into_iter().collect(),
             pin_target: self.pin_mutation_target(),
             pin_bind_options: self.pin_bind_options(),
@@ -1164,6 +1166,26 @@ impl App {
             }
         }
         names
+    }
+
+    fn known_harness_keys(&self) -> BTreeSet<String> {
+        let mut keys: BTreeSet<String> =
+            HARNESS_OPTIONS.iter().map(|key| key.to_string()).collect();
+        if let Some(database) = self.database.as_ref() {
+            for node in &database.snapshot().nodes {
+                if let crate::model::GraphNode::AgentSession(session) = node
+                    && !session.harness_key.trim().is_empty()
+                {
+                    keys.insert(session.harness_key.clone());
+                }
+            }
+            for pin in &database.snapshot().pins {
+                if !pin.harness.trim().is_empty() {
+                    keys.insert(pin.harness.clone());
+                }
+            }
+        }
+        keys
     }
 
     /// Walk active `LinkedToMux` candidates whose target is `mux` and
@@ -2723,6 +2745,26 @@ mod tests {
 
         let ctx = app.pins_context();
         assert_eq!(ctx.known_mux_names, vec!["work".to_string()]);
+    }
+
+    #[test]
+    fn pins_context_exposes_registered_and_discovered_harness_keys() {
+        let snap = make_snapshot_with(&[("custom-harness", "s1", "/workspace/project")]);
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+
+        let ctx = app.pins_context();
+        assert!(ctx.known_harness_keys.contains(&"codex".to_string()));
+        assert!(
+            ctx.known_harness_keys
+                .contains(&"custom-harness".to_string())
+        );
     }
 
     #[test]

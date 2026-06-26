@@ -1068,6 +1068,7 @@ fn open_pin_create_action(app: &mut App) {
     let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create_options(
         ctx.pin_create_defaults,
         ctx.pin_adopt_defaults,
+        ctx.known_harness_keys,
         ctx.known_mux_names,
     );
     app.set_pins_overlay(state);
@@ -1105,6 +1106,7 @@ fn open_pin_adopt_action(app: &mut App) {
     let state = crate::tui::widgets::pins::PinsOverlayState::open_with_adopt_options(
         ctx.pin_create_defaults,
         ctx.pin_adopt_defaults,
+        ctx.known_harness_keys,
         ctx.known_mux_names,
     );
     app.set_pins_overlay(state);
