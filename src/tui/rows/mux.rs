@@ -174,7 +174,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
         MuxGrouping::Repo => {
             // Pins group sits above the repo-grouped muxes so
             // the operator sees the deck's pinned work first.
-            emit_pins_group_for_mux(&mut tree, &pins, inputs.home);
+            emit_pins_group_for_mux(&mut tree, &pins, &groups, &short_ids, inputs.home, now);
 
             let path_index = PathIndex::from_snapshot(snapshot);
             emit_repo_grouped(&mut tree, groups, &inputs, &short_ids, &path_index, now);
@@ -197,7 +197,14 @@ fn bare_tmux_name(pin_mux_native_id: &str) -> Option<&str> {
     }
 }
 
-fn emit_pins_group_for_mux(tree: &mut RowTree, pins: &[&PinCandidate], home: Option<&Path>) {
+fn emit_pins_group_for_mux(
+    tree: &mut RowTree,
+    pins: &[&PinCandidate],
+    groups: &[MuxGroup],
+    short_ids: &HashMap<&str, String>,
+    home: Option<&Path>,
+    now: Option<i64>,
+) {
     if pins.is_empty() {
         return;
     }
@@ -213,7 +220,27 @@ fn emit_pins_group_for_mux(tree: &mut RowTree, pins: &[&PinCandidate], home: Opt
         }),
     });
 
+    let group_by_mux: HashMap<NodeId, &MuxGroup> = groups
+        .iter()
+        .map(|group| (group.parent_node_id.clone(), group))
+        .collect();
+    let mut emitted_muxes: HashSet<NodeId> = HashSet::new();
+
     for pin in pins {
+        let bound_mux = match &pin.binding {
+            Some(PinBinding::Bound { mux, .. }) | Some(PinBinding::StaleMux { mux }) => {
+                Some(NodeId::MuxSession(mux.clone()))
+            }
+            Some(PinBinding::Unbound) | None => None,
+        };
+        if let Some(mux_id) = bound_mux
+            && emitted_muxes.insert(mux_id.clone())
+            && let Some(group) = group_by_mux.get(&mux_id)
+        {
+            (*group).clone().push_into(tree, 1, short_ids, home, now);
+            continue;
+        }
+
         let state_label = match &pin.binding {
             Some(PinBinding::Bound { .. }) => "bound",
             Some(PinBinding::StaleMux { .. }) => "stale-mux",
@@ -1519,6 +1546,79 @@ mod tests {
         assert_eq!(row_summary[1], (1, "pin:ingest".to_string()));
         assert_eq!(row_summary[2], (0, "/p/foo".to_string()));
         assert_eq!(row_summary[3], (1, "mux:foo-a".to_string()));
+    }
+
+    #[test]
+    fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
+        use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes.push(GraphNode::Repo(RepoNode {
+            id: crate::model::RepoId::new("/p/foo/.git"),
+            common_dir: "/p/foo/.git".to_string(),
+            source_paths: vec!["/p/foo".to_string()],
+            remotes: vec![],
+        }));
+        snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
+            id: crate::model::CheckoutId::new(
+                crate::model::RepoId::new("/p/foo/.git"),
+                "/p/foo".to_string(),
+            ),
+            root: "/p/foo".to_string(),
+            git_dir: None,
+            current_branch: None,
+        }));
+        snapshot.nodes.push(mux_node_with_paths(
+            "foo-a",
+            Some("/p/foo".to_string()),
+            None,
+        ));
+        snapshot.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest Pin".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/foo".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "foo-a".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/foo/.conspectus.toml".to_string(),
+            binding: Some(PinBinding::StaleMux {
+                mux: MuxSessionId::new("tmux:foo-a"),
+            }),
+        });
+
+        let tree = build_mux_tree(MuxBuildInputs {
+            snapshot: &snapshot,
+            home: None,
+            now: Some(1_700_000_000),
+            filter: RowFilter::default(),
+            grouping: MuxGrouping::Repo,
+            sort: Sort::Hierarchy,
+        });
+
+        let pins_group_idx = tree
+            .rows
+            .iter()
+            .position(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"))
+            .expect("Pins group present");
+        let pins_children: Vec<_> = tree
+            .rows
+            .iter()
+            .skip(pins_group_idx + 1)
+            .take_while(|row| row.depth > 0)
+            .collect();
+        assert_eq!(pins_children.len(), 1, "{:#?}", tree.rows);
+        match &pins_children[0].kind {
+            RowKind::MuxSession(mux) => {
+                assert_eq!(mux.native_id, "foo-a");
+                assert_eq!(mux.pin_id.as_deref(), Some("ingest"));
+            }
+            other => panic!("expected pinned mux row, got {other:?}"),
+        }
     }
 
     #[test]

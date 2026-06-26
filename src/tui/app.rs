@@ -2821,17 +2821,27 @@ mod tests {
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
         });
-        app.set_selection(RowId::Pin {
-            pin_id: "ingest".to_string(),
-        });
+        let row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
+                    Some(row.id.clone())
+                }
+                _ => None,
+            })
+            .expect("bound pin should render as a session row");
+        app.set_selection(row_id);
 
-        let detail = app.detail().expect("bound pin should resolve detail");
-        assert_eq!(detail.kind_label, "pin");
+        let detail = app
+            .detail()
+            .expect("bound pin session row should resolve detail");
+        assert_eq!(detail.kind_label, "agent_session");
         assert!(
             detail
                 .header_fields
                 .iter()
-                .any(|field| { field.label == "session" && field.value.contains("codex:alpha") })
+                .any(|field| { field.label == "harness" && field.value.contains("codex") })
         );
     }
 
