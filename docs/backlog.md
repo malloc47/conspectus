@@ -6233,6 +6233,37 @@ layout or awkward key semantics.
   - Blockers: ADR/model decision for pin node identity and relation
     kinds.
 
+- [ ] `H-PIN-TUI-010` Project pins as placeholder session and mux
+  entities.
+  - Motivation: creating a new, unlaunched pin from the mux view can
+    currently leave no mux-shaped row to select because no real
+    `MuxSessionNode` exists yet. A pin is a first-class declaration,
+    but it also describes the user's intended next mux/session, so the
+    session and mux views need placeholder entities that preserve the
+    user's current view vocabulary before first launch.
+  - Scope: decide the graph shape for pin-introduced placeholders and
+    implement it consistently across the resolver, row builders,
+    details, search, and launch/attach affordances. Preserve
+    `PinNode` as the authored declaration and store-lineage entity,
+    while allowing unbound pins to contribute placeholder
+    `AgentSession`- and `MuxSession`-shaped rows keyed by stable
+    identities derived from the pin. In grouped session/mux views,
+    the Pins bucket should contain session-shaped rows in the sessions
+    view and mux-shaped rows in the mux view; in flat views, these
+    placeholders should sort with pinned entities near the top. When
+    a real mux/session appears, the placeholder should resolve into
+    the observed node without changing the operator's row-level mental
+    model. Include the last-resolved session sidecar as the preferred
+    placeholder session identity when available.
+  - Tests: model/resolver tests for placeholder identity stability,
+    unbound-to-bound transition, stale-mux behavior, and sidecar-backed
+    last-session projection; row-builder tests for sessions and mux
+    views across grouped and flat groupings; TUI snapshot coverage for
+    an unlaunched pin created from mux view; detail/search tests that
+    show the placeholder row links back to the `PinNode`.
+  - Blockers: ADR or design note deciding whether placeholders are
+    graph nodes, row-only view models, or derived node variants.
+
 #### Deferred follow-ups (post-v1)
 
 These are explicitly out of v1 scope but recorded so the design

@@ -1180,8 +1180,30 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 /// no longer the source of truth after the first user action.
 pub(super) fn refresh(app: &mut App, _seed: &RunConfig) {
     let config = app.config().clone();
-    populate_provider_status(app, &config);
-    match discover_and_build(&config) {
+    refresh_with_config(app, &config);
+}
+
+/// Refresh immediately after a pin mutation.
+///
+/// Pin writes update `.conspectus.toml` synchronously, but the
+/// regular refresh path may short-circuit through a running daemon.
+/// Force the local discovery branch here so the row tree reflects
+/// the just-written pin store without waiting for the daemon's next
+/// tick.
+fn refresh_after_pin_mutation(app: &mut App, _seed: &RunConfig) {
+    let config = pin_mutation_refresh_config(app);
+    refresh_with_config(app, &config);
+}
+
+fn pin_mutation_refresh_config(app: &App) -> RunConfig {
+    let mut config = app.config().clone();
+    config.refresh = true;
+    config
+}
+
+fn refresh_with_config(app: &mut App, config: &RunConfig) {
+    populate_provider_status(app, config);
+    match discover_and_build(config) {
         Ok((database, tree)) => {
             let initial_selection_hint = launch_context_row_id(&tree);
             app.update(Msg::SetData {
@@ -1688,7 +1710,7 @@ fn create_pin_action(
             };
             let rename_status = apply_pin_adopt_mux_rename(tmux, &request);
             let pin_id = entry.id.clone();
-            refresh(app, config);
+            refresh_after_pin_mutation(app, config);
             let selected = app.select_pin_after_mutation(&pin_id);
             app.post_toast(pin_create_success_toast(is_adopt, &pin_id));
             let mut message = format!(
@@ -1805,7 +1827,7 @@ fn bind_pin_action(
             } else {
                 "unchanged"
             };
-            refresh(app, config);
+            refresh_after_pin_mutation(app, config);
             app.update(Msg::SetStatus(Some(format!(
                 "{verb} pin `{}` to session `{}` in {}",
                 request.pin_id,
@@ -1885,7 +1907,7 @@ fn edit_pin_action(
             } else {
                 "unchanged"
             };
-            refresh(app, config);
+            refresh_after_pin_mutation(app, config);
             app.update(Msg::SetStatus(Some(format!(
                 "{verb} pin `{}` in {}",
                 request.id,
@@ -1976,7 +1998,7 @@ fn remove_pin_controls_action(
 ) {
     match write_pin_remove(&request) {
         Ok(outcome) if outcome.changed => {
-            refresh(app, config);
+            refresh_after_pin_mutation(app, config);
             app.update(Msg::SetStatus(Some(format!(
                 "removed pin `{}` from {}",
                 request.id,
@@ -1984,7 +2006,7 @@ fn remove_pin_controls_action(
             ))));
         }
         Ok(outcome) => {
-            refresh(app, config);
+            refresh_after_pin_mutation(app, config);
             app.update(Msg::SetStatus(Some(format!(
                 "pin `{}` was already absent from {}",
                 request.id,
@@ -2657,6 +2679,21 @@ mod tests {
             translate(press(KeyCode::Char('r'), KeyModifiers::NONE), 24),
             Some(Action::Refresh)
         );
+    }
+
+    #[test]
+    fn pin_mutation_refresh_config_forces_local_discovery() {
+        let mut config = RunConfig::defaults();
+        config.refresh = false;
+        config.no_cache = true;
+        config.default_view = View::Mux;
+        let app = App::new(config);
+
+        let refresh_config = pin_mutation_refresh_config(&app);
+
+        assert!(refresh_config.refresh);
+        assert!(refresh_config.no_cache);
+        assert_eq!(refresh_config.default_view, View::Mux);
     }
 
     #[test]

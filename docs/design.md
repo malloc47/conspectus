@@ -573,6 +573,16 @@ rows select the pin node itself; bound/stale detail fields link onward
 to the related session or mux rather than pretending the pin row is that
 entity.
 
+Pinned work should also project into session- and mux-shaped surfaces
+before the first launch. An unbound pin represents an intended mux and
+an intended next agent session even when neither live entity exists yet;
+TUI session and mux views should therefore be able to show placeholder
+session/mux rows introduced by the pin while retaining the separate
+`PinNode` as the authored declaration and source of launch/store
+lineage. Once the mux or session is observed, those placeholders should
+resolve to the real graph nodes without changing the user's row-level
+mental model.
+
 Pins declare the *next* logical session; the H-AGENTMUX adapter
 workstream extracts evidence from *existing* agent-mux orchestrators
 (agent-deck, dmux, workmux, agent-of-empires). The two surfaces are
