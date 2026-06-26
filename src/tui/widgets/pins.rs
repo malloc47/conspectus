@@ -29,7 +29,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use tui_popup::KnownSize;
 
-use crate::discovery::harness::launch_argv_for;
+use crate::discovery::harness::{
+    HarnessLaunchOption, argv_contains_fragment, argv_with_fragment, argv_without_fragment,
+    launch_argv_for, launch_options_for, strip_known_launch_option_fragments,
+};
 use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
 use crate::tui::widgets::popup_frame::themed_popup;
@@ -623,7 +626,17 @@ enum PinRemoveOutcome {
 }
 
 impl PinCreateState {
-    const LOGICAL_STORE_FIELD: usize = 9;
+    const FIELD_NAME: usize = 0;
+    const FIELD_MODE: usize = 1;
+    const FIELD_CWD: usize = 2;
+    const FIELD_HARNESS: usize = 3;
+    const FIELD_LAUNCH_OPTIONS: usize = 4;
+    const FIELD_LAUNCH_ARGV: usize = 5;
+    const FIELD_ID: usize = 6;
+    const FIELD_DISPLAY: usize = 7;
+    const FIELD_MUX_NAME: usize = 8;
+    const FIELD_MUX_SOCKET: usize = 9;
+    const FIELD_STORE: usize = 10;
 
     #[cfg(test)]
     fn new(
@@ -730,12 +743,14 @@ impl PinCreateState {
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                if self.logical_cursor() == 1 && self.can_toggle_mode() =>
+                if self.logical_cursor() == Self::FIELD_MODE && self.can_toggle_mode() =>
             {
                 self.toggle_mode();
                 PinCreateOutcome::Continue
             }
-            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if self.logical_cursor() == 3 => {
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                if self.logical_cursor() == Self::FIELD_HARNESS =>
+            {
                 self.cycle_harness(if matches!(event.code, KeyCode::Left) {
                     -1
                 } else {
@@ -745,7 +760,18 @@ impl PinCreateState {
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                if self.logical_cursor() == Self::LOGICAL_STORE_FIELD =>
+                if self.logical_cursor() == Self::FIELD_LAUNCH_OPTIONS =>
+            {
+                self.toggle_launch_option(if matches!(event.code, KeyCode::Left) {
+                    -1
+                } else {
+                    1
+                });
+                self.error = None;
+                PinCreateOutcome::Continue
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                if self.logical_cursor() == Self::FIELD_STORE =>
             {
                 self.cycle_store(if matches!(event.code, KeyCode::Left) {
                     -1
@@ -764,7 +790,7 @@ impl PinCreateState {
                     .active_input()
                     .map(|input| input.value().to_string())
                     .unwrap_or_default();
-                let active = self.cursor;
+                let active = self.logical_cursor();
                 if let Some(input) = self.active_input_mut() {
                     let _ = input.handle_key(event);
                     let changed = input.value() != before;
@@ -785,19 +811,43 @@ impl PinCreateState {
     }
 
     fn field_count(&self) -> usize {
-        if self.can_toggle_mode() { 10 } else { 9 }
+        self.visible_fields().len()
     }
 
     fn can_toggle_mode(&self) -> bool {
         self.adopt_defaults.is_some()
     }
 
-    fn logical_cursor(&self) -> usize {
-        if self.can_toggle_mode() || self.cursor == 0 {
-            self.cursor
-        } else {
-            self.cursor + 1
+    fn has_launch_options(&self) -> bool {
+        !self.launch_options().is_empty()
+    }
+
+    fn visible_fields(&self) -> Vec<usize> {
+        let mut fields = vec![Self::FIELD_NAME];
+        if self.can_toggle_mode() {
+            fields.push(Self::FIELD_MODE);
         }
+        fields.push(Self::FIELD_CWD);
+        fields.push(Self::FIELD_HARNESS);
+        if self.has_launch_options() {
+            fields.push(Self::FIELD_LAUNCH_OPTIONS);
+        }
+        fields.extend([
+            Self::FIELD_LAUNCH_ARGV,
+            Self::FIELD_ID,
+            Self::FIELD_DISPLAY,
+            Self::FIELD_MUX_NAME,
+            Self::FIELD_MUX_SOCKET,
+            Self::FIELD_STORE,
+        ]);
+        fields
+    }
+
+    fn logical_cursor(&self) -> usize {
+        self.visible_fields()
+            .get(self.cursor)
+            .copied()
+            .unwrap_or(Self::FIELD_NAME)
     }
 
     fn render_cursor(&self) -> usize {
@@ -859,6 +909,8 @@ impl PinCreateState {
         if self.known_harness_keys.is_empty() {
             return;
         }
+        let before = self.launch_argv_override().ok();
+        let previous_default = self.default_launch_argv();
         let value = self.harness.value().trim();
         let idx = match self
             .known_harness_keys
@@ -873,43 +925,111 @@ impl PinCreateState {
             None => 0,
         } as usize;
         self.harness = TextInputState::new(" harness ", self.known_harness_keys[idx].clone());
+        if let Some(argv) = before {
+            let stripped = strip_known_launch_option_fragments(argv);
+            if stripped == previous_default {
+                self.launch_argv = TextInputState::new(" launch argv ", String::new());
+            } else {
+                self.set_launch_argv_from_effective(stripped);
+            }
+        }
+    }
+
+    fn launch_options(&self) -> &'static [HarnessLaunchOption] {
+        launch_options_for(self.harness.value().trim())
+    }
+
+    fn selected_launch_option_ids(&self) -> Vec<&'static str> {
+        let argv = self.effective_launch_argv_list().unwrap_or_default();
+        self.launch_options()
+            .iter()
+            .filter(|option| argv_contains_fragment(&argv, option.argv))
+            .map(|option| option.id)
+            .collect()
+    }
+
+    fn launch_option_selected(&self, option: HarnessLaunchOption) -> bool {
+        self.effective_launch_argv_list()
+            .is_ok_and(|argv| argv_contains_fragment(&argv, option.argv))
+    }
+
+    fn toggle_launch_option(&mut self, delta: i32) {
+        let options = self.launch_options();
+        if options.is_empty() {
+            return;
+        }
+        let selected = self.selected_launch_option_ids();
+        let current_idx = selected
+            .first()
+            .and_then(|selected| options.iter().position(|option| option.id == *selected))
+            .unwrap_or(0);
+        let len = options.len() as i32;
+        let idx = if matches!(delta, -1 | 1) && selected.len() == 1 {
+            ((current_idx as i32 + delta) % len + len) % len
+        } else {
+            current_idx as i32
+        } as usize;
+        let option = options[idx];
+        let Ok(argv) = self.effective_launch_argv_list() else {
+            return;
+        };
+        let argv = if self.launch_option_selected(option) {
+            argv_without_fragment(argv, option.argv)
+        } else {
+            argv_with_fragment(argv, option.argv)
+        };
+        self.set_launch_argv_from_effective(argv);
+    }
+
+    fn effective_launch_argv_list(&self) -> Result<Vec<String>, String> {
+        let override_argv = self.launch_argv_override()?;
+        if override_argv.is_empty() {
+            Ok(self.default_launch_argv())
+        } else {
+            Ok(override_argv)
+        }
+    }
+
+    fn set_launch_argv_from_effective(&mut self, argv: Vec<String>) {
+        let default = self.default_launch_argv();
+        if argv.is_empty() || argv == default {
+            self.launch_argv = TextInputState::new(" launch argv ", String::new());
+        } else {
+            self.launch_argv = TextInputState::new(" launch argv ", display_launch_argv(&argv));
+        }
     }
 
     fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
         match self.logical_cursor() {
-            0 => Some(&mut self.name),
-            2 => Some(&mut self.cwd),
-            3 => Some(&mut self.harness),
-            4 => Some(&mut self.launch_argv),
-            5 => Some(&mut self.id),
-            6 => Some(&mut self.display_name),
-            7 => Some(&mut self.mux_name),
-            8 => Some(&mut self.mux_socket),
+            Self::FIELD_NAME => Some(&mut self.name),
+            Self::FIELD_CWD => Some(&mut self.cwd),
+            Self::FIELD_HARNESS => Some(&mut self.harness),
+            Self::FIELD_LAUNCH_ARGV => Some(&mut self.launch_argv),
+            Self::FIELD_ID => Some(&mut self.id),
+            Self::FIELD_DISPLAY => Some(&mut self.display_name),
+            Self::FIELD_MUX_NAME => Some(&mut self.mux_name),
+            Self::FIELD_MUX_SOCKET => Some(&mut self.mux_socket),
             _ => None,
         }
     }
 
     fn active_input(&self) -> Option<&TextInputState> {
         match self.logical_cursor() {
-            0 => Some(&self.name),
-            2 => Some(&self.cwd),
-            3 => Some(&self.harness),
-            4 => Some(&self.launch_argv),
-            5 => Some(&self.id),
-            6 => Some(&self.display_name),
-            7 => Some(&self.mux_name),
-            8 => Some(&self.mux_socket),
+            Self::FIELD_NAME => Some(&self.name),
+            Self::FIELD_CWD => Some(&self.cwd),
+            Self::FIELD_HARNESS => Some(&self.harness),
+            Self::FIELD_LAUNCH_ARGV => Some(&self.launch_argv),
+            Self::FIELD_ID => Some(&self.id),
+            Self::FIELD_DISPLAY => Some(&self.display_name),
+            Self::FIELD_MUX_NAME => Some(&self.mux_name),
+            Self::FIELD_MUX_SOCKET => Some(&self.mux_socket),
             _ => None,
         }
     }
 
     fn after_active_input_changed(&mut self, active: usize) {
-        match if self.can_toggle_mode() || active == 0 {
-            active
-        } else {
-            active + 1
-        } {
-            0 => {
+        match active {
+            Self::FIELD_NAME => {
                 if self.mode == PinCreateMode::AdoptSelected && self.adopt_auto_uncheck_armed {
                     self.mode = PinCreateMode::NewVariation;
                     self.adopt_auto_uncheck_armed = false;
@@ -917,9 +1037,9 @@ impl PinCreateState {
                 self.sync_from_name();
                 self.sync_mode_from_mux_collision();
             }
-            5 => self.id_overridden = !self.id.value().is_empty(),
-            6 => self.display_overridden = !self.display_name.value().is_empty(),
-            7 => {
+            Self::FIELD_ID => self.id_overridden = !self.id.value().is_empty(),
+            Self::FIELD_DISPLAY => self.display_overridden = !self.display_name.value().is_empty(),
+            Self::FIELD_MUX_NAME => {
                 self.mux_overridden = !self.mux_name.value().is_empty();
                 self.sync_mode_from_mux_collision();
             }
@@ -1565,16 +1685,39 @@ impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let cursor = self.state.render_cursor();
-        let content_lines = 15 + usize::from(self.state.error.is_some()) * 2;
+        let content_lines = 15
+            + usize::from(self.state.has_launch_options())
+            + usize::from(self.state.error.is_some()) * 2;
         let modal = pin_create_modal_rect(area, content_lines);
         let inner_width = modal.width.saturating_sub(2) as usize;
         let mut lines = vec![
-            pin_create_input_field(0, "name", &self.state.name, cursor, inner_width),
-            pin_create_mode_field(self.state, cursor, inner_width),
-            pin_create_input_field(2, "cwd", &self.state.cwd, cursor, inner_width),
-            pin_create_harness_field(self.state, cursor, inner_width),
             pin_create_input_field(
-                4,
+                PinCreateState::FIELD_NAME,
+                "name",
+                &self.state.name,
+                cursor,
+                inner_width,
+            ),
+            pin_create_mode_field(self.state, cursor, inner_width),
+            pin_create_input_field(
+                PinCreateState::FIELD_CWD,
+                "cwd",
+                &self.state.cwd,
+                cursor,
+                inner_width,
+            ),
+            pin_create_harness_field(self.state, cursor, inner_width),
+        ];
+        if self.state.has_launch_options() {
+            lines.push(pin_create_launch_options_field(
+                self.state,
+                cursor,
+                inner_width,
+            ));
+        }
+        lines.extend([
+            pin_create_input_field(
+                PinCreateState::FIELD_LAUNCH_ARGV,
                 "launch argv",
                 &self.state.launch_argv,
                 cursor,
@@ -1583,19 +1726,37 @@ impl Widget for PinCreateWidget<'_> {
             pin_create_launch_preview_field(self.state, inner_width),
             line![""],
             line![span!(Modifier::DIM; "Advanced identity")],
-            pin_create_input_field(5, "id", &self.state.id, cursor, inner_width),
-            pin_create_input_field(6, "display", &self.state.display_name, cursor, inner_width),
+            pin_create_input_field(
+                PinCreateState::FIELD_ID,
+                "id",
+                &self.state.id,
+                cursor,
+                inner_width,
+            ),
+            pin_create_input_field(
+                PinCreateState::FIELD_DISPLAY,
+                "display",
+                &self.state.display_name,
+                cursor,
+                inner_width,
+            ),
             pin_create_value_field(
-                7,
+                PinCreateState::FIELD_MUX_NAME,
                 "mux.name",
                 &self.state.mux_name_display(),
                 self.state.mux_name.cursor(),
                 cursor,
                 inner_width,
             ),
-            pin_create_input_field(8, "mux.socket", &self.state.mux_socket, cursor, inner_width),
+            pin_create_input_field(
+                PinCreateState::FIELD_MUX_SOCKET,
+                "mux.socket",
+                &self.state.mux_socket,
+                cursor,
+                inner_width,
+            ),
             pin_create_store_field(self.state.store, cursor, inner_width),
-        ];
+        ]);
         if let Some(error) = &self.state.error {
             lines.push(line![""]);
             lines.push(line![span!(Modifier::BOLD; "{}", error.clone())]);
@@ -1698,7 +1859,7 @@ fn pin_create_mode_field(
 ) -> Line<'static> {
     if state.can_toggle_mode() {
         option_pair_line(
-            cursor == 1,
+            cursor == PinCreateState::FIELD_MODE,
             "mode",
             "new",
             state.mode == PinCreateMode::NewVariation,
@@ -1707,7 +1868,13 @@ fn pin_create_mode_field(
             inner_width,
         )
     } else {
-        pin_create_static_field(1, "mode", state.mode.label(), cursor, inner_width)
+        pin_create_static_field(
+            PinCreateState::FIELD_MODE,
+            "mode",
+            state.mode.label(),
+            cursor,
+            inner_width,
+        )
     }
 }
 
@@ -1718,7 +1885,7 @@ fn pin_create_harness_field(
 ) -> Line<'static> {
     const HARNESS_VALUE_SLOT_WIDTH: usize = 18;
 
-    let active = cursor == 3;
+    let active = cursor == PinCreateState::FIELD_HARNESS;
     let (prefix, label_style) = pin_create_prefix("harness", active);
     let available = inner_width.saturating_sub(prefix.chars().count());
     if state.harness_warning().is_some() {
@@ -1762,6 +1929,29 @@ fn pin_create_harness_field(
     }
     spans.extend(suffix);
     Line::from(spans)
+}
+
+fn pin_create_launch_options_field(
+    state: &PinCreateState,
+    cursor: usize,
+    inner_width: usize,
+) -> Line<'static> {
+    let active = cursor == PinCreateState::FIELD_LAUNCH_OPTIONS;
+    let options = state.launch_options();
+    let (prefix, style) = pin_create_prefix("options", active);
+    let value = options
+        .iter()
+        .map(|option| option_token(option.label, state.launch_option_selected(*option)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let value_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(PIN_CREATE_TEXT_GUTTER.chars().count());
+    line![
+        span!(style; "{prefix}"),
+        span!("{}", PIN_CREATE_TEXT_GUTTER),
+        span!(pin_create_entry_style(active); "{}", truncate_chars(&value, value_width))
+    ]
 }
 
 fn pin_create_harness_custom_field(
@@ -1866,7 +2056,7 @@ fn pin_create_store_field(
     cursor: usize,
     inner_width: usize,
 ) -> Line<'static> {
-    let active = cursor == 9;
+    let active = cursor == PinCreateState::FIELD_STORE;
     let (prefix, label_style) = pin_create_prefix("store", active);
     let value = format!(
         "{} {} {}",
@@ -2369,6 +2559,16 @@ mod tests {
         }
     }
 
+    fn move_to_create_field(editor: &mut PinCreateState, target: usize) {
+        for _ in 0..editor.field_count() {
+            if editor.render_cursor() == target {
+                return;
+            }
+            editor.handle_key(key(KeyCode::Down));
+        }
+        panic!("field {target} is not visible");
+    }
+
     fn pin_target() -> PinMutationTarget {
         PinMutationTarget {
             id: "ingest".to_string(),
@@ -2629,7 +2829,7 @@ mod tests {
         editor.handle_key(key(KeyCode::BackTab));
         assert_eq!(editor.render_cursor(), 0);
         editor.handle_key(shift_key(KeyCode::BackTab));
-        assert_eq!(editor.render_cursor(), 9);
+        assert_eq!(editor.render_cursor(), PinCreateState::FIELD_STORE);
     }
 
     #[test]
@@ -2784,6 +2984,124 @@ mod tests {
             editor.request().expect("valid request").launch_argv,
             preview.argv
         );
+    }
+
+    #[test]
+    fn create_form_launch_option_toggles_codex_skip_permissions_into_argv() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+            vec![],
+        );
+
+        move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
+        editor.handle_key(key(KeyCode::Char(' ')));
+        assert_eq!(
+            editor.launch_argv.value(),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+        assert_eq!(
+            editor.request().expect("valid request").launch_argv,
+            vec![
+                "codex".to_string(),
+                "--dangerously-bypass-approvals-and-sandbox".to_string()
+            ]
+        );
+
+        editor.handle_key(key(KeyCode::Char(' ')));
+        assert_eq!(editor.launch_argv.value(), "");
+        assert_eq!(
+            editor.request().expect("valid request").launch_argv,
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn create_form_launch_option_toggles_claude_skip_permissions_into_argv() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "claude-code".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+            vec![],
+        );
+
+        move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
+        editor.handle_key(key(KeyCode::Char(' ')));
+
+        assert_eq!(
+            editor.launch_argv.value(),
+            "claude --dangerously-skip-permissions"
+        );
+    }
+
+    #[test]
+    fn create_form_launch_option_preserves_manual_argv_tokens() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec![],
+            vec![],
+        );
+        editor.launch_argv = TextInputState::new(" launch argv ", "sandbox run codex".to_string());
+
+        move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
+        editor.handle_key(key(KeyCode::Char(' ')));
+        assert_eq!(
+            editor.launch_argv.value(),
+            "sandbox run codex --dangerously-bypass-approvals-and-sandbox"
+        );
+        editor.handle_key(key(KeyCode::Char(' ')));
+        assert_eq!(editor.launch_argv.value(), "sandbox run codex");
+    }
+
+    #[test]
+    fn create_form_switching_harness_removes_incompatible_option_flags() {
+        let mut editor = PinCreateState::new(
+            PinCreateDefaults {
+                id: "scratch".to_string(),
+                display_name: "scratch".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/workspace/project".to_string(),
+                mux_name: "scratch".to_string(),
+                mode: PinCreateMode::NewVariation,
+            },
+            None,
+            vec!["claude-code".to_string(), "codex".to_string()],
+            vec![],
+        );
+        move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
+        editor.handle_key(key(KeyCode::Char(' ')));
+        assert_eq!(
+            editor.launch_argv.value(),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+
+        move_to_create_field(&mut editor, PinCreateState::FIELD_HARNESS);
+        editor.handle_key(key(KeyCode::Left));
+        assert_eq!(editor.harness.value(), "claude-code");
+        assert_eq!(editor.launch_argv.value(), "");
     }
 
     #[test]
@@ -3127,7 +3445,7 @@ mod tests {
 
         editor.handle_key(key(KeyCode::Down));
         editor.handle_key(key(KeyCode::Char(' ')));
-        for _ in 0..6 {
+        for _ in 0..7 {
             editor.handle_key(key(KeyCode::Down));
         }
         for _ in 0.."live_mux".len() {

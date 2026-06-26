@@ -6111,7 +6111,7 @@ layout or awkward key semantics.
     later fail with no command. Preview display quotes whitespace
     arguments without shell execution.
 
-- [ ] `H-PIN-TUI-006a` Harness launch option mappings for pin create.
+- [x] `H-PIN-TUI-006a` Harness launch option mappings for pin create.
   - Scope: define a data model for harness-specific launch options
     that the TUI can render as controls such as `skip permissions`
     checkboxes while applying the correct argv fragments for the
@@ -6129,6 +6129,19 @@ layout or awkward key semantics.
     preserving unknown/manual argv tokens, switching harnesses without
     leaking incompatible flags, and fallback behavior for unknown
     harness keys or versions.
+  - Outcome: harness launch options now live in
+    `discovery::harness` as data keyed by harness identity. The
+    create form renders an `options` row for known harnesses with
+    defined mappings; `codex` and `claude-code` both expose
+    `skip permissions`, mapped respectively to
+    `--dangerously-bypass-approvals-and-sandbox` and
+    `--dangerously-skip-permissions`. Toggling an option updates the
+    editable `launch argv` field, preserving manual wrapper tokens
+    and clearing back to the harness default when the structured
+    option is removed. Switching harnesses strips incompatible known
+    option fragments so stale flags do not leak into the new harness.
+    Unknown harnesses continue to fall back to the free-form launch
+    argv editor.
   - Blockers: `H-PIN-TUI-005`, `H-PIN-TUI-006`.
 
 - [x] `H-PIN-TUI-007` Post-create/adopt focus and toast behavior.

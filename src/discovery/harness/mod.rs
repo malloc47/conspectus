@@ -34,6 +34,28 @@ pub use claude_code::ClaudeCodeAdapter;
 pub use codex::CodexAdapter;
 pub use opencode::OpenCodeAdapter;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HarnessLaunchOption {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub argv: &'static [&'static str],
+}
+
+const CODEX_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-bypass-approvals-and-sandbox"];
+const CLAUDE_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-skip-permissions"];
+
+const CODEX_LAUNCH_OPTIONS: &[HarnessLaunchOption] = &[HarnessLaunchOption {
+    id: "skip-permissions",
+    label: "skip permissions",
+    argv: CODEX_SKIP_PERMISSIONS_ARGV,
+}];
+
+const CLAUDE_CODE_LAUNCH_OPTIONS: &[HarnessLaunchOption] = &[HarnessLaunchOption {
+    id: "skip-permissions",
+    label: "skip permissions",
+    argv: CLAUDE_SKIP_PERMISSIONS_ARGV,
+}];
+
 pub trait HarnessAdapter: Send + Sync {
     fn harness_key(&self) -> &str;
 
@@ -76,6 +98,73 @@ pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
         aider::HARNESS_KEY => AiderAdapter::new().launch_argv(),
         _ => Vec::new(),
     }
+}
+
+pub fn launch_options_for(harness_key: &str) -> &'static [HarnessLaunchOption] {
+    match harness_key {
+        codex::HARNESS_KEY => CODEX_LAUNCH_OPTIONS,
+        claude_code::HARNESS_KEY => CLAUDE_CODE_LAUNCH_OPTIONS,
+        _ => &[],
+    }
+}
+
+pub fn launch_option_for(harness_key: &str, option_id: &str) -> Option<HarnessLaunchOption> {
+    launch_options_for(harness_key)
+        .iter()
+        .copied()
+        .find(|option| option.id == option_id)
+}
+
+pub fn argv_contains_fragment(argv: &[String], fragment: &[&str]) -> bool {
+    if fragment.is_empty() {
+        return false;
+    }
+    argv.windows(fragment.len()).any(|window| {
+        window
+            .iter()
+            .zip(fragment.iter())
+            .all(|(actual, expected)| actual == expected)
+    })
+}
+
+pub fn argv_with_fragment(mut argv: Vec<String>, fragment: &[&str]) -> Vec<String> {
+    if fragment.is_empty() || argv_contains_fragment(&argv, fragment) {
+        return argv;
+    }
+    argv.extend(fragment.iter().map(|arg| (*arg).to_string()));
+    argv
+}
+
+pub fn argv_without_fragment(argv: Vec<String>, fragment: &[&str]) -> Vec<String> {
+    if fragment.is_empty() {
+        return argv;
+    }
+    let mut out = Vec::with_capacity(argv.len());
+    let mut idx = 0;
+    while idx < argv.len() {
+        if idx + fragment.len() <= argv.len()
+            && argv[idx..idx + fragment.len()]
+                .iter()
+                .zip(fragment.iter())
+                .all(|(actual, expected)| actual == expected)
+        {
+            idx += fragment.len();
+        } else {
+            out.push(argv[idx].clone());
+            idx += 1;
+        }
+    }
+    out
+}
+
+pub fn strip_known_launch_option_fragments(argv: Vec<String>) -> Vec<String> {
+    let mut stripped = argv;
+    for options in [CODEX_LAUNCH_OPTIONS, CLAUDE_CODE_LAUNCH_OPTIONS] {
+        for option in options {
+            stripped = argv_without_fragment(stripped, option.argv);
+        }
+    }
+    stripped
 }
 
 /// Look up the per-harness resume argv. Sibling of [`launch_argv_for`]
@@ -362,6 +451,67 @@ mod tests {
     #[test]
     fn unknown_harness_resume_argv_returns_none() {
         assert!(resume_argv_for("nonesuch", "abc123", Path::new("/p")).is_none());
+    }
+
+    #[test]
+    fn launch_options_include_skip_permissions_for_codex_and_claude() {
+        let codex = launch_options_for("codex");
+        assert_eq!(codex.len(), 1);
+        assert_eq!(codex[0].id, "skip-permissions");
+        assert_eq!(
+            codex[0].argv,
+            ["--dangerously-bypass-approvals-and-sandbox"]
+        );
+
+        let claude = launch_options_for("claude-code");
+        assert_eq!(claude.len(), 1);
+        assert_eq!(claude[0].id, "skip-permissions");
+        assert_eq!(claude[0].argv, ["--dangerously-skip-permissions"]);
+
+        assert!(launch_options_for("aider").is_empty());
+    }
+
+    #[test]
+    fn launch_option_fragment_helpers_preserve_manual_tokens() {
+        let argv = vec![
+            "sandbox".to_string(),
+            "run".to_string(),
+            "codex".to_string(),
+        ];
+        let argv = argv_with_fragment(argv, CODEX_SKIP_PERMISSIONS_ARGV);
+        assert_eq!(
+            argv,
+            vec![
+                "sandbox".to_string(),
+                "run".to_string(),
+                "codex".to_string(),
+                "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            ]
+        );
+        assert!(argv_contains_fragment(&argv, CODEX_SKIP_PERMISSIONS_ARGV));
+
+        let stripped = argv_without_fragment(argv, CODEX_SKIP_PERMISSIONS_ARGV);
+        assert_eq!(
+            stripped,
+            vec![
+                "sandbox".to_string(),
+                "run".to_string(),
+                "codex".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn strip_known_launch_option_fragments_removes_cross_harness_flags() {
+        let argv = vec![
+            "codex".to_string(),
+            "--dangerously-bypass-approvals-and-sandbox".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        assert_eq!(
+            strip_known_launch_option_fragments(argv),
+            vec!["codex".to_string()]
+        );
     }
 
     #[test]
