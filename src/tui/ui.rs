@@ -1173,13 +1173,21 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     const SESSION_DISPLAY_LABEL_WIDTH: usize = 32;
 
     let mut spans = Vec::new();
+    let placeholder = row_primary_node_is_pin(&session.primary_node);
     // Lead with the harness-native session key rather than
     // Conspectus's internal short node id. Operators recognize the
     // external session id; the internal id is still accepted by
     // explicit node lookup commands.
     let session_id =
         truncate_to_width_no_marker(&session.session.session_key, SESSION_ID_COLUMN_WIDTH);
-    spans.push(span!(Style::default().fg(theme.secondary_text); "{session_id}  "));
+    let id_style = if placeholder {
+        Style::default()
+            .fg(theme.secondary_text)
+            .add_modifier(theme.placeholder)
+    } else {
+        Style::default().fg(theme.secondary_text)
+    };
+    spans.push(span!(id_style; "{session_id}  "));
     // The badge widget pads internally so every chip is the same
     // width regardless of label length; no external padding span
     // needed.
@@ -1199,13 +1207,18 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         // marker reads without depending on a new theme key.
         spans.push(span!(theme.placeholder; "  📌"));
     }
+    if placeholder {
+        spans.push(span!(theme.placeholder; "  planned"));
+    }
     // P8-015: the row's tree label surfaces the operator-chosen
     // alias unconditionally and the harness-recorded title only when
     // the builder flagged this row for disambiguation. Right pane,
     // search index, and status hints still read `display_label`.
     if let Some(label) = session.tree_label().filter(|label| !label.is_empty()) {
         let label = truncate_to_width_strict(label, SESSION_DISPLAY_LABEL_WIDTH);
-        let style = if session
+        let style = if placeholder {
+            Style::default().add_modifier(theme.placeholder | Modifier::BOLD)
+        } else if session
             .alias
             .as_deref()
             .is_some_and(|alias| !alias.is_empty())
@@ -1296,6 +1309,7 @@ fn render_mux_session_spans(
     if width == 0 {
         return spans;
     }
+    let placeholder = row_primary_node_is_pin(&mux.primary_node);
 
     // Column order mirrors the agent-session row so muxed and
     // session rows scan as a single visual rhythm:
@@ -1305,8 +1319,15 @@ fn render_mux_session_spans(
     // steals horizontal space.
     let label = compact_mux_native_id(&mux.native_id);
     let label_width = mux_label_column_width(width);
+    let label_style = if placeholder {
+        Style::default()
+            .fg(theme.link_id)
+            .add_modifier(theme.placeholder)
+    } else {
+        Style::default().fg(theme.link_id)
+    };
     spans.push(span!(
-        Style::default().fg(theme.link_id);
+        label_style;
         "{}",
         pad_to_width(truncate_to_width_strict(&label, label_width), label_width)
     ));
@@ -1334,15 +1355,19 @@ fn render_mux_session_spans(
     ));
 
     spans.push(Span::raw("  "));
-    match mux.client_attached {
-        Some(true) => {
-            spans.push(span!(Style::default().fg(theme.mux_attached); "◉"));
-        }
-        Some(false) => {
-            spans.push(span!(theme.mux_unmuxed; "◯"));
-        }
-        None => {
-            spans.push(span!(theme.placeholder; "?"));
+    if placeholder {
+        spans.push(span!(theme.placeholder; "planned"));
+    } else {
+        match mux.client_attached {
+            Some(true) => {
+                spans.push(span!(Style::default().fg(theme.mux_attached); "◉"));
+            }
+            Some(false) => {
+                spans.push(span!(theme.mux_unmuxed; "◯"));
+            }
+            None => {
+                spans.push(span!(theme.placeholder; "?"));
+            }
         }
     }
     if mux.ambiguous_count > 0 {
@@ -1358,6 +1383,10 @@ fn render_mux_session_spans(
 
     append_mux_single_session_preview(&mut spans, mux, theme, width);
     fit_spans_to_width(spans, width)
+}
+
+fn row_primary_node_is_pin(node: &NodeId) -> bool {
+    matches!(node, NodeId::Pin(_))
 }
 
 fn append_mux_agent_labels(
@@ -3058,15 +3087,24 @@ fn default_action_status_hint(app: &App) -> String {
         }
         return format!("{launch_hint} · b bind · Del remove");
     }
-    if let RowKind::AgentSession(session) = &row.kind
-        && session.pin_id.is_some()
-    {
+    let selected_pin_id = match &row.kind {
+        RowKind::AgentSession(session) => session.pin_id.as_deref(),
+        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+        _ => None,
+    };
+    if selected_pin_id.is_some() {
         let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
         if let Some(hint) = crate::tui::actions::pin_status_hint(&diagnostics) {
             if !hint.contains(" b bind") {
                 return format!("{hint} · b bind");
             }
             return hint;
+        }
+        if pin_placeholder_row_kind(&row.kind) {
+            return format!(
+                "Enter to launch `{}` · b bind · Del remove",
+                selected_pin_id.unwrap_or("pin")
+            );
         }
     }
     match resolve_attach_target(app) {
@@ -3095,6 +3133,14 @@ fn default_action_status_hint(app: &App) -> String {
             }
             attach_disabled_reason(&reason)
         }
+    }
+}
+
+fn pin_placeholder_row_kind(kind: &RowKind) -> bool {
+    match kind {
+        RowKind::AgentSession(session) => row_primary_node_is_pin(&session.primary_node),
+        RowKind::MuxSession(mux) => row_primary_node_is_pin(&mux.primary_node),
+        _ => false,
     }
 }
 
@@ -5019,6 +5065,34 @@ mod tests {
     }
 
     #[test]
+    fn placeholder_session_row_renders_planned_marker() {
+        use crate::tui::rows::{AgentSessionRow, MuxIndicator};
+        let theme = Theme::default();
+        let row = AgentSessionRow {
+            session: AgentSessionId::new("codex", "pin:ingest", "ingest"),
+            short_id: "ingest".into(),
+            harness_label: "codex".into(),
+            cwd_display: Some("~/repo".into()),
+            project_display: None,
+            recency: None,
+            activity_epoch: None,
+            mux_state: MuxIndicator::Unmuxed,
+            preview: Some("planned mux tmux:ingest".into()),
+            title: Some("planned".into()),
+            alias: Some("ingest".into()),
+            title_disambiguates: false,
+            primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
+            pin_id: Some("ingest".into()),
+        };
+
+        let spans = render_session_spans(&row, &theme, 1_700_000_000);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+
+        assert!(rendered.contains("planned"), "{rendered}");
+        assert!(rendered.contains("📌"), "{rendered}");
+    }
+
+    #[test]
     fn mux_session_row_mirrors_session_column_order() {
         let theme = Theme::default();
         let now: i64 = 1_700_000_000;
@@ -5084,6 +5158,32 @@ mod tests {
         assert!(chip_idx < recency_idx, "chip before recency: {rendered}");
         assert!(recency_idx < glyph_idx, "recency before glyph: {rendered}");
         assert!(glyph_idx < preview_idx, "glyph before preview: {rendered}");
+    }
+
+    #[test]
+    fn placeholder_mux_row_renders_planned_marker() {
+        let theme = Theme::default();
+        let row = MuxSessionRow {
+            mux: MuxSessionId::new("tmux:ingest"),
+            backend: "tmux".into(),
+            native_id: "ingest".into(),
+            client_attached: None,
+            cwd_display: Some("~/repo".into()),
+            attached_count: 0,
+            ambiguous_count: 0,
+            recency: None,
+            activity_epoch: None,
+            agent_labels: vec!["codex".into()],
+            single_session_preview: Some("planned session".into()),
+            pin_id: Some("ingest".into()),
+            primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
+        };
+
+        let spans = render_mux_session_spans(&row, &theme, 1_700_000_000, 100);
+        let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
+
+        assert!(rendered.contains("planned"), "{rendered}");
+        assert!(rendered.contains("📌"), "{rendered}");
     }
 
     #[test]

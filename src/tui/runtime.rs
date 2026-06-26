@@ -1471,6 +1471,9 @@ fn selected_default_action(app: &App) -> SelectedDefault {
     let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
         return SelectedDefault::ToggleExpand;
     };
+    if pin_placeholder_row(row) {
+        return SelectedDefault::LaunchPin;
+    }
     match &row.kind {
         RowKind::Group(_) => SelectedDefault::ToggleExpand,
         RowKind::MuxSession(_) | RowKind::AgentSessionMuxCandidate(_) => SelectedDefault::Attach,
@@ -1485,6 +1488,20 @@ fn selected_default_action(app: &App) -> SelectedDefault {
         // primitive (H-PIN-012) via a subprocess so the launch
         // logic stays in one place.
         RowKind::Pin(_) => SelectedDefault::LaunchPin,
+    }
+}
+
+fn pin_placeholder_row(row: &crate::tui::rows::Row) -> bool {
+    use crate::model::NodeId;
+    matches!(
+        &row.kind,
+        crate::tui::rows::RowKind::AgentSession(_) | crate::tui::rows::RowKind::MuxSession(_)
+    ) && match &row.kind {
+        crate::tui::rows::RowKind::AgentSession(session) => {
+            matches!(&session.primary_node, NodeId::Pin(_))
+        }
+        crate::tui::rows::RowKind::MuxSession(mux) => matches!(&mux.primary_node, NodeId::Pin(_)),
+        _ => false,
     }
 }
 
@@ -2071,14 +2088,23 @@ fn launch_pin_action(terminal: &mut DefaultTerminal, app: &mut App, config: &Run
         app.update(Msg::SetStatus(Some("launch: nothing selected".to_string())));
         return;
     };
-    let pin_id = match selection {
-        crate::tui::rows::RowId::Pin { pin_id } => pin_id.clone(),
-        _ => {
-            app.update(Msg::SetStatus(Some(
-                "launch: select an unbound pin row".to_string(),
-            )));
-            return;
-        }
+    let pin_id = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| &row.id == selection)
+        .and_then(|row| match &row.kind {
+            crate::tui::rows::RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
+            crate::tui::rows::RowKind::AgentSession(session) => session.pin_id.as_deref(),
+            crate::tui::rows::RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+            _ => None,
+        })
+        .map(str::to_string);
+    let Some(pin_id) = pin_id else {
+        app.update(Msg::SetStatus(Some(
+            "launch: select a pin or placeholder row".to_string(),
+        )));
+        return;
     };
     launch_pin_by_id(terminal, app, config, &pin_id);
 }

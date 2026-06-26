@@ -6261,8 +6261,17 @@ layout or awkward key semantics.
     views across grouped and flat groupings; TUI snapshot coverage for
     an unlaunched pin created from mux view; detail/search tests that
     show the placeholder row links back to the `PinNode`.
-  - Blockers: ADR or design note deciding whether placeholders are
-    graph nodes, row-only view models, or derived node variants.
+  - Progress: first implementation slice uses row-only placeholders:
+    unbound pins emit session-shaped rows in the sessions view and
+    mux-shaped rows in the mux view, with `primary_node` pointing at
+    the owning `PinNode`, pin launch as the default action, and a
+    `planned` visual marker. Detail/search/model placeholder identity
+    work remains open under this story.
+  - Decision note: the first slice uses row-only view models backed by
+    the existing `PinNode`; a later slice can still promote placeholder
+    identities into graph nodes if detail/search/JSON consumers need
+    that surface.
+  - Remaining work: revisit "planned" language, style placeholder rows
 
 #### Deferred follow-ups (post-v1)
 

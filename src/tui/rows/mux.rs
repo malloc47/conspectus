@@ -12,12 +12,12 @@ use std::path::{Path, PathBuf};
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphNode, GraphSnapshot, LinkEndpoint,
-    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinBinding, PinCandidate, RelationKind,
+    LinkState, MuxSessionId, MuxSessionNode, NodeId, PinBinding, PinCandidate, PinId, RelationKind,
     RepoId, path_is_ancestor_of,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, PinRow, Row, RowId, RowKind, RowTree,
+    AgentSessionRow, GroupRow, MuxIndicator, MuxSessionRow, Row, RowId, RowKind, RowTree,
     ViewLabel, format_recency, harness_label, shorten_home,
 };
 use crate::tui::{MuxGrouping, Sort};
@@ -167,6 +167,13 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
         });
     }
 
+    for pin in pins
+        .iter()
+        .filter(|pin| matches!(pin.binding, Some(PinBinding::Unbound) | None))
+    {
+        groups.push(placeholder_mux_group_for_pin(pin, inputs.home));
+    }
+
     match inputs.grouping {
         MuxGrouping::Session | MuxGrouping::Host => {
             emit_flat(&mut tree, groups, &inputs, &short_ids, now);
@@ -182,19 +189,6 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     }
 
     tree
-}
-
-/// Strip the `tmux:` (default socket) or `tmux:<socket>:`
-/// (non-default socket) prefix from a pin's
-/// `mux.native_id()` so it matches the bare tmux session name
-/// carried on `MuxSessionNode.native_id`. Returns `None` when
-/// the prefix is absent.
-fn bare_tmux_name(pin_mux_native_id: &str) -> Option<&str> {
-    let rest = pin_mux_native_id.strip_prefix("tmux:")?;
-    match rest.find(':') {
-        Some(socket_end) => Some(&rest[socket_end + 1..]),
-        None => Some(rest),
-    }
 }
 
 fn emit_pins_group_for_mux(
@@ -241,42 +235,38 @@ fn emit_pins_group_for_mux(
             continue;
         }
 
-        let state_label = match &pin.binding {
-            Some(PinBinding::Bound { .. }) => "bound",
-            Some(PinBinding::StaleMux { .. }) => "stale-mux",
-            Some(PinBinding::Unbound) => "unbound",
-            None => "unresolved",
-        };
-        let pin_native_id = pin.mux.native_id();
-        let mux_socket = pin.mux.socket_name.clone();
-        let launch_argv = pin.launch_argv.clone().unwrap_or_default();
-        let bare = bare_tmux_name(&pin_native_id).unwrap_or(&pin_native_id);
-        let mux_label = match mux_socket.as_deref() {
-            Some(socket) => format!("tmux:{socket}:{bare}"),
-            None => format!("tmux:{bare}"),
-        };
-        let mux_name = bare.to_string();
-        tree.rows.push(Row {
-            id: RowId::Pin {
-                pin_id: pin.id.clone(),
-            },
-            depth: 1,
-            expandable: false,
-            kind: RowKind::Pin(PinRow {
-                pin_id: pin.id.clone(),
-                display_name: pin.display_name.clone(),
-                harness: pin.harness.clone(),
-                cwd: pin.cwd.clone(),
-                mux_name,
-                mux_socket,
-                launch_argv,
-                store_path: pin.store_path.clone(),
-                harness_label: harness_label(&pin.harness),
-                cwd_display: shorten_home(&pin.cwd, home),
-                mux_label,
-                state_label,
-            }),
-        });
+        placeholder_mux_group_for_pin(pin, home).push_into(tree, 1, short_ids, home, now);
+    }
+}
+
+fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> MuxGroup {
+    let pin_node = NodeId::Pin(PinId::new(pin.id.clone()));
+    let native_id = pin
+        .mux
+        .socket_name
+        .as_ref()
+        .map(|socket| format!("{socket}:{}", pin.mux.name))
+        .unwrap_or_else(|| pin.mux.name.clone());
+    MuxGroup {
+        parent_row: MuxSessionRow {
+            mux: MuxSessionId::new(pin.mux.native_id()),
+            backend: pin.mux.backend.clone(),
+            native_id,
+            client_attached: None,
+            cwd_display: Some(shorten_home(&pin.cwd, home)),
+            attached_count: 0,
+            ambiguous_count: 0,
+            recency: None,
+            activity_epoch: None,
+            agent_labels: vec![harness_label(&pin.harness)],
+            single_session_preview: Some("planned session".to_string()),
+            pin_id: Some(pin.id.clone()),
+            primary_node: pin_node.clone(),
+        },
+        parent_node_id: pin_node,
+        children: Vec::new(),
+        attached_count: 0,
+        cwd: Some(pin.cwd.clone()),
     }
 }
 
@@ -1541,11 +1531,15 @@ mod tests {
                 (row.depth, label)
             })
             .collect();
-        // Pins group first, then the repo bucket.
+        // Pins group first, then the repo bucket. The unbound pin
+        // also appears in its natural repo location as a placeholder
+        // mux row, mirroring bound pins appearing both in Pins and
+        // in place.
         assert_eq!(row_summary[0], (0, "Pins".to_string()));
-        assert_eq!(row_summary[1], (1, "pin:ingest".to_string()));
+        assert_eq!(row_summary[1], (1, "mux:ingest".to_string()));
         assert_eq!(row_summary[2], (0, "/p/foo".to_string()));
-        assert_eq!(row_summary[3], (1, "mux:foo-a".to_string()));
+        assert_eq!(row_summary[3], (1, "mux:ingest".to_string()));
+        assert_eq!(row_summary[4], (1, "mux:foo-a".to_string()));
     }
 
     #[test]
@@ -1622,12 +1616,13 @@ mod tests {
     }
 
     #[test]
-    fn mux_view_skips_pins_group_under_flat_groupings() {
+    fn mux_view_flat_grouping_renders_unbound_pin_as_placeholder_mux_row() {
         // Flat groupings float pinned mux entities directly rather
-        // than inserting a synthetic Pins group header.
+        // than inserting a synthetic Pins group header. Unbound pins
+        // still get a mux-shaped placeholder row so the operator can
+        // launch them from the mux view before tmux exists.
         use crate::model::{PinBinding, PinCandidate, PinMuxRef, Provenance};
         let mut snapshot = GraphSnapshot::empty();
-        snapshot.nodes.push(mux_node("editor"));
         snapshot.pins.push(PinCandidate {
             id: "code".to_string(),
             display_name: "Pin".to_string(),
@@ -1665,13 +1660,20 @@ mod tests {
             "session/host groupings should not emit a Pins group: {:#?}",
             tree.rows,
         );
-    }
-
-    #[test]
-    fn bare_tmux_name_strips_default_and_socket_prefixes() {
-        assert_eq!(super::bare_tmux_name("tmux:editor"), Some("editor"));
-        assert_eq!(super::bare_tmux_name("tmux:scratch:editor"), Some("editor"),);
-        assert_eq!(super::bare_tmux_name("editor"), None);
-        assert_eq!(super::bare_tmux_name("zellij:foo"), None);
+        let mux = tree
+            .rows
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::MuxSession(mux) if mux.pin_id.as_deref() == Some("code") => Some(mux),
+                _ => None,
+            })
+            .expect("placeholder mux row");
+        assert_eq!(mux.native_id, "editor");
+        assert_eq!(mux.agent_labels, vec!["claude".to_string()]);
+        assert_eq!(
+            mux.single_session_preview.as_deref(),
+            Some("planned session")
+        );
+        assert!(matches!(&mux.primary_node, NodeId::Pin(pin) if pin.id == "code"));
     }
 }

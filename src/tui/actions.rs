@@ -237,6 +237,7 @@ pub fn selected_pin_diagnostics(app: &App) -> Vec<PinDiagnosticView> {
     let pin_id = match &row.kind {
         RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
         RowKind::AgentSession(session) => session.pin_id.as_deref(),
+        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
         _ => None,
     };
     let Some(pin_id) = pin_id else {
