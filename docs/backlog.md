@@ -6280,8 +6280,20 @@ layout or awkward key semantics.
     row body. Single-session preview / session preview fall through
     to the pin's cwd (`~`-collapsed). Session placeholder rows also
     drop the trailing "planned" chip and the "planned" title.
+  - Detail-pane dispatch (2026-06-27): placeholder pin rows route
+    through a view-aligned upgrade in `App::recompute_detail`. The
+    sessions view upgrades to the `PinUnbound` diagnostic's
+    `last_session` when its `AgentSession` node is present in the
+    snapshot; the mux view upgrades to the bound / stale-mux target
+    when the pin has one. When neither is available the right pane
+    falls back to the `PinNode` itself, with both `NodeDetail`
+    candidate-link summaries and the `NodeView` Related zone stripped
+    so the surface reads as "no live entity yet" rather than dumping
+    the resolver-synthesized `LinkedToMux` candidate. Header label
+    now reads `pin` (the missing arm in `right_panel_kind_label` was
+    added in the same pass).
   - Remaining work: bound-pin `📌` glyph polish stays deferred to
-    `H-PIN-016`; detail/search/model placeholder identity is still
+    `H-PIN-016`; search / model / JSON placeholder identity is still
     open under this story.
 
 #### Deferred follow-ups (post-v1)

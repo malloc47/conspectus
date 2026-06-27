@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
 
-use crate::model::{MuxSessionId, NodeId, PinId};
+use crate::model::{Diagnostic, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinBinding, PinId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
 use crate::tui::explorer::{
     BreadcrumbHop, ExplorerInputs, ExplorerRow, ExplorerRowKey, NodeView, build_node_view,
@@ -2070,7 +2070,12 @@ impl App {
             self.explorer = None;
             return;
         };
-        let target = match selection {
+        let Some(database) = self.database.as_ref() else {
+            self.explorer = None;
+            return;
+        };
+        let snapshot = database.snapshot();
+        let raw_target = match selection {
             RowId::Group(node) => Some(node.clone()),
             RowId::AgentSession(node) => Some(node.clone()),
             RowId::AgentSessionMuxCandidate { mux, .. } => Some(mux.clone()),
@@ -2080,24 +2085,50 @@ impl App {
             RowId::Pin { pin_id } => Some(NodeId::Pin(PinId::new(pin_id.clone()))),
             RowId::Synthetic(_) => None,
         };
-        let Some(target) = target else {
+        let Some(raw_target) = raw_target else {
             self.explorer = None;
             return;
         };
-        let Some(database) = self.database.as_ref() else {
-            self.explorer = None;
-            return;
+        // Placeholder pin rows route through here whether they live in
+        // the sessions view (`RowId::Pin`) or the mux view (`RowId::
+        // MuxSession(NodeId::Pin(...))`). Either way the raw target is a
+        // Pin node; redirect to a view-aligned upgrade (last_session in
+        // the sessions view, bound / stale mux in the mux view) when one
+        // is known, and fall back to the Pin itself otherwise.
+        let target = match &raw_target {
+            NodeId::Pin(pin) => {
+                placeholder_detail_target(snapshot, &pin.id, self.config.default_view)
+            }
+            _ => raw_target,
         };
         let home = home_for_config(&self.config);
-        self.detail = build_node_detail(DetailInputs {
-            snapshot: database.snapshot(),
+        // When the placeholder fell back to the Pin node (no view-aligned
+        // session or mux known), strip the candidate-link summaries so the
+        // right pane reflects the operator-facing reality: the mux isn't
+        // running and the session has not been created yet. Resolved /
+        // diagnostic surfaces stay so the operator can still see why the
+        // pin is in this state.
+        let strip_pin_relationships = matches!(&target, NodeId::Pin(_));
+        let mut detail = build_node_detail(DetailInputs {
+            snapshot,
             target: &target,
             home: home.as_deref(),
         });
-        self.recompute_explorer_for(target, home.as_deref());
+        if strip_pin_relationships && let Some(detail) = detail.as_mut() {
+            detail.outgoing_links.clear();
+            detail.incoming_links.clear();
+            detail.resolved.clear();
+        }
+        self.detail = detail;
+        self.recompute_explorer_for(target, home.as_deref(), strip_pin_relationships);
     }
 
-    fn recompute_explorer_for(&mut self, target: NodeId, home: Option<&std::path::Path>) {
+    fn recompute_explorer_for(
+        &mut self,
+        target: NodeId,
+        home: Option<&std::path::Path>,
+        strip_relationships: bool,
+    ) {
         let database = self.database.as_ref();
         let Some(database) = database else {
             self.explorer = None;
@@ -2110,7 +2141,10 @@ impl App {
         });
         match view {
             None => self.explorer = None,
-            Some(view) => {
+            Some(mut view) => {
+                if strip_relationships {
+                    view.relationships.groups.clear();
+                }
                 // When the focused node hasn't changed, preserve
                 // cursor / expansion / breadcrumb across refresh.
                 let preserved =
@@ -2579,6 +2613,56 @@ fn add_expandable_group(expanded: &mut BTreeSet<RowId>, row: &Row) {
     }
 }
 
+/// Pick the detail-pane target for a placeholder pin row given the
+/// active view. View-aligned: the sessions view upgrades to the
+/// pin's `last_session` when one is recorded *and* the corresponding
+/// agent-session node is in the snapshot; the mux view upgrades to
+/// the bound / stale-mux target when the pin has one. Otherwise the
+/// pin node itself is the detail target so the operator sees a sparse
+/// "no live entity" surface rather than a mismatched session/mux view.
+fn placeholder_detail_target(snapshot: &GraphSnapshot, pin_id: &str, view: View) -> NodeId {
+    let pin_node = || NodeId::Pin(PinId::new(pin_id.to_string()));
+    let Some(pin) = snapshot.pins.iter().find(|p| p.id == pin_id) else {
+        return pin_node();
+    };
+    match view {
+        View::Mux => match &pin.binding {
+            Some(PinBinding::Bound { mux, .. }) | Some(PinBinding::StaleMux { mux }) => {
+                NodeId::MuxSession(mux.clone())
+            }
+            _ => pin_node(),
+        },
+        View::Sessions => {
+            if let Some(PinBinding::Bound { session, .. }) = &pin.binding {
+                return NodeId::AgentSession(session.clone());
+            }
+            let last_session_key = snapshot.diagnostics.iter().find_map(|d| match d {
+                Diagnostic::PinUnbound {
+                    pin_id: id,
+                    last_session: Some(last),
+                    ..
+                } if id == pin_id => Some(last.session_id.as_str()),
+                _ => None,
+            });
+            if let Some(session_key) = last_session_key {
+                let upgraded = snapshot.nodes.iter().find_map(|n| match n {
+                    GraphNode::AgentSession(s)
+                        if s.id.harness_key == pin.harness && s.id.session_key == session_key =>
+                    {
+                        Some(NodeId::AgentSession(s.id.clone()))
+                    }
+                    _ => None,
+                });
+                if let Some(upgraded) = upgraded {
+                    return upgraded;
+                }
+            }
+            pin_node()
+        }
+        View::Union | View::Prs | View::Forks => pin_node(),
+    }
+}
+
 fn home_for_config(_config: &RunConfig) -> Option<std::path::PathBuf> {
     // RunConfig doesn't carry the home directory today; the
     // dispatcher passes paths in already-shortened form via the
@@ -2989,6 +3073,158 @@ mod tests {
         assert_eq!(target.mux_socket, None);
         assert_eq!(target.launch_argv, Vec::<String>::new());
         assert_eq!(target.store_path, "/p/project/.conspectus.toml");
+    }
+
+    fn pin_only_snapshot(binding: Option<PinBinding>) -> GraphSnapshot {
+        let mut snap = GraphSnapshot::empty();
+        snap.pins.push(PinCandidate {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/p/project".to_string(),
+            mux: PinMuxRef {
+                backend: "tmux".to_string(),
+                name: "ingest".to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: Provenance::LocalPin,
+            store_path: "/p/project/.conspectus.toml".to_string(),
+            binding,
+        });
+        snap.sync_pin_nodes();
+        snap
+    }
+
+    #[test]
+    fn placeholder_detail_target_falls_back_to_pin_when_no_view_aligned_entity() {
+        let snap = pin_only_snapshot(Some(PinBinding::Unbound));
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Sessions),
+            NodeId::Pin(PinId::new("ingest")),
+        );
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Mux),
+            NodeId::Pin(PinId::new("ingest")),
+        );
+    }
+
+    #[test]
+    fn placeholder_detail_target_upgrades_to_mux_for_stale_mux_in_mux_view() {
+        let mux_id = MuxSessionId::new("tmux:ingest");
+        let snap = pin_only_snapshot(Some(PinBinding::StaleMux {
+            mux: mux_id.clone(),
+        }));
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Mux),
+            NodeId::MuxSession(mux_id),
+        );
+        // Sessions view stays on the pin: the stale mux is not a session.
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Sessions),
+            NodeId::Pin(PinId::new("ingest")),
+        );
+    }
+
+    #[test]
+    fn placeholder_detail_target_upgrades_to_last_session_in_sessions_view() {
+        let mut snap = pin_only_snapshot(Some(PinBinding::Unbound));
+        let session_id = AgentSessionId::new("codex", "/state", "alpha");
+        snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
+            id: session_id.clone(),
+            harness_key: "codex".to_string(),
+            cwd: Some("/p/project".to_string()),
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        }));
+        snap.diagnostics.push(crate::model::Diagnostic::PinUnbound {
+            pin_id: "ingest".to_string(),
+            expected_mux_native_id: "tmux:ingest".to_string(),
+            last_session: Some(crate::model::PinLastSession {
+                session_id: "alpha".to_string(),
+                observed_epoch: 1_700_000_000,
+            }),
+        });
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Sessions),
+            NodeId::AgentSession(session_id),
+        );
+        // Mux view stays on the pin: a known session is not a mux.
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Mux),
+            NodeId::Pin(PinId::new("ingest")),
+        );
+    }
+
+    #[test]
+    fn placeholder_detail_target_falls_back_to_pin_when_last_session_not_in_snapshot() {
+        let mut snap = pin_only_snapshot(Some(PinBinding::Unbound));
+        snap.diagnostics.push(crate::model::Diagnostic::PinUnbound {
+            pin_id: "ingest".to_string(),
+            expected_mux_native_id: "tmux:ingest".to_string(),
+            last_session: Some(crate::model::PinLastSession {
+                session_id: "ghost".to_string(),
+                observed_epoch: 1_700_000_000,
+            }),
+        });
+        assert_eq!(
+            placeholder_detail_target(&snap, "ingest", View::Sessions),
+            NodeId::Pin(PinId::new("ingest")),
+        );
+    }
+
+    #[test]
+    fn placeholder_pin_detail_strips_candidate_link_summaries() {
+        // sync_pin_nodes synthesizes a LinkedToMux candidate from the
+        // pin to its expected mux; on the Pin-fallback path the
+        // detail/explorer surfaces are expected to elide that
+        // candidate so the right pane reads as "nothing live yet".
+        let snap = pin_only_snapshot(Some(PinBinding::Unbound));
+        let snap = resolve_snapshot(snap);
+        let tree = build_tree(&snap);
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::SetData {
+            snapshot: GraphDb::from_snapshot(&snap),
+            tree,
+            loaded_at_epoch: 1_700_000_000,
+            initial_selection_hint: None,
+        });
+        let pin_row_id = app
+            .visible_rows()
+            .iter()
+            .find_map(|row| match &row.kind {
+                RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
+                    Some(row.id.clone())
+                }
+                _ => None,
+            })
+            .expect("placeholder pin row");
+        app.set_selection(pin_row_id);
+        let detail = app.detail().expect("detail computed for pin placeholder");
+        assert_eq!(detail.kind_label, "pin");
+        assert!(
+            detail.outgoing_links.is_empty(),
+            "pin fallback should not list outgoing candidate links: {:?}",
+            detail.outgoing_links,
+        );
+        assert!(
+            detail.incoming_links.is_empty(),
+            "pin fallback should not list incoming candidate links: {:?}",
+            detail.incoming_links,
+        );
+        assert!(
+            detail.resolved.is_empty(),
+            "pin fallback should not list resolved relationships: {:?}",
+            detail.resolved,
+        );
+        let explorer = app.explorer().expect("explorer view present");
+        assert!(
+            explorer.view.relationships.groups.is_empty(),
+            "explorer Related zone should be empty for pin fallback",
+        );
     }
 
     #[test]

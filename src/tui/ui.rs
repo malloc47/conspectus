@@ -811,6 +811,7 @@ fn right_panel_kind_label(app: &App) -> &'static str {
         "checkout" => "checkout",
         "workspace" => "workspace",
         "branch" => "branch",
+        "pin" => "pin",
         _ => "detail",
     }
 }
