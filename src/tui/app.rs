@@ -2968,15 +2968,17 @@ mod tests {
             loaded_at_epoch: 1_700_000_000,
             initial_selection_hint: None,
         });
-        let pin_id = app
+        let pin_row_id = app
             .visible_rows()
             .iter()
             .find_map(|row| match &row.kind {
-                RowKind::Pin(_) => Some(row.id.clone()),
+                RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("ingest") => {
+                    Some(row.id.clone())
+                }
                 _ => None,
             })
-            .expect("pin row");
-        app.set_selection(pin_id);
+            .expect("placeholder pin row");
+        app.set_selection(pin_row_id);
 
         let target = app.pins_context().pin_target.expect("pin mutation target");
         assert_eq!(target.id, "ingest");

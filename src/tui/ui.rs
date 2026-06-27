@@ -3110,10 +3110,19 @@ fn default_action_status_hint(app: &App) -> String {
             return hint;
         }
         if pin_placeholder_row_kind(&row.kind) {
-            return format!(
-                "Enter to launch `{}` · b bind · Del remove",
-                selected_pin_id.unwrap_or("pin")
-            );
+            let pin_id = selected_pin_id.unwrap_or("pin");
+            let pin = app
+                .graph_db()
+                .and_then(|db| db.snapshot().pins.iter().find(|pin| pin.id == pin_id));
+            let display = pin.map(|pin| pin.display_name.as_str()).unwrap_or(pin_id);
+            let launch_hint = match pin.and_then(|p| p.binding.as_ref()) {
+                Some(crate::model::PinBinding::StaleMux { mux }) => format!(
+                    "Enter to relaunch `{display}` in existing mux `{}`",
+                    mux.native_id
+                ),
+                _ => format!("Enter to launch `{display}`"),
+            };
+            return format!("{launch_hint} · b bind · Del remove");
         }
     }
     match resolve_attach_target(app) {
