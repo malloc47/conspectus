@@ -259,7 +259,7 @@ fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> Mux
             recency: None,
             activity_epoch: None,
             agent_labels: vec![harness_label(&pin.harness)],
-            single_session_preview: Some("planned session".to_string()),
+            single_session_preview: Some(shorten_home(&pin.cwd, home)),
             pin_id: Some(pin.id.clone()),
             primary_node: pin_node.clone(),
         },
@@ -1670,10 +1670,7 @@ mod tests {
             .expect("placeholder mux row");
         assert_eq!(mux.native_id, "editor");
         assert_eq!(mux.agent_labels, vec!["claude".to_string()]);
-        assert_eq!(
-            mux.single_session_preview.as_deref(),
-            Some("planned session")
-        );
+        assert_eq!(mux.single_session_preview.as_deref(), Some("/p"));
         assert!(matches!(&mux.primary_node, NodeId::Pin(pin) if pin.id == "code"));
     }
 }

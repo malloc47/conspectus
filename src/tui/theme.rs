@@ -53,6 +53,12 @@ pub struct Theme {
     pub cwd_mark: Color,
     pub link_id: Color,
     pub placeholder: Modifier,
+    /// Foreground color for the placeholder-pin glyph (`◌`) that
+    /// stands in for the attached-state glyph on unbound-pin rows.
+    /// Default is a bright yellow so the dotted circle reads as a
+    /// distinct affordance against the solid `◉` / `◯` glyphs without
+    /// being mistaken for the dim `mux_unmuxed` state.
+    pub pin_placeholder: Color,
     /// Reliable foreground color for "secondary" text the operator
     /// shouldn't put the same visual weight on as primary columns —
     /// row short ids and the inline preview snippet. Modeled as a
@@ -190,6 +196,7 @@ impl Default for Theme {
             cwd_mark: Color::Cyan,
             link_id: Color::Blue,
             placeholder: Modifier::DIM,
+            pin_placeholder: Color::LightYellow,
             secondary_text: Color::DarkGray,
             disclosure: Color::Cyan,
             divider: Modifier::DIM,
@@ -340,6 +347,10 @@ impl Theme {
                 kind: Modifier,
             },
             ThemeKey {
+                name: "pin_placeholder",
+                kind: Color,
+            },
+            ThemeKey {
                 name: "secondary_text",
                 kind: Color,
             },
@@ -441,6 +452,7 @@ impl Theme {
             "panel_focus_accent" => self.panel_focus_accent = color,
             "cwd_mark" => self.cwd_mark = color,
             "link_id" => self.link_id = color,
+            "pin_placeholder" => self.pin_placeholder = color,
             "secondary_text" => self.secondary_text = color,
             "disclosure" => self.disclosure = color,
             "warning" => self.warning = color,

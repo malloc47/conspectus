@@ -1199,16 +1199,20 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
         .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
     spans.push(span!(recency_style; "{recency:>4}"));
     spans.push(Span::raw("  "));
-    spans.push(mux_indicator_span(session.mux_state, theme));
+    if placeholder {
+        // Mirror the mux view: an unbound-pin session has no live mux
+        // to attach to, so the attached-glyph column shows the same
+        // dotted-circle marker as the mux-view placeholder row.
+        spans.push(span!(Style::default().fg(theme.pin_placeholder); "◌"));
+    } else {
+        spans.push(mux_indicator_span(session.mux_state, theme));
+    }
     if session.pin_id.is_some() {
         // ADR 0057 bound-pin marker. Glyph + theme entry are
         // finalized alongside the rest of the H-PIN-016 styling
         // polish; for the v1 slice we reuse `placeholder` so the
         // marker reads without depending on a new theme key.
         spans.push(span!(theme.placeholder; "  📌"));
-    }
-    if placeholder {
-        spans.push(span!(theme.placeholder; "  planned"));
     }
     // P8-015: the row's tree label surfaces the operator-chosen
     // alias unconditionally and the harness-recorded title only when
@@ -1356,7 +1360,12 @@ fn render_mux_session_spans(
 
     spans.push(Span::raw("  "));
     if placeholder {
-        spans.push(span!(theme.placeholder; "planned"));
+        // Single-char colored glyph keeps the attached-glyph column
+        // in rhythm with ◉/◯/? on real rows. The dotted circle
+        // (U+25CC) reads as "phantom / not currently live"; the
+        // `pin_placeholder` color (default yellow) keeps it from
+        // being confused with the dim `◯` unmuxed glyph.
+        spans.push(span!(Style::default().fg(theme.pin_placeholder); "◌"));
     } else {
         match mux.client_attached {
             Some(true) => {
@@ -5065,7 +5074,7 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_session_row_renders_planned_marker() {
+    fn placeholder_session_row_renders_pin_marker_without_planned_vocab() {
         use crate::tui::rows::{AgentSessionRow, MuxIndicator};
         let theme = Theme::default();
         let row = AgentSessionRow {
@@ -5077,8 +5086,8 @@ mod tests {
             recency: None,
             activity_epoch: None,
             mux_state: MuxIndicator::Unmuxed,
-            preview: Some("planned mux tmux:ingest".into()),
-            title: Some("planned".into()),
+            preview: Some("~/repo".into()),
+            title: None,
             alias: Some("ingest".into()),
             title_disambiguates: false,
             primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
@@ -5088,8 +5097,28 @@ mod tests {
         let spans = render_session_spans(&row, &theme, 1_700_000_000);
         let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
-        assert!(rendered.contains("planned"), "{rendered}");
         assert!(rendered.contains("📌"), "{rendered}");
+        assert!(
+            rendered.contains('◌'),
+            "placeholder session row should render the dotted-circle glyph: {rendered}"
+        );
+        assert!(
+            !rendered.contains('◯'),
+            "placeholder session row should not render the unmuxed glyph: {rendered}"
+        );
+        let glyph_span = spans
+            .iter()
+            .find(|span| span.content.as_ref() == "◌")
+            .expect("dotted-circle span present");
+        assert_eq!(
+            glyph_span.style.fg,
+            Some(theme.pin_placeholder),
+            "dotted-circle glyph should use the pin_placeholder color",
+        );
+        assert!(
+            !rendered.contains("planned"),
+            "placeholder session row should not spell out 'planned': {rendered}"
+        );
     }
 
     #[test]
@@ -5161,7 +5190,7 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_mux_row_renders_planned_marker() {
+    fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         let theme = Theme::default();
         let row = MuxSessionRow {
             mux: MuxSessionId::new("tmux:ingest"),
@@ -5174,7 +5203,7 @@ mod tests {
             recency: None,
             activity_epoch: None,
             agent_labels: vec!["codex".into()],
-            single_session_preview: Some("planned session".into()),
+            single_session_preview: Some("~/repo".into()),
             pin_id: Some("ingest".into()),
             primary_node: NodeId::Pin(crate::model::PinId::new("ingest")),
         };
@@ -5182,8 +5211,28 @@ mod tests {
         let spans = render_mux_session_spans(&row, &theme, 1_700_000_000, 100);
         let rendered: String = spans.iter().map(|span| span.content.as_ref()).collect();
 
-        assert!(rendered.contains("planned"), "{rendered}");
+        assert!(
+            rendered.contains('◌'),
+            "placeholder attached glyph should render as ◌: {rendered}"
+        );
+        let glyph_span = spans
+            .iter()
+            .find(|span| span.content.as_ref() == "◌")
+            .expect("dotted-circle span present");
+        assert_eq!(
+            glyph_span.style.fg,
+            Some(theme.pin_placeholder),
+            "dotted-circle glyph should use the pin_placeholder color",
+        );
         assert!(rendered.contains("📌"), "{rendered}");
+        assert!(
+            rendered.contains("~/repo"),
+            "preview should fall through to the pin cwd: {rendered}"
+        );
+        assert!(
+            !rendered.contains("planned"),
+            "placeholder mux row should not spell out 'planned': {rendered}"
+        );
     }
 
     #[test]

@@ -249,8 +249,9 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
 /// this view is session-first: the top bucket should answer "which
 /// sessions are pinned?" rather than "which pin declarations exist?".
 /// Unbound/stale/pre-resolve pins render as session-shaped
-/// placeholder rows: the row still points at the pin node, but it
-/// preserves the sessions view's "planned next session" vocabulary.
+/// placeholder rows: the row still points at the pin node, and a dim
+/// placeholder glyph plus the pin's cwd identifies it as a not-running
+/// declaration without overloading the row with extra vocabulary.
 fn emit_pins_group(ctx: &mut EmitCtx<'_, '_>) {
     if ctx.data.snapshot.pins.is_empty() {
         return;
@@ -310,8 +311,8 @@ fn emit_pin_placeholder_session_row(ctx: &mut EmitCtx<'_, '_>, pin: &PinCandidat
             recency: None,
             activity_epoch: None,
             mux_state: MuxIndicator::Unmuxed,
-            preview: Some(format!("planned mux {}", pin.mux.native_id())),
-            title: Some("planned".to_string()),
+            preview: Some(shorten_home(&pin.cwd, ctx.home)),
+            title: None,
             alias: Some(pin.display_name.clone()),
             title_disambiguates: false,
             primary_node: pin_node,
@@ -3715,7 +3716,8 @@ mod tests {
                 assert_eq!(row.session.session_key, "ingest");
                 assert_eq!(row.harness_label, "codex");
                 assert_eq!(row.cwd_display.as_deref(), Some("~/work/repo"));
-                assert_eq!(row.preview.as_deref(), Some("planned mux tmux:ingest"));
+                assert_eq!(row.preview.as_deref(), Some("~/work/repo"));
+                assert_eq!(row.title, None);
                 assert_eq!(row.alias.as_deref(), Some("ingest"));
                 assert_eq!(row.pin_id.as_deref(), Some("ingest"));
                 assert!(matches!(&row.primary_node, NodeId::Pin(pin) if pin.id == "ingest"));
@@ -3750,7 +3752,8 @@ mod tests {
                 _ => None,
             })
             .expect("placeholder session row");
-        assert_eq!(row.preview.as_deref(), Some("planned mux tmux:ingest"));
+        assert_eq!(row.preview.as_deref(), Some("~/work/repo"));
+        assert_eq!(row.title, None);
         assert!(matches!(&row.primary_node, NodeId::Pin(pin) if pin.id == "ingest"));
     }
 

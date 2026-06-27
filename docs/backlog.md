@@ -6271,7 +6271,18 @@ layout or awkward key semantics.
     the existing `PinNode`; a later slice can still promote placeholder
     identities into graph nodes if detail/search/JSON consumers need
     that surface.
-  - Remaining work: revisit "planned" language, style placeholder rows
+  - Styling polish (2026-06-26): dropped the "planned" vocabulary
+    from placeholder rows entirely. Both the mux and session
+    placeholder rows render the attached-glyph column as a colored
+    `◌` (U+25CC dotted circle) aligned with `◉ / ◯ / ?` on real rows,
+    using a new `theme.pin_placeholder` color (default
+    `Color::LightYellow`) so the glyph stands out against the dim
+    row body. Single-session preview / session preview fall through
+    to the pin's cwd (`~`-collapsed). Session placeholder rows also
+    drop the trailing "planned" chip and the "planned" title.
+  - Remaining work: bound-pin `📌` glyph polish stays deferred to
+    `H-PIN-016`; detail/search/model placeholder identity is still
+    open under this story.
 
 #### Deferred follow-ups (post-v1)
 
