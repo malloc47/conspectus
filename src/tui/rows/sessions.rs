@@ -224,6 +224,26 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     // so selection/detail/formatting all remain session-oriented.
     emit_pins_group(&mut ctx);
 
+    // Mirror bound pins' "appear in both the Pins group AND the
+    // natural project bucket" pattern for unbound / stale-mux pins:
+    // bucket each non-bound pin's placeholder by the same group key
+    // its cwd would produce, pre-seed any buckets that contain only
+    // placeholders so the project header still emits, then hand the
+    // placeholder list to `emit_checkout_bucket` so it emits after
+    // the bucket's sessions at the matching depth.
+    let mut placeholders_by_key: BTreeMap<GroupKey, Vec<&PinCandidate>> = BTreeMap::new();
+    for pin in &ctx.data.snapshot.pins {
+        if matches!(pin.binding, Some(PinBinding::Bound { .. })) {
+            continue;
+        }
+        if let Some(key) = pin_group_key(pin, ctx.data, inputs.grouping) {
+            placeholders_by_key.entry(key).or_default().push(pin);
+        }
+    }
+    for key in placeholders_by_key.keys() {
+        buckets.entry(key.clone()).or_default();
+    }
+
     // Iterate worktree-keyed buckets while deduplicating their
     // ancestor headers. Buckets ordered by (workspace, repo,
     // worktree) come out adjacent for the same (workspace, repo)
@@ -232,7 +252,15 @@ pub fn build_sessions_tree(inputs: SessionsBuildInputs<'_>) -> RowTree {
     let mut last_workspace: Option<Option<String>> = None;
     let mut last_repo: Option<RepoId> = None;
     for (key, sessions) in buckets {
-        emit_checkout_bucket(&mut ctx, key, sessions, &mut last_workspace, &mut last_repo);
+        let placeholders = placeholders_by_key.remove(&key).unwrap_or_default();
+        emit_checkout_bucket(
+            &mut ctx,
+            key,
+            sessions,
+            placeholders,
+            &mut last_workspace,
+            &mut last_repo,
+        );
     }
 
     if !ungrouped.is_empty() {
@@ -759,6 +787,37 @@ struct SessionEntry<'a> {
     pinned: bool,
 }
 
+/// Pick the group key an unbound / stale-mux pin's placeholder row
+/// should land in, alongside any sessions that bucket to the same
+/// key. Mirrors the repo-path arm of `resolve_group_key` so a
+/// placeholder shows up under its declared cwd's project bucket — the
+/// same way a bound pin's realized session row does. Pins do not
+/// carry an `AssociatedWith Workspace` edge, so the workspace and
+/// workspace-only grouping arms simply return `None` and leave the
+/// pin in the synthetic Pins group only.
+fn pin_group_key(
+    pin: &PinCandidate,
+    data: &SessionsData<'_>,
+    grouping: SessionsGrouping,
+) -> Option<GroupKey> {
+    if matches!(grouping, SessionsGrouping::Workspace) {
+        return None;
+    }
+    let (worktree_id, _worktree) = data.checkout_for_path(&pin.cwd)?;
+    let repo_id = worktree_id.repo.clone();
+    let repo = Some(RepoBucket {
+        common_dir: repo_id.common_dir.clone(),
+        repo_display_path: data.repo_display_path(&repo_id),
+        repo_id,
+    });
+    let worktree = Some(worktree_id.root.clone());
+    Some(GroupKey {
+        workspace: None,
+        repo,
+        worktree,
+    })
+}
+
 fn resolve_group_key(
     entry: &SessionEntry<'_>,
     data: &SessionsData<'_>,
@@ -832,6 +891,7 @@ fn emit_checkout_bucket(
     ctx: &mut EmitCtx<'_, '_>,
     key: GroupKey,
     mut sessions: Vec<SessionEntry<'_>>,
+    placeholder_pins: Vec<&PinCandidate>,
     last_workspace: &mut Option<Option<String>>,
     last_repo: &mut Option<RepoId>,
 ) {
@@ -848,14 +908,17 @@ fn emit_checkout_bucket(
             let flag = disambiguating.contains(&entry.id);
             emit_session(ctx, 1, entry, flag);
         }
+        for pin in placeholder_pins {
+            emit_pin_placeholder_session_row(ctx, pin, 1);
+        }
         *last_workspace = Some(key.workspace);
         *last_repo = None;
         return;
     }
 
     // Repo path. `key.repo` is `Some` here by construction
-    // (`resolve_group_key` builds either a workspace-only or a
-    // repo bucket, never neither).
+    // (`resolve_group_key` and `pin_group_key` both build either a
+    // workspace-only or a repo bucket, never neither).
     let Some(repo_bucket) = key.repo else {
         return;
     };
@@ -890,6 +953,9 @@ fn emit_checkout_bucket(
     for entry in sessions {
         let flag = disambiguating.contains(&entry.id);
         emit_session(ctx, session_depth, entry, flag);
+    }
+    for pin in placeholder_pins {
+        emit_pin_placeholder_session_row(ctx, pin, session_depth);
     }
 
     *last_workspace = Some(key.workspace);
@@ -3725,6 +3791,131 @@ mod tests {
             other => panic!("expected placeholder AgentSession row, got {other:?}"),
         }
         assert_eq!(pin_row.depth, 1);
+    }
+
+    #[test]
+    fn unbound_pin_placeholder_also_emits_in_matching_repo_bucket() {
+        // When a pin's cwd lives under a known checkout, the
+        // placeholder row should appear under the project bucket in
+        // addition to the synthetic Pins group at top — mirroring how
+        // bound pinned sessions show up in both contexts. The pin's
+        // cwd here matches the repo's checkout root.
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                repo("/home/op/work/repo/.git"),
+                worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        snapshot.pins.push(pin_candidate(
+            "ingest",
+            "codex",
+            "/home/op/work/repo",
+            "ingest",
+            Provenance::LocalPin,
+            Some(PinBinding::Unbound),
+        ));
+
+        let tree = build_tree(&snapshot);
+
+        let pin_rows: Vec<_> = tree
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
+            .collect();
+        assert_eq!(
+            pin_rows.len(),
+            2,
+            "placeholder should appear in both Pins group and repo bucket: {:#?}",
+            tree.rows,
+        );
+
+        let pin_group_idx = tree
+            .rows
+            .iter()
+            .position(|row| matches!(&row.id, RowId::Synthetic(tag) if *tag == "pins"))
+            .expect("Pins group emitted");
+        let repo_group_idx = tree
+            .rows
+            .iter()
+            .position(|row| matches!(&row.id, RowId::Group(NodeId::Repo(_))))
+            .expect("repo group emitted");
+        assert!(
+            pin_group_idx < repo_group_idx,
+            "Pins group should precede the repo bucket: pins={pin_group_idx} repo={repo_group_idx}",
+        );
+
+        let (first_idx, _) = pin_rows[0];
+        let (second_idx, _) = pin_rows[1];
+        assert!(
+            first_idx > pin_group_idx && first_idx < repo_group_idx,
+            "first placeholder belongs to the Pins group: idx={first_idx}",
+        );
+        assert!(
+            second_idx > repo_group_idx,
+            "second placeholder belongs to the repo bucket: idx={second_idx}",
+        );
+    }
+
+    #[test]
+    fn unbound_pin_placeholder_seeds_empty_repo_bucket() {
+        // A pin whose cwd maps to a known checkout, but that
+        // checkout has no live sessions, should still cause the
+        // project header to render so the operator sees the pin
+        // alongside its declared cwd. Without the pre-seed, the
+        // bucket map would be empty for that key and no header
+        // would emit.
+        let mut snapshot = GraphSnapshot {
+            nodes: vec![
+                repo("/home/op/work/repo/.git"),
+                worktree("/home/op/work/repo/.git", "/home/op/work/repo"),
+            ],
+            ..GraphSnapshot::empty()
+        };
+        snapshot.pins.push(pin_candidate(
+            "ingest",
+            "codex",
+            "/home/op/work/repo",
+            "ingest",
+            Provenance::LocalPin,
+            Some(PinBinding::Unbound),
+        ));
+
+        let tree = build_tree(&snapshot);
+        let repo_group = tree
+            .rows
+            .iter()
+            .find(|row| matches!(&row.id, RowId::Group(NodeId::Repo(_))));
+        assert!(
+            repo_group.is_some(),
+            "repo bucket header should emit even with no sessions: {:#?}",
+            tree.rows,
+        );
+    }
+
+    #[test]
+    fn unbound_pin_with_unknown_cwd_appears_only_in_pins_group() {
+        // No checkout covers the pin's cwd, so the bucket lookup
+        // returns None and the placeholder only surfaces in the
+        // synthetic Pins group — same as before this slice.
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.pins.push(pin_candidate(
+            "ingest",
+            "codex",
+            "/elsewhere/no-checkout",
+            "ingest",
+            Provenance::LocalPin,
+            Some(PinBinding::Unbound),
+        ));
+
+        let tree = build_tree(&snapshot);
+        let pin_rows = tree
+            .rows
+            .iter()
+            .filter(|row| matches!(&row.id, RowId::Pin { pin_id } if pin_id == "ingest"))
+            .count();
+        assert_eq!(pin_rows, 1, "{:#?}", tree.rows);
     }
 
     #[test]

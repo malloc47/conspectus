@@ -6280,6 +6280,16 @@ layout or awkward key semantics.
     row body. Single-session preview / session preview fall through
     to the pin's cwd (`~`-collapsed). Session placeholder rows also
     drop the trailing "planned" chip and the "planned" title.
+  - Repo-bucket placement (2026-06-27): unbound / stale-mux pin
+    placeholders now also surface under the project bucket whose
+    checkout contains the pin's cwd, mirroring how bound pinned
+    sessions appear in both the synthetic Pins group at top *and*
+    their natural project bucket. The row builder adds a `pin_group_
+    key` helper that mirrors `resolve_group_key`'s repo path,
+    pre-seeds buckets for placeholder-only keys so empty project
+    headers still emit, and emits placeholder rows after sessions at
+    the same depth. Pins whose cwd doesn't map to any checkout
+    continue to appear only in the Pins group.
   - Detail-pane dispatch (2026-06-27): placeholder pin rows route
     through a view-aligned upgrade in `App::recompute_detail`. The
     sessions view upgrades to the `PinUnbound` diagnostic's
