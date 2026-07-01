@@ -321,3 +321,21 @@ The detailed story breakdown lives in `docs/backlog.md` Phase 11.
   tick) picks up the change. If contention or ordering
   becomes a real problem, a future ADR can route through the
   socket.
+
+## Lessons
+
+Added 2026-07-01 per the `docs/adr-audit.md` corpus audit. Two
+generalizable rules from the arc this ADR retired, recorded so future
+capability work can be checked against them:
+
+1. **Consumers read the typed model; storage is an implementation
+   detail.** ADR 0043 inverted the data-model-first tenet by making
+   the storage engine the consumer surface, which coupled every view
+   to a schema that later had to be unwound. The typed
+   `GraphSnapshot` is the consumer contract; persistence formats may
+   change behind it without touching views.
+2. **No capability before its first consumer.** ADR 0042 landed
+   vector-search schema and query plumbing with no embedding pipeline
+   and no consumer; all of it was deleted without serving a request.
+   Designing *for* a capability is cheap; landing one ahead of demand
+   is not.

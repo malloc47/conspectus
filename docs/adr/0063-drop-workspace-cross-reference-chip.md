@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. The chip removal remains in force; the workspace surfaces
+this ADR references were later reshaped by ADR 0064 and ADR 0065
+(the dedicated Workspaces view is gone; `SessionsGrouping::Workspace`
+is the successor surface).
 
 ## Context
 

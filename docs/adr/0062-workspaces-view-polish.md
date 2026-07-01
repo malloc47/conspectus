@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0065](0065-sessions-workspace-grouping-replaces-workspaces-view.md).
+The dedicated Workspaces view this ADR polished was removed;
+`SessionsGrouping::Workspace` is the successor surface. The inline
+member-span formatting decided here carried forward into the
+workspace group headers.
 
 ## Context
 
