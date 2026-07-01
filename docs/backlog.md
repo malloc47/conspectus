@@ -1396,20 +1396,11 @@ area is already being touched. Group prefixes:
   - Tests: existing resolver table-driven tests must continue to pass
     byte-for-byte against current snapshots.
   - Blockers: none.
-- [ ] `H-REF-004` Unify the external-tool runner seam.
-  - Scope: `TmuxRunner`/`SystemTmux`/`FakeTmux` (`src/discovery/tmux/mod.rs`)
-    and `GhRunner`/`SystemGh`/`FakeGh`
-    (`src/discovery/forge/mod.rs`) duplicate outcome enums, unavailable
-    classification, and fake-runner plumbing. Extract a generic
-    `ExternalCommand<O>` (or runner trait + outcome type) that both
-    backends specialize. New backends (zellij, GitLab) should not need to
-    re-derive the same seam.
-  - Tests: keep existing unit coverage for tmux and gh runners; add one
-    test that the shared abstraction classifies a missing binary the same
-    way across both adapters.
-  - Blockers: `H-FUTURE-001` is the obvious consumer but not a hard
-    dependency.
-- [ ] `H-REF-005` Split `src/declared.rs` (1338 lines) by concern.
+- [x] `H-REF-004` Unify the external-tool runner seam.
+  - Outcome: folded into `H-EXT-008` (see `docs/extensibility-assessment.md`
+    Phase C) — the shared runner seam lands as part of extracting the
+    `MuxBackend` trait rather than as a standalone refactor. Tracked there.
+- [ ] `H-REF-005` Split `src/declared.rs` (1370 lines) by concern.
   - Scope: separate (a) TOML models + parse/validate, (b) read-modify-write
     helpers and file I/O, and (c) snapshot-aware helpers
     (`endpoint_project_root`, `declared_endpoint_from_node_id`,
@@ -1419,7 +1410,8 @@ area is already being touched. Group prefixes:
   - Tests: existing declared and CLI tests must continue to pass without
     snapshot diffs.
   - Blockers: `H-REF-001` is friendlier to do first.
-- [ ] `H-REF-006` Slim `src/cli.rs` (961 lines) into per-command modules.
+- [ ] `H-REF-006` Slim `src/cli.rs` (5982 lines; ~2760 production) into
+  per-command modules.
   - Scope: move the `declared` subcommand tree, endpoint/relation codec
     helpers, and shared output formatting into a `src/cli/` module
     hierarchy. Keep `main` and top-level dispatch in `cli.rs`.
@@ -1463,6 +1455,135 @@ area is already being touched. Group prefixes:
     explanation.
   - Tests: existing doctest; add one that asserts the public surface from
     `api::*` for the cases consumers actually have.
+  - Blockers: none.
+
+### Code Hygiene And Simplification (H-HYG-*)
+
+Source plan: `docs/code-hygiene-audit.md` (2026-07-01 audit; companion to
+`docs/extensibility-assessment.md`). Findings were verified by diff/hash and
+a pedantic+nursery clippy inventory, not name-matching. All chunks are
+behavior-preserving; existing snapshot suites are the regression net. The
+audit's "What Not To Change" section bounds the scope — resolver semantics,
+runner seams, doc culture, and test volume are explicitly out of bounds.
+
+- [ ] `H-HYG-001` Dedupe the copy-pasted micro-helpers.
+  - Scope: collapse `snapshot_fragment` (7 verbatim copies across
+    `discovery/{mod,harness/mod,forge/mod,agent_deck,atelier,workspace,git}.rs`)
+    into `impl From<GraphSnapshot> for GraphFragment`; `current_epoch`
+    (5 copies) and `path_string` (5 copies) into one shared helper each.
+  - Tests: existing suites pass unchanged; no snapshot diffs.
+  - Blockers: none.
+- [ ] `H-HYG-002` Extract shared TUI/output row-assembly helpers.
+  - Scope: `agent_row` / `mux_indicator` / `session_matches_filter` are
+    byte-identical across `src/tui/rows/{union,prs,forks}.rs` (near-twin in
+    `rows/mux.rs`); `collect_agent_mux_candidate_counts` has 6 copies in
+    two identical clusters (`tui/rows` ×4, `output/{prs,forks}.rs` ×2).
+    Move the row glue into `tui/rows/mod.rs` and the count helper into a
+    shared query location (interim home; `H-HYG-006` deletes it for good).
+  - Tests: TUI snapshot tests and table snapshots byte-identical.
+  - Blockers: none.
+- [ ] `H-HYG-003` Parameterize the centered-modal rect math.
+  - Scope: six hand-rolled `centered_modal_rect` variants
+    (`widgets/{help,controls,search,input,multi_select,pins}.rs`) differ
+    only in width cap / height policy. One
+    `centered_rect(area, max_width, height_policy)` helper next to
+    `popup_frame.rs`; evaluate collapsing into the existing `tui-popup`
+    dependency while there.
+  - Tests: TUI snapshot tests for each overlay unchanged.
+  - Blockers: none.
+- [ ] `H-HYG-004` Remove the argv-sniffing fake-mtime test backdoor.
+  - Scope: `discovery/harness/{aider,claude_code,codex}.rs` each carry a
+    `#[cfg(not(test))] file_modified_epoch` that detects
+    `/target/debug/deps/` in argv (`is_cargo_test_process`) and fabricates
+    mtime `1_700_000_000` for temp-dir paths — a test backdoor compiled
+    into release binaries, duplicated ×3. Replace with an injected mtime
+    source on the adapter (default: real `fs::metadata`) or set real
+    mtimes on fixture files so integration tests need no production-side
+    cooperation.
+  - Tests: harness adapter + fixture-corpus suites pass with real or
+    fixture-controlled mtimes; grep asserts the argv sniff is gone.
+  - Blockers: none; `H-REF-007` (shared state-root scanning) is a natural
+    companion since it touches the same files.
+- [ ] `H-HYG-005` Adopt a curated `[lints.clippy]` table and fix fallout.
+  - Scope: no `[lints]` table exists today. Enable and fix:
+    `redundant_clone` (63; top: `tui/explorer.rs` 9, `model/mod.rs` 8),
+    `match_same_arms` (36), `needless_pass_by_value` (60),
+    `match_wildcard_for_single_variants` (29 — the `_` arms that would
+    silently swallow future `NodeKind`/`RelationKind` variants; directly
+    synergistic with `H-EXT-*` compile-time safety), `needless_collect`,
+    `map_unwrap_or`, `uninlined_format_args`. Consciously skip the doc
+    lints and allow cast-truncation in TUI layout modules with a comment.
+  - Tests: `just check` green with the new table; no snapshot diffs.
+  - Blockers: `H-HYG-001`/`H-HYG-002` first make the fixes land in shared
+    code instead of six copies.
+- [ ] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
+  - Scope: re-lands ADR 0035 Stage 1 (see its 2026-07-01 status
+    amendment). Production code linear-scans `GraphSnapshot.nodes` at 35 sites
+    and `candidate_links` at 25, and every view rebuilds ad-hoc maps per
+    render. Build an index once per snapshot publish (id→node,
+    source→links-by-relation, session→mux candidate counts, preferred-mux)
+    and thread it through row builders, detail, and explorer. Deletes the
+    `collect_agent_mux_candidate_counts` family permanently.
+  - Tests: row/detail/explorer snapshots byte-identical; add an index
+    consistency unit test (index agrees with a linear scan on a dense
+    fixture).
+  - Blockers: `H-HYG-002` friendlier first.
+- [ ] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
+  help.
+  - Scope: key handling is hand-matched (`KeyCode::` ×128 in `runtime.rs`,
+    ×137 in `widgets/pins.rs`), `remap_for_focus` re-maps actions across
+    ~200 lines, and `widgets/help.rs::keymap_sections` hand-maintains a
+    parallel list of the same bindings — nothing forces the three to
+    agree. Introduce one `(mode/focus, key, Action, help text)` table
+    consumed by the dispatcher, the focus remap (becomes data), the help
+    overlay, and the controls/pins hint footers. Serves the menu-first
+    discoverability direction: overlays render from the table the
+    dispatcher executes.
+  - Tests: existing key-handling unit tests; one drift test asserting
+    every dispatched action appears in the table and vice versa.
+  - Blockers: none.
+- [ ] `H-HYG-008` Unify the dual event loops, then split `runtime.rs`.
+  - Scope: `event_loop` and `static_event_loop`
+    (`src/tui/runtime.rs:105,344`) share the same body skeleton and differ
+    only in refresh strategy (discovery channel vs fixture reload).
+    Extract one loop driver parameterized by a refresh source, then split
+    the remaining ~2.6k production lines into loop driver / key dispatch /
+    action-handler modules.
+  - Tests: interactive + fixture-mode TUI suites and ADR 0067 snapshot
+    runs unchanged.
+  - Blockers: `H-HYG-007` first removes most of the dispatch bulk.
+- [ ] `H-HYG-009` Split the TUI monolith files by concern.
+  - Scope: `tui/ui.rs` (~3.2k production lines) splits by view/panel —
+    dispatch is already centralized in 3 `match view` sites so extraction
+    is clean; `widgets/pins.rs` (~2.8k) separates the pins menu model
+    (actions, selection-aware defaults; unit-testable without ratatui)
+    from form rendering.
+  - Tests: `conspectus tui --snapshot` runs and TUI snapshot suites
+    byte-identical.
+  - Blockers: none; independent of `H-HYG-008`.
+- [ ] `H-HYG-010` Finish the `output::render` migration and settle
+  `dev_scenarios` gating.
+  - Scope: `output/table.rs` is a 147-line re-export shim whose own
+    comment says new code should use `output::render::*` — migrate the
+    remaining callers and delete the shim (keep the two genuinely
+    table-specific fns). Decide `dev_scenarios.rs` (1,194 lines + the
+    `dev scenario` CLI tree, compiled into release unconditionally):
+    either gate behind a feature per the ADR 0067 `snapshot` precedent or
+    record that shipping it is intentional.
+  - Tests: table snapshots unchanged; feature-gated build compiles both
+    ways in CI.
+  - Blockers: none.
+- [ ] `H-HYG-011` Test builders and sibling-file test extraction (rolling).
+  - Scope: 83 `AgentSessionNode { … }` / 53 `MuxSessionNode { … }` struct
+    literals spell out five-plus `None` fields each, so every model-field
+    addition touches dozens of sites — add builders (or `new` +
+    `with_*` mirroring `RepoNode::new`) and migrate opportunistically.
+    Move the largest in-file `mod tests` blocks (~45k lines in `src/`;
+    worst: `output/table.rs` 147 prod / 2,678 test lines, `tui/ui.rs`,
+    `rows/sessions.rs`) to sibling `tests.rs` files via
+    `#[cfg(test)] mod tests;`. Rolling policy per file touched, not a
+    big-bang.
+  - Tests: purely mechanical; suites pass unchanged.
   - Blockers: none.
 
 ### Observability And CLI UX
@@ -2153,24 +2274,218 @@ These items match the design guidance to *design for* additional providers
 without *implementing* them until needed. File them so the next consumer
 need does not surprise the project.
 
-- [ ] `H-FUTURE-001` Add a mux backend for zellij (and stub screen).
-  - Scope: introduce a `MuxRunner` abstraction shared with tmux
-    (depends on `H-REF-004`), add a zellij adapter behind it, and leave
-    screen as a documented extension point.
-  - Tests: parser tests against canned `zellij list-sessions` output.
-  - Blockers: `H-REF-004`.
-- [ ] `H-FUTURE-002` Add a forge adapter for GitLab or Gitea.
-  - Scope: validate the `ForgeAdapter` boundary against a second provider
-    once a user need surfaces. Reuse the shared external-runner seam.
-  - Tests: fixture-driven adapter tests with a canned `glab` (or REST)
-    payload.
-  - Blockers: `H-REF-004`, `H-DESIGN-002`.
+- [x] `H-FUTURE-001` Add a mux backend for zellij (and stub screen).
+  - Outcome: re-scoped as `H-EXT-010` on top of the `H-EXT-008` `MuxBackend`
+    seam (see `docs/extensibility-assessment.md` Phase C). Tracked there.
+- [x] `H-FUTURE-002` Add a forge adapter for GitLab or Gitea.
+  - Outcome: re-scoped as `H-EXT-013` on top of the `H-EXT-012` forge
+    adapter list (see `docs/extensibility-assessment.md` Phase D). Tracked
+    there.
 - [ ] `H-FUTURE-003` Add harness adapters for jujutsu and sapling sessions
   if and when a user uses them with a supported harness.
   - Scope: not on the roadmap until requested; track here so the request
     has a home.
   - Tests: TBD.
   - Blockers: requires user demand.
+
+### Provider Extensibility (H-EXT-*)
+
+Source plan: `docs/extensibility-assessment.md` (2026-07-01 audit). Goal:
+implementing a single interface per entity family — harness, mux backend,
+forge, orchestrator — is sufficient for a new provider to flow through
+discovery, CLI, TUI, graph exports, and continuous mode. The acceptance
+criterion is the assessment's: anything a new provider needs outside its own
+module plus one registry entry is a regression. Phases A (registry backbone)
+and B–D land independently; ordering below follows the assessment's
+dependency graph.
+
+Phase A — registry backbone (no behavior change):
+
+- [ ] `H-EXT-001` Add a provider descriptor registry.
+  - Scope: replace `discovery/providers.rs` bare consts, the
+    `cache::provider_class` match, the `discover_local_warm_with`
+    hand-wiring, and `LocalDiscoveryConfig::from_env` per-provider env
+    plumbing with one descriptor table (key, TTL class, enable/root env
+    vars, constructor) consumed by discovery wiring, the freshness gate,
+    the daemon scheduler, and `from_env`. Snapshot provider strings stay
+    byte-identical (`canonical_strings_are_stable` pins this). Record the
+    registration convention as an ADR.
+  - Tests: existing cache/eviction/scheduler suites pass unchanged; add a
+    registry round-trip test (every descriptor maps to a class and back).
+  - Blockers: none.
+- [ ] `H-EXT-002` Route harness pure-data lookups through the adapter
+  registry.
+  - Scope: fold `launch_argv_for` / `resume_argv_for` / `launch_options_for`
+    / `strip_known_launch_option_fragments`
+    (`src/discovery/harness/mod.rs:93-187`), `HARNESS_OPTIONS`
+    (`src/tui/widgets/controls.rs:47`), `harness_label`
+    (`src/tui/rows/mod.rs:431`), and the `src/tui/resume.rs:42` dispatch
+    into iteration over registered `HarnessAdapter`s. Add `display_label()`
+    and `launch_options()` to the trait; delete the parallel match tables.
+  - Tests: existing launch/resume/filter suites pass; one test asserting a
+    registry-only fake harness appears in filter options and labels.
+  - Blockers: `H-EXT-001`.
+- [ ] `H-EXT-003` Key TUI harness colors by harness key.
+  - Scope: replace the `harness_claude` / `harness_codex` /
+    `harness_opencode` / `harness_aider` theme fields and the
+    `harness_color` label match (`src/tui/theme.rs:29-32,234`) with a map
+    populated from adapter defaults plus `[tui.theme.harness.<key>]`
+    overrides. Keep the existing flat keys as deprecated aliases per the
+    ADR 0031 precedent; unknown keys keep the `harness_unknown` fallback.
+  - Tests: existing theme/config parse tests plus alias-compat coverage.
+  - Blockers: `H-EXT-002`.
+
+Phase B — harness experience parity:
+
+- [ ] `H-EXT-004` Move per-harness runtime signatures onto `HarnessAdapter`.
+  - Scope: extract cross_link's inlined harness knowledge — process-command
+    matching (`process_command_harnesses`, `command_harnesses`), fd-path
+    patterns, session-key grammars (`session_keys_for_harness_text`), and
+    subagent/background role heuristics
+    (`src/discovery/cross_link.rs:1250-1748`) — into a `RuntimeSignature`
+    value provided by each adapter. cross_link consumes signatures
+    generically; move resolver evidence strings
+    (`src/resolve/mod.rs:741`) to shared constants.
+  - Tests: existing cross-link and resolver snapshots byte-identical; one
+    signature-driven attribution test for a fake harness.
+  - Blockers: `H-EXT-001`.
+- [ ] `H-EXT-005` Normalize hook payloads through the adapter.
+  - Scope: replace the per-harness `*_record_from_payload` writers
+    (`src/hook.rs:150-240`) and the `HookWriteHarness` clap enum
+    (`src/cli.rs:662`) with `conspectus hook write <harness-key>` resolving
+    through the registry to `HarnessAdapter::hook_record_from_payload`.
+    Per-harness hook plugins (e.g. `plugins/opencode-hook`) stay
+    per-harness; document their contract in `H-EXT-017`.
+  - Tests: existing hook CLI tests pass with the generic subcommand;
+    unknown-key error path covered.
+  - Blockers: `H-EXT-002`.
+- [ ] `H-EXT-006` Provide transcript locator and parser via the adapter.
+  - Scope: replace the closed `SessionLocator` enum
+    (`src/viewer/model.rs:36`), the `viewer_bridge::locator_for_session`
+    match, and the fixed parser trio with
+    `HarnessAdapter::transcript_source(&AgentSessionNode)` returning an
+    opaque locator plus a `HarnessParser` handle. The renderer stays
+    harness-neutral; aider gains an explicit no-transcript-source answer.
+  - Tests: existing viewer parser tests; bridge test for a harness without
+    a transcript source.
+  - Blockers: `H-EXT-002`.
+- [ ] `H-EXT-007` Generalize the codex_log-style aux-reader wiring.
+  - Scope: turn the codex_log special case — dedicated
+    `LocalDiscoveryConfig` fields (`codex_log_disabled`,
+    `codex_log_window_seconds`) and the named call in `apply_mutators`
+    (`src/discovery/mod.rs:399`) — into an adapter-provided optional
+    mutator pass so the next harness with a state/log DB (ADR 0048 shape)
+    adds no top-level config fields.
+  - Tests: codex log attribution suites pass unchanged with the generic
+    hook.
+  - Blockers: `H-EXT-001`, `H-EXT-004` friendlier first.
+
+Phase C — mux backend abstraction:
+
+- [ ] `H-EXT-008` Extract a `MuxBackend` trait from `TmuxRunner`.
+  - Scope: backend-neutral trait — `backend_key()`, `discover()`, and
+    capability methods with `Unsupported` defaults (`attach_argv`,
+    `rename_session`, `new_session`, `send_keys`, `capture_pane`,
+    `current_session_context`), plus a namespace concept generalizing
+    tmux's `socket_name`. Absorbs `H-REF-004`'s shared external-runner
+    seam (outcome enums, unavailable classification, fake plumbing shared
+    with `GhRunner`). `SystemTmux` becomes the first impl; all
+    `&dyn TmuxRunner` call sites (TUI runtime, CLI rename, pin launch,
+    preview) resolve a backend by the node's/pin's `backend` field through
+    a backend registry; `LocalDiscoveryConfig.tmux_runner` becomes a
+    backend list. Needs an ADR (supersedes parts of ADR 0057's launch
+    wording).
+  - Tests: existing tmux runner + pin + rename suites pass; shared-seam
+    test that missing-binary classification matches across backends.
+  - Blockers: `H-EXT-001`.
+- [ ] `H-EXT-009` Capability-gate mux actions instead of naming tmux.
+  - Scope: replace the "only tmux" attach gate
+    (`src/tui/actions.rs:190,442`) and the pin `backend == "tmux"`
+    validation (`src/pins.rs:260,326`) with registry + capability checks;
+    error messages report the missing capability, not the missing tool.
+    Pin schema keeps `backend` as declared data per ADR 0057.
+  - Tests: attach/pin validation tests updated to capability-flavored
+    messages; unsupported-capability path covered per action.
+  - Blockers: `H-EXT-008`.
+- [ ] `H-EXT-010` Add a zellij mux backend (discovery + attach).
+  - Scope: re-scopes `H-FUTURE-001` onto the `H-EXT-008` seam:
+    `zellij list-sessions` parsing, attach argv, no-namespace semantics;
+    rename/send-keys/capture start as `Unsupported`; screen stays a
+    documented extension point. Acceptance test for `H-EXT-008`: zero
+    edits outside the new module plus its registry entry.
+  - Tests: parser tests against canned `zellij list-sessions` output;
+    fixture-driven discovery + attach-target tests.
+  - Blockers: `H-EXT-008`, `H-EXT-009`.
+- [ ] `H-EXT-011` Capture hook mux context through the backend probe.
+  - Scope: generalize `tmux_context()` / `current_tmux_session_name()`
+    (`src/cli.rs:1113,2694`) and the `HookTmuxRecord` naming so hook
+    records carry `(backend, session, pane?)` neutrally via
+    `MuxBackend::current_session_context`. Schema-versioned sidecar
+    change.
+  - Tests: hook writer + sidecar replay suites with both a tmux and a
+    fake second backend.
+  - Blockers: `H-EXT-008`.
+
+Phase D — forge and orchestrator registries:
+
+- [ ] `H-EXT-012` Wire forges as an adapter list.
+  - Scope: replace `LocalDiscoveryConfig.forge_runner`
+    (`src/discovery/mod.rs:424`) and the inline `GitHubForgeProvider`
+    construction with a forge adapter list routed through the existing
+    `ForgeDiscovery` coordinator; move `GhRunner` types from
+    `forge/mod.rs` into `forge/github.rs`; add `claims_remote_url`
+    routing to `ForgeAdapter`; per-forge disable toggles from the
+    descriptor registry.
+  - Tests: existing forge snapshots pass; routing test with two fake
+    adapters claiming different remotes.
+  - Blockers: `H-EXT-001`.
+- [ ] `H-EXT-013` Add a second forge adapter (GitLab or Gitea).
+  - Scope: re-scopes `H-FUTURE-002` onto the `H-EXT-012` seam as its
+    acceptance test. Settles the multi-forge `ForgePr` identity questions
+    (`docs/design.md` § Forge PR Identity) in a new ADR.
+  - Tests: fixture-driven adapter tests with a canned `glab` (or REST)
+    payload.
+  - Blockers: `H-EXT-012`, `H-DESIGN-002`.
+- [ ] `H-EXT-014` Add a generic orchestrator registration surface.
+  - Scope: replace the bespoke `agent_deck_root` config field and env
+    wiring (`src/discovery/mod.rs:346,598`) with an
+    `[orchestrators.<key>]` config table plus an
+    `OrchestratorDescriptor { key, default_root, build(root) }` registry.
+    Orchestrator adapters stay plain `DiscoveryProvider`s per ADR 0060;
+    amend ADR 0060 to record the revisit (multiple orchestrators justify
+    registry-shaped wiring, not a discovery trait) and what would trigger
+    a capability trait. dmux/herdr/pertmux/workmux adapters then land as
+    independent follow-ups gated on their `H-AGENTMUX-*` evidence audits.
+  - Tests: agent-deck suites pass on the new wiring; config-table parse
+    and disable-toggle coverage.
+  - Blockers: `H-EXT-001`.
+- [ ] `H-EXT-015` Add an orchestrator mutation-capability seam (deferred).
+  - Scope: optional `owns_mux()` / rename-routing capability so
+    ownership-aware mutations (first consumer: `H-AGENTMUX-008` agent-deck
+    rename routing) have a home. Do not build until that first mutation
+    feature lands.
+  - Tests: TBD with the first consumer.
+  - Blockers: `H-EXT-014`, `H-AGENTMUX-008` demand.
+
+Phase E — conformance and docs:
+
+- [ ] `H-EXT-016` Add adapter conformance suites per entity family.
+  - Scope: shared test harnesses asserting the invariants every adapter
+    must satisfy — stable node ids, provenance stamping, sparse-input
+    tolerance, registry round-trip, capability-outcome behavior — plus
+    fixture-corpus integration so a new adapter joins `fixture_corpus` /
+    snapshot coverage by adding fixtures only.
+  - Tests: the suites themselves; run one existing adapter per family
+    through them.
+  - Blockers: first landed chunk of each of Phases B, C, D.
+- [ ] `H-EXT-017` Write the provider-adapter contributor guide.
+  - Scope: re-scopes `H-DOC-002` against the post-H-EXT seams: the
+    end-to-end checklist per entity family — what to implement, what the
+    registry provides for free, what needs fixtures, what needs an ADR.
+    Use codex and GitHub as worked examples; include the hook-plugin
+    contract from `H-EXT-005`.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: `H-EXT-002`, `H-EXT-008`, `H-EXT-012`, `H-EXT-014`.
 
 ### Documentation
 
@@ -2182,20 +2497,86 @@ need does not surprise the project.
     README.
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [ ] `H-DOC-002` Add a provider-adapter contributor guide.
-  - Scope: document the `HarnessAdapter`, `ForgeAdapter`, `TmuxRunner`,
-    and `DiscoveryProvider` contracts so a contributor adding a new
-    harness or forge knows where to plug in. Use the existing codex and
-    GitHub adapters as worked examples.
-  - Tests: docs-only.
-  - Blockers: `H-REF-004` (the boundary is simpler to document after the
-    shared seam exists).
+- [x] `H-DOC-002` Add a provider-adapter contributor guide.
+  - Outcome: re-scoped as `H-EXT-017` so the guide documents the
+    post-registry seams instead of today's boundaries (see
+    `docs/extensibility-assessment.md` Phase E). Tracked there.
 - [ ] `H-DOC-003` Add library-integration examples beyond the api doctest.
   - Scope: `docs/library-api.md` names the entry points but provides no
     worked example for embedding Conspectus in a TUI or test. Add at
     least one end-to-end snippet (probably in `docs/library-api.md` and a
     second doctest under `conspectus::api`).
   - Tests: doctest run as part of `cargo test`.
+  - Blockers: none.
+
+### ADR And Tenet Alignment (H-ADR-*)
+
+Source plan: `docs/adr-audit.md` (2026-07-01 corpus audit). The audit's
+bookkeeping amendments (ADR 0035 status, ADR 0062/0063 supersession notes,
+ADR 0082 lessons addendum) were applied directly on 2026-07-01; the items
+below need a real decision or real writing and are tracked here. All are
+documentation/tenet work — none block feature stories, but `H-ADR-001` and
+`H-ADR-002` should land before external contributors read the guardrails.
+
+- [ ] `H-ADR-001` Restate the payload-privacy tenet precisely.
+  - Scope: ADR 0048 states harness-DB readers "never select
+    privacy-sensitive payload columns" (echoed in `docs/design.md`), but
+    the opencode preview query selects `json_extract(data, '$.text')`
+    from opencode's message table (ADR 0013 / ADR 0023 lineage), and the
+    preview + native viewer (ADR 0052) intentionally surface transcript
+    content. Amend ADR 0048 (or add a small tenet ADR) stating the actual
+    invariant: attribution/identity readers never read payload;
+    operator-facing content features may, normalized and truncated for
+    display; hook-sidecar and state readers stay payload-free. Update the
+    design.md wording to match.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-ADR-002` Replace "read-only first" with a defined mutation
+  envelope.
+  - Scope: the guardrail in CLAUDE.md / design.md predates the sanctioned
+    mutation surface (lockstep tmux renames per ADR 0029, pin
+    launch/send-keys per ADR 0057, resume splicing per ADR 0058, TOML
+    store writes per ADR 0014). Record a tenet amendment defining the
+    envelope — Conspectus may write its own TOML/user-intent stores and
+    manage mux lifecycle when operator-initiated; it never mutates
+    harness-native state and never injects terminal input into agents
+    (ADR 0028 stays absolute) — and update CLAUDE.md + design.md to cite
+    it. Describes decisions already made; introduces no new capability.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `H-ADR-003` Retire or permanently bless the `[tui].sessions_grouping`
+  legacy alias.
+  - Scope: ADR 0031 promised the alias survives "until a follow-on ADR
+    retires it"; that ADR never happened and the alias path is live at
+    `src/config.rs:624`. Decide retire-with-deprecation-warning vs bless
+    as permanent, record it as the promised follow-on ADR, and remove or
+    annotate the code path accordingly. Consider alongside whether
+    `[table.<rows>]` (ADR 0021) and `[tui.views.<name>]` (ADR 0031)
+    should converge when `H-EXT` config work touches this area.
+  - Tests: config parse tests for whichever outcome (warning emitted, or
+    alias documented as permanent).
+  - Blockers: none.
+- [ ] `H-ADR-004` Write the consolidated mux-attribution architecture note.
+  - Scope: the attribution rules span ADRs 0006, 0028, 0046, 0047, 0048,
+    0071, 0072, and 0077 plus resolver evidence-string weights; no single
+    document states the evidence hierarchy end-to-end. Write one
+    architecture note (no new decisions) describing what evidence exists,
+    what outranks what, and how ambiguity is preserved and surfaced, with
+    links back to the ADRs. Natural moment: alongside `H-EXT-004`, which
+    moves the per-harness halves of this logic onto the adapter.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none hard; pairs with `H-EXT-004`.
+- [ ] `H-ADR-005` Adopt a two-tier decision-record convention.
+  - Scope: ~25 of the 84 ADRs are pixel-level UI decisions
+    (0034, 0061–0063, 0071/0072, 0074/0075, …) whose supersession upkeep
+    demonstrably lags, diluting the ~30 load-bearing records. Record a
+    convention ADR: full ADRs for model/persistence/dependency/workflow
+    decisions; a lighter `docs/design-notes/` (or a `Tier: UI` header
+    with relaxed supersession expectations) for view polish, using
+    ADR 0078's rubric style as the model. Migrating existing UI ADRs is
+    optional; stopping the dilution is the point. Update the CLAUDE.md
+    Decision Records section to reference the tiers.
+  - Tests: docs-only; `git diff --check`.
   - Blockers: none.
 
 ### Intra-Harness Session Lineage
