@@ -1770,15 +1770,24 @@ cross-references below.
     `help_overlay()` / `help_overlay_mut()` route through the stack so
     every runtime + UI caller keeps working. `handle_help_overlay_key`
     dispatches through the `Overlay::handle` trait method; `Commit`
-    outcomes pop + `dispatch()` through the reducer. Pattern
-    established with 5 unit tests in `tui::app::tests::modal_stack`.
-  - Waves 2-7 (next, per-overlay migrations): rename, controls, pins,
+    outcomes pop + `dispatch()` through the reducer.
+  - Wave 3 (landed 2026-07-02, Controls migration): `Modal::Controls`
+    variant + storage migration for the controls overlay. Widget
+    doesn't implement the `Overlay` trait because its `handle_key`
+    reads a live `ControlsContext` borrowed from `App`; a future
+    story either grows the trait with an associated context type
+    or refactors the widget. Runtime's existing dispatch stays.
+    Multi-overlay stacking now works — Help can open on top of
+    Controls and pop back to it. Test count grows from 5 to 10 in
+    `tui::app::tests::modal_stack` with stacking + guard-against-
+    naive-pop coverage.
+  - Waves 2, 4-7 (next, per-overlay migrations): rename, pins,
     search, value_modal, viewer_modal each migrate independently by
     adding a `Modal::X(...)` variant, deleting the corresponding
     `Option<...>` field, and re-routing `open_*` / `close_*` /
-    accessors + input handlers through the stack. The controls and
-    pins overlays already produce Msg values (Phase F / Phase F
-    cleanup) so their `Commit(Msg)` path is one wrapper away.
+    accessors + input handlers through the stack. The pins overlay
+    already produces Msg values (Phase F cleanup) so its
+    `Commit(Msg)` path is one wrapper away.
   - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
     help over controls) and a routing test per outcome variant.
   - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
