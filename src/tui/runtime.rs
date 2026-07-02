@@ -24,15 +24,11 @@ use crate::discovery::tmux::{SystemTmux, TmuxRunner};
 use crate::model::{GraphSnapshot, MuxSessionId};
 use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
 use crate::resolve::resolve_snapshot;
-use crate::tui::actions::{
-    AttachTarget, attach_disabled_reason, resolve_attach_target, resolve_view_session,
-};
+use crate::tui::actions::{AttachTarget, resolve_attach_target, resolve_view_session};
 use crate::tui::app::{App, GraphDb, Msg};
 use crate::tui::effect::Effect;
 use crate::tui::preview::capture_via;
-use crate::tui::resume::{
-    ResumeTarget, launch_resume, resolve_resume_target, resume_disabled_reason,
-};
+use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
 use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
@@ -258,8 +254,12 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                         spawn_discovery_worker(app.config(), &result_tx);
                     }
                 }
-                Some(Action::Attach) => attach_action(terminal, &mut app, &config),
-                Some(Action::Resume) => resume_action(&mut app),
+                Some(Action::Attach) => {
+                    dispatch_live(terminal, &mut app, &config, Msg::AttachSelected);
+                }
+                Some(Action::Resume) => {
+                    dispatch_live(terminal, &mut app, &config, Msg::ResumeSelected);
+                }
                 Some(Action::View) => view_action(terminal, &mut app, &config),
                 Some(Action::DefaultAction) => default_action(terminal, &mut app, &config),
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
@@ -1209,45 +1209,124 @@ pub(super) fn refresh(app: &mut App, _seed: &RunConfig) {
     refresh_with_config(app, &config);
 }
 
-/// Execute the [`Effect`]s returned by the reducer (ADR 0085
-/// contract 2). This is the only code in the TUI that runs a
-/// reducer-emitted side effect against `App` or the runtime's
-/// resources. Terminal-suspending exec, mux ops, store writes, and
-/// background preview capture will land here as subsequent
-/// H-TUI-002 waves migrate their Action variants over.
+/// Run one pure (no-terminal) effect. Shared between
+/// [`execute_effects`] and [`execute_effects_live`] so the two
+/// executors stay in lockstep for the non-`Exec` variants.
+fn execute_pure_effect(app: &mut App, effect: Effect) {
+    match effect {
+        Effect::Quit => {
+            // `Msg::Quit` already set `App::should_quit`; the event
+            // loop reads that flag each iteration. The effect
+            // signal is redundant with the state field today and
+            // will become the sole quit signal once every quit
+            // path routes through here.
+        }
+        Effect::Toast(label) => app.post_toast(label),
+        Effect::Persist => app.persist_state(),
+        Effect::SpawnRefresh { force_local } => {
+            if force_local {
+                let mut cfg = app.config().clone();
+                cfg.refresh = true;
+                refresh_with_config(app, &cfg);
+            } else {
+                let cfg = app.config().clone();
+                refresh(app, &cfg);
+            }
+        }
+        Effect::Exec(_) => {
+            // Exec effects need a live terminal; the pure executor
+            // silently drops them. Static and snapshot modes gate
+            // their translators upstream so `AttachSelected` /
+            // `ResumeSelected` never fire there — this branch is a
+            // safety net rather than a code path exercised in
+            // practice.
+        }
+    }
+}
+
+/// Pure executor (ADR 0085 contract 2). Runs the effects a reducer
+/// can produce without a live terminal — used by tests, snapshot
+/// mode, and the scenario TUI. `Effect::Exec` is silently dropped;
+/// callers that need to run execs use [`execute_effects_live`].
 pub(super) fn execute_effects(app: &mut App, effects: Vec<Effect>) {
     for effect in effects {
+        execute_pure_effect(app, effect);
+    }
+}
+
+/// Live-loop executor. Handles every [`Effect`] variant, including
+/// `Effect::Exec`, which requires `&mut DefaultTerminal` and the
+/// process launcher. This is the sole code in the TUI that touches
+/// `&mut Terminal` for reducer-emitted effects.
+pub(super) fn execute_effects_live(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    effects: Vec<Effect>,
+) {
+    for effect in effects {
         match effect {
-            Effect::Quit => {
-                // `Msg::Quit` already set `App::should_quit`; the
-                // event loop reads that flag each iteration. The
-                // effect signal is redundant with the state field
-                // today and will become the sole quit signal once
-                // every quit path routes through here.
-            }
-            Effect::Toast(label) => app.post_toast(label),
-            Effect::Persist => app.persist_state(),
-            Effect::SpawnRefresh { force_local } => {
-                if force_local {
-                    let mut cfg = app.config().clone();
-                    cfg.refresh = true;
-                    refresh_with_config(app, &cfg);
-                } else {
-                    let cfg = app.config().clone();
-                    refresh(app, &cfg);
+            Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec),
+            other => execute_pure_effect(app, other),
+        }
+    }
+}
+
+/// Dispatch an [`ExecSpec`] against the live terminal. Every branch
+/// owns the terminal handoff, waits for the child to exit,
+/// re-enters the alt screen if needed, schedules a follow-up
+/// refresh, and posts a status message summarizing the outcome.
+fn execute_exec_spec(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    spec: crate::tui::effect::ExecSpec,
+) {
+    use crate::tui::effect::ExecSpec;
+    match spec {
+        ExecSpec::AttachMux(target) => {
+            let outcome = run_tmux_attach(terminal, &target);
+            refresh(app, config);
+            let message = match outcome {
+                AttachOutcome::Detached => format!("attached/detached: {}", target_short(&target)),
+                AttachOutcome::Failed(reason) => format!("attach failed: {reason}"),
+            };
+            let _ = app.update(Msg::SetStatus(Some(message)));
+        }
+        ExecSpec::Resume(target) => {
+            let message = match &target {
+                ResumeTarget::Launch { label, .. } => {
+                    if launch_resume(&target) {
+                        format!("resumed: {label}")
+                    } else {
+                        "resume: failed to launch".to_string()
+                    }
                 }
-            }
+                other => resume_disabled_reason(other),
+            };
+            let _ = app.update(Msg::SetStatus(Some(message)));
         }
     }
 }
 
 /// Bridge helper: dispatch a `Msg` through the reducer and run any
-/// returned effects through the executor. Call sites that used to
-/// bare-call `app.update(msg)` migrate to this so the executor is
-/// the only path that side-effects hit.
+/// returned effects through the pure executor. Call sites that don't
+/// have a live terminal (tests, scenario TUI) use this; the live
+/// loop uses [`dispatch_live`] so exec effects have a place to run.
 pub(super) fn dispatch(app: &mut App, msg: Msg) {
     let effects = app.update(msg);
     execute_effects(app, effects);
+}
+
+/// Live-loop dispatch: reduce + execute against the live terminal.
+pub(super) fn dispatch_live(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    msg: Msg,
+) {
+    let effects = app.update(msg);
+    execute_effects_live(terminal, app, config, effects);
 }
 
 /// Refresh immediately after a pin mutation.
@@ -2208,7 +2287,7 @@ pub(super) fn cycle_view(view: View, delta: i32) -> View {
 fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
     match selected_default_action(app) {
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
-        SelectedDefault::Attach => attach_action(terminal, app, config),
+        SelectedDefault::Attach => dispatch_live(terminal, app, config, Msg::AttachSelected),
         SelectedDefault::View => view_action(terminal, app, config),
         SelectedDefault::LaunchPin => launch_pin_action(terminal, app, config),
     }
@@ -2460,64 +2539,6 @@ fn copy_session_id_action(app: &mut App) {
 fn copy_and_toast(app: &mut App, label: String, value: String) {
     let _ = crate::tui::clipboard::copy_to_clipboard(&value);
     app.post_toast(label);
-}
-
-/// Handle the `a` key. On success, suspend the TUI, spawn
-/// `tmux attach-session` and wait for it to exit, then re-enter
-/// the alt screen so the operator returns to the TUI ready to
-/// pick another row. On disabled, set a status-bar message and
-/// stay in the TUI without touching the terminal.
-fn attach_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
-    match resolve_attach_target(app) {
-        Ok(target) => {
-            let outcome = run_tmux_attach(terminal, &target);
-            // Always restore the row tree state — sessions may have
-            // come and gone during the attach.
-            refresh(app, config);
-            // Surface a status line that reflects what happened so
-            // the operator isn't guessing if anything ran.
-            let message = match outcome {
-                AttachOutcome::Detached => format!("attached/detached: {}", target_short(&target)),
-                AttachOutcome::Failed(reason) => format!("attach failed: {reason}"),
-            };
-            app.update(Msg::SetStatus(Some(message)));
-        }
-        Err(reason) => {
-            app.update(Msg::SetStatus(Some(attach_disabled_reason(&reason))));
-        }
-    }
-}
-
-/// Handle the resume action: resolve the selected agent session's
-/// resume command, launch it in the background, and surface the
-/// outcome as a status-bar message.
-fn resume_action(app: &mut App) {
-    let Some(selection) = app.selection().cloned() else {
-        app.update(Msg::SetStatus(Some("resume: nothing selected".to_string())));
-        return;
-    };
-    let session_id = match &selection {
-        RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
-        _ => {
-            app.update(Msg::SetStatus(Some(
-                "resume: select an agent session".to_string(),
-            )));
-            return;
-        }
-    };
-    let target = resolve_resume_target(&session_id);
-    match &target {
-        ResumeTarget::Launch { label, .. } => {
-            if launch_resume(&target) {
-                app.update(Msg::SetStatus(Some(format!("resumed: {label}"))));
-            } else {
-                app.update(Msg::SetStatus(Some("resume: failed to launch".to_string())));
-            }
-        }
-        _ => {
-            app.update(Msg::SetStatus(Some(resume_disabled_reason(&target))));
-        }
-    }
 }
 
 /// Outcome of a single attach attempt. Errors carry a

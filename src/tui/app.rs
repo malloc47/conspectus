@@ -505,6 +505,18 @@ pub enum Msg {
     /// good snapshot remains in place; this message surfaces a
     /// stale indicator in the header or status bar (T8-003).
     SetRefreshFailure(String),
+    /// Attach to the currently selected row's mux session
+    /// (ADR 0085 contract 2). The reducer resolves the target via
+    /// `resolve_attach_target(&self)` and emits either
+    /// `Effect::Exec(ExecSpec::AttachMux(target))` when attachable
+    /// or `Effect::Toast(reason)` when disabled. All the terminal
+    /// / `tmux` I/O lives in the executor.
+    AttachSelected,
+    /// Resume the currently selected agent session (ADR 0085
+    /// contract 2). The reducer resolves the resume target and
+    /// emits either `Effect::Exec(ExecSpec::Resume(target))` when
+    /// launchable or `Effect::Toast(reason)` when disabled.
+    ResumeSelected,
 }
 
 impl App {
@@ -1852,6 +1864,38 @@ impl App {
             }
             Msg::SetRefreshFailure(reason) => {
                 self.refresh_failure = Some(reason);
+            }
+            Msg::AttachSelected => {
+                use crate::tui::effect::ExecSpec;
+                match crate::tui::actions::resolve_attach_target(self) {
+                    Ok(target) => effects.push(Effect::Exec(ExecSpec::AttachMux(target))),
+                    Err(reason) => effects.push(Effect::Toast(
+                        crate::tui::actions::attach_disabled_reason(&reason),
+                    )),
+                }
+            }
+            Msg::ResumeSelected => {
+                use crate::tui::effect::ExecSpec;
+                let Some(selection) = self.selection.clone() else {
+                    effects.push(Effect::Toast("resume: nothing selected".to_string()));
+                    return effects;
+                };
+                let session_id = match &selection {
+                    RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
+                    _ => {
+                        effects.push(Effect::Toast("resume: select an agent session".to_string()));
+                        return effects;
+                    }
+                };
+                let target = crate::tui::resume::resolve_resume_target(&session_id);
+                match &target {
+                    crate::tui::resume::ResumeTarget::Launch { .. } => {
+                        effects.push(Effect::Exec(ExecSpec::Resume(target)));
+                    }
+                    _ => effects.push(Effect::Toast(crate::tui::resume::resume_disabled_reason(
+                        &target,
+                    ))),
+                }
             }
         }
         effects
@@ -5257,6 +5301,69 @@ mod tests {
             let mut app = App::new(RunConfig::defaults());
             let effects = app.update(Msg::SetStatus(Some("hi".to_string())));
             assert!(effects.is_empty());
+        }
+
+        // ADR 0085 contract 2: terminal-suspending exec resolves in
+        // the reducer and comes back as `Effect::Exec(...)`. The
+        // executor is the only code that touches `tmux` or
+        // `std::process`, and never gets involved here — these tests
+        // assert the (state', effects) shape without a terminal in
+        // the loop.
+        #[test]
+        fn attach_selected_with_no_selection_emits_toast() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::AttachSelected);
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                Effect::Toast(reason) => assert!(
+                    reason.starts_with("attach: "),
+                    "expected attach disabled reason, got {reason:?}",
+                ),
+                other => panic!("expected Toast, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn resume_selected_with_no_selection_emits_toast() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::ResumeSelected);
+            assert_eq!(
+                effects,
+                vec![Effect::Toast("resume: nothing selected".to_string())]
+            );
+        }
+
+        #[test]
+        fn resume_selected_on_supported_harness_emits_exec() {
+            use crate::tui::effect::ExecSpec;
+            let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+            select_session(&mut app, "Session One");
+            let effects = app.update(Msg::ResumeSelected);
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                Effect::Exec(ExecSpec::Resume(crate::tui::resume::ResumeTarget::Launch {
+                    label,
+                    ..
+                })) => {
+                    assert_eq!(label, "Session One");
+                }
+                other => panic!("expected Exec(Resume(Launch)), got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn resume_selected_on_unsupported_harness_emits_toast() {
+            let mut app = seeded_app(&[("aider", "Session One", "/p/project")]);
+            select_session(&mut app, "Session One");
+            let effects = app.update(Msg::ResumeSelected);
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                Effect::Toast(reason) => assert!(
+                    reason.contains("aider"),
+                    "expected aider-unsupported reason, got {reason:?}",
+                ),
+                other => panic!("expected Toast, got {other:?}"),
+            }
         }
     }
 }
