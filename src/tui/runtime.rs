@@ -11,6 +11,7 @@
 //! background channel and never block input.
 
 use std::path::PathBuf;
+use std::process::Output;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -1657,7 +1658,10 @@ fn apply_pins_action_and_refresh(
         PinsAction::EditPin(request) => edit_pin_action(app, config, request),
         PinsAction::BindPin(request) => bind_pin_action(app, config, request),
         PinsAction::RemovePin(request) => remove_pin_controls_action(app, config, request),
-        PinsAction::LaunchPin { pin_id } => launch_pin_by_id(terminal, app, config, &pin_id),
+        PinsAction::LaunchPin { pin_id } => {
+            let target = pin_launch_target_from_snapshot(app, &pin_id);
+            launch_pin_by_id(terminal, app, config, &pin_id, target.as_ref());
+        }
         PinsAction::PinPlaceholder(_) => {
             app.apply_pins_action(action);
         }
@@ -2106,7 +2110,8 @@ fn launch_pin_action(terminal: &mut DefaultTerminal, app: &mut App, config: &Run
         )));
         return;
     };
-    launch_pin_by_id(terminal, app, config, &pin_id);
+    let target = selected_pin_launch_target(app);
+    launch_pin_by_id(terminal, app, config, &pin_id, target.as_ref());
 }
 
 /// Shared body of `pin launch <id>`: suspend the TUI, re-exec into
@@ -2118,23 +2123,173 @@ fn launch_pin_by_id(
     app: &mut App,
     config: &RunConfig,
     pin_id: &str,
+    target: Option<&PinLaunchTarget>,
 ) {
     ratatui::restore();
-    let status = std::process::Command::new(
+    let output = std::process::Command::new(
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
     )
-    .args(["pin", "launch", pin_id])
-    .status();
+    .args(["pin", "launch", pin_id, "--no-attach"])
+    .output();
     *terminal = ratatui::init();
     let _ = terminal.clear();
 
     refresh(app, config);
-    let message = match status {
-        Ok(s) if s.success() => format!("pin `{pin_id}` launch finished"),
-        Ok(s) => format!("pin `{pin_id}` launch exited with {s}"),
-        Err(err) => format!("pin `{pin_id}` launch failed to spawn: {err}"),
+    let launch = summarize_pin_launch_output(pin_id, output);
+    app.update(Msg::SetStatus(Some(launch.message.clone())));
+    if !launch.success {
+        app.post_toast(launch.message);
+        return;
+    }
+
+    let Some(target) = target else {
+        app.update(Msg::SetStatus(Some(format!(
+            "{}; attach target unavailable after refresh",
+            launch.message
+        ))));
+        return;
+    };
+
+    if let Some(reason) = tmux_session_unavailable(target) {
+        let message = format!(
+            "pin `{pin_id}` launched but tmux session `{}` is not attachable: {reason}",
+            target.mux_name
+        );
+        app.update(Msg::SetStatus(Some(message.clone())));
+        app.post_toast(message);
+        return;
+    }
+
+    let attach_target = AttachTarget {
+        mux: MuxSessionId::new(format!("tmux:{}", target.mux_name)),
+        backend: "tmux".to_string(),
+        native_id: target.mux_name.clone(),
+    };
+    let outcome =
+        run_tmux_attach_with_socket(terminal, &attach_target, target.mux_socket.as_deref());
+    refresh(app, config);
+    let message = match outcome {
+        AttachOutcome::Detached => format!("pin `{pin_id}` launch attached/detached"),
+        AttachOutcome::Failed(reason) => format!("pin `{pin_id}` launch attach failed: {reason}"),
     };
     app.update(Msg::SetStatus(Some(message)));
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PinLaunchTarget {
+    mux_name: String,
+    mux_socket: Option<String>,
+}
+
+fn selected_pin_launch_target(app: &App) -> Option<PinLaunchTarget> {
+    let selection = app.selection()?;
+    let row = app.tree().rows.iter().find(|row| &row.id == selection)?;
+    match &row.kind {
+        crate::tui::rows::RowKind::Pin(pin) => Some(PinLaunchTarget {
+            mux_name: pin.mux_name.clone(),
+            mux_socket: pin.mux_socket.clone(),
+        }),
+        crate::tui::rows::RowKind::AgentSession(session) => {
+            let pin_id = session.pin_id.as_ref()?;
+            pin_launch_target_from_snapshot(app, pin_id)
+        }
+        crate::tui::rows::RowKind::MuxSession(mux) => {
+            let pin_id = mux.pin_id.as_ref()?;
+            pin_launch_target_from_snapshot(app, pin_id)
+        }
+        _ => None,
+    }
+}
+
+fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLaunchTarget> {
+    app.graph_db()?
+        .snapshot()
+        .pins
+        .iter()
+        .find(|pin| pin.id == pin_id)
+        .map(|pin| PinLaunchTarget {
+            mux_name: pin.mux.name.clone(),
+            mux_socket: pin.mux.socket_name.clone(),
+        })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PinLaunchSummary {
+    success: bool,
+    message: String,
+}
+
+fn summarize_pin_launch_output(pin_id: &str, output: std::io::Result<Output>) -> PinLaunchSummary {
+    match output {
+        Ok(output) if output.status.success() => {
+            let detail = command_output_excerpt(&output);
+            PinLaunchSummary {
+                success: true,
+                message: if detail.is_empty() {
+                    format!("pin `{pin_id}` launched")
+                } else {
+                    format!("pin `{pin_id}` launched: {detail}")
+                },
+            }
+        }
+        Ok(output) => {
+            let detail = command_output_excerpt(&output);
+            PinLaunchSummary {
+                success: false,
+                message: if detail.is_empty() {
+                    format!("pin `{pin_id}` launch exited with {}", output.status)
+                } else {
+                    format!("pin `{pin_id}` launch failed: {detail}")
+                },
+            }
+        }
+        Err(err) => PinLaunchSummary {
+            success: false,
+            message: format!("pin `{pin_id}` launch failed to spawn: {err}"),
+        },
+    }
+}
+
+fn command_output_excerpt(output: &Output) -> String {
+    let mut lines = String::new();
+    lines.push_str(&String::from_utf8_lossy(&output.stderr));
+    if lines.trim().is_empty() {
+        lines.push_str(&String::from_utf8_lossy(&output.stdout));
+    }
+    lines
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(180)
+        .collect()
+}
+
+fn tmux_session_unavailable(target: &PinLaunchTarget) -> Option<String> {
+    let mut command = std::process::Command::new("tmux");
+    if let Some(socket) = target
+        .mux_socket
+        .as_deref()
+        .filter(|socket| *socket != "default")
+    {
+        command.args(["-L", socket]);
+    }
+    let output = command
+        .args(["has-session", "-t", target.mux_name.as_str()])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => {
+            let detail = command_output_excerpt(&output);
+            Some(if detail.is_empty() {
+                format!("tmux has-session exited with {}", output.status)
+            } else {
+                detail
+            })
+        }
+        Err(err) => Some(format!("could not run tmux has-session: {err}")),
+    }
 }
 
 /// Right-pane Enter (T8-040 / T8-043). When the explorer cursor is on
@@ -2247,13 +2402,29 @@ enum AttachOutcome {
 /// `DefaultTerminal` is replaced in place so the resumed event
 /// loop draws into the fresh terminal.
 fn run_tmux_attach(terminal: &mut DefaultTerminal, target: &AttachTarget) -> AttachOutcome {
+    run_tmux_attach_with_socket(terminal, target, None)
+}
+
+fn run_tmux_attach_with_socket(
+    terminal: &mut DefaultTerminal,
+    target: &AttachTarget,
+    socket_name: Option<&str>,
+) -> AttachOutcome {
     // Suspend the ratatui terminal so tmux owns the real screen
     // for the duration of the attach.
     ratatui::restore();
 
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &target.native_id])
-        .status();
+    let nested = std::env::var_os("TMUX").is_some();
+    let subcommand = if nested {
+        "switch-client"
+    } else {
+        "attach-session"
+    };
+    let mut command = std::process::Command::new("tmux");
+    if let Some(socket) = socket_name.filter(|socket| *socket != "default") {
+        command.args(["-L", socket]);
+    }
+    let status = command.args([subcommand, "-t", &target.native_id]).status();
 
     // Re-enter the alt screen + raw mode and swap the terminal in
     // place. Failure to re-init is fatal for the TUI, but we
@@ -2266,7 +2437,7 @@ fn run_tmux_attach(terminal: &mut DefaultTerminal, target: &AttachTarget) -> Att
 
     match status {
         Ok(s) if s.success() => AttachOutcome::Detached,
-        Ok(s) => AttachOutcome::Failed(format!("tmux exited with {s}")),
+        Ok(s) => AttachOutcome::Failed(format!("tmux {subcommand} exited with {s}")),
         Err(err) => AttachOutcome::Failed(format!("could not launch tmux: {err}")),
     }
 }
@@ -2644,6 +2815,7 @@ mod tests {
     };
     use ratatui::crossterm::event::KeyEvent;
     use std::fs;
+    use std::os::unix::process::ExitStatusExt;
 
     fn press(code: KeyCode, mods: KeyModifiers) -> Event {
         let mut key = KeyEvent::new(code, mods);
@@ -2735,6 +2907,41 @@ mod tests {
         assert_eq!(
             translate(press(KeyCode::Delete, KeyModifiers::NONE), 24),
             Some(Action::RemovePin)
+        );
+    }
+
+    #[test]
+    fn pin_launch_summary_surfaces_stderr_on_failure() {
+        let output = Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: b"stdout line\n".to_vec(),
+            stderr: b"tmux session `demo` vanished before attach\n".to_vec(),
+        };
+
+        let summary = summarize_pin_launch_output("demo", Ok(output));
+
+        assert!(!summary.success);
+        assert_eq!(
+            summary.message,
+            "pin `demo` launch failed: tmux session `demo` vanished before attach"
+        );
+    }
+
+    #[test]
+    fn pin_launch_summary_uses_stdout_on_success() {
+        let output = Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: b"spawned `demo` (detached); attach with: tmux attach-session -t demo\n"
+                .to_vec(),
+            stderr: Vec::new(),
+        };
+
+        let summary = summarize_pin_launch_output("demo", Ok(output));
+
+        assert!(summary.success);
+        assert_eq!(
+            summary.message,
+            "pin `demo` launched: spawned `demo` (detached); attach with: tmux attach-session -t demo"
         );
     }
 
