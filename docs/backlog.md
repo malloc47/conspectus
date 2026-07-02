@@ -1781,13 +1781,20 @@ cross-references below.
     Controls and pop back to it. Test count grows from 5 to 10 in
     `tui::app::tests::modal_stack` with stacking + guard-against-
     naive-pop coverage.
-  - Waves 2, 4-7 (next, per-overlay migrations): rename, pins,
+  - Wave 4 (landed 2026-07-02, Pins migration): `Modal::Pins`
+    variant + storage migration. Same shape as Controls — widget
+    doesn't implement `Overlay` because handle_key reads a
+    `PinsContext` at event time. `set_pins_overlay` (direct-key
+    openers with pre-configured state) also migrated to push
+    onto the stack. Triple-stack scenarios exercised via
+    `triple_stack_orders_correctly_and_pops_lifo`: Controls at
+    bottom, Pins in middle, Help on top; pop reveals each in
+    turn. Test count grows from 10 to 14.
+  - Waves 2, 5-7 (next, per-overlay migrations): rename,
     search, value_modal, viewer_modal each migrate independently by
     adding a `Modal::X(...)` variant, deleting the corresponding
     `Option<...>` field, and re-routing `open_*` / `close_*` /
-    accessors + input handlers through the stack. The pins overlay
-    already produces Msg values (Phase F cleanup) so its
-    `Commit(Msg)` path is one wrapper away.
+    accessors + input handlers through the stack.
   - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
     help over controls) and a routing test per outcome variant.
   - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
