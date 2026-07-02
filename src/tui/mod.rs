@@ -31,6 +31,7 @@ pub mod detail;
 pub mod effect;
 pub mod explorer;
 pub mod icons;
+pub mod modal;
 pub mod preview;
 pub mod resume;
 pub mod rows;
@@ -46,6 +47,7 @@ pub mod widgets;
 
 pub use app::{App, Msg};
 pub use effect::Effect;
+pub use modal::{Modal, Overlay, OverlayOutcome};
 #[cfg(feature = "snapshot")]
 pub use runtime::run_from_fixture;
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]

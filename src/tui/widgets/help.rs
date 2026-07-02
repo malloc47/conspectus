@@ -87,6 +87,15 @@ pub enum HelpOutcome {
     Close,
 }
 
+impl crate::tui::Overlay for HelpOverlayState {
+    fn handle(&mut self, key: KeyEvent) -> crate::tui::OverlayOutcome {
+        match self.handle_key(key) {
+            HelpOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
+            HelpOutcome::Close => crate::tui::OverlayOutcome::Close,
+        }
+    }
+}
+
 /// Centered modal that renders the keymap reference. Lays out two
 /// columns of `key · action` pairs grouped into sections so the
 /// operator can scan for the action they want. Supports vertical

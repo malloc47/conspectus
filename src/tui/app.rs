@@ -202,8 +202,14 @@ pub struct App {
     /// through the modal, and overlays a ranked match list within
     /// the active filter set.
     search_overlay: Option<crate::tui::widgets::search::SearchOverlayState>,
-    /// Active `?` help overlay (F8-011). `None` when closed.
-    help_overlay: Option<crate::tui::widgets::help::HelpOverlayState>,
+    /// Open overlays as a stack (ADR 0085 contract 3). Input routes
+    /// to the top entry first, `draw` renders bottom-to-top, and
+    /// commit / close outcomes pop the top. Grows one variant per
+    /// overlay migration wave — see [`crate::tui::Modal`]. The
+    /// `Option<...>` fields below still host overlays that haven't
+    /// migrated yet; each wave deletes one field and moves the
+    /// state to a `Modal` variant.
+    modal_stack: Vec<crate::tui::Modal>,
     /// Active `o` full-value modal (T8-030). `None` when closed;
     /// `Some` suspends navigation keys and routes input through the
     /// modal.
@@ -626,7 +632,7 @@ impl App {
             controls_overlay: None,
             pins_overlay: None,
             search_overlay: None,
-            help_overlay: None,
+            modal_stack: Vec::new(),
             value_modal: None,
             viewer_modal: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
@@ -807,21 +813,42 @@ impl App {
         self.search_overlay = None;
     }
 
-    /// Active `?` help overlay (F8-011), if any.
+    /// Active `?` help overlay (F8-011), if any. Lives on the modal
+    /// stack (ADR 0085 contract 3); this accessor peeks the top
+    /// entry.
     pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
-        self.help_overlay.as_ref()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Help(state) => Some(state),
+        }
     }
 
     pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::HelpOverlayState> {
-        self.help_overlay.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Help(state) => Some(state),
+        }
     }
 
+    /// Push a fresh help overlay onto the modal stack.
     pub fn open_help_overlay(&mut self) {
-        self.help_overlay = Some(crate::tui::widgets::help::HelpOverlayState::new());
+        self.modal_stack.push(crate::tui::Modal::Help(
+            crate::tui::widgets::help::HelpOverlayState::new(),
+        ));
     }
 
+    /// Pop the help overlay if it's on top; no-op otherwise.
     pub fn close_help_overlay(&mut self) {
-        self.help_overlay = None;
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Help(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// The modal stack (ADR 0085 contract 3). Reserved for
+    /// generic stack-operating code (draw sweep, generic
+    /// input-routing helper); overlay-specific consumers use the
+    /// per-overlay accessors like `help_overlay()`.
+    #[cfg(test)]
+    pub(crate) fn modal_stack(&self) -> &[crate::tui::Modal] {
+        &self.modal_stack
     }
 
     /// Active `o` full-value modal (T8-030), if any.
@@ -5383,6 +5410,61 @@ mod tests {
             crate::tui_state::read_last_view(&cache).is_none(),
             "view switch without enabled persistence must not write",
         );
+    }
+
+    // ADR 0085 contract 3 (H-TUI-003 phase 1): the modal stack is
+    // the sole open-overlay tracker for migrated overlays. These
+    // tests pin the Help overlay's push/pop shape so a future
+    // migration wave can trust the same pattern.
+    mod modal_stack {
+        use super::*;
+        use crate::tui::Modal;
+
+        #[test]
+        fn open_help_pushes_modal_help_onto_stack() {
+            let mut app = App::new(RunConfig::defaults());
+            assert!(app.modal_stack().is_empty());
+            app.open_help_overlay();
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(app.modal_stack().first(), Some(Modal::Help(_))));
+            assert!(app.help_overlay().is_some());
+        }
+
+        #[test]
+        fn close_help_pops_when_top_is_help() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_help_overlay();
+            app.close_help_overlay();
+            assert!(app.modal_stack().is_empty());
+            assert!(app.help_overlay().is_none());
+        }
+
+        #[test]
+        fn close_help_when_stack_empty_is_a_no_op() {
+            let mut app = App::new(RunConfig::defaults());
+            app.close_help_overlay();
+            assert!(app.modal_stack().is_empty());
+        }
+
+        #[test]
+        fn help_overlay_esc_key_returns_close_via_overlay_trait() {
+            use crate::tui::widgets::help::HelpOverlayState;
+            use crate::tui::{Overlay, OverlayOutcome};
+            use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+            let mut state = HelpOverlayState::new();
+            let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+            assert_eq!(state.handle(key), OverlayOutcome::Close);
+        }
+
+        #[test]
+        fn help_overlay_scroll_key_returns_consumed_via_overlay_trait() {
+            use crate::tui::widgets::help::HelpOverlayState;
+            use crate::tui::{Overlay, OverlayOutcome};
+            use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+            let mut state = HelpOverlayState::new();
+            let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+            assert_eq!(state.handle(key), OverlayOutcome::Consumed);
+        }
     }
 
     // ADR 0085 contract 2: the reducer emits Effects as data. These

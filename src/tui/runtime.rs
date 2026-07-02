@@ -1823,16 +1823,23 @@ fn pin_placeholder_row(row: &crate::tui::rows::Row) -> bool {
     }
 }
 
-/// Dispatch a key into the open help overlay and close it on
-/// HelpOutcome::Close.
+/// Dispatch a key into the open help overlay via the shared
+/// [`crate::tui::Overlay`] contract (ADR 0085 contract 3). Close /
+/// Commit outcomes pop the stack; Consumed leaves the overlay
+/// open.
 pub(super) fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
-    use crate::tui::widgets::help::HelpOutcome;
+    use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.help_overlay_mut() {
-        Some(state) => state.handle_key(key),
+        Some(state) => state.handle(key),
         None => return,
     };
-    if let HelpOutcome::Close = outcome {
-        app.close_help_overlay();
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => app.close_help_overlay(),
+        OverlayOutcome::Commit(msg) => {
+            app.close_help_overlay();
+            dispatch(app, *msg);
+        }
     }
 }
 
