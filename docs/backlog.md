@@ -1712,13 +1712,24 @@ cross-references below.
     `Effect::CapturePreview(MuxTarget)` runs from the executor's
     per-tick sweep; `Effect::Persist` is already in the catalog
     and gets emitted from view / grouping / filter changes.
-  - Phase F (collapse update layers): merge `ControlsAction` into
-    `Msg` variants that emit the appropriate effect; delete
-    `apply_controls_action` / `apply_controls_action_and_rebuild`
-    / `apply_view_switch` in favor of reducer arms. `Action`
-    enum shrinks to a translation layer or disappears entirely.
-    Prereq for `H-TUI-003` (modal stack Overlay contract's
-    `Commit(Msg)` outcome).
+  - Phase F (landed 2026-07-02, collapse update layers):
+    `ControlsAction` enum deleted. Four new Msg variants
+    (`SwitchView`, `SetGrouping`, `SetFilter`, `SetSort`) carry
+    the projection changes end-to-end; reducer arms mutate state
+    and re-derive the row tree via a new
+    `App::rebuild_tree_in_place()` helper. `build_tree_for_view`
+    + `TreeInputs` relocated to `tui/rows/mod.rs` so the reducer
+    can call them without a runtime dependency. The controls
+    overlay now produces `Msg` values in
+    `ControlsOutcome::ApplyAndStay(Msg)` /
+    `ApplyAndClose(Msg)` per ADR 0085 contract 3. Runtime
+    helpers `apply_controls_action_and_rebuild` (live + static),
+    `App::apply_controls_action`, and `apply_view_switch` all
+    deleted; call sites (~15 across live loop, static loop,
+    controls overlay, snapshot.rs, tests) route through
+    `dispatch()`/`dispatch_live()`. Reducer test coverage grows
+    to 23; the existing `projection_zero_discovery` suite pins
+    the invariant via the new Msg variants directly.
   - Blockers: `H-TUI-001` (landed). Phase B unblocks after
     Phase A; C/D/E/F land opportunistically as their variants
     are needed.
