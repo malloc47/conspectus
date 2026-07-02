@@ -28,6 +28,7 @@ pub mod actions;
 mod app;
 pub mod clipboard;
 pub mod detail;
+pub mod effect;
 pub mod explorer;
 pub mod icons;
 pub mod preview;
@@ -44,6 +45,7 @@ pub mod viewer_bridge;
 pub mod widgets;
 
 pub use app::{App, Msg};
+pub use effect::Effect;
 #[cfg(feature = "snapshot")]
 pub use runtime::run_from_fixture;
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]

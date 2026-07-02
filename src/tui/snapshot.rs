@@ -42,7 +42,7 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::model::GraphSnapshot;
 use crate::tui::app::App;
 use crate::tui::runtime::{
-    self, Action, apply_controls_action_and_rebuild, apply_view_switch, cycle_view,
+    self, Action, apply_controls_action_and_rebuild, apply_view_switch, cycle_view, dispatch,
     handle_controls_overlay_key, handle_help_overlay_key, handle_search_overlay_key, refresh,
     refresh_from_snapshot, translate,
 };
@@ -214,7 +214,7 @@ fn dispatch_event(app: &App, event: Event, viewport_height: u16) -> Option<Actio
 /// agent knows the key was a no-op rather than silently dropped.
 fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
     match action {
-        Action::Msg(msg) => app.update(*msg),
+        Action::Msg(msg) => dispatch(app, *msg),
         Action::SwitchView(view) => apply_view_switch(app, config, view),
         Action::CycleView(delta) => {
             let next = cycle_view(app.active_view(), delta);

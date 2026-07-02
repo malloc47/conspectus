@@ -1764,7 +1764,8 @@ impl App {
 
     /// Apply a single [`Msg`] to the state. Pure: no I/O, no panics,
     /// no clock reads.
-    pub fn update(&mut self, msg: Msg) {
+    pub fn update(&mut self, msg: Msg) -> Vec<super::Effect> {
+        use super::Effect;
         // The empty-stack Backspace arming only persists across
         // consecutive Backspace presses; any other message clears it
         // so the operator doesn't accidentally back out of the right
@@ -1772,8 +1773,12 @@ impl App {
         if !matches!(msg, Msg::ExplorerBack) {
             self.explorer_back_armed = false;
         }
+        let mut effects: Vec<Effect> = Vec::new();
         match msg {
-            Msg::Quit => self.should_quit = true,
+            Msg::Quit => {
+                self.should_quit = true;
+                effects.push(Effect::Quit);
+            }
             Msg::SetData {
                 snapshot,
                 tree,
@@ -1849,6 +1854,7 @@ impl App {
                 self.refresh_failure = Some(reason);
             }
         }
+        effects
     }
 
     fn set_data(
@@ -5217,5 +5223,40 @@ mod tests {
             crate::tui_state::read_last_view(&cache).is_none(),
             "view switch without enabled persistence must not write",
         );
+    }
+
+    // ADR 0085 contract 2: the reducer emits Effects as data. These
+    // tests pin the initial catalog — Msg::Quit yields Effect::Quit,
+    // navigation Msgs yield none — so a future PR that accidentally
+    // stops emitting an effect fails a fast unit test rather than a
+    // slow integration test.
+    mod reducer_effects {
+        use super::*;
+        use crate::tui::Effect;
+
+        #[test]
+        fn quit_msg_emits_quit_effect_and_sets_should_quit() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::Quit);
+            assert_eq!(effects, vec![Effect::Quit]);
+            assert!(app.should_quit());
+        }
+
+        #[test]
+        fn nav_msgs_emit_no_effects() {
+            let mut app = App::new(RunConfig::defaults());
+            assert!(app.update(Msg::NavDown).is_empty());
+            assert!(app.update(Msg::NavUp).is_empty());
+            assert!(app.update(Msg::Home).is_empty());
+            assert!(app.update(Msg::End).is_empty());
+            assert!(app.update(Msg::CycleFocus).is_empty());
+        }
+
+        #[test]
+        fn set_status_emits_no_effects() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::SetStatus(Some("hi".to_string())));
+            assert!(effects.is_empty());
+        }
     }
 }

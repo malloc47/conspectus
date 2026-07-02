@@ -28,6 +28,7 @@ use crate::tui::actions::{
     AttachTarget, attach_disabled_reason, resolve_attach_target, resolve_view_session,
 };
 use crate::tui::app::{App, GraphDb, Msg};
+use crate::tui::effect::Effect;
 use crate::tui::preview::capture_via;
 use crate::tui::resume::{
     ResumeTarget, launch_resume, resolve_resume_target, resume_disabled_reason,
@@ -241,8 +242,16 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus()))
             };
             match action {
-                Some(Action::Msg(msg)) => app.update(*msg),
+                Some(Action::Msg(msg)) => dispatch(&mut app, *msg),
                 Some(Action::Refresh) => {
+                    // Route through the executor for symmetry —
+                    // this variant will collapse into
+                    // `Msg::RequestRefresh` returning
+                    // `Effect::SpawnRefresh` once every keymap
+                    // entry produces a `Msg`. The async worker
+                    // spawn stays here (it needs `result_tx`)
+                    // until an executor-owned worker handle
+                    // exists.
                     if !pending_refresh {
                         pending_refresh = true;
                         last_refresh = Instant::now();
@@ -392,7 +401,7 @@ fn static_event_loop(
             let prev_mux_target = current_mux_target(&app);
             let action = static_action_for_event(&app, event, viewport);
             match action {
-                Some(Action::Msg(msg)) => app.update(*msg),
+                Some(Action::Msg(msg)) => dispatch(&mut app, *msg),
                 Some(Action::OpenHelp) => app.open_help_overlay(),
                 Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(&mut app, key),
                 Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
@@ -482,18 +491,21 @@ fn static_event_loop(
                         "scenario TUI is static; view is disabled".to_string(),
                     )));
                 }
-                Some(Action::DefaultAction) => match selected_default_action(&app) {
-                    SelectedDefault::ToggleExpand => app.update(Msg::ToggleExpand),
-                    SelectedDefault::Attach => app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; attach is disabled".to_string(),
-                    ))),
-                    SelectedDefault::View => app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; view is disabled".to_string(),
-                    ))),
-                    SelectedDefault::LaunchPin => app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; pin launch is disabled".to_string(),
-                    ))),
-                },
+                Some(Action::DefaultAction) => {
+                    let msg = match selected_default_action(&app) {
+                        SelectedDefault::ToggleExpand => Msg::ToggleExpand,
+                        SelectedDefault::Attach => Msg::SetStatus(Some(
+                            "scenario TUI is static; attach is disabled".to_string(),
+                        )),
+                        SelectedDefault::View => Msg::SetStatus(Some(
+                            "scenario TUI is static; view is disabled".to_string(),
+                        )),
+                        SelectedDefault::LaunchPin => Msg::SetStatus(Some(
+                            "scenario TUI is static; pin launch is disabled".to_string(),
+                        )),
+                    };
+                    dispatch(&mut app, msg);
+                }
                 Some(Action::CycleGrouping(delta)) => {
                     let next = if delta >= 0 {
                         app.grouping().cycle_next()
@@ -1070,12 +1082,11 @@ fn pin_bind_hint_action(app: &mut App) {
         return;
     }
     let diagnostics = crate::tui::actions::selected_pin_diagnostics(app);
-    match crate::tui::actions::pin_bind_hint(&diagnostics) {
-        Some(message) => app.update(Msg::SetStatus(Some(message))),
-        None => app.update(Msg::SetStatus(Some(
-            "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
-        ))),
-    }
+    let status = match crate::tui::actions::pin_bind_hint(&diagnostics) {
+        Some(message) => message,
+        None => "pin bind: select a pin-bound row with a PinAmbiguous diagnostic".to_string(),
+    };
+    dispatch(app, Msg::SetStatus(Some(status)));
 }
 
 fn open_pin_create_action(app: &mut App) {
@@ -1196,6 +1207,47 @@ fn current_mux_target(app: &App) -> Option<MuxSessionId> {
 pub(super) fn refresh(app: &mut App, _seed: &RunConfig) {
     let config = app.config().clone();
     refresh_with_config(app, &config);
+}
+
+/// Execute the [`Effect`]s returned by the reducer (ADR 0085
+/// contract 2). This is the only code in the TUI that runs a
+/// reducer-emitted side effect against `App` or the runtime's
+/// resources. Terminal-suspending exec, mux ops, store writes, and
+/// background preview capture will land here as subsequent
+/// H-TUI-002 waves migrate their Action variants over.
+pub(super) fn execute_effects(app: &mut App, effects: Vec<Effect>) {
+    for effect in effects {
+        match effect {
+            Effect::Quit => {
+                // `Msg::Quit` already set `App::should_quit`; the
+                // event loop reads that flag each iteration. The
+                // effect signal is redundant with the state field
+                // today and will become the sole quit signal once
+                // every quit path routes through here.
+            }
+            Effect::Toast(label) => app.post_toast(label),
+            Effect::Persist => app.persist_state(),
+            Effect::SpawnRefresh { force_local } => {
+                if force_local {
+                    let mut cfg = app.config().clone();
+                    cfg.refresh = true;
+                    refresh_with_config(app, &cfg);
+                } else {
+                    let cfg = app.config().clone();
+                    refresh(app, &cfg);
+                }
+            }
+        }
+    }
+}
+
+/// Bridge helper: dispatch a `Msg` through the reducer and run any
+/// returned effects through the executor. Call sites that used to
+/// bare-call `app.update(msg)` migrate to this so the executor is
+/// the only path that side-effects hit.
+pub(super) fn dispatch(app: &mut App, msg: Msg) {
+    let effects = app.update(msg);
+    execute_effects(app, effects);
 }
 
 /// Refresh immediately after a pin mutation.
@@ -2155,7 +2207,7 @@ pub(super) fn cycle_view(view: View, delta: i32) -> View {
 /// [`remap_for_focus`] before this is reached.
 fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
     match selected_default_action(app) {
-        SelectedDefault::ToggleExpand => app.update(Msg::ToggleExpand),
+        SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
         SelectedDefault::Attach => attach_action(terminal, app, config),
         SelectedDefault::View => view_action(terminal, app, config),
         SelectedDefault::LaunchPin => launch_pin_action(terminal, app, config),
@@ -2393,9 +2445,11 @@ fn explorer_enter_action(app: &mut App) {
 fn copy_session_id_action(app: &mut App) {
     match app.selected_session_id() {
         Some((label, value)) => copy_and_toast(app, label, value),
-        None => app.update(Msg::SetStatus(Some(
-            "i: select an agent or mux session row to copy its id".to_string(),
-        ))),
+        None => {
+            app.update(Msg::SetStatus(Some(
+                "i: select an agent or mux session row to copy its id".to_string(),
+            )));
+        }
     }
 }
 
