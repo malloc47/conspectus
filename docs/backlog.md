@@ -1674,11 +1674,30 @@ cross-references below.
     `Effect::WriteStore` alongside Phase D. Landing both in one
     story keeps the status-message wording (currently pinned by
     tests) intact instead of splitting it across two phases.
-  - Phase D (store writes): `Effect::WriteStore(StoreOp)` for pin
-    CRUD (create / edit / bind / remove) and alias writes.
-    Collapses `PinsAction` into `Msg` variants that emit the
-    matching effect + a follow-up `Effect::SpawnRefresh
-    { force_local: true }`.
+  - Phase D.1 (landed 2026-07-02, pin remove + bind):
+    `Effect::WriteStore(StoreOp)` with
+    `StoreOp::PinRemove(PinRemoveRequest)` and
+    `StoreOp::PinBind(PinBindRequest)`. `Msg::PinRemove` /
+    `Msg::PinBind` reducer arms emit the effect (bind gates on
+    the snapshot being loaded and falls back to `Effect::Toast`
+    otherwise). `Effect::WriteStore` handled by
+    `execute_pure_effect` — no terminal or tmux needed, so tests
+    and static mode inherit the same behavior. `PinsAction::
+    RemovePin` / `PinsAction::BindPin` dispatch through the new
+    Msgs; the direct-key remove path preserves its confirmation
+    arming as runtime orchestration but funnels the actual write
+    through the reducer. `remove_pin_controls_action` and
+    `bind_pin_action` free functions deleted.
+  - Phase D.2 (next, pin create / edit + rename overlay):
+    grow `StoreOp` with `PinCreate`, `PinEdit`, and
+    `AliasUpsert` / `AliasRemove`. These bundle with mux ops
+    (`create_pin_action` triggers a pin-adopt tmux rename;
+    `commit_rename` triggers a lockstep session-native rename), so
+    each reducer arm emits `Effect::WriteStore(...)` alongside a
+    conditional `Effect::RunMux(MuxOp::RenameSession { ... })` —
+    which is Phase C.2 landing here since the two are coupled.
+    Reducer emits both effects up front; the executor runs them
+    in order and produces the composite status message.
   - Phase E (preview capture + persistence completion):
     `Effect::CapturePreview(MuxTarget)` runs from the executor's
     per-tick sweep; `Effect::Persist` is already in the catalog
