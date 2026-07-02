@@ -5572,15 +5572,13 @@ mod tests {
     #[test]
     fn status_bar_shows_group_filter_and_sort_settings() {
         let mut app = seeded_app();
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
+        let _ = app.update(crate::tui::Msg::SetGrouping(
             crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::None),
         ));
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
-            crate::filter::RowFilter {
-                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
-                ..crate::filter::RowFilter::default()
-            },
-        ));
+        let _ = app.update(crate::tui::Msg::SetFilter(crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+            ..crate::filter::RowFilter::default()
+        }));
 
         let area = Rect::new(0, 0, 120, 24);
         let buffer = render_to_buffer(&app, area);

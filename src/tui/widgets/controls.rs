@@ -22,9 +22,9 @@
 //!
 //! Key handling returns a [`ControlsOutcome`] describing what the
 //! caller should do: keep the overlay open, close it, or apply a
-//! [`ControlsAction`] (and either close or stay open per the
-//! action). The reducer applies actions; the overlay never mutates
-//! the app directly.
+//! [`crate::tui::Msg`] (and either close or stay open per the
+//! outcome). The reducer applies messages; the overlay never
+//! mutates the app directly.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -108,29 +108,21 @@ pub enum SubEditor {
 }
 
 /// What the controls overlay returned from a single key event.
+/// Committed variants carry a [`crate::tui::Msg`] the runtime
+/// dispatches through the reducer (ADR 0085 contract 3).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlsOutcome {
     /// Nothing to do — overlay stays open, no app state change.
     Continue,
     /// Close the overlay without applying anything (Esc at top level).
     Close,
-    /// Apply the action and leave the overlay open so the operator
+    /// Apply the message and leave the overlay open so the operator
     /// can see chips update in place.
-    ApplyAndStay(ControlsAction),
-    /// Apply the action and close (view switch is the canonical
+    ApplyAndStay(crate::tui::Msg),
+    /// Apply the message and close (view switch is the canonical
     /// case — operators expect the overlay to dismiss after picking
     /// a view).
-    ApplyAndClose(ControlsAction),
-}
-
-/// Side-effecting outcome the reducer applies. The overlay never
-/// touches the app directly.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ControlsAction {
-    SwitchView(View),
-    SetGrouping(Grouping),
-    SetFilter(RowFilter),
-    SetSort(Sort),
+    ApplyAndClose(crate::tui::Msg),
 }
 
 /// Pure state for the controls overlay: cursor position plus the
@@ -215,13 +207,13 @@ impl ControlsOverlayState {
                     // the cancel feedback rather than a stuck overlay.
                     ControlsOutcome::Close
                 } else {
-                    ControlsOutcome::ApplyAndClose(ControlsAction::SwitchView(view))
+                    ControlsOutcome::ApplyAndClose(crate::tui::Msg::SwitchView(view))
                 }
             }
             ControlsCursor::Grouping(idx) => {
                 let options = Grouping::values_for(ctx.view);
                 let chosen = options.get(idx).copied().unwrap_or(ctx.grouping);
-                ControlsOutcome::ApplyAndStay(ControlsAction::SetGrouping(chosen))
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetGrouping(chosen))
             }
             ControlsCursor::FilterHarness => {
                 self.sub_editor = Some(SubEditor::Harness(build_harness_editor(ctx.filter)));
@@ -238,24 +230,24 @@ impl ControlsOverlayState {
             ControlsCursor::FilterFloatMuxedSessions => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.float_muxed_sessions_top = !new_filter.float_muxed_sessions_top;
-                ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterFloatAttachedMuxes => {
                 let mut new_filter = ctx.filter.clone();
                 new_filter.float_attached_muxes_top = !new_filter.float_attached_muxes_top;
-                ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
             }
             ControlsCursor::FilterClear => {
                 if ctx.filter.is_empty() {
                     // Nothing to clear; keep the overlay open silently.
                     ControlsOutcome::Continue
                 } else {
-                    ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(RowFilter::default()))
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
                 }
             }
             ControlsCursor::Sort(idx) => {
                 let sort = SORT_OPTIONS.get(idx).copied().unwrap_or(ctx.sort);
-                ControlsOutcome::ApplyAndStay(ControlsAction::SetSort(sort))
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSort(sort))
             }
         }
     }
@@ -277,7 +269,7 @@ impl ControlsOverlayState {
                     *slot = None;
                     let new_filter =
                         with_harness(ctx.filter.clone(), indices_to_harness_values(&indices));
-                    ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                 }
             },
             SubEditor::MuxState(state) => match state.handle_key(event) {
@@ -290,7 +282,7 @@ impl ControlsOverlayState {
                     *slot = None;
                     let new_filter =
                         with_mux_state(ctx.filter.clone(), indices_to_mux_states(&indices));
-                    ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
+                    ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                 }
             },
             SubEditor::MaxAge(state) => match state.handle_key(event) {
@@ -310,7 +302,7 @@ impl ControlsOverlayState {
                         Ok(max_age) => {
                             *slot = None;
                             let new_filter = with_max_age(ctx.filter.clone(), max_age);
-                            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(new_filter))
+                            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(new_filter))
                         }
                         Err(_) => {
                             // Reject the commit and keep the editor open
@@ -964,7 +956,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            ControlsOutcome::ApplyAndClose(ControlsAction::SwitchView(View::Mux))
+            ControlsOutcome::ApplyAndClose(crate::tui::Msg::SwitchView(View::Mux))
         );
     }
 
@@ -989,7 +981,7 @@ mod tests {
         let expected = Grouping::values_for(View::Sessions)[1];
         assert_eq!(
             outcome,
-            ControlsOutcome::ApplyAndStay(ControlsAction::SetGrouping(expected))
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetGrouping(expected))
         );
     }
 
@@ -1024,7 +1016,7 @@ mod tests {
         state.handle_key(&ctx, key(KeyCode::Char(' ')));
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         match outcome {
-            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(f)) => {
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(f)) => {
                 let values = f
                     .harness
                     .as_ref()
@@ -1072,7 +1064,7 @@ mod tests {
         }
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         match outcome {
-            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(f)) => {
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(f)) => {
                 assert_eq!(f.max_age, Some(std::time::Duration::from_secs(7 * 86_400)));
             }
             other => panic!("unexpected outcome: {other:?}"),
@@ -1139,7 +1131,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(RowFilter::default()))
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(RowFilter::default()))
         );
     }
 
@@ -1192,7 +1184,7 @@ mod tests {
         assert_eq!(state.cursor(), ControlsCursor::FilterFloatMuxedSessions);
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         match outcome {
-            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(f)) => {
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(f)) => {
                 assert!(f.float_muxed_sessions_top);
                 assert!(!f.float_attached_muxes_top);
             }
@@ -1219,7 +1211,7 @@ mod tests {
         assert_eq!(state.cursor(), ControlsCursor::FilterFloatAttachedMuxes);
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         match outcome {
-            ControlsOutcome::ApplyAndStay(ControlsAction::SetFilter(f)) => {
+            ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetFilter(f)) => {
                 assert!(!f.float_attached_muxes_top, "Enter toggles bool off");
             }
             other => panic!("unexpected outcome: {other:?}"),

@@ -238,7 +238,7 @@ pub struct App {
     /// Active row filter (ADR 0031, F8-003). Mirrors the active
     /// view's slot in `view_states` so callers don't pay a map
     /// lookup per read. Kept in sync via `switch_to_view` /
-    /// `apply_controls_action::SetFilter`.
+    /// `Msg::SetFilter`.
     filter: crate::filter::RowFilter,
     /// Active grouping (ADR 0031, F8-003). Same caching pattern as
     /// `filter` — mirrors the active view's slot.
@@ -556,6 +556,23 @@ pub enum Msg {
     /// toast. The alias-rename branch also chains an optional
     /// native mux rename inside the executor per lockstep.
     CommitRename(String),
+    /// Switch the active row-tree view (ADR 0031). Reducer saves
+    /// the current view's per-view slot, loads the target's slot
+    /// (or fresh defaults on first visit), and re-derives the row
+    /// tree from the held snapshot — projection-only, never
+    /// triggers discovery (ADR 0085 contract 4).
+    SwitchView(View),
+    /// Update the active view's grouping (ADR 0031). Reducer
+    /// mutates the projection state and re-derives the tree.
+    SetGrouping(super::Grouping),
+    /// Update the active row filter (ADR 0031, F8-003). Reducer
+    /// mutates the projection state and re-derives the tree.
+    SetFilter(crate::filter::RowFilter),
+    /// Update the global sort (ADR 0031). Reducer mutates the
+    /// projection state and re-derives the tree; the flat-
+    /// sessions grouping forces recency regardless of the
+    /// requested value.
+    SetSort(super::Sort),
 }
 
 impl App {
@@ -1400,49 +1417,11 @@ impl App {
         self.sort
     }
 
-    /// Apply a [`crate::tui::widgets::controls::ControlsAction`] to
-    /// the app state. The runtime calls this when the controls
-    /// overlay returns an `ApplyAndStay` / `ApplyAndClose` outcome
-    /// so the side effect lives in one place.
-    pub fn apply_controls_action(&mut self, action: crate::tui::widgets::controls::ControlsAction) {
-        use crate::tui::widgets::controls::ControlsAction;
-        match action {
-            ControlsAction::SwitchView(view) => {
-                // Per ADR 0031 / F8-003: save the prior view's
-                // filter / grouping / expanded / selection / scroll
-                // into the per-view map and load the target view's
-                // saved state (or fresh defaults on first visit).
-                self.switch_to_view(view);
-            }
-            ControlsAction::SetGrouping(g) => {
-                self.grouping = g;
-                if matches!(g, super::Grouping::Sessions(_)) {
-                    self.force_recency_for_flat_sessions();
-                }
-            }
-            ControlsAction::SetFilter(filter) => {
-                self.filter = filter;
-            }
-            ControlsAction::SetSort(sort) => {
-                let sort = if matches!(
-                    self.grouping,
-                    super::Grouping::Sessions(super::SessionsGrouping::None)
-                ) {
-                    super::Sort::Recency
-                } else {
-                    sort
-                };
-                self.sort = sort;
-            }
-        }
-    }
-
     /// Apply a [`crate::tui::widgets::pins::PinsAction`] to the app
-    /// state. Mirrors [`Self::apply_controls_action`] but covers the
-    /// pin-specific surfaces (CRUD requests and the placeholder hint
-    /// for menu entries without prerequisites). The CRUD write paths
-    /// themselves live in the runtime so direct shortcuts can share
-    /// the same plumbing.
+    /// state. Covers the pin-specific surfaces (CRUD requests and the
+    /// placeholder hint for menu entries without prerequisites). The
+    /// CRUD write paths themselves live in the runtime so direct
+    /// shortcuts can share the same plumbing.
     pub fn apply_pins_action(&mut self, action: crate::tui::widgets::pins::PinsAction) {
         use crate::tui::widgets::pins::PinsAction;
         match action {
@@ -1987,6 +1966,33 @@ impl App {
                     request,
                 )));
             }
+            Msg::SwitchView(view) => {
+                self.switch_to_view(view);
+                self.rebuild_tree_in_place();
+            }
+            Msg::SetGrouping(g) => {
+                self.grouping = g;
+                if matches!(g, super::Grouping::Sessions(_)) {
+                    self.force_recency_for_flat_sessions();
+                }
+                self.rebuild_tree_in_place();
+            }
+            Msg::SetFilter(filter) => {
+                self.filter = filter;
+                self.rebuild_tree_in_place();
+            }
+            Msg::SetSort(sort) => {
+                let sort = if matches!(
+                    self.grouping,
+                    super::Grouping::Sessions(super::SessionsGrouping::None)
+                ) {
+                    super::Sort::Recency
+                } else {
+                    sort
+                };
+                self.sort = sort;
+                self.rebuild_tree_in_place();
+            }
             Msg::CommitRename(value) => match self.selection.clone() {
                 Some(RowId::AgentSession(crate::model::NodeId::AgentSession(id))) => {
                     let trimmed = value.trim().to_string();
@@ -2096,6 +2102,25 @@ impl App {
     /// `SetData`, so any tree-less first-load path is out of scope
     /// here — the empty-tree branch is a safety net for corner
     /// cases like an empty snapshot.
+    ///
+    /// Re-derive the row tree from the held snapshot and current
+    /// projection state, then swap it in via [`Self::set_tree`].
+    /// Called from the projection-change reducer arms (Msg::SwitchView
+    /// / SetGrouping / SetFilter / SetSort). No-op when no snapshot
+    /// is loaded yet — the projection change still lands, and the
+    /// next Msg::SetData will build the tree against the up-to-date
+    /// projection state.
+    fn rebuild_tree_in_place(&mut self) {
+        let Some(db) = self.database.as_ref() else {
+            return;
+        };
+        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+            db.snapshot(),
+            self,
+        ));
+        self.set_tree(tree);
+    }
+
     fn set_tree(&mut self, tree: RowTree) {
         let prev_selection = self.selection.take();
         let prev_visible_index = prev_selection
@@ -4193,17 +4218,13 @@ mod tests {
     fn switching_views_saves_active_state_and_loads_target_defaults() {
         let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
         // Apply a sessions-only filter so we can observe it round-trip.
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
-            crate::filter::RowFilter {
-                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
-                ..crate::filter::RowFilter::default()
-            },
-        ));
+        app.update(Msg::SetFilter(crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+            ..crate::filter::RowFilter::default()
+        }));
         // Switch to mux view; sessions state should park in the
         // per-view map and mux loads fresh defaults.
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Mux,
-        ));
+        app.update(Msg::SwitchView(View::Mux));
         assert_eq!(app.active_view(), View::Mux);
         assert!(app.filter().is_empty(), "mux view starts unfiltered");
         assert_eq!(
@@ -4221,20 +4242,14 @@ mod tests {
             harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
             ..crate::filter::RowFilter::default()
         };
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
-            original_filter.clone(),
-        ));
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
-            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Repo),
-        ));
+        app.update(Msg::SetFilter(original_filter.clone()));
+        app.update(Msg::SetGrouping(crate::tui::Grouping::Sessions(
+            crate::tui::SessionsGrouping::Repo,
+        )));
         // Switch away…
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Prs,
-        ));
+        app.update(Msg::SwitchView(View::Prs));
         // …and back.
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Sessions,
-        ));
+        app.update(Msg::SwitchView(View::Sessions));
         assert_eq!(app.filter(), &original_filter);
         assert_eq!(
             app.grouping(),
@@ -4245,67 +4260,49 @@ mod tests {
     #[test]
     fn switching_views_keeps_sort_global() {
         let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetSort(
-            crate::tui::Sort::Recency,
-        ));
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Mux,
-        ));
+        app.update(Msg::SetSort(crate::tui::Sort::Recency));
+        app.update(Msg::SwitchView(View::Mux));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Sessions,
-        ));
+        app.update(Msg::SwitchView(View::Sessions));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
     }
 
     #[test]
     fn flat_sessions_grouping_forces_recency_sort() {
         let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
-            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::None),
-        ));
+        app.update(Msg::SetGrouping(crate::tui::Grouping::Sessions(
+            crate::tui::SessionsGrouping::None,
+        )));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
 
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetSort(
-            crate::tui::Sort::Hierarchy,
-        ));
+        app.update(Msg::SetSort(crate::tui::Sort::Hierarchy));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
     }
 
     #[test]
     fn returning_to_flat_sessions_grouping_restores_recency_sort() {
         let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetGrouping(
-            crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::None),
-        ));
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Mux,
-        ));
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetSort(
-            crate::tui::Sort::Hierarchy,
-        ));
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            View::Sessions,
-        ));
+        app.update(Msg::SetGrouping(crate::tui::Grouping::Sessions(
+            crate::tui::SessionsGrouping::None,
+        )));
+        app.update(Msg::SwitchView(View::Mux));
+        app.update(Msg::SetSort(crate::tui::Sort::Hierarchy));
+        app.update(Msg::SwitchView(View::Sessions));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
     }
 
     #[test]
     fn no_op_view_switch_is_idempotent() {
         let mut app = seeded_app(&[("codex", "a", "/p/proja")]);
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SetFilter(
-            crate::filter::RowFilter {
-                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
-                ..crate::filter::RowFilter::default()
-            },
-        ));
+        app.update(Msg::SetFilter(crate::filter::RowFilter {
+            harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+            ..crate::filter::RowFilter::default()
+        }));
         let filter_before = app.filter().clone();
         let grouping_before = app.grouping();
         // SwitchView to the current view should be a no-op — not
         // a save+restore cycle that could wipe state.
-        app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            app.active_view(),
-        ));
+        app.update(Msg::SwitchView(app.active_view()));
         assert_eq!(app.filter(), &filter_before);
         assert_eq!(app.grouping(), grouping_before);
     }
@@ -5683,6 +5680,53 @@ mod tests {
                     "rename: lost selection before commit".to_string()
                 )]
             );
+        }
+
+        // ADR 0085 contracts 1 + 4 (H-TUI-002 Phase F): projection
+        // changes now flow through the reducer as first-class Msgs
+        // instead of the runtime's `ControlsAction` bridge. The
+        // arms mutate App state and re-derive the row tree from the
+        // held snapshot in one shot; no effects are emitted (the
+        // tree swap happens inline).
+        #[test]
+        fn switch_view_msg_updates_active_view_and_emits_no_effect() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::SwitchView(View::Mux));
+            assert_eq!(app.active_view(), View::Mux);
+            assert!(effects.is_empty());
+        }
+
+        #[test]
+        fn set_grouping_msg_updates_grouping_and_emits_no_effect() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::SetGrouping(crate::tui::Grouping::Sessions(
+                crate::tui::SessionsGrouping::Workspace,
+            )));
+            assert_eq!(
+                app.grouping(),
+                crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Workspace)
+            );
+            assert!(effects.is_empty());
+        }
+
+        #[test]
+        fn set_filter_msg_updates_filter_and_emits_no_effect() {
+            let mut app = App::new(RunConfig::defaults());
+            let filter = crate::filter::RowFilter {
+                harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+                ..crate::filter::RowFilter::default()
+            };
+            let effects = app.update(Msg::SetFilter(filter.clone()));
+            assert_eq!(app.filter(), &filter);
+            assert!(effects.is_empty());
+        }
+
+        #[test]
+        fn set_sort_msg_updates_sort_and_emits_no_effect() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::SetSort(crate::tui::Sort::Recency));
+            assert_eq!(app.sort(), crate::tui::Sort::Recency);
+            assert!(effects.is_empty());
         }
     }
 }

@@ -515,6 +515,109 @@ impl RecencyBucket {
     }
 }
 
+/// Projection state consumed by [`build_tree_for_view`]. Read from
+/// [`crate::tui::App`], which is the sole owner of projection
+/// state (ADR 0085 contract 4). `App`'s fields are seeded from
+/// [`crate::tui::RunConfig`] in `App::new`, so cold-start builds
+/// see the initial config values through the same read path.
+pub(crate) struct TreeInputs<'a> {
+    pub snapshot: &'a crate::model::GraphSnapshot,
+    pub view: View,
+    pub grouping: crate::tui::Grouping,
+    pub filter: crate::filter::RowFilter,
+    pub sort: crate::tui::Sort,
+    pub cwd: Option<&'a Path>,
+}
+
+impl<'a> TreeInputs<'a> {
+    /// Assemble tree-derivation inputs from an [`crate::tui::App`]'s
+    /// current projection state plus the passed-in snapshot. Used
+    /// by the reducer's projection-change arms and by the runtime's
+    /// discovery-result handler.
+    pub fn from_app(snapshot: &'a crate::model::GraphSnapshot, app: &'a crate::tui::App) -> Self {
+        Self {
+            snapshot,
+            view: app.active_view(),
+            grouping: app.grouping(),
+            filter: app.filter().clone(),
+            sort: app.sort(),
+            cwd: app.config().cwd.as_deref(),
+        }
+    }
+}
+
+/// Pure row-tree derivation (ADR 0085 contract 4). Reads only the
+/// projection tuple; discovery-triggering paths pull it from
+/// [`crate::tui::RunConfig`] at startup, and post-first-load
+/// projection changes pull it from `App` state.
+pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
+    let home = tree_home_dir();
+    let now = tree_current_unix_epoch();
+    let TreeInputs {
+        snapshot,
+        view,
+        grouping,
+        filter,
+        sort,
+        cwd,
+    } = inputs;
+    match view {
+        View::Sessions => {
+            let sessions_grouping = match grouping {
+                crate::tui::Grouping::Sessions(g) => g,
+                _ => crate::tui::SessionsGrouping::Graph,
+            };
+            sessions::build_sessions_tree(sessions::SessionsBuildInputs {
+                snapshot,
+                grouping: sessions_grouping,
+                home: home.as_deref(),
+                now,
+                cwd,
+                filter,
+            })
+        }
+        View::Mux => {
+            let mux_grouping = match grouping {
+                crate::tui::Grouping::Mux(g) => g,
+                _ => crate::tui::MuxGrouping::Session,
+            };
+            mux::build_mux_tree(mux::MuxBuildInputs {
+                snapshot,
+                home: home.as_deref(),
+                now,
+                filter,
+                grouping: mux_grouping,
+                sort,
+            })
+        }
+        View::Union => union::build_union_tree(union::UnionBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+            filter,
+        }),
+        View::Prs => prs::build_prs_tree(prs::PrsBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+        }),
+        View::Forks => forks::build_forks_tree(forks::ForksBuildInputs {
+            snapshot,
+            home: home.as_deref(),
+        }),
+    }
+}
+
+fn tree_home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(std::path::PathBuf::from)
+}
+
+fn tree_current_unix_epoch() -> Option<i64> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

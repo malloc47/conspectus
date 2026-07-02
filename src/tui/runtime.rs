@@ -21,7 +21,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui::layout::Rect;
 
 use crate::discovery::tmux::{SystemTmux, TmuxRunner};
-use crate::model::{GraphSnapshot, MuxSessionId};
+use crate::model::MuxSessionId;
 use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
 use crate::resolve::resolve_snapshot;
 use crate::tui::actions::{AttachTarget, PinLaunchTarget, resolve_attach_target};
@@ -31,7 +31,6 @@ use crate::tui::preview::capture_via;
 use crate::tui::resume::{ResumeTarget, launch_resume, resume_disabled_reason};
 use crate::tui::rows::RowId;
 use crate::tui::rows::RowTree;
-use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::viewer::{
     LaunchPlan, PathBinaryProbe, ViewerTarget, resolve_viewer_target, viewer_disabled_reason,
 };
@@ -153,7 +152,9 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     // projection the operator is actually looking at
                     // instead of the stale config snapshot the worker
                     // captured.
-                    let tree = build_tree_for_view(TreeInputs::from_app(&snapshot, &app));
+                    let tree = crate::tui::rows::build_tree_for_view(
+                        crate::tui::rows::TreeInputs::from_app(&snapshot, &app),
+                    );
                     let database = GraphDb::new(snapshot);
                     let initial_selection_hint = launch_context_row_id(&tree);
                     app.update(Msg::SetData {
@@ -322,10 +323,10 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::PinsOverlayKey(key)) => {
                     handle_pins_overlay_key(terminal, &mut app, &config, tmux.as_ref(), key)
                 }
-                Some(Action::SwitchView(view)) => apply_view_switch(&mut app, &config, view),
+                Some(Action::SwitchView(view)) => dispatch(&mut app, Msg::SwitchView(view)),
                 Some(Action::CycleView(delta)) => {
                     let next = cycle_view(app.active_view(), delta);
-                    apply_view_switch(&mut app, &config, next);
+                    dispatch(&mut app, Msg::SwitchView(next));
                 }
                 Some(Action::CycleGrouping(delta)) => {
                     let next = if delta >= 0 {
@@ -333,17 +334,12 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     } else {
                         app.grouping().cycle_prev()
                     };
-                    apply_controls_action_and_rebuild(
-                        &mut app,
-                        crate::tui::widgets::controls::ControlsAction::SetGrouping(next),
-                    );
+                    dispatch(&mut app, Msg::SetGrouping(next));
                 }
                 Some(Action::ClearFilters) => {
-                    apply_controls_action_and_rebuild(
+                    dispatch(
                         &mut app,
-                        crate::tui::widgets::controls::ControlsAction::SetFilter(
-                            crate::filter::RowFilter::default(),
-                        ),
+                        Msg::SetFilter(crate::filter::RowFilter::default()),
                     );
                     app.update(Msg::SetStatus(Some("filters cleared".to_string())));
                 }
@@ -465,17 +461,11 @@ fn static_event_loop(
                     static_handle_pins_overlay_key(&mut app, &config, &snapshot, key)?;
                 }
                 Some(Action::SwitchView(view)) => {
-                    app.apply_controls_action(
-                        crate::tui::widgets::controls::ControlsAction::SwitchView(view),
-                    );
-                    set_static_data(&mut app, &config, &snapshot)?;
+                    dispatch(&mut app, Msg::SwitchView(view));
                 }
                 Some(Action::CycleView(delta)) => {
                     let next = cycle_view(app.active_view(), delta);
-                    app.apply_controls_action(
-                        crate::tui::widgets::controls::ControlsAction::SwitchView(next),
-                    );
-                    set_static_data(&mut app, &config, &snapshot)?;
+                    dispatch(&mut app, Msg::SwitchView(next));
                 }
                 Some(Action::Refresh) => {
                     if let Some(path) = fixture_path.as_deref() {
@@ -544,22 +534,13 @@ fn static_event_loop(
                     } else {
                         app.grouping().cycle_prev()
                     };
-                    static_apply_controls_action_and_rebuild(
-                        &mut app,
-                        &config,
-                        &snapshot,
-                        crate::tui::widgets::controls::ControlsAction::SetGrouping(next),
-                    )?;
+                    dispatch(&mut app, Msg::SetGrouping(next));
                 }
                 Some(Action::ClearFilters) => {
-                    static_apply_controls_action_and_rebuild(
+                    dispatch(
                         &mut app,
-                        &config,
-                        &snapshot,
-                        crate::tui::widgets::controls::ControlsAction::SetFilter(
-                            crate::filter::RowFilter::default(),
-                        ),
-                    )?;
+                        Msg::SetFilter(crate::filter::RowFilter::default()),
+                    );
                     app.update(Msg::SetStatus(Some("filters cleared".to_string())));
                 }
                 Some(Action::OpenRename) | Some(Action::RenameOverlayKey(_)) => {
@@ -617,38 +598,19 @@ fn static_handle_controls_overlay_key(
         Some(state) => state.handle_key(&ctx, key),
         None => return Ok(()),
     };
+    let _ = (config, snapshot);
     match outcome {
         ControlsOutcome::Continue => {}
         ControlsOutcome::Close => {
             app.close_controls_overlay();
         }
-        ControlsOutcome::ApplyAndStay(action) => {
-            static_apply_controls_action_and_rebuild(app, config, snapshot, action)?;
+        ControlsOutcome::ApplyAndStay(msg) => {
+            dispatch(app, msg);
         }
-        ControlsOutcome::ApplyAndClose(action) => {
+        ControlsOutcome::ApplyAndClose(msg) => {
             app.close_controls_overlay();
-            static_apply_controls_action_and_rebuild(app, config, snapshot, action)?;
+            dispatch(app, msg);
         }
-    }
-    Ok(())
-}
-
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_apply_controls_action_and_rebuild(
-    app: &mut App,
-    _config: &RunConfig,
-    _snapshot: &crate::model::GraphSnapshot,
-    action: crate::tui::widgets::controls::ControlsAction,
-) -> Result<()> {
-    // The static-mode snapshot is the same one the App already
-    // holds after the initial set_static_data(), so we go through
-    // the same App-driven derive path as the live loop (ADR 0085
-    // contract 4). The `_config` / `_snapshot` params are kept for
-    // call-site symmetry with the pin variant that still needs
-    // them.
-    app.apply_controls_action(action);
-    if let Some(tree) = derive_row_tree(app) {
-        app.update(Msg::SetTree(tree));
     }
     Ok(())
 }
@@ -684,7 +646,9 @@ fn set_static_data(
     config: &RunConfig,
     snapshot: &crate::model::GraphSnapshot,
 ) -> Result<()> {
-    let tree = build_tree_for_view(TreeInputs::from_app(snapshot, app));
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        snapshot, app,
+    ));
     let database = GraphDb::new(snapshot.clone());
     let initial_selection_hint = launch_context_row_id(&tree);
     app.update(Msg::SetData {
@@ -1601,7 +1565,9 @@ fn refresh_with_config(app: &mut App, config: &RunConfig) {
             // mutations landed between resolve and build, but
             // reading from App keeps the shape symmetric with the
             // async worker path above.
-            let tree = build_tree_for_view(TreeInputs::from_app(&snapshot, app));
+            let tree = crate::tui::rows::build_tree_for_view(
+                crate::tui::rows::TreeInputs::from_app(&snapshot, app),
+            );
             let database = GraphDb::new(snapshot);
             let initial_selection_hint = launch_context_row_id(&tree);
             app.update(Msg::SetData {
@@ -1662,7 +1628,9 @@ pub(super) fn refresh_from_snapshot(
 ) -> Result<()> {
     populate_provider_status(app, config);
     let resolved = resolve_snapshot(snapshot);
-    let tree = build_tree_for_view(TreeInputs::from_app(&resolved, app));
+    let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+        &resolved, app,
+    ));
     let database = GraphDb::new(resolved);
     let initial_selection_hint = launch_context_row_id(&tree);
     app.update(Msg::SetData {
@@ -1674,113 +1642,9 @@ pub(super) fn refresh_from_snapshot(
     Ok(())
 }
 
-/// Pure row-tree derivation (ADR 0085 contract 4). Reads only the
-/// projection tuple; discovery-triggering paths pull it from
-/// [`RunConfig`] at startup, and post-first-load projection changes
-/// pull it from `App` state via [`derive_row_tree`].
-fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
-    let home = home_dir();
-    let now = current_unix_epoch();
-    let TreeInputs {
-        snapshot,
-        view,
-        grouping,
-        filter,
-        sort,
-        cwd,
-    } = inputs;
-    match view {
-        View::Sessions => {
-            let sessions_grouping = match grouping {
-                super::Grouping::Sessions(g) => g,
-                _ => super::SessionsGrouping::Graph,
-            };
-            build_sessions_tree(SessionsBuildInputs {
-                snapshot,
-                grouping: sessions_grouping,
-                home: home.as_deref(),
-                now,
-                cwd,
-                filter,
-            })
-        }
-        View::Mux => {
-            let mux_grouping = match grouping {
-                super::Grouping::Mux(g) => g,
-                _ => super::MuxGrouping::Session,
-            };
-            crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
-                snapshot,
-                home: home.as_deref(),
-                now,
-                filter,
-                grouping: mux_grouping,
-                sort,
-            })
-        }
-        View::Union => {
-            crate::tui::rows::union::build_union_tree(crate::tui::rows::union::UnionBuildInputs {
-                snapshot,
-                home: home.as_deref(),
-                filter,
-            })
-        }
-        View::Prs => crate::tui::rows::prs::build_prs_tree(crate::tui::rows::prs::PrsBuildInputs {
-            snapshot,
-            home: home.as_deref(),
-        }),
-        View::Forks => {
-            crate::tui::rows::forks::build_forks_tree(crate::tui::rows::forks::ForksBuildInputs {
-                snapshot,
-                home: home.as_deref(),
-            })
-        }
-    }
-}
-
-/// Projection state consumed by [`build_tree_for_view`]. Read
-/// from `App`, which is the sole owner of projection state
-/// (ADR 0085 contract 4). `App`'s fields are seeded from
-/// [`RunConfig`] in `App::new`, so cold-start builds see the
-/// initial config values through the same read path.
-struct TreeInputs<'a> {
-    snapshot: &'a GraphSnapshot,
-    view: View,
-    grouping: super::Grouping,
-    filter: crate::filter::RowFilter,
-    sort: super::Sort,
-    cwd: Option<&'a std::path::Path>,
-}
-
-impl<'a> TreeInputs<'a> {
-    fn from_app(snapshot: &'a GraphSnapshot, app: &'a App) -> Self {
-        Self {
-            snapshot,
-            view: app.active_view(),
-            grouping: app.grouping(),
-            filter: app.filter().clone(),
-            sort: app.sort(),
-            cwd: app.config().cwd.as_deref(),
-        }
-    }
-}
-
-/// Re-derive the row tree from the held snapshot and `App`'s
-/// projection state (ADR 0085 contract 4). Returns `None` when no
-/// snapshot is loaded yet — the projection change is still applied
-/// to `App`, and the next `Msg::SetData` will build the tree
-/// against the up-to-date projection state.
-fn derive_row_tree(app: &App) -> Option<RowTree> {
-    let db = app.graph_db()?;
-    Some(build_tree_for_view(TreeInputs::from_app(
-        db.snapshot(),
-        app,
-    )))
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
-}
+// Tree derivation moved to `tui::rows::mod.rs` in H-TUI-002 Phase F
+// so `App::update`'s projection-change reducer arms can call it
+// without depending on runtime.
 
 fn current_unix_epoch() -> Option<i64> {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2051,12 +1915,12 @@ pub(super) fn handle_controls_overlay_key(
         ControlsOutcome::Close => {
             app.close_controls_overlay();
         }
-        ControlsOutcome::ApplyAndStay(action) => {
-            apply_controls_action_and_rebuild(app, action);
+        ControlsOutcome::ApplyAndStay(msg) => {
+            dispatch(app, msg);
         }
-        ControlsOutcome::ApplyAndClose(action) => {
+        ControlsOutcome::ApplyAndClose(msg) => {
             app.close_controls_overlay();
-            apply_controls_action_and_rebuild(app, action);
+            dispatch(app, msg);
         }
     }
 }
@@ -2163,22 +2027,6 @@ fn static_handle_pins_overlay_key(
         }
     }
     Ok(())
-}
-
-/// Apply a controls action and re-derive the row tree from the
-/// held snapshot (ADR 0085 contract 4). View / grouping / filter /
-/// sort changes never trigger discovery — the projection tuple
-/// changed, not the underlying data. When no snapshot is loaded
-/// yet the App mutation still lands and the next `Msg::SetData`
-/// will build the tree against the up-to-date projection state.
-pub(super) fn apply_controls_action_and_rebuild(
-    app: &mut App,
-    action: crate::tui::widgets::controls::ControlsAction,
-) {
-    app.apply_controls_action(action);
-    if let Some(tree) = derive_row_tree(app) {
-        app.update(Msg::SetTree(tree));
-    }
 }
 
 fn pin_create_success_toast(is_adopt: bool, pin_id: &str) -> String {
@@ -2384,16 +2232,6 @@ fn write_pin_remove(
     request: &crate::tui::widgets::pins::PinRemoveRequest,
 ) -> Result<PinWriteOutcome> {
     crate::pins::remove_pin_entry(&request.store_path, &request.id).map_err(Into::into)
-}
-
-/// Switch view and re-derive the row tree. Shared between the
-/// `1`–`5` direct keys and `]` / `[` cycling. Projection-only — no
-/// discovery (ADR 0085 contract 4).
-pub(super) fn apply_view_switch(app: &mut App, _config: &RunConfig, view: View) {
-    apply_controls_action_and_rebuild(
-        app,
-        crate::tui::widgets::controls::ControlsAction::SwitchView(view),
-    );
 }
 
 /// Step the view enum forward (delta > 0) or back (delta < 0),
@@ -4193,7 +4031,6 @@ mod tests {
         };
         use crate::resolve::resolve_snapshot;
         use crate::tui::app::GraphDb;
-        use crate::tui::widgets::controls::ControlsAction;
         use crate::tui::{Grouping, MuxGrouping, SessionsGrouping, View};
 
         fn seeded_app() -> App {
@@ -4219,7 +4056,7 @@ mod tests {
                     session_kind: None,
                 }));
             let snapshot = resolve_snapshot(snapshot);
-            let tree = build_tree_for_view(TreeInputs {
+            let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
                 snapshot: &snapshot,
                 view: View::Sessions,
                 grouping: Grouping::Sessions(SessionsGrouping::Graph),
@@ -4250,7 +4087,7 @@ mod tests {
         fn view_switch_does_not_run_discovery() {
             let mut app = seeded_app();
             let before = app.graph_db().expect("snapshot loaded").snapshot() as *const _;
-            apply_controls_action_and_rebuild(&mut app, ControlsAction::SwitchView(View::Mux));
+            let _ = app.update(Msg::SwitchView(View::Mux));
             assert_eq!(app.active_view(), View::Mux);
             assert!(
                 same_snapshot(&app, before),
@@ -4262,10 +4099,9 @@ mod tests {
         fn grouping_change_does_not_run_discovery() {
             let mut app = seeded_app();
             let before = app.graph_db().expect("snapshot loaded").snapshot() as *const _;
-            apply_controls_action_and_rebuild(
-                &mut app,
-                ControlsAction::SetGrouping(Grouping::Sessions(SessionsGrouping::Workspace)),
-            );
+            let _ = app.update(Msg::SetGrouping(Grouping::Sessions(
+                SessionsGrouping::Workspace,
+            )));
             assert_eq!(
                 app.grouping(),
                 Grouping::Sessions(SessionsGrouping::Workspace)
@@ -4284,7 +4120,7 @@ mod tests {
                 harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
                 ..RowFilter::default()
             };
-            apply_controls_action_and_rebuild(&mut app, ControlsAction::SetFilter(filter.clone()));
+            let _ = app.update(Msg::SetFilter(filter.clone()));
             assert_eq!(app.filter(), &filter);
             assert!(
                 same_snapshot(&app, before),
@@ -4300,11 +4136,8 @@ mod tests {
             let before_view = app.config().default_view;
             let before_grouping = app.config().sessions_grouping;
             let before_mux_grouping = app.config().mux_grouping;
-            apply_controls_action_and_rebuild(&mut app, ControlsAction::SwitchView(View::Mux));
-            apply_controls_action_and_rebuild(
-                &mut app,
-                ControlsAction::SetGrouping(Grouping::Mux(MuxGrouping::Host)),
-            );
+            let _ = app.update(Msg::SwitchView(View::Mux));
+            let _ = app.update(Msg::SetGrouping(Grouping::Mux(MuxGrouping::Host)));
             assert_eq!(app.config().default_view, before_view);
             assert_eq!(app.config().sessions_grouping, before_grouping);
             assert_eq!(app.config().mux_grouping, before_mux_grouping);

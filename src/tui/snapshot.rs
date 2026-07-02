@@ -40,13 +40,12 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::model::GraphSnapshot;
+use crate::tui::Msg;
 use crate::tui::app::App;
 use crate::tui::runtime::{
-    self, Action, apply_controls_action_and_rebuild, apply_view_switch, cycle_view, dispatch,
-    handle_controls_overlay_key, handle_help_overlay_key, handle_search_overlay_key, refresh,
-    refresh_from_snapshot, translate,
+    self, Action, cycle_view, dispatch, handle_controls_overlay_key, handle_help_overlay_key,
+    handle_search_overlay_key, refresh, refresh_from_snapshot, translate,
 };
-use crate::tui::widgets::controls::ControlsAction;
 use crate::tui::{RunConfig, ui};
 
 /// Tunables for one snapshot pass. Filled from `--snapshot-*` flags
@@ -213,12 +212,13 @@ fn dispatch_event(app: &App, event: Event, viewport_height: u16) -> Option<Actio
 /// reach outside the snapshot are skipped with a stderr note so the
 /// agent knows the key was a no-op rather than silently dropped.
 fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
+    let _ = config;
     match action {
         Action::Msg(msg) => dispatch(app, *msg),
-        Action::SwitchView(view) => apply_view_switch(app, config, view),
+        Action::SwitchView(view) => dispatch(app, Msg::SwitchView(view)),
         Action::CycleView(delta) => {
             let next = cycle_view(app.active_view(), delta);
-            apply_view_switch(app, config, next);
+            dispatch(app, Msg::SwitchView(next));
         }
         Action::CycleGrouping(delta) => {
             let next = if delta >= 0 {
@@ -226,13 +226,10 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
             } else {
                 app.grouping().cycle_prev()
             };
-            apply_controls_action_and_rebuild(app, ControlsAction::SetGrouping(next));
+            dispatch(app, Msg::SetGrouping(next));
         }
         Action::ClearFilters => {
-            apply_controls_action_and_rebuild(
-                app,
-                ControlsAction::SetFilter(crate::filter::RowFilter::default()),
-            );
+            dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
         }
         Action::OpenControls => app.open_controls_overlay(),
         Action::OpenPins => app.open_pins_overlay(),
