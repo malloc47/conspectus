@@ -96,6 +96,15 @@ pub enum ValueModalOutcome {
     Close,
 }
 
+impl crate::tui::Overlay for ValueModalState {
+    fn handle(&mut self, key: KeyEvent) -> crate::tui::OverlayOutcome {
+        match self.handle_key(key) {
+            ValueModalOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
+            ValueModalOutcome::Close => crate::tui::OverlayOutcome::Close,
+        }
+    }
+}
+
 /// Centered modal that renders [`ValueModalState`]. Uses the same
 /// `centered_modal_rect` frame as the help overlay so all modal
 /// surfaces line up consistently.

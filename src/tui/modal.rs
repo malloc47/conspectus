@@ -40,6 +40,19 @@ pub enum Modal {
     /// [`crate::tui::widgets::pins::PinsContext`] on every event —
     /// so it doesn't implement [`Overlay`] yet.
     Pins(crate::tui::widgets::pins::PinsOverlayState),
+    /// Rename overlay (ADR 0029 / ADR 0030). Reuses the generic
+    /// text-input widget; the runtime maps its `Confirm(String)`
+    /// outcome to `Msg::CommitRename`. Doesn't implement `Overlay`
+    /// because the text-input widget is generic and the mapping to
+    /// a specific `Msg` lives at the rename call site.
+    Rename(crate::tui::widgets::input::TextInputState),
+    /// `/` search overlay (T8-017). The widget's `Confirm(RowId)`
+    /// outcome sets the selection through a specialized handler,
+    /// which is why it doesn't implement `Overlay` yet.
+    Search(crate::tui::widgets::search::SearchOverlayState),
+    /// `o` full-value modal (T8-030). Only `Continue` / `Close`
+    /// outcomes, so it implements [`Overlay`] cleanly.
+    ValueModal(crate::tui::widgets::value_modal::ValueModalState),
 }
 
 /// What an overlay wants the runtime to do after a single key

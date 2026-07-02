@@ -181,31 +181,18 @@ pub struct App {
     /// later duplicate snaps the cursor back to the row after the
     /// first one.
     last_visible_index: Cell<Option<usize>>,
-    /// Active rename overlay state per ADR 0029 / ADR 0030. `None`
-    /// when no overlay is open; `Some` suspends the surrounding
-    /// keymap and routes input through the modal.
-    rename_overlay: Option<crate::tui::widgets::input::TextInputState>,
     /// Pin id waiting for a second `Delete` press. This gives pin
     /// removal a confirmation step without introducing a full modal
     /// before the H-PIN-023 edit/remove flow lands.
     pending_pin_remove: Option<String>,
-    /// Active `/` search overlay (T8-017). `None` when closed;
-    /// `Some` suspends the surrounding keymap, routes input
-    /// through the modal, and overlays a ranked match list within
-    /// the active filter set.
-    search_overlay: Option<crate::tui::widgets::search::SearchOverlayState>,
     /// Open overlays as a stack (ADR 0085 contract 3). Input routes
     /// to the top entry first, `draw` renders bottom-to-top, and
     /// commit / close outcomes pop the top. Grows one variant per
     /// overlay migration wave — see [`crate::tui::Modal`]. The
-    /// `Option<...>` fields below still host overlays that haven't
-    /// migrated yet; each wave deletes one field and moves the
-    /// state to a `Modal` variant.
+    /// remaining `Option<...>` fields below still host overlays
+    /// that haven't migrated yet; each wave deletes one field and
+    /// moves the state to a `Modal` variant.
     modal_stack: Vec<crate::tui::Modal>,
-    /// Active `o` full-value modal (T8-030). `None` when closed;
-    /// `Some` suspends navigation keys and routes input through the
-    /// modal.
-    value_modal: Option<crate::tui::widgets::value_modal::ValueModalState>,
     /// Active full-screen transcript viewer modal
     /// (H-VIEWER-NATIVE-008). `None` when closed; `Some` replaces
     /// the entire two-panel layout with the native viewer widget
@@ -619,11 +606,8 @@ impl App {
             left_scroll: Cell::new(0),
             explorer_scroll: Cell::new(0),
             last_visible_index: Cell::new(None),
-            rename_overlay: None,
             pending_pin_remove: None,
-            search_overlay: None,
             modal_stack: Vec::new(),
-            value_modal: None,
             viewer_modal: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
                 crate::tui::widgets::toast::engine(),
@@ -685,28 +669,38 @@ impl App {
         self.status_message = None;
     }
 
-    /// Active rename-overlay state, if any.
+    /// Active rename-overlay state, if any. Lives on the modal
+    /// stack (ADR 0085 contract 3); this accessor peeks the top
+    /// entry.
     pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextInputState> {
-        self.rename_overlay.as_ref()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Rename(state) => Some(state),
+            _ => None,
+        }
     }
 
     /// Mutable access for the runtime's per-key forwarding.
     pub fn rename_overlay_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::input::TextInputState> {
-        self.rename_overlay.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Rename(state) => Some(state),
+            _ => None,
+        }
     }
 
-    /// Open the rename overlay for `state`. The caller pre-populates
-    /// the input with the current alias, harness title, or empty
-    /// string per ADR 0030.
+    /// Push a rename overlay onto the modal stack. Caller
+    /// pre-populates the input with the current alias, harness
+    /// title, or empty string per ADR 0030.
     pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
-        self.rename_overlay = Some(state);
+        self.modal_stack.push(crate::tui::Modal::Rename(state));
     }
 
-    /// Close the rename overlay without committing.
+    /// Pop the rename overlay if it's on top; no-op otherwise.
     pub fn close_rename_overlay(&mut self) {
-        self.rename_overlay = None;
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Rename(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     pub fn pending_pin_remove(&self) -> Option<&str> {
@@ -811,23 +805,37 @@ impl App {
         }
     }
 
-    /// Active `/` search overlay (T8-017), if any.
+    /// Active `/` search overlay (T8-017), if any. Lives on the
+    /// modal stack (ADR 0085 contract 3); this accessor peeks the
+    /// top entry.
     pub fn search_overlay(&self) -> Option<&crate::tui::widgets::search::SearchOverlayState> {
-        self.search_overlay.as_ref()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Search(state) => Some(state),
+            _ => None,
+        }
     }
 
     pub fn search_overlay_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::search::SearchOverlayState> {
-        self.search_overlay.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Search(state) => Some(state),
+            _ => None,
+        }
     }
 
+    /// Push a fresh search overlay onto the modal stack.
     pub fn open_search_overlay(&mut self) {
-        self.search_overlay = Some(crate::tui::widgets::search::SearchOverlayState::new());
+        self.modal_stack.push(crate::tui::Modal::Search(
+            crate::tui::widgets::search::SearchOverlayState::new(),
+        ));
     }
 
+    /// Pop the search overlay if it's on top; no-op otherwise.
     pub fn close_search_overlay(&mut self) {
-        self.search_overlay = None;
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Search(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Active `?` help overlay (F8-011), if any. Lives on the modal
@@ -870,19 +878,33 @@ impl App {
         &self.modal_stack
     }
 
-    /// Active `o` full-value modal (T8-030), if any.
+    /// Active `o` full-value modal (T8-030), if any. Lives on the
+    /// modal stack (ADR 0085 contract 3); this accessor peeks the
+    /// top entry.
     pub fn value_modal(&self) -> Option<&crate::tui::widgets::value_modal::ValueModalState> {
-        self.value_modal.as_ref()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::ValueModal(state) => Some(state),
+            _ => None,
+        }
     }
 
     pub fn value_modal_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::value_modal::ValueModalState> {
-        self.value_modal.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::ValueModal(state) => Some(state),
+            _ => None,
+        }
     }
 
+    /// Pop the value modal if it's on top; no-op otherwise.
     pub fn close_value_modal(&mut self) {
-        self.value_modal = None;
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::ValueModal(_))
+        ) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Read-only access to the active transcript viewer modal
@@ -1019,8 +1041,8 @@ impl App {
         };
         match opened {
             Some((label, value)) => {
-                self.value_modal = Some(crate::tui::widgets::value_modal::ValueModalState::new(
-                    label, value,
+                self.modal_stack.push(crate::tui::Modal::ValueModal(
+                    crate::tui::widgets::value_modal::ValueModalState::new(label, value),
                 ));
                 self.status_message = None;
             }
@@ -5053,9 +5075,8 @@ mod tests {
     fn value_modal_close_clears_state() {
         let mut app = app_for_explorer();
         // Simulate an opened modal — exercise the close path.
-        app.value_modal = Some(crate::tui::widgets::value_modal::ValueModalState::new(
-            "command",
-            "long".to_string(),
+        app.modal_stack.push(crate::tui::Modal::ValueModal(
+            crate::tui::widgets::value_modal::ValueModalState::new("command", "long".to_string()),
         ));
         assert!(app.value_modal().is_some());
         app.close_value_modal();
@@ -5600,6 +5621,102 @@ mod tests {
             app.close_pins_overlay();
             assert_eq!(app.modal_stack().len(), 1);
             assert!(app.pins_overlay().is_none());
+            assert!(app.controls_overlay().is_some());
+
+            app.close_controls_overlay();
+            assert!(app.modal_stack().is_empty());
+        }
+
+        // H-TUI-003 wave 5: rename, search, value_modal on the
+        // same stack. ValueModal implements the Overlay trait
+        // (its Continue/Close outcomes map cleanly to
+        // Consumed/Close); rename and search stay with their
+        // specialized dispatchers.
+        #[test]
+        fn open_rename_pushes_modal_rename_onto_stack() {
+            use crate::tui::widgets::input::TextInputState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_rename_overlay(TextInputState::new("rename", ""));
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(app.modal_stack().first(), Some(Modal::Rename(_))));
+            assert!(app.rename_overlay().is_some());
+        }
+
+        #[test]
+        fn close_rename_pops_when_top_is_rename() {
+            use crate::tui::widgets::input::TextInputState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_rename_overlay(TextInputState::new("rename", ""));
+            app.close_rename_overlay();
+            assert!(app.modal_stack().is_empty());
+            assert!(app.rename_overlay().is_none());
+        }
+
+        #[test]
+        fn open_search_pushes_modal_search_onto_stack() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_search_overlay();
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(app.modal_stack().first(), Some(Modal::Search(_))));
+            assert!(app.search_overlay().is_some());
+        }
+
+        #[test]
+        fn close_search_pops_when_top_is_search() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_search_overlay();
+            app.close_search_overlay();
+            assert!(app.modal_stack().is_empty());
+            assert!(app.search_overlay().is_none());
+        }
+
+        #[test]
+        fn value_modal_esc_key_returns_close_via_overlay_trait() {
+            use crate::tui::widgets::value_modal::ValueModalState;
+            use crate::tui::{Overlay, OverlayOutcome};
+            use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+            let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
+            let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+            assert_eq!(state.handle(key), OverlayOutcome::Close);
+        }
+
+        #[test]
+        fn value_modal_scroll_key_returns_consumed_via_overlay_trait() {
+            use crate::tui::widgets::value_modal::ValueModalState;
+            use crate::tui::{Overlay, OverlayOutcome};
+            use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+            let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
+            let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+            assert_eq!(state.handle(key), OverlayOutcome::Consumed);
+        }
+
+        #[test]
+        fn five_wide_stack_orders_and_pops_lifo() {
+            // Bottom to top: Controls, Pins, Search, Rename, Help.
+            // (ValueModal covered separately since it exercises
+            // the Overlay trait path.) Peek accessors report the
+            // exact top variant only; pop reveals each in turn.
+            use crate::tui::widgets::input::TextInputState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.open_pins_overlay();
+            app.open_search_overlay();
+            app.open_rename_overlay(TextInputState::new("rename", ""));
+            app.open_help_overlay();
+            assert_eq!(app.modal_stack().len(), 5);
+            assert!(app.help_overlay().is_some());
+            assert!(app.rename_overlay().is_none());
+
+            app.close_help_overlay();
+            assert!(app.rename_overlay().is_some());
+
+            app.close_rename_overlay();
+            assert!(app.search_overlay().is_some());
+
+            app.close_search_overlay();
+            assert!(app.pins_overlay().is_some());
+
+            app.close_pins_overlay();
             assert!(app.controls_overlay().is_some());
 
             app.close_controls_overlay();

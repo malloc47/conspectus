@@ -1843,16 +1843,22 @@ pub(super) fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::ev
     }
 }
 
-/// Dispatch a key into the open full-value modal and close it on
-/// ValueModalOutcome::Close.
+/// Dispatch a key into the open full-value modal via the shared
+/// [`crate::tui::Overlay`] contract (ADR 0085 contract 3). Close /
+/// Commit outcomes pop the stack; Consumed leaves the modal open.
 fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
-    use crate::tui::widgets::value_modal::ValueModalOutcome;
+    use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.value_modal_mut() {
-        Some(state) => state.handle_key(key),
+        Some(state) => state.handle(key),
         None => return,
     };
-    if let ValueModalOutcome::Close = outcome {
-        app.close_value_modal();
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => app.close_value_modal(),
+        OverlayOutcome::Commit(msg) => {
+            app.close_value_modal();
+            dispatch(app, *msg);
+        }
     }
 }
 
