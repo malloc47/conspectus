@@ -531,6 +531,13 @@ pub enum Msg {
     /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`
     /// or `Effect::Toast(reason)`.
     LaunchSelectedPin,
+    /// Launch a specific pin by id (ADR 0057 / ADR 0058). Used by
+    /// the Pins overlay's launch entry, which already knows the
+    /// pin id and doesn't need selection-based resolution. The
+    /// reducer looks up the optional attach target from the held
+    /// snapshot and emits
+    /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`.
+    LaunchPinById(String),
     /// Remove a pin declaration from its TOML store (ADR 0057).
     /// Carries the already-resolved [`PinRemoveRequest`]; the
     /// reducer emits `Effect::WriteStore(StoreOp::PinRemove(...))`
@@ -1417,40 +1424,6 @@ impl App {
         self.sort
     }
 
-    /// Apply a [`crate::tui::widgets::pins::PinsAction`] to the app
-    /// state. Covers the pin-specific surfaces (CRUD requests and the
-    /// placeholder hint for menu entries without prerequisites). The
-    /// CRUD write paths themselves live in the runtime so direct
-    /// shortcuts can share the same plumbing.
-    pub fn apply_pins_action(&mut self, action: crate::tui::widgets::pins::PinsAction) {
-        use crate::tui::widgets::pins::PinsAction;
-        match action {
-            PinsAction::CreatePin(_) => {
-                self.status_message =
-                    Some("pins: create is handled by the TUI runtime".to_string());
-            }
-            PinsAction::EditPin(_) => {
-                self.status_message = Some("pins: edit is handled by the TUI runtime".to_string());
-            }
-            PinsAction::BindPin(_) => {
-                self.status_message = Some("pins: bind is handled by the TUI runtime".to_string());
-            }
-            PinsAction::RemovePin(_) => {
-                self.status_message =
-                    Some("pins: remove is handled by the TUI runtime".to_string());
-            }
-            PinsAction::LaunchPin { .. } => {
-                self.status_message =
-                    Some("pins: launch is handled by the TUI runtime".to_string());
-            }
-            PinsAction::PinPlaceholder(label) => {
-                self.status_message = Some(format!(
-                    "pins: `{label}` needs a pin selection; press `p` for the picker or use `conspectus pin {label}`"
-                ));
-            }
-        }
-    }
-
     fn force_recency_for_flat_sessions(&mut self) {
         if matches!(
             self.grouping,
@@ -1939,6 +1912,15 @@ impl App {
                         crate::tui::actions::pin_launch_disabled_reason(&reason),
                     )),
                 }
+            }
+            Msg::LaunchPinById(pin_id) => {
+                use crate::tui::effect::ExecSpec;
+                let attach_target =
+                    crate::tui::actions::pin_launch_target_from_snapshot(self, &pin_id);
+                effects.push(Effect::Exec(ExecSpec::LaunchPin {
+                    pin_id,
+                    attach_target,
+                }));
             }
             Msg::PinRemove(request) => {
                 effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRemove(
@@ -5727,6 +5709,20 @@ mod tests {
             let effects = app.update(Msg::SetSort(crate::tui::Sort::Recency));
             assert_eq!(app.sort(), crate::tui::Sort::Recency);
             assert!(effects.is_empty());
+        }
+
+        #[test]
+        fn launch_pin_by_id_without_snapshot_emits_exec_with_no_attach_target() {
+            use crate::tui::effect::ExecSpec;
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::LaunchPinById("work".to_string()));
+            assert_eq!(
+                effects,
+                vec![Effect::Exec(ExecSpec::LaunchPin {
+                    pin_id: "work".to_string(),
+                    attach_target: None,
+                })]
+            );
         }
     }
 }

@@ -616,25 +616,23 @@ fn static_handle_controls_overlay_key(
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_apply_pins_action_and_refresh(
-    app: &mut App,
-    _config: &RunConfig,
-    _snapshot: &crate::model::GraphSnapshot,
-    action: crate::tui::widgets::pins::PinsAction,
-) -> Result<()> {
-    use crate::tui::widgets::pins::PinsAction;
-    match action {
-        PinsAction::CreatePin(_)
-        | PinsAction::EditPin(_)
-        | PinsAction::BindPin(_)
-        | PinsAction::RemovePin(_)
-        | PinsAction::LaunchPin { .. } => {
+fn static_apply_pins_msg(app: &mut App, msg: Msg) -> Result<()> {
+    // Scenario TUI keeps every mutating pin action off. Anything
+    // that would write TOML or spawn a subprocess gets replaced
+    // with a status hint; harmless status/placeholder Msgs pass
+    // through to the reducer.
+    match msg {
+        Msg::PinCreate(_)
+        | Msg::PinEdit(_)
+        | Msg::PinBind(_)
+        | Msg::PinRemove(_)
+        | Msg::LaunchPinById(_) => {
             app.update(Msg::SetStatus(Some(
                 "scenario TUI keeps mutating actions disabled".to_string(),
             )));
         }
-        PinsAction::PinPlaceholder(_) => {
-            app.apply_pins_action(action);
+        other => {
+            app.update(other);
         }
     }
     Ok(())
@@ -1946,55 +1944,12 @@ fn handle_pins_overlay_key(
         PinsOutcome::Close => {
             app.close_pins_overlay();
         }
-        PinsOutcome::ApplyAndStay(action) => {
-            apply_pins_action_and_refresh(terminal, app, config, tmux, action);
+        PinsOutcome::ApplyAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, msg);
         }
-        PinsOutcome::ApplyAndClose(action) => {
+        PinsOutcome::ApplyAndClose(msg) => {
             app.close_pins_overlay();
-            apply_pins_action_and_refresh(terminal, app, config, tmux, action);
-        }
-    }
-}
-
-/// Apply a pins action and rebuild the row tree so the change is
-/// visible immediately. Mirrors [`apply_controls_action_and_rebuild`]
-/// but only handles the pin-specific variants; everything else routes
-/// through the placeholder status hint.
-///
-/// `terminal` is threaded through so the `LaunchPin` variant can
-/// suspend the alt screen and re-exec into the CLI's launch path —
-/// every other variant only writes TOML and does not need it.
-fn apply_pins_action_and_refresh(
-    terminal: &mut DefaultTerminal,
-    app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn TmuxRunner,
-    action: crate::tui::widgets::pins::PinsAction,
-) {
-    use crate::tui::widgets::pins::PinsAction;
-    match action {
-        PinsAction::CreatePin(request) => {
-            dispatch_live(terminal, app, config, tmux, Msg::PinCreate(request));
-        }
-        PinsAction::EditPin(request) => {
-            dispatch_live(terminal, app, config, tmux, Msg::PinEdit(request));
-        }
-        PinsAction::BindPin(request) => {
-            dispatch_live(terminal, app, config, tmux, Msg::PinBind(request));
-        }
-        PinsAction::RemovePin(request) => {
-            dispatch_live(terminal, app, config, tmux, Msg::PinRemove(request));
-        }
-        PinsAction::LaunchPin { pin_id } => {
-            // Pins overlay bypasses the reducer until Phase D lands
-            // — it already has the pin id in hand from the modal
-            // — but still funnels through the executor helper so
-            // the terminal handoff logic stays single-sourced.
-            let target = crate::tui::actions::pin_launch_target_from_snapshot(app, &pin_id);
-            execute_launch_pin(terminal, app, config, &pin_id, target.as_ref());
-        }
-        PinsAction::PinPlaceholder(_) => {
-            app.apply_pins_action(action);
+            dispatch_live(terminal, app, config, tmux, msg);
         }
     }
 }
@@ -2013,17 +1968,18 @@ fn static_handle_pins_overlay_key(
         Some(state) => state.handle_key(&ctx, key),
         None => return Ok(()),
     };
+    let _ = (config, snapshot);
     match outcome {
         PinsOutcome::Continue => {}
         PinsOutcome::Close => {
             app.close_pins_overlay();
         }
-        PinsOutcome::ApplyAndStay(action) => {
-            static_apply_pins_action_and_refresh(app, config, snapshot, action)?;
+        PinsOutcome::ApplyAndStay(msg) => {
+            static_apply_pins_msg(app, msg)?;
         }
-        PinsOutcome::ApplyAndClose(action) => {
+        PinsOutcome::ApplyAndClose(msg) => {
             app.close_pins_overlay();
-            static_apply_pins_action_and_refresh(app, config, snapshot, action)?;
+            static_apply_pins_msg(app, msg)?;
         }
     }
     Ok(())

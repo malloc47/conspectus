@@ -15,10 +15,9 @@
 //! a [`PinsContext`].
 //!
 //! Key dispatch returns a [`PinsOutcome`]: keep open, close, or
-//! apply a [`PinsAction`] (and either close or stay open). Pin
-//! mutation side effects live in the runtime so the file write path
-//! is shared with direct-shortcut openers; this widget only
-//! describes intent.
+//! apply a [`crate::tui::Msg`] (and either close or stay open).
+//! Pin mutation side effects live in the reducer + executor per
+//! ADR 0085 contract 2; this widget only describes intent.
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -141,33 +140,25 @@ pub enum PinsSubEditor {
 }
 
 /// What the pins overlay returned from a single key event.
+/// Committed variants carry a [`crate::tui::Msg`] the runtime
+/// dispatches through the reducer (ADR 0085 contract 3), matching
+/// the `ControlsOutcome` shape landed in Phase F.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PinsOutcome {
     Continue,
     Close,
-    ApplyAndStay(PinsAction),
-    ApplyAndClose(PinsAction),
+    ApplyAndStay(crate::tui::Msg),
+    ApplyAndClose(crate::tui::Msg),
 }
 
-/// Side-effecting outcome the runtime applies. The overlay never
-/// touches the app directly.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PinsAction {
-    CreatePin(PinCreateRequest),
-    EditPin(PinEditRequest),
-    BindPin(PinBindRequest),
-    RemovePin(PinRemoveRequest),
-    /// Launch the named pin via the CLI's `pin launch` path (ADR
-    /// 0057 / ADR 0058). The runtime suspends the TUI, re-execs
-    /// into the binary, and refreshes on return — same code path
-    /// the row-level `Enter` / `L` shortcuts use.
-    LaunchPin {
-        pin_id: String,
-    },
-    /// Action chosen from the menu without the prerequisites met
-    /// (e.g. `rename` with no pin row selected). The runtime surfaces
-    /// a status hint instead of mutating.
-    PinPlaceholder(&'static str),
+/// Format a placeholder-hint status message for a menu action
+/// chosen without its prerequisites met. Shared between the
+/// widget's outcome constructor and any direct caller wanting
+/// to match the wording.
+pub fn pin_placeholder_status(label: &str) -> String {
+    format!(
+        "pins: `{label}` needs a pin selection; press `p` for the picker or use `conspectus pin {label}`"
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -523,16 +514,20 @@ impl PinsOverlayState {
             // suspending the TUI. Requires a pin selection;
             // placeholder otherwise.
             if let Some(target) = ctx.pin_target.clone() {
-                PinsOutcome::ApplyAndClose(PinsAction::LaunchPin { pin_id: target.id })
+                PinsOutcome::ApplyAndClose(crate::tui::Msg::LaunchPinById(target.id))
             } else {
-                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+                PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                    label,
+                ))))
             }
         } else if label == "rename" {
             if let Some(target) = ctx.pin_target.clone() {
                 self.sub_editor = Some(PinsSubEditor::Edit(Box::new(PinEditState::new(target))));
                 PinsOutcome::Continue
             } else {
-                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+                PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                    label,
+                ))))
             }
         } else if label == "rebind" {
             if let Some(target) = ctx.pin_target.clone() {
@@ -540,7 +535,9 @@ impl PinsOverlayState {
                     Some(PinsSubEditor::Rebind(Box::new(PinRebindState::new(target))));
                 PinsOutcome::Continue
             } else {
-                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+                PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                    label,
+                ))))
             }
         } else if label == "remove" {
             if let Some(target) = ctx.pin_target.clone() {
@@ -548,11 +545,15 @@ impl PinsOverlayState {
                     Some(PinsSubEditor::Remove(Box::new(PinRemoveState::new(target))));
                 PinsOutcome::Continue
             } else {
-                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+                PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                    label,
+                ))))
             }
         } else if label == "bind" {
             if ctx.pin_bind_options.is_empty() {
-                PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+                PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                    label,
+                ))))
             } else {
                 self.sub_editor = Some(PinsSubEditor::Bind(PinBindState::new(
                     ctx.pin_bind_options.clone(),
@@ -560,7 +561,9 @@ impl PinsOverlayState {
                 PinsOutcome::Continue
             }
         } else {
-            PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder(label))
+            PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                label,
+            ))))
         }
     }
 
@@ -575,7 +578,7 @@ impl PinsOverlayState {
                 }
                 PinCreateOutcome::Confirm(request) => {
                     *slot = None;
-                    PinsOutcome::ApplyAndClose(PinsAction::CreatePin(request))
+                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinCreate(request))
                 }
             },
             PinsSubEditor::Edit(state) => match state.handle_key(event) {
@@ -586,7 +589,7 @@ impl PinsOverlayState {
                 }
                 PinEditOutcome::Confirm(request) => {
                     *slot = None;
-                    PinsOutcome::ApplyAndClose(PinsAction::EditPin(*request))
+                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinEdit(*request))
                 }
             },
             PinsSubEditor::Rebind(state) => match state.handle_key(event) {
@@ -597,7 +600,7 @@ impl PinsOverlayState {
                 }
                 PinEditOutcome::Confirm(request) => {
                     *slot = None;
-                    PinsOutcome::ApplyAndClose(PinsAction::EditPin(*request))
+                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinEdit(*request))
                 }
             },
             PinsSubEditor::Bind(state) => match state.handle_key(event) {
@@ -608,7 +611,7 @@ impl PinsOverlayState {
                 }
                 PinBindOutcome::Confirm(request) => {
                     *slot = None;
-                    PinsOutcome::ApplyAndClose(PinsAction::BindPin(request))
+                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinBind(request))
                 }
             },
             PinsSubEditor::Remove(state) => match state.handle_key(event) {
@@ -619,7 +622,7 @@ impl PinsOverlayState {
                 }
                 PinRemoveOutcome::Confirm(request) => {
                     *slot = None;
-                    PinsOutcome::ApplyAndClose(PinsAction::RemovePin(request))
+                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinRemove(request))
                 }
             },
         }
@@ -3021,7 +3024,7 @@ mod tests {
         let outcome = state.handle_key(&PinsContext::default(), key(KeyCode::Enter));
         assert!(matches!(
             outcome,
-            PinsOutcome::ApplyAndClose(PinsAction::CreatePin(_))
+            PinsOutcome::ApplyAndClose(crate::tui::Msg::PinCreate(_))
         ));
     }
 
@@ -3798,7 +3801,9 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder("rename"))
+            PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                "rename"
+            ))))
         );
     }
 
@@ -3828,7 +3833,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndClose(PinsAction::EditPin(PinEditRequest {
+            PinsOutcome::ApplyAndClose(crate::tui::Msg::PinEdit(PinEditRequest {
                 original_id: "ingest".to_string(),
                 id: "ingest".to_string(),
                 display_name: "Ingest".to_string(),
@@ -3883,7 +3888,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndClose(PinsAction::RemovePin(PinRemoveRequest {
+            PinsOutcome::ApplyAndClose(crate::tui::Msg::PinRemove(PinRemoveRequest {
                 id: "ingest".to_string(),
                 display_name: "Ingest".to_string(),
                 store_path: "/workspace/project/.conspectus.toml".to_string(),
@@ -3941,7 +3946,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndClose(PinsAction::BindPin(PinBindRequest {
+            PinsOutcome::ApplyAndClose(crate::tui::Msg::PinBind(PinBindRequest {
                 pin_id: "ingest".to_string(),
                 session_key: "b".to_string(),
             }))
@@ -3956,7 +3961,9 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder("bind"))
+            PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                "bind"
+            ))))
         );
     }
 
@@ -3979,7 +3986,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndClose(PinsAction::CreatePin(PinCreateRequest {
+            PinsOutcome::ApplyAndClose(crate::tui::Msg::PinCreate(PinCreateRequest {
                 id: "ingest".to_string(),
                 display_name: "Ingest".to_string(),
                 harness: "codex".to_string(),
@@ -4205,7 +4212,9 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndStay(PinsAction::PinPlaceholder("launch"))
+            PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
+                "launch"
+            ))))
         );
     }
 
@@ -4223,9 +4232,7 @@ mod tests {
         let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
         assert_eq!(
             outcome,
-            PinsOutcome::ApplyAndClose(PinsAction::LaunchPin {
-                pin_id: "ingest".to_string()
-            })
+            PinsOutcome::ApplyAndClose(crate::tui::Msg::LaunchPinById("ingest".to_string()))
         );
         assert!(state.sub_editor().is_none());
     }
