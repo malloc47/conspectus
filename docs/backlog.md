@@ -1527,7 +1527,8 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
   - Tests: row/detail/explorer snapshots byte-identical; add an index
     consistency unit test (index agrees with a linear scan on a dense
     fixture).
-  - Blockers: `H-HYG-002` friendlier first.
+  - Blockers: `H-HYG-002` friendlier first. `H-TUI-001` builds on this
+    substrate to make row trees fully derived view-models.
 - [ ] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
   help.
   - Scope: key handling is hand-matched (`KeyCode::` ×128 in `runtime.rs`,
@@ -1541,26 +1542,24 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     dispatcher executes.
   - Tests: existing key-handling unit tests; one drift test asserting
     every dispatched action appears in the table and vice versa.
-  - Blockers: none.
-- [ ] `H-HYG-008` Unify the dual event loops, then split `runtime.rs`.
-  - Scope: `event_loop` and `static_event_loop`
-    (`src/tui/runtime.rs:105,344`) share the same body skeleton and differ
-    only in refresh strategy (discovery channel vs fixture reload).
-    Extract one loop driver parameterized by a refresh source, then split
-    the remaining ~2.6k production lines into loop driver / key dispatch /
-    action-handler modules.
-  - Tests: interactive + fixture-mode TUI suites and ADR 0067 snapshot
-    runs unchanged.
-  - Blockers: `H-HYG-007` first removes most of the dispatch bulk.
+  - Blockers: none; works standalone, and the `H-TUI-003` modal stack
+    later supplies the table's mode column.
+- [x] `H-HYG-008` Unify the dual event loops, then split `runtime.rs`.
+  - Outcome: folded into `H-TUI-004` (see
+    `docs/tui-architecture-review.md` R5) — the loop unification lands
+    as an event union + subscriptions rather than a parameterized
+    refresh source, and the `runtime.rs` split follows it. Tracked
+    there.
 - [ ] `H-HYG-009` Split the TUI monolith files by concern.
   - Scope: `tui/ui.rs` (~3.2k production lines) splits by view/panel —
     dispatch is already centralized in 3 `match view` sites so extraction
     is clean; `widgets/pins.rs` (~2.8k) separates the pins menu model
     (actions, selection-aware defaults; unit-testable without ratatui)
-    from form rendering.
+    from form rendering, targeting the `H-TUI-003` Overlay contract as
+    the split boundary.
   - Tests: `conspectus tui --snapshot` runs and TUI snapshot suites
     byte-identical.
-  - Blockers: none; independent of `H-HYG-008`.
+  - Blockers: none; independent of `H-TUI-004`.
 - [ ] `H-HYG-010` Finish the `output::render` migration and settle
   `dev_scenarios` gating.
   - Scope: `output/table.rs` is a 147-line re-export shim whose own
@@ -1585,6 +1584,81 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     big-bang.
   - Tests: purely mechanical; suites pass unchanged.
   - Blockers: none.
+
+### TUI Architecture Convergence (H-TUI-*)
+
+Source plan: `docs/tui-architecture-review.md` (2026-07-01 fresh-eyes
+review). Verdict: the TUI is ~70% of an Elm/MVU architecture — single
+state value, `Msg` reducer, immediate-mode render, async discovery as
+messages — and these stories finish that shape instead of adopting a
+framework. Explicit non-goals recorded in the review: no tui-realm or
+component framework, no retained-mode rewrite, no async reducer. These
+refine the overlapping `H-HYG` stories rather than duplicating them;
+cross-references below.
+
+- [ ] `H-TUI-001` Make row trees derived view-models.
+  - Scope: view/grouping/filter changes currently run synchronous
+    discovery on the UI thread (`apply_controls_action_and_refresh` →
+    `refresh` → `discover_and_build`) even though `App.database` already
+    holds the snapshot, and `build_tree_for_view` reads view/grouping
+    from `RunConfig`, forcing config-as-live-state double bookkeeping.
+    Make `RowTree` a memoized derivation of `(snapshot, view, grouping,
+    filter, sort, now)` read from `App` fields; projection changes
+    become pure `Msg`s that never touch discovery; only `r`, the refresh
+    timer, and store mutations schedule refreshes. `RunConfig` reverts
+    to initial-values-only.
+  - Tests: existing TUI snapshots byte-identical; add a test asserting a
+    view switch performs zero discovery calls (fake runner call counts).
+  - Blockers: none hard; `H-HYG-006` (SnapshotIndex) is the natural
+    substrate and friendlier first.
+- [ ] `H-TUI-002` Adopt effects-as-data in the reducer.
+  - Scope: collapse `Action`'s effectful variants and the per-overlay
+    commit handling into `update(&mut App, Msg) -> Vec<Effect>` with an
+    `Effect` enum (spawn refresh, mux op, exec/terminal-suspend, store
+    write, preview capture, toast, persist view state, quit). The
+    runtime's effect executor becomes the only code touching
+    `&mut Terminal`, the mux runner, and `std::process`; long effects
+    complete by sending a `Msg` back (the discovery worker already
+    models this). Record as an ADR — it changes how every future TUI
+    feature is written.
+  - Tests: reducer tests asserting `(state', effects)` per interaction
+    with no terminal/tmux; existing runtime integration tests pass.
+  - Blockers: `H-TUI-001` (fewer effectful paths left to migrate).
+- [ ] `H-TUI-003` Replace overlay Option slots with a modal stack and a
+  shared Overlay contract.
+  - Scope: eight modal surfaces (seven `Option` fields on `App` plus the
+    viewer island) become an explicit `Vec<Modal>`: input routes to the
+    stack top, draw renders in stack order, Esc/commit pops. One
+    `Overlay` trait (`handle(&mut self, KeyEvent) -> OverlayOutcome`
+    with `Consumed` / `Commit(Msg)` / `Close`, plus
+    `render(frame, area, &Theme)`) implemented by the existing widgets;
+    the viewer becomes a nested-reducer stack entry
+    (`Msg::Viewer(ViewerMsg)`). Adding a modal becomes struct + trait
+    impl + enum variant with zero new loop/keymap/draw branches. The
+    `H-HYG-009` pins-widget split should target this contract.
+  - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
+    help over controls) and a routing test per outcome variant.
+  - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
+    path).
+- [ ] `H-TUI-004` Unify the event loops behind an event union and
+  subscriptions.
+  - Scope: `enum UiEvent { Input(Event), Tick, Discovery(..) }` consumed
+    by one loop parameterized by its subscription set — live mode
+    subscribes to the discovery channel and refresh timer, fixture mode
+    to file reload, snapshot mode runs the body once. Absorbs
+    `H-HYG-008`'s dual-loop unification; then split `runtime.rs` into
+    loop driver / keymap / effect executor modules.
+  - Tests: live, fixture, and ADR 0067 snapshot suites unchanged.
+  - Blockers: `H-TUI-002`.
+- [ ] `H-TUI-005` Move scroll reconciliation into the reducer.
+  - Scope: `left_scroll` / `explorer_scroll` / `last_visible_index` are
+    `Cell`s mutated during `draw`. Deliver viewport dimensions to the
+    reducer (extend the existing `PageDown(u16)` pattern or add a
+    post-layout `Msg::ViewportChanged`) and reconcile scroll there, so
+    `draw` is strictly `&App → buffer`.
+  - Tests: scroll-behavior snapshots unchanged; reducer unit tests for
+    reconciliation at list boundaries.
+  - Blockers: `H-TUI-002` friendlier first, not hard.
 
 ### Observability And CLI UX
 
