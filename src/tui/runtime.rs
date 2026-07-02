@@ -286,9 +286,11 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 }
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
-                    handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
+                    handle_rename_overlay_key(terminal, &mut app, &config, tmux.as_ref(), key)
                 }
-                Some(Action::RemovePin) => remove_pin_action(&mut app, &config),
+                Some(Action::RemovePin) => {
+                    remove_pin_action(terminal, &mut app, &config, tmux.as_ref())
+                }
                 Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
                 Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
                 Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
@@ -884,6 +886,7 @@ fn open_rename_overlay(app: &mut App) {
 /// optional tmux rename) and refreshes; Cancel just closes the
 /// overlay.
 fn handle_rename_overlay_key(
+    terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
     tmux: &dyn TmuxRunner,
@@ -902,161 +905,17 @@ fn handle_rename_overlay_key(
         }
         InputOutcome::Confirm(value) => {
             app.close_rename_overlay();
-            commit_rename(app, config, tmux, value);
+            dispatch_live(terminal, app, config, tmux, Msg::CommitRename(value));
         }
     }
 }
 
-fn commit_rename(app: &mut App, config: &RunConfig, tmux: &dyn TmuxRunner, value: String) {
-    use crate::tui::rows::RowId;
-    let selection = app.selection().cloned();
-    let session_id = match selection {
-        Some(RowId::AgentSession(crate::model::NodeId::AgentSession(id))) => id,
-        Some(RowId::Pin { pin_id }) => {
-            commit_pin_rename(app, config, &pin_id, value);
-            return;
-        }
-        _ => {
-            app.update(Msg::SetStatus(Some(
-                "rename: lost selection before commit".to_string(),
-            )));
-            return;
-        }
-    };
-    let trimmed = value.trim().to_string();
-    let new_display_name = if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.clone())
-    };
-
-    let database = match app.graph_db() {
-        Some(database) => database,
-        None => {
-            app.update(Msg::SetStatus(Some(
-                "rename: no graph database available".to_string(),
-            )));
-            return;
-        }
-    };
-    let snapshot = database.snapshot();
-
-    let plan = match crate::rename::plan_session_rename(
-        snapshot,
-        &session_id,
-        new_display_name.clone(),
-        false,
-    ) {
-        Ok(plan) => plan,
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
-            return;
-        }
-    };
-
-    let endpoint = crate::declared::declared_endpoint_from_node_id(
-        &crate::model::NodeId::AgentSession(session_id.clone()),
-    );
-    let loader = crate::config::ConfigLoader::from_env();
-    let store_path = match crate::declared::select_store_for_declaration(
-        &endpoint, &endpoint, snapshot, &loader,
-    ) {
-        Some(selection) => selection.path,
-        None => match loader.user_config_path() {
-            Some(path) => path,
-            None => {
-                app.update(Msg::SetStatus(Some(
-                    "rename failed: no alias store available".to_string(),
-                )));
-                return;
-            }
-        },
-    };
-
-    let alias_outcome = match &plan.agent_alias_write.display_name {
-        Some(name) => crate::aliases::upsert_alias_entry(
-            &store_path,
-            crate::aliases::AliasEntry {
-                node: endpoint.clone(),
-                display_name: name.clone(),
-                reason: None,
-            },
-        )
-        .map(|_| format!("renamed: {name}"))
-        .map_err(|err| err.to_string()),
-        None => crate::aliases::remove_alias_entry(&store_path, &endpoint)
-            .map(|_| "rename: cleared alias".to_string())
-            .map_err(|err| err.to_string()),
-    };
-
-    let alias_status = match alias_outcome {
-        Ok(message) => message,
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
-            return;
-        }
-    };
-
-    if let Some(mux_rename) = &plan.mux_native_rename {
-        // Default-socket rename for now; the pin-driven socket
-        // propagation lands with H-PIN-017's TUI lockstep work.
-        match tmux.rename_session(None, &mux_rename.mux.native_id, &mux_rename.new_name) {
-            Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
-            Ok(other) => {
-                app.update(Msg::SetStatus(Some(format!(
-                    "alias updated, tmux rename failed: {other:?}"
-                ))));
-                refresh(app, config);
-                return;
-            }
-            Err(err) => {
-                app.update(Msg::SetStatus(Some(format!(
-                    "alias updated, tmux rename errored: {err}"
-                ))));
-                refresh(app, config);
-                return;
-            }
-        }
-    }
-
-    let advisory = live_session_advisory(app, &session_id);
-    refresh(app, config);
-    let final_status = match advisory {
-        Some(suffix) => format!("{alias_status} · {suffix}"),
-        None => alias_status,
-    };
-    app.update(Msg::SetStatus(Some(final_status)));
-}
-
-fn commit_pin_rename(app: &mut App, config: &RunConfig, pin_id: &str, value: String) {
-    let display = value.trim();
-    if display.is_empty() {
-        app.update(Msg::SetStatus(Some(
-            "pin rename: display name cannot be empty".to_string(),
-        )));
-        return;
-    }
-    let Some(target) = app.pins_context().pin_target else {
-        app.update(Msg::SetStatus(Some(format!(
-            "pin rename: no editable pin `{pin_id}` in current selection"
-        ))));
-        return;
-    };
-    let request = crate::tui::widgets::pins::PinEditRequest {
-        original_id: target.id.clone(),
-        id: target.id,
-        display_name: display.to_string(),
-        harness: target.harness,
-        cwd: target.cwd,
-        mux_name: target.mux_name,
-        mux_socket: target.mux_socket,
-        launch_argv: target.launch_argv,
-        store_path: target.store_path,
-    };
-    edit_pin_action(app, config, request);
-}
-
-fn remove_pin_action(app: &mut App, config: &RunConfig) {
+fn remove_pin_action(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn TmuxRunner,
+) {
     let Some(selection) = app.selection().cloned() else {
         app.update(Msg::SetStatus(Some(
             "pin remove: nothing selected".to_string(),
@@ -1087,9 +946,11 @@ fn remove_pin_action(app: &mut App, config: &RunConfig) {
         ))));
         return;
     };
-    let _ = config;
-    dispatch(
+    dispatch_live(
+        terminal,
         app,
+        config,
+        tmux,
         Msg::PinRemove(crate::tui::widgets::pins::PinRemoveRequest {
             id: target.id,
             display_name: target.display_name,
@@ -1292,7 +1153,14 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
             // above — no static-mode path emits `RunMux` today, so
             // this branch is a safety net.
         }
-        Effect::WriteStore(op) => execute_store_op(app, op),
+        Effect::WriteStore(_) => {
+            // Some `WriteStore` variants (`PinCreate`,
+            // `CommitAliasRename`) chain a tmux rename through the
+            // executor, so all store writes flow through
+            // `execute_effects_live` where the `TmuxRunner`
+            // reference lives. The pure executor drops them the
+            // same way it drops `RunMux` / `Exec`.
+        }
     }
 }
 
@@ -1301,11 +1169,17 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
 /// `.conspectus.toml` (ADR 0085 contract 2 Phase D). Handles the
 /// full post-write flow: refresh so the row tree reflects the
 /// change, then post a status message summarizing the outcome.
-fn execute_store_op(app: &mut App, op: crate::tui::effect::StoreOp) {
+fn execute_store_op(app: &mut App, tmux: &dyn TmuxRunner, op: crate::tui::effect::StoreOp) {
     use crate::tui::effect::StoreOp;
     match op {
+        StoreOp::PinCreate(request) => execute_pin_create(app, tmux, request),
+        StoreOp::PinEdit(request) => execute_pin_edit(app, request),
         StoreOp::PinRemove(request) => execute_pin_remove(app, request),
         StoreOp::PinBind(request) => execute_pin_bind(app, request),
+        StoreOp::CommitAliasRename {
+            session_id,
+            new_display_name,
+        } => execute_commit_alias_rename(app, tmux, session_id, new_display_name),
     }
 }
 
@@ -1372,6 +1246,182 @@ fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins::PinBindRe
     }
 }
 
+fn execute_pin_create(
+    app: &mut App,
+    tmux: &dyn TmuxRunner,
+    request: crate::tui::widgets::pins::PinCreateRequest,
+) {
+    match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
+        Ok((outcome, entry, store_kind)) => {
+            let is_adopt = request.adopt_source_mux_name.is_some();
+            let verb = if outcome.changed {
+                if outcome.entry_count == 1 {
+                    "wrote"
+                } else {
+                    "updated"
+                }
+            } else {
+                "unchanged"
+            };
+            let rename_status = apply_pin_adopt_mux_rename(tmux, &request);
+            let pin_id = entry.id.clone();
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            let selected = app.select_pin_after_mutation(&pin_id);
+            app.post_toast(pin_create_success_toast(is_adopt, &pin_id));
+            let mut message = format!(
+                "{verb} pin `{}` in {} ({})",
+                entry.id,
+                outcome.path.display(),
+                pin_store_label(store_kind)
+            );
+            if let Some(rename_status) = rename_status {
+                message.push_str("; ");
+                message.push_str(&rename_status);
+            }
+            if !selected {
+                message.push_str("; no visible row matched the new pin");
+            }
+            let _ = app.update(Msg::SetStatus(Some(message)));
+        }
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("pin create failed: {err}"))));
+        }
+    }
+}
+
+fn execute_pin_edit(app: &mut App, request: crate::tui::widgets::pins::PinEditRequest) {
+    match write_pin_edit(&request) {
+        Ok(outcome) => {
+            let verb = if outcome.changed {
+                "saved"
+            } else {
+                "unchanged"
+            };
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            let _ = app.update(Msg::SetStatus(Some(format!(
+                "{verb} pin `{}` in {}",
+                request.id,
+                outcome.path.display()
+            ))));
+        }
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("pin edit failed: {err}"))));
+        }
+    }
+}
+
+/// Executor branch for `StoreOp::CommitAliasRename`. Mirrors the
+/// old `commit_rename` runtime helper: plan the rename against the
+/// held snapshot, write the alias entry (or remove it when the
+/// operator cleared the field), then chain a tmux rename when the
+/// plan carries a native mux rename. Uses `app.config()` for the
+/// post-write refresh so a stale config from an earlier snapshot
+/// doesn't leak through.
+fn execute_commit_alias_rename(
+    app: &mut App,
+    tmux: &dyn TmuxRunner,
+    session_id: crate::model::AgentSessionId,
+    new_display_name: Option<String>,
+) {
+    let Some(database) = app.graph_db() else {
+        let _ = app.update(Msg::SetStatus(Some(
+            "rename: no graph database available".to_string(),
+        )));
+        return;
+    };
+    let snapshot = database.snapshot().clone();
+
+    let plan = match crate::rename::plan_session_rename(
+        &snapshot,
+        &session_id,
+        new_display_name.clone(),
+        false,
+    ) {
+        Ok(plan) => plan,
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+            return;
+        }
+    };
+
+    let endpoint = crate::declared::declared_endpoint_from_node_id(
+        &crate::model::NodeId::AgentSession(session_id.clone()),
+    );
+    let loader = crate::config::ConfigLoader::from_env();
+    let store_path = match crate::declared::select_store_for_declaration(
+        &endpoint, &endpoint, &snapshot, &loader,
+    ) {
+        Some(selection) => selection.path,
+        None => match loader.user_config_path() {
+            Some(path) => path,
+            None => {
+                let _ = app.update(Msg::SetStatus(Some(
+                    "rename failed: no alias store available".to_string(),
+                )));
+                return;
+            }
+        },
+    };
+
+    let alias_outcome = match &plan.agent_alias_write.display_name {
+        Some(name) => crate::aliases::upsert_alias_entry(
+            &store_path,
+            crate::aliases::AliasEntry {
+                node: endpoint.clone(),
+                display_name: name.clone(),
+                reason: None,
+            },
+        )
+        .map(|_| format!("renamed: {name}"))
+        .map_err(|err| err.to_string()),
+        None => crate::aliases::remove_alias_entry(&store_path, &endpoint)
+            .map(|_| "rename: cleared alias".to_string())
+            .map_err(|err| err.to_string()),
+    };
+
+    let alias_status = match alias_outcome {
+        Ok(message) => message,
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+            return;
+        }
+    };
+
+    if let Some(mux_rename) = &plan.mux_native_rename {
+        // Default-socket rename for now; pin-driven socket
+        // propagation lands with H-PIN-017's TUI lockstep work.
+        let config = app.config().clone();
+        match tmux.rename_session(None, &mux_rename.mux.native_id, &mux_rename.new_name) {
+            Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {}
+            Ok(other) => {
+                let _ = app.update(Msg::SetStatus(Some(format!(
+                    "alias updated, tmux rename failed: {other:?}"
+                ))));
+                refresh(app, &config);
+                return;
+            }
+            Err(err) => {
+                let _ = app.update(Msg::SetStatus(Some(format!(
+                    "alias updated, tmux rename errored: {err}"
+                ))));
+                refresh(app, &config);
+                return;
+            }
+        }
+    }
+
+    let advisory = live_session_advisory(app, &session_id);
+    let config = app.config().clone();
+    refresh(app, &config);
+    let final_status = match advisory {
+        Some(suffix) => format!("{alias_status} · {suffix}"),
+        None => alias_status,
+    };
+    let _ = app.update(Msg::SetStatus(Some(final_status)));
+}
+
 /// Pure executor (ADR 0085 contract 2). Runs the effects a reducer
 /// can produce without a live terminal — used by tests, snapshot
 /// mode, and the scenario TUI. `Effect::Exec` is silently dropped;
@@ -1399,6 +1449,7 @@ pub(super) fn execute_effects_live(
         match effect {
             Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec),
             Effect::RunMux(op) => execute_mux_op(app, tmux, op),
+            Effect::WriteStore(op) => execute_store_op(app, tmux, op),
             other => execute_pure_effect(app, other),
         }
     }
@@ -2058,10 +2109,18 @@ fn apply_pins_action_and_refresh(
 ) {
     use crate::tui::widgets::pins::PinsAction;
     match action {
-        PinsAction::CreatePin(request) => create_pin_action(app, config, tmux, request),
-        PinsAction::EditPin(request) => edit_pin_action(app, config, request),
-        PinsAction::BindPin(request) => dispatch(app, Msg::PinBind(request)),
-        PinsAction::RemovePin(request) => dispatch(app, Msg::PinRemove(request)),
+        PinsAction::CreatePin(request) => {
+            dispatch_live(terminal, app, config, tmux, Msg::PinCreate(request));
+        }
+        PinsAction::EditPin(request) => {
+            dispatch_live(terminal, app, config, tmux, Msg::PinEdit(request));
+        }
+        PinsAction::BindPin(request) => {
+            dispatch_live(terminal, app, config, tmux, Msg::PinBind(request));
+        }
+        PinsAction::RemovePin(request) => {
+            dispatch_live(terminal, app, config, tmux, Msg::PinRemove(request));
+        }
         PinsAction::LaunchPin { pin_id } => {
             // Pins overlay bypasses the reducer until Phase D lands
             // — it already has the pin id in hand from the modal
@@ -2119,50 +2178,6 @@ pub(super) fn apply_controls_action_and_rebuild(
     app.apply_controls_action(action);
     if let Some(tree) = derive_row_tree(app) {
         app.update(Msg::SetTree(tree));
-    }
-}
-
-fn create_pin_action(
-    app: &mut App,
-    config: &RunConfig,
-    tmux: &dyn TmuxRunner,
-    request: crate::tui::widgets::pins::PinCreateRequest,
-) {
-    match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
-        Ok((outcome, entry, store_kind)) => {
-            let is_adopt = request.adopt_source_mux_name.is_some();
-            let verb = if outcome.changed {
-                if outcome.entry_count == 1 {
-                    "wrote"
-                } else {
-                    "updated"
-                }
-            } else {
-                "unchanged"
-            };
-            let rename_status = apply_pin_adopt_mux_rename(tmux, &request);
-            let pin_id = entry.id.clone();
-            refresh_after_pin_mutation(app, config);
-            let selected = app.select_pin_after_mutation(&pin_id);
-            app.post_toast(pin_create_success_toast(is_adopt, &pin_id));
-            let mut message = format!(
-                "{verb} pin `{}` in {} ({})",
-                entry.id,
-                outcome.path.display(),
-                pin_store_label(store_kind)
-            );
-            if let Some(rename_status) = rename_status {
-                message.push_str("; ");
-                message.push_str(&rename_status);
-            }
-            if !selected {
-                message.push_str("; no visible row matched the new pin");
-            }
-            app.update(Msg::SetStatus(Some(message)));
-        }
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("pin create failed: {err}"))));
-        }
     }
 }
 
@@ -2292,31 +2307,6 @@ fn write_pin_bind(
             .or_else(|| loader.user_config_path())
             .ok_or_else(|| anyhow::anyhow!("no declared-link store available for pin bind"))?;
     Ok(crate::declared::upsert_declared_link(&path, link)?)
-}
-
-fn edit_pin_action(
-    app: &mut App,
-    config: &RunConfig,
-    request: crate::tui::widgets::pins::PinEditRequest,
-) {
-    match write_pin_edit(&request) {
-        Ok(outcome) => {
-            let verb = if outcome.changed {
-                "saved"
-            } else {
-                "unchanged"
-            };
-            refresh_after_pin_mutation(app, config);
-            app.update(Msg::SetStatus(Some(format!(
-                "{verb} pin `{}` in {}",
-                request.id,
-                outcome.path.display()
-            ))));
-        }
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("pin edit failed: {err}"))));
-        }
-    }
 }
 
 fn write_pin_edit(request: &crate::tui::widgets::pins::PinEditRequest) -> Result<PinWriteOutcome> {

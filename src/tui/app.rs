@@ -543,6 +543,19 @@ pub enum Msg {
     /// `Effect::WriteStore(StoreOp::PinBind(...))` or
     /// `Effect::Toast(reason)`.
     PinBind(crate::tui::widgets::pins::PinBindRequest),
+    /// Write a new pin entry (ADR 0057). When the request carries
+    /// an `adopt_source_mux_name`, the executor chains a tmux
+    /// rename after the write to promote the adopted mux to the
+    /// pin's declared name.
+    PinCreate(crate::tui::widgets::pins::PinCreateRequest),
+    /// Update an existing pin entry (ADR 0057).
+    PinEdit(crate::tui::widgets::pins::PinEditRequest),
+    /// Confirm the rename overlay's typed value (ADR 0029).
+    /// Reducer resolves the selected row and emits either a pin
+    /// edit, an agent-session alias rename, or a "lost selection"
+    /// toast. The alias-rename branch also chains an optional
+    /// native mux rename inside the executor per lockstep.
+    CommitRename(String),
 }
 
 impl App {
@@ -1964,6 +1977,63 @@ impl App {
                     )));
                 }
             }
+            Msg::PinCreate(request) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinCreate(
+                    request,
+                )));
+            }
+            Msg::PinEdit(request) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinEdit(
+                    request,
+                )));
+            }
+            Msg::CommitRename(value) => match self.selection.clone() {
+                Some(RowId::AgentSession(crate::model::NodeId::AgentSession(id))) => {
+                    let trimmed = value.trim().to_string();
+                    let new_display_name = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
+                    effects.push(Effect::WriteStore(
+                        crate::tui::effect::StoreOp::CommitAliasRename {
+                            session_id: id,
+                            new_display_name,
+                        },
+                    ));
+                }
+                Some(RowId::Pin { pin_id }) => {
+                    let display = value.trim();
+                    if display.is_empty() {
+                        effects.push(Effect::Toast(
+                            "pin rename: display name cannot be empty".to_string(),
+                        ));
+                        return effects;
+                    }
+                    let Some(target) = self.pins_context().pin_target else {
+                        effects.push(Effect::Toast(format!(
+                            "pin rename: no editable pin `{pin_id}` in current selection"
+                        )));
+                        return effects;
+                    };
+                    effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinEdit(
+                        crate::tui::widgets::pins::PinEditRequest {
+                            original_id: target.id.clone(),
+                            id: target.id,
+                            display_name: display.to_string(),
+                            harness: target.harness,
+                            cwd: target.cwd,
+                            mux_name: target.mux_name,
+                            mux_socket: target.mux_socket,
+                            launch_argv: target.launch_argv,
+                            store_path: target.store_path,
+                        },
+                    )));
+                }
+                _ => effects.push(Effect::Toast(
+                    "rename: lost selection before commit".to_string(),
+                )),
+            },
         }
         effects
     }
@@ -5524,6 +5594,95 @@ mod tests {
             };
             let effects = app.update(Msg::PinBind(request.clone()));
             assert_eq!(effects, vec![Effect::WriteStore(StoreOp::PinBind(request))]);
+        }
+
+        #[test]
+        fn pin_create_msg_emits_write_store_effect() {
+            use crate::tui::effect::StoreOp;
+            let mut app = App::new(RunConfig::defaults());
+            let request = crate::tui::widgets::pins::PinCreateRequest {
+                id: "work".to_string(),
+                display_name: "work".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/p/project".to_string(),
+                mux_name: "work".to_string(),
+                mux_socket: None,
+                adopt_source_mux_name: None,
+                launch_argv: Vec::new(),
+                store: crate::tui::widgets::pins::PinCreateStore::Auto,
+            };
+            let effects = app.update(Msg::PinCreate(request.clone()));
+            assert_eq!(
+                effects,
+                vec![Effect::WriteStore(StoreOp::PinCreate(request))]
+            );
+        }
+
+        #[test]
+        fn pin_edit_msg_emits_write_store_effect() {
+            use crate::tui::effect::StoreOp;
+            let mut app = App::new(RunConfig::defaults());
+            let request = crate::tui::widgets::pins::PinEditRequest {
+                original_id: "work".to_string(),
+                id: "work-2".to_string(),
+                display_name: "Work Two".to_string(),
+                harness: "codex".to_string(),
+                cwd: "/p/project".to_string(),
+                mux_name: "work-2".to_string(),
+                mux_socket: None,
+                launch_argv: Vec::new(),
+                store_path: "/tmp/.conspectus.toml".to_string(),
+            };
+            let effects = app.update(Msg::PinEdit(request.clone()));
+            assert_eq!(effects, vec![Effect::WriteStore(StoreOp::PinEdit(request))]);
+        }
+
+        #[test]
+        fn commit_rename_with_agent_session_selection_emits_alias_rename() {
+            use crate::tui::effect::StoreOp;
+            let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+            select_session(&mut app, "Session One");
+            let effects = app.update(Msg::CommitRename("New Alias".to_string()));
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                Effect::WriteStore(StoreOp::CommitAliasRename {
+                    session_id,
+                    new_display_name,
+                }) => {
+                    assert_eq!(session_id.harness_key, "codex");
+                    assert_eq!(new_display_name.as_deref(), Some("New Alias"));
+                }
+                other => panic!("expected CommitAliasRename, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn commit_rename_with_empty_value_on_agent_session_clears_alias() {
+            use crate::tui::effect::StoreOp;
+            let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+            select_session(&mut app, "Session One");
+            let effects = app.update(Msg::CommitRename("   ".to_string()));
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                Effect::WriteStore(StoreOp::CommitAliasRename {
+                    new_display_name, ..
+                }) => {
+                    assert!(new_display_name.is_none());
+                }
+                other => panic!("expected CommitAliasRename, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn commit_rename_without_selection_emits_toast() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::CommitRename("value".to_string()));
+            assert_eq!(
+                effects,
+                vec![Effect::Toast(
+                    "rename: lost selection before commit".to_string()
+                )]
+            );
         }
     }
 }

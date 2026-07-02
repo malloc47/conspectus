@@ -12,7 +12,9 @@
 use crate::model::{AgentSessionId, MuxSessionId};
 use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::resume::ResumeTarget;
-use crate::tui::widgets::pins::{PinBindRequest, PinRemoveRequest};
+use crate::tui::widgets::pins::{
+    PinBindRequest, PinCreateRequest, PinEditRequest, PinRemoveRequest,
+};
 
 /// A side effect the reducer wants the runtime to schedule.
 #[derive(Debug, Clone, PartialEq)]
@@ -121,9 +123,29 @@ pub enum MuxOp {
 /// §H-TUI-002 Phase D.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StoreOp {
+    /// Write a new pin entry to its TOML store (ADR 0057). When
+    /// `request.adopt_source_mux_name` is `Some`, the executor
+    /// chains a tmux rename after the write so the just-adopted
+    /// mux session takes the pin's declared name — see
+    /// [`crate::tui::effect::MuxOp`]'s roadmap in
+    /// `docs/backlog.md`.
+    PinCreate(PinCreateRequest),
+    /// Update an existing pin entry (id / display name / harness /
+    /// cwd / mux / launch argv).
+    PinEdit(PinEditRequest),
     /// Remove a pin entry from its TOML store (ADR 0057).
     PinRemove(PinRemoveRequest),
     /// Write a pin-binding declaration linking a pin to an
     /// existing agent session (ADR 0057 / ADR 0058).
     PinBind(PinBindRequest),
+    /// Commit the rename-overlay's confirm on an agent-session
+    /// row (ADR 0029). The executor plans the rename against the
+    /// held snapshot, writes the alias entry (or removes it when
+    /// the operator cleared the field), and — when the plan
+    /// carries a native mux rename — chains a tmux rename so the
+    /// live session's title tracks the alias in lockstep.
+    CommitAliasRename {
+        session_id: AgentSessionId,
+        new_display_name: Option<String>,
+    },
 }
