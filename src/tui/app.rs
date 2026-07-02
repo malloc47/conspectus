@@ -189,10 +189,6 @@ pub struct App {
     /// removal a confirmation step without introducing a full modal
     /// before the H-PIN-023 edit/remove flow lands.
     pending_pin_remove: Option<String>,
-    /// Active pins overlay (ADR 0057). Dedicated modal for pin CRUD,
-    /// kept separate from the controls overlay so view/filter and
-    /// pin management stay one-key-each on `f` and `p`.
-    pins_overlay: Option<crate::tui::widgets::pins::PinsOverlayState>,
     /// Active `/` search overlay (T8-017). `None` when closed;
     /// `Some` suspends the surrounding keymap, routes input
     /// through the modal, and overlays a ranked match list within
@@ -625,7 +621,6 @@ impl App {
             last_visible_index: Cell::new(None),
             rename_overlay: None,
             pending_pin_remove: None,
-            pins_overlay: None,
             search_overlay: None,
             modal_stack: Vec::new(),
             value_modal: None,
@@ -761,29 +756,43 @@ impl App {
         }
     }
 
-    /// Active pins-overlay state (ADR 0057), if any.
+    /// Active pins-overlay state (ADR 0057), if any. Lives on the
+    /// modal stack (ADR 0085 contract 3); this accessor peeks the
+    /// top entry.
     pub fn pins_overlay(&self) -> Option<&crate::tui::widgets::pins::PinsOverlayState> {
-        self.pins_overlay.as_ref()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Pins(state) => Some(state),
+            _ => None,
+        }
     }
 
     pub fn pins_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::pins::PinsOverlayState> {
-        self.pins_overlay.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Pins(state) => Some(state),
+            _ => None,
+        }
     }
 
-    /// Open the pins overlay at the top of the action list.
+    /// Push a fresh pins overlay onto the modal stack at the top
+    /// of the action list.
     pub fn open_pins_overlay(&mut self) {
-        self.pins_overlay = Some(crate::tui::widgets::pins::PinsOverlayState::new());
+        self.modal_stack.push(crate::tui::Modal::Pins(
+            crate::tui::widgets::pins::PinsOverlayState::new(),
+        ));
     }
 
-    /// Replace the pins overlay state — used by direct shortcuts
-    /// (`N`/`B`/`A`/`b`) that skip the menu and open a sub-editor.
+    /// Push a pre-configured pins overlay state — used by direct
+    /// shortcuts (`N`/`B`/`A`/`b`) that skip the menu and open a
+    /// sub-editor directly.
     pub fn set_pins_overlay(&mut self, state: crate::tui::widgets::pins::PinsOverlayState) {
-        self.pins_overlay = Some(state);
+        self.modal_stack.push(crate::tui::Modal::Pins(state));
     }
 
-    /// Close the pins overlay without applying anything.
+    /// Pop the pins overlay if it's on top; no-op otherwise.
     pub fn close_pins_overlay(&mut self) {
-        self.pins_overlay = None;
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Pins(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Snapshot of the live pin state the pins overlay renders against.
@@ -5538,6 +5547,63 @@ mod tests {
             app.close_controls_overlay();
             assert_eq!(app.modal_stack().len(), 2);
             assert!(app.help_overlay().is_some());
+        }
+
+        // H-TUI-003 wave 4: pins overlay on the same stack.
+        #[test]
+        fn open_pins_pushes_modal_pins_onto_stack() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_pins_overlay();
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(app.modal_stack().first(), Some(Modal::Pins(_))));
+            assert!(app.pins_overlay().is_some());
+        }
+
+        #[test]
+        fn set_pins_overlay_pushes_preconfigured_state() {
+            use crate::tui::widgets::pins::PinsOverlayState;
+            let mut app = App::new(RunConfig::defaults());
+            app.set_pins_overlay(PinsOverlayState::new());
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(app.modal_stack().first(), Some(Modal::Pins(_))));
+        }
+
+        #[test]
+        fn close_pins_pops_when_top_is_pins() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_pins_overlay();
+            app.close_pins_overlay();
+            assert!(app.modal_stack().is_empty());
+            assert!(app.pins_overlay().is_none());
+        }
+
+        #[test]
+        fn triple_stack_orders_correctly_and_pops_lifo() {
+            // Controls at bottom, Pins in middle, Help on top.
+            // Peek accessors report the exact top variant only;
+            // popping in reverse order reveals each in turn.
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.open_pins_overlay();
+            app.open_help_overlay();
+            assert_eq!(app.modal_stack().len(), 3);
+            assert!(app.help_overlay().is_some());
+            assert!(app.pins_overlay().is_none());
+            assert!(app.controls_overlay().is_none());
+
+            app.close_help_overlay();
+            assert_eq!(app.modal_stack().len(), 2);
+            assert!(app.help_overlay().is_none());
+            assert!(app.pins_overlay().is_some());
+            assert!(app.controls_overlay().is_none());
+
+            app.close_pins_overlay();
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(app.pins_overlay().is_none());
+            assert!(app.controls_overlay().is_some());
+
+            app.close_controls_overlay();
+            assert!(app.modal_stack().is_empty());
         }
     }
 

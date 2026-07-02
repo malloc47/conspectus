@@ -35,6 +35,11 @@ pub enum Modal {
     /// until either the trait grows an associated context type or
     /// the widget internalizes its state.
     Controls(crate::tui::widgets::controls::ControlsOverlayState),
+    /// Pins overlay (ADR 0057). Same context-carrying shape as
+    /// `Controls` — the widget's `handle_key` reads a
+    /// [`crate::tui::widgets::pins::PinsContext`] on every event —
+    /// so it doesn't implement [`Overlay`] yet.
+    Pins(crate::tui::widgets::pins::PinsOverlayState),
 }
 
 /// What an overlay wants the runtime to do after a single key
