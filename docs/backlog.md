@@ -1750,7 +1750,7 @@ cross-references below.
   - Blockers: `H-TUI-001` (landed). Phase B unblocks after
     Phase A; C/D/E/F land opportunistically as their variants
     are needed.
-- [ ] `H-TUI-003` Replace overlay Option slots with a modal stack and a
+- [x] `H-TUI-003` Replace overlay Option slots with a modal stack and a
   shared Overlay contract.
   - Scope: eight modal surfaces (seven `Option` fields on `App` plus the
     viewer island) become an explicit `Vec<Modal>`: input routes to the
@@ -1807,12 +1807,32 @@ cross-references below.
     enum. Test count grows from 14 to 21, including a five-
     wide LIFO stack test with Controls / Pins / Search /
     Rename / Help.
-  - Wave 7 (next, viewer_modal): the transcript viewer becomes
-    a nested-reducer stack entry per ADR 0085 contract 3 —
-    `Msg::Viewer(ViewerMsg)` composes the widget's own reducer
-    with the App's, matching Elm/Bubble Tea nested-reducer
-    conventions. The one remaining Option field on App goes
-    away with this wave.
+  - Wave 7 (landed 2026-07-02, viewer_modal): the transcript
+    viewer migrated as a nested-reducer stack entry per ADR
+    0085 contract 3. New `Msg::Viewer(ViewerMsg)` variant; the
+    reducer arm pops the top `Modal::Viewer` state, runs it
+    through `viewer::input::reduce`, then pushes the new state
+    back on `ViewerEffect::None` or leaves it popped + sets
+    "viewer closed" status on `ViewerEffect::Close`. The
+    take-reduce-put ownership dance moves from the runtime helper
+    into the reducer arm; `take_viewer_modal` accessor deleted.
+    `handle_viewer_overlay_key` now translates keys to
+    `ViewerMsg` and dispatches through the shared
+    `dispatch(app, Msg::Viewer(vmsg))`. First Elm/Bubble Tea
+    nested-reducer example in the codebase. Test count grows
+    from 21 to 26, including a "Help-on-top-of-Viewer keeps
+    Viewer state exactly as-is" guard.
+  - Landing state: every overlay is on the modal stack. Help
+    and ValueModal implement the `Overlay` trait. Viewer uses
+    the nested-reducer composition. Controls, Pins, Rename, and
+    Search stay with specialized dispatchers — Controls and
+    Pins because their handlers need widget-side context;
+    Rename and Search because their `Confirm` outcomes carry
+    values that the runtime maps to specific Msgs at the call
+    site. Growing the `Overlay` trait with an associated
+    context type (or refactoring those widgets to internalize
+    their context) is follow-up territory and doesn't block
+    other H-TUI-* work.
   - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
     help over controls) and a routing test per outcome variant.
   - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
