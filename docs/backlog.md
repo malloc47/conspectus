@@ -1600,21 +1600,21 @@ framework, no retained-mode rewrite, no async reducer. These refine
 the overlapping `H-HYG` stories rather than duplicating them;
 cross-references below.
 
-- [ ] `H-TUI-001` Make row trees derived view-models.
-  - Scope: view/grouping/filter changes currently run synchronous
-    discovery on the UI thread (`apply_controls_action_and_refresh` →
-    `refresh` → `discover_and_build`) even though `App.database` already
-    holds the snapshot, and `build_tree_for_view` reads view/grouping
-    from `RunConfig`, forcing config-as-live-state double bookkeeping.
-    Make `RowTree` a memoized derivation of `(snapshot, view, grouping,
-    filter, sort, now)` read from `App` fields; projection changes
-    become pure `Msg`s that never touch discovery; only `r`, the refresh
-    timer, and store mutations schedule refreshes. `RunConfig` reverts
-    to initial-values-only.
-  - Tests: existing TUI snapshots byte-identical; add a test asserting a
-    view switch performs zero discovery calls (fake runner call counts).
-  - Blockers: none hard; `H-HYG-006` (SnapshotIndex) is the natural
-    substrate and friendlier first.
+- [x] `H-TUI-001` Make row trees derived view-models.
+  - Landed 2026-07-01. `App` now owns `active_view`; `RowTree` is a
+    pure derivation of `(snapshot, view, grouping, filter, sort,
+    cwd)` via `build_tree_for_view(TreeInputs::from_app(...))`.
+    `apply_controls_action_and_refresh` is now
+    `apply_controls_action_and_rebuild` — mutates App, emits
+    `Msg::SetTree` against the held snapshot, no discovery.
+    `RunConfig` is initial-values-only; `apply_controls_action` /
+    `switch_to_view` / `force_recency_for_flat_sessions` /
+    `restore_persisted_state` no longer mirror back to it. Also
+    fixed the timer-refresh race: the discovery worker's result
+    path now builds against App projection state. Regression net:
+    four `projection_zero_discovery::*` tests plus the existing
+    TUI snapshot suite. `H-HYG-006` (`SnapshotIndex`) is a follow-on
+    optimization; H-TUI-001 does not depend on it.
 - [ ] `H-TUI-002` Adopt effects-as-data in the reducer.
   - Scope: collapse `Action`'s effectful variants and the per-overlay
     commit handling into `update(&mut App, Msg) -> Vec<Effect>` with an
