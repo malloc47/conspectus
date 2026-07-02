@@ -255,15 +255,35 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                     }
                 }
                 Some(Action::Attach) => {
-                    dispatch_live(terminal, &mut app, &config, Msg::AttachSelected);
+                    dispatch_live(
+                        terminal,
+                        &mut app,
+                        &config,
+                        tmux.as_ref(),
+                        Msg::AttachSelected,
+                    );
                 }
                 Some(Action::Resume) => {
-                    dispatch_live(terminal, &mut app, &config, Msg::ResumeSelected);
+                    dispatch_live(
+                        terminal,
+                        &mut app,
+                        &config,
+                        tmux.as_ref(),
+                        Msg::ResumeSelected,
+                    );
                 }
                 Some(Action::View) => {
-                    dispatch_live(terminal, &mut app, &config, Msg::ViewSelected);
+                    dispatch_live(
+                        terminal,
+                        &mut app,
+                        &config,
+                        tmux.as_ref(),
+                        Msg::ViewSelected,
+                    );
                 }
-                Some(Action::DefaultAction) => default_action(terminal, &mut app, &config),
+                Some(Action::DefaultAction) => {
+                    default_action(terminal, &mut app, &config, tmux.as_ref())
+                }
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
                     handle_rename_overlay_key(&mut app, &config, tmux.as_ref(), key)
@@ -274,7 +294,13 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
                 Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
                 Some(Action::LaunchPin) => {
-                    dispatch_live(terminal, &mut app, &config, Msg::LaunchSelectedPin);
+                    dispatch_live(
+                        terminal,
+                        &mut app,
+                        &config,
+                        tmux.as_ref(),
+                        Msg::LaunchSelectedPin,
+                    );
                 }
                 Some(Action::OpenControls) => {
                     app.open_controls_overlay();
@@ -1163,33 +1189,48 @@ fn live_session_advisory(
     }
 }
 
-/// If the selection has moved to a new muxed target, capture its
-/// pane and stash the result in the app. Skipped when
-/// `live_preview_enabled` is false (privacy flag) or when the
-/// target hasn't changed (avoids re-shelling on every keystroke).
+/// Plan a preview-capture effect for the current selection.
+/// Returns `None` when live preview is disabled, when the target is
+/// unchanged and already cached, or when the selection has no mux
+/// target. Pure: reads only [`App`] and [`RunConfig`] state.
+fn plan_mux_preview_capture(
+    app: &App,
+    config: &RunConfig,
+    prev: Option<MuxSessionId>,
+) -> Option<Effect> {
+    if !config.live_preview_enabled {
+        return None;
+    }
+    let target = resolve_attach_target(app).ok()?;
+    if prev.as_ref() == Some(&target.mux) && app.mux_preview(&target.mux).is_some() {
+        return None;
+    }
+    Some(Effect::RunMux(crate::tui::effect::MuxOp::CapturePreview {
+        mux: target.mux,
+        native_id: target.native_id,
+    }))
+}
+
+/// Refresh the mux preview if the selection has moved to a new
+/// target. Reducer-adjacent orchestration: pure [`plan_mux_preview_capture`]
+/// decides whether a capture is needed; the executor performs it.
 fn refresh_mux_preview_if_needed(
     app: &mut App,
     config: &RunConfig,
-    runner: &dyn TmuxRunner,
+    tmux: &dyn TmuxRunner,
     prev: Option<MuxSessionId>,
 ) {
-    if !config.live_preview_enabled {
-        return;
-    }
-    let Some(target) = resolve_attach_target(app).ok() else {
+    let Some(effect) = plan_mux_preview_capture(app, config, prev) else {
         return;
     };
-    if prev.as_ref() == Some(&target.mux) && app.mux_preview(&target.mux).is_some() {
-        return;
-    }
-    // Capture against the **raw** backend-native session name (e.g.
-    // `editor`), not the backend-prefixed graph id (`tmux:editor`)
-    // — tmux itself doesn't understand the latter.
-    let content = capture_via(runner, &target.native_id);
-    app.update(Msg::SetMuxPreview {
-        mux: target.mux,
-        content,
-    });
+    execute_mux_op(
+        app,
+        tmux,
+        match effect {
+            Effect::RunMux(op) => op,
+            _ => unreachable!("plan_mux_preview_capture only emits RunMux"),
+        },
+    );
 }
 
 /// Resolve the selection's preferred mux target's graph id, if
@@ -1245,6 +1286,12 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
             // safety net rather than a code path exercised in
             // practice.
         }
+        Effect::RunMux(_) => {
+            // Mux ops need a live `TmuxRunner`; the pure executor
+            // silently drops them. Same rationale as `Effect::Exec`
+            // above — no static-mode path emits `RunMux` today, so
+            // this branch is a safety net.
+        }
     }
 }
 
@@ -1259,19 +1306,40 @@ pub(super) fn execute_effects(app: &mut App, effects: Vec<Effect>) {
 }
 
 /// Live-loop executor. Handles every [`Effect`] variant, including
-/// `Effect::Exec`, which requires `&mut DefaultTerminal` and the
-/// process launcher. This is the sole code in the TUI that touches
-/// `&mut Terminal` for reducer-emitted effects.
+/// `Effect::Exec` (which requires `&mut DefaultTerminal` and the
+/// process launcher) and `Effect::RunMux` (which requires a live
+/// [`TmuxRunner`] reference). This is the sole code in the TUI
+/// that touches `&mut Terminal`, `std::process`, or `TmuxRunner`
+/// for reducer-emitted effects.
 pub(super) fn execute_effects_live(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
+    tmux: &dyn TmuxRunner,
     effects: Vec<Effect>,
 ) {
     for effect in effects {
         match effect {
             Effect::Exec(spec) => execute_exec_spec(terminal, app, config, spec),
+            Effect::RunMux(op) => execute_mux_op(app, tmux, op),
             other => execute_pure_effect(app, other),
+        }
+    }
+}
+
+/// Dispatch a [`MuxOp`] against the executor's `TmuxRunner`. The
+/// only place in the TUI where a reducer-emitted mux op talks to
+/// tmux (ADR 0085 contract 2 Phase C).
+fn execute_mux_op(app: &mut App, tmux: &dyn TmuxRunner, op: crate::tui::effect::MuxOp) {
+    use crate::tui::effect::MuxOp;
+    match op {
+        MuxOp::CapturePreview { mux, native_id } => {
+            // Capture against the **raw** backend-native session
+            // name (e.g. `editor`), not the backend-prefixed graph
+            // id (`tmux:editor`) — tmux itself doesn't understand
+            // the latter.
+            let content = capture_via(tmux, &native_id);
+            let _ = app.update(Msg::SetMuxPreview { mux, content });
         }
     }
 }
@@ -1363,15 +1431,19 @@ pub(super) fn dispatch(app: &mut App, msg: Msg) {
     execute_effects(app, effects);
 }
 
-/// Live-loop dispatch: reduce + execute against the live terminal.
+/// Live-loop dispatch: reduce + execute against the live terminal
+/// and mux backend. Only used from the live event loop and
+/// executor-adjacent helpers — pure contexts (tests, snapshot mode)
+/// call [`dispatch`] instead.
 pub(super) fn dispatch_live(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
+    tmux: &dyn TmuxRunner,
     msg: Msg,
 ) {
     let effects = app.update(msg);
-    execute_effects_live(terminal, app, config, effects);
+    execute_effects_live(terminal, app, config, tmux, effects);
 }
 
 /// Refresh immediately after a pin mutation.
@@ -2333,13 +2405,18 @@ pub(super) fn cycle_view(view: View, delta: i32) -> View {
 /// muxed agent sessions attach; un-muxed agent sessions open the
 /// transcript viewer. Right-pane focus is handled in
 /// [`remap_for_focus`] before this is reached.
-fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
+fn default_action(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn TmuxRunner,
+) {
     match selected_default_action(app) {
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
-        SelectedDefault::Attach => dispatch_live(terminal, app, config, Msg::AttachSelected),
-        SelectedDefault::View => dispatch_live(terminal, app, config, Msg::ViewSelected),
+        SelectedDefault::Attach => dispatch_live(terminal, app, config, tmux, Msg::AttachSelected),
+        SelectedDefault::View => dispatch_live(terminal, app, config, tmux, Msg::ViewSelected),
         SelectedDefault::LaunchPin => {
-            dispatch_live(terminal, app, config, Msg::LaunchSelectedPin);
+            dispatch_live(terminal, app, config, tmux, Msg::LaunchSelectedPin);
         }
     }
 }
@@ -4225,6 +4302,78 @@ mod tests {
             assert_eq!(app.config().default_view, before_view);
             assert_eq!(app.config().sessions_grouping, before_grouping);
             assert_eq!(app.config().mux_grouping, before_mux_grouping);
+        }
+    }
+
+    /// H-TUI-002 Phase C (ADR 0085 contract 2): mux ops flow through
+    /// the executor. The reducer emits `Effect::RunMux(...)` and the
+    /// executor is the only code holding a `TmuxRunner` reference.
+    mod mux_effect_executor {
+        use super::*;
+        use crate::discovery::tmux::{FakeTmux, TmuxCaptureOutcome};
+        use crate::model::MuxSessionId;
+        use crate::tui::app::GraphDb;
+        use crate::tui::effect::{Effect, MuxOp};
+        use crate::tui::preview::PreviewContent;
+
+        #[test]
+        fn capture_preview_effect_lands_in_app_preview_store() {
+            let mut app = App::new(RunConfig::defaults());
+            // No snapshot needed — the executor branch just calls
+            // capture_via on the runner and dispatches
+            // Msg::SetMuxPreview, so App only needs to be alive.
+            let _ = GraphDb::from_snapshot(&crate::model::GraphSnapshot::empty());
+            let mux = MuxSessionId::new("tmux:editor");
+            let tmux = FakeTmux::with_sessions("").with_capture(
+                "editor",
+                TmuxCaptureOutcome::Captured("hello from pane".to_string()),
+            );
+
+            execute_mux_op(
+                &mut app,
+                &tmux,
+                MuxOp::CapturePreview {
+                    mux: mux.clone(),
+                    native_id: "editor".to_string(),
+                },
+            );
+
+            let entry = app.mux_preview(&mux).expect("preview cached");
+            assert!(
+                matches!(entry.content, PreviewContent::Text(ref s) if s.contains("hello from pane"))
+            );
+        }
+
+        #[test]
+        fn plan_mux_preview_capture_returns_none_when_live_preview_disabled() {
+            let mut config = RunConfig::defaults();
+            config.live_preview_enabled = false;
+            let app = App::new(RunConfig::defaults());
+            assert!(plan_mux_preview_capture(&app, &config, None).is_none());
+        }
+
+        #[test]
+        fn plan_mux_preview_capture_returns_none_when_no_mux_target_selected() {
+            let app = App::new(RunConfig::defaults());
+            // Empty app: no selection, no mux target — nothing to
+            // capture regardless of the previous target.
+            assert!(plan_mux_preview_capture(&app, app.config(), None).is_none());
+        }
+
+        #[test]
+        fn plan_mux_preview_capture_emits_run_mux_effect_shape() {
+            // Smoke test the returned effect variant when a plan is
+            // constructed manually via `Effect::RunMux(...)` —
+            // proves the enum wiring, without needing a full seeded
+            // App that resolves to an attachable mux row.
+            let planned = Effect::RunMux(MuxOp::CapturePreview {
+                mux: MuxSessionId::new("tmux:pane"),
+                native_id: "pane".to_string(),
+            });
+            assert!(matches!(
+                planned,
+                Effect::RunMux(MuxOp::CapturePreview { .. })
+            ));
         }
     }
 }

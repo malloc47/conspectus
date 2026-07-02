@@ -9,7 +9,7 @@
 //! reducer never emits an effect nobody can execute. See
 //! `docs/backlog.md` §H-TUI-002 for the phase roadmap.
 
-use crate::model::AgentSessionId;
+use crate::model::{AgentSessionId, MuxSessionId};
 use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::resume::ResumeTarget;
 
@@ -38,6 +38,14 @@ pub enum Effect {
     /// executor handles `Exec`; pure contexts (tests, snapshot mode)
     /// treat it as a no-op.
     Exec(ExecSpec),
+    /// Run a mux backend op (ADR 0085 contract 2 Phase C). The
+    /// executor owns the `TmuxRunner` reference for the duration of
+    /// the call; the reducer never talks to tmux directly. Pure
+    /// contexts silently drop `RunMux` — snapshot mode has no live
+    /// backend and tests use FakeTmux directly against
+    /// [`execute_effects_live`] when they want to assert against
+    /// mux ops.
+    RunMux(MuxOp),
 }
 
 /// Description of a subprocess the executor should run. All variants
@@ -71,5 +79,25 @@ pub enum ExecSpec {
     LaunchPin {
         pin_id: String,
         attach_target: Option<PinLaunchTarget>,
+    },
+}
+
+/// A mux backend op the executor should run. The reducer emits this
+/// via `Effect::RunMux(...)`; the executor holds the sole
+/// `TmuxRunner` reference and performs the call. Further variants
+/// (`RenameSession`, `NewSession`, `SendKeys`) migrate over as
+/// their current call sites (rename overlay commit, pin adopt/
+/// create) get carved out of the runtime and into reducer arms —
+/// tracked in `docs/backlog.md` §H-TUI-002.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MuxOp {
+    /// Capture a tmux pane and stash the result in the App's
+    /// preview store (H-VIEWER-NATIVE + T8-014). Reducer-triggered
+    /// after selection changes to a new mux target; the executor
+    /// runs `capture-pane`, wraps the payload, and dispatches
+    /// `Msg::SetMuxPreview` back into the reducer.
+    CapturePreview {
+        mux: MuxSessionId,
+        native_id: String,
     },
 }
