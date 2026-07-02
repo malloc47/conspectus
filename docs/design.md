@@ -1124,6 +1124,20 @@ migration helper and harmless if it fails.
     (`pin_targets_mux`, `pin_realized_by_session`). The TOML pin entry
     remains authoritative; graph nodes and binding fields are rebuilt
     from the pin sidecar and resolver output.
+  - ADR 0085 (Accepted): the TUI is a single-store Elm/MVU loop with
+    effects-as-data, a modal stack, and derived view-models. One
+    `Msg`, one `update(&mut App, Msg) -> Vec<Effect>`, one runtime
+    that owns the terminal / mux / process / store effects, and a
+    `Vec<Modal>` with a shared `Overlay` trait. `RowTree` /
+    `NodeDetail` / `ExplorerState` are pure derivations of
+    `(snapshot, view, grouping, filter, sort, now, selection)`;
+    projection changes never trigger discovery. `RunConfig` is
+    initial-values-only; per-view UI state lives on `App`.
+    Immediate-mode ratatui rendering is strictly `&App → pixels`
+    (scroll reconciliation moves into the reducer). Non-goals: no
+    tui-realm or component framework, no retained-mode rewrite, no
+    async reducer, no actor-per-pane. Governs the H-TUI-001..005
+    convergence work and every future TUI feature.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

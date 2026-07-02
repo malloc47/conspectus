@@ -1588,12 +1588,16 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
 ### TUI Architecture Convergence (H-TUI-*)
 
 Source plan: `docs/tui-architecture-review.md` (2026-07-01 fresh-eyes
-review). Verdict: the TUI is ~70% of an Elm/MVU architecture — single
-state value, `Msg` reducer, immediate-mode render, async discovery as
-messages — and these stories finish that shape instead of adopting a
-framework. Explicit non-goals recorded in the review: no tui-realm or
-component framework, no retained-mode rewrite, no async reducer. These
-refine the overlapping `H-HYG` stories rather than duplicating them;
+review). Governing decision: **ADR 0085** — memorializes the target
+model (single-store Elm/MVU loop with effects-as-data, modal stack,
+and derived view-models) as the guardrail every H-TUI-* story lands
+against. Verdict from the review: the TUI is ~70% of an Elm/MVU
+architecture already — single state value, `Msg` reducer,
+immediate-mode render, async discovery as messages — and these
+stories finish that shape instead of adopting a framework. Explicit
+non-goals recorded in the ADR and review: no tui-realm or component
+framework, no retained-mode rewrite, no async reducer. These refine
+the overlapping `H-HYG` stories rather than duplicating them;
 cross-references below.
 
 - [ ] `H-TUI-001` Make row trees derived view-models.
@@ -1619,8 +1623,8 @@ cross-references below.
     runtime's effect executor becomes the only code touching
     `&mut Terminal`, the mux runner, and `std::process`; long effects
     complete by sending a `Msg` back (the discovery worker already
-    models this). Record as an ADR — it changes how every future TUI
-    feature is written.
+    models this). Governed by ADR 0085 contract 2; the ADR fixes the
+    shape, this story lands the code.
   - Tests: reducer tests asserting `(state', effects)` per interaction
     with no terminal/tmux; existing runtime integration tests pass.
   - Blockers: `H-TUI-001` (fewer effectful paths left to migrate).
