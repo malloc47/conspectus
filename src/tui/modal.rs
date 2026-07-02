@@ -26,6 +26,15 @@ use crate::tui::Msg;
 #[derive(Debug, Clone)]
 pub enum Modal {
     Help(crate::tui::widgets::help::HelpOverlayState),
+    /// Controls overlay (ADR 0031, F8-004). Doesn't implement
+    /// [`Overlay`] yet — the widget's `handle_key` reads a live
+    /// [`crate::tui::widgets::controls::ControlsContext`] borrowed
+    /// from `App` on every event, and the trait's context-free
+    /// signature can't carry it. Dispatch stays through the
+    /// specialized `handle_controls_overlay_key` runtime helper
+    /// until either the trait grows an associated context type or
+    /// the widget internalizes its state.
+    Controls(crate::tui::widgets::controls::ControlsOverlayState),
 }
 
 /// What an overlay wants the runtime to do after a single key

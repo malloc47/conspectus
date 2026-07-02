@@ -189,10 +189,6 @@ pub struct App {
     /// removal a confirmation step without introducing a full modal
     /// before the H-PIN-023 edit/remove flow lands.
     pending_pin_remove: Option<String>,
-    /// Active controls overlay (ADR 0031, F8-004). `None` when the
-    /// overlay is closed; `Some` suspends the surrounding keymap
-    /// and routes input through the modal.
-    controls_overlay: Option<crate::tui::widgets::controls::ControlsOverlayState>,
     /// Active pins overlay (ADR 0057). Dedicated modal for pin CRUD,
     /// kept separate from the controls overlay so view/filter and
     /// pin management stay one-key-each on `f` and `p`.
@@ -629,7 +625,6 @@ impl App {
             last_visible_index: Cell::new(None),
             rename_overlay: None,
             pending_pin_remove: None,
-            controls_overlay: None,
             pins_overlay: None,
             search_overlay: None,
             modal_stack: Vec::new(),
@@ -728,29 +723,42 @@ impl App {
     }
 
     /// Active controls-overlay state (ADR 0031, F8-004), if any.
+    /// Lives on the modal stack (ADR 0085 contract 3); this
+    /// accessor peeks the top entry.
     pub fn controls_overlay(&self) -> Option<&crate::tui::widgets::controls::ControlsOverlayState> {
-        self.controls_overlay.as_ref()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Controls(state) => Some(state),
+            _ => None,
+        }
     }
 
     /// Mutable access for the runtime's per-key forwarding.
     pub fn controls_overlay_mut(
         &mut self,
     ) -> Option<&mut crate::tui::widgets::controls::ControlsOverlayState> {
-        self.controls_overlay.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Controls(state) => Some(state),
+            _ => None,
+        }
     }
 
-    /// Open the controls overlay with the cursor on the active view
-    /// row.
+    /// Push a fresh controls overlay onto the modal stack, cursor
+    /// on the active view row.
     pub fn open_controls_overlay(&mut self) {
         let ctx = self.controls_context();
-        self.controls_overlay = Some(crate::tui::widgets::controls::ControlsOverlayState::new(
-            &ctx,
+        self.modal_stack.push(crate::tui::Modal::Controls(
+            crate::tui::widgets::controls::ControlsOverlayState::new(&ctx),
         ));
     }
 
-    /// Close the controls overlay without applying anything.
+    /// Pop the controls overlay if it's on top; no-op otherwise.
     pub fn close_controls_overlay(&mut self) {
-        self.controls_overlay = None;
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::Controls(_))
+        ) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Active pins-overlay state (ADR 0057), if any.
@@ -819,12 +827,14 @@ impl App {
     pub fn help_overlay(&self) -> Option<&crate::tui::widgets::help::HelpOverlayState> {
         match self.modal_stack.last()? {
             crate::tui::Modal::Help(state) => Some(state),
+            _ => None,
         }
     }
 
     pub fn help_overlay_mut(&mut self) -> Option<&mut crate::tui::widgets::help::HelpOverlayState> {
         match self.modal_stack.last_mut()? {
             crate::tui::Modal::Help(state) => Some(state),
+            _ => None,
         }
     }
 
@@ -5464,6 +5474,70 @@ mod tests {
             let mut state = HelpOverlayState::new();
             let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
             assert_eq!(state.handle(key), OverlayOutcome::Consumed);
+        }
+
+        // H-TUI-003 wave 3: controls overlay lives on the same
+        // modal stack. Doesn't implement the Overlay trait yet
+        // (needs live ControlsContext), but push/pop invariants
+        // match Help's.
+        #[test]
+        fn open_controls_pushes_modal_controls_onto_stack() {
+            let mut app = App::new(RunConfig::defaults());
+            assert!(app.modal_stack().is_empty());
+            app.open_controls_overlay();
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(
+                app.modal_stack().first(),
+                Some(Modal::Controls(_))
+            ));
+            assert!(app.controls_overlay().is_some());
+        }
+
+        #[test]
+        fn close_controls_pops_when_top_is_controls() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.close_controls_overlay();
+            assert!(app.modal_stack().is_empty());
+            assert!(app.controls_overlay().is_none());
+        }
+
+        #[test]
+        fn controls_and_help_stack_together_with_correct_top() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.open_help_overlay();
+            assert_eq!(app.modal_stack().len(), 2);
+            assert!(app.help_overlay().is_some());
+            // controls_overlay() peeks the top — Help is on top,
+            // not Controls, so this must return None even though
+            // Modal::Controls is somewhere in the stack.
+            assert!(app.controls_overlay().is_none());
+        }
+
+        #[test]
+        fn close_help_leaves_controls_on_stack() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.open_help_overlay();
+            app.close_help_overlay();
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(app.controls_overlay().is_some());
+            assert!(app.help_overlay().is_none());
+        }
+
+        #[test]
+        fn close_controls_is_no_op_when_help_is_on_top() {
+            // Guards against a naive "pop the top" close impl —
+            // close_controls_overlay must only pop when the top
+            // variant matches, otherwise the operator could Esc
+            // Help and accidentally close Controls too.
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.open_help_overlay();
+            app.close_controls_overlay();
+            assert_eq!(app.modal_stack().len(), 2);
+            assert!(app.help_overlay().is_some());
         }
     }
 
