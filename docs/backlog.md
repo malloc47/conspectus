@@ -1856,6 +1856,40 @@ cross-references below.
   - Tests: scroll-behavior snapshots unchanged; reducer unit tests for
     reconciliation at list boundaries.
   - Blockers: `H-TUI-002` friendlier first, not hard.
+- [ ] `H-TUI-006` Unify overlay dispatch under the `Overlay` trait.
+  - Scope: after `H-TUI-003`, four of the seven modal stack entries
+    (Controls, Pins, Rename, Search) still use specialized runtime
+    dispatchers instead of the `Overlay` trait's `handle(KeyEvent)
+    -> OverlayOutcome`. Two reasons: (a) Controls / Pins widgets need
+    live context (`ControlsContext` borrowed from `App`, `PinsContext`
+    read at event time) that the trait's context-free signature can't
+    carry; (b) Rename / Search have `Confirm(String)` /
+    `Confirm(RowId)` outcomes that the runtime maps to specific Msgs
+    (`Msg::CommitRename`, `App::set_selection`) at the call site
+    instead of inside the widget.
+  - Two possible directions, pick one per widget cluster:
+    1. **Grow the trait** with an associated `Ctx<'a>` type; overlays
+       that need context declare it, the runtime's stack-driven
+       dispatch matches per-`Modal` variant and passes the right
+       context. Keeps widgets stateless-context-wise.
+    2. **Internalize context** in the widget state; the runtime
+       refreshes it via a `context_updated(ctx)` method between events
+       (or the state clones a snapshot on open). Uniforms the trait
+       but couples widget lifecycle to context freshness.
+  - For Rename / Search, the widgets can produce `Msg` values directly
+    by moving the Confirm→Msg mapping into a widget constructor
+    (e.g. `TextInputState::for_rename()` returns
+    `Confirm(Msg::CommitRename(value))`). That keeps the widget
+    generic while making the outcome self-contained. Slightly couples
+    the widget to the App's Msg enum — same tradeoff Phase F accepted
+    for `ControlsOutcome::ApplyAndStay(Msg)`.
+  - Tests: `Overlay` trait outcomes per widget (Consumed / Commit /
+    Close); existing dispatcher snapshot suites unchanged since the
+    end-state behavior is the same.
+  - Blockers: `H-TUI-003` (landed). Not on the critical path — every
+    overlay is already on the stack and works correctly through its
+    specialized dispatcher; this story is a uniformity cleanup, not
+    a functional gap.
 
 ### Observability And CLI UX
 
