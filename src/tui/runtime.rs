@@ -2488,11 +2488,11 @@ fn target_short(target: &AttachTarget) -> String {
 /// dismiss the modal. Keys that don't map are dropped silently
 /// (the modal owns every keystroke while open).
 fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
-    use crate::viewer::input::{ViewerEffect, ViewerMsg, reduce};
-    let Some(state) = app.take_viewer_modal() else {
+    use crate::viewer::input::ViewerMsg;
+    if app.viewer_modal().is_none() {
         return;
-    };
-    let msg =
+    }
+    let vmsg =
         match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
             (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(ViewerMsg::Close),
@@ -2514,20 +2514,14 @@ fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyE
             (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
             _ => None,
         };
-    let Some(msg) = msg else {
-        app.open_viewer_modal(state);
+    let Some(vmsg) = vmsg else {
         return;
     };
-    let (next, effect) = reduce(state, msg);
-    match effect {
-        ViewerEffect::Close => {
-            app.close_viewer_modal();
-            app.update(Msg::SetStatus(Some("viewer closed".to_string())));
-        }
-        ViewerEffect::None => {
-            app.open_viewer_modal(next);
-        }
-    }
+    // Nested-reducer dispatch: the App reducer's Msg::Viewer arm
+    // pops the top viewer state, runs it through
+    // viewer::input::reduce, and pushes the new state back
+    // (or leaves it popped on ViewerEffect::Close).
+    dispatch(app, Msg::Viewer(vmsg));
 }
 
 /// Outcome of a single viewer launch attempt. Errors carry a

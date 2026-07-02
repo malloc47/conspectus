@@ -193,11 +193,6 @@ pub struct App {
     /// that haven't migrated yet; each wave deletes one field and
     /// moves the state to a `Modal` variant.
     modal_stack: Vec<crate::tui::Modal>,
-    /// Active full-screen transcript viewer modal
-    /// (H-VIEWER-NATIVE-008). `None` when closed; `Some` replaces
-    /// the entire two-panel layout with the native viewer widget
-    /// and routes input through its reducer.
-    viewer_modal: Option<crate::viewer::state::ViewerState>,
     /// Active transient toast (T8-040, H-WIDG-003). The
     /// `ratatui_comfy_toaster::ToastEngine` owns the per-toast
     /// lifetime + bordered rendering; the runtime calls
@@ -490,6 +485,14 @@ pub enum Msg {
     /// good snapshot remains in place; this message surfaces a
     /// stale indicator in the header or status bar (T8-003).
     SetRefreshFailure(String),
+    /// Nested-reducer entry point for the transcript viewer
+    /// (ADR 0085 contract 3, H-TUI-003 wave 7). The reducer arm
+    /// pops the top viewer state, runs it through
+    /// [`crate::viewer::input::reduce`], and pushes the new state
+    /// back on `ViewerEffect::None` or leaves the stack popped
+    /// on `ViewerEffect::Close`. No-op when the top of the modal
+    /// stack isn't the viewer.
+    Viewer(crate::viewer::input::ViewerMsg),
     /// Attach to the currently selected row's mux session
     /// (ADR 0085 contract 2). The reducer resolves the target via
     /// `resolve_attach_target(&self)` and emits either
@@ -608,7 +611,6 @@ impl App {
             last_visible_index: Cell::new(None),
             pending_pin_remove: None,
             modal_stack: Vec::new(),
-            viewer_modal: None,
             toast: crate::tui::widgets::toast::ToastEngineHolder(
                 crate::tui::widgets::toast::engine(),
             ),
@@ -908,31 +910,36 @@ impl App {
     }
 
     /// Read-only access to the active transcript viewer modal
-    /// (H-VIEWER-NATIVE-008). `None` when closed.
+    /// (H-VIEWER-NATIVE-008). Lives on the modal stack
+    /// (ADR 0085 contract 3); this accessor peeks the top entry.
     pub fn viewer_modal(&self) -> Option<&crate::viewer::state::ViewerState> {
-        self.viewer_modal.as_ref()
-    }
-
-    /// Take the viewer modal state out of the App so the pure
-    /// reducer can consume it; callers put a new state back via
-    /// [`Self::open_viewer_modal`] when the reducer returns
-    /// `ViewerEffect::None`.
-    pub fn take_viewer_modal(&mut self) -> Option<crate::viewer::state::ViewerState> {
-        self.viewer_modal.take()
+        match self.modal_stack.last()? {
+            crate::tui::Modal::Viewer(state) => Some(state),
+            _ => None,
+        }
     }
 
     /// Mutable access for the draw path (the widget writes back
     /// viewport_height + total_lines metrics during render).
     pub fn viewer_modal_mut(&mut self) -> Option<&mut crate::viewer::state::ViewerState> {
-        self.viewer_modal.as_mut()
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::Viewer(state) => Some(state),
+            _ => None,
+        }
     }
 
+    /// Push a viewer modal onto the stack. Callers construct the
+    /// initial state via `viewer_bridge::build_viewer_state` and
+    /// pass ownership here.
     pub fn open_viewer_modal(&mut self, state: crate::viewer::state::ViewerState) {
-        self.viewer_modal = Some(state);
+        self.modal_stack.push(crate::tui::Modal::Viewer(state));
     }
 
+    /// Pop the viewer modal if it's on top; no-op otherwise.
     pub fn close_viewer_modal(&mut self) {
-        self.viewer_modal = None;
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+            self.modal_stack.pop();
+        }
     }
 
     /// Read accessor for the toast engine (T8-040 / H-WIDG-003).
@@ -1923,6 +1930,24 @@ impl App {
             }
             Msg::SetRefreshFailure(reason) => {
                 self.refresh_failure = Some(reason);
+            }
+            Msg::Viewer(vmsg) => {
+                use crate::viewer::input::{ViewerEffect, reduce};
+                if !matches!(self.modal_stack.last(), Some(crate::tui::Modal::Viewer(_))) {
+                    return effects;
+                }
+                let Some(crate::tui::Modal::Viewer(state)) = self.modal_stack.pop() else {
+                    unreachable!("checked above");
+                };
+                let (next, effect) = reduce(state, vmsg);
+                match effect {
+                    ViewerEffect::Close => {
+                        self.status_message = Some("viewer closed".to_string());
+                    }
+                    ViewerEffect::None => {
+                        self.modal_stack.push(crate::tui::Modal::Viewer(next));
+                    }
+                }
             }
             Msg::AttachSelected => {
                 use crate::tui::effect::ExecSpec;
@@ -5721,6 +5746,72 @@ mod tests {
 
             app.close_controls_overlay();
             assert!(app.modal_stack().is_empty());
+        }
+
+        // H-TUI-003 wave 7: viewer_modal migrates as a nested
+        // reducer entry. Msg::Viewer(ViewerMsg) is the App-level
+        // wrapper; the reducer arm pops, delegates to
+        // viewer::input::reduce, and pushes back or leaves
+        // popped based on the returned ViewerEffect.
+        #[test]
+        fn open_viewer_pushes_modal_viewer_onto_stack() {
+            use crate::viewer::model::TranscriptDocument;
+            use crate::viewer::state::ViewerState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+            assert_eq!(app.modal_stack().len(), 1);
+            assert!(matches!(app.modal_stack().first(), Some(Modal::Viewer(_))));
+            assert!(app.viewer_modal().is_some());
+        }
+
+        #[test]
+        fn viewer_msg_close_pops_stack_and_sets_status() {
+            use crate::viewer::input::ViewerMsg;
+            use crate::viewer::model::TranscriptDocument;
+            use crate::viewer::state::ViewerState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+            let effects = app.update(Msg::Viewer(ViewerMsg::Close));
+            assert!(effects.is_empty());
+            assert!(app.modal_stack().is_empty());
+            assert_eq!(app.status_message(), Some("viewer closed"));
+        }
+
+        #[test]
+        fn viewer_msg_scroll_leaves_modal_on_top() {
+            use crate::viewer::input::ViewerMsg;
+            use crate::viewer::model::TranscriptDocument;
+            use crate::viewer::state::ViewerState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+            let effects = app.update(Msg::Viewer(ViewerMsg::ScrollDown));
+            assert!(effects.is_empty());
+            assert!(app.viewer_modal().is_some());
+        }
+
+        #[test]
+        fn viewer_msg_without_open_viewer_is_a_no_op() {
+            use crate::viewer::input::ViewerMsg;
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::Viewer(ViewerMsg::Close));
+            assert!(effects.is_empty());
+            assert!(app.modal_stack().is_empty());
+        }
+
+        #[test]
+        fn viewer_msg_with_help_on_top_leaves_viewer_underneath_untouched() {
+            use crate::viewer::input::ViewerMsg;
+            use crate::viewer::model::TranscriptDocument;
+            use crate::viewer::state::ViewerState;
+            let mut app = App::new(RunConfig::defaults());
+            app.open_viewer_modal(ViewerState::new(TranscriptDocument::default()));
+            app.open_help_overlay();
+            // Msg::Viewer must only fire when Viewer is on top.
+            // Help is on top now, so the reducer no-ops.
+            let effects = app.update(Msg::Viewer(ViewerMsg::Close));
+            assert!(effects.is_empty());
+            assert_eq!(app.modal_stack().len(), 2);
+            assert!(app.help_overlay().is_some());
         }
     }
 
