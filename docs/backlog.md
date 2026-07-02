@@ -1790,11 +1790,29 @@ cross-references below.
     `triple_stack_orders_correctly_and_pops_lifo`: Controls at
     bottom, Pins in middle, Help on top; pop reveals each in
     turn. Test count grows from 10 to 14.
-  - Waves 2, 5-7 (next, per-overlay migrations): rename,
-    search, value_modal, viewer_modal each migrate independently by
-    adding a `Modal::X(...)` variant, deleting the corresponding
-    `Option<...>` field, and re-routing `open_*` / `close_*` /
-    accessors + input handlers through the stack.
+  - Wave 5 (landed 2026-07-02, rename + search + value_modal
+    rolled together): three simple overlays migrate in one
+    landing. `Modal::Rename` / `Modal::Search` /
+    `Modal::ValueModal` variants added; corresponding Option
+    fields deleted; accessors + open/close methods migrated to
+    the stack. `ValueModalState` gets an `Overlay` trait impl
+    (its Continue/Close outcome maps cleanly to Consumed/Close);
+    `handle_value_modal_key` routes through the trait's
+    handle()/OverlayOutcome path, matching help's pattern.
+    Rename and Search stay with their specialized handlers —
+    their Confirm outcomes carry values that map to specific
+    Msgs (Msg::CommitRename, App::set_selection) at the call
+    site, and moving the mapping into a widget-side Msg
+    constructor would couple the widgets to the reducer's
+    enum. Test count grows from 14 to 21, including a five-
+    wide LIFO stack test with Controls / Pins / Search /
+    Rename / Help.
+  - Wave 7 (next, viewer_modal): the transcript viewer becomes
+    a nested-reducer stack entry per ADR 0085 contract 3 —
+    `Msg::Viewer(ViewerMsg)` composes the widget's own reducer
+    with the App's, matching Elm/Bubble Tea nested-reducer
+    conventions. The one remaining Option field on App goes
+    away with this wave.
   - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
     help over controls) and a routing test per outcome variant.
   - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
