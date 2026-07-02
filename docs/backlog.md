@@ -1616,18 +1616,48 @@ cross-references below.
     TUI snapshot suite. `H-HYG-006` (`SnapshotIndex`) is a follow-on
     optimization; H-TUI-001 does not depend on it.
 - [ ] `H-TUI-002` Adopt effects-as-data in the reducer.
-  - Scope: collapse `Action`'s effectful variants and the per-overlay
-    commit handling into `update(&mut App, Msg) -> Vec<Effect>` with an
-    `Effect` enum (spawn refresh, mux op, exec/terminal-suspend, store
-    write, preview capture, toast, persist view state, quit). The
-    runtime's effect executor becomes the only code touching
-    `&mut Terminal`, the mux runner, and `std::process`; long effects
-    complete by sending a `Msg` back (the discovery worker already
-    models this). Governed by ADR 0085 contract 2; the ADR fixes the
-    shape, this story lands the code.
-  - Tests: reducer tests asserting `(state', effects)` per interaction
-    with no terminal/tmux; existing runtime integration tests pass.
-  - Blockers: `H-TUI-001` (fewer effectful paths left to migrate).
+  - Governed by ADR 0085 contract 2. Lands in phases so each wave
+    ships with tests and no half-migrated state.
+  - Phase A (landed 2026-07-01): scaffolding + first migrations.
+    `Effect` enum introduced with `Quit`, `Toast`, `Persist`, and
+    `SpawnRefresh { force_local }`; `App::update` returns
+    `Vec<Effect>`; `execute_effects(app, effects)` and
+    `dispatch(app, msg)` land in runtime. `Msg::Quit` emits
+    `Effect::Quit` (should_quit stays as state during the
+    migration). Reducer contract pinned by
+    `tui::app::tests::reducer_effects`. Reserved variants for
+    future waves are documented in `src/tui/effect.rs` but not
+    enumerated until an executor case exists.
+  - Phase B (next, terminal-suspending exec): add
+    `Effect::Exec(ExecSpec)` for attach, resume, viewer, and pin
+    launch. Move `attach_action` / `resume_action` /
+    `view_action` / `launch_pin_action` into executor cases so
+    `&mut Terminal` disappears from the handler signature. First
+    reducer-level end-to-end test (`(state', effects)` for an
+    attach interaction).
+  - Phase C (mux ops): `Effect::RunMux(MuxOp)` for rename,
+    new-session, send-keys, capture-pane; consolidates the
+    `TmuxRunner` threading currently split across `handle_*` and
+    `apply_*` helpers.
+  - Phase D (store writes): `Effect::WriteStore(StoreOp)` for pin
+    CRUD (create / edit / bind / remove) and alias writes.
+    Collapses `PinsAction` into `Msg` variants that emit the
+    matching effect + a follow-up `Effect::SpawnRefresh
+    { force_local: true }`.
+  - Phase E (preview capture + persistence completion):
+    `Effect::CapturePreview(MuxTarget)` runs from the executor's
+    per-tick sweep; `Effect::Persist` is already in the catalog
+    and gets emitted from view / grouping / filter changes.
+  - Phase F (collapse update layers): merge `ControlsAction` into
+    `Msg` variants that emit the appropriate effect; delete
+    `apply_controls_action` / `apply_controls_action_and_rebuild`
+    / `apply_view_switch` in favor of reducer arms. `Action`
+    enum shrinks to a translation layer or disappears entirely.
+    Prereq for `H-TUI-003` (modal stack Overlay contract's
+    `Commit(Msg)` outcome).
+  - Blockers: `H-TUI-001` (landed). Phase B unblocks after
+    Phase A; C/D/E/F land opportunistically as their variants
+    are needed.
 - [ ] `H-TUI-003` Replace overlay Option slots with a modal stack and a
   shared Overlay contract.
   - Scope: eight modal surfaces (seven `Option` fields on `App` plus the
