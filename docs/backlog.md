@@ -1638,15 +1638,21 @@ cross-references below.
     `resume_action` free functions deleted; four reducer-level
     `(state', effects)` tests land as the first interaction-level
     coverage per ADR 0085 contract 2.
-  - Phase B.2 (next, viewer + pin launch): grow `ExecSpec` with
-    `ViewerExternal(ViewerPlan)` and
-    `LaunchPin { pin_id, target }`. Viewer needs a separate
-    executor-side branch for the native viewer path (fs read to
-    build `ViewerState` + `app.open_viewer_modal`) — the reducer
-    emits a data description (`Msg::ViewSelected`), the executor
-    picks native vs external. `view_action` and
-    `launch_pin_action` free functions delete; the terminal
-    argument leaves the last two dispatch handlers.
+  - Phase B.2 (landed 2026-07-02): `ExecSpec` grew
+    `ViewSession(AgentSessionId)` and
+    `LaunchPin { pin_id, attach_target }`. `Msg::ViewSelected` /
+    `Msg::LaunchSelectedPin` reducer arms use pure resolvers
+    (`resolve_view_session` already existed, `resolve_launch_pin`
+    and `PinLaunchDisabled` moved into `tui/actions.rs` alongside
+    the `PinLaunchTarget` struct). Executor's `execute_view_session`
+    picks native (fs read + `open_viewer_modal`) vs external
+    fallback (`claude-history`) — the reducer never touches either.
+    `view_action` and `launch_pin_action` free functions deleted;
+    `launch_pin_by_id` renamed to `execute_launch_pin` and now
+    lives entirely under the executor. Four new reducer-level
+    tests bring the `(state', effects)` coverage to 8 cases across
+    all four Phase B Msgs. `&mut Terminal` no longer appears in
+    any non-executor handler in the runtime.
   - Phase C (mux ops): `Effect::RunMux(MuxOp)` for rename,
     new-session, send-keys, capture-pane; consolidates the
     `TmuxRunner` threading currently split across `handle_*` and
