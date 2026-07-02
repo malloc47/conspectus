@@ -517,6 +517,20 @@ pub enum Msg {
     /// emits either `Effect::Exec(ExecSpec::Resume(target))` when
     /// launchable or `Effect::Toast(reason)` when disabled.
     ResumeSelected,
+    /// Open the transcript viewer for the current selection
+    /// (ADR 0085 contract 2). The reducer resolves the session id
+    /// via `resolve_view_session` and emits either
+    /// `Effect::Exec(ExecSpec::ViewSession(id))` or
+    /// `Effect::Toast(reason)`. The native-vs-external branching
+    /// (and the accompanying filesystem read) happens in the
+    /// executor, not here.
+    ViewSelected,
+    /// Launch the pin backing the current selection (ADR 0085
+    /// contract 2). The reducer resolves the pin id + optional
+    /// attach target via `resolve_launch_pin` and emits either
+    /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`
+    /// or `Effect::Toast(reason)`.
+    LaunchSelectedPin,
 }
 
 impl App {
@@ -1895,6 +1909,31 @@ impl App {
                     _ => effects.push(Effect::Toast(crate::tui::resume::resume_disabled_reason(
                         &target,
                     ))),
+                }
+            }
+            Msg::ViewSelected => {
+                use crate::tui::effect::ExecSpec;
+                match crate::tui::actions::resolve_view_session(self) {
+                    Ok(session_id) => {
+                        effects.push(Effect::Exec(ExecSpec::ViewSession(session_id)));
+                    }
+                    Err(reason) => effects.push(Effect::Toast(
+                        crate::tui::viewer::viewer_disabled_reason(&reason),
+                    )),
+                }
+            }
+            Msg::LaunchSelectedPin => {
+                use crate::tui::effect::ExecSpec;
+                match crate::tui::actions::resolve_launch_pin(self) {
+                    Ok((pin_id, attach_target)) => {
+                        effects.push(Effect::Exec(ExecSpec::LaunchPin {
+                            pin_id,
+                            attach_target,
+                        }));
+                    }
+                    Err(reason) => effects.push(Effect::Toast(
+                        crate::tui::actions::pin_launch_disabled_reason(&reason),
+                    )),
                 }
             }
         }
@@ -5364,6 +5403,55 @@ mod tests {
                 ),
                 other => panic!("expected Toast, got {other:?}"),
             }
+        }
+
+        #[test]
+        fn view_selected_with_no_selection_emits_toast() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::ViewSelected);
+            assert_eq!(effects.len(), 1);
+            assert!(matches!(effects[0], Effect::Toast(_)));
+        }
+
+        #[test]
+        fn view_selected_on_agent_session_emits_exec() {
+            use crate::tui::effect::ExecSpec;
+            let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+            select_session(&mut app, "Session One");
+            let effects = app.update(Msg::ViewSelected);
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                Effect::Exec(ExecSpec::ViewSession(session_id)) => {
+                    assert_eq!(session_id.harness_key, "codex");
+                }
+                other => panic!("expected Exec(ViewSession), got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn launch_selected_pin_with_no_selection_emits_toast() {
+            let mut app = App::new(RunConfig::defaults());
+            let effects = app.update(Msg::LaunchSelectedPin);
+            assert_eq!(
+                effects,
+                vec![Effect::Toast("launch: nothing selected".to_string())]
+            );
+        }
+
+        #[test]
+        fn launch_selected_pin_on_non_pin_row_emits_toast() {
+            // A plain agent-session row with no pin_id — nothing to
+            // launch. The reducer surfaces the operator-facing hint
+            // instead of firing Exec.
+            let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+            select_session(&mut app, "Session One");
+            let effects = app.update(Msg::LaunchSelectedPin);
+            assert_eq!(
+                effects,
+                vec![Effect::Toast(
+                    "launch: select a pin or placeholder row".to_string(),
+                )]
+            );
         }
     }
 }

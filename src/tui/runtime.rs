@@ -24,7 +24,7 @@ use crate::discovery::tmux::{SystemTmux, TmuxRunner};
 use crate::model::{GraphSnapshot, MuxSessionId};
 use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
 use crate::resolve::resolve_snapshot;
-use crate::tui::actions::{AttachTarget, resolve_attach_target, resolve_view_session};
+use crate::tui::actions::{AttachTarget, PinLaunchTarget, resolve_attach_target};
 use crate::tui::app::{App, GraphDb, Msg};
 use crate::tui::effect::Effect;
 use crate::tui::preview::capture_via;
@@ -260,7 +260,9 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::Resume) => {
                     dispatch_live(terminal, &mut app, &config, Msg::ResumeSelected);
                 }
-                Some(Action::View) => view_action(terminal, &mut app, &config),
+                Some(Action::View) => {
+                    dispatch_live(terminal, &mut app, &config, Msg::ViewSelected);
+                }
                 Some(Action::DefaultAction) => default_action(terminal, &mut app, &config),
                 Some(Action::OpenRename) => open_rename_overlay(&mut app),
                 Some(Action::RenameOverlayKey(key)) => {
@@ -271,7 +273,9 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
                 Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
                 Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
                 Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
-                Some(Action::LaunchPin) => launch_pin_action(terminal, &mut app, &config),
+                Some(Action::LaunchPin) => {
+                    dispatch_live(terminal, &mut app, &config, Msg::LaunchSelectedPin);
+                }
                 Some(Action::OpenControls) => {
                     app.open_controls_overlay();
                     app.update(Msg::SetStatus(Some(
@@ -1306,7 +1310,48 @@ fn execute_exec_spec(
             };
             let _ = app.update(Msg::SetStatus(Some(message)));
         }
+        ExecSpec::ViewSession(session_id) => {
+            execute_view_session(terminal, app, config, session_id);
+        }
+        ExecSpec::LaunchPin {
+            pin_id,
+            attach_target,
+        } => {
+            execute_launch_pin(terminal, app, config, &pin_id, attach_target.as_ref());
+        }
     }
+}
+
+/// Executor branch for `ExecSpec::ViewSession`. Tries the native
+/// viewer first (ADR 0052) — its filesystem read + parser call
+/// keep the reducer pure. Falls through to the external-launch
+/// escape hatch for harnesses without a native parser (currently
+/// `aider`).
+fn execute_view_session(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    session_id: crate::model::AgentSessionId,
+) {
+    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state(&session_id) {
+        let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
+        app.open_viewer_modal(state);
+        let _ = app.update(Msg::SetStatus(Some(format!("viewing {label}"))));
+        return;
+    }
+    let target = resolve_viewer_target(&session_id, &PathBinaryProbe);
+    let message = match target {
+        ViewerTarget::Launch(plan) => {
+            let outcome = run_viewer_launch(terminal, &plan);
+            refresh(app, config);
+            match outcome {
+                ViewerOutcome::Exited => format!("viewed: {}", plan.label),
+                ViewerOutcome::Failed(reason) => format!("view failed: {reason}"),
+            }
+        }
+        ViewerTarget::Disabled(reason) => viewer_disabled_reason(&reason),
+    };
+    let _ = app.update(Msg::SetStatus(Some(message)));
 }
 
 /// Bridge helper: dispatch a `Msg` through the reducer and run any
@@ -1869,8 +1914,12 @@ fn apply_pins_action_and_refresh(
         PinsAction::BindPin(request) => bind_pin_action(app, config, request),
         PinsAction::RemovePin(request) => remove_pin_controls_action(app, config, request),
         PinsAction::LaunchPin { pin_id } => {
-            let target = pin_launch_target_from_snapshot(app, &pin_id);
-            launch_pin_by_id(terminal, app, config, &pin_id, target.as_ref());
+            // Pins overlay bypasses the reducer until Phase D lands
+            // — it already has the pin id in hand from the modal
+            // — but still funnels through the executor helper so
+            // the terminal handoff logic stays single-sourced.
+            let target = crate::tui::actions::pin_launch_target_from_snapshot(app, &pin_id);
+            execute_launch_pin(terminal, app, config, &pin_id, target.as_ref());
         }
         PinsAction::PinPlaceholder(_) => {
             app.apply_pins_action(action);
@@ -2288,8 +2337,10 @@ fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunCon
     match selected_default_action(app) {
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
         SelectedDefault::Attach => dispatch_live(terminal, app, config, Msg::AttachSelected),
-        SelectedDefault::View => view_action(terminal, app, config),
-        SelectedDefault::LaunchPin => launch_pin_action(terminal, app, config),
+        SelectedDefault::View => dispatch_live(terminal, app, config, Msg::ViewSelected),
+        SelectedDefault::LaunchPin => {
+            dispatch_live(terminal, app, config, Msg::LaunchSelectedPin);
+        }
     }
 }
 
@@ -2300,38 +2351,14 @@ fn default_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunCon
 /// nested process to exit (typically when the operator detaches
 /// from tmux), then re-enters the alt screen and refreshes the
 /// row tree.
-fn launch_pin_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
-    let Some(selection) = app.selection() else {
-        app.update(Msg::SetStatus(Some("launch: nothing selected".to_string())));
-        return;
-    };
-    let pin_id = app
-        .tree()
-        .rows
-        .iter()
-        .find(|row| &row.id == selection)
-        .and_then(|row| match &row.kind {
-            crate::tui::rows::RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
-            crate::tui::rows::RowKind::AgentSession(session) => session.pin_id.as_deref(),
-            crate::tui::rows::RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
-            _ => None,
-        })
-        .map(str::to_string);
-    let Some(pin_id) = pin_id else {
-        app.update(Msg::SetStatus(Some(
-            "launch: select a pin or placeholder row".to_string(),
-        )));
-        return;
-    };
-    let target = selected_pin_launch_target(app);
-    launch_pin_by_id(terminal, app, config, &pin_id, target.as_ref());
-}
-
-/// Shared body of `pin launch <id>`: suspend the TUI, re-exec into
-/// the CLI, and refresh on return. Used by both the row-level
-/// `Enter` / `L` dispatch and the Pins modal's `launch` entry so
-/// the modal flow doesn't reinvent the terminal hand-off.
-fn launch_pin_by_id(
+/// Executor branch for `ExecSpec::LaunchPin`: suspend the alt
+/// screen, re-exec into `conspectus pin launch <id> --no-attach`,
+/// refresh so the row tree reflects the just-created session, then
+/// attach to the resulting tmux session when the pin has an
+/// attachable target. Also called directly from the Pins overlay's
+/// `PinsAction::LaunchPin` path (which has the pin id in hand from
+/// the modal and bypasses the reducer until Phase D lands).
+fn execute_launch_pin(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
@@ -2386,44 +2413,6 @@ fn launch_pin_by_id(
         AttachOutcome::Failed(reason) => format!("pin `{pin_id}` launch attach failed: {reason}"),
     };
     app.update(Msg::SetStatus(Some(message)));
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PinLaunchTarget {
-    mux_name: String,
-    mux_socket: Option<String>,
-}
-
-fn selected_pin_launch_target(app: &App) -> Option<PinLaunchTarget> {
-    let selection = app.selection()?;
-    let row = app.tree().rows.iter().find(|row| &row.id == selection)?;
-    match &row.kind {
-        crate::tui::rows::RowKind::Pin(pin) => Some(PinLaunchTarget {
-            mux_name: pin.mux_name.clone(),
-            mux_socket: pin.mux_socket.clone(),
-        }),
-        crate::tui::rows::RowKind::AgentSession(session) => {
-            let pin_id = session.pin_id.as_ref()?;
-            pin_launch_target_from_snapshot(app, pin_id)
-        }
-        crate::tui::rows::RowKind::MuxSession(mux) => {
-            let pin_id = mux.pin_id.as_ref()?;
-            pin_launch_target_from_snapshot(app, pin_id)
-        }
-        _ => None,
-    }
-}
-
-fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLaunchTarget> {
-    app.graph_db()?
-        .snapshot()
-        .pins
-        .iter()
-        .find(|pin| pin.id == pin_id)
-        .map(|pin| PinLaunchTarget {
-            mux_name: pin.mux.name.clone(),
-            mux_socket: pin.mux.socket_name.clone(),
-        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2601,54 +2590,6 @@ fn run_tmux_attach_with_socket(
 
 fn target_short(target: &AttachTarget) -> String {
     format!("{}:{}", target.backend, target.native_id)
-}
-
-/// Handle the `T` key (H-VIEWER-NATIVE-008, ADR 0052). Resolve the
-/// selected agent session through `viewer_bridge::build_viewer_state`
-/// and open the native full-screen modal. Falls through to the
-/// escape-hatch external launch (`H-TRANSCRIPT-012`) when the
-/// harness has no native parser registered (currently: `aider`).
-/// On disabled, set a status-bar message and stay in the TUI.
-fn view_action(terminal: &mut DefaultTerminal, app: &mut App, config: &RunConfig) {
-    // Resolve the session through the actions module so mux rows
-    // open the viewer for their preferred linked session (T8-043
-    // companion: `v` on a mux row is the inverse of `a` on a
-    // session). Agent-session rows pass through unchanged.
-    let session_id = match resolve_view_session(app) {
-        Ok(id) => id,
-        Err(reason) => {
-            app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
-            return;
-        }
-    };
-
-    // Native viewer is the default per ADR 0052.
-    if let Some(state) = crate::tui::viewer_bridge::build_viewer_state(&session_id) {
-        let label = format!("{}:{}", session_id.harness_key, session_id.session_key);
-        app.open_viewer_modal(state);
-        app.update(Msg::SetStatus(Some(format!("viewing {label}"))));
-        return;
-    }
-
-    // Fallback: harness has no native parser. Honor the escape-hatch
-    // external launcher (`claude-history` only, for now). Used by
-    // `aider` and any other harness we add to the graph before its
-    // viewer parser lands.
-    let target = resolve_viewer_target(&session_id, &PathBinaryProbe);
-    match target {
-        ViewerTarget::Launch(plan) => {
-            let outcome = run_viewer_launch(terminal, &plan);
-            refresh(app, config);
-            let message = match outcome {
-                ViewerOutcome::Exited => format!("viewed: {}", plan.label),
-                ViewerOutcome::Failed(reason) => format!("view failed: {reason}"),
-            };
-            app.update(Msg::SetStatus(Some(message)));
-        }
-        ViewerTarget::Disabled(reason) => {
-            app.update(Msg::SetStatus(Some(viewer_disabled_reason(&reason))));
-        }
-    }
 }
 
 /// Translate a key event into a [`crate::viewer::input::ViewerMsg`],

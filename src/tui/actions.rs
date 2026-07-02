@@ -469,6 +469,85 @@ pub fn lookup_mux_node<'a>(
     })
 }
 
+/// Resolved tmux launch target for a pin (ADR 0057). Carries the
+/// pin's declared mux name and optional socket so the executor can
+/// attach to the session once `conspectus pin launch <id>`
+/// finishes. `None` when the pin has no attachable target yet
+/// (e.g. the launch synthesized a mux the operator asked us to
+/// leave detached).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinLaunchTarget {
+    pub mux_name: String,
+    pub mux_socket: Option<String>,
+}
+
+/// Reasons `Msg::LaunchSelectedPin` refuses to fire in the reducer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinLaunchDisabled {
+    /// No selection to derive a pin from.
+    NoSelection,
+    /// The selected row is not a pin, a pin-bound session, or a
+    /// pin-bound mux — nothing to launch.
+    NotAPinRow,
+}
+
+/// Format `PinLaunchDisabled` as an operator-facing status hint.
+pub fn pin_launch_disabled_reason(reason: &PinLaunchDisabled) -> String {
+    match reason {
+        PinLaunchDisabled::NoSelection => "launch: nothing selected".to_string(),
+        PinLaunchDisabled::NotAPinRow => "launch: select a pin or placeholder row".to_string(),
+    }
+}
+
+/// Look up a pin's launch target from the loaded snapshot. Public
+/// so both the reducer (via `resolve_launch_pin`) and the Pins-
+/// overlay dispatch (which already has the `pin_id` in hand from
+/// the modal) can share the same lookup.
+pub fn pin_launch_target_from_snapshot(app: &App, pin_id: &str) -> Option<PinLaunchTarget> {
+    app.graph_db()?
+        .snapshot()
+        .pins
+        .iter()
+        .find(|pin| pin.id == pin_id)
+        .map(|pin| PinLaunchTarget {
+            mux_name: pin.mux.name.clone(),
+            mux_socket: pin.mux.socket_name.clone(),
+        })
+}
+
+/// Resolve the launch-pin action against `App` state. Pure. Returns
+/// the pin id plus its optional attach target on success. The
+/// executor is the only code that runs the launch subprocess.
+pub fn resolve_launch_pin(
+    app: &App,
+) -> Result<(String, Option<PinLaunchTarget>), PinLaunchDisabled> {
+    let selection = app.selection().ok_or(PinLaunchDisabled::NoSelection)?;
+    let row = app
+        .tree()
+        .rows
+        .iter()
+        .find(|row| &row.id == selection)
+        .ok_or(PinLaunchDisabled::NoSelection)?;
+    let pin_id = match &row.kind {
+        RowKind::Pin(pin) => Some(pin.pin_id.as_str()),
+        RowKind::AgentSession(session) => session.pin_id.as_deref(),
+        RowKind::MuxSession(mux) => mux.pin_id.as_deref(),
+        _ => None,
+    };
+    let pin_id = pin_id.ok_or(PinLaunchDisabled::NotAPinRow)?.to_string();
+    let target = match &row.kind {
+        RowKind::Pin(pin) => Some(PinLaunchTarget {
+            mux_name: pin.mux_name.clone(),
+            mux_socket: pin.mux_socket.clone(),
+        }),
+        RowKind::AgentSession(_) | RowKind::MuxSession(_) => {
+            pin_launch_target_from_snapshot(app, &pin_id)
+        }
+        _ => None,
+    };
+    Ok((pin_id, target))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

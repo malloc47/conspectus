@@ -9,7 +9,8 @@
 //! reducer never emits an effect nobody can execute. See
 //! `docs/backlog.md` §H-TUI-002 for the phase roadmap.
 
-use crate::tui::actions::AttachTarget;
+use crate::model::AgentSessionId;
+use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::resume::ResumeTarget;
 
 /// A side effect the reducer wants the runtime to schedule.
@@ -41,7 +42,7 @@ pub enum Effect {
 
 /// Description of a subprocess the executor should run. All variants
 /// carry the resolved target data so the reducer never touches
-/// `std::process` or the terminal.
+/// `std::process`, the filesystem, or the terminal.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecSpec {
     /// Suspend the alt screen and attach to a mux session.
@@ -55,4 +56,20 @@ pub enum ExecSpec {
     /// operator can watch a new terminal window come up while
     /// staying in the TUI.
     Resume(ResumeTarget),
+    /// Open the transcript viewer for an agent session. The executor
+    /// picks native (parse transcript on disk into `ViewerState` +
+    /// `App::open_viewer_modal`) vs external fallback (spawn
+    /// `claude-history` etc.); both paths read the filesystem so the
+    /// reducer never touches them.
+    ViewSession(AgentSessionId),
+    /// Suspend the alt screen, re-exec into
+    /// `conspectus pin launch <id> --no-attach`, refresh so the row
+    /// tree reflects the just-created session, then attach to the
+    /// resulting tmux session when `attach_target` is available. The
+    /// executor owns the full sequence; the reducer never sees the
+    /// intermediate states.
+    LaunchPin {
+        pin_id: String,
+        attach_target: Option<PinLaunchTarget>,
+    },
 }
