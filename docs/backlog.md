@@ -1653,10 +1653,27 @@ cross-references below.
     tests bring the `(state', effects)` coverage to 8 cases across
     all four Phase B Msgs. `&mut Terminal` no longer appears in
     any non-executor handler in the runtime.
-  - Phase C (mux ops): `Effect::RunMux(MuxOp)` for rename,
-    new-session, send-keys, capture-pane; consolidates the
-    `TmuxRunner` threading currently split across `handle_*` and
-    `apply_*` helpers.
+  - Phase C.1 (landed 2026-07-02, capture-pane): introduced
+    `Effect::RunMux(MuxOp)` with `MuxOp::CapturePreview`.
+    `execute_effects_live` and `dispatch_live` grew a `tmux`
+    parameter — the executor is now the sole holder of the
+    `TmuxRunner` reference for reducer-emitted effects.
+    `refresh_mux_preview_if_needed` split into a pure planner
+    (`plan_mux_preview_capture`) + executor branch
+    (`execute_mux_op`). Pure `execute_effects` treats `RunMux` as
+    a no-op the same way it does `Exec`. Four executor-level
+    tests cover the CapturePreview path end-to-end with FakeTmux.
+    `new-session` and `send-keys` weren't threaded through the
+    runtime today so no dispatch surface to migrate.
+  - Phase C.2 (next, rename): `MuxOp::RenameSession { socket,
+    from, to, purpose }` for the two current rename call sites
+    (`commit_rename` and `apply_pin_adopt_mux_rename`). Both
+    currently take `&dyn TmuxRunner` and bundle a tmux rename
+    with an alias/pin store write. The mux half migrates to
+    `Effect::RunMux`; the store-write half moves to
+    `Effect::WriteStore` alongside Phase D. Landing both in one
+    story keeps the status-message wording (currently pinned by
+    tests) intact instead of splitting it across two phases.
   - Phase D (store writes): `Effect::WriteStore(StoreOp)` for pin
     CRUD (create / edit / bind / remove) and alias writes.
     Collapses `PinsAction` into `Msg` variants that emit the
