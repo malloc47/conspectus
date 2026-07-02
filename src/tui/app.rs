@@ -531,6 +531,18 @@ pub enum Msg {
     /// `Effect::Exec(ExecSpec::LaunchPin { pin_id, attach_target })`
     /// or `Effect::Toast(reason)`.
     LaunchSelectedPin,
+    /// Remove a pin declaration from its TOML store (ADR 0057).
+    /// Carries the already-resolved [`PinRemoveRequest`]; the
+    /// reducer emits `Effect::WriteStore(StoreOp::PinRemove(...))`
+    /// and the executor performs the write.
+    PinRemove(crate::tui::widgets::pins::PinRemoveRequest),
+    /// Write a pin-binding declaration linking a pin to an existing
+    /// agent session (ADR 0057 / ADR 0058). The reducer checks that
+    /// a graph snapshot is loaded (needed for the target lookup at
+    /// executor time) and emits either
+    /// `Effect::WriteStore(StoreOp::PinBind(...))` or
+    /// `Effect::Toast(reason)`.
+    PinBind(crate::tui::widgets::pins::PinBindRequest),
 }
 
 impl App {
@@ -1934,6 +1946,22 @@ impl App {
                     Err(reason) => effects.push(Effect::Toast(
                         crate::tui::actions::pin_launch_disabled_reason(&reason),
                     )),
+                }
+            }
+            Msg::PinRemove(request) => {
+                effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinRemove(
+                    request,
+                )));
+            }
+            Msg::PinBind(request) => {
+                if self.database.is_none() {
+                    effects.push(Effect::Toast(
+                        "pin bind failed: no graph database available".to_string(),
+                    ));
+                } else {
+                    effects.push(Effect::WriteStore(crate::tui::effect::StoreOp::PinBind(
+                        request,
+                    )));
                 }
             }
         }
@@ -5452,6 +5480,50 @@ mod tests {
                     "launch: select a pin or placeholder row".to_string(),
                 )]
             );
+        }
+
+        #[test]
+        fn pin_remove_msg_emits_write_store_effect() {
+            use crate::tui::effect::StoreOp;
+            let mut app = App::new(RunConfig::defaults());
+            let request = crate::tui::widgets::pins::PinRemoveRequest {
+                id: "work".to_string(),
+                display_name: "work".to_string(),
+                store_path: "/tmp/.conspectus.toml".to_string(),
+            };
+            let effects = app.update(Msg::PinRemove(request.clone()));
+            assert_eq!(
+                effects,
+                vec![Effect::WriteStore(StoreOp::PinRemove(request))]
+            );
+        }
+
+        #[test]
+        fn pin_bind_without_snapshot_emits_toast() {
+            let mut app = App::new(RunConfig::defaults());
+            let request = crate::tui::widgets::pins::PinBindRequest {
+                pin_id: "work".to_string(),
+                session_key: "abc".to_string(),
+            };
+            let effects = app.update(Msg::PinBind(request));
+            assert_eq!(
+                effects,
+                vec![Effect::Toast(
+                    "pin bind failed: no graph database available".to_string()
+                )]
+            );
+        }
+
+        #[test]
+        fn pin_bind_with_snapshot_emits_write_store_effect() {
+            use crate::tui::effect::StoreOp;
+            let mut app = seeded_app(&[("codex", "Session One", "/p/project")]);
+            let request = crate::tui::widgets::pins::PinBindRequest {
+                pin_id: "work".to_string(),
+                session_key: "abc".to_string(),
+            };
+            let effects = app.update(Msg::PinBind(request.clone()));
+            assert_eq!(effects, vec![Effect::WriteStore(StoreOp::PinBind(request))]);
         }
     }
 }

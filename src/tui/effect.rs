@@ -12,6 +12,7 @@
 use crate::model::{AgentSessionId, MuxSessionId};
 use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::resume::ResumeTarget;
+use crate::tui::widgets::pins::{PinBindRequest, PinRemoveRequest};
 
 /// A side effect the reducer wants the runtime to schedule.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +47,14 @@ pub enum Effect {
     /// [`execute_effects_live`] when they want to assert against
     /// mux ops.
     RunMux(MuxOp),
+    /// Persist a user-authored declaration to disk (ADR 0085
+    /// contract 2 Phase D). The reducer emits the store op; the
+    /// executor performs the TOML write, schedules a follow-up
+    /// force-local refresh so the row tree reflects the change,
+    /// and posts a status message summarizing the outcome. The
+    /// executor is the sole code in the TUI that writes to
+    /// `.conspectus.toml` for reducer-emitted effects.
+    WriteStore(StoreOp),
 }
 
 /// Description of a subprocess the executor should run. All variants
@@ -100,4 +109,21 @@ pub enum MuxOp {
         mux: MuxSessionId,
         native_id: String,
     },
+}
+
+/// A durable-store write the executor should perform. Each variant
+/// carries the fully-resolved request the pure resolver already
+/// built; the executor writes the TOML, schedules a follow-up
+/// refresh so the row tree reflects the change, and posts the
+/// summary status. Further variants (`PinCreate`, `PinEdit`,
+/// `AliasUpsert`, `AliasRemove`) migrate over as their bundling
+/// with mux renames is resolved — see `docs/backlog.md`
+/// §H-TUI-002 Phase D.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StoreOp {
+    /// Remove a pin entry from its TOML store (ADR 0057).
+    PinRemove(PinRemoveRequest),
+    /// Write a pin-binding declaration linking a pin to an
+    /// existing agent session (ADR 0057 / ADR 0058).
+    PinBind(PinBindRequest),
 }

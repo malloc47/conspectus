@@ -1087,14 +1087,14 @@ fn remove_pin_action(app: &mut App, config: &RunConfig) {
         ))));
         return;
     };
-    remove_pin_controls_action(
+    let _ = config;
+    dispatch(
         app,
-        config,
-        crate::tui::widgets::pins::PinRemoveRequest {
+        Msg::PinRemove(crate::tui::widgets::pins::PinRemoveRequest {
             id: target.id,
             display_name: target.display_name,
             store_path: target.store_path,
-        },
+        }),
     );
 }
 
@@ -1291,6 +1291,83 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
             // silently drops them. Same rationale as `Effect::Exec`
             // above — no static-mode path emits `RunMux` today, so
             // this branch is a safety net.
+        }
+        Effect::WriteStore(op) => execute_store_op(app, op),
+    }
+}
+
+/// Dispatch a [`StoreOp`] against the on-disk TOML store. The only
+/// place in the TUI where a reducer-emitted store write touches
+/// `.conspectus.toml` (ADR 0085 contract 2 Phase D). Handles the
+/// full post-write flow: refresh so the row tree reflects the
+/// change, then post a status message summarizing the outcome.
+fn execute_store_op(app: &mut App, op: crate::tui::effect::StoreOp) {
+    use crate::tui::effect::StoreOp;
+    match op {
+        StoreOp::PinRemove(request) => execute_pin_remove(app, request),
+        StoreOp::PinBind(request) => execute_pin_bind(app, request),
+    }
+}
+
+fn execute_pin_remove(app: &mut App, request: crate::tui::widgets::pins::PinRemoveRequest) {
+    match write_pin_remove(&request) {
+        Ok(outcome) => {
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            let message = if outcome.changed {
+                format!(
+                    "removed pin `{}` from {}",
+                    request.id,
+                    outcome.path.display()
+                )
+            } else {
+                format!(
+                    "pin `{}` was already absent from {}",
+                    request.id,
+                    outcome.path.display()
+                )
+            };
+            let _ = app.update(Msg::SetStatus(Some(message)));
+        }
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("pin remove failed: {err}"))));
+        }
+    }
+}
+
+fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins::PinBindRequest) {
+    let Some(database) = app.graph_db() else {
+        // Reducer already gated on this — the branch is a safety
+        // net for direct executor callers.
+        let _ = app.update(Msg::SetStatus(Some(
+            "pin bind failed: no graph database available".to_string(),
+        )));
+        return;
+    };
+    let snapshot = database.snapshot().clone();
+    match write_pin_bind(
+        &request,
+        &snapshot,
+        &crate::config::ConfigLoader::from_env(),
+    ) {
+        Ok(outcome) => {
+            let verb = if outcome.changed {
+                "bound"
+            } else {
+                "unchanged"
+            };
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            let message = format!(
+                "{verb} pin `{}` to session `{}` in {}",
+                request.pin_id,
+                request.session_key,
+                outcome.path.display()
+            );
+            let _ = app.update(Msg::SetStatus(Some(message)));
+        }
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("pin bind failed: {err}"))));
         }
     }
 }
@@ -1983,8 +2060,8 @@ fn apply_pins_action_and_refresh(
     match action {
         PinsAction::CreatePin(request) => create_pin_action(app, config, tmux, request),
         PinsAction::EditPin(request) => edit_pin_action(app, config, request),
-        PinsAction::BindPin(request) => bind_pin_action(app, config, request),
-        PinsAction::RemovePin(request) => remove_pin_controls_action(app, config, request),
+        PinsAction::BindPin(request) => dispatch(app, Msg::PinBind(request)),
+        PinsAction::RemovePin(request) => dispatch(app, Msg::PinRemove(request)),
         PinsAction::LaunchPin { pin_id } => {
             // Pins overlay bypasses the reducer until Phase D lands
             // — it already has the pin id in hand from the modal
@@ -2163,39 +2240,6 @@ fn pin_store_label(kind: PinStoreKind) -> &'static str {
     }
 }
 
-fn bind_pin_action(
-    app: &mut App,
-    config: &RunConfig,
-    request: crate::tui::widgets::pins::PinBindRequest,
-) {
-    let Some(database) = app.graph_db() else {
-        app.update(Msg::SetStatus(Some(
-            "pin bind failed: no graph database available".to_string(),
-        )));
-        return;
-    };
-    let snapshot = database.snapshot();
-    match write_pin_bind(&request, snapshot, &crate::config::ConfigLoader::from_env()) {
-        Ok(outcome) => {
-            let verb = if outcome.changed {
-                "bound"
-            } else {
-                "unchanged"
-            };
-            refresh_after_pin_mutation(app, config);
-            app.update(Msg::SetStatus(Some(format!(
-                "{verb} pin `{}` to session `{}` in {}",
-                request.pin_id,
-                request.session_key,
-                outcome.path.display()
-            ))));
-        }
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("pin bind failed: {err}"))));
-        }
-    }
-}
-
 fn write_pin_bind(
     request: &crate::tui::widgets::pins::PinBindRequest,
     snapshot: &crate::model::GraphSnapshot,
@@ -2344,34 +2388,6 @@ fn preflight_pin_edit(
         );
     }
     Ok(())
-}
-
-fn remove_pin_controls_action(
-    app: &mut App,
-    config: &RunConfig,
-    request: crate::tui::widgets::pins::PinRemoveRequest,
-) {
-    match write_pin_remove(&request) {
-        Ok(outcome) if outcome.changed => {
-            refresh_after_pin_mutation(app, config);
-            app.update(Msg::SetStatus(Some(format!(
-                "removed pin `{}` from {}",
-                request.id,
-                outcome.path.display()
-            ))));
-        }
-        Ok(outcome) => {
-            refresh_after_pin_mutation(app, config);
-            app.update(Msg::SetStatus(Some(format!(
-                "pin `{}` was already absent from {}",
-                request.id,
-                outcome.path.display()
-            ))));
-        }
-        Err(err) => {
-            app.update(Msg::SetStatus(Some(format!("pin remove failed: {err}"))));
-        }
-    }
 }
 
 fn write_pin_remove(
