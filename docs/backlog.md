@@ -1730,6 +1730,23 @@ cross-references below.
     `dispatch()`/`dispatch_live()`. Reducer test coverage grows
     to 23; the existing `projection_zero_discovery` suite pins
     the invariant via the new Msg variants directly.
+  - Phase F cleanup (landed 2026-07-02, PinsAction collapse):
+    `PinsAction` enum deleted. `PinsOutcome` carries
+    `crate::tui::Msg` values directly. The four write variants
+    (Create / Edit / Bind / Remove) map to the existing
+    `Msg::Pin{Create,Edit,Bind,Remove}`; the launch variant
+    becomes new `Msg::LaunchPinById(String)` (reducer looks up
+    the attach target from the snapshot and emits
+    `Effect::Exec(ExecSpec::LaunchPin { ... })`); the
+    placeholder variant becomes `Msg::SetStatus(...)` with the
+    hint text pre-formatted via a shared
+    `pin_placeholder_status(&str)` helper. `App::apply_pins_action`
+    and `apply_pins_action_and_refresh` runtime helper deleted;
+    `static_apply_pins_action_and_refresh` becomes
+    `static_apply_pins_msg`. Reducer test grows to 24. Scope
+    note: the eight `Action::Open*` overlay-opens still live in
+    the Action enum — they fold naturally when `H-TUI-003`'s
+    modal stack lands with a shared Open contract.
   - Blockers: `H-TUI-001` (landed). Phase B unblocks after
     Phase A; C/D/E/F land opportunistically as their variants
     are needed.
@@ -1745,10 +1762,27 @@ cross-references below.
     (`Msg::Viewer(ViewerMsg)`). Adding a modal becomes struct + trait
     impl + enum variant with zero new loop/keymap/draw branches. The
     `H-HYG-009` pins-widget split should target this contract.
+  - Wave 1 (landed 2026-07-02, scaffolding + Help): new `tui/modal.rs`
+    with `Overlay` trait, `OverlayOutcome { Consumed, Commit(Box<Msg>),
+    Close }`, and `Modal` enum. `App::modal_stack: Vec<Modal>` replaces
+    the `help_overlay: Option<...>` field for the first migrated
+    surface. `open_help_overlay` / `close_help_overlay` /
+    `help_overlay()` / `help_overlay_mut()` route through the stack so
+    every runtime + UI caller keeps working. `handle_help_overlay_key`
+    dispatches through the `Overlay::handle` trait method; `Commit`
+    outcomes pop + `dispatch()` through the reducer. Pattern
+    established with 5 unit tests in `tui::app::tests::modal_stack`.
+  - Waves 2-7 (next, per-overlay migrations): rename, controls, pins,
+    search, value_modal, viewer_modal each migrate independently by
+    adding a `Modal::X(...)` variant, deleting the corresponding
+    `Option<...>` field, and re-routing `open_*` / `close_*` /
+    accessors + input handlers through the stack. The controls and
+    pins overlays already produce Msg values (Phase F / Phase F
+    cleanup) so their `Commit(Msg)` path is one wrapper away.
   - Tests: overlay snapshot tests unchanged; one stacking test (e.g.
     help over controls) and a routing test per outcome variant.
   - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
-    path).
+    path) landed. Wave 1 landed. Subsequent waves are mechanical.
 - [ ] `H-TUI-004` Unify the event loops behind an event union and
   subscriptions.
   - Scope: `enum UiEvent { Input(Event), Tick, Discovery(..) }` consumed
