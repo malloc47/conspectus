@@ -1628,13 +1628,25 @@ cross-references below.
     `tui::app::tests::reducer_effects`. Reserved variants for
     future waves are documented in `src/tui/effect.rs` but not
     enumerated until an executor case exists.
-  - Phase B (next, terminal-suspending exec): add
-    `Effect::Exec(ExecSpec)` for attach, resume, viewer, and pin
-    launch. Move `attach_action` / `resume_action` /
-    `view_action` / `launch_pin_action` into executor cases so
-    `&mut Terminal` disappears from the handler signature. First
-    reducer-level end-to-end test (`(state', effects)` for an
-    attach interaction).
+  - Phase B.1 (landed 2026-07-02): `Effect::Exec(ExecSpec)` with
+    `AttachMux(AttachTarget)` and `Resume(ResumeTarget)`. Reducer
+    handles `Msg::AttachSelected` / `Msg::ResumeSelected` via the
+    existing pure resolvers; the executor split into pure
+    `execute_effects` and live `execute_effects_live` — the latter
+    is the only code that touches `&mut Terminal` /
+    `std::process` for these paths. `attach_action` /
+    `resume_action` free functions deleted; four reducer-level
+    `(state', effects)` tests land as the first interaction-level
+    coverage per ADR 0085 contract 2.
+  - Phase B.2 (next, viewer + pin launch): grow `ExecSpec` with
+    `ViewerExternal(ViewerPlan)` and
+    `LaunchPin { pin_id, target }`. Viewer needs a separate
+    executor-side branch for the native viewer path (fs read to
+    build `ViewerState` + `app.open_viewer_modal`) — the reducer
+    emits a data description (`Msg::ViewSelected`), the executor
+    picks native vs external. `view_action` and
+    `launch_pin_action` free functions delete; the terminal
+    argument leaves the last two dispatch handlers.
   - Phase C (mux ops): `Effect::RunMux(MuxOp)` for rename,
     new-session, send-keys, capture-pane; consolidates the
     `TmuxRunner` threading currently split across `handle_*` and
