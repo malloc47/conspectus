@@ -1665,15 +1665,17 @@ cross-references below.
     tests cover the CapturePreview path end-to-end with FakeTmux.
     `new-session` and `send-keys` weren't threaded through the
     runtime today so no dispatch surface to migrate.
-  - Phase C.2 (next, rename): `MuxOp::RenameSession { socket,
-    from, to, purpose }` for the two current rename call sites
-    (`commit_rename` and `apply_pin_adopt_mux_rename`). Both
-    currently take `&dyn TmuxRunner` and bundle a tmux rename
-    with an alias/pin store write. The mux half migrates to
-    `Effect::RunMux`; the store-write half moves to
-    `Effect::WriteStore` alongside Phase D. Landing both in one
-    story keeps the status-message wording (currently pinned by
-    tests) intact instead of splitting it across two phases.
+  - Phase C.2 (landed 2026-07-02 alongside Phase D.2, rename):
+    the two rename call sites (`commit_rename`,
+    `apply_pin_adopt_mux_rename`) migrated as bundled effects
+    inside their WriteStore executor branches. Rather than
+    exposing a standalone `MuxOp::RenameSession` variant, the
+    executor's `execute_pin_create` and `execute_commit_alias_rename`
+    call `tmux.rename_session(...)` inline after the store write,
+    preserving the current composite status-message wording. A
+    future story can factor the shared "rename mux by socket+
+    from+to" call out into a first-class `MuxOp::RenameSession`
+    once a third consumer needs it.
   - Phase D.1 (landed 2026-07-02, pin remove + bind):
     `Effect::WriteStore(StoreOp)` with
     `StoreOp::PinRemove(PinRemoveRequest)` and
@@ -1688,16 +1690,24 @@ cross-references below.
     arming as runtime orchestration but funnels the actual write
     through the reducer. `remove_pin_controls_action` and
     `bind_pin_action` free functions deleted.
-  - Phase D.2 (next, pin create / edit + rename overlay):
-    grow `StoreOp` with `PinCreate`, `PinEdit`, and
-    `AliasUpsert` / `AliasRemove`. These bundle with mux ops
-    (`create_pin_action` triggers a pin-adopt tmux rename;
-    `commit_rename` triggers a lockstep session-native rename), so
-    each reducer arm emits `Effect::WriteStore(...)` alongside a
-    conditional `Effect::RunMux(MuxOp::RenameSession { ... })` —
-    which is Phase C.2 landing here since the two are coupled.
-    Reducer emits both effects up front; the executor runs them
-    in order and produces the composite status message.
+  - Phase D.2 (landed 2026-07-02, pin create / edit + rename
+    overlay): `StoreOp` grew `PinCreate(PinCreateRequest)`,
+    `PinEdit(PinEditRequest)`, and
+    `CommitAliasRename { session_id, new_display_name }`.
+    `Msg::PinCreate` / `Msg::PinEdit` emit their WriteStore
+    directly. `Msg::CommitRename(String)` branches on selection:
+    agent-session → `CommitAliasRename`; pin row → builds a
+    `PinEditRequest` from `pins_context()` and emits
+    `PinEdit`; anything else → `Toast`. All WriteStore variants
+    consolidated under `execute_effects_live` (some need tmux
+    for their bundled mux rename); pure `execute_effects` drops
+    WriteStore silently, same as it does for Exec / RunMux.
+    `remove_pin_action` grew terminal + tmux parameters and
+    routes through `dispatch_live`; `handle_rename_overlay_key`
+    similarly. Free functions `create_pin_action`,
+    `edit_pin_action`, `commit_rename`, and `commit_pin_rename`
+    deleted; five new reducer-level `(state', effects)` tests
+    bring the phase's coverage to 19 cases.
   - Phase E (preview capture + persistence completion):
     `Effect::CapturePreview(MuxTarget)` runs from the executor's
     per-tick sweep; `Effect::Persist` is already in the catalog
