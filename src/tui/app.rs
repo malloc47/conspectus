@@ -224,6 +224,12 @@ pub struct App {
     /// while transparently delegating via `Deref`/`DerefMut`.
     /// Non-blocking: input continues to flow to the underlying view.
     toast: crate::tui::widgets::toast::ToastEngineHolder,
+    /// Currently active view (ADR 0085 contract 4). Seeded from
+    /// [`RunConfig::default_view`] at startup; after that, the
+    /// reducer is the sole owner. `RunConfig` remains as an
+    /// initial-values source and never re-reads from here — the
+    /// TUI's projection state lives on `App`, not on the config.
+    active_view: View,
     /// Global sort toggle (ADR 0031). Per-view state covers
     /// filter/grouping/expanded; sort stays global because the
     /// recency-vs-hierarchy choice is view-independent in operator
@@ -400,6 +406,14 @@ pub enum Msg {
         loaded_at_epoch: i64,
         initial_selection_hint: Option<RowId>,
     },
+    /// Projection-only row-tree replacement (ADR 0085 contract 4).
+    /// The runtime dispatches this after a view / grouping / filter
+    /// / sort change so the tree re-derives from the held snapshot
+    /// without touching discovery. Snapshot and `loaded_at_epoch`
+    /// are untouched — the data isn't fresher, only re-projected —
+    /// and the `initial_selection_hint` path is skipped because
+    /// `SetTree` never fires before the first `SetData`.
+    SetTree(RowTree),
     /// Left panel: move selection down/up one visible row.
     NavDown,
     NavUp,
@@ -502,10 +516,16 @@ impl App {
         }
         let sort = config.default_sort;
         let filter = config.initial_filter.clone();
-        let grouping = super::Grouping::Sessions(config.sessions_grouping);
+        let active_view = config.default_view;
+        let grouping = match active_view {
+            View::Sessions => super::Grouping::Sessions(config.sessions_grouping),
+            View::Mux => super::Grouping::Mux(config.mux_grouping),
+            View::Union | View::Prs | View::Forks => super::Grouping::default_for(active_view),
+        };
         let edge_meta_visible = config.show_edge_meta;
         Self {
             config,
+            active_view,
             should_quit: false,
             database: None,
             tree: RowTree::default(),
@@ -572,7 +592,7 @@ impl App {
     /// state (or fresh defaults on first visit). Per ADR 0031 sort
     /// stays global, so callers don't touch it here.
     pub(crate) fn switch_to_view(&mut self, target: View) {
-        let from = self.config.default_view;
+        let from = self.active_view;
         if from == target {
             return;
         }
@@ -583,23 +603,14 @@ impl App {
             .remove(&target)
             .unwrap_or_else(|| ViewStateSlot::defaults_for(target));
         self.restore_active_state(loaded);
-        self.config.default_view = target;
+        self.active_view = target;
         // F8-013: persist the full UI state best-effort. When the
         // runtime hasn't enabled persistence (snapshot mode,
         // `--no-resume-view`, or any test path), the cache is `None`
         // and the call is a no-op. Failures here never abort the
         // switch.
         self.persist_state();
-        // Keep `config.sessions_grouping` in sync for the sessions
-        // row-tree builder. Other views read their grouping from
-        // `self.grouping` once their builders land.
-        if let super::Grouping::Sessions(g) = self.grouping {
-            self.config.sessions_grouping = g;
-        }
         self.force_recency_for_flat_sessions();
-        // Mirror the active filter into config so refresh() picks
-        // it up when it rebuilds the row tree.
-        self.config.initial_filter = self.filter.clone();
         self.status_message = None;
     }
 
@@ -971,7 +982,7 @@ impl App {
     /// behind the app.
     pub fn controls_context(&self) -> crate::tui::widgets::controls::ControlsContext<'_> {
         crate::tui::widgets::controls::ControlsContext {
-            view: self.config.default_view,
+            view: self.active_view,
             grouping: self.grouping,
             filter: &self.filter,
             sort: self.sort,
@@ -1354,22 +1365,12 @@ impl App {
             }
             ControlsAction::SetGrouping(g) => {
                 self.grouping = g;
-                match g {
-                    super::Grouping::Sessions(g) => {
-                        self.config.sessions_grouping = g;
-                        self.force_recency_for_flat_sessions();
-                    }
-                    super::Grouping::Mux(g) => {
-                        self.config.mux_grouping = g;
-                    }
-                    super::Grouping::Union(_)
-                    | super::Grouping::Prs(_)
-                    | super::Grouping::Forks(_) => {}
+                if matches!(g, super::Grouping::Sessions(_)) {
+                    self.force_recency_for_flat_sessions();
                 }
             }
             ControlsAction::SetFilter(filter) => {
-                self.filter = filter.clone();
-                self.config.initial_filter = filter;
+                self.filter = filter;
             }
             ControlsAction::SetSort(sort) => {
                 let sort = if matches!(
@@ -1381,7 +1382,6 @@ impl App {
                     sort
                 };
                 self.sort = sort;
-                self.config.default_sort = sort;
             }
         }
     }
@@ -1427,7 +1427,6 @@ impl App {
             super::Grouping::Sessions(super::SessionsGrouping::None)
         ) {
             self.sort = super::Sort::Recency;
-            self.config.default_sort = super::Sort::Recency;
         }
     }
 
@@ -1471,12 +1470,11 @@ impl App {
             && let Some(sort) = persisted.sort
         {
             self.sort = sort;
-            self.config.default_sort = sort;
         }
 
         // Pre-populate view_states from persisted state.
         for (view, slot) in persisted.view_states {
-            let is_active = view == self.config.default_view;
+            let is_active = view == self.active_view;
             let filter = if is_active && self.config.explicit_filter {
                 self.filter.clone()
             } else {
@@ -1502,13 +1500,11 @@ impl App {
             if is_active {
                 if !self.config.explicit_filter {
                     self.filter = slot.filter.clone();
-                    self.config.initial_filter = self.filter.clone();
                 }
                 if !self.config.explicit_grouping
                     && let Some(g) = slot.grouping
                 {
                     self.grouping = g;
-                    self.apply_grouping_to_config(g);
                 }
             }
         }
@@ -1522,7 +1518,7 @@ impl App {
     /// in `view_states`).
     pub fn build_persisted_state(&self) -> crate::tui_state::PersistedState {
         let mut view_states: BTreeMap<View, crate::tui_state::PersistedViewSlot> = BTreeMap::new();
-        let active_view = self.config.default_view;
+        let active_view = self.active_view;
         // Add the active view's current state.
         view_states.insert(
             active_view,
@@ -1543,7 +1539,7 @@ impl App {
             }
         }
         crate::tui_state::PersistedState {
-            last_view: Some(self.config.default_view),
+            last_view: Some(active_view),
             sort: Some(self.sort),
             view_states,
         }
@@ -1558,16 +1554,11 @@ impl App {
         }
     }
 
-    fn apply_grouping_to_config(&mut self, grouping: super::Grouping) {
-        match grouping {
-            super::Grouping::Sessions(g) => {
-                self.config.sessions_grouping = g;
-            }
-            super::Grouping::Mux(g) => {
-                self.config.mux_grouping = g;
-            }
-            super::Grouping::Union(_) | super::Grouping::Prs(_) | super::Grouping::Forks(_) => {}
-        }
+    /// Currently active view (ADR 0085 contract 4). Reads from
+    /// `App`, not `RunConfig`; the config's `default_view` is only
+    /// consulted at startup to seed this field.
+    pub fn active_view(&self) -> View {
+        self.active_view
     }
 
     /// Resolved color theme (ADR 0032). Renderer reads from this in
@@ -1792,6 +1783,10 @@ impl App {
                 self.pending_pin_remove = None;
                 self.set_data(snapshot, tree, loaded_at_epoch, initial_selection_hint);
             }
+            Msg::SetTree(tree) => {
+                self.pending_pin_remove = None;
+                self.set_tree(tree);
+            }
             Msg::NavDown => {
                 self.pending_pin_remove = None;
                 self.move_selection(1);
@@ -1900,6 +1895,40 @@ impl App {
             // selection.
             self.selection = Some(hint);
             self.last_visible_index.set(Some(pos));
+        } else {
+            self.selection = Some(visible[0].clone());
+            self.last_visible_index.set(Some(0));
+        }
+        self.recompute_detail();
+    }
+
+    /// Swap the row tree in place after a projection-only rebuild
+    /// (ADR 0085 contract 4). Snapshot / staleness / first-load
+    /// bookkeeping stay untouched; only the tree and the selection
+    /// retention run. `SetTree` never fires before the first
+    /// `SetData`, so any tree-less first-load path is out of scope
+    /// here — the empty-tree branch is a safety net for corner
+    /// cases like an empty snapshot.
+    fn set_tree(&mut self, tree: RowTree) {
+        let prev_selection = self.selection.take();
+        let prev_visible_index = prev_selection
+            .as_ref()
+            .and_then(|id| self.visible_rows().iter().position(|r| &r.id == id));
+        self.tree = tree;
+
+        let visible = self.visible_rows_owned();
+        if visible.is_empty() {
+            self.selection = None;
+            self.last_visible_index.set(None);
+        } else if let Some(prev) = prev_selection.as_ref()
+            && let Some(pos) = self.position_closest_to(&visible, prev, prev_visible_index)
+        {
+            self.selection = Some(visible[pos].clone());
+            self.last_visible_index.set(Some(pos));
+        } else if let Some(prev_index) = prev_visible_index {
+            let clamped = prev_index.min(visible.len() - 1);
+            self.selection = Some(visible[clamped].clone());
+            self.last_visible_index.set(Some(clamped));
         } else {
             self.selection = Some(visible[0].clone());
             self.last_visible_index.set(Some(0));
@@ -2096,9 +2125,7 @@ impl App {
         // the sessions view, bound / stale mux in the mux view) when one
         // is known, and fall back to the Pin itself otherwise.
         let target = match &raw_target {
-            NodeId::Pin(pin) => {
-                placeholder_detail_target(snapshot, &pin.id, self.config.default_view)
-            }
+            NodeId::Pin(pin) => placeholder_detail_target(snapshot, &pin.id, self.active_view),
             _ => raw_target,
         };
         let home = home_for_config(&self.config);
@@ -3990,7 +4017,7 @@ mod tests {
         app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
             View::Mux,
         ));
-        assert_eq!(app.config().default_view, View::Mux);
+        assert_eq!(app.active_view(), View::Mux);
         assert!(app.filter().is_empty(), "mux view starts unfiltered");
         assert_eq!(
             app.grouping(),
@@ -4090,7 +4117,7 @@ mod tests {
         // SwitchView to the current view should be a no-op — not
         // a save+restore cycle that could wipe state.
         app.apply_controls_action(crate::tui::widgets::controls::ControlsAction::SwitchView(
-            app.config().default_view,
+            app.active_view(),
         ));
         assert_eq!(app.filter(), &filter_before);
         assert_eq!(app.grouping(), grouping_before);
@@ -5118,16 +5145,10 @@ mod tests {
         app.restore_persisted_state();
 
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
-        assert_eq!(app.config().default_sort, crate::tui::Sort::Recency);
         assert_eq!(app.filter(), &filter);
-        assert_eq!(app.config().initial_filter, filter);
         assert_eq!(
             app.grouping(),
             crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Repo)
-        );
-        assert_eq!(
-            app.config().sessions_grouping,
-            crate::tui::SessionsGrouping::Repo
         );
     }
 
@@ -5172,16 +5193,10 @@ mod tests {
         app.restore_persisted_state();
 
         assert_eq!(app.sort(), crate::tui::Sort::Hierarchy);
-        assert_eq!(app.config().default_sort, crate::tui::Sort::Hierarchy);
         assert_eq!(app.filter(), &cli_filter);
-        assert_eq!(app.config().initial_filter, cli_filter);
         assert_eq!(
             app.grouping(),
             crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Workspace)
-        );
-        assert_eq!(
-            app.config().sessions_grouping,
-            crate::tui::SessionsGrouping::Workspace
         );
     }
 

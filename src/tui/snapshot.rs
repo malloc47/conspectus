@@ -42,7 +42,7 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::model::GraphSnapshot;
 use crate::tui::app::App;
 use crate::tui::runtime::{
-    self, Action, apply_controls_action_and_refresh, apply_view_switch, cycle_view,
+    self, Action, apply_controls_action_and_rebuild, apply_view_switch, cycle_view,
     handle_controls_overlay_key, handle_help_overlay_key, handle_search_overlay_key, refresh,
     refresh_from_snapshot, translate,
 };
@@ -217,7 +217,7 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::Msg(msg) => app.update(*msg),
         Action::SwitchView(view) => apply_view_switch(app, config, view),
         Action::CycleView(delta) => {
-            let next = cycle_view(app.config().default_view, delta);
+            let next = cycle_view(app.active_view(), delta);
             apply_view_switch(app, config, next);
         }
         Action::CycleGrouping(delta) => {
@@ -226,12 +226,11 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
             } else {
                 app.grouping().cycle_prev()
             };
-            apply_controls_action_and_refresh(app, config, ControlsAction::SetGrouping(next));
+            apply_controls_action_and_rebuild(app, ControlsAction::SetGrouping(next));
         }
         Action::ClearFilters => {
-            apply_controls_action_and_refresh(
+            apply_controls_action_and_rebuild(
                 app,
-                config,
                 ControlsAction::SetFilter(crate::filter::RowFilter::default()),
             );
         }

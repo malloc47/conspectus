@@ -700,7 +700,7 @@ fn render_vertical_scrollbar(
 /// the `1`–`5` accelerators or open the controls overlay.
 fn left_panel_title(app: &App) -> Line<'static> {
     let theme = app.theme();
-    let active = app.config().default_view;
+    let active = app.active_view();
     let mut spans = vec![Span::raw(" "), focus_marker_span(app, Focus::Left)];
     let mut first = true;
     for &view in crate::tui::widgets::controls::VIEW_OPTIONS {
@@ -942,7 +942,10 @@ fn group_row_body_width(
         return 0;
     };
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let flat_sessions = matches!(app.config().sessions_grouping, SessionsGrouping::None);
+    let flat_sessions = matches!(
+        app.grouping(),
+        crate::tui::Grouping::Sessions(SessionsGrouping::None)
+    );
     if !(flat_sessions && matches!(row.kind, RowKind::AgentSession(_))) {
         spans.push(Span::raw(row_indent(row.depth)));
     }
@@ -1033,7 +1036,10 @@ fn render_left_row(
 ) -> Line<'static> {
     let theme = app.theme();
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let flat_sessions = matches!(app.config().sessions_grouping, SessionsGrouping::None);
+    let flat_sessions = matches!(
+        app.grouping(),
+        crate::tui::Grouping::Sessions(SessionsGrouping::None)
+    );
     if flat_sessions && matches!(row.kind, RowKind::AgentSession(_)) {
         spans.push(disclosure_span(row, app));
     } else {
