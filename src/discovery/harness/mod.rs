@@ -232,6 +232,34 @@ pub trait HarnessAdapter: Send + Sync {
         &STUB_RUNTIME_SIGNATURE
     }
 
+    /// Build a viewer `SessionLocator` for the given
+    /// [`crate::model::AgentSessionId`] (H-EXT-006). Returning
+    /// `None` marks this harness as having no native transcript
+    /// source — the viewer bridge falls through to its
+    /// escape-hatch external launch (currently only `aider` does
+    /// this).
+    ///
+    /// Adapters that emit a locator populate its `state_root`
+    /// according to their parser's expectations: claude-code +
+    /// codex point at the harness state root; opencode resolves
+    /// the SQLite database path (or its containing directory)
+    /// so the parser can open it directly.
+    fn transcript_source(
+        &self,
+        session: &crate::model::AgentSessionId,
+    ) -> Option<crate::viewer::model::SessionLocator> {
+        let _ = session;
+        None
+    }
+
+    /// Native transcript parser for this harness (H-EXT-006).
+    /// Returning `None` marks the harness as unsupported by
+    /// the native viewer; the bridge falls back to the
+    /// escape-hatch external viewer.
+    fn transcript_parser(&self) -> Option<&'static dyn crate::viewer::parser::HarnessParser> {
+        None
+    }
+
     /// Build a hook sidecar record from a harness's SessionStart
     /// hook payload (H-EXT-005). The default implementation
     /// reads the ADR 0028 canonical `session_id` string and

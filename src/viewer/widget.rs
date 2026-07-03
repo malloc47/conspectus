@@ -641,9 +641,10 @@ mod tests {
     }
 
     fn unavailable_document() -> TranscriptDocument {
-        TranscriptDocument::unavailable(&SessionLocator::ClaudeCode {
-            state_root: PathBuf::from("/x"),
+        TranscriptDocument::unavailable(&SessionLocator {
+            harness_key: "claude-code".to_string(),
             session_key: "missing".to_string(),
+            state_root: PathBuf::from("/x"),
         })
     }
 

@@ -86,6 +86,21 @@ impl HarnessAdapter for CodexAdapter {
         &CODEX_RUNTIME_SIGNATURE
     }
 
+    fn transcript_source(
+        &self,
+        session: &crate::model::AgentSessionId,
+    ) -> Option<crate::viewer::model::SessionLocator> {
+        Some(crate::viewer::model::SessionLocator {
+            harness_key: HARNESS_KEY.to_string(),
+            session_key: session.session_key.clone(),
+            state_root: session.state_scope.clone().into(),
+        })
+    }
+
+    fn transcript_parser(&self) -> Option<&'static dyn crate::viewer::parser::HarnessParser> {
+        Some(&crate::viewer::parser::codex::CodexParser)
+    }
+
     fn launch_options(&self) -> &'static [super::HarnessLaunchOption] {
         super::CODEX_LAUNCH_OPTIONS
     }

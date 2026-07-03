@@ -99,6 +99,36 @@ impl HarnessAdapter for OpenCodeAdapter {
         &OPENCODE_RUNTIME_SIGNATURE
     }
 
+    fn transcript_source(
+        &self,
+        session: &crate::model::AgentSessionId,
+    ) -> Option<crate::viewer::model::SessionLocator> {
+        // H-EXT-006: resolve the SQLite database path. The
+        // pre-H-EXT-006 shape in `viewer_bridge::locator_for_session`
+        // treated the session's `state_scope` as either the
+        // database file itself or its containing directory; both
+        // shapes are accepted here so operator configs stay
+        // wire-compatible.
+        let mut db_path = std::path::PathBuf::from(session.state_scope.clone());
+        if db_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.eq_ignore_ascii_case("db"))
+            != Some(true)
+        {
+            db_path.push("opencode.db");
+        }
+        Some(crate::viewer::model::SessionLocator {
+            harness_key: HARNESS_KEY.to_string(),
+            session_key: session.session_key.clone(),
+            state_root: db_path,
+        })
+    }
+
+    fn transcript_parser(&self) -> Option<&'static dyn crate::viewer::parser::HarnessParser> {
+        Some(&crate::viewer::parser::opencode::OpenCodeParser)
+    }
+
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         let Some(state_root) = context.harness_state_root(self.harness_key()) else {
             return Ok(GraphFragment::empty());

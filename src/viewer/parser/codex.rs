@@ -57,18 +57,11 @@ use crate::viewer::model::{
 pub struct CodexParser;
 
 impl HarnessParser for CodexParser {
-    fn supports(&self, locator: &SessionLocator) -> bool {
-        matches!(locator, SessionLocator::Codex { .. })
-    }
-
     fn read(&self, locator: &SessionLocator) -> ParseResult {
-        let (state_root, session_key) = match locator {
-            SessionLocator::Codex {
-                state_root,
-                session_key,
-            } => (state_root.as_path(), session_key.as_str()),
-            _ => return Err(ParseError::NotFound),
-        };
+        // H-EXT-006: locator.state_root is the codex state root
+        // the adapter's `transcript_source` produced.
+        let state_root = locator.state_root.as_path();
+        let session_key = locator.session_key.as_str();
         let file_path = find_rollout_file(state_root, session_key).ok_or(ParseError::NotFound)?;
         parse_file(&file_path, locator)
     }
@@ -473,32 +466,25 @@ mod tests {
         for line in lines {
             writeln!(file, "{line}").expect("write line");
         }
-        let locator = SessionLocator::Codex {
-            state_root: dir.path().to_path_buf(),
+        let locator = SessionLocator {
+            harness_key: "codex".to_string(),
             session_key: session_key.to_string(),
+            state_root: dir.path().to_path_buf(),
         };
         (dir, locator)
     }
 
-    #[test]
-    fn supports_only_codex_locator() {
-        let p = CodexParser;
-        assert!(p.supports(&SessionLocator::Codex {
-            state_root: PathBuf::from("/x"),
-            session_key: "k".to_string(),
-        }));
-        assert!(!p.supports(&SessionLocator::ClaudeCode {
-            state_root: PathBuf::from("/x"),
-            session_key: "k".to_string(),
-        }));
-    }
+    // H-EXT-006: pre-existing `supports_only_codex_locator`
+    // test removed; parser dispatch happens through the adapter
+    // registry so per-parser filters are dead weight.
 
     #[test]
     fn missing_file_reports_not_found() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let locator = SessionLocator::Codex {
-            state_root: dir.path().to_path_buf(),
+        let locator = SessionLocator {
+            harness_key: "codex".to_string(),
             session_key: "absent".to_string(),
+            state_root: dir.path().to_path_buf(),
         };
         match CodexParser.read(&locator) {
             Err(ParseError::NotFound) => {}

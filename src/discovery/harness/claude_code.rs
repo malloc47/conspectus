@@ -119,6 +119,21 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         &CLAUDE_CODE_RUNTIME_SIGNATURE
     }
 
+    fn transcript_source(
+        &self,
+        session: &crate::model::AgentSessionId,
+    ) -> Option<crate::viewer::model::SessionLocator> {
+        Some(crate::viewer::model::SessionLocator {
+            harness_key: HARNESS_KEY.to_string(),
+            session_key: session.session_key.clone(),
+            state_root: session.state_scope.clone().into(),
+        })
+    }
+
+    fn transcript_parser(&self) -> Option<&'static dyn crate::viewer::parser::HarnessParser> {
+        Some(&crate::viewer::parser::claude_code::ClaudeCodeParser)
+    }
+
     /// H-TBL-014: the row-label column is tight, so `claude-code`
     /// renders as `claude`. Kept here alongside the adapter
     /// (H-EXT-002) instead of the rows-module match arm that

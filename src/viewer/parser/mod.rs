@@ -6,8 +6,11 @@
 //! [`SessionLocator`] without harness-specific knowledge in the
 //! widget layer.
 //!
-//! Stubs only at the scaffold stage. `H-VIEWER-NATIVE-003 .. 005`
-//! fill in claude_code / codex / opencode implementations.
+//! H-EXT-006: parser lookup now goes through the adapter
+//! registry via
+//! [`crate::discovery::harness::HarnessAdapter::transcript_parser`],
+//! so the pre-H-EXT-006 `supports(&locator) -> bool` fan-out is
+//! gone — the caller already knows which parser it wants.
 
 pub mod claude_code;
 pub mod codex;
@@ -16,9 +19,7 @@ pub mod opencode;
 use crate::viewer::model::{SessionLocator, TranscriptDocument};
 
 /// Read a session's full transcript from its on-disk shape.
-pub trait HarnessParser {
-    /// Returns true when this parser handles `locator`'s variant.
-    fn supports(&self, locator: &SessionLocator) -> bool;
+pub trait HarnessParser: Send + Sync {
     /// Read the transcript. Errors degrade to a stub document
     /// with a "transcript unavailable" marker rather than failing
     /// hard, so the widget always has something to render.

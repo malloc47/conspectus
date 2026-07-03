@@ -54,18 +54,12 @@ use crate::viewer::model::{
 pub struct ClaudeCodeParser;
 
 impl HarnessParser for ClaudeCodeParser {
-    fn supports(&self, locator: &SessionLocator) -> bool {
-        matches!(locator, SessionLocator::ClaudeCode { .. })
-    }
-
     fn read(&self, locator: &SessionLocator) -> ParseResult {
-        let (state_root, session_key) = match locator {
-            SessionLocator::ClaudeCode {
-                state_root,
-                session_key,
-            } => (state_root.as_path(), session_key.as_str()),
-            _ => return Err(ParseError::NotFound),
-        };
+        // H-EXT-006: the locator is already dispatched to us via
+        // the registry, so `state_root` here is the claude-code
+        // state root the adapter's `transcript_source` produced.
+        let state_root = locator.state_root.as_path();
+        let session_key = locator.session_key.as_str();
         let file_path = find_session_file(state_root, session_key).ok_or(ParseError::NotFound)?;
         parse_file(&file_path, locator)
     }
@@ -438,36 +432,25 @@ mod tests {
         for line in lines {
             writeln!(file, "{line}").expect("write line");
         }
-        let locator = SessionLocator::ClaudeCode {
-            state_root: dir.path().to_path_buf(),
+        let locator = SessionLocator {
+            harness_key: "claude-code".to_string(),
             session_key: session_key.to_string(),
+            state_root: dir.path().to_path_buf(),
         };
         (dir, locator)
     }
 
-    #[test]
-    fn supports_only_claude_code_locator() {
-        let p = ClaudeCodeParser;
-        assert!(p.supports(&SessionLocator::ClaudeCode {
-            state_root: PathBuf::from("/x"),
-            session_key: "k".to_string(),
-        }));
-        assert!(!p.supports(&SessionLocator::Codex {
-            state_root: PathBuf::from("/x"),
-            session_key: "k".to_string(),
-        }));
-        assert!(!p.supports(&SessionLocator::OpenCode {
-            db_path: PathBuf::from("/x"),
-            session_id: "s".to_string(),
-        }));
-    }
+    // H-EXT-006: pre-existing `supports_only_claude_code_locator`
+    // test removed; parser dispatch happens through the adapter
+    // registry so per-parser filters are dead weight.
 
     #[test]
     fn missing_file_reports_not_found() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let locator = SessionLocator::ClaudeCode {
-            state_root: dir.path().to_path_buf(),
+        let locator = SessionLocator {
+            harness_key: "claude-code".to_string(),
             session_key: "absent".to_string(),
+            state_root: dir.path().to_path_buf(),
         };
         match ClaudeCodeParser.read(&locator) {
             Err(ParseError::NotFound) => {}

@@ -152,9 +152,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn empty_doc() -> TranscriptDocument {
-        TranscriptDocument::unavailable(&SessionLocator::ClaudeCode {
-            state_root: PathBuf::from("/x"),
+        TranscriptDocument::unavailable(&SessionLocator {
+            harness_key: "claude-code".to_string(),
             session_key: "k".to_string(),
+            state_root: PathBuf::from("/x"),
         })
     }
 

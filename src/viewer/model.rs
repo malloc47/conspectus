@@ -31,51 +31,47 @@ use serde::{Deserialize, Serialize};
 /// renderer never branches on harness — it consumes the parsed
 /// [`TranscriptDocument`] — but the parser dispatcher needs to know
 /// which file/db to open.
+///
+/// H-EXT-006 flattened the pre-existing closed
+/// `enum SessionLocator { ClaudeCode { .. }, Codex { .. },
+/// OpenCode { .. } }` into this open struct. Adapters build the
+/// locator via
+/// [`crate::discovery::harness::HarnessAdapter::transcript_source`];
+/// each adapter's `state_root` interpretation is documented on
+/// that method. Adding a fifth harness with a native transcript
+/// source is a matter of implementing the trait methods — no new
+/// enum variant, no bridge / parser dispatch update.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "harness", rename_all = "kebab-case")]
-pub enum SessionLocator {
-    /// `<state_root>/projects/*/<session_key>.jsonl`.
-    ClaudeCode {
-        state_root: PathBuf,
-        session_key: String,
-    },
-    /// `<state_root>/sessions/YYYY/MM/DD/rollout-*-<session_key>.jsonl`.
-    Codex {
-        state_root: PathBuf,
-        session_key: String,
-    },
-    /// `<db_path>` (SQLite) holding `session_id`. ADR 0013.
-    ///
-    /// Rename override because conspectus's harness key for this
-    /// provider is the single-word `opencode`, not what
-    /// `kebab-case` would produce.
-    #[serde(rename = "opencode")]
-    OpenCode {
-        db_path: PathBuf,
-        session_id: String,
-    },
+pub struct SessionLocator {
+    /// Adapter harness key (e.g. `claude-code`, `codex`,
+    /// `opencode`). Matches
+    /// [`crate::model::AgentSessionId::harness_key`].
+    pub harness_key: String,
+    /// Harness-native session id (UUID for Claude/Codex,
+    /// `ses_<alphanumeric>` for OpenCode).
+    pub session_key: String,
+    /// Adapter-authored transcript root. Interpretation is
+    /// parser-specific:
+    /// - claude-code + codex → harness state root; the parser
+    ///   walks the standard per-session file layout beneath it.
+    /// - opencode → resolved SQLite database file (or its
+    ///   parent directory; the opencode adapter's
+    ///   `transcript_source` handles both shapes).
+    pub state_root: PathBuf,
 }
 
 impl SessionLocator {
-    /// Provider-neutral harness key for the locator. Matches the
-    /// `AgentSessionId::harness_key` strings conspectus uses
-    /// elsewhere so the bridge doesn't have to remap.
-    pub fn harness_key(&self) -> &'static str {
-        match self {
-            Self::ClaudeCode { .. } => "claude-code",
-            Self::Codex { .. } => "codex",
-            Self::OpenCode { .. } => "opencode",
-        }
+    /// Adapter harness key for this locator. Kept as a method
+    /// for callers that came in through the pre-H-EXT-006
+    /// `enum SessionLocator::harness_key()` accessor.
+    pub fn harness_key(&self) -> &str {
+        &self.harness_key
     }
 
-    /// The harness-native session identifier (UUID for Claude/Codex,
-    /// `ses_*` for OpenCode). Used in `TranscriptMeta` headers.
+    /// The harness-native session identifier. Kept for
+    /// pre-H-EXT-006 callers.
     pub fn session_key(&self) -> &str {
-        match self {
-            Self::ClaudeCode { session_key, .. } => session_key,
-            Self::Codex { session_key, .. } => session_key,
-            Self::OpenCode { session_id, .. } => session_id,
-        }
+        &self.session_key
     }
 }
 
@@ -228,23 +224,26 @@ mod tests {
     use chrono::TimeZone;
 
     fn sample_locator_claude() -> SessionLocator {
-        SessionLocator::ClaudeCode {
-            state_root: PathBuf::from("/home/u/.claude"),
+        SessionLocator {
+            harness_key: "claude-code".to_string(),
             session_key: "0b34e59c-14d0-4d04-be79-4dc1d4c120c2".to_string(),
+            state_root: PathBuf::from("/home/u/.claude"),
         }
     }
 
     fn sample_locator_codex() -> SessionLocator {
-        SessionLocator::Codex {
-            state_root: PathBuf::from("/home/u/.codex"),
+        SessionLocator {
+            harness_key: "codex".to_string(),
             session_key: "019df146-41e8-7fb0-8df0-dc326b4fdee8".to_string(),
+            state_root: PathBuf::from("/home/u/.codex"),
         }
     }
 
     fn sample_locator_opencode() -> SessionLocator {
-        SessionLocator::OpenCode {
-            db_path: PathBuf::from("/home/u/.local/share/opencode/opencode.db"),
-            session_id: "ses_17f328a8effeK52nvLaEV954yO".to_string(),
+        SessionLocator {
+            harness_key: "opencode".to_string(),
+            session_key: "ses_17f328a8effeK52nvLaEV954yO".to_string(),
+            state_root: PathBuf::from("/home/u/.local/share/opencode/opencode.db"),
         }
     }
 
@@ -275,9 +274,14 @@ mod tests {
     fn locator_serde_round_trip_claude() {
         let original = sample_locator_claude();
         let json = serde_json::to_string(&original).expect("serialize");
-        // Tag-shape contract: external bin / future config files
-        // should be able to write `{"harness": "claude-code", ...}`.
-        assert!(json.contains("\"harness\":\"claude-code\""), "got {json}");
+        // H-EXT-006 flat shape: `harness_key` field replaces the
+        // pre-H-EXT-006 `harness` tag; external bin / future
+        // config files write `{"harness_key": "claude-code",
+        // ...}`.
+        assert!(
+            json.contains("\"harness_key\":\"claude-code\""),
+            "got {json}"
+        );
         let decoded: SessionLocator = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded, original);
     }
@@ -294,7 +298,7 @@ mod tests {
     fn locator_serde_round_trip_opencode() {
         let original = sample_locator_opencode();
         let json = serde_json::to_string(&original).expect("serialize");
-        assert!(json.contains("\"harness\":\"opencode\""), "got {json}");
+        assert!(json.contains("\"harness_key\":\"opencode\""), "got {json}");
         let decoded: SessionLocator = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded, original);
     }

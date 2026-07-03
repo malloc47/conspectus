@@ -9,51 +9,27 @@
 //! glue that stays behind — extracted-crate users wire up their own
 //! `SessionLocator` from clap arguments without ever touching
 //! conspectus graph types.
+//!
+//! H-EXT-006: harness dispatch goes through the adapter registry.
+//! `locator_for_session` iterates registered adapters and asks each
+//! for a `transcript_source`; the first non-`None` answer wins.
+//! `build_viewer_state` grabs the same adapter's `transcript_parser`
+//! and delegates the read. Aider (and every future harness that
+//! declines `transcript_source`) drops through both functions with
+//! `None` so the escape-hatch external viewer takes over.
 
+use crate::discovery::harness::registered_adapters;
 use crate::model::AgentSessionId;
 use crate::viewer::model::{SessionLocator, TranscriptDocument};
-use crate::viewer::parser::HarnessParser;
-use crate::viewer::parser::claude_code::ClaudeCodeParser;
-use crate::viewer::parser::codex::CodexParser;
-use crate::viewer::parser::opencode::OpenCodeParser;
 use crate::viewer::state::ViewerState;
 
 /// Map a graph-flavored [`AgentSessionId`] to a viewer-flavored
 /// [`SessionLocator`], or `None` when the harness key has no
-/// registered native parser in v1.
+/// registered native transcript source.
 pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
-    match session.harness_key.as_str() {
-        "claude-code" => Some(SessionLocator::ClaudeCode {
-            state_root: session.state_scope.clone().into(),
-            session_key: session.session_key.clone(),
-        }),
-        "codex" => Some(SessionLocator::Codex {
-            state_root: session.state_scope.clone().into(),
-            session_key: session.session_key.clone(),
-        }),
-        "opencode" => {
-            // OpenCode's `state_scope` from the discovery layer is
-            // the parent directory containing `opencode.db`
-            // (ADR 0013). Append the canonical file name to derive
-            // the SQLite path.
-            let mut db_path = std::path::PathBuf::from(session.state_scope.clone());
-            // If state_scope already names the .db file, keep it;
-            // otherwise treat it as the parent directory.
-            if db_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|s| s.eq_ignore_ascii_case("db"))
-                != Some(true)
-            {
-                db_path.push("opencode.db");
-            }
-            Some(SessionLocator::OpenCode {
-                db_path,
-                session_id: session.session_key.clone(),
-            })
-        }
-        _ => None,
-    }
+    registered_adapters()
+        .find(|a| a.harness_key() == session.harness_key)
+        .and_then(|a| a.transcript_source(session))
 }
 
 /// Resolve a session into a [`ViewerState`] ready for the modal.
@@ -61,23 +37,13 @@ pub fn locator_for_session(session: &AgentSessionId) -> Option<SessionLocator> {
 /// document so the widget can always render a coherent banner
 /// instead of bubbling the error up.
 pub fn build_viewer_state(session: &AgentSessionId) -> Option<ViewerState> {
-    let locator = locator_for_session(session)?;
-    let document = read_with_appropriate_parser(&locator)
+    let adapter = registered_adapters().find(|a| a.harness_key() == session.harness_key)?;
+    let locator = adapter.transcript_source(session)?;
+    let document = adapter
+        .transcript_parser()
+        .and_then(|parser| parser.read(&locator).ok())
         .unwrap_or_else(|| TranscriptDocument::unavailable(&locator));
     Some(ViewerState::new(document))
-}
-
-fn read_with_appropriate_parser(locator: &SessionLocator) -> Option<TranscriptDocument> {
-    // Backends in fixed order; the first one whose `supports()`
-    // returns true tries to read. Mirrors the dispatch shape the
-    // extracted crate's CLI will use.
-    let backends: [&dyn HarnessParser; 3] = [&ClaudeCodeParser, &CodexParser, &OpenCodeParser];
-    for backend in backends {
-        if backend.supports(locator) {
-            return backend.read(locator).ok();
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -91,54 +57,39 @@ mod tests {
     #[test]
     fn claude_code_session_maps_to_claude_code_locator() {
         let id = session("claude-code", "/u/.claude", "abc");
-        match locator_for_session(&id) {
-            Some(SessionLocator::ClaudeCode {
-                state_root,
-                session_key,
-            }) => {
-                assert_eq!(state_root, std::path::PathBuf::from("/u/.claude"));
-                assert_eq!(session_key, "abc");
-            }
-            other => panic!("expected ClaudeCode, got {other:?}"),
-        }
+        let locator = locator_for_session(&id).expect("claude-code has a locator");
+        assert_eq!(locator.harness_key, "claude-code");
+        assert_eq!(locator.session_key, "abc");
+        assert_eq!(locator.state_root, std::path::PathBuf::from("/u/.claude"));
     }
 
     #[test]
     fn codex_session_maps_to_codex_locator() {
         let id = session("codex", "/u/.codex", "abc");
-        match locator_for_session(&id) {
-            Some(SessionLocator::Codex { .. }) => {}
-            other => panic!("expected Codex, got {other:?}"),
-        }
+        let locator = locator_for_session(&id).expect("codex has a locator");
+        assert_eq!(locator.harness_key, "codex");
     }
 
     #[test]
     fn opencode_session_treats_state_scope_as_parent_dir() {
         let id = session("opencode", "/u/.local/share/opencode", "ses_x");
-        match locator_for_session(&id) {
-            Some(SessionLocator::OpenCode {
-                db_path,
-                session_id,
-            }) => {
-                assert_eq!(
-                    db_path,
-                    std::path::PathBuf::from("/u/.local/share/opencode/opencode.db")
-                );
-                assert_eq!(session_id, "ses_x");
-            }
-            other => panic!("expected OpenCode, got {other:?}"),
-        }
+        let locator = locator_for_session(&id).expect("opencode has a locator");
+        assert_eq!(locator.harness_key, "opencode");
+        assert_eq!(locator.session_key, "ses_x");
+        assert_eq!(
+            locator.state_root,
+            std::path::PathBuf::from("/u/.local/share/opencode/opencode.db")
+        );
     }
 
     #[test]
     fn opencode_session_with_db_filename_in_state_scope_uses_it_directly() {
         let id = session("opencode", "/some/path/opencode.db", "ses_x");
-        match locator_for_session(&id) {
-            Some(SessionLocator::OpenCode { db_path, .. }) => {
-                assert_eq!(db_path, std::path::PathBuf::from("/some/path/opencode.db"));
-            }
-            other => panic!("expected OpenCode, got {other:?}"),
-        }
+        let locator = locator_for_session(&id).expect("opencode has a locator");
+        assert_eq!(
+            locator.state_root,
+            std::path::PathBuf::from("/some/path/opencode.db")
+        );
     }
 
     #[test]

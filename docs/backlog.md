@@ -2827,16 +2827,42 @@ Phase B — harness experience parity:
     dispatch entry point. All 25 suites pass byte-identically;
     fmt / clippy clean.
   - Blockers: `H-EXT-002` (landed).
-- [ ] `H-EXT-006` Provide transcript locator and parser via the adapter.
-  - Scope: replace the closed `SessionLocator` enum
-    (`src/viewer/model.rs:36`), the `viewer_bridge::locator_for_session`
-    match, and the fixed parser trio with
-    `HarnessAdapter::transcript_source(&AgentSessionNode)` returning an
-    opaque locator plus a `HarnessParser` handle. The renderer stays
-    harness-neutral; aider gains an explicit no-transcript-source answer.
-  - Tests: existing viewer parser tests; bridge test for a harness without
-    a transcript source.
-  - Blockers: `H-EXT-002`.
+- [x] `H-EXT-006` Provide transcript locator and parser via the adapter.
+  - Landed 2026-07-03. `SessionLocator` flattened from a
+    closed `enum { ClaudeCode { .. }, Codex { .. }, OpenCode { .. } }`
+    to an open `struct { harness_key, session_key, state_root }`.
+    Each parser interprets `state_root` per its own convention
+    (claude-code + codex: harness state root; opencode: SQLite
+    database path). `HarnessParser` trait sheds its per-parser
+    `supports(&locator) -> bool` filter — the adapter registry
+    now dispatches by harness key so per-parser filtering is
+    dead weight.
+    `HarnessAdapter` gains two trait methods:
+    `transcript_source(&AgentSessionId) -> Option<SessionLocator>`
+    and `transcript_parser() -> Option<&'static dyn HarnessParser>`.
+    Both default to `None`; adapters that ship a native viewer
+    surface override. claude-code, codex, opencode wire their
+    parsers and build their locators (opencode's
+    `state_scope` → `opencode.db` resolution moves from
+    `viewer_bridge` onto the adapter). Aider inherits the
+    default `None` — explicit "no transcript source" answer
+    that flows through the bridge and drops into the
+    escape-hatch external viewer.
+    `viewer_bridge::locator_for_session` collapses to a two-line
+    registry lookup. `build_viewer_state` grabs the same
+    adapter's parser and delegates the read. The pre-H-EXT-006
+    fixed `[&ClaudeCodeParser, &CodexParser, &OpenCodeParser]`
+    dispatch array is gone.
+    Serde shape changed from tagged-enum
+    (`{"harness": "claude-code", "state_root": ..., "session_key": ...}`)
+    to flat struct
+    (`{"harness_key": "claude-code", "session_key": ..., "state_root": ...}`).
+    No persisted SessionLocator anywhere in the codebase, so
+    this is a pure test-shape change.
+    Existing parser + bridge tests migrated to the flat shape;
+    three `supports_only_*` tests deleted as redundant. All
+    25 suites (1516 lib tests) pass; fmt / clippy clean.
+  - Blockers: `H-EXT-002` (landed).
 - [ ] `H-EXT-007` Generalize the codex_log-style aux-reader wiring.
   - Scope: turn the codex_log special case — dedicated
     `LocalDiscoveryConfig` fields (`codex_log_disabled`,

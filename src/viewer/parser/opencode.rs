@@ -54,18 +54,15 @@ use crate::viewer::model::{
 pub struct OpenCodeParser;
 
 impl HarnessParser for OpenCodeParser {
-    fn supports(&self, locator: &SessionLocator) -> bool {
-        matches!(locator, SessionLocator::OpenCode { .. })
-    }
-
     fn read(&self, locator: &SessionLocator) -> ParseResult {
-        let (db_path, session_id) = match locator {
-            SessionLocator::OpenCode {
-                db_path,
-                session_id,
-            } => (db_path.as_path(), session_id.as_str()),
-            _ => return Err(ParseError::NotFound),
-        };
+        // H-EXT-006: the opencode adapter's `transcript_source`
+        // resolves `state_root` to the SQLite database file path
+        // (or, when the caller passed a directory, materializes
+        // the `opencode.db` child). Either way, this parser
+        // receives an absolute file path pointing at the SQLite
+        // database.
+        let db_path = locator.state_root.as_path();
+        let session_id = locator.session_key.as_str();
         if !db_path.exists() {
             return Err(ParseError::NotFound);
         }
@@ -357,9 +354,10 @@ mod tests {
         .expect("create schema");
         seed(&conn);
         drop(conn);
-        let locator = SessionLocator::OpenCode {
-            db_path,
-            session_id: session_id.to_string(),
+        let locator = SessionLocator {
+            harness_key: "opencode".to_string(),
+            session_key: session_id.to_string(),
+            state_root: db_path,
         };
         (dir, locator)
     }
@@ -395,24 +393,18 @@ mod tests {
         .expect("insert part");
     }
 
-    #[test]
-    fn supports_only_opencode_locator() {
-        let p = OpenCodeParser;
-        assert!(p.supports(&SessionLocator::OpenCode {
-            db_path: PathBuf::from("/x"),
-            session_id: "s".to_string(),
-        }));
-        assert!(!p.supports(&SessionLocator::ClaudeCode {
-            state_root: PathBuf::from("/x"),
-            session_key: "k".to_string(),
-        }));
-    }
+    // H-EXT-006: pre-existing `supports_only_opencode_locator`
+    // test removed. `HarnessParser` no longer carries a
+    // `supports(&locator) -> bool` method — parser dispatch
+    // goes through the adapter registry via `transcript_parser`,
+    // so a per-parser filter is dead weight.
 
     #[test]
     fn missing_db_reports_not_found() {
-        let locator = SessionLocator::OpenCode {
-            db_path: PathBuf::from("/nonexistent/opencode.db"),
-            session_id: "ses_x".to_string(),
+        let locator = SessionLocator {
+            harness_key: "opencode".to_string(),
+            session_key: "ses_x".to_string(),
+            state_root: PathBuf::from("/nonexistent/opencode.db"),
         };
         match OpenCodeParser.read(&locator) {
             Err(ParseError::NotFound) => {}
