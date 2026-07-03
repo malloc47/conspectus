@@ -64,7 +64,12 @@ impl CodexAdapter {
 /// are no daemon / subagent helper processes to distinguish.
 static CODEX_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
     harness_key: HARNESS_KEY,
-    process_command_basenames: &["codex"],
+    // H-EXT-005: the CLI hook-writer pid-resolver
+    // (`cli::harness_binaries`) accepts `codex-rs` as an
+    // alternate binary name (rust rewrite lineage). Keep both
+    // here so the CLI's registry-driven lookup gets the same
+    // pair the pre-H-EXT-005 hardcoded match did.
+    process_command_basenames: &["codex", "codex-rs"],
     command_substrings: &["codex"],
     fd_path_patterns: &["/.codex/sessions/", "/.codex/tmp/"],
     extract_session_keys: super::generic_uuid_like_session_keys,

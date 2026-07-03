@@ -140,79 +140,22 @@ pub fn current_epoch() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn claude_code_record_from_payload(
-    payload: &serde_json::Value,
-    pid: Option<i64>,
-    ppid: Option<i64>,
-    tmux: Option<HookTmuxRecord>,
-    harness_version: Option<String>,
-    observed_epoch: i64,
-) -> Result<HookRecord> {
-    let Some(session_id) = payload
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-    else {
-        bail!("Claude Code hook payload missing string `session_id`");
-    };
-    if session_id.is_empty() {
-        bail!("Claude Code hook payload has empty `session_id`");
-    }
-
-    Ok(HookRecord {
-        schema_version: SCHEMA_VERSION,
-        harness_key: "claude-code".to_string(),
-        session_key: session_id.to_string(),
-        cwd: optional_string(payload, "cwd"),
-        pid,
-        ppid,
-        tmux: tmux.filter(|tmux| !tmux.is_empty()),
-        transcript_path: optional_string(payload, "transcript_path"),
-        hook_event_name: optional_string(payload, "hook_event_name"),
-        observed_epoch,
-        harness_version,
-    })
-}
-
-pub fn codex_record_from_payload(
-    payload: &serde_json::Value,
-    pid: Option<i64>,
-    ppid: Option<i64>,
-    tmux: Option<HookTmuxRecord>,
-    harness_version: Option<String>,
-    observed_epoch: i64,
-) -> Result<HookRecord> {
-    let Some(session_id) = payload
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-    else {
-        bail!("Codex hook payload missing string `session_id`");
-    };
-    if session_id.is_empty() {
-        bail!("Codex hook payload has empty `session_id`");
-    }
-
-    Ok(HookRecord {
-        schema_version: SCHEMA_VERSION,
-        harness_key: "codex".to_string(),
-        session_key: session_id.to_string(),
-        cwd: optional_string(payload, "cwd"),
-        pid,
-        ppid,
-        tmux: tmux.filter(|tmux| !tmux.is_empty()),
-        transcript_path: optional_string(payload, "transcript_path"),
-        hook_event_name: optional_string(payload, "hook_event_name"),
-        observed_epoch,
-        harness_version,
-    })
-}
-
-/// Build a hook record from an opencode plugin payload.
+/// Build a hook sidecar record from a harness's SessionStart
+/// hook payload (H-EXT-005). Looks up the harness key against
+/// the adapter registry and delegates to
+/// `HarnessAdapter::hook_record_from_payload`.
 ///
-/// The opencode plugin (see `plugins/opencode-hook`) normalizes the SDK
-/// `Event` union into a flat shape matching the Claude/Codex writers
-/// before piping to stdin. See `H-MUXPROC-014` audit notes in
-/// `docs/backlog.md` for the field mapping per `Event` variant.
-pub fn opencode_record_from_payload(
+/// Unknown keys yield an error listing the registered set so
+/// misconfigured harness hooks fail loudly instead of silently
+/// producing a record with a non-registered `harness_key`
+/// (which the discovery pipeline would then ignore).
+///
+/// This replaces the pre-H-EXT-005 per-harness
+/// `claude_code_record_from_payload` / `codex_record_from_payload`
+/// / `opencode_record_from_payload` writers; every caller now
+/// funnels through the registry.
+pub fn hook_record_from_payload(
+    harness_key: &str,
     payload: &serde_json::Value,
     pid: Option<i64>,
     ppid: Option<i64>,
@@ -220,34 +163,23 @@ pub fn opencode_record_from_payload(
     harness_version: Option<String>,
     observed_epoch: i64,
 ) -> Result<HookRecord> {
-    let Some(session_id) = payload
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-    else {
-        bail!("OpenCode hook payload missing string `session_id`");
-    };
-    if session_id.is_empty() {
-        bail!("OpenCode hook payload has empty `session_id`");
+    for adapter in crate::discovery::harness::registered_adapters() {
+        if adapter.harness_key() == harness_key {
+            return adapter.hook_record_from_payload(
+                payload,
+                pid,
+                ppid,
+                tmux,
+                harness_version,
+                observed_epoch,
+            );
+        }
     }
-
-    Ok(HookRecord {
-        schema_version: SCHEMA_VERSION,
-        harness_key: "opencode".to_string(),
-        session_key: session_id.to_string(),
-        cwd: optional_string(payload, "cwd"),
-        pid,
-        ppid,
-        tmux: tmux.filter(|tmux| !tmux.is_empty()),
-        // opencode sessions are tracked in the project sqlite store rather
-        // than a per-session JSONL transcript file. The plugin may still
-        // forward an explicit `transcript_path` if a project surface like
-        // `info.share.url` or a future field maps onto it; leave the slot
-        // open and accept it when present.
-        transcript_path: optional_string(payload, "transcript_path"),
-        hook_event_name: optional_string(payload, "hook_event_name"),
-        observed_epoch,
-        harness_version,
-    })
+    let registered: Vec<&'static str> = crate::discovery::harness::harness_keys().to_vec();
+    bail!(
+        "unknown harness key `{harness_key}`; registered: {}",
+        registered.join(", ")
+    );
 }
 
 impl HookTmuxRecord {
@@ -259,7 +191,13 @@ impl HookTmuxRecord {
     }
 }
 
-fn optional_string(payload: &serde_json::Value, key: &str) -> Option<String> {
+/// Read a payload field as an owned non-empty string.
+/// H-EXT-005 promotes this from a module-private helper to
+/// `pub` so `HarnessAdapter::hook_record_from_payload` can call
+/// it from `crate::discovery::harness` — the same payload
+/// convention (skip empties, materialize the value) applies to
+/// every harness's hook payload.
+pub fn optional_payload_string(payload: &serde_json::Value, key: &str) -> Option<String> {
     payload
         .get(key)
         .and_then(serde_json::Value::as_str)
@@ -437,7 +375,8 @@ mod tests {
 
     #[test]
     fn claude_payload_requires_session_id() {
-        let err = claude_code_record_from_payload(
+        let err = hook_record_from_payload(
+            "claude-code",
             &serde_json::json!({"cwd": "/work"}),
             Some(1),
             Some(2),
@@ -452,7 +391,8 @@ mod tests {
 
     #[test]
     fn codex_payload_builds_hook_record() {
-        let record = codex_record_from_payload(
+        let record = hook_record_from_payload(
+            "codex",
             &serde_json::json!({
                 "session_id": "019e531f-19ee-7823-816f-4526ef89d70b",
                 "transcript_path": "/home/me/.codex/sessions/2026/05/23/rollout.jsonl",
@@ -486,7 +426,8 @@ mod tests {
 
     #[test]
     fn opencode_payload_builds_hook_record() {
-        let record = opencode_record_from_payload(
+        let record = hook_record_from_payload(
+            "opencode",
             &serde_json::json!({
                 "session_id": "ses_01HZX2J5Y",
                 "cwd": "/home/me/src/proj",
@@ -519,7 +460,8 @@ mod tests {
 
     #[test]
     fn opencode_payload_requires_session_id() {
-        let err = opencode_record_from_payload(
+        let err = hook_record_from_payload(
+            "opencode",
             &serde_json::json!({"cwd": "/work"}),
             Some(1),
             Some(2),
@@ -533,7 +475,8 @@ mod tests {
 
     #[test]
     fn opencode_payload_rejects_empty_session_id() {
-        let err = opencode_record_from_payload(
+        let err = hook_record_from_payload(
+            "opencode",
             &serde_json::json!({"session_id": ""}),
             Some(1),
             Some(2),

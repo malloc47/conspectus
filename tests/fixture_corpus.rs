@@ -33,9 +33,7 @@ use conspectus::discovery::harness::{
 };
 use conspectus::discovery::tmux::parse_list_sessions;
 use conspectus::discovery::{DiscoveryContext, GraphFragment};
-use conspectus::hook::{
-    HookTmuxRecord, claude_code_record_from_payload, codex_record_from_payload,
-};
+use conspectus::hook::{HookTmuxRecord, hook_record_from_payload};
 use conspectus::model::GraphNode;
 use tempfile::TempDir;
 
@@ -356,7 +354,8 @@ fn claude_hook_payload_converts_to_record() {
     )
     .unwrap();
 
-    let record = claude_code_record_from_payload(
+    let record = hook_record_from_payload(
+        "claude-code",
         &payload,
         Some(12345),
         Some(12344),
@@ -393,7 +392,8 @@ fn claude_ephemeral_hook_handles_null_transcript_path() {
     )
     .unwrap();
 
-    let record = claude_code_record_from_payload(
+    let record = hook_record_from_payload(
+        "claude-code",
         &payload,
         Some(12345),
         Some(12344),
@@ -417,7 +417,8 @@ fn codex_hook_payload_converts_to_record() {
     )
     .unwrap();
 
-    let record = codex_record_from_payload(
+    let record = hook_record_from_payload(
+        "codex",
         &payload,
         Some(12346),
         Some(12345),

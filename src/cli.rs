@@ -644,119 +644,42 @@ enum HookCommand {
 
 #[derive(Debug, Args)]
 struct HookWriteArgs {
-    #[command(subcommand)]
-    harness: HookWriteHarness,
+    /// Registered harness key
+    /// (e.g. `claude-code`, `codex`, `opencode`).
+    /// H-EXT-005: the pre-H-EXT-005 three subcommands
+    /// (`hook write claude-code` / `codex` / `opencode`) are
+    /// now positional dispatches through the adapter registry.
+    /// Existing operator configs that invoke
+    /// `conspectus hook write <harness>` continue to work
+    /// unchanged.
+    harness: String,
+    /// Override hook state root. Primarily useful for tests
+    /// and experiments.
+    #[arg(long = "state-root", value_name = "PATH")]
+    state_root: Option<PathBuf>,
 }
 
 impl HookWriteArgs {
     fn run(self) -> Result<()> {
-        match self.harness {
-            HookWriteHarness::ClaudeCode(args) => args.run(),
-            HookWriteHarness::Codex(args) => args.run(),
-            HookWriteHarness::Opencode(args) => args.run(),
-        }
-    }
-}
-
-#[derive(Debug, Subcommand)]
-enum HookWriteHarness {
-    /// Read Claude Code hook JSON from stdin and write a hook observation.
-    ClaudeCode(ClaudeHookWriteArgs),
-    /// Read Codex hook JSON from stdin and write a hook observation.
-    Codex(CodexHookWriteArgs),
-    /// Read opencode plugin hook JSON from stdin and write a hook observation.
-    Opencode(OpenCodeHookWriteArgs),
-}
-
-#[derive(Debug, Args)]
-struct ClaudeHookWriteArgs {
-    /// Override hook state root. Primarily useful for tests and experiments.
-    #[arg(long = "state-root", value_name = "PATH")]
-    state_root: Option<PathBuf>,
-}
-
-impl ClaudeHookWriteArgs {
-    fn run(self) -> Result<()> {
         let mut input = String::new();
         io::stdin().read_to_string(&mut input)?;
         if input.trim().is_empty() {
-            bail!("Claude Code hook payload was empty");
+            bail!("{} hook payload was empty", self.harness);
         }
-        let payload: serde_json::Value =
-            serde_json::from_str(&input).context("failed to parse Claude Code hook JSON")?;
-        let state_root = self.state_root;
-        let (pid, ppid) = harness_pid_pair("claude-code");
-        let record = conspectus::hook::claude_code_record_from_payload(
+        let payload: serde_json::Value = serde_json::from_str(&input)
+            .with_context(|| format!("failed to parse {} hook JSON", self.harness))?;
+        let (pid, ppid) = harness_pid_pair(&self.harness);
+        let harness_version = harness_version_env(&self.harness);
+        let record = conspectus::hook::hook_record_from_payload(
+            &self.harness,
             &payload,
             pid,
             ppid,
             tmux_context(),
-            std::env::var("CLAUDE_CODE_VERSION").ok(),
+            harness_version,
             conspectus::hook::current_epoch(),
         )?;
-        write_or_ingest_hook_record(&record, state_root)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Args)]
-struct CodexHookWriteArgs {
-    /// Override hook state root. Primarily useful for tests and experiments.
-    #[arg(long = "state-root", value_name = "PATH")]
-    state_root: Option<PathBuf>,
-}
-
-impl CodexHookWriteArgs {
-    fn run(self) -> Result<()> {
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        if input.trim().is_empty() {
-            bail!("Codex hook payload was empty");
-        }
-        let payload: serde_json::Value =
-            serde_json::from_str(&input).context("failed to parse Codex hook JSON")?;
-        let state_root = self.state_root;
-        let (pid, ppid) = harness_pid_pair("codex");
-        let record = conspectus::hook::codex_record_from_payload(
-            &payload,
-            pid,
-            ppid,
-            tmux_context(),
-            None,
-            conspectus::hook::current_epoch(),
-        )?;
-        write_or_ingest_hook_record(&record, state_root)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Args)]
-struct OpenCodeHookWriteArgs {
-    /// Override hook state root. Primarily useful for tests and experiments.
-    #[arg(long = "state-root", value_name = "PATH")]
-    state_root: Option<PathBuf>,
-}
-
-impl OpenCodeHookWriteArgs {
-    fn run(self) -> Result<()> {
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        if input.trim().is_empty() {
-            bail!("opencode hook payload was empty");
-        }
-        let payload: serde_json::Value =
-            serde_json::from_str(&input).context("failed to parse opencode hook JSON")?;
-        let state_root = self.state_root;
-        let (pid, ppid) = harness_pid_pair("opencode");
-        let record = conspectus::hook::opencode_record_from_payload(
-            &payload,
-            pid,
-            ppid,
-            tmux_context(),
-            std::env::var("CONSPECTUS_OPENCODE_HOOK_VERSION").ok(),
-            conspectus::hook::current_epoch(),
-        )?;
-        write_or_ingest_hook_record(&record, state_root)?;
+        write_or_ingest_hook_record(&record, self.state_root)?;
         Ok(())
     }
 }
@@ -1089,12 +1012,27 @@ where
 /// walking the parent-pid chain from a hook writer up to the live
 /// agent process. Mirrors the harness keys recognized elsewhere in
 /// the cross-link and process-tree code.
-fn harness_binaries(harness: &str) -> &'static [&'static str] {
+///
+/// H-EXT-005: reads from the adapter registry's
+/// `RuntimeSignature::process_command_basenames` so a new
+/// harness gets pid-pair resolution for free — no cli.rs
+/// match-table edit required.
+fn harness_binaries(harness: &str) -> Vec<&'static str> {
+    conspectus::discovery::harness::registered_adapters()
+        .find(|a| a.harness_key() == harness)
+        .map(|a| a.runtime_signature().process_command_basenames.to_vec())
+        .unwrap_or_default()
+}
+
+/// Environment variable Conspectus consults for a harness's
+/// version string when writing a hook sidecar record. Read
+/// through a helper (rather than inline in `HookWriteArgs::run`)
+/// so the per-harness mapping stays in one place.
+fn harness_version_env(harness: &str) -> Option<String> {
     match harness {
-        "claude-code" => &["claude", "claude-code"],
-        "codex" => &["codex", "codex-rs"],
-        "opencode" => &["opencode"],
-        _ => &[],
+        "claude-code" => std::env::var("CLAUDE_CODE_VERSION").ok(),
+        "opencode" => std::env::var("CONSPECTUS_OPENCODE_HOOK_VERSION").ok(),
+        _ => None,
     }
 }
 
@@ -1104,7 +1042,7 @@ fn harness_binaries(harness: &str) -> &'static [&'static str] {
 /// branch entirely so the record stays Active rather than being
 /// marked Ignored against a stillborn writer pid (H-MUXPROC-020).
 fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
-    match resolve_harness_pid(harness_binaries(harness)) {
+    match resolve_harness_pid(&harness_binaries(harness)) {
         Some((pid, ppid)) => (Some(i64::from(pid)), Some(i64::from(ppid))),
         None => (None, None),
     }

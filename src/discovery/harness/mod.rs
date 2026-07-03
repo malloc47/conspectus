@@ -231,6 +231,57 @@ pub trait HarnessAdapter: Send + Sync {
     fn runtime_signature(&self) -> &'static RuntimeSignature {
         &STUB_RUNTIME_SIGNATURE
     }
+
+    /// Build a hook sidecar record from a harness's SessionStart
+    /// hook payload (H-EXT-005). The default implementation
+    /// reads the ADR 0028 canonical `session_id` string and
+    /// stamps the record with `self.harness_key()`; adapters
+    /// that use a different payload shape (a nested field, an
+    /// alternate key) override.
+    ///
+    /// This is the single dispatch surface behind
+    /// `conspectus hook write <harness-key>`, replacing the
+    /// pre-H-EXT-005 per-harness `*_record_from_payload`
+    /// writers in `src/hook.rs`.
+    fn hook_record_from_payload(
+        &self,
+        payload: &serde_json::Value,
+        pid: Option<i64>,
+        ppid: Option<i64>,
+        tmux: Option<crate::hook::HookTmuxRecord>,
+        harness_version: Option<String>,
+        observed_epoch: i64,
+    ) -> anyhow::Result<crate::hook::HookRecord> {
+        use anyhow::bail;
+        let Some(session_id) = payload
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+        else {
+            bail!(
+                "{} hook payload missing string `session_id`",
+                self.display_label()
+            );
+        };
+        if session_id.is_empty() {
+            bail!(
+                "{} hook payload has empty `session_id`",
+                self.display_label()
+            );
+        }
+        Ok(crate::hook::HookRecord {
+            schema_version: crate::hook::SCHEMA_VERSION,
+            harness_key: self.harness_key().to_string(),
+            session_key: session_id.to_string(),
+            cwd: crate::hook::optional_payload_string(payload, "cwd"),
+            pid,
+            ppid,
+            tmux: tmux.filter(|tmux| !tmux.is_empty()),
+            transcript_path: crate::hook::optional_payload_string(payload, "transcript_path"),
+            hook_event_name: crate::hook::optional_payload_string(payload, "hook_event_name"),
+            observed_epoch,
+            harness_version,
+        })
+    }
 }
 
 /// Stub signature used as the [`HarnessAdapter::runtime_signature`]
