@@ -1848,28 +1848,44 @@ cross-references below.
   - Wave 1 (landed 2026-07-02, shared helpers + UiEvent
     scaffolding): introduced `UiEvent { Input(Event), Tick,
     Discovery(DiscoveryResult) }` enum (dead-code allowed until
-    wave 2 wires it into a `next_ui_event` stream). Extracted
-    two shared helpers both loops now use: `draw_frame(app,
+    a future wave wires it into a `next_ui_event` stream).
+    Extracted two shared helpers both loops now use: `draw_frame(app,
     terminal)` (the toast prep + viewer-or-ui render block that
     was byte-identical in both loops) and
     `overlay_key_from_event(app, event)` (the modal-stack-aware
     input routing that returns `Some(Action::*OverlayKey(key))`
     or `None` for the caller's per-mode fallback). Dedupes ~160
-    lines from runtime.rs, sets up the destination surface area
-    without changing loop structure.
-  - Wave 2 (next, unify loop bodies): both loops become one
-    driver over `next_ui_event(...)`. The differences (live
-    loop's discovery worker + refresh timer, fixture mode's
-    `Action::Refresh` file reload, scenario TUI's mutating-
-    action gate) move into a per-mode configuration passed to
-    the shared driver.
-  - Wave 3 (next, runtime.rs module split): once the loop is
-    unified, split runtime.rs into loop driver (event union +
-    subscriptions), keymap (translate + remap_for_focus +
-    Action enum), and effect executor (execute_effects_live +
-    execute_effects) modules.
+    lines from runtime.rs.
+  - Wave 2 (landed 2026-07-02, unify loop bodies): introduced
+    `trait LoopMode { init, drain, dispatch, tmux }` with
+    `LiveMode` and `StaticMode` impls. New `fn run_loop(terminal,
+    app, config, mode)` shared driver: mode.init → while
+    !should_quit → draw_frame → mode.drain → event::poll →
+    overlay_key_from_event.or_else(translate) → mode.dispatch →
+    refresh_mux_preview → app.persist_state. `event_loop` and
+    `static_event_loop` shrink to ~15-line wrappers that
+    construct their mode and call run_loop. Discovery channel
+    + refresh timer moved into `LiveMode`; fixture reload moved
+    into `StaticMode`. Net diff: +445 / -403 (the dispatch
+    matches are still mode-specific inside trait impls, not
+    deduped; the loop skeleton, event poll, overlay routing,
+    draw pipeline, and mux-preview refresh are all shared).
+  - Wave 3 (deferred to its own story): split runtime.rs (~4200
+    lines) into loop driver (LoopMode / LiveMode / StaticMode /
+    run_loop / draw_frame / overlay_key_from_event / UiEvent),
+    keymap (Action enum / translate / remap_for_focus /
+    cycle_view / SelectedDefault / selected_default_action),
+    and effect executor (execute_effects_live / execute_effects
+    / execute_exec_spec / execute_mux_op / execute_store_op +
+    branches) modules. Involves cascading visibility changes
+    for ~30 runtime helpers referenced by LoopMode impls and
+    moving ~1000 lines of translate/keymap tests. Non-trivial
+    mechanical refactor; better as its own story than bundled
+    with the behavioral work.
   - Tests: live, fixture, and ADR 0067 snapshot suites unchanged.
-  - Blockers: `H-TUI-002` (landed). Wave 1 landed.
+  - Blockers: `H-TUI-002` (landed). Waves 1 + 2 landed. Wave 3
+    is optional cleanup and can happen alongside `H-HYG-009`
+    (which also touches runtime.rs boundaries).
 - [ ] `H-TUI-005` Move scroll reconciliation into the reducer.
   - Scope: `left_scroll` / `explorer_scroll` / `last_visible_index` are
     `Cell`s mutated during `draw`. Deliver viewport dimensions to the
