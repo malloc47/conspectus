@@ -45,6 +45,23 @@ pub trait ForgeAdapter: Send + Sync {
     fn provider(&self) -> &str;
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
+
+    /// Should this adapter own PR discovery for the given remote
+    /// origin URL (H-EXT-012)? A repo whose `origin` URL points
+    /// at `github.com` should be handled by the GitHub adapter;
+    /// a repo whose origin points at `gitlab.com` should be
+    /// handled by a GitLab adapter. Returning `false` means "not
+    /// mine"; returning `true` means "mine — call `discover`
+    /// against a context that includes this repo."
+    ///
+    /// Default returns `false`. GitHub adapter overrides for
+    /// `github.com` hosts. Future forge adapters (GitLab,
+    /// Gitea, custom hosted GitHub Enterprise) override with
+    /// their own host matching.
+    fn claims_remote_url(&self, remote_url: &str) -> bool {
+        let _ = remote_url;
+        false
+    }
 }
 
 /// Coordinator that runs every registered [`ForgeAdapter`] and returns a
@@ -61,6 +78,15 @@ impl ForgeDiscovery {
 
     pub fn with_adapter(mut self, adapter: impl ForgeAdapter + 'static) -> Self {
         self.adapters.push(Box::new(adapter));
+        self
+    }
+
+    /// H-EXT-012: register an already-boxed adapter. Used by the
+    /// discovery driver, which takes ownership of adapters from
+    /// `LocalDiscoveryConfig.forge_adapters` (already boxed) and
+    /// hands them to the coordinator without re-boxing.
+    pub fn with_boxed_adapter(mut self, adapter: Box<dyn ForgeAdapter>) -> Self {
+        self.adapters.push(adapter);
         self
     }
 }

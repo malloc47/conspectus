@@ -334,7 +334,15 @@ pub fn discover_local_warm_with(
     // per-backend `DiscoveryProvider`.
     let tmux_runner = config.take_mux_backend_by_key(tmux::TMUX_BACKEND);
     let zellij_runner = config.take_mux_backend_by_key(zellij::ZELLIJ_BACKEND);
-    let forge_runner = config.forge_runner.take();
+    // H-EXT-012: forge adapters live in a registry list; drain
+    // them here so they can be wrapped in a `ForgeDiscovery`
+    // coordinator that fans a repo out to every registered
+    // adapter. The adapter registry keeps the pre-H-EXT-012
+    // "GitHub-only" single-slot behavior intact for consumers
+    // that ship one adapter; multi-forge hosts extend it via
+    // `LocalDiscoveryConfig::with_forge_adapter`.
+    let forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> =
+        std::mem::take(&mut config.forge_adapters);
 
     let mut providers = LocalDiscovery::new()
         .with_keyed_provider(&["git"], git::GitDiscovery::new())
@@ -363,11 +371,19 @@ pub fn discover_local_warm_with(
             .with_keyed_provider(&["zellij"], zellij::ZellijDiscovery::with_runner(runner));
     }
 
-    if let Some(runner) = forge_runner {
-        providers = providers.with_keyed_provider(
-            &["github"],
-            forge::github::GitHubForgeProvider::with_runner(runner),
-        );
+    if !forge_adapters.is_empty() {
+        // H-EXT-012: fan every registered adapter through the
+        // ForgeDiscovery coordinator. The coordinator already
+        // knew how to merge multiple adapters; the registry
+        // list finally has more than one entry (or the room
+        // for one).
+        let mut coordinator = forge::ForgeDiscovery::new();
+        for adapter in forge_adapters {
+            coordinator = coordinator.with_boxed_adapter(adapter);
+        }
+        // Provider key list matches the pre-H-EXT-012 single
+        // `"github"` string until a second forge lands.
+        providers = providers.with_keyed_provider(&["github"], coordinator);
     }
 
     let mut fresh = providers.discover_skipping(&context, &gate.fresh)?;
@@ -450,7 +466,16 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::from_env`]; multi-backend hosts push additional
     /// entries via [`Self::with_mux_backend`].
     pub mux_backends: Vec<Box<dyn tmux::MuxBackend>>,
-    pub forge_runner: Option<Box<dyn forge::GhRunner>>,
+    /// Registered forge adapters (H-EXT-012). Adding a second
+    /// adapter (GitLab per H-EXT-013, Gitea, hosted GitHub
+    /// Enterprise) is a matter of pushing another entry. Each
+    /// adapter implements [`forge::ForgeAdapter`] and reports
+    /// which remote URLs it claims via
+    /// [`forge::ForgeAdapter::claims_remote_url`]. v1 ships with
+    /// a single GitHub entry populated by
+    /// [`Self::from_env`]; multi-forge hosts push additional
+    /// entries via [`Self::with_forge_adapter`].
+    pub forge_adapters: Vec<Box<dyn forge::ForgeAdapter>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
     /// Agent-deck multi-repo worktrees root, typically
@@ -501,12 +526,18 @@ impl LocalDiscoveryConfig {
             mux_backends.push(Box::new(zellij::SystemZellij::new()));
         }
 
-        let forge_runner: Option<Box<dyn forge::GhRunner>> =
-            if env::var_os("CONSPECTUS_DISABLE_FORGE").is_some() {
-                None
-            } else {
-                Some(Box::new(forge::SystemGh::new()))
-            };
+        // H-EXT-012: forge adapters live in a registry list.
+        // GitHub is the single default entry; a fifth forge
+        // (GitLab per H-EXT-013) becomes a `push` here without
+        // touching `discover_local_warm_with`.
+        // `CONSPECTUS_DISABLE_FORGE` still zeroes the list for
+        // wire compatibility.
+        let mut forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> = Vec::new();
+        if env::var_os("CONSPECTUS_DISABLE_FORGE").is_none() {
+            forge_adapters.push(Box::new(forge::github::GitHubForgeProvider::with_runner(
+                forge::SystemGh::new(),
+            )));
+        }
 
         // H-EXT-007: codex_log-specific `codex_log_window_seconds`
         // env parsing moves into `CodexAdapter::apply_aux_attribution`.
@@ -522,7 +553,7 @@ impl LocalDiscoveryConfig {
         Self {
             harness_state_roots,
             mux_backends,
-            forge_runner,
+            forge_adapters,
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             agent_deck_root: default_agent_deck_root(),
@@ -535,7 +566,7 @@ impl LocalDiscoveryConfig {
         Self {
             harness_state_roots: BTreeMap::new(),
             mux_backends: Vec::new(),
-            forge_runner: None,
+            forge_adapters: Vec::new(),
             process_tree_enabled: false,
             hook_sidecar_root: None,
             agent_deck_root: None,
@@ -606,13 +637,35 @@ impl LocalDiscoveryConfig {
         Some(self.mux_backends.remove(idx))
     }
 
-    pub fn with_forge_runner(mut self, runner: impl forge::GhRunner + 'static) -> Self {
-        self.forge_runner = Some(Box::new(runner));
+    /// Push a forge adapter onto the registry (H-EXT-012).
+    /// Adapters are iterated in registration order; each one
+    /// receives every repo whose `origin` remote it claims via
+    /// [`forge::ForgeAdapter::claims_remote_url`].
+    pub fn with_forge_adapter(mut self, adapter: impl forge::ForgeAdapter + 'static) -> Self {
+        self.forge_adapters.push(Box::new(adapter));
         self
     }
 
+    /// Deprecated alias for [`Self::with_forge_adapter`] (H-EXT-012).
+    /// Kept so pre-H-EXT-012 test call sites (`.with_forge_runner(
+    /// FakeGh::with_pull_requests(...))`) compile without a mass
+    /// rename. The runner gets wrapped in a
+    /// [`forge::github::GitHubForgeProvider`] before it's pushed
+    /// so the adapter list stays uniform.
+    pub fn with_forge_runner(mut self, runner: impl forge::GhRunner + 'static) -> Self {
+        self.forge_adapters
+            .push(Box::new(forge::github::GitHubForgeProvider::with_runner(
+                runner,
+            )));
+        self
+    }
+
+    /// Clear every registered forge adapter. Matches the historical
+    /// `.without_forge()` semantic (H-EXT-012 rewired it against
+    /// the adapter list; `CONSPECTUS_DISABLE_FORGE` still zeroes
+    /// the list through `from_env`).
     pub fn without_forge(mut self) -> Self {
-        self.forge_runner = None;
+        self.forge_adapters.clear();
         self
     }
 

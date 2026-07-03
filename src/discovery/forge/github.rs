@@ -549,6 +549,41 @@ impl<R: GhRunner + 'static> DiscoveryProvider for GitHubForgeProvider<R> {
     }
 }
 
+/// H-EXT-012: `GitHubForgeProvider` also satisfies the
+/// `ForgeAdapter` shape so the `LocalDiscoveryConfig.forge_adapters`
+/// registry can carry it. Every method here delegates to the
+/// existing `DiscoveryProvider` impl (for `discover`) or to
+/// a URL-host matcher (for `claims_remote_url`).
+impl<R: GhRunner + 'static> super::ForgeAdapter for GitHubForgeProvider<R> {
+    fn provider(&self) -> &str {
+        FORGE_ADAPTER
+    }
+
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+        <Self as DiscoveryProvider>::discover(self, context)
+    }
+
+    fn claims_remote_url(&self, remote_url: &str) -> bool {
+        remote_url_is_github(remote_url)
+    }
+}
+
+/// True when `remote_url` names a GitHub host — either the
+/// canonical `github.com` or a Conspectus operator's declared
+/// enterprise host. H-EXT-012 keeps the initial impl focused on
+/// `github.com`; enterprise-host routing is a follow-up.
+fn remote_url_is_github(remote_url: &str) -> bool {
+    let lower = remote_url.to_ascii_lowercase();
+    // Accept both HTTPS (`https://github.com/o/r`,
+    // `https://github.com:443/o/r`) and SSH
+    // (`git@github.com:o/r.git`, `ssh://git@github.com/o/r`)
+    // shapes. `contains` is fine here because the token is
+    // both specific enough not to collide with unrelated hosts
+    // and short enough that false-positives on user paths are
+    // negligible.
+    lower.contains("github.com")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
