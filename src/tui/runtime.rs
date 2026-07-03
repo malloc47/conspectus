@@ -43,8 +43,9 @@ type DiscoveryResult = Result<crate::model::GraphSnapshot>;
 
 /// One event the TUI runtime consumes per iteration (ADR 0085
 /// contract 5, H-TUI-004). Wave 1 introduces the type but each
-/// loop still gathers its own events inline; wave 2 refactors the
-/// loops to consume a `next_ui_event(...)` stream.
+/// loop still gathers its own events inline; wave 3 refactors the
+/// loops to consume a `next_ui_event(...)` stream once the
+/// module split lands.
 ///
 /// `Input` carries a crossterm event (key press, resize, focus,
 /// mouse). `Tick` fires from the refresh timer. `Discovery`
@@ -58,6 +59,429 @@ pub(super) enum UiEvent {
     Input(Event),
     Tick,
     Discovery(DiscoveryResult),
+}
+
+/// Mode-specific behavior for the shared [`run_loop`] driver
+/// (ADR 0085 contract 5, H-TUI-004 wave 2). Each mode owns its
+/// own async event sources (discovery worker + refresh timer
+/// for live; nothing for scenario) and its own action-dispatch
+/// policy (real handlers vs "disabled" status hints). The
+/// driver stays generic over the mode.
+trait LoopMode {
+    /// Called once before the loop starts. Runs mode-specific
+    /// initial data population + preview capture.
+    fn init(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+    ) -> Result<()>;
+
+    /// Called before input poll each iteration. Live mode drains
+    /// completed discovery results off its channel and fires the
+    /// refresh timer when it expires; scenario mode is a no-op.
+    fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()>;
+
+    /// Dispatch a translated action against `app`. Live modes
+    /// call real handlers (exec, tmux ops, store writes);
+    /// scenario mode returns "disabled" status hints for mutating
+    /// actions and reloads the fixture on `Action::Refresh`.
+    fn dispatch(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+        action: Option<Action>,
+    ) -> Result<()>;
+
+    /// Reference to the mode's mux runner. Used by
+    /// [`refresh_mux_preview_if_needed`] at the end of each
+    /// iteration.
+    fn tmux(&self) -> &dyn TmuxRunner;
+}
+
+/// Shared event loop driver (H-TUI-004 wave 2). Consumes any
+/// [`LoopMode`]; both live and scenario runs go through here.
+/// Per-mode differences (discovery channel, refresh timer,
+/// dispatch policy) live in the mode impl.
+fn run_loop(
+    terminal: &mut DefaultTerminal,
+    mut app: App,
+    config: RunConfig,
+    mut mode: impl LoopMode,
+) -> Result<()> {
+    let poll_timeout = Duration::from_millis(100);
+    mode.init(terminal, &mut app, &config)?;
+
+    while !app.should_quit() {
+        draw_frame(&mut app, terminal)?;
+        mode.drain(&mut app, &config)?;
+        if event::poll(poll_timeout)? {
+            let event = event::read()?;
+            let viewport = terminal.size()?.height.saturating_sub(2);
+            let prev_mux_target = current_mux_target(&app);
+            let action = overlay_key_from_event(&app, &event).or_else(|| {
+                translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus()))
+            });
+            mode.dispatch(terminal, &mut app, &config, action)?;
+            refresh_mux_preview_if_needed(&mut app, &config, mode.tmux(), prev_mux_target);
+        }
+    }
+
+    // Persist final state on clean shutdown so in-session
+    // changes (sort, filter, grouping) that didn't trigger a
+    // view switch are saved.
+    app.persist_state();
+    Ok(())
+}
+
+/// Live-mode loop state: owns the mux runner, the background
+/// discovery channel, and the refresh timer. Its `dispatch`
+/// routes every action to the real handler (exec, tmux ops,
+/// store writes).
+struct LiveMode {
+    tmux: Box<dyn TmuxRunner>,
+    result_tx: mpsc::Sender<DiscoveryResult>,
+    result_rx: mpsc::Receiver<DiscoveryResult>,
+    pending_refresh: bool,
+    last_refresh: Instant,
+    refresh_interval: Duration,
+}
+
+impl LoopMode for LiveMode {
+    fn init(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+    ) -> Result<()> {
+        // Initial synchronous discovery.
+        refresh(app, config);
+        refresh_mux_preview_if_needed(app, config, self.tmux.as_ref(), None);
+        Ok(())
+    }
+
+    fn drain(&mut self, app: &mut App, config: &RunConfig) -> Result<()> {
+        // Drain completed background discovery results without
+        // blocking. Only the most recent result wins.
+        while let Ok(result) = self.result_rx.try_recv() {
+            self.pending_refresh = false;
+            match result {
+                Ok(snapshot) => {
+                    // Build the tree against `App`'s current
+                    // projection state (ADR 0085 contract 4). If
+                    // the operator changed view / grouping /
+                    // filter after the worker was spawned, the
+                    // fresh snapshot lands in the projection the
+                    // operator is actually looking at instead of
+                    // the stale config snapshot the worker
+                    // captured.
+                    let tree = crate::tui::rows::build_tree_for_view(
+                        crate::tui::rows::TreeInputs::from_app(&snapshot, app),
+                    );
+                    let database = GraphDb::new(snapshot);
+                    let initial_selection_hint = launch_context_row_id(&tree);
+                    app.update(Msg::SetData {
+                        snapshot: database,
+                        tree,
+                        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
+                        initial_selection_hint,
+                    });
+                    let cfg_clone = app.config().clone();
+                    populate_provider_status(app, &cfg_clone);
+                }
+                Err(err) => {
+                    app.update(Msg::SetRefreshFailure(format!(
+                        "last refresh failed; {err}"
+                    )));
+                }
+            }
+        }
+        let _ = config;
+        // Timer-driven auto-refresh. Only fires when no request
+        // is in-flight and at least `refresh_interval` has
+        // elapsed.
+        if !self.pending_refresh && self.last_refresh.elapsed() >= self.refresh_interval {
+            self.pending_refresh = true;
+            self.last_refresh = Instant::now();
+            spawn_discovery_worker(app.config(), &self.result_tx);
+        }
+        Ok(())
+    }
+
+    fn dispatch(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+        action: Option<Action>,
+    ) -> Result<()> {
+        let tmux = self.tmux.as_ref();
+        match action {
+            Some(Action::Msg(msg)) => dispatch(app, *msg),
+            Some(Action::Refresh) => {
+                if !self.pending_refresh {
+                    self.pending_refresh = true;
+                    self.last_refresh = Instant::now();
+                    spawn_discovery_worker(app.config(), &self.result_tx);
+                }
+            }
+            Some(Action::Attach) => {
+                dispatch_live(terminal, app, config, tmux, Msg::AttachSelected);
+            }
+            Some(Action::Resume) => {
+                dispatch_live(terminal, app, config, tmux, Msg::ResumeSelected);
+            }
+            Some(Action::View) => {
+                dispatch_live(terminal, app, config, tmux, Msg::ViewSelected);
+            }
+            Some(Action::DefaultAction) => default_action(terminal, app, config, tmux),
+            Some(Action::OpenRename) => open_rename_overlay(app),
+            Some(Action::RenameOverlayKey(key)) => {
+                handle_rename_overlay_key(terminal, app, config, tmux, key)
+            }
+            Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
+            Some(Action::PinBindHint) => pin_bind_hint_action(app),
+            Some(Action::OpenPinCreate) => open_pin_create_action(app),
+            Some(Action::OpenPinRebind) => open_pin_rebind_action(app),
+            Some(Action::OpenPinAdopt) => open_pin_adopt_action(app),
+            Some(Action::LaunchPin) => {
+                dispatch_live(terminal, app, config, tmux, Msg::LaunchSelectedPin);
+            }
+            Some(Action::OpenControls) => {
+                app.open_controls_overlay();
+                app.update(Msg::SetStatus(Some(
+                    "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
+                )));
+            }
+            Some(Action::ControlsOverlayKey(key)) => handle_controls_overlay_key(app, config, key),
+            Some(Action::OpenPins) => {
+                app.open_pins_overlay();
+                app.update(Msg::SetStatus(Some(
+                    "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
+                )));
+            }
+            Some(Action::PinsOverlayKey(key)) => {
+                handle_pins_overlay_key(terminal, app, config, tmux, key)
+            }
+            Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
+            Some(Action::CycleView(delta)) => {
+                let next = cycle_view(app.active_view(), delta);
+                dispatch(app, Msg::SwitchView(next));
+            }
+            Some(Action::CycleGrouping(delta)) => {
+                let next = if delta >= 0 {
+                    app.grouping().cycle_next()
+                } else {
+                    app.grouping().cycle_prev()
+                };
+                dispatch(app, Msg::SetGrouping(next));
+            }
+            Some(Action::ClearFilters) => {
+                dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+                app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+            }
+            Some(Action::OpenSearch) => {
+                app.open_search_overlay();
+                app.update(Msg::SetStatus(Some(
+                    "search: type to filter · Enter pick · Esc close".to_string(),
+                )));
+            }
+            Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
+            Some(Action::OpenHelp) => {
+                app.open_help_overlay();
+            }
+            Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
+            Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
+            Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
+            Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
+            Some(Action::ExplorerEnter) => explorer_enter_action(app),
+            Some(Action::CopySessionId) => copy_session_id_action(app),
+            None => {}
+        }
+        Ok(())
+    }
+
+    fn tmux(&self) -> &dyn TmuxRunner {
+        self.tmux.as_ref()
+    }
+}
+
+/// Static-mode loop state: fixture-replay + scenario TUI. Its
+/// `dispatch` blocks mutating actions with a status hint and
+/// reloads the fixture on `Action::Refresh`.
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+struct StaticMode {
+    tmux: Box<dyn TmuxRunner>,
+    snapshot: crate::model::GraphSnapshot,
+    fixture_path: Option<std::path::PathBuf>,
+}
+
+#[cfg(any(test, debug_assertions, feature = "snapshot"))]
+impl LoopMode for StaticMode {
+    fn init(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+    ) -> Result<()> {
+        set_static_data(app, config, &self.snapshot)?;
+        refresh_mux_preview_if_needed(app, config, self.tmux.as_ref(), None);
+        Ok(())
+    }
+
+    fn drain(&mut self, _app: &mut App, _config: &RunConfig) -> Result<()> {
+        // Scenario mode has no async event sources: no discovery
+        // worker to poll and no refresh timer to arm.
+        Ok(())
+    }
+
+    fn dispatch(
+        &mut self,
+        _terminal: &mut DefaultTerminal,
+        app: &mut App,
+        config: &RunConfig,
+        action: Option<Action>,
+    ) -> Result<()> {
+        match action {
+            Some(Action::Msg(msg)) => dispatch(app, *msg),
+            Some(Action::OpenHelp) => app.open_help_overlay(),
+            Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(app, key),
+            Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
+            Some(Action::ValueModalKey(key)) => handle_value_modal_key(app, key),
+            Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(app, key),
+            Some(Action::OpenSearch) => {
+                app.open_search_overlay();
+                app.update(Msg::SetStatus(Some(
+                    "search: type to filter · Enter pick · Esc close".to_string(),
+                )));
+            }
+            Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(app, key),
+            Some(Action::OpenControls) => {
+                app.open_controls_overlay();
+                app.update(Msg::SetStatus(Some(
+                    "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
+                )));
+            }
+            Some(Action::ControlsOverlayKey(key)) => {
+                static_handle_controls_overlay_key(app, config, &self.snapshot, key)?;
+            }
+            Some(Action::OpenPins) => {
+                app.open_pins_overlay();
+                app.update(Msg::SetStatus(Some(
+                    "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
+                )));
+            }
+            Some(Action::PinsOverlayKey(key)) => {
+                static_handle_pins_overlay_key(app, config, &self.snapshot, key)?;
+            }
+            Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
+            Some(Action::CycleView(delta)) => {
+                let next = cycle_view(app.active_view(), delta);
+                dispatch(app, Msg::SwitchView(next));
+            }
+            Some(Action::Refresh) => {
+                if let Some(path) = self.fixture_path.as_deref() {
+                    // ADR 0069: in fixture mode, `r` re-reads the
+                    // file on disk so the operator can edit the
+                    // JSON and cycle in the new state without
+                    // leaving the session. Parse errors land in
+                    // the status bar; the previously loaded
+                    // fixture stays active.
+                    match read_fixture(path) {
+                        Ok(fresh) => {
+                            self.snapshot = fresh;
+                            set_static_data(app, config, &self.snapshot)?;
+                            app.update(Msg::SetStatus(Some(format!(
+                                "fixture reloaded from {}",
+                                path.display()
+                            ))));
+                        }
+                        Err(err) => {
+                            app.update(Msg::SetStatus(Some(format!(
+                                "fixture reload failed ({}): {err}",
+                                path.display()
+                            ))));
+                        }
+                    }
+                } else {
+                    set_static_data(app, config, &self.snapshot)?;
+                    app.update(Msg::SetStatus(Some(
+                        "scenario snapshot reloaded".to_string(),
+                    )));
+                }
+            }
+            Some(Action::Attach) => {
+                app.update(Msg::SetStatus(Some(
+                    "scenario TUI is static; attach is disabled".to_string(),
+                )));
+            }
+            Some(Action::Resume) => {
+                app.update(Msg::SetStatus(Some(
+                    "scenario TUI is static; resume is disabled".to_string(),
+                )));
+            }
+            Some(Action::View) => {
+                app.update(Msg::SetStatus(Some(
+                    "scenario TUI is static; view is disabled".to_string(),
+                )));
+            }
+            Some(Action::DefaultAction) => {
+                let msg = match selected_default_action(app) {
+                    SelectedDefault::ToggleExpand => Msg::ToggleExpand,
+                    SelectedDefault::Attach => Msg::SetStatus(Some(
+                        "scenario TUI is static; attach is disabled".to_string(),
+                    )),
+                    SelectedDefault::View => {
+                        Msg::SetStatus(Some("scenario TUI is static; view is disabled".to_string()))
+                    }
+                    SelectedDefault::LaunchPin => Msg::SetStatus(Some(
+                        "scenario TUI is static; pin launch is disabled".to_string(),
+                    )),
+                };
+                dispatch(app, msg);
+            }
+            Some(Action::CycleGrouping(delta)) => {
+                let next = if delta >= 0 {
+                    app.grouping().cycle_next()
+                } else {
+                    app.grouping().cycle_prev()
+                };
+                dispatch(app, Msg::SetGrouping(next));
+            }
+            Some(Action::ClearFilters) => {
+                dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
+                app.update(Msg::SetStatus(Some("filters cleared".to_string())));
+            }
+            Some(Action::OpenRename) | Some(Action::RenameOverlayKey(_)) => {
+                app.update(Msg::SetStatus(Some(
+                    "scenario TUI keeps mutating actions disabled".to_string(),
+                )));
+            }
+            Some(Action::RemovePin) => {
+                app.update(Msg::SetStatus(Some(
+                    "scenario TUI keeps mutating actions disabled".to_string(),
+                )));
+            }
+            Some(Action::PinBindHint) => pin_bind_hint_action(app),
+            Some(Action::OpenPinCreate) => open_pin_create_action(app),
+            Some(Action::OpenPinRebind) => open_pin_rebind_action(app),
+            Some(Action::OpenPinAdopt) => open_pin_adopt_action(app),
+            Some(Action::LaunchPin) => {
+                app.update(Msg::SetStatus(Some(
+                    "scenario TUI is static; pin launch is disabled".to_string(),
+                )));
+            }
+            Some(Action::ExplorerEnter) => explorer_enter_action(app),
+            Some(Action::CopySessionId) => copy_session_id_action(app),
+            None => {}
+        }
+        Ok(())
+    }
+
+    fn tmux(&self) -> &dyn TmuxRunner {
+        self.tmux.as_ref()
+    }
 }
 
 /// Prepare the toast area and render one frame. Shared between
@@ -185,219 +609,17 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     // genuine interactive runs.
     app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
     app.restore_persisted_state();
-    let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
-
-    // Initial synchronous discovery.
-    refresh(&mut app, &config);
-    refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);
-
     let (result_tx, result_rx) = mpsc::channel::<DiscoveryResult>();
-    let mut pending_refresh = false;
     let refresh_interval = config.refresh_interval;
-    let mut last_refresh = Instant::now();
-    let poll_timeout = Duration::from_millis(100);
-
-    while !app.should_quit() {
-        // H-WIDG-003 + H-TUI-004 wave 1: draw_frame() handles the
-        // toast area + tick + viewer-or-ui render in one place.
-        draw_frame(&mut app, terminal)?;
-
-        // Drain completed background discovery results without
-        // blocking. Only the most recent result wins.
-        while let Ok(result) = result_rx.try_recv() {
-            pending_refresh = false;
-            match result {
-                Ok(snapshot) => {
-                    // Build the tree against `App`'s current projection
-                    // state (ADR 0085 contract 4). If the operator
-                    // changed view / grouping / filter after the worker
-                    // was spawned, the fresh snapshot lands in the
-                    // projection the operator is actually looking at
-                    // instead of the stale config snapshot the worker
-                    // captured.
-                    let tree = crate::tui::rows::build_tree_for_view(
-                        crate::tui::rows::TreeInputs::from_app(&snapshot, &app),
-                    );
-                    let database = GraphDb::new(snapshot);
-                    let initial_selection_hint = launch_context_row_id(&tree);
-                    app.update(Msg::SetData {
-                        snapshot: database,
-                        tree,
-                        loaded_at_epoch: current_unix_epoch().unwrap_or(0),
-                        initial_selection_hint,
-                    });
-                    let cfg_clone = app.config().clone();
-                    populate_provider_status(&mut app, &cfg_clone);
-                }
-                Err(err) => {
-                    app.update(Msg::SetRefreshFailure(format!(
-                        "last refresh failed; {err}"
-                    )));
-                }
-            }
-        }
-
-        // Timer-driven auto-refresh. Only fires when no request is
-        // in-flight and at least `refresh_interval` has elapsed.
-        if !pending_refresh && last_refresh.elapsed() >= refresh_interval {
-            pending_refresh = true;
-            last_refresh = Instant::now();
-            spawn_discovery_worker(app.config(), &result_tx);
-        }
-
-        if event::poll(poll_timeout)? {
-            let event = event::read()?;
-            let viewport = terminal.size()?.height.saturating_sub(2);
-            let prev_mux_target = current_mux_target(&app);
-            // H-TUI-004 wave 1: overlay routing is a shared helper.
-            // Falls through to translate + focus remap for the
-            // non-modal case.
-            let action = overlay_key_from_event(&app, &event).or_else(|| {
-                translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus()))
-            });
-            match action {
-                Some(Action::Msg(msg)) => dispatch(&mut app, *msg),
-                Some(Action::Refresh) => {
-                    // Route through the executor for symmetry —
-                    // this variant will collapse into
-                    // `Msg::RequestRefresh` returning
-                    // `Effect::SpawnRefresh` once every keymap
-                    // entry produces a `Msg`. The async worker
-                    // spawn stays here (it needs `result_tx`)
-                    // until an executor-owned worker handle
-                    // exists.
-                    if !pending_refresh {
-                        pending_refresh = true;
-                        last_refresh = Instant::now();
-                        spawn_discovery_worker(app.config(), &result_tx);
-                    }
-                }
-                Some(Action::Attach) => {
-                    dispatch_live(
-                        terminal,
-                        &mut app,
-                        &config,
-                        tmux.as_ref(),
-                        Msg::AttachSelected,
-                    );
-                }
-                Some(Action::Resume) => {
-                    dispatch_live(
-                        terminal,
-                        &mut app,
-                        &config,
-                        tmux.as_ref(),
-                        Msg::ResumeSelected,
-                    );
-                }
-                Some(Action::View) => {
-                    dispatch_live(
-                        terminal,
-                        &mut app,
-                        &config,
-                        tmux.as_ref(),
-                        Msg::ViewSelected,
-                    );
-                }
-                Some(Action::DefaultAction) => {
-                    default_action(terminal, &mut app, &config, tmux.as_ref())
-                }
-                Some(Action::OpenRename) => open_rename_overlay(&mut app),
-                Some(Action::RenameOverlayKey(key)) => {
-                    handle_rename_overlay_key(terminal, &mut app, &config, tmux.as_ref(), key)
-                }
-                Some(Action::RemovePin) => {
-                    remove_pin_action(terminal, &mut app, &config, tmux.as_ref())
-                }
-                Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
-                Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
-                Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
-                Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
-                Some(Action::LaunchPin) => {
-                    dispatch_live(
-                        terminal,
-                        &mut app,
-                        &config,
-                        tmux.as_ref(),
-                        Msg::LaunchSelectedPin,
-                    );
-                }
-                Some(Action::OpenControls) => {
-                    app.open_controls_overlay();
-                    app.update(Msg::SetStatus(Some(
-                        "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::ControlsOverlayKey(key)) => {
-                    handle_controls_overlay_key(&mut app, &config, key)
-                }
-                Some(Action::OpenPins) => {
-                    app.open_pins_overlay();
-                    app.update(Msg::SetStatus(Some(
-                        "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::PinsOverlayKey(key)) => {
-                    handle_pins_overlay_key(terminal, &mut app, &config, tmux.as_ref(), key)
-                }
-                Some(Action::SwitchView(view)) => dispatch(&mut app, Msg::SwitchView(view)),
-                Some(Action::CycleView(delta)) => {
-                    let next = cycle_view(app.active_view(), delta);
-                    dispatch(&mut app, Msg::SwitchView(next));
-                }
-                Some(Action::CycleGrouping(delta)) => {
-                    let next = if delta >= 0 {
-                        app.grouping().cycle_next()
-                    } else {
-                        app.grouping().cycle_prev()
-                    };
-                    dispatch(&mut app, Msg::SetGrouping(next));
-                }
-                Some(Action::ClearFilters) => {
-                    dispatch(
-                        &mut app,
-                        Msg::SetFilter(crate::filter::RowFilter::default()),
-                    );
-                    app.update(Msg::SetStatus(Some("filters cleared".to_string())));
-                }
-                Some(Action::OpenSearch) => {
-                    app.open_search_overlay();
-                    app.update(Msg::SetStatus(Some(
-                        "search: type to filter · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::SearchOverlayKey(key)) => {
-                    handle_search_overlay_key(&mut app, key);
-                }
-                Some(Action::OpenHelp) => {
-                    app.open_help_overlay();
-                }
-                Some(Action::HelpOverlayKey(key)) => {
-                    handle_help_overlay_key(&mut app, key);
-                }
-                Some(Action::OpenValueModal) => {
-                    app.open_value_modal_for_cursor();
-                }
-                Some(Action::ValueModalKey(key)) => {
-                    handle_value_modal_key(&mut app, key);
-                }
-                Some(Action::ViewerOverlayKey(key)) => {
-                    handle_viewer_overlay_key(&mut app, key);
-                }
-                Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
-                Some(Action::CopySessionId) => copy_session_id_action(&mut app),
-                None => {}
-            }
-            refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
-        }
-    }
-
-    // Persist final state on clean shutdown so in-session changes
-    // (sort, filter, grouping) that didn't trigger a view switch
-    // are saved.
-    app.persist_state();
-
-    Ok(())
+    let mode = LiveMode {
+        tmux: Box::new(SystemTmux::new()),
+        result_tx,
+        result_rx,
+        pending_refresh: false,
+        last_refresh: Instant::now(),
+        refresh_interval,
+    };
+    run_loop(terminal, app, config, mode)
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
@@ -407,7 +629,6 @@ fn static_event_loop(
     initial_snapshot: crate::model::GraphSnapshot,
     fixture_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let mut snapshot = initial_snapshot;
     let mut app = App::new(config.clone());
     // F8-013: enable last-active-view persistence for the static
     // fixture-replay TUI mode too. Snapshot mode (ADR 0067) uses a
@@ -416,165 +637,12 @@ fn static_event_loop(
     // unconditionally unmoved when the snapshot tooling runs.
     app.enable_view_persistence(crate::tui_state::TuiStateCache::from_env());
     app.restore_persisted_state();
-    set_static_data(&mut app, &config, &snapshot)?;
-    let tmux: Box<dyn TmuxRunner> = Box::new(SystemTmux::new());
-    refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), None);
-    let poll_timeout = Duration::from_millis(100);
-
-    while !app.should_quit() {
-        // H-WIDG-003 + H-TUI-004 wave 1: shared draw_frame() call.
-        draw_frame(&mut app, terminal)?;
-        if event::poll(poll_timeout)? {
-            let event = event::read()?;
-            let viewport = terminal.size()?.height.saturating_sub(2);
-            let prev_mux_target = current_mux_target(&app);
-            let action = static_action_for_event(&app, event, viewport);
-            match action {
-                Some(Action::Msg(msg)) => dispatch(&mut app, *msg),
-                Some(Action::OpenHelp) => app.open_help_overlay(),
-                Some(Action::HelpOverlayKey(key)) => handle_help_overlay_key(&mut app, key),
-                Some(Action::OpenValueModal) => app.open_value_modal_for_cursor(),
-                Some(Action::ValueModalKey(key)) => handle_value_modal_key(&mut app, key),
-                Some(Action::ViewerOverlayKey(key)) => handle_viewer_overlay_key(&mut app, key),
-                Some(Action::OpenSearch) => {
-                    app.open_search_overlay();
-                    app.update(Msg::SetStatus(Some(
-                        "search: type to filter · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::SearchOverlayKey(key)) => handle_search_overlay_key(&mut app, key),
-                Some(Action::OpenControls) => {
-                    app.open_controls_overlay();
-                    app.update(Msg::SetStatus(Some(
-                        "controls: ↑/↓ move · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::ControlsOverlayKey(key)) => {
-                    static_handle_controls_overlay_key(&mut app, &config, &snapshot, key)?;
-                }
-                Some(Action::OpenPins) => {
-                    app.open_pins_overlay();
-                    app.update(Msg::SetStatus(Some(
-                        "pins: ↑/↓ move · Enter pick · Esc close".to_string(),
-                    )));
-                }
-                Some(Action::PinsOverlayKey(key)) => {
-                    static_handle_pins_overlay_key(&mut app, &config, &snapshot, key)?;
-                }
-                Some(Action::SwitchView(view)) => {
-                    dispatch(&mut app, Msg::SwitchView(view));
-                }
-                Some(Action::CycleView(delta)) => {
-                    let next = cycle_view(app.active_view(), delta);
-                    dispatch(&mut app, Msg::SwitchView(next));
-                }
-                Some(Action::Refresh) => {
-                    if let Some(path) = fixture_path.as_deref() {
-                        // ADR 0069: in fixture mode, `r` re-reads the
-                        // file on disk so the operator can edit the
-                        // JSON and cycle in the new state without
-                        // leaving the session. Parse errors land in
-                        // the status bar; the previously loaded
-                        // fixture stays active.
-                        match read_fixture(path) {
-                            Ok(fresh) => {
-                                snapshot = fresh;
-                                set_static_data(&mut app, &config, &snapshot)?;
-                                app.update(Msg::SetStatus(Some(format!(
-                                    "fixture reloaded from {}",
-                                    path.display()
-                                ))));
-                            }
-                            Err(err) => {
-                                app.update(Msg::SetStatus(Some(format!(
-                                    "fixture reload failed ({}): {err}",
-                                    path.display()
-                                ))));
-                            }
-                        }
-                    } else {
-                        set_static_data(&mut app, &config, &snapshot)?;
-                        app.update(Msg::SetStatus(Some(
-                            "scenario snapshot reloaded".to_string(),
-                        )));
-                    }
-                }
-                Some(Action::Attach) => {
-                    app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; attach is disabled".to_string(),
-                    )));
-                }
-                Some(Action::Resume) => {
-                    app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; resume is disabled".to_string(),
-                    )));
-                }
-                Some(Action::View) => {
-                    app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; view is disabled".to_string(),
-                    )));
-                }
-                Some(Action::DefaultAction) => {
-                    let msg = match selected_default_action(&app) {
-                        SelectedDefault::ToggleExpand => Msg::ToggleExpand,
-                        SelectedDefault::Attach => Msg::SetStatus(Some(
-                            "scenario TUI is static; attach is disabled".to_string(),
-                        )),
-                        SelectedDefault::View => Msg::SetStatus(Some(
-                            "scenario TUI is static; view is disabled".to_string(),
-                        )),
-                        SelectedDefault::LaunchPin => Msg::SetStatus(Some(
-                            "scenario TUI is static; pin launch is disabled".to_string(),
-                        )),
-                    };
-                    dispatch(&mut app, msg);
-                }
-                Some(Action::CycleGrouping(delta)) => {
-                    let next = if delta >= 0 {
-                        app.grouping().cycle_next()
-                    } else {
-                        app.grouping().cycle_prev()
-                    };
-                    dispatch(&mut app, Msg::SetGrouping(next));
-                }
-                Some(Action::ClearFilters) => {
-                    dispatch(
-                        &mut app,
-                        Msg::SetFilter(crate::filter::RowFilter::default()),
-                    );
-                    app.update(Msg::SetStatus(Some("filters cleared".to_string())));
-                }
-                Some(Action::OpenRename) | Some(Action::RenameOverlayKey(_)) => {
-                    app.update(Msg::SetStatus(Some(
-                        "scenario TUI keeps mutating actions disabled".to_string(),
-                    )));
-                }
-                Some(Action::RemovePin) => {
-                    app.update(Msg::SetStatus(Some(
-                        "scenario TUI keeps mutating actions disabled".to_string(),
-                    )));
-                }
-                Some(Action::PinBindHint) => pin_bind_hint_action(&mut app),
-                Some(Action::OpenPinCreate) => open_pin_create_action(&mut app),
-                Some(Action::OpenPinRebind) => open_pin_rebind_action(&mut app),
-                Some(Action::OpenPinAdopt) => open_pin_adopt_action(&mut app),
-                Some(Action::LaunchPin) => {
-                    app.update(Msg::SetStatus(Some(
-                        "scenario TUI is static; pin launch is disabled".to_string(),
-                    )));
-                }
-                Some(Action::ExplorerEnter) => explorer_enter_action(&mut app),
-                Some(Action::CopySessionId) => copy_session_id_action(&mut app),
-                None => {}
-            }
-            refresh_mux_preview_if_needed(&mut app, &config, tmux.as_ref(), prev_mux_target);
-        }
-    }
-
-    // Persist final state on clean shutdown.
-    app.persist_state();
-
-    Ok(())
+    let mode = StaticMode {
+        tmux: Box::new(SystemTmux::new()),
+        snapshot: initial_snapshot,
+        fixture_path,
+    };
+    run_loop(terminal, app, config, mode)
 }
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
@@ -658,16 +726,6 @@ fn set_static_data(
     });
     populate_provider_status(app, config);
     Ok(())
-}
-
-#[cfg(any(test, debug_assertions, feature = "snapshot"))]
-fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
-    // H-TUI-004 wave 1: shared overlay routing with the live loop.
-    // Non-modal events go through the same translate + focus remap
-    // path — the scenario TUI's per-mode differences kick in only
-    // when the resulting Action gets dispatched.
-    overlay_key_from_event(app, &event)
-        .or_else(|| translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus())))
 }
 
 /// Spawn a background thread that runs discovery and sends the resolved
@@ -2996,26 +3054,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn static_action_routes_keys_to_controls_overlay() {
-        let mut app = App::new(RunConfig::defaults());
-        app.open_controls_overlay();
-
-        assert_eq!(
-            static_action_for_event(&app, press(KeyCode::Down, KeyModifiers::NONE), 24),
-            Some(Action::ControlsOverlayKey(KeyEvent::new(
-                KeyCode::Down,
-                KeyModifiers::NONE
-            )))
-        );
-        assert_eq!(
-            static_action_for_event(&app, press(KeyCode::Char('q'), KeyModifiers::NONE), 24),
-            Some(Action::ControlsOverlayKey(KeyEvent::new(
-                KeyCode::Char('q'),
-                KeyModifiers::NONE
-            )))
-        );
-    }
+    // static_action_for_event removed in H-TUI-004 wave 2 — its
+    // body was `overlay_key_from_event.or_else(translate + remap)`,
+    // which the shared `run_loop` now inlines. Overlay routing
+    // coverage lives in `tui::runtime::tests::overlay_routing`.
 
     #[test]
     fn translate_shift_f_clears_filters() {
