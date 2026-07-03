@@ -14,7 +14,6 @@
 //! - `P8-008` onward: background data loader dispatches
 //!   `Msg::SetData` results into the reducer.
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
@@ -160,18 +159,23 @@ pub struct App {
     /// selection points at a muxed agent session or a mux node.
     preview_store: PreviewStore,
     /// Left-panel vertical scroll offset, in rendered lines. The
-    /// renderer reads/updates this via [`App::adjust_left_scroll`]
-    /// each frame so the selected row stays visible without the
-    /// renderer needing `&mut self`.
-    left_scroll: Cell<u16>,
+    /// renderer reconciles this each frame via
+    /// [`App::adjust_left_scroll`] so the selected row stays
+    /// visible. H-TUI-005 wave 1 dropped the `Cell` interior
+    /// mutability: draw now takes `&mut App` and mutates the
+    /// field directly; wave 2 will move the reconciliation into
+    /// the reducer via a `Msg::LeftViewportChanged` per ADR 0085
+    /// contract 5.
+    left_scroll: u16,
     /// Right-panel explorer scroll offset, in rendered lines. Used
     /// to keep the explorer cursor visible inside the header section
     /// when the Related list grows past the section's height (the
-    /// preview zone below reserves a minimum). Renderer-managed via
-    /// [`App::adjust_explorer_scroll`] each frame, mirroring the
-    /// left pane's pattern. Does not affect [`Self::preview_scroll`],
-    /// which scrolls the preview body independently.
-    explorer_scroll: Cell<u16>,
+    /// preview zone below reserves a minimum). Reconciled each
+    /// frame via [`App::adjust_explorer_scroll`], mirroring the
+    /// left pane's pattern. Does not affect
+    /// [`Self::preview_scroll`], which scrolls the preview body
+    /// independently.
+    explorer_scroll: u16,
     /// Last visible-row index the selection landed on, used as a
     /// tiebreaker when the same `RowId` appears in multiple visible
     /// positions (e.g. the mux view lists the same ambiguously-
@@ -180,7 +184,7 @@ pub struct App {
     /// which always returns the first occurrence, and `j` from a
     /// later duplicate snaps the cursor back to the row after the
     /// first one.
-    last_visible_index: Cell<Option<usize>>,
+    last_visible_index: Option<usize>,
     /// Pin id waiting for a second `Delete` press. This gives pin
     /// removal a confirmation step without introducing a full modal
     /// before the H-PIN-023 edit/remove flow lands.
@@ -606,9 +610,9 @@ impl App {
             provider_status: ProviderStatus::default(),
             refresh_failure: None,
             preview_store: PreviewStore::new(),
-            left_scroll: Cell::new(0),
-            explorer_scroll: Cell::new(0),
-            last_visible_index: Cell::new(None),
+            left_scroll: 0,
+            explorer_scroll: 0,
+            last_visible_index: None,
             pending_pin_remove: None,
             modal_stack: Vec::new(),
             toast: crate::tui::widgets::toast::ToastEngineHolder(
@@ -631,7 +635,7 @@ impl App {
             grouping: self.grouping,
             expanded: self.expanded.clone(),
             selection: self.selection.clone(),
-            left_scroll: self.left_scroll.get(),
+            left_scroll: self.left_scroll,
         }
     }
 
@@ -641,7 +645,7 @@ impl App {
         self.grouping = slot.grouping;
         self.expanded = slot.expanded;
         self.selection = slot.selection;
-        self.left_scroll.set(slot.left_scroll);
+        self.left_scroll = slot.left_scroll;
     }
 
     /// Switch the active view to `target`, saving the previous
@@ -1074,7 +1078,7 @@ impl App {
         // reset the duplicate-RowId tiebreaker. The next NavDown
         // falls back to the first occurrence in `visible_rows`, then
         // the cache repopulates from there.
-        self.last_visible_index.set(None);
+        self.last_visible_index = None;
         self.selection = Some(id);
         self.status_message = None;
         self.recompute_detail();
@@ -1120,7 +1124,7 @@ impl App {
             return false;
         };
         let row_id = visible[idx].id.clone();
-        self.last_visible_index.set(Some(idx));
+        self.last_visible_index = Some(idx);
         self.selection = Some(row_id);
         self.status_message = None;
         self.recompute_detail();
@@ -1747,26 +1751,26 @@ impl App {
     ///   bottom edge moves down (and the offset advances).
     /// - Otherwise the offset is left alone — incidental cursor
     ///   movement inside the viewport doesn't reshuffle the view.
-    pub fn adjust_left_scroll(&self, selected_line: usize, viewport_height: u16) -> u16 {
+    pub fn adjust_left_scroll(&mut self, selected_line: usize, viewport_height: u16) -> u16 {
         let vh = viewport_height as usize;
         if vh == 0 {
-            return self.left_scroll.get();
+            return self.left_scroll;
         }
-        let mut offset = self.left_scroll.get() as usize;
+        let mut offset = self.left_scroll as usize;
         if selected_line < offset {
             offset = selected_line;
         } else if selected_line >= offset + vh {
             offset = selected_line + 1 - vh;
         }
         let clamped = offset.min(u16::MAX as usize) as u16;
-        self.left_scroll.set(clamped);
+        self.left_scroll = clamped;
         clamped
     }
 
     /// Test-only accessor for the current scroll offset.
     #[cfg(test)]
     pub fn left_scroll(&self) -> u16 {
-        self.left_scroll.get()
+        self.left_scroll
     }
 
     /// Reconcile the explorer (right-pane) scroll offset against the
@@ -1786,16 +1790,16 @@ impl App {
     /// Triggered every frame so an out-of-date offset self-corrects
     /// without explicit invalidation on focus changes or rebuilds.
     pub fn adjust_explorer_scroll(
-        &self,
+        &mut self,
         cursor_first_row: usize,
         cursor_last_row: usize,
         viewport_height: u16,
     ) -> u16 {
         let vh = viewport_height as usize;
         if vh == 0 {
-            return self.explorer_scroll.get();
+            return self.explorer_scroll;
         }
-        let mut offset = self.explorer_scroll.get() as usize;
+        let mut offset = self.explorer_scroll as usize;
         // Scroll up if the cursor's first row is above the top of
         // the viewport.
         if cursor_first_row < offset {
@@ -1808,14 +1812,14 @@ impl App {
             offset = cursor_last_row + 1 - vh;
         }
         let clamped = offset.min(u16::MAX as usize) as u16;
-        self.explorer_scroll.set(clamped);
+        self.explorer_scroll = clamped;
         clamped
     }
 
     /// Test-only accessor for the current explorer scroll offset.
     #[cfg(test)]
     pub fn explorer_scroll(&self) -> u16 {
-        self.explorer_scroll.get()
+        self.explorer_scroll
     }
 
     /// Iterate the row tree, skipping rows whose ancestors are
@@ -2142,16 +2146,16 @@ impl App {
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
-            self.last_visible_index.set(None);
+            self.last_visible_index = None;
         } else if let Some(prev) = prev_selection.as_ref()
             && let Some(pos) = self.position_closest_to(&visible, prev, prev_visible_index)
         {
             self.selection = Some(visible[pos].clone());
-            self.last_visible_index.set(Some(pos));
+            self.last_visible_index = Some(pos);
         } else if let Some(prev_index) = prev_visible_index {
             let clamped = prev_index.min(visible.len() - 1);
             self.selection = Some(visible[clamped].clone());
-            self.last_visible_index.set(Some(clamped));
+            self.last_visible_index = Some(clamped);
         } else if is_first_load
             && let Some(hint) = initial_selection_hint
             && let Some(pos) = visible.iter().position(|id| id == &hint)
@@ -2162,10 +2166,10 @@ impl App {
             // refreshes don't fight the operator's manual
             // selection.
             self.selection = Some(hint);
-            self.last_visible_index.set(Some(pos));
+            self.last_visible_index = Some(pos);
         } else {
             self.selection = Some(visible[0].clone());
-            self.last_visible_index.set(Some(0));
+            self.last_visible_index = Some(0);
         }
         self.recompute_detail();
     }
@@ -2206,19 +2210,19 @@ impl App {
         let visible = self.visible_rows_owned();
         if visible.is_empty() {
             self.selection = None;
-            self.last_visible_index.set(None);
+            self.last_visible_index = None;
         } else if let Some(prev) = prev_selection.as_ref()
             && let Some(pos) = self.position_closest_to(&visible, prev, prev_visible_index)
         {
             self.selection = Some(visible[pos].clone());
-            self.last_visible_index.set(Some(pos));
+            self.last_visible_index = Some(pos);
         } else if let Some(prev_index) = prev_visible_index {
             let clamped = prev_index.min(visible.len() - 1);
             self.selection = Some(visible[clamped].clone());
-            self.last_visible_index.set(Some(clamped));
+            self.last_visible_index = Some(clamped);
         } else {
             self.selection = Some(visible[0].clone());
-            self.last_visible_index.set(Some(0));
+            self.last_visible_index = Some(0);
         }
         self.recompute_detail();
     }
@@ -2261,7 +2265,7 @@ impl App {
         if visible.is_empty() {
             self.selection = None;
             self.detail = None;
-            self.last_visible_index.set(None);
+            self.last_visible_index = None;
             return;
         }
         let current = self
@@ -2272,7 +2276,7 @@ impl App {
         let len = visible.len() as i32;
         let target = (current as i32 + delta).clamp(0, len - 1) as usize;
         self.selection = Some(visible[target].clone());
-        self.last_visible_index.set(Some(target));
+        self.last_visible_index = Some(target);
         self.recompute_detail();
     }
 
@@ -2283,12 +2287,12 @@ impl App {
         if visible.is_empty() {
             self.selection = None;
             self.detail = None;
-            self.last_visible_index.set(None);
+            self.last_visible_index = None;
             return;
         }
         let clamped = index.min(visible.len() - 1);
         self.selection = Some(visible[clamped].clone());
-        self.last_visible_index.set(Some(clamped));
+        self.last_visible_index = Some(clamped);
         self.recompute_detail();
     }
 
@@ -2308,7 +2312,7 @@ impl App {
         let Some(first) = matches.next() else {
             return 0;
         };
-        let Some(cached) = self.last_visible_index.get() else {
+        let Some(cached) = self.last_visible_index else {
             return first;
         };
         let mut best = first;
@@ -3937,14 +3941,14 @@ mod tests {
         // Step onto the first duplicate, then the second.
         app.update(Msg::NavDown);
         app.update(Msg::NavDown);
-        assert_eq!(app.last_visible_index.get(), Some(2));
+        assert_eq!(app.last_visible_index, Some(2));
         assert_eq!(app.selection.as_ref(), Some(&RowId::Group(dup_id.clone())));
 
         // From the second duplicate, NavDown must advance to the
         // row *after* it, not snap back to the row after the first
         // copy.
         app.update(Msg::NavDown);
-        assert_eq!(app.last_visible_index.get(), Some(3));
+        assert_eq!(app.last_visible_index, Some(3));
         assert_eq!(
             app.selection.as_ref(),
             Some(&RowId::Group(workspace("c"))),
@@ -4070,7 +4074,7 @@ mod tests {
 
     #[test]
     fn adjust_left_scroll_keeps_selection_above_top() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         // Selection at line 0 with viewport 5: offset is 0.
         assert_eq!(app.adjust_left_scroll(0, 5), 0);
         // Walk the selection down to line 10; offset advances so
@@ -4083,7 +4087,7 @@ mod tests {
 
     #[test]
     fn adjust_left_scroll_holds_when_selection_inside_viewport() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         // Prime offset by scrolling to line 10 in a 5-tall viewport.
         app.adjust_left_scroll(10, 5);
         assert_eq!(app.left_scroll(), 6);
@@ -4095,7 +4099,7 @@ mod tests {
 
     #[test]
     fn adjust_left_scroll_with_zero_viewport_does_nothing() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         app.adjust_left_scroll(10, 5);
         let before = app.left_scroll();
         let returned = app.adjust_left_scroll(99, 0);
@@ -4105,7 +4109,7 @@ mod tests {
 
     #[test]
     fn adjust_explorer_scroll_keeps_cursor_in_viewport() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         assert_eq!(app.adjust_explorer_scroll(0, 0, 5), 0);
         assert_eq!(app.adjust_explorer_scroll(10, 10, 5), 6);
         assert_eq!(app.adjust_explorer_scroll(4, 4, 5), 4);
@@ -4113,7 +4117,7 @@ mod tests {
 
     #[test]
     fn adjust_explorer_scroll_holds_when_cursor_inside_viewport() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         app.adjust_explorer_scroll(10, 10, 5);
         assert_eq!(app.explorer_scroll(), 6);
         assert_eq!(app.adjust_explorer_scroll(8, 8, 5), 6);
@@ -4123,7 +4127,7 @@ mod tests {
 
     #[test]
     fn adjust_explorer_scroll_with_zero_viewport_does_nothing() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         app.adjust_explorer_scroll(10, 10, 5);
         let before = app.explorer_scroll();
         let returned = app.adjust_explorer_scroll(99, 99, 0);
@@ -4140,7 +4144,7 @@ mod tests {
         // "scroll down" branch so a 2-row wrapped cursor line at
         // the bottom of the content advances the offset enough
         // for both rows to fit.
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         // Viewport 5 rows. Cursor's line starts at row 9 and
         // wraps to 2 rows (occupies 9 and 10). The offset must
         // advance to 6 so both 9 and 10 fit in [6, 10].
@@ -4148,7 +4152,7 @@ mod tests {
         assert_eq!(app.explorer_scroll(), 6);
         // Single-row cursor at the same row keeps the older
         // tighter behavior (offset = 5).
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         assert_eq!(app.adjust_explorer_scroll(9, 9, 5), 5);
     }
 

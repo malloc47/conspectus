@@ -54,9 +54,13 @@ use crate::tui::rows::{
 /// phase-08 layout note).
 pub(super) const NARROW_LAYOUT_THRESHOLD: u16 = 100;
 
-/// Render one frame. Pure with respect to `app`; the runtime calls
-/// this on every loop iteration.
-pub fn draw(app: &App, frame: &mut Frame<'_>) {
+/// Render one frame. H-TUI-005 wave 1: takes `&mut App` because
+/// scroll reconciliation writes back through the row-panel draw
+/// paths. The ADR 0085 contract 5 target is a strict
+/// `&App → buffer` — wave 2 will move the reconciliation into
+/// the reducer via `Msg::LeftViewportChanged` and revert this to
+/// `&App`.
+pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     let area = frame.area();
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -516,7 +520,7 @@ fn snapshot_counts(database: Option<&GraphDb>) -> (usize, usize) {
 // Body: left tree + right detail
 // -----------------------------------------------------------------------------
 
-fn draw_body(app: &App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     let direction = if area.width < NARROW_LAYOUT_THRESHOLD {
         Direction::Vertical
     } else {
@@ -530,7 +534,7 @@ fn draw_body(app: &App, frame: &mut Frame<'_>, area: Rect) {
     draw_right_panel(app, frame, split[1]);
 }
 
-fn draw_left_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(left_panel_title(app));
@@ -1808,7 +1812,7 @@ fn compact_mux_native_id(native: &str) -> String {
 // Right panel
 // -----------------------------------------------------------------------------
 
-fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
+fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(right_panel_title(app, area.width as usize));
@@ -1827,7 +1831,14 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // with cursor highlight) on top. Falls back to the legacy
     // section-grouped detail when the explorer state isn't ready
     // yet (race during the first SetData).
-    if let Some(state) = app.explorer() {
+    if app.explorer().is_some() {
+        // H-TUI-005 wave 1: `app` is `&mut` here so scroll
+        // reconciliation lives on the App fields directly rather
+        // than in `Cell`s. We derive all state-dependent lines +
+        // wrap counts through an immutable borrow of the explorer
+        // state, drop that borrow, mutate the scroll offset, then
+        // re-borrow the state for the preview render below.
+        //
         // Render the chip dividers (`Related`, `Other`) at the
         // narrower content width that `scrollbar_layout` will give
         // the paragraph once it reserves a gutter for the
@@ -1838,9 +1849,10 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
         // per_line_rows math expects, leaving the cursor visible
         // off the bottom of the viewport.
         let content_width = inner.width.saturating_sub(1).max(1) as usize;
-        let rendered =
-            render_explorer_lines(state, content_width, app.theme(), app.edge_meta_visible());
-        let ExplorerRender { lines, cursor_line } = rendered;
+        let ExplorerRender { lines, cursor_line } = {
+            let state = app.explorer().expect("checked above");
+            render_explorer_lines(state, content_width, app.theme(), app.edge_meta_visible())
+        };
         // Account for Paragraph wrap: any logical line whose
         // displayed width exceeds the pane width consumes extra
         // terminal rows. Without the wrap-aware row count, the
@@ -1938,6 +1950,11 @@ fn draw_right_panel(app: &App, frame: &mut Frame<'_>, area: Rect) {
             )),
             split[1],
         );
+        // Re-fetch the explorer state for the preview render — the
+        // adjust_explorer_scroll call above needed a mutable
+        // borrow of `app`, which required dropping the earlier
+        // immutable state borrow.
+        let state = app.explorer().expect("checked above");
         draw_explorer_preview(app, state, frame, split[2]);
         return;
     }
@@ -3219,7 +3236,7 @@ fn crop_bottom_lines(text: &str, max_lines: usize) -> String {
 /// terminal area. Exposed for snapshot tests so they can assert on
 /// the rendered shape without a real TTY.
 #[cfg(test)]
-pub fn render_to_buffer(app: &App, area: Rect) -> ratatui::buffer::Buffer {
+pub fn render_to_buffer(app: &mut App, area: Rect) -> ratatui::buffer::Buffer {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     let mut terminal =
@@ -3495,7 +3512,7 @@ mod tests {
         app.update(Msg::NavDown);
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
 
         assert!(
@@ -3536,9 +3553,9 @@ mod tests {
         // N > 0. With the showcase fixture having zero ambiguous
         // rows, the header should now read approximately
         // `updated Ns ago · N/M sessions · M mux` with no chips.
-        let app = seeded_app();
+        let mut app = seeded_app();
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let header = text.lines().next().expect("header line");
 
@@ -3570,9 +3587,9 @@ mod tests {
         // truncation). The pre-audit baseline `Conspectus · sessions ·
         // updated 0s ago · N of M agents · M mux` was ~65 cells, with
         // chip sections then overflowing entirely.
-        let app = seeded_app();
+        let mut app = seeded_app();
         let area = Rect::new(0, 0, 80, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let header = text.lines().next().expect("header line");
         assert!(
@@ -3594,9 +3611,9 @@ mod tests {
         // only when `[tui] show_harness_chips = true` is set in the
         // operator's config. Default-off seeded_app + a separately
         // seeded opt-in app exercise both paths.
-        let opt_in = seeded_app_with_harness_chips();
+        let mut opt_in = seeded_app_with_harness_chips();
         let area = Rect::new(0, 0, 200, 24);
-        let buffer = render_to_buffer(&opt_in, area);
+        let buffer = render_to_buffer(&mut opt_in, area);
         let text = buffer_to_string(&buffer);
         let header = text.lines().next().expect("header line");
         assert!(
@@ -3662,9 +3679,9 @@ mod tests {
         // active one accented. Operators see the available views at
         // a glance instead of having to remember the 1–5
         // accelerators.
-        let app = seeded_app();
+        let mut app = seeded_app();
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let title_line = text
             .lines()
@@ -3688,7 +3705,7 @@ mod tests {
         let mut app = seeded_app();
         app.update(Msg::NavDown);
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let title_line = text
             .lines()
@@ -3710,8 +3727,8 @@ mod tests {
         // varies by selection kind (Phase 11) so the assertion is
         // on the *count* of `▸` markers, not on a specific suffix.
         let area = Rect::new(0, 0, 160, 24);
-        let app = seeded_app();
-        let buffer = render_to_buffer(&app, area);
+        let mut app = seeded_app();
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert_eq!(
             text.matches('▸').count(),
@@ -3732,7 +3749,7 @@ mod tests {
 
         let mut app = seeded_app();
         app.update(Msg::CycleFocus);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert_eq!(
             text.matches('▸').count(),
@@ -3805,9 +3822,9 @@ mod tests {
         // Two group rows with very different body widths must have
         // their `(N)` chips start at the same column so the eye can
         // scan summary state without zig-zagging across rows.
-        let app = two_repo_app();
+        let mut app = two_repo_app();
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
 
         let short_line = text
@@ -3832,9 +3849,9 @@ mod tests {
         // `+`-delimited member list) must start at the same column
         // on every visible group row, even when the labels have
         // very different widths.
-        let app = two_repo_app();
+        let mut app = two_repo_app();
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
 
         let short_line = text
@@ -3865,9 +3882,9 @@ mod tests {
         // from the original Phase 7 chip strip are gone; ambiguity
         // is surfaced only by the trailing `⚠` glyph (asserted in
         // `group_rows_show_warning_glyph_when_descendant_is_ambiguous`).
-        let app = seeded_app();
+        let mut app = seeded_app();
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let group_line = text
             .lines()
@@ -4004,9 +4021,9 @@ mod tests {
         // sections are suppressed entirely. ADR 0074 collapsed the
         // prior `Upstream` / `Downstream` chip dividers into one
         // `Related` chip; this test pins the new label.
-        let app = muxed_app("editor", None);
+        let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             !text.contains(" Node "),
@@ -4029,9 +4046,9 @@ mod tests {
         // single `<verb> <glyph> <neighbor_label>` line. The verb
         // carries the relation, the glyph carries the neighbor
         // kind, and the row is selectable as one cursor stop.
-        let app = muxed_app("editor", None);
+        let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let line = text
             .lines()
@@ -4053,14 +4070,14 @@ mod tests {
         // the trailing meta surfaces.
         let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let default_text = buffer_to_string(&render_to_buffer(&app, area));
+        let default_text = buffer_to_string(&render_to_buffer(&mut app, area));
         assert!(
             !default_text.contains("discovered · "),
             "edge meta should be hidden by default: {default_text}",
         );
         // Toggle to opt-in.
         app.update(Msg::ToggleEdgeMeta);
-        let toggled_text = buffer_to_string(&render_to_buffer(&app, area));
+        let toggled_text = buffer_to_string(&render_to_buffer(&mut app, area));
         assert!(
             toggled_text.contains("discovered · ") || toggled_text.contains("strong_discovered · "),
             "edge meta should surface after the toggle: {toggled_text}",
@@ -4110,9 +4127,9 @@ mod tests {
         // the left, so the right-panel title reads
         // `▸ ● session ◀ …` (`AgentSession` glyph is preserved at
         // pill-less surfaces per the §3 amendment).
-        let app = muxed_app("editor", None);
+        let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let agent_glyph = crate::tui::icons::NodeKind::AgentSession.default_glyph();
         let pattern = format!("{agent_glyph} session");
@@ -4130,9 +4147,9 @@ mod tests {
         // operator can scan kinds without reading the label first.
         // Pin glyph + ordering on the validated `attached to … ▣
         // tmux:editor` row that the muxed fixture produces.
-        let app = muxed_app("editor", None);
+        let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let mux_glyph = crate::tui::icons::NodeKind::MuxSession.default_glyph();
         let line = text
@@ -4294,9 +4311,9 @@ mod tests {
         // · M other …`) sits to the left of the chip on the same
         // divider line. Pin the relative ordering plus the new
         // summary vocabulary.
-        let app = muxed_app("editor", None);
+        let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let line = text
             .lines()
@@ -4320,7 +4337,7 @@ mod tests {
         // the mux summary (`backend · native_id`, etc.).
         let mut app = muxed_app("editor", None);
         let area = Rect::new(0, 0, 120, 24);
-        let initial = buffer_to_string(&render_to_buffer(&app, area));
+        let initial = buffer_to_string(&render_to_buffer(&mut app, area));
         assert!(
             initial.contains("attached to"),
             "session detail should expose the `attached to` row (ADR 0074 verb catalog): {initial}"
@@ -4344,7 +4361,7 @@ mod tests {
             app.update(Msg::ExplorerNavDown);
         }
         app.update(Msg::ExplorerActivate);
-        let drilled = buffer_to_string(&render_to_buffer(&app, area));
+        let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
         assert!(
             drilled.contains("backend") && drilled.contains("tmux"),
             "after drilldown the Node zone should expose the mux fields: {drilled}"
@@ -4565,7 +4582,7 @@ mod tests {
         // kicks in — the bug should reproduce purely from the
         // section-content path, not from vertical clamping.
         let area = Rect::new(0, 0, 120, 40);
-        let collapsed = buffer_to_string(&render_to_buffer(&app, area));
+        let collapsed = buffer_to_string(&render_to_buffer(&mut app, area));
         // T8-029 + ADR 0074: the linked session now surfaces in the
         // mux's `Related` zone via the inbound `attached session`
         // verb (the session is the link's source, the mux its
@@ -4689,7 +4706,7 @@ mod tests {
         app.update(Msg::ExplorerActivate);
 
         let area = Rect::new(0, 0, 120, 40);
-        let drilled = buffer_to_string(&render_to_buffer(&app, area));
+        let drilled = buffer_to_string(&render_to_buffer(&mut app, area));
         // T8-029: post-drill the right pane is now focused on the
         // session itself. Its Node zone exposes the standalone
         // session core fields (id, harness, alias, cwd, status).
@@ -4711,9 +4728,9 @@ mod tests {
 
     #[test]
     fn empty_app_renders_loading_placeholder() {
-        let app = App::new(RunConfig::defaults());
+        let mut app = App::new(RunConfig::defaults());
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("Loading"),
@@ -5349,12 +5366,12 @@ mod tests {
 
     #[test]
     fn header_shows_updated_ns_ago_when_clock_is_ahead_of_load_epoch() {
-        let app = seeded_app();
+        let mut app = seeded_app();
         // seeded_app sets loaded_at_epoch = 1_700_000_000.
         // Advance the rendering clock 12s to assert the freshness slot.
         test_clock::set(1_700_000_012);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("updated 12s ago"),
@@ -5368,7 +5385,7 @@ mod tests {
         app.update(Msg::NavDown);
         // Width 60 is below NARROW_LAYOUT_THRESHOLD.
         let area = Rect::new(0, 0, 60, 30);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
 
         // In the stacked layout, only one panel border occupies
@@ -5473,7 +5490,7 @@ mod tests {
         app.update(Msg::NavDown); // jump from repo group → session row
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("preview disabled"),
@@ -5494,7 +5511,7 @@ mod tests {
         app.update(Msg::CycleFocus);
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             // T8-029: right-focus hint now describes the explorer
@@ -5533,7 +5550,7 @@ mod tests {
         let mut app = seeded_app();
         app.update(Msg::NavDown);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         // T8-043: un-muxed agent sessions now advertise Enter
         // (and `v`) as the primary default action rather than the
@@ -5561,7 +5578,7 @@ mod tests {
         let mut app = app;
         app.update(Msg::NavDown);
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("Enter/a attach"),
@@ -5581,7 +5598,7 @@ mod tests {
         }));
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("group:none"),
@@ -5745,7 +5762,7 @@ mod tests {
         app.update(Msg::NavDown);
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("Enter/a attach preferred"),
@@ -5761,11 +5778,11 @@ mod tests {
     fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
         // T8-014: a group-row selection should surface the
         // expand/collapse fold bindings, not an attach hint.
-        let app = seeded_app();
+        let mut app = seeded_app();
         // Auto-selection lands on the project group row, which is
         // exactly what we want to assert against.
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("Enter/l expand"),
@@ -5789,7 +5806,7 @@ mod tests {
         app.update(Msg::SetStatus(None));
 
         let area = Rect::new(0, 0, 220, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("stale"),
@@ -5813,7 +5830,7 @@ mod tests {
         }));
 
         let area = Rect::new(0, 0, 220, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("tmux:missing binary"),
@@ -5837,7 +5854,7 @@ mod tests {
         app.config_mut().current_tmux_session = Some("editor".to_string());
 
         let area = Rect::new(0, 0, 160, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         assert!(
             text.contains("refusing to attach current tmux session `editor`"),
@@ -5859,7 +5876,7 @@ mod tests {
         app.update(Msg::ScrollPreviewBy(-1));
 
         let area = Rect::new(0, 0, 100, 14);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
         let preview_divider = text
             .lines()
@@ -6048,7 +6065,7 @@ mod tests {
         // inner viewport is 20 rows tall, so the final selected row
         // should land exactly on y=21, the bottom content row.
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let text = buffer_to_string(&buffer);
 
         // The last row should be visible. Confirm via the external
@@ -6171,7 +6188,7 @@ mod tests {
         for _ in 0..3 {
             app.update(Msg::ExplorerNavDown);
         }
-        let initial = buffer_to_string(&render_to_buffer(&app, area));
+        let initial = buffer_to_string(&render_to_buffer(&mut app, area));
         assert!(
             initial.contains("repo-00.git"),
             "early rows should be visible before scrolling: {initial}"
@@ -6196,7 +6213,7 @@ mod tests {
             app.update(Msg::ExplorerNavDown);
         }
 
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let scrolled = buffer_to_string(&buffer);
         assert!(
             scrolled.contains("repo-19.git"),
@@ -6255,9 +6272,9 @@ mod tests {
         // right pane, the explorer header used to grow until the
         // preview zone collapsed to 2 rows. The renderer now caps
         // the header so the preview zone keeps a usable minimum.
-        let app = workspace_app_with_repos(40);
+        let mut app = workspace_app_with_repos(40);
         let area = Rect::new(0, 0, 100, 30);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
 
         // Locate the 1-row Preview divider that separates the
         // explorer header from the preview body. It's the line that
@@ -6360,7 +6377,7 @@ mod tests {
         // (post-border) sits at x=1..59; the scrollbar rides the
         // rightmost inner column.
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -6381,9 +6398,9 @@ mod tests {
         // session — three rows total. With a 24-row terminal there
         // is nothing to scroll, so the bar must stay hidden
         // (fade-on-fit, ADR 0076).
-        let app = seeded_app();
+        let mut app = seeded_app();
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -6409,7 +6426,7 @@ mod tests {
         let mut app = workspace_app_with_repos(20);
         app.update(Msg::CycleFocus);
         let area = Rect::new(0, 0, 120, 20);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -6479,7 +6496,7 @@ mod tests {
         app.update(Msg::End);
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -6571,7 +6588,7 @@ mod tests {
         });
 
         let area = Rect::new(0, 0, 120, 24);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -6611,9 +6628,9 @@ mod tests {
         // A workspace with two repos has only two validated rows;
         // the explorer header comfortably fits in any non-tiny
         // terminal so no scrollbar should render.
-        let app = workspace_app_with_repos(2);
+        let mut app = workspace_app_with_repos(2);
         let area = Rect::new(0, 0, 120, 30);
-        let buffer = render_to_buffer(&app, area);
+        let buffer = render_to_buffer(&mut app, area);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])

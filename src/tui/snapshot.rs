@@ -134,7 +134,7 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     // Rect::default() and any toast queued by `--snapshot-keys`
     // never paints.
     app.prepare_toast_for_render(Rect::new(0, 0, snap.width, snap.height));
-    terminal.draw(|frame| ui::draw(&app, frame))?;
+    terminal.draw(|frame| ui::draw(&mut app, frame))?;
     let buffer = terminal.backend().buffer();
 
     let area = Rect::new(0, 0, snap.width, snap.height);
