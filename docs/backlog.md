@@ -3108,19 +3108,53 @@ Phase D — forge and orchestrator registries:
   - Blockers: `H-EXT-012` (landed), `H-DESIGN-002`
     (still open; blocks the real discovery implementation
     but not the skeleton that proves the routing shape).
-- [ ] `H-EXT-014` Add a generic orchestrator registration surface.
-  - Scope: replace the bespoke `agent_deck_root` config field and env
-    wiring (`src/discovery/mod.rs:346,598`) with an
-    `[orchestrators.<key>]` config table plus an
-    `OrchestratorDescriptor { key, default_root, build(root) }` registry.
-    Orchestrator adapters stay plain `DiscoveryProvider`s per ADR 0060;
-    amend ADR 0060 to record the revisit (multiple orchestrators justify
-    registry-shaped wiring, not a discovery trait) and what would trigger
-    a capability trait. dmux/herdr/pertmux/workmux adapters then land as
-    independent follow-ups gated on their `H-AGENTMUX-*` evidence audits.
-  - Tests: agent-deck suites pass on the new wiring; config-table parse
-    and disable-toggle coverage.
-  - Blockers: `H-EXT-001`.
+- [x] `H-EXT-014` Add a generic orchestrator registration surface.
+  - Landed 2026-07-03. New `discovery/orchestrator.rs` module
+    carries `OrchestratorDescriptor { key, env_root_var,
+    env_disable_var, home_relative_default, build:
+    fn(PathBuf) -> Box<dyn DiscoveryProvider> }` +
+    `pub const REGISTRY: &[OrchestratorDescriptor]` with
+    `agent_deck` as the single entry. Adding dmux / herdr /
+    pertmux / workmux is a matter of pushing another entry —
+    the discovery driver, config table parser, and env-var
+    walk pick it up automatically.
+    Descriptor accessor `resolve_default_root()` walks
+    `env_disable_var → env_root_var → home_relative_default`
+    (matches the pre-H-EXT-014 semantics for agent_deck).
+    `descriptor_by_key(key)` exposes registry lookup.
+    `LocalDiscoveryConfig.agent_deck_root: Option<PathBuf>`
+    field removed. Replaced with
+    `orchestrator_roots: BTreeMap<String, PathBuf>`. New
+    generic builders `with_orchestrator_root(key, root)` and
+    `without_orchestrator(key)`; deprecated
+    `with_agent_deck_root` / `without_agent_deck` retained as
+    aliases so pre-H-EXT-014 test call sites compile
+    unchanged.
+    `from_env` walks `REGISTRY`, materializes each
+    descriptor's default root, and populates
+    `orchestrator_roots`. `discover_local_warm_with` iterates
+    `REGISTRY` and calls each descriptor's `build` on the
+    configured root; the pre-H-EXT-014 hardcoded
+    `AgentDeckDiscovery::new(root)` special case is gone.
+    New blanket `impl DiscoveryProvider for Box<dyn DiscoveryProvider>`
+    so descriptor `build` fns can return an owned box that
+    the `LocalDiscovery::with_keyed_provider` API accepts.
+    2 new registry tests
+    (`agent_deck_descriptor_matches_pre_h_ext_014_env_semantics`,
+    `unknown_key_returns_none`). Retired
+    `default_agent_deck_root` helper (its logic now lives on
+    `OrchestratorDescriptor::resolve_default_root`).
+    Deferred: `[orchestrators.<key>]` TOML config-table parse
+    surface (env-var contract stays the source of truth for
+    now; landing a config-table parser without a second
+    orchestrator to exercise it wouldn't be well-motivated).
+    ADR 0060 amendment (recording the revisit + what would
+    trigger a capability trait) also deferred; the shape here
+    matches ADR 0060's original stance so an amendment isn't
+    load-bearing until H-EXT-015 lands its first mutation
+    capability. All 25 suites (1527 lib tests: +2 registry
+    tests) pass; fmt / clippy clean.
+  - Blockers: `H-EXT-001` (landed).
 - [ ] `H-EXT-015` Add an orchestrator mutation-capability seam (deferred).
   - Scope: optional `owns_mux()` / rename-routing capability so
     ownership-aware mutations (first consumer: `H-AGENTMUX-008` agent-deck

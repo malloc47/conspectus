@@ -113,7 +113,7 @@ mod tests {
         // stamps distinguish them.
         let adapter = GitLabForgeProvider::new();
         assert_eq!(adapter.provider(), "gitlab");
-        assert_ne!(adapter.provider(), super::GITHUB_PROVIDER);
+        assert_ne!(adapter.provider(), crate::discovery::forge::GITHUB_PROVIDER);
     }
 
     #[test]

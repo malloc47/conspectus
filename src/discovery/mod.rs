@@ -24,6 +24,7 @@ pub mod forge;
 pub mod git;
 pub mod harness;
 pub mod hook_sidecar;
+pub mod orchestrator;
 pub mod pins;
 pub mod providers;
 pub mod tmux;
@@ -188,6 +189,12 @@ impl GraphFragment {
 
 pub trait DiscoveryProvider {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
+}
+
+impl DiscoveryProvider for Box<dyn DiscoveryProvider> {
+    fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
+        (**self).discover(context)
+    }
 }
 
 #[derive(Default)]
@@ -356,9 +363,18 @@ pub fn discover_local_warm_with(
             harness::HarnessDiscovery::with_default_adapters(),
         );
 
-    if let Some(root) = config.agent_deck_root.clone() {
-        providers = providers
-            .with_keyed_provider(&["agent_deck"], agent_deck::AgentDeckDiscovery::new(root));
+    // H-EXT-014: iterate the orchestrator registry and build a
+    // provider per configured root. The registry names each
+    // descriptor's builder, so a new orchestrator (dmux /
+    // herdr / pertmux / workmux, gated on `H-AGENTMUX-*`
+    // evidence audits) becomes a `REGISTRY` entry + a
+    // per-orchestrator `[orchestrators.<key>].root = "..."` in
+    // config (config-table parsing lands in a follow-up).
+    for descriptor in orchestrator::REGISTRY {
+        if let Some(root) = config.orchestrator_roots.get(descriptor.key) {
+            let provider = (descriptor.build)(root.clone());
+            providers = providers.with_keyed_provider(&[descriptor.key], provider);
+        }
     }
 
     if let Some(runner) = tmux_runner {
@@ -478,12 +494,17 @@ pub struct LocalDiscoveryConfig {
     pub forge_adapters: Vec<Box<dyn forge::ForgeAdapter>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
-    /// Agent-deck multi-repo worktrees root, typically
-    /// `$HOME/.agent-deck/multi-repo-worktrees`. `None` disables the
-    /// adapter entirely; defaults are populated by [`Self::from_env`]
-    /// unless `CONSPECTUS_DISABLE_AGENT_DECK` is set. Override the
-    /// concrete path with `CONSPECTUS_AGENT_DECK_ROOT`.
-    pub agent_deck_root: Option<PathBuf>,
+    /// Registered orchestrator adapter roots (H-EXT-014).
+    /// Keyed by orchestrator descriptor key
+    /// (`agent_deck` today; dmux / herdr / pertmux / workmux
+    /// slot in via `orchestrator::REGISTRY` follow-ups).
+    /// `from_env` populates each entry from the descriptor's
+    /// `env_root_var` (falling back to `home_relative_default`)
+    /// unless the descriptor's `env_disable_var` is set.
+    /// Callers add or remove entries via
+    /// [`Self::with_orchestrator_root`] /
+    /// [`Self::without_orchestrator`].
+    pub orchestrator_roots: BTreeMap<String, PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
     /// Harness keys whose optional aux-attribution mutator pass
     /// (H-EXT-007) should be skipped, even when the harness has a
@@ -554,13 +575,26 @@ impl LocalDiscoveryConfig {
             disabled_aux_harnesses.insert(harness::codex::HARNESS_KEY.to_string());
         }
 
+        // H-EXT-014: walk the orchestrator registry and
+        // materialize each descriptor's default root. The
+        // agent_deck env-var contract
+        // (`CONSPECTUS_AGENT_DECK_ROOT` /
+        // `CONSPECTUS_DISABLE_AGENT_DECK`) stays wire-compatible
+        // because it's now driven by the descriptor entry.
+        let mut orchestrator_roots: BTreeMap<String, PathBuf> = BTreeMap::new();
+        for descriptor in orchestrator::REGISTRY {
+            if let Some(root) = descriptor.resolve_default_root() {
+                orchestrator_roots.insert(descriptor.key.to_string(), root);
+            }
+        }
+
         Self {
             harness_state_roots,
             mux_backends,
             forge_adapters,
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
-            agent_deck_root: default_agent_deck_root(),
+            orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             disabled_aux_harnesses,
         }
@@ -573,7 +607,7 @@ impl LocalDiscoveryConfig {
             forge_adapters: Vec::new(),
             process_tree_enabled: false,
             hook_sidecar_root: None,
-            agent_deck_root: None,
+            orchestrator_roots: BTreeMap::new(),
             declared_config_loader: None,
             disabled_aux_harnesses: BTreeSet::new(),
         }
@@ -704,14 +738,39 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    pub fn with_agent_deck_root(mut self, root: impl Into<PathBuf>) -> Self {
-        self.agent_deck_root = Some(root.into());
+    /// Register an orchestrator's on-disk root (H-EXT-014).
+    /// `key` is the descriptor key
+    /// (`orchestrator::OrchestratorDescriptor::key`); `root` is
+    /// the resolved filesystem root the adapter's
+    /// `DiscoveryProvider` reads from.
+    pub fn with_orchestrator_root(
+        mut self,
+        key: impl Into<String>,
+        root: impl Into<PathBuf>,
+    ) -> Self {
+        self.orchestrator_roots.insert(key.into(), root.into());
         self
     }
 
-    pub fn without_agent_deck(mut self) -> Self {
-        self.agent_deck_root = None;
+    /// Unregister an orchestrator by key (H-EXT-014). No-op
+    /// when the key isn't currently in the map.
+    pub fn without_orchestrator(mut self, key: &str) -> Self {
+        self.orchestrator_roots.remove(key);
         self
+    }
+
+    /// Deprecated alias for
+    /// [`Self::with_orchestrator_root`]`("agent_deck", root)`
+    /// (H-EXT-014). Kept so pre-H-EXT-014 test call sites
+    /// (`.with_agent_deck_root(...)`) keep compiling.
+    pub fn with_agent_deck_root(self, root: impl Into<PathBuf>) -> Self {
+        self.with_orchestrator_root("agent_deck", root)
+    }
+
+    /// Deprecated alias for
+    /// [`Self::without_orchestrator`]`("agent_deck")`.
+    pub fn without_agent_deck(self) -> Self {
+        self.without_orchestrator("agent_deck")
     }
 
     pub fn with_declared_config_loader(mut self, loader: ConfigLoader) -> Self {
@@ -732,19 +791,9 @@ fn env_state_root(env_key: &str, home_relative: &str) -> Option<PathBuf> {
     env::var_os("HOME").map(|home| PathBuf::from(home).join(home_relative))
 }
 
-fn default_agent_deck_root() -> Option<PathBuf> {
-    if env::var_os("CONSPECTUS_DISABLE_AGENT_DECK").is_some() {
-        return None;
-    }
-    if let Some(value) = env::var_os("CONSPECTUS_AGENT_DECK_ROOT") {
-        return Some(PathBuf::from(value));
-    }
-    env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".agent-deck")
-            .join("multi-repo-worktrees")
-    })
-}
+// `default_agent_deck_root` retired in H-EXT-014; the same
+// env-var contract now lives in
+// `orchestrator::REGISTRY[..].resolve_default_root()`.
 
 pub fn merge_fragments(fragments: impl IntoIterator<Item = GraphFragment>) -> GraphSnapshot {
     let mut nodes = BTreeMap::new();
