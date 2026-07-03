@@ -2756,6 +2756,21 @@ fn scroll_offset_for_cursor(
         .min(max_scroll) as u16
 }
 
+impl crate::tui::Overlay for PinsOverlayState {
+    type Ctx<'a> = &'a PinsContext;
+
+    fn handle(&mut self, ctx: &PinsContext, key: KeyEvent) -> crate::tui::OverlayOutcome {
+        match self.handle_key(ctx, key) {
+            PinsOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
+            PinsOutcome::Close => crate::tui::OverlayOutcome::Close,
+            PinsOutcome::ApplyAndStay(msg) => {
+                crate::tui::OverlayOutcome::CommitAndStay(Box::new(msg))
+            }
+            PinsOutcome::ApplyAndClose(msg) => crate::tui::OverlayOutcome::Commit(Box::new(msg)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

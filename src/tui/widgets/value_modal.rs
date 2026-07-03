@@ -97,7 +97,9 @@ pub enum ValueModalOutcome {
 }
 
 impl crate::tui::Overlay for ValueModalState {
-    fn handle(&mut self, key: KeyEvent) -> crate::tui::OverlayOutcome {
+    type Ctx<'a> = ();
+
+    fn handle(&mut self, _ctx: (), key: KeyEvent) -> crate::tui::OverlayOutcome {
         match self.handle_key(key) {
             ValueModalOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
             ValueModalOutcome::Close => crate::tui::OverlayOutcome::Close,

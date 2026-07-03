@@ -48,7 +48,7 @@ pub mod widgets;
 
 pub use app::{App, Msg};
 pub use effect::Effect;
-pub use modal::{Modal, Overlay, OverlayOutcome};
+pub use modal::{Modal, Overlay, OverlayOutcome, RenameOverlayState};
 #[cfg(feature = "snapshot")]
 pub use runtime::run_from_fixture;
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]

@@ -398,6 +398,12 @@ pub enum Msg {
     /// and the `initial_selection_hint` path is skipped because
     /// `SetTree` never fires before the first `SetData`.
     SetTree(RowTree),
+    /// Set the left-panel selection to a specific row id
+    /// (H-TUI-006). Used by the search overlay's Confirm outcome so
+    /// its selection change flows through the reducer instead of a
+    /// direct `App::set_selection` call inside a specialized runtime
+    /// handler.
+    SelectRow(Box<RowId>),
     /// Left panel: move selection down/up one visible row.
     NavDown,
     NavUp,
@@ -680,15 +686,13 @@ impl App {
     /// entry.
     pub fn rename_overlay(&self) -> Option<&crate::tui::widgets::input::TextInputState> {
         match self.modal_stack.last()? {
-            crate::tui::Modal::Rename(state) => Some(state),
+            crate::tui::Modal::Rename(state) => Some(state.inner()),
             _ => None,
         }
     }
 
     /// Mutable access for the runtime's per-key forwarding.
-    pub fn rename_overlay_mut(
-        &mut self,
-    ) -> Option<&mut crate::tui::widgets::input::TextInputState> {
+    pub fn rename_overlay_mut(&mut self) -> Option<&mut crate::tui::RenameOverlayState> {
         match self.modal_stack.last_mut()? {
             crate::tui::Modal::Rename(state) => Some(state),
             _ => None,
@@ -697,9 +701,14 @@ impl App {
 
     /// Push a rename overlay onto the modal stack. Caller
     /// pre-populates the input with the current alias, harness
-    /// title, or empty string per ADR 0030.
+    /// title, or empty string per ADR 0030. H-TUI-006 wraps the
+    /// raw text-input state in a [`RenameOverlayState`] so the
+    /// overlay's Confirm(String) maps to Msg::CommitRename via
+    /// the uniform Overlay trait.
     pub fn open_rename_overlay(&mut self, state: crate::tui::widgets::input::TextInputState) {
-        self.modal_stack.push(crate::tui::Modal::Rename(state));
+        self.modal_stack.push(crate::tui::Modal::Rename(
+            crate::tui::RenameOverlayState::new(state),
+        ));
     }
 
     /// Pop the rename overlay if it's on top; no-op otherwise.
@@ -1873,6 +1882,10 @@ impl App {
             Msg::SetTree(tree) => {
                 self.pending_pin_remove = None;
                 self.set_tree(tree);
+            }
+            Msg::SelectRow(id) => {
+                self.pending_pin_remove = None;
+                self.set_selection(*id);
             }
             Msg::NavDown => {
                 self.pending_pin_remove = None;
@@ -5522,7 +5535,7 @@ mod tests {
             use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
             let mut state = HelpOverlayState::new();
             let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-            assert_eq!(state.handle(key), OverlayOutcome::Close);
+            assert_eq!(state.handle((), key), OverlayOutcome::Close);
         }
 
         #[test]
@@ -5532,7 +5545,7 @@ mod tests {
             use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
             let mut state = HelpOverlayState::new();
             let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-            assert_eq!(state.handle(key), OverlayOutcome::Consumed);
+            assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
         }
 
         // H-TUI-003 wave 3: controls overlay lives on the same
@@ -5706,7 +5719,7 @@ mod tests {
             use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
             let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
             let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-            assert_eq!(state.handle(key), OverlayOutcome::Close);
+            assert_eq!(state.handle((), key), OverlayOutcome::Close);
         }
 
         #[test]
@@ -5716,7 +5729,7 @@ mod tests {
             use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
             let mut state = ValueModalState::new("cwd", "/very/long/path".to_string());
             let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-            assert_eq!(state.handle(key), OverlayOutcome::Consumed);
+            assert_eq!(state.handle((), key), OverlayOutcome::Consumed);
         }
 
         #[test]

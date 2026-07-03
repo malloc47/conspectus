@@ -8,10 +8,17 @@
 //! variant + one trait impl — the keymap, event loop, and draw
 //! pipeline acquire zero new branches.
 //!
-//! The story is phased: `Modal` grows one variant per migration
-//! wave (see `docs/backlog.md` §H-TUI-003). Each wave replaces one
-//! `Option<...OverlayState>` field on `App` with a `Modal` variant
-//! and moves its input/dispatch through the trait's outcome.
+//! H-TUI-006 finished the migration: every one of the seven
+//! `Modal` variants now implements [`Overlay`]. The trait carries
+//! an associated `Ctx<'a>` type so overlays that need live App
+//! state (Controls read view/grouping/filter/sort; Pins read a
+//! `PinsContext`; Search reads the current row items) can declare
+//! it in one place instead of via a specialized runtime handler.
+//! Context-free overlays (Help / ValueModal / Viewer / Rename) set
+//! `type Ctx<'a> = ()`. The runtime's stack dispatcher matches per
+//! `Modal` variant, builds the per-widget context, and calls
+//! `overlay.handle(ctx, key)`; every specialized `handle_*_overlay_key`
+//! runtime helper is gone.
 
 use crate::tui::Msg;
 
@@ -19,39 +26,34 @@ use crate::tui::Msg;
 /// the overlay's live state; the [`Overlay`] impl handles input and
 /// rendering.
 ///
-/// Growing this enum is the migration point for each overlay wave.
-/// Ordering here matches the migration order recorded in the
-/// backlog so reviewers can trace which surfaces are on the stack
-/// vs still on `App`'s `Option<...>` fields.
+/// Every variant here now implements [`Overlay`]. Adding a new one
+/// is a state struct + one `Modal` variant + one trait impl; the
+/// dispatcher is a single match arm that builds the widget's
+/// context and calls the trait method.
 #[derive(Debug, Clone)]
 pub enum Modal {
+    /// `?` help overlay (F8-011). Context-free.
     Help(crate::tui::widgets::help::HelpOverlayState),
-    /// Controls overlay (ADR 0031, F8-004). Doesn't implement
-    /// [`Overlay`] yet — the widget's `handle_key` reads a live
-    /// [`crate::tui::widgets::controls::ControlsContext`] borrowed
-    /// from `App` on every event, and the trait's context-free
-    /// signature can't carry it. Dispatch stays through the
-    /// specialized `handle_controls_overlay_key` runtime helper
-    /// until either the trait grows an associated context type or
-    /// the widget internalizes its state.
+    /// Controls overlay (ADR 0031, F8-004). Reads a
+    /// [`crate::tui::widgets::controls::ControlsContext`] on every
+    /// event so view / grouping / filter / sort surface fresh
+    /// values as the operator toggles them.
     Controls(crate::tui::widgets::controls::ControlsOverlayState),
-    /// Pins overlay (ADR 0057). Same context-carrying shape as
-    /// `Controls` — the widget's `handle_key` reads a
-    /// [`crate::tui::widgets::pins::PinsContext`] on every event —
-    /// so it doesn't implement [`Overlay`] yet.
+    /// Pins overlay (ADR 0057). Reads a
+    /// [`crate::tui::widgets::pins::PinsContext`] on every event
+    /// so the "adopt selected mux" flow sees the current
+    /// selection.
     Pins(crate::tui::widgets::pins::PinsOverlayState),
-    /// Rename overlay (ADR 0029 / ADR 0030). Reuses the generic
-    /// text-input widget; the runtime maps its `Confirm(String)`
-    /// outcome to `Msg::CommitRename`. Doesn't implement `Overlay`
-    /// because the text-input widget is generic and the mapping to
-    /// a specific `Msg` lives at the rename call site.
-    Rename(crate::tui::widgets::input::TextInputState),
-    /// `/` search overlay (T8-017). The widget's `Confirm(RowId)`
-    /// outcome sets the selection through a specialized handler,
-    /// which is why it doesn't implement `Overlay` yet.
+    /// Rename overlay (ADR 0029 / ADR 0030). Wraps the generic
+    /// text-input widget with a [`Msg::CommitRename`] mapper so
+    /// the trait's uniform `Commit(Msg)` outcome carries the
+    /// specific rename intent.
+    Rename(RenameOverlayState),
+    /// `/` search overlay (T8-017). Reads the current visible-row
+    /// items as its context and emits a
+    /// [`Msg::SelectRow`] on Confirm.
     Search(crate::tui::widgets::search::SearchOverlayState),
-    /// `o` full-value modal (T8-030). Only `Continue` / `Close`
-    /// outcomes, so it implements [`Overlay`] cleanly.
+    /// `o` full-value modal (T8-030). Context-free.
     ValueModal(crate::tui::widgets::value_modal::ValueModalState),
     /// Full-screen transcript viewer modal (H-VIEWER-NATIVE-008,
     /// ADR 0052). Uses the nested-reducer composition described
@@ -67,11 +69,11 @@ pub enum Modal {
 /// What an overlay wants the runtime to do after a single key
 /// event.
 ///
-/// `Commit` boxes its [`Msg`] because the message enum is large
-/// (over 256 bytes for `Msg::SetData` and friends) and the vast
-/// majority of `OverlayOutcome` values are `Consumed` / `Close`;
-/// paying an indirection per commit is cheaper than fattening
-/// every stack-owned outcome.
+/// `Commit` and `CommitAndStay` box their [`Msg`] because the
+/// message enum is large (over 256 bytes for `Msg::SetData` and
+/// friends) and the vast majority of `OverlayOutcome` values are
+/// `Consumed` / `Close`; paying an indirection per commit is
+/// cheaper than fattening every stack-owned outcome.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OverlayOutcome {
     /// Overlay handled the key — nothing else to do. The stack
@@ -80,15 +82,93 @@ pub enum OverlayOutcome {
     /// Overlay committed a value. The runtime pops the overlay,
     /// then dispatches the [`Msg`] through the reducer + executor.
     Commit(Box<Msg>),
+    /// Overlay committed a value but wants to stay open. The
+    /// runtime dispatches the [`Msg`] and leaves the overlay on
+    /// the stack. Used by Controls (`ApplyAndStay`, e.g. toggling
+    /// a filter chip without closing the overlay) and Pins
+    /// (`ApplyAndStay`, e.g. arming a Delete confirmation).
+    CommitAndStay(Box<Msg>),
     /// Operator asked to close (Esc / Ctrl-C / dedicated key).
     /// The runtime pops the overlay; no follow-up dispatch.
     Close,
 }
 
 /// Every stack entry implements this trait. The dispatcher matches
-/// on the `Modal` variant, calls `handle`, and acts on the
-/// [`OverlayOutcome`]. New overlays don't touch the dispatcher —
-/// they add a `Modal` variant and a trait impl.
+/// on the `Modal` variant, builds the widget's per-variant
+/// context, calls `handle(ctx, key)`, and acts on the
+/// [`OverlayOutcome`]. New overlays don't touch the dispatcher
+/// beyond adding a match arm that builds their context and calls
+/// the trait method.
+///
+/// The `Ctx<'a>` associated type carries any live App state the
+/// widget needs to see on every event. Widgets that need no
+/// context set `type Ctx<'a> = ()`; widgets that need borrowed
+/// App data (Controls, Pins, Search) declare a lifetime-carrying
+/// context type and the dispatcher builds a fresh borrow per
+/// event.
 pub trait Overlay {
-    fn handle(&mut self, key: ratatui::crossterm::event::KeyEvent) -> OverlayOutcome;
+    /// Live App context the widget consumes on every event. `()`
+    /// for context-free widgets (Help, ValueModal, Viewer,
+    /// Rename); a lifetime-parameterized reference type for
+    /// Controls / Pins / Search.
+    type Ctx<'a>;
+
+    /// Handle one key event against fresh `ctx`.
+    fn handle(
+        &mut self,
+        ctx: Self::Ctx<'_>,
+        key: ratatui::crossterm::event::KeyEvent,
+    ) -> OverlayOutcome;
+}
+
+/// Wrapper that adapts the generic [`TextInputState`] widget into
+/// an [`Overlay`] impl for the rename modal. The widget-level
+/// `InputOutcome::Confirm(String)` maps to
+/// [`Msg::CommitRename(String)`] here so the trait's uniform
+/// `Commit(Msg)` outcome carries the specific rename intent.
+/// Cancel maps to `Close`; incidental keystrokes stay `Consumed`.
+///
+/// The wrapper exists because [`TextInputState`] is used by more
+/// than the rename overlay (H-EXT config editing surfaces reuse
+/// it), so its outcome enum stays generic and the modal-specific
+/// mapping lives here.
+///
+/// [`TextInputState`]: crate::tui::widgets::input::TextInputState
+#[derive(Debug, Clone)]
+pub struct RenameOverlayState {
+    inner: crate::tui::widgets::input::TextInputState,
+}
+
+impl RenameOverlayState {
+    /// Wrap a fresh text-input state seeded for a rename.
+    pub fn new(inner: crate::tui::widgets::input::TextInputState) -> Self {
+        Self { inner }
+    }
+
+    /// Access the wrapped state so the renderer and existing
+    /// helpers can keep working with `TextInputState` directly.
+    pub fn inner(&self) -> &crate::tui::widgets::input::TextInputState {
+        &self.inner
+    }
+
+    /// Mutable access to the wrapped state — used by helpers that
+    /// seed the input buffer before opening the overlay.
+    pub fn inner_mut(&mut self) -> &mut crate::tui::widgets::input::TextInputState {
+        &mut self.inner
+    }
+}
+
+impl Overlay for RenameOverlayState {
+    type Ctx<'a> = ();
+
+    fn handle(&mut self, _ctx: (), key: ratatui::crossterm::event::KeyEvent) -> OverlayOutcome {
+        use crate::tui::widgets::input::InputOutcome;
+        match self.inner.handle_key(key) {
+            InputOutcome::Continue => OverlayOutcome::Consumed,
+            InputOutcome::Cancel => OverlayOutcome::Close,
+            InputOutcome::Confirm(value) => {
+                OverlayOutcome::Commit(Box::new(Msg::CommitRename(value)))
+            }
+        }
+    }
 }

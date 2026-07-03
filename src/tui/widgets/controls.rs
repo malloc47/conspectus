@@ -864,6 +864,23 @@ fn max_controls_content_lines() -> usize {
         .unwrap_or(0)
 }
 
+impl crate::tui::Overlay for ControlsOverlayState {
+    type Ctx<'a> = &'a ControlsContext<'a>;
+
+    fn handle(&mut self, ctx: &ControlsContext<'_>, key: KeyEvent) -> crate::tui::OverlayOutcome {
+        match self.handle_key(ctx, key) {
+            ControlsOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
+            ControlsOutcome::Close => crate::tui::OverlayOutcome::Close,
+            ControlsOutcome::ApplyAndStay(msg) => {
+                crate::tui::OverlayOutcome::CommitAndStay(Box::new(msg))
+            }
+            ControlsOutcome::ApplyAndClose(msg) => {
+                crate::tui::OverlayOutcome::Commit(Box::new(msg))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

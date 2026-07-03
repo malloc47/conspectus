@@ -443,6 +443,32 @@ fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {
     }
 }
 
+/// Per-event context the search overlay reads through the
+/// [`crate::tui::Overlay`] trait (H-TUI-006). Carries the current
+/// visible-row items so the widget can rerank matches on every
+/// keystroke, plus the ranking backend so a future fuzzy backend
+/// swap needs no runtime change.
+pub struct SearchContext<'a> {
+    pub items: &'a [SearchItem<'a>],
+    pub backend: &'a dyn SearchBackend,
+}
+
+impl crate::tui::Overlay for SearchOverlayState {
+    type Ctx<'a> = SearchContext<'a>;
+
+    fn handle(&mut self, ctx: SearchContext<'_>, key: KeyEvent) -> crate::tui::OverlayOutcome {
+        let outcome = self.handle_key(key);
+        self.refresh_matches(ctx.backend, ctx.items);
+        match outcome {
+            SearchOutcome::Continue => crate::tui::OverlayOutcome::Consumed,
+            SearchOutcome::Cancel => crate::tui::OverlayOutcome::Close,
+            SearchOutcome::Confirm(id) => {
+                crate::tui::OverlayOutcome::Commit(Box::new(crate::tui::Msg::SelectRow(id)))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

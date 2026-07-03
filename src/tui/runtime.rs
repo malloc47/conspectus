@@ -654,7 +654,8 @@ fn static_handle_controls_overlay_key(
     snapshot: &crate::model::GraphSnapshot,
     key: ratatui::crossterm::event::KeyEvent,
 ) -> Result<()> {
-    use crate::tui::widgets::controls::{ControlsContext, ControlsOutcome};
+    use crate::tui::widgets::controls::ControlsContext;
+    use crate::tui::{Overlay, OverlayOutcome};
     let view = app.active_view();
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
@@ -666,21 +667,21 @@ fn static_handle_controls_overlay_key(
         sort,
     };
     let outcome = match app.controls_overlay_mut() {
-        Some(state) => state.handle_key(&ctx, key),
+        Some(state) => state.handle(&ctx, key),
         None => return Ok(()),
     };
     let _ = (config, snapshot);
     match outcome {
-        ControlsOutcome::Continue => {}
-        ControlsOutcome::Close => {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
             app.close_controls_overlay();
         }
-        ControlsOutcome::ApplyAndStay(msg) => {
-            dispatch(app, msg);
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch(app, *msg);
         }
-        ControlsOutcome::ApplyAndClose(msg) => {
+        OverlayOutcome::Commit(msg) => {
             app.close_controls_overlay();
-            dispatch(app, msg);
+            dispatch(app, *msg);
         }
     }
     Ok(())
@@ -870,20 +871,23 @@ fn handle_rename_overlay_key(
     tmux: &dyn TmuxRunner,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
-    use crate::tui::widgets::input::InputOutcome;
-    let Some(state) = app.rename_overlay_mut() else {
-        return;
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.rename_overlay_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
     };
-    let outcome = state.handle_key(key);
     match outcome {
-        InputOutcome::Continue => {}
-        InputOutcome::Cancel => {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
             app.close_rename_overlay();
             app.update(Msg::SetStatus(Some("rename: cancelled".to_string())));
         }
-        InputOutcome::Confirm(value) => {
+        OverlayOutcome::Commit(msg) => {
             app.close_rename_overlay();
-            dispatch_live(terminal, app, config, tmux, Msg::CommitRename(value));
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
         }
     }
 }
@@ -1692,7 +1696,7 @@ pub(super) use crate::tui::keymap::{Action, SelectedDefault, selected_default_ac
 pub(super) fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.help_overlay_mut() {
-        Some(state) => state.handle(key),
+        Some(state) => state.handle((), key),
         None => return,
     };
     match outcome {
@@ -1700,6 +1704,9 @@ pub(super) fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::ev
         OverlayOutcome::Close => app.close_help_overlay(),
         OverlayOutcome::Commit(msg) => {
             app.close_help_overlay();
+            dispatch(app, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
             dispatch(app, *msg);
         }
     }
@@ -1711,7 +1718,7 @@ pub(super) fn handle_help_overlay_key(app: &mut App, key: ratatui::crossterm::ev
 fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
     use crate::tui::{Overlay, OverlayOutcome};
     let outcome = match app.value_modal_mut() {
-        Some(state) => state.handle(key),
+        Some(state) => state.handle((), key),
         None => return,
     };
     match outcome {
@@ -1719,6 +1726,9 @@ fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEven
         OverlayOutcome::Close => app.close_value_modal(),
         OverlayOutcome::Commit(msg) => {
             app.close_value_modal();
+            dispatch(app, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
             dispatch(app, *msg);
         }
     }
@@ -1729,7 +1739,8 @@ fn handle_value_modal_key(app: &mut App, key: ratatui::crossterm::event::KeyEven
 /// and act on its outcome (Confirm picks a row, Cancel closes).
 pub(super) fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyEvent) {
     use crate::tui::search::{SubstringBackend, items_from_rows};
-    use crate::tui::widgets::search::SearchOutcome;
+    use crate::tui::widgets::search::SearchContext;
+    use crate::tui::{Overlay, OverlayOutcome};
     // The backend choice lives behind the SearchBackend trait so a
     // future swap (e.g. to a fuzzy matcher) needs only an
     // implementation change, not a runtime change. The substring
@@ -1738,22 +1749,25 @@ pub(super) fn handle_search_overlay_key(app: &mut App, key: ratatui::crossterm::
     let backend = SubstringBackend;
     let visible: Vec<_> = app.visible_rows().into_iter().cloned().collect();
     let items = items_from_rows(&visible);
+    let ctx = SearchContext {
+        items: &items,
+        backend: &backend,
+    };
     let outcome = match app.search_overlay_mut() {
-        Some(state) => {
-            let outcome = state.handle_key(key);
-            state.refresh_matches(&backend, &items);
-            outcome
-        }
+        Some(state) => state.handle(ctx, key),
         None => return,
     };
     match outcome {
-        SearchOutcome::Continue => {}
-        SearchOutcome::Cancel => {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
             app.close_search_overlay();
         }
-        SearchOutcome::Confirm(id) => {
+        OverlayOutcome::Commit(msg) => {
             app.close_search_overlay();
-            app.set_selection(*id);
+            dispatch(app, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch(app, *msg);
         }
     }
 }
@@ -1765,7 +1779,8 @@ pub(super) fn handle_controls_overlay_key(
     _config: &RunConfig,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
-    use crate::tui::widgets::controls::{ControlsContext, ControlsOutcome};
+    use crate::tui::widgets::controls::ControlsContext;
+    use crate::tui::{Overlay, OverlayOutcome};
     // Snapshot the live state into owned copies so the immutable
     // borrow on `app` ends before we re-borrow it mutably to
     // dispatch the key into the overlay.
@@ -1780,20 +1795,20 @@ pub(super) fn handle_controls_overlay_key(
         sort,
     };
     let outcome = match app.controls_overlay_mut() {
-        Some(state) => state.handle_key(&ctx, key),
+        Some(state) => state.handle(&ctx, key),
         None => return,
     };
     match outcome {
-        ControlsOutcome::Continue => {}
-        ControlsOutcome::Close => {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
             app.close_controls_overlay();
         }
-        ControlsOutcome::ApplyAndStay(msg) => {
-            dispatch(app, msg);
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch(app, *msg);
         }
-        ControlsOutcome::ApplyAndClose(msg) => {
+        OverlayOutcome::Commit(msg) => {
             app.close_controls_overlay();
-            dispatch(app, msg);
+            dispatch(app, *msg);
         }
     }
 }
@@ -1808,23 +1823,23 @@ fn handle_pins_overlay_key(
     tmux: &dyn TmuxRunner,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
-    use crate::tui::widgets::pins::PinsOutcome;
+    use crate::tui::{Overlay, OverlayOutcome};
     let ctx = app.pins_context();
     let outcome = match app.pins_overlay_mut() {
-        Some(state) => state.handle_key(&ctx, key),
+        Some(state) => state.handle(&ctx, key),
         None => return,
     };
     match outcome {
-        PinsOutcome::Continue => {}
-        PinsOutcome::Close => {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
             app.close_pins_overlay();
         }
-        PinsOutcome::ApplyAndStay(msg) => {
-            dispatch_live(terminal, app, config, tmux, msg);
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
         }
-        PinsOutcome::ApplyAndClose(msg) => {
+        OverlayOutcome::Commit(msg) => {
             app.close_pins_overlay();
-            dispatch_live(terminal, app, config, tmux, msg);
+            dispatch_live(terminal, app, config, tmux, *msg);
         }
     }
 }
@@ -1837,24 +1852,24 @@ fn static_handle_pins_overlay_key(
     snapshot: &crate::model::GraphSnapshot,
     key: ratatui::crossterm::event::KeyEvent,
 ) -> Result<()> {
-    use crate::tui::widgets::pins::PinsOutcome;
+    use crate::tui::{Overlay, OverlayOutcome};
     let ctx = app.pins_context();
     let outcome = match app.pins_overlay_mut() {
-        Some(state) => state.handle_key(&ctx, key),
+        Some(state) => state.handle(&ctx, key),
         None => return Ok(()),
     };
     let _ = (config, snapshot);
     match outcome {
-        PinsOutcome::Continue => {}
-        PinsOutcome::Close => {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
             app.close_pins_overlay();
         }
-        PinsOutcome::ApplyAndStay(msg) => {
-            static_apply_pins_msg(app, msg)?;
+        OverlayOutcome::CommitAndStay(msg) => {
+            static_apply_pins_msg(app, *msg)?;
         }
-        PinsOutcome::ApplyAndClose(msg) => {
+        OverlayOutcome::Commit(msg) => {
             app.close_pins_overlay();
-            static_apply_pins_msg(app, msg)?;
+            static_apply_pins_msg(app, *msg)?;
         }
     }
     Ok(())
