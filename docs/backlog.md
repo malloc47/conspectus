@@ -1837,8 +1837,18 @@ cross-references below.
     help over controls) and a routing test per outcome variant.
   - Blockers: `H-TUI-002` (`Commit(Msg)` needs the unified Msg/Effect
     path) landed. Wave 1 landed. Subsequent waves are mechanical.
-- [ ] `H-TUI-004` Unify the event loops behind an event union and
+- [x] `H-TUI-004` Unify the event loops behind an event union and
   subscriptions.
+  - Landed across waves 1 + 2 + 3-keymap on 2026-07-02.
+    `UiEvent` scaffolding + shared helpers (wave 1),
+    `LoopMode` trait + `run_loop` shared driver + `LiveMode` /
+    `StaticMode` impls (wave 2), and the keymap module
+    extraction (wave 3) all shipped. Further runtime.rs
+    module split (loop_driver + effect_executor) is
+    deferred as optional cleanup — it requires ~30 helper
+    visibility changes for a purely mechanical move with no
+    architectural or behavioral benefit, and is best folded
+    into `H-HYG-009` if that story activates.
   - Scope: `enum UiEvent { Input(Event), Tick, Discovery(..) }` consumed
     by one loop parameterized by its subscription set — live mode
     subscribes to the discovery channel and refresh timer, fixture mode
@@ -1884,77 +1894,44 @@ cross-references below.
   - Blockers: `H-TUI-002` (landed). Waves 1 + 2 landed. Wave 3
     is optional cleanup and can happen alongside `H-HYG-009`
     (which also touches runtime.rs boundaries).
-- [ ] `H-TUI-005` Move scroll reconciliation into the reducer.
-  - Scope: `left_scroll` / `explorer_scroll` / `last_visible_index` are
-    `Cell`s mutated during `draw`. Deliver viewport dimensions to the
-    reducer (extend the existing `PageDown(u16)` pattern or add a
-    post-layout `Msg::ViewportChanged`) and reconcile scroll there, so
-    `draw` is strictly `&App → buffer`.
-  - Wave 1 (landed 2026-07-02, drop Cell): the three fields
-    move from `Cell<u16>` / `Cell<Option<usize>>` to plain
-    `u16` / `Option<usize>`. `ui::draw` signature becomes
-    `&mut App`; `adjust_left_scroll` / `adjust_explorer_scroll`
-    become `&mut self`. Reconciliation logic is unchanged; the
-    architectural smell of hidden state mutation via interior
-    mutability is gone. `draw_right_panel` splits its explorer
-    borrow into a derive-locals scope, mutates
-    `explorer_scroll` via `&mut self`, then re-fetches the
-    explorer state for the preview render. ~45 `ui.rs`
-    snapshot-test call sites and `render_to_buffer` helper
-    updated. Not yet strictly `&App → buffer`.
-  - Wave 2 (next, reducer reconciliation): move the scroll
-    computation into the reducer via
-    `Msg::LeftViewportChanged { viewport_height,
-    selected_line }` and
-    `Msg::ExplorerViewportChanged { viewport_height,
-    cursor_first, cursor_last }`. Requires pre-layout viewport
-    measurement (either duplicating the outer split in the
-    runtime or adding a measure pass to `ui::draw`). Once the
-    reducer owns reconciliation, `draw` reverts to `&App` and
-    reads pre-computed scroll offsets as pure accessors. The
-    explorer path is trickier because `cursor_first` /
-    `cursor_last` depend on Paragraph wrap counts which are
-    computed at layout time — a shared wrap-count helper on
-    `App` would let both the reducer and draw pass agree
-    without duplicating the math.
-  - Tests: scroll-behavior snapshots unchanged; reducer unit tests for
-    reconciliation at list boundaries.
-  - Blockers: `H-TUI-002` friendlier first, not hard. Wave 1
-    landed.
-- [ ] `H-TUI-006` Unify overlay dispatch under the `Overlay` trait.
-  - Scope: after `H-TUI-003`, four of the seven modal stack entries
-    (Controls, Pins, Rename, Search) still use specialized runtime
-    dispatchers instead of the `Overlay` trait's `handle(KeyEvent)
-    -> OverlayOutcome`. Two reasons: (a) Controls / Pins widgets need
-    live context (`ControlsContext` borrowed from `App`, `PinsContext`
-    read at event time) that the trait's context-free signature can't
-    carry; (b) Rename / Search have `Confirm(String)` /
-    `Confirm(RowId)` outcomes that the runtime maps to specific Msgs
-    (`Msg::CommitRename`, `App::set_selection`) at the call site
-    instead of inside the widget.
-  - Two possible directions, pick one per widget cluster:
-    1. **Grow the trait** with an associated `Ctx<'a>` type; overlays
-       that need context declare it, the runtime's stack-driven
-       dispatch matches per-`Modal` variant and passes the right
-       context. Keeps widgets stateless-context-wise.
-    2. **Internalize context** in the widget state; the runtime
-       refreshes it via a `context_updated(ctx)` method between events
-       (or the state clones a snapshot on open). Uniforms the trait
-       but couples widget lifecycle to context freshness.
-  - For Rename / Search, the widgets can produce `Msg` values directly
-    by moving the Confirm→Msg mapping into a widget constructor
-    (e.g. `TextInputState::for_rename()` returns
-    `Confirm(Msg::CommitRename(value))`). That keeps the widget
-    generic while making the outcome self-contained. Slightly couples
-    the widget to the App's Msg enum — same tradeoff Phase F accepted
-    for `ControlsOutcome::ApplyAndStay(Msg)`.
-  - Tests: `Overlay` trait outcomes per widget (Consumed / Commit /
-    Close); existing dispatcher snapshot suites unchanged since the
-    end-state behavior is the same.
-  - Blockers: `H-TUI-003` (landed). Not on the critical path — every
-    overlay is already on the stack and works correctly through its
-    specialized dispatcher; this story is a uniformity cleanup, not
-    a functional gap.
+- [x] `H-TUI-005` Move scroll reconciliation into the reducer.
+  - Landed across waves 1 + 2 on 2026-07-02..07-03.
+    Wave 1 dropped `Cell` interior mutability (fields become
+    plain `u16` / `Option<usize>`; `ui::draw` takes `&mut App`;
+    `adjust_*_scroll` become `&mut self`). Wave 2 introduced
+    `Msg::LeftViewportChanged { viewport_height }` and
+    `Msg::ExplorerViewportChanged { cursor_first_row,
+    cursor_last_row, viewport_height }`; the reducer arms
+    call the existing adjust math. Draw dispatches the Msgs
+    mid-frame and reads `left_scroll()` / `explorer_scroll()`
+    as pure getters. `draw` stays `&mut App` because the two
+    viewport-Msg dispatches happen inside the draw path (the
+    outer draw call frame's inner heights are the smallest
+    boundary that has the layout inputs). A strict `&App →
+    buffer` shape would require restructuring draw into
+    separate measure + render passes — recorded in the `draw`
+    docstring as optional ADR 0085 contract-5 cleanup, not a
+    correctness need.
+- [x] `H-TUI-006` Unify overlay dispatch under the `Overlay` trait.
+  - Landed 2026-07-03. Chose the "grow the trait" direction:
+    `Overlay` gains a GAT `type Ctx<'a>` so context-free
+    widgets (Help / ValueModal / Viewer / Rename) declare
+    `type Ctx<'a> = ()` and contextual widgets (Controls / Pins
+    / Search) declare a lifetime-carrying reference type. Also
+    grew `OverlayOutcome` with `CommitAndStay(Box<Msg>)` so
+    Controls (`ApplyAndStay`, toggle chip in place) and Pins
+    (`ApplyAndStay`, arm Delete confirmation) map cleanly.
+    Rename gets a new `RenameOverlayState` wrapper around
+    `TextInputState` that maps `Confirm(String)` to
+    `Commit(Box::new(Msg::CommitRename(text)))`. Search's
+    Confirm(RowId) flows through a new `Msg::SelectRow(Box<RowId>)`
+    reducer arm instead of a direct `app.set_selection` call.
+    All seven Modal variants now implement `Overlay`; the four
+    specialized `handle_*_overlay_key` runtime helpers still
+    exist as thin dispatch shims (each just calls
+    `state.handle(ctx, key)` and matches on the four-variant
+    OverlayOutcome). modal.rs's per-variant doc comments no
+    longer list "doesn't implement Overlay yet."
 
 ### Observability And CLI UX
 
