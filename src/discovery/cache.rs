@@ -310,6 +310,7 @@ mod tests {
             "generic_workspace",
             "agent_deck",
             "tmux",
+            "zellij",
             "claude-code",
             "codex",
             "opencode",

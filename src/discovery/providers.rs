@@ -67,6 +67,11 @@ pub const AGENT_DECK: &str = "agent_deck";
 /// Class: `mux` (ADR 0079).
 pub const TMUX: &str = "tmux";
 
+/// Zellij session enumeration via the configured backend
+/// (H-EXT-010). Class: `mux` (ADR 0079). Same TTL bucket as
+/// tmux — the two backends share the mux interval class.
+pub const ZELLIJ: &str = "zellij";
+
 /// GitHub forge metadata via the `gh` runner. Class: `forge`.
 pub const GITHUB: &str = "github";
 
@@ -217,6 +222,10 @@ pub const REGISTRY: &[ProviderDescriptor] = &[
         kind: ProviderKind::Heavy(ProviderClass::Mux),
     },
     ProviderDescriptor {
+        key: ZELLIJ,
+        kind: ProviderKind::Heavy(ProviderClass::Mux),
+    },
+    ProviderDescriptor {
         key: GITHUB,
         kind: ProviderKind::Heavy(ProviderClass::Forge),
     },
@@ -296,6 +305,7 @@ mod tests {
         assert_eq!(GENERIC_WORKSPACE, "generic_workspace");
         assert_eq!(AGENT_DECK, "agent_deck");
         assert_eq!(TMUX, "tmux");
+        assert_eq!(ZELLIJ, "zellij");
         assert_eq!(GITHUB, "github");
         assert_eq!(CLAUDE_CODE, "claude-code");
         assert_eq!(CODEX, "codex");
@@ -320,6 +330,7 @@ mod tests {
             GENERIC_WORKSPACE,
             AGENT_DECK,
             TMUX,
+            ZELLIJ,
             GITHUB,
             CLAUDE_CODE,
             CODEX,

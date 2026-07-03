@@ -28,6 +28,7 @@ pub mod pins;
 pub mod providers;
 pub mod tmux;
 pub mod workspace;
+pub mod zellij;
 
 pub fn empty_graph() -> GraphSnapshot {
     GraphSnapshot::empty()
@@ -328,12 +329,11 @@ pub fn discover_local_warm_with(
     // config now so `apply_mutators` below can still borrow the
     // remaining fields without a partial-move issue.
     let mut config = config;
-    // H-EXT-008: mux backends live in a registry list; take the
-    // tmux entry (if any) by key so the discovery path can wrap
-    // it in `TmuxDiscovery`. Future backends (zellij per
-    // H-EXT-010) get pulled the same way inside their own
-    // per-backend discovery wrappers.
+    // H-EXT-008 / H-EXT-010: mux backends live in a registry
+    // list; each is pulled by key and wrapped in its
+    // per-backend `DiscoveryProvider`.
     let tmux_runner = config.take_mux_backend_by_key(tmux::TMUX_BACKEND);
+    let zellij_runner = config.take_mux_backend_by_key(zellij::ZELLIJ_BACKEND);
     let forge_runner = config.forge_runner.take();
 
     let mut providers = LocalDiscovery::new()
@@ -356,6 +356,11 @@ pub fn discover_local_warm_with(
     if let Some(runner) = tmux_runner {
         providers =
             providers.with_keyed_provider(&["tmux"], tmux::TmuxDiscovery::with_runner(runner));
+    }
+
+    if let Some(runner) = zellij_runner {
+        providers = providers
+            .with_keyed_provider(&["zellij"], zellij::ZellijDiscovery::with_runner(runner));
     }
 
     if let Some(runner) = forge_runner {
@@ -486,6 +491,14 @@ impl LocalDiscoveryConfig {
         let mut mux_backends: Vec<Box<dyn tmux::MuxBackend>> = Vec::new();
         if env::var_os("CONSPECTUS_DISABLE_TMUX").is_none() {
             mux_backends.push(Box::new(tmux::SystemTmux::new()));
+        }
+        // H-EXT-010: zellij backend, opt-out via
+        // `CONSPECTUS_DISABLE_ZELLIJ`. Registered unconditionally
+        // by default; missing `zellij` binary surfaces as
+        // `TmuxOutcome::Unavailable(BinaryNotFound)` and the
+        // discovery layer degrades to an empty session set.
+        if env::var_os("CONSPECTUS_DISABLE_ZELLIJ").is_none() {
+            mux_backends.push(Box::new(zellij::SystemZellij::new()));
         }
 
         let forge_runner: Option<Box<dyn forge::GhRunner>> =

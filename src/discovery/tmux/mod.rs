@@ -32,7 +32,13 @@ pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 /// entry away. Runtime capability checks (does this backend
 /// *actually* support attach / rename / etc.) come from the
 /// [`MuxBackend`] impl's outcome returns.
-pub const KNOWN_MUX_BACKENDS: &[&str] = &[TMUX_BACKEND];
+pub const KNOWN_MUX_BACKENDS: &[&str] = &[
+    TMUX_BACKEND,
+    // H-EXT-010: zellij backend. Added here so pin validation
+    // and attach dispatch accept `mux.backend = "zellij"`
+    // without touching `pins.rs` / `tui/actions.rs`.
+    crate::discovery::providers::ZELLIJ,
+];
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
 /// session roots can safely contain spaces.

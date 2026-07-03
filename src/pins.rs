@@ -1042,8 +1042,11 @@ mod tests {
 
     #[test]
     fn unsupported_mux_backend_is_rejected() {
+        // H-EXT-010: `zellij` is now a registered backend; test
+        // with a synthetic key so the assertion still targets
+        // the unregistered-backend rejection path.
         let mut entry = sample_entry("ingest", "ingest");
-        entry.mux.backend = "zellij".to_string();
+        entry.mux.backend = "screen-notreal".to_string();
         let document = PinsDocument {
             pins: Some(PinsSection {
                 schema_version: PINS_SCHEMA_VERSION,
@@ -1051,7 +1054,7 @@ mod tests {
             }),
         };
         let encoded = to_toml(&document).expect("serialize");
-        let err = parse_pins_document(&encoded).expect_err("zellij not supported");
+        let err = parse_pins_document(&encoded).expect_err("unregistered backend");
         assert!(matches!(err, PinParseError::UnsupportedMuxBackend { .. }));
     }
 
