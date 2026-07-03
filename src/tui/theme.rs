@@ -13,6 +13,8 @@
 //! light terminals who want a different foreground palette override
 //! the corresponding theme fields.
 
+use std::collections::BTreeMap;
+
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::tui::icons::IconOverrides;
@@ -26,10 +28,14 @@ use crate::tui::icons::IconOverrides;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Theme {
     // ---- harness identity ---------------------------------------------------
-    pub harness_claude: Color,
-    pub harness_codex: Color,
-    pub harness_opencode: Color,
-    pub harness_aider: Color,
+    /// Per-harness identity colors, keyed by adapter harness key
+    /// (H-EXT-003). The default populates the four v1 harnesses;
+    /// operators add or override entries via `[tui.theme.harness]`
+    /// in config. Lookup goes through [`Theme::harness_color`],
+    /// which walks the adapter registry so callers can pass
+    /// either a harness key or a display label. Missing entries
+    /// fall back to [`Theme::harness_unknown`].
+    pub harness_colors: BTreeMap<String, Color>,
     pub harness_unknown: Color,
 
     // ---- recency buckets (Phase 3 introduces the buckets; the colors
@@ -173,11 +179,17 @@ impl Default for Theme {
     /// that the styling overhaul plan's later phases will exercise;
     /// they are inert until those phases call them.
     fn default() -> Self {
+        // H-EXT-003: per-harness colors keyed by adapter harness
+        // key. Values match the pre-H-EXT-003 flat-field defaults
+        // so existing snapshots stay stable.
+        let mut harness_colors = BTreeMap::new();
+        harness_colors.insert("claude-code".to_string(), Color::Magenta);
+        harness_colors.insert("codex".to_string(), Color::Cyan);
+        harness_colors.insert("opencode".to_string(), Color::Green);
+        harness_colors.insert("aider".to_string(), Color::Red);
+
         Self {
-            harness_claude: Color::Magenta,
-            harness_codex: Color::Cyan,
-            harness_opencode: Color::Green,
-            harness_aider: Color::Red,
+            harness_colors,
             harness_unknown: Color::White,
 
             recency_fresh: StyleSpec::fg_mod(Color::LightGreen, Modifier::BOLD),
@@ -228,16 +240,32 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Color associated with a harness label. Unknown harnesses fall
-    /// back to [`Self::harness_unknown`] so the renderer always has a
+    /// Color associated with a harness. Accepts either the
+    /// canonical harness key (`claude-code`) or the display label
+    /// (`claude`) — both resolve to the same entry in
+    /// [`Self::harness_colors`] by walking the adapter registry
+    /// (H-EXT-003). Unknown harnesses fall back to
+    /// [`Self::harness_unknown`] so the renderer always has a
     /// hue to use.
-    pub fn harness_color(&self, label: &str) -> Color {
-        match label {
-            "claude" => self.harness_claude,
-            "codex" => self.harness_codex,
-            "opencode" => self.harness_opencode,
-            "aider" => self.harness_aider,
-            _ => self.harness_unknown,
+    pub fn harness_color(&self, label_or_key: &str) -> Color {
+        // Resolve label → key via the registry so the
+        // pre-H-EXT-003 badge callers (which pass display
+        // labels) hit the same map entry as new callers that
+        // pass harness keys.
+        let canonical_key = crate::discovery::harness::registered_adapters()
+            .find(|a| a.harness_key() == label_or_key || a.display_label() == label_or_key)
+            .map(|a| a.harness_key());
+        match canonical_key {
+            Some(key) => self
+                .harness_colors
+                .get(key)
+                .copied()
+                .unwrap_or(self.harness_unknown),
+            None => self
+                .harness_colors
+                .get(label_or_key)
+                .copied()
+                .unwrap_or(self.harness_unknown),
         }
     }
 }
@@ -442,10 +470,23 @@ impl Theme {
     /// as a routing-error diagnostic.
     pub fn set_color(&mut self, name: &str, color: Color) -> bool {
         match name {
-            "harness_claude" => self.harness_claude = color,
-            "harness_codex" => self.harness_codex = color,
-            "harness_opencode" => self.harness_opencode = color,
-            "harness_aider" => self.harness_aider = color,
+            // Legacy flat harness aliases (pre-H-EXT-003). Kept
+            // for config back-compat per ADR 0031's precedent for
+            // grandfathered keys; they route to the same
+            // `harness_colors` entry the new
+            // `[tui.theme.harness].<key>` form would.
+            "harness_claude" => {
+                self.harness_colors.insert("claude-code".to_string(), color);
+            }
+            "harness_codex" => {
+                self.harness_colors.insert("codex".to_string(), color);
+            }
+            "harness_opencode" => {
+                self.harness_colors.insert("opencode".to_string(), color);
+            }
+            "harness_aider" => {
+                self.harness_colors.insert("aider".to_string(), color);
+            }
             "harness_unknown" => self.harness_unknown = color,
             "mux_attached" => self.mux_attached = color,
             "mux_ambiguous" => self.mux_ambiguous = color,
@@ -669,7 +710,10 @@ mod tests {
     #[test]
     fn default_preserves_inline_literals() {
         let theme = Theme::default();
+        // H-EXT-003: both the display label and the harness key
+        // resolve to the same entry in `harness_colors`.
         assert_eq!(theme.harness_color("claude"), Color::Magenta);
+        assert_eq!(theme.harness_color("claude-code"), Color::Magenta);
         assert_eq!(theme.harness_color("codex"), Color::Cyan);
         assert_eq!(theme.harness_color("opencode"), Color::Green);
         assert_eq!(theme.harness_color("aider"), Color::Red);

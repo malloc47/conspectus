@@ -276,7 +276,11 @@ fn chip_color(turn: &TranscriptTurn, theme: &Theme) -> ratatui::style::Color {
         (_, TurnKind::Thinking) => theme.secondary_text,
         (_, TurnKind::ToolUse) => theme.warning,
         (_, TurnKind::ToolResult) => theme.warning,
-        (TurnRole::User, _) => theme.harness_codex,
+        // H-EXT-003: semantic reuse of the codex identity color
+        // for user turns. Kept in one place via the theme's
+        // registry-aware lookup so a theme override to
+        // `[tui.theme.harness].codex` also recolors user turns.
+        (TurnRole::User, _) => theme.harness_color("codex"),
         (TurnRole::Assistant, _) => theme.success,
         (TurnRole::System, _) => theme.secondary_text,
     }

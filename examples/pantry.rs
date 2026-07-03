@@ -856,23 +856,23 @@ fn theme_sections(theme: &Theme) -> Vec<ThemeSection> {
             title: "Harness identity",
             rows: vec![
                 (
-                    "harness_claude",
-                    ThemeSample::Color(theme.harness_claude),
+                    "harness.claude-code",
+                    ThemeSample::Color(theme.harness_color("claude-code")),
                     "claude row badge",
                 ),
                 (
-                    "harness_codex",
-                    ThemeSample::Color(theme.harness_codex),
+                    "harness.codex",
+                    ThemeSample::Color(theme.harness_color("codex")),
                     "codex row badge",
                 ),
                 (
-                    "harness_opencode",
-                    ThemeSample::Color(theme.harness_opencode),
+                    "harness.opencode",
+                    ThemeSample::Color(theme.harness_color("opencode")),
                     "opencode row badge",
                 ),
                 (
-                    "harness_aider",
-                    ThemeSample::Color(theme.harness_aider),
+                    "harness.aider",
+                    ThemeSample::Color(theme.harness_color("aider")),
                     "aider row badge",
                 ),
                 (

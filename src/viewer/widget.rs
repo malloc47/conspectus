@@ -416,7 +416,12 @@ fn draw_help_overlay(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
                 Span::styled(
                     format!("{}{} ", " ".repeat(key_pad), key),
                     Style::new()
-                        .fg(theme.harness_codex)
+                        // H-EXT-003: use the codex color via the
+                        // registry-aware lookup. This is a
+                        // semantic reuse — the viewer help sheet
+                        // paints its key column in the same cyan
+                        // as codex identity chips.
+                        .fg(theme.harness_color("codex"))
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
@@ -561,17 +566,14 @@ fn passes_abort_filter(turn: &crate::viewer::model::TranscriptTurn, state: &View
     state.show_aborted || !turn.aborted
 }
 
-/// Pick a harness-identity color for the title chip. Falls back to
-/// `harness_unknown` for harnesses outside the v1 set.
+/// Pick a harness-identity color for the title chip. H-EXT-003:
+/// delegates to [`Theme::harness_color`] so the per-harness color
+/// lookup lives in one place (the theme + adapter registry) rather
+/// than a match table here.
 fn harness_chip_style(harness: &str, theme: &Theme) -> Style {
-    let color = match harness {
-        "claude-code" => theme.harness_claude,
-        "codex" => theme.harness_codex,
-        "opencode" => theme.harness_opencode,
-        "aider" => theme.harness_aider,
-        _ => theme.harness_unknown,
-    };
-    Style::new().fg(color).add_modifier(Modifier::BOLD)
+    Style::new()
+        .fg(theme.harness_color(harness))
+        .add_modifier(Modifier::BOLD)
 }
 
 #[cfg(test)]

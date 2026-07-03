@@ -729,6 +729,10 @@ fn merge_tui_theme(
             merge_tui_theme_icons(theme, value, path, diagnostics);
             continue;
         }
+        if key == "harness" {
+            merge_tui_theme_harness(theme, value, path, diagnostics);
+            continue;
+        }
         let Some(&kind) = known.get(key.as_str()) else {
             diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
@@ -819,6 +823,67 @@ fn merge_tui_theme_icons(
             Err(err) => diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
                 message: err,
+            }),
+        }
+    }
+}
+
+/// Apply `[tui.theme.harness]` overrides to `theme.harness_colors`
+/// (H-EXT-003). Table keys are harness keys registered via the
+/// adapter registry; unknown keys emit a diagnostic listing the
+/// registered set and leave the target map entry alone. Non-table
+/// values and non-string entries produce diagnostics without
+/// touching state.
+fn merge_tui_theme_harness(
+    theme: &mut Theme,
+    value: toml::Value,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(table) = value.as_table() else {
+        diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: format!(
+                "`[tui.theme.harness]` must be a table (got `{}`)",
+                value.type_str()
+            ),
+        });
+        return;
+    };
+    let registered: std::collections::BTreeSet<&'static str> =
+        crate::discovery::harness::harness_keys()
+            .iter()
+            .copied()
+            .collect();
+    for (key, value) in table {
+        if !registered.contains(key.as_str()) {
+            let registered_list: Vec<String> = registered.iter().map(|s| s.to_string()).collect();
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "unknown `[tui.theme.harness]` key `{key}`; registered harnesses: {}",
+                    registered_list.join(", ")
+                ),
+            });
+            continue;
+        }
+        let Some(raw) = value.as_str() else {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "`[tui.theme.harness].{key}` must be a string (got `{}`)",
+                    value.type_str()
+                ),
+            });
+            continue;
+        };
+        match parse_color(raw) {
+            Ok(color) => {
+                theme.harness_colors.insert(key.clone(), color);
+            }
+            Err(err) => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("`[tui.theme.harness].{key}`: {err}"),
             }),
         }
     }
@@ -1618,7 +1683,10 @@ mod tests {
 
         assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
         let theme = &outcome.config.tui.theme;
-        assert_eq!(theme.harness_claude, ratatui::style::Color::LightRed);
+        assert_eq!(
+            theme.harness_color("claude-code"),
+            ratatui::style::Color::LightRed
+        );
         assert_eq!(
             theme.mux_attached,
             ratatui::style::Color::Rgb(0x00, 0xff, 0x88)
@@ -1656,9 +1724,12 @@ mod tests {
 
         let theme = &outcome.config.tui.theme;
         let defaults = Theme::default();
-        assert_eq!(theme.harness_codex, ratatui::style::Color::Yellow);
+        assert_eq!(theme.harness_color("codex"), ratatui::style::Color::Yellow);
         // Untouched fields stay at default values.
-        assert_eq!(theme.harness_claude, defaults.harness_claude);
+        assert_eq!(
+            theme.harness_color("claude-code"),
+            defaults.harness_color("claude-code")
+        );
         assert_eq!(theme.mux_attached, defaults.mux_attached);
     }
 
@@ -1683,7 +1754,7 @@ mod tests {
         );
         // Recognized neighbors still apply.
         assert_eq!(
-            outcome.config.tui.theme.harness_claude,
+            outcome.config.tui.theme.harness_color("claude-code"),
             ratatui::style::Color::Green
         );
     }
@@ -1709,7 +1780,8 @@ mod tests {
         );
         let defaults = Theme::default();
         assert_eq!(
-            outcome.config.tui.theme.harness_claude, defaults.harness_claude,
+            outcome.config.tui.theme.harness_color("claude-code"),
+            defaults.harness_color("claude-code"),
             "bad spec falls back to default"
         );
         // Sibling fields still parse.
@@ -1734,6 +1806,81 @@ mod tests {
 
         assert_eq!(outcome.diagnostics.len(), 1);
         assert!(outcome.diagnostics[0].message.contains("must be a string"));
+    }
+
+    #[test]
+    fn tui_theme_harness_table_overrides_per_key_colors() {
+        // H-EXT-003: `[tui.theme.harness].<key> = "color"` sets
+        // theme.harness_colors[<key>]. Adapter-registry-registered
+        // keys are accepted; unknown keys emit a diagnostic
+        // pointing at the registered set.
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme.harness]\nclaude-code = \"bright_blue\"\ncodex = \"magenta\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        let theme = &outcome.config.tui.theme;
+        assert_eq!(
+            theme.harness_color("claude-code"),
+            ratatui::style::Color::LightBlue
+        );
+        assert_eq!(theme.harness_color("codex"), ratatui::style::Color::Magenta);
+        // Unlisted registered adapters keep their defaults.
+        let defaults = Theme::default();
+        assert_eq!(
+            theme.harness_color("opencode"),
+            defaults.harness_color("opencode")
+        );
+    }
+
+    #[test]
+    fn tui_theme_harness_table_unknown_key_emits_diagnostic() {
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme.harness]\nnever-registered = \"red\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert_eq!(outcome.diagnostics.len(), 1);
+        let msg = &outcome.diagnostics[0].message;
+        assert!(
+            msg.contains("unknown `[tui.theme.harness]` key `never-registered`"),
+            "{msg}"
+        );
+        assert!(msg.contains("registered harnesses:"), "{msg}");
+    }
+
+    #[test]
+    fn tui_theme_flat_harness_alias_still_works() {
+        // Pre-H-EXT-003 flat keys stay as aliases per ADR 0031.
+        let temp = TempDir::new().expect("temp dir");
+        let project = temp.path().join("project");
+        fs::create_dir(&project).expect("create project dir");
+        write_file(
+            &project.join(PROJECT_CONFIG_FILENAME),
+            "[tui.theme]\nharness_codex = \"magenta\"\n",
+        );
+
+        let loader = ConfigLoader::new().with_home(temp.path());
+        let outcome = loader.load_from(&project);
+
+        assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+        assert_eq!(
+            outcome.config.tui.theme.harness_color("codex"),
+            ratatui::style::Color::Magenta
+        );
     }
 
     #[test]
