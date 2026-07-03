@@ -12,9 +12,16 @@
 //! walk the configured scan roots instead. The [`HarnessDiscovery`] coordinator
 //! is a [`DiscoveryProvider`] that runs every registered adapter and merges
 //! fragments deterministically through [`merge_fragments`].
+//!
+//! H-EXT-004: adapters also carry a [`RuntimeSignature`] that
+//! describes their process / fd / session-key surface. The
+//! `cross_link` module iterates registered adapters and consumes
+//! signatures generically instead of hard-coding
+//! per-harness match arms.
 
 #[cfg(test)]
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -39,6 +46,106 @@ pub struct HarnessLaunchOption {
     pub id: &'static str,
     pub label: &'static str,
     pub argv: &'static [&'static str],
+}
+
+/// Runtime attribution surface for a single harness (H-EXT-004).
+///
+/// The `cross_link` module iterates registered adapters and
+/// consumes signatures generically instead of hard-coding
+/// per-harness match arms. Each field carries a small,
+/// composable chunk of harness knowledge that `cross_link` uses
+/// to attribute mux panes and process trees back to sessions
+/// discovered by the adapter's `discover` method.
+///
+/// The struct is intentionally lean — one static value per
+/// adapter — so registering a new harness is a matter of
+/// filling in the fields, not writing a new attribution
+/// pipeline.
+pub struct RuntimeSignature {
+    /// Harness key this signature belongs to; matches
+    /// [`HarnessAdapter::harness_key`]. Present so
+    /// registry-iteration consumers can carry the key through
+    /// without a second lookup.
+    pub harness_key: &'static str,
+    /// Executable basenames that identify this harness in
+    /// process command output. Matched case-insensitively
+    /// against the first whitespace-separated token of the
+    /// command's basename. For example, `claude-code` accepts
+    /// both `claude` and `claude-code` because either binary
+    /// may be on `PATH`.
+    pub process_command_basenames: &'static [&'static str],
+    /// Substrings that identify this harness in loose command
+    /// scans (mux `active_pane_command` and
+    /// `active_pane_start_command`). Matched case-insensitively
+    /// via `contains(...)`, so keep the entries short and
+    /// unambiguous.
+    pub command_substrings: &'static [&'static str],
+    /// Path prefixes that identify this harness in an fd path
+    /// (e.g. `"/.codex/sessions/"` for codex). Matched via
+    /// `contains(...)` so paths with leading directories
+    /// (e.g. `/home/alice/.codex/sessions/…`) still match.
+    pub fd_path_patterns: &'static [&'static str],
+    /// Extract session keys from a text (fd path or command).
+    /// Different harnesses use different session-id grammars —
+    /// opencode's `ses_<alphanumeric>` vs. codex/claude-code's
+    /// UUID-shaped keys. Defaults to
+    /// [`generic_uuid_like_session_keys`] for adapters without
+    /// a custom grammar.
+    pub extract_session_keys: fn(&str) -> BTreeSet<String>,
+    /// Recognize this harness's helper / daemon processes so
+    /// `cross_link` can classify them as [`RuntimeProcessRole::Background`]
+    /// instead of treating them as human-driven agent panes.
+    /// Defaults to always-false.
+    pub is_background_process: fn(&str) -> bool,
+    /// Recognize this harness's subagent processes (opencode's
+    /// nested-agent spawns, currently) so `cross_link` can
+    /// classify them as [`RuntimeProcessRole::Subagent`] instead
+    /// of duplicating them as human-driven rows. Defaults to
+    /// always-false.
+    pub is_subagent_process: fn(&str) -> bool,
+}
+
+/// UUID-shaped session-key grammar used by codex, claude-code,
+/// and every future harness whose session ids follow the
+/// canonical `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` shape.
+/// Public so per-adapter `RuntimeSignature` values can point
+/// their `extract_session_keys` field at it directly.
+pub fn generic_uuid_like_session_keys(value: &str) -> BTreeSet<String> {
+    const UUID_LEN: usize = 36;
+
+    if value.len() < UUID_LEN {
+        return BTreeSet::new();
+    }
+
+    let bytes = value.as_bytes();
+    (0..=bytes.len() - UUID_LEN)
+        .filter(|start| {
+            is_uuid_like_bytes(&bytes[*start..*start + UUID_LEN])
+                && uuid_boundary(bytes.get(start.wrapping_sub(1)).copied())
+                && uuid_boundary(bytes.get(*start + UUID_LEN).copied())
+        })
+        .filter_map(|start| value.get(start..start + UUID_LEN).map(str::to_string))
+        .collect()
+}
+
+fn is_uuid_like_bytes(bytes: &[u8]) -> bool {
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(idx, byte)| match idx {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+}
+
+fn uuid_boundary(byte: Option<u8>) -> bool {
+    !byte.is_some_and(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Placeholder for `is_background_process` /
+/// `is_subagent_process` on adapters that don't ship with
+/// helper daemons or subagent surfaces. Adapters point their
+/// signature at this instead of writing a stub.
+pub fn no_match(_command: &str) -> bool {
+    false
 }
 
 const CODEX_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-bypass-approvals-and-sandbox"];
@@ -109,7 +216,36 @@ pub trait HarnessAdapter: Send + Sync {
         let _ = (session_id, cwd);
         None
     }
+
+    /// Runtime attribution surface (H-EXT-004). Returned
+    /// reference is `'static` so `cross_link` can carry it
+    /// across per-adapter iteration without allocation.
+    /// Adapters return a module-level `const` value that
+    /// packages together process / fd / session-key patterns.
+    ///
+    /// The default returns a stub signature keyed on the
+    /// adapter's `harness_key` with no process / fd / session-key
+    /// patterns — appropriate for test adapters and future
+    /// harnesses whose attribution surface hasn't been wired
+    /// yet. Production adapters override.
+    fn runtime_signature(&self) -> &'static RuntimeSignature {
+        &STUB_RUNTIME_SIGNATURE
+    }
 }
+
+/// Stub signature used as the [`HarnessAdapter::runtime_signature`]
+/// default. Its `harness_key` field is intentionally left as
+/// `"unknown"` — callers that need the adapter's real key read
+/// it from [`HarnessAdapter::harness_key`] instead.
+static STUB_RUNTIME_SIGNATURE: RuntimeSignature = RuntimeSignature {
+    harness_key: "unknown",
+    process_command_basenames: &[],
+    command_substrings: &[],
+    fd_path_patterns: &[],
+    extract_session_keys: generic_uuid_like_session_keys,
+    is_background_process: no_match,
+    is_subagent_process: no_match,
+};
 
 /// Canonical set of registered harness adapters (H-EXT-002).
 /// The six parallel-table functions below iterate this list

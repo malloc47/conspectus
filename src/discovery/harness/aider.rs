@@ -27,9 +27,29 @@ impl AiderAdapter {
     }
 }
 
+/// H-EXT-004 runtime attribution surface for aider. Aider tracks
+/// history per-cwd rather than per-session, so there are no
+/// fd-path patterns or session-key grammars to match on — the
+/// signature exists so registry iteration can carry it, but its
+/// pattern arrays are empty and its session-key extractor
+/// returns the empty set.
+static AIDER_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
+    harness_key: HARNESS_KEY,
+    process_command_basenames: &["aider"],
+    command_substrings: &["aider"],
+    fd_path_patterns: &[],
+    extract_session_keys: super::generic_uuid_like_session_keys,
+    is_background_process: super::no_match,
+    is_subagent_process: super::no_match,
+};
+
 impl HarnessAdapter for AiderAdapter {
     fn harness_key(&self) -> &'static str {
         HARNESS_KEY
+    }
+
+    fn runtime_signature(&self) -> &'static super::RuntimeSignature {
+        &AIDER_RUNTIME_SIGNATURE
     }
 
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {

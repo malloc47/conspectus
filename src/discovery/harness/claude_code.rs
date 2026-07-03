@@ -85,9 +85,38 @@ impl ClaudeCodeAdapter {
     }
 }
 
+/// H-EXT-004 runtime attribution surface for claude-code.
+/// The harness ships as either `claude` or `claude-code` on
+/// `PATH`; session ids are UUID-shaped; the CLI spawns a few
+/// helper daemons whose commands the pre-H-EXT-004
+/// `is_claude_background_process` heuristic already recognizes.
+static CLAUDE_CODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
+    harness_key: HARNESS_KEY,
+    process_command_basenames: &["claude", "claude-code"],
+    command_substrings: &["claude"],
+    fd_path_patterns: &["/.claude/tasks/", "/.claude/projects/"],
+    extract_session_keys: super::generic_uuid_like_session_keys,
+    is_background_process: claude_code_is_background_process,
+    is_subagent_process: super::no_match,
+};
+
+/// Recognize claude-code's helper daemons. Preserves the
+/// pre-H-EXT-004 heuristics from
+/// `cross_link::RuntimeProcessRecord::is_claude_background_process`.
+fn claude_code_is_background_process(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    command.contains(" daemon run ")
+        || command.contains(" --bg-spare")
+        || command.contains(" --bg-pty-host")
+}
+
 impl HarnessAdapter for ClaudeCodeAdapter {
     fn harness_key(&self) -> &'static str {
         HARNESS_KEY
+    }
+
+    fn runtime_signature(&self) -> &'static super::RuntimeSignature {
+        &CLAUDE_CODE_RUNTIME_SIGNATURE
     }
 
     /// H-TBL-014: the row-label column is tight, so `claude-code`

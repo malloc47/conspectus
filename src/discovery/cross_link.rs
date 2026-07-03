@@ -440,7 +440,7 @@ fn process_linked_to_mux(
     let mut link = linked_to_mux(
         session,
         mux,
-        "active_pane_process_match",
+        crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH,
         Provenance::StrongDiscovered,
         Confidence::High,
     );
@@ -497,7 +497,7 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         "match_kind".to_string(),
-        serde_json::Value::String("active_pane_process_match".to_string()),
+        serde_json::Value::String(crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH.to_string()),
     );
     insert_process_fields(&mut fields, evidence);
 
@@ -547,7 +547,7 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some("active_pane_process_match".to_string()),
+            evidence: Some(crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH.to_string()),
             fields,
             freshness_epoch: None,
         },
@@ -619,7 +619,7 @@ fn runtime_process_graph(
                         },
                     },
                     RelationKind::ProcessCandidatesSession,
-                    "active_pane_process_match",
+                    crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH,
                     Confidence::Low,
                     evidence,
                 );
@@ -647,7 +647,7 @@ fn runtime_process_graph(
                     process_id.clone(),
                     LinkEndpoint::Node { id: target },
                     relation,
-                    "active_pane_process_match",
+                    crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH,
                     confidence,
                     evidence,
                 );
@@ -750,7 +750,7 @@ fn fd_runtime_process_graph(
         let Some(evidence) = active_pane_evidence(mux, fd_reader) else {
             continue;
         };
-        if evidence.link_evidence == "active_pane_command_session_match" {
+        if evidence.link_evidence == crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH {
             continue;
         }
 
@@ -968,7 +968,8 @@ fn active_mux_sessions(
                 .collect();
 
             if direct_matches.is_empty()
-                && evidence.link_evidence != "active_pane_command_session_match"
+                && evidence.link_evidence
+                    != crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH
             {
                 matches.unresolved_identity = true;
             } else if !direct_matches.is_empty() {
@@ -1004,7 +1005,8 @@ fn active_mux_sessions(
                     sessions: matched_sessions,
                     evidence: evidence.link_evidence,
                 });
-                if evidence.link_evidence == "active_pane_command_session_match"
+                if evidence.link_evidence
+                    == crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH
                     && let Some(activity_match) = &activity_match
                     && most_recent_epoch(&activity_match.sessions, sessions)
                         > most_recent_epoch(
@@ -1247,17 +1249,29 @@ impl ProcessPaneEvidence {
     }
 
     fn is_opencode_subagent_process(&self) -> bool {
-        self.harness_key == "opencode" && self.command.to_ascii_lowercase().contains(" subagent")
+        // H-EXT-004: delegate to the registered adapter's
+        // signature. Preserves the pre-H-EXT-004 opencode-only
+        // rule.
+        self.signature_role_check(|sig| (sig.is_subagent_process)(&self.command))
     }
 
     fn is_claude_background_process(&self) -> bool {
-        if self.harness_key != "claude-code" {
-            return false;
-        }
-        let command = self.command.to_ascii_lowercase();
-        command.contains(" daemon run ")
-            || command.contains(" --bg-spare")
-            || command.contains(" --bg-pty-host")
+        // H-EXT-004: delegate to the registered adapter's
+        // signature. Preserves the pre-H-EXT-004 claude-code-only
+        // rule; adapters that don't ship helper daemons point
+        // their `is_background_process` at
+        // [`crate::discovery::harness::no_match`].
+        self.signature_role_check(|sig| (sig.is_background_process)(&self.command))
+    }
+
+    fn signature_role_check<F>(&self, predicate: F) -> bool
+    where
+        F: Fn(&crate::discovery::harness::RuntimeSignature) -> bool,
+    {
+        crate::discovery::harness::registered_adapters()
+            .find(|a| a.harness_key() == self.harness_key)
+            .map(|a| predicate(a.runtime_signature()))
+            .unwrap_or(false)
     }
 
     fn role(&self) -> RuntimeProcessRole {
@@ -1455,6 +1469,10 @@ fn active_pane_process_evidence(
 }
 
 fn process_command_harnesses(command: &str) -> BTreeSet<String> {
+    // H-EXT-004: iterate registered adapters and consult each
+    // signature's `process_command_basenames`. The pre-H-EXT-004
+    // hand-rolled match table for the four v1 harnesses now
+    // lives on the per-adapter signatures.
     let Some(first) = command.split_whitespace().next() else {
         return BTreeSet::new();
     };
@@ -1464,20 +1482,15 @@ fn process_command_harnesses(command: &str) -> BTreeSet<String> {
         .unwrap_or(first)
         .to_ascii_lowercase();
     let mut harnesses = BTreeSet::new();
-    match name.as_str() {
-        "claude" | "claude-code" => {
-            harnesses.insert("claude-code".to_string());
+    for adapter in crate::discovery::harness::registered_adapters() {
+        let sig = adapter.runtime_signature();
+        if sig
+            .process_command_basenames
+            .iter()
+            .any(|b| b.eq_ignore_ascii_case(&name))
+        {
+            harnesses.insert(adapter.harness_key().to_string());
         }
-        "codex" => {
-            harnesses.insert("codex".to_string());
-        }
-        "opencode" => {
-            harnesses.insert("opencode".to_string());
-        }
-        "aider" => {
-            harnesses.insert("aider".to_string());
-        }
-        _ => {}
     }
     harnesses
 }
@@ -1523,7 +1536,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: fd_evidence.session_keys,
             harnesses: fd_harnesses,
-            link_evidence: "active_pane_fd_session_match",
+            link_evidence: crate::resolve::evidence::ACTIVE_PANE_FD_SESSION_MATCH,
         });
     }
 
@@ -1538,7 +1551,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: intersection,
             harnesses,
-            link_evidence: "active_pane_fd_command_session_match",
+            link_evidence: crate::resolve::evidence::ACTIVE_PANE_FD_COMMAND_SESSION_MATCH,
         });
     }
 
@@ -1548,7 +1561,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: command_evidence.session_keys,
             harnesses,
-            link_evidence: "active_pane_command_session_match",
+            link_evidence: crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH,
         });
     }
 
@@ -1556,7 +1569,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: fd_evidence.session_keys,
             harnesses: fd_harnesses,
-            link_evidence: "active_pane_fd_session_match",
+            link_evidence: crate::resolve::evidence::ACTIVE_PANE_FD_SESSION_MATCH,
         });
     }
 
@@ -1588,28 +1601,29 @@ where
 
     for path in paths {
         let path = path.as_ref();
-        let harness = if path.contains("/.codex/sessions/") || path.contains("/.codex/tmp/") {
-            Some("codex")
-        } else if path.contains("/.claude/tasks/") || path.contains("/.claude/projects/") {
-            Some("claude-code")
-        } else if path.contains("/.local/share/opencode/")
-            || path.contains("/.config/opencode/")
-            || path.contains("/.opencode/")
-        {
-            Some("opencode")
-        } else {
-            None
-        };
-        let Some(harness) = harness else {
+        // H-EXT-004: match the path against every registered
+        // adapter's `fd_path_patterns`. First match wins so
+        // paths that contain multiple harness fragments
+        // (rare) resolve to the first-registered adapter,
+        // matching the pre-H-EXT-004 if-chain's short-circuit
+        // behavior.
+        let mut matched: Option<&'static dyn crate::discovery::harness::HarnessAdapter> = None;
+        for adapter in crate::discovery::harness::registered_adapters() {
+            let sig = adapter.runtime_signature();
+            if sig.fd_path_patterns.iter().any(|p| path.contains(p)) {
+                matched = Some(adapter);
+                break;
+            }
+        }
+        let Some(adapter) = matched else {
             continue;
         };
-
-        let keys = session_keys_for_harness_text(harness, path);
+        let keys = (adapter.runtime_signature().extract_session_keys)(path);
         if keys.is_empty() {
             continue;
         }
 
-        evidence.harnesses.insert(harness.to_string());
+        evidence.harnesses.insert(adapter.harness_key().to_string());
         evidence.session_keys.extend(keys);
     }
 
@@ -1620,7 +1634,9 @@ fn command_session_evidence(command: &str) -> SessionKeyEvidence {
     let harnesses = command_harnesses(command);
     let mut session_keys = BTreeSet::new();
     if harnesses.is_empty() {
-        session_keys.extend(generic_uuid_like_session_keys(command));
+        session_keys.extend(crate::discovery::harness::generic_uuid_like_session_keys(
+            command,
+        ));
     } else {
         for harness in &harnesses {
             session_keys.extend(command_session_keys_for_harness(command, harness));
@@ -1667,56 +1683,17 @@ fn looks_like_command_flag(value: &str) -> bool {
 }
 
 fn session_keys_for_harness_text(harness: &str, value: &str) -> BTreeSet<String> {
-    match harness {
-        "opencode" => {
-            let mut keys = opencode_session_key_values(value);
-            keys.extend(generic_uuid_like_session_keys(value));
-            keys
+    // H-EXT-004: dispatch to the registered adapter's
+    // `extract_session_keys` callback. Unknown harnesses fall
+    // back to the generic UUID grammar via
+    // `crate::discovery::harness::generic_uuid_like_session_keys`
+    // (matches pre-H-EXT-004 catch-all behavior).
+    for adapter in crate::discovery::harness::registered_adapters() {
+        if adapter.harness_key() == harness {
+            return (adapter.runtime_signature().extract_session_keys)(value);
         }
-        _ => generic_uuid_like_session_keys(value),
     }
-}
-
-fn opencode_session_key_values(value: &str) -> BTreeSet<String> {
-    value
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
-        .filter(|part| {
-            part.strip_prefix("ses_").is_some_and(|rest| {
-                rest.len() >= 8 && rest.chars().all(|ch| ch.is_ascii_alphanumeric())
-            })
-        })
-        .map(str::to_string)
-        .collect()
-}
-
-fn generic_uuid_like_session_keys(value: &str) -> BTreeSet<String> {
-    const UUID_LEN: usize = 36;
-
-    if value.len() < UUID_LEN {
-        return BTreeSet::new();
-    }
-
-    let bytes = value.as_bytes();
-    (0..=bytes.len() - UUID_LEN)
-        .filter(|start| {
-            is_uuid_like_bytes(&bytes[*start..*start + UUID_LEN])
-                && uuid_boundary(bytes.get(start.wrapping_sub(1)).copied())
-                && uuid_boundary(bytes.get(*start + UUID_LEN).copied())
-        })
-        .filter_map(|start| value.get(start..start + UUID_LEN).map(str::to_string))
-        .collect()
-}
-
-fn is_uuid_like_bytes(bytes: &[u8]) -> bool {
-    bytes.len() == 36
-        && bytes.iter().enumerate().all(|(idx, byte)| match idx {
-            8 | 13 | 18 | 23 => *byte == b'-',
-            _ => byte.is_ascii_hexdigit(),
-        })
-}
-
-fn uuid_boundary(byte: Option<u8>) -> bool {
-    !byte.is_some_and(|byte| byte.is_ascii_hexdigit())
+    crate::discovery::harness::generic_uuid_like_session_keys(value)
 }
 
 fn active_pane_harnesses(mux: &MuxSessionNode) -> BTreeSet<String> {
@@ -1731,19 +1708,21 @@ fn active_pane_harnesses(mux: &MuxSessionNode) -> BTreeSet<String> {
 }
 
 fn command_harnesses(command: &str) -> BTreeSet<String> {
+    // H-EXT-004: iterate registered adapters and consult each
+    // signature's `command_substrings` (loose case-insensitive
+    // contains). The pre-H-EXT-004 hand-rolled if-chain for the
+    // four v1 harnesses now lives on the per-adapter signatures.
     let command = command.to_ascii_lowercase();
     let mut harnesses = BTreeSet::new();
-    if command.contains("claude") {
-        harnesses.insert("claude-code".to_string());
-    }
-    if command.contains("codex") {
-        harnesses.insert("codex".to_string());
-    }
-    if command.contains("opencode") {
-        harnesses.insert("opencode".to_string());
-    }
-    if command.contains("aider") {
-        harnesses.insert("aider".to_string());
+    for adapter in crate::discovery::harness::registered_adapters() {
+        let sig = adapter.runtime_signature();
+        if sig
+            .command_substrings
+            .iter()
+            .any(|s| command.contains(&s.to_ascii_lowercase()))
+        {
+            harnesses.insert(adapter.harness_key().to_string());
+        }
     }
     harnesses
 }
@@ -3135,7 +3114,7 @@ mod tests {
 
     #[test]
     fn generic_uuid_like_session_keys_extracts_uuid_shaped_tokens() {
-        let values = generic_uuid_like_session_keys(
+        let values = crate::discovery::harness::generic_uuid_like_session_keys(
             "/home/me/.codex/sessions/2026/05/19/rollout-2026-05-19T23-00-48-019e4354-26b9-7ad2-9521-4ad921cc312b.jsonl",
         );
 

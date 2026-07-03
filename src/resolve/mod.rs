@@ -8,6 +8,7 @@ use crate::model::{
     ResolvedRelationship, RuntimeProcessRole, ScoreAxis, SourceMetadata,
 };
 
+pub mod evidence;
 pub mod pins;
 
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
@@ -739,11 +740,19 @@ fn process_identity_score(link: &GraphLink) -> ProcessIdentityScore {
 }
 
 fn process_identity_evidence_rank(match_kind: Option<&str>) -> u8 {
+    // H-EXT-004: match against the shared evidence-string
+    // constants so a rename anywhere in the pipeline is caught
+    // at compile time instead of silently losing rank.
+    use evidence::*;
     match match_kind {
-        Some("codex_log_process_thread_match" | "hook_process_session_match") => 60,
-        Some("active_pane_fd_session_match" | "active_pane_fd_command_session_match") => 50,
-        Some("active_pane_process_match") => 35,
-        Some("active_pane_command_session_match") => 30,
+        Some(s) if s == CODEX_LOG_PROCESS_THREAD_MATCH || s == HOOK_PROCESS_SESSION_MATCH => 60,
+        Some(s)
+            if s == ACTIVE_PANE_FD_SESSION_MATCH || s == ACTIVE_PANE_FD_COMMAND_SESSION_MATCH =>
+        {
+            50
+        }
+        Some(s) if s == ACTIVE_PANE_PROCESS_MATCH => 35,
+        Some(s) if s == ACTIVE_PANE_COMMAND_SESSION_MATCH => 30,
         _ => 0,
     }
 }

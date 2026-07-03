@@ -478,7 +478,9 @@ fn codex_process_link(
     let mut fields = Metadata::new();
     fields.insert(
         "match_kind".to_string(),
-        serde_json::Value::String("codex_log_process_thread_match".to_string()),
+        serde_json::Value::String(
+            crate::resolve::evidence::CODEX_LOG_PROCESS_THREAD_MATCH.to_string(),
+        ),
     );
     fields.insert(
         "observed_epoch".to_string(),
@@ -502,7 +504,7 @@ fn codex_process_link(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some("codex_log_process_thread_match".to_string()),
+            evidence: Some(crate::resolve::evidence::CODEX_LOG_PROCESS_THREAD_MATCH.to_string()),
             fields,
             freshness_epoch: None,
         },
@@ -538,7 +540,7 @@ fn demote_stale_codex_command_matches(snapshot: &mut GraphSnapshot, fresh: &Grap
             .get("match_kind")
             .and_then(serde_json::Value::as_str)
             .or(link.source_metadata.evidence.as_deref());
-        if match_kind != Some("active_pane_command_session_match") {
+        if match_kind != Some(crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH) {
             continue;
         }
 
@@ -650,7 +652,9 @@ mod tests {
         let mut fields = Metadata::new();
         fields.insert(
             "match_kind".to_string(),
-            serde_json::Value::String("active_pane_command_session_match".to_string()),
+            serde_json::Value::String(
+                crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH.to_string(),
+            ),
         );
         GraphLink {
             id: format!("cross_link:cmd:{session_key}:{native_id}"),
@@ -662,7 +666,9 @@ mod tests {
             freshness: Freshness::Fresh,
             source_metadata: SourceMetadata {
                 adapter: "cross_link".to_string(),
-                evidence: Some("active_pane_command_session_match".to_string()),
+                evidence: Some(
+                    crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH.to_string(),
+                ),
                 fields,
                 freshness_epoch: None,
             },

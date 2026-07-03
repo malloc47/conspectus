@@ -45,9 +45,58 @@ impl OpenCodeAdapter {
     }
 }
 
+/// H-EXT-004 runtime attribution surface for opencode.
+/// Opencode's session ids follow the `ses_<alphanumeric>`
+/// grammar with a UUID fallback for legacy sessions;
+/// the CLI spawns subagent processes distinguished by
+/// ` subagent` in their argv.
+static OPENCODE_RUNTIME_SIGNATURE: super::RuntimeSignature = super::RuntimeSignature {
+    harness_key: HARNESS_KEY,
+    process_command_basenames: &["opencode"],
+    command_substrings: &["opencode"],
+    fd_path_patterns: &[
+        "/.local/share/opencode/",
+        "/.config/opencode/",
+        "/.opencode/",
+    ],
+    extract_session_keys: opencode_extract_session_keys,
+    is_background_process: super::no_match,
+    is_subagent_process: opencode_is_subagent_process,
+};
+
+/// Combine opencode's `ses_<alphanumeric>` grammar with the
+/// generic UUID fallback so legacy sessions still resolve.
+fn opencode_extract_session_keys(value: &str) -> std::collections::BTreeSet<String> {
+    let mut keys = opencode_session_key_values(value);
+    keys.extend(super::generic_uuid_like_session_keys(value));
+    keys
+}
+
+fn opencode_session_key_values(value: &str) -> std::collections::BTreeSet<String> {
+    value
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'))
+        .filter(|part| {
+            part.strip_prefix("ses_").is_some_and(|rest| {
+                rest.len() >= 8 && rest.chars().all(|ch| ch.is_ascii_alphanumeric())
+            })
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Preserves the pre-H-EXT-004 heuristic from
+/// `cross_link::RuntimeProcessRecord::is_opencode_subagent_process`.
+fn opencode_is_subagent_process(command: &str) -> bool {
+    command.to_ascii_lowercase().contains(" subagent")
+}
+
 impl HarnessAdapter for OpenCodeAdapter {
     fn harness_key(&self) -> &'static str {
         HARNESS_KEY
+    }
+
+    fn runtime_signature(&self) -> &'static super::RuntimeSignature {
+        &OPENCODE_RUNTIME_SIGNATURE
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
