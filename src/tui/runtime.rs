@@ -41,6 +41,84 @@ use crate::tui::{RunConfig, View, ui};
 /// the app's current view config.
 type DiscoveryResult = Result<crate::model::GraphSnapshot>;
 
+/// One event the TUI runtime consumes per iteration (ADR 0085
+/// contract 5, H-TUI-004). Wave 1 introduces the type but each
+/// loop still gathers its own events inline; wave 2 refactors the
+/// loops to consume a `next_ui_event(...)` stream.
+///
+/// `Input` carries a crossterm event (key press, resize, focus,
+/// mouse). `Tick` fires from the refresh timer. `Discovery`
+/// carries a completed background discovery result off the
+/// mpsc channel. Fixture mode's `r` re-reads happen synchronously
+/// on `Input(Refresh)` in the current shape and don't need their
+/// own variant.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(super) enum UiEvent {
+    Input(Event),
+    Tick,
+    Discovery(DiscoveryResult),
+}
+
+/// Prepare the toast area and render one frame. Shared between
+/// [`event_loop`] and [`static_event_loop`] (H-TUI-004 wave 1) —
+/// the toast prep + viewer-or-ui draw block was byte-identical
+/// in both loops.
+fn draw_frame(app: &mut App, terminal: &mut DefaultTerminal) -> Result<()> {
+    let size = terminal.size()?;
+    app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
+    terminal.draw(|frame| {
+        let area = frame.area();
+        if app.viewer_modal().is_some() {
+            let theme = app.theme().clone();
+            if let Some(state) = app.viewer_modal_mut() {
+                crate::viewer::widget::draw(state, &theme, frame, area);
+            }
+        } else {
+            ui::draw(app, frame);
+        }
+    })?;
+    Ok(())
+}
+
+/// Route a crossterm event through the modal stack (ADR 0085
+/// contract 3). Returns `Some(...OverlayKey(key))` when an overlay
+/// owns the input, `None` when the caller should fall through to
+/// its per-mode action translation.
+///
+/// Shared between the live and static event loops (H-TUI-004
+/// wave 1). Only KeyEventKind::Press events are forwarded — the
+/// modal stack ignores repeat/release + non-key events like the
+/// individual overlay handlers already did.
+fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
+    let key = match event {
+        Event::Key(k) if k.kind == KeyEventKind::Press => *k,
+        _ => return None,
+    };
+    if app.viewer_modal().is_some() {
+        return Some(Action::ViewerOverlayKey(key));
+    }
+    if app.value_modal().is_some() {
+        return Some(Action::ValueModalKey(key));
+    }
+    if app.rename_overlay().is_some() {
+        return Some(Action::RenameOverlayKey(key));
+    }
+    if app.controls_overlay().is_some() {
+        return Some(Action::ControlsOverlayKey(key));
+    }
+    if app.pins_overlay().is_some() {
+        return Some(Action::PinsOverlayKey(key));
+    }
+    if app.search_overlay().is_some() {
+        return Some(Action::SearchOverlayKey(key));
+    }
+    if app.help_overlay().is_some() {
+        return Some(Action::HelpOverlayKey(key));
+    }
+    None
+}
+
 /// Run the TUI to completion. Restores the terminal on normal exit,
 /// errors, and panics (the panic path is covered by the hook
 /// `ratatui::init` installs).
@@ -120,24 +198,9 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
     let poll_timeout = Duration::from_millis(100);
 
     while !app.should_quit() {
-        // H-WIDG-003: refresh the toast engine's area + tick the
-        // expiry timer before each render. set_area handles
-        // terminal resize; tick retires any toast past its
-        // duration so the next render reflects the polled state
-        // the prior in-tree `is_expired()` provided.
-        let size = terminal.size()?;
-        app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
-        terminal.draw(|frame| {
-            let area = frame.area();
-            if app.viewer_modal().is_some() {
-                let theme = app.theme().clone();
-                if let Some(state) = app.viewer_modal_mut() {
-                    crate::viewer::widget::draw(state, &theme, frame, area);
-                }
-            } else {
-                ui::draw(&app, frame);
-            }
-        })?;
+        // H-WIDG-003 + H-TUI-004 wave 1: draw_frame() handles the
+        // toast area + tick + viewer-or-ui render in one place.
+        draw_frame(&mut app, terminal)?;
 
         // Drain completed background discovery results without
         // blocking. Only the most recent result wins.
@@ -186,58 +249,12 @@ fn event_loop(terminal: &mut DefaultTerminal, config: RunConfig) -> Result<()> {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
             let prev_mux_target = current_mux_target(&app);
-            let action = if app.viewer_modal().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::ViewerOverlayKey(key))
-                    }
-                    _ => None,
-                }
-            } else if app.value_modal().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::ValueModalKey(key))
-                    }
-                    _ => None,
-                }
-            } else if app.help_overlay().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::HelpOverlayKey(key))
-                    }
-                    _ => None,
-                }
-            } else if app.search_overlay().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::SearchOverlayKey(key))
-                    }
-                    _ => None,
-                }
-            } else if app.controls_overlay().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::ControlsOverlayKey(key))
-                    }
-                    _ => None,
-                }
-            } else if app.pins_overlay().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::PinsOverlayKey(key))
-                    }
-                    _ => None,
-                }
-            } else if app.rename_overlay().is_some() {
-                match event {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        Some(Action::RenameOverlayKey(key))
-                    }
-                    _ => None,
-                }
-            } else {
+            // H-TUI-004 wave 1: overlay routing is a shared helper.
+            // Falls through to translate + focus remap for the
+            // non-modal case.
+            let action = overlay_key_from_event(&app, &event).or_else(|| {
                 translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus()))
-            };
+            });
             match action {
                 Some(Action::Msg(msg)) => dispatch(&mut app, *msg),
                 Some(Action::Refresh) => {
@@ -405,24 +422,8 @@ fn static_event_loop(
     let poll_timeout = Duration::from_millis(100);
 
     while !app.should_quit() {
-        // H-WIDG-003: refresh the toast engine's area + tick the
-        // expiry timer before each render. set_area handles
-        // terminal resize; tick retires any toast past its
-        // duration so the next render reflects the polled state
-        // the prior in-tree `is_expired()` provided.
-        let size = terminal.size()?;
-        app.prepare_toast_for_render(Rect::new(0, 0, size.width, size.height));
-        terminal.draw(|frame| {
-            let area = frame.area();
-            if app.viewer_modal().is_some() {
-                let theme = app.theme().clone();
-                if let Some(state) = app.viewer_modal_mut() {
-                    crate::viewer::widget::draw(state, &theme, frame, area);
-                }
-            } else {
-                ui::draw(&app, frame);
-            }
-        })?;
+        // H-WIDG-003 + H-TUI-004 wave 1: shared draw_frame() call.
+        draw_frame(&mut app, terminal)?;
         if event::poll(poll_timeout)? {
             let event = event::read()?;
             let viewport = terminal.size()?.height.saturating_sub(2);
@@ -661,57 +662,12 @@ fn set_static_data(
 
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 fn static_action_for_event(app: &App, event: Event, viewport: u16) -> Option<Action> {
-    if app.viewer_modal().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                Some(Action::ViewerOverlayKey(key))
-            }
-            _ => None,
-        };
-    }
-    if app.value_modal().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::ValueModalKey(key)),
-            _ => None,
-        };
-    }
-    if app.help_overlay().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::HelpOverlayKey(key)),
-            _ => None,
-        };
-    }
-    if app.search_overlay().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                Some(Action::SearchOverlayKey(key))
-            }
-            _ => None,
-        };
-    }
-    if app.controls_overlay().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                Some(Action::ControlsOverlayKey(key))
-            }
-            _ => None,
-        };
-    }
-    if app.pins_overlay().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => Some(Action::PinsOverlayKey(key)),
-            _ => None,
-        };
-    }
-    if app.rename_overlay().is_some() {
-        return match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                Some(Action::RenameOverlayKey(key))
-            }
-            _ => None,
-        };
-    }
-    translate(event, viewport).and_then(|action| remap_for_focus(action, app.focus()))
+    // H-TUI-004 wave 1: shared overlay routing with the live loop.
+    // Non-modal events go through the same translate + focus remap
+    // path — the scenario TUI's per-mode differences kick in only
+    // when the resulting Action gets dispatched.
+    overlay_key_from_event(app, &event)
+        .or_else(|| translate(event, viewport).and_then(|a| remap_for_focus(a, app.focus())))
 }
 
 /// Spawn a background thread that runs discovery and sends the resolved
@@ -4176,6 +4132,76 @@ mod tests {
                 planned,
                 Effect::RunMux(MuxOp::CapturePreview { .. })
             ));
+        }
+    }
+
+    /// H-TUI-004 wave 1: `overlay_key_from_event` centralizes the
+    /// modal-stack-aware routing both event loops used to duplicate.
+    /// These tests pin the routing: each open modal takes ownership
+    /// of the next key press, and the fallback returns None when no
+    /// modal is on top.
+    mod overlay_routing {
+        use super::*;
+        use ratatui::crossterm::event::KeyEvent;
+
+        fn press(code: KeyCode, mods: KeyModifiers) -> Event {
+            let mut key = KeyEvent::new(code, mods);
+            key.kind = KeyEventKind::Press;
+            Event::Key(key)
+        }
+
+        #[test]
+        fn empty_stack_returns_none() {
+            let app = App::new(RunConfig::defaults());
+            assert!(
+                overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE))
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn help_on_stack_routes_key_press() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_help_overlay();
+            let action =
+                overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE));
+            assert!(matches!(action, Some(Action::HelpOverlayKey(_))));
+        }
+
+        #[test]
+        fn controls_on_stack_routes_key_press() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            let action = overlay_key_from_event(&app, &press(KeyCode::Enter, KeyModifiers::NONE));
+            assert!(matches!(action, Some(Action::ControlsOverlayKey(_))));
+        }
+
+        #[test]
+        fn help_on_top_of_controls_routes_to_help() {
+            // Multi-overlay: the top variant wins, matching the
+            // modal stack's LIFO input-owner contract.
+            let mut app = App::new(RunConfig::defaults());
+            app.open_controls_overlay();
+            app.open_help_overlay();
+            let action =
+                overlay_key_from_event(&app, &press(KeyCode::Char('j'), KeyModifiers::NONE));
+            assert!(matches!(action, Some(Action::HelpOverlayKey(_))));
+        }
+
+        #[test]
+        fn non_key_events_return_none_even_when_modal_is_open() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_help_overlay();
+            assert!(overlay_key_from_event(&app, &Event::FocusGained).is_none());
+        }
+
+        #[test]
+        fn key_release_events_return_none_even_when_modal_is_open() {
+            let mut app = App::new(RunConfig::defaults());
+            app.open_help_overlay();
+            let mut key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+            key.kind = KeyEventKind::Release;
+            assert!(overlay_key_from_event(&app, &Event::Key(key)).is_none());
         }
     }
 }
