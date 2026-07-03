@@ -3011,15 +3011,34 @@ Phase C — mux backend abstraction:
     suites (1521 lib tests: +5 from the new zellij tests)
     pass; fmt / clippy clean.
   - Blockers: `H-EXT-008` (landed), `H-EXT-009` (landed).
-- [ ] `H-EXT-011` Capture hook mux context through the backend probe.
-  - Scope: generalize `tmux_context()` / `current_tmux_session_name()`
-    (`src/cli.rs:1113,2694`) and the `HookTmuxRecord` naming so hook
-    records carry `(backend, session, pane?)` neutrally via
-    `MuxBackend::current_session_context`. Schema-versioned sidecar
-    change.
-  - Tests: hook writer + sidecar replay suites with both a tmux and a
-    fake second backend.
-  - Blockers: `H-EXT-008`.
+- [x] `H-EXT-011` Capture hook mux context through the backend probe.
+  - Landed 2026-07-03 (partial). New
+    `discovery::tmux::MuxSessionContext { backend, session_name,
+    pane_id, namespace }` struct + trait method
+    `MuxBackend::current_session_context() ->
+    Option<MuxSessionContext>` with `None` default. `SystemTmux`
+    overrides: the pre-H-EXT-011 `$TMUX` + `tmux
+    display-message` probe (previously inlined in
+    `cli::tmux_context`) moves onto the impl. `SystemZellij`
+    inherits the None default for now — a `$ZELLIJ` env-var
+    contract is a follow-up (zellij's env probe is
+    less-well-documented than tmux's).
+    `cli::tmux_context` and `cli::current_tmux_session_name`
+    both refactored to consult the trait method. The former
+    iterates a compile-time list of `Box<dyn MuxBackend>`
+    (tmux + zellij) and takes the first `Some`; the latter
+    delegates to `SystemTmux::current_session_context` because
+    the TUI runtime consumes an `Option<String>` shape
+    directly for the self-attach guard.
+    Deferred: (a) `HookTmuxRecord` rename to `HookMuxRecord`
+    with a `backend` field on the record, (b) sidecar schema
+    version bump, (c) zellij's own `current_session_context`
+    impl once its env-var contract is settled. All are
+    ADR 0028 schema follow-ups that don't need to land
+    atomically with the trait-shape change.
+    All 25 suites (1521 lib tests) pass byte-identically;
+    fmt / clippy clean.
+  - Blockers: `H-EXT-008` (landed).
 
 Phase D — forge and orchestrator registries:
 

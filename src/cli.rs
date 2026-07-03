@@ -1049,35 +1049,31 @@ fn harness_pid_pair(harness: &str) -> (Option<i64>, Option<i64>) {
 }
 
 fn tmux_context() -> Option<HookTmuxRecord> {
-    std::env::var_os("TMUX")?;
-    let socket_path = std::env::var("TMUX")
-        .ok()
-        .and_then(|value| value.split_once(',').map(|(socket, _)| socket.to_string()));
-    let record = HookTmuxRecord {
-        session_name: tmux_value("#{session_name}"),
-        native_id: None,
-        pane_id: tmux_value("#{pane_id}"),
-        socket_path,
-    };
-    (!record.is_empty()).then_some(record)
-}
-
-fn tmux_value(format: &str) -> Option<String> {
-    let output = ProcCommand::new("tmux")
-        .arg("display-message")
-        .arg("-p")
-        .arg(format)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    // H-EXT-011: iterate the registered mux backends and ask
+    // each for its current-session context. The first backend
+    // to answer wins. The pre-H-EXT-011 direct `$TMUX` + `tmux
+    // display-message` probe moved onto the SystemTmux
+    // implementation of `MuxBackend::current_session_context`.
+    // Additional backends (zellij, screen, …) supply their own
+    // env-var contract via the same trait method.
+    let backends: Vec<Box<dyn conspectus::discovery::tmux::MuxBackend>> = vec![
+        Box::new(conspectus::discovery::tmux::SystemTmux::new()),
+        Box::new(conspectus::discovery::zellij::SystemZellij::new()),
+    ];
+    for backend in backends {
+        if let Some(ctx) = backend.current_session_context() {
+            let record = HookTmuxRecord {
+                session_name: ctx.session_name,
+                native_id: None,
+                pane_id: ctx.pane_id,
+                socket_path: ctx.namespace,
+            };
+            if !record.is_empty() {
+                return Some(record);
+            }
+        }
     }
-    String::from_utf8(output.stdout)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    None
 }
 
 fn claude_settings_path(scope: HookScopeFlag) -> Result<PathBuf> {
@@ -2630,16 +2626,15 @@ impl TuiArgs {
 }
 
 fn current_tmux_session_name() -> Option<String> {
-    std::env::var_os("TMUX")?;
-    let output = ProcCommand::new("tmux")
-        .args(["display-message", "-p", "#S"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!name.is_empty()).then_some(name)
+    // H-EXT-011: reuse the trait-based probe. Kept as a
+    // separate helper because the TUI runtime consumes the
+    // `Option<String>` shape directly (for the self-attach
+    // guard); constructing the full HookTmuxRecord here would
+    // be wasted work.
+    let backend = conspectus::discovery::tmux::SystemTmux::new();
+    backend
+        .current_session_context()
+        .and_then(|ctx| ctx.session_name)
 }
 
 /// Parse a duration like [`parse_tui_duration`] but accept a `d`

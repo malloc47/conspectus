@@ -139,6 +139,58 @@ pub trait MuxBackend: Send + Sync {
     ) -> Result<TmuxSendKeysOutcome> {
         Ok(TmuxSendKeysOutcome::Unsupported)
     }
+
+    /// Probe the current shell environment to see if the caller is
+    /// running *inside* a session of this backend (H-EXT-011). Used
+    /// by the hook writer (`conspectus hook write ...`) to
+    /// enrich each hook record with the mux context the harness
+    /// launched from, so the discovery layer can join `hook` to
+    /// `mux` deterministically instead of guessing.
+    ///
+    /// Returning `None` means either the backend is unavailable in
+    /// this environment or the caller isn't inside one of its
+    /// sessions. The default returns `None`; SystemTmux overrides
+    /// with a `$TMUX` + `tmux display-message` probe. Zellij will
+    /// override when its equivalent probe is decided (defer to a
+    /// follow-up story alongside a `$ZELLIJ` env-var contract).
+    fn current_session_context(&self) -> Option<MuxSessionContext> {
+        None
+    }
+}
+
+/// Backend-neutral session context the hook writer records
+/// alongside a harness's `SessionStart` payload (H-EXT-011). Grew
+/// out of the pre-H-EXT-011 tmux-specific
+/// `cli::tmux_context()`, which read `$TMUX` + shelled out to
+/// `tmux display-message`. The trait method
+/// [`MuxBackend::current_session_context`] returns this
+/// consistently across every backend.
+///
+/// Fields are optional individually because different backends
+/// expose different amounts of context — tmux carries pane_id
+/// and socket_path; zellij (when it lands) will likely carry
+/// only session_name.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MuxSessionContext {
+    /// Backend key matching
+    /// [`MuxBackend::backend_key`]. Stamped on the record so the
+    /// consumer can route by backend without a second lookup.
+    pub backend: &'static str,
+    /// Session name (`tmux #{session_name}`, zellij session name,
+    /// etc.). `None` when the probe found no session (which for a
+    /// caller inside a backend session is unusual — treat as
+    /// missing evidence rather than a strict absence).
+    pub session_name: Option<String>,
+    /// Pane identifier when the backend has a pane concept (tmux
+    /// `#{pane_id}`); `None` for backends without one. Zellij
+    /// panes are ephemeral inside a floating-plane model; the
+    /// `pane` slot stays `None` there.
+    pub pane_id: Option<String>,
+    /// Backend-specific namespace identifier. For tmux this is
+    /// the socket path (`$TMUX` split on the first `,`). Future
+    /// backends can carry their equivalent addressing scope
+    /// through this slot without a schema change.
+    pub namespace: Option<String>,
 }
 
 /// Outcome of a `tmux capture-pane` call. Mirrors the shape of
@@ -610,6 +662,47 @@ impl MuxBackend for SystemTmux {
             message: stderr,
         })
     }
+
+    fn current_session_context(&self) -> Option<MuxSessionContext> {
+        // H-EXT-011: probe `$TMUX` and `tmux display-message` for
+        // the caller's mux context. Migrated from
+        // `cli::tmux_context` so the tmux-specific env-var
+        // reading lives on the backend that owns it; the CLI
+        // hook writer iterates registered backends and asks each
+        // for its answer.
+        std::env::var_os("TMUX")?;
+        let socket_path = std::env::var("TMUX")
+            .ok()
+            .and_then(|value| value.split_once(',').map(|(socket, _)| socket.to_string()));
+        let session_name = display_message_value(&self.binary, "#{session_name}");
+        let pane_id = display_message_value(&self.binary, "#{pane_id}");
+        let ctx = MuxSessionContext {
+            backend: TMUX_BACKEND,
+            session_name,
+            pane_id,
+            namespace: socket_path,
+        };
+        if ctx.session_name.is_none() && ctx.pane_id.is_none() && ctx.namespace.is_none() {
+            return None;
+        }
+        Some(ctx)
+    }
+}
+
+fn display_message_value(binary: &Path, format: &str) -> Option<String> {
+    let output = Command::new(binary)
+        .args(["display-message", "-p", format])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn looks_like_no_server(stderr: &str) -> bool {
