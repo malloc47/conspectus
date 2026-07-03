@@ -124,7 +124,14 @@ Likely atelier features to move or delegate over time:
 ## Initial Scope
 
 Start read-only, but design the data model and storage layout for quick follow-up
-commands that let users add or remove links manually.
+commands that let users add or remove links manually. Read-only is still the
+default for discovery and orchestration; the sanctioned write surface today is
+bounded by the mutation envelope in ADR 0087 (user-intent TOML stores,
+rebuildable observation sidecars, operator-initiated mux lifecycle, and
+Conspectus-owned subprocess launches) with an explicit prohibition list
+covering harness-native state, terminal input into live agent panes,
+payload persistence, shared/system locations, background mutation, git
+mutation, and hook bypass.
 
 Concrete v1 sources:
 
@@ -1158,6 +1165,26 @@ migration helper and harmless if it fails.
     columns" wording in ADR 0048, which was already narrower
     than the codebase (opencode preview + native viewer are
     compliant Tier 2 surfaces).
+  - ADR 0087 (Accepted): the mutation envelope. Read-only stays
+    the default for discovery and orchestration; sanctioned
+    writes are (1) user-intent TOML stores under Conspectus's
+    ownership (declared / aliases / pins per ADR 0014 / 0029 /
+    0057), (2) rebuildable observation sidecars under
+    `$XDG_STATE_HOME/conspectus/` (hook sidecars per ADR 0028,
+    pin-binding sidecars per ADR 0058, snapshot cache per
+    ADR 0083), (3) operator-initiated mux lifecycle (tmux
+    rename / new-session / attach and the narrow pin-launch
+    `send-keys` on Conspectus-constructed argv per ADR 0029 /
+    0057), and (4) Conspectus-owned subprocess launches (resume
+    spawn, external viewer fallback, pin launch re-exec).
+    Prohibitions are absolute: no writes to harness-native
+    state, no `send-keys` into a live agent pane (ADR 0028), no
+    payload persistence (ADR 0086), no shared/system locations,
+    no background mutation, no git-state mutation, no hook
+    bypass. Any new write path must land in one of the
+    sanctioned categories or supersede this ADR. Replaces the
+    "start read-only unless a task explicitly calls for
+    persistence or link CRUD" wording in CLAUDE.md.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

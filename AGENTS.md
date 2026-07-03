@@ -52,7 +52,17 @@ standard checks.
 
 ## Implementation Notes
 
-- Start read-only unless a task explicitly calls for persistence or link CRUD.
+- Read-only is the default for discovery and orchestration. Writes are
+  bounded by the mutation envelope in ADR 0087: user-intent TOML stores,
+  rebuildable observation sidecars under `$XDG_STATE_HOME/conspectus/`,
+  operator-initiated mux lifecycle (rename / new-session / attach and the
+  narrow pin-launch `send-keys` on Conspectus-constructed argv), and
+  Conspectus-owned subprocess launches. Conspectus never mutates
+  harness-native state, injects terminal input into live agent panes
+  (ADR 0028 absolute), persists payload (ADR 0086), writes shared/system
+  locations, performs background mutation, mutates git state, or bypasses
+  hooks. Any new write path must cite ADR 0087 and land inside one of
+  its sanctioned categories.
 - Avoid making Conspectus depend on Atelier command modules directly. Shared
   code should be pure discovery/parsing/model code with a clean boundary.
 - Track implementation work in `docs/backlog.md` until a dedicated tracker is

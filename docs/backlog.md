@@ -2904,19 +2904,24 @@ documentation/tenet work — none block feature stories, but `H-ADR-001` and
     sweeping "never selects privacy-sensitive payload
     columns" wording with a citation of ADR 0086. ADR 0086
     added to the Decisions catalog.
-- [ ] `H-ADR-002` Replace "read-only first" with a defined mutation
+- [x] `H-ADR-002` Replace "read-only first" with a defined mutation
   envelope.
-  - Scope: the guardrail in CLAUDE.md / design.md predates the sanctioned
-    mutation surface (lockstep tmux renames per ADR 0029, pin
-    launch/send-keys per ADR 0057, resume splicing per ADR 0058, TOML
-    store writes per ADR 0014). Record a tenet amendment defining the
-    envelope — Conspectus may write its own TOML/user-intent stores and
-    manage mux lifecycle when operator-initiated; it never mutates
-    harness-native state and never injects terminal input into agents
-    (ADR 0028 stays absolute) — and update CLAUDE.md + design.md to cite
-    it. Describes decisions already made; introduces no new capability.
-  - Tests: docs-only; `git diff --check`.
-  - Blockers: none.
+  - Landed 2026-07-03. New tenet ADR 0087 defines the mutation
+    envelope: four sanctioned write categories (user-intent
+    TOML stores, rebuildable observation sidecars under
+    `$XDG_STATE_HOME/conspectus/`, operator-initiated mux
+    lifecycle including the narrow pin-launch `send-keys`
+    exception on Conspectus-constructed argv, and
+    Conspectus-owned subprocess launches) and seven absolute
+    prohibitions (harness-native state, terminal input into
+    live agent panes, payload persistence, shared/system
+    locations, background mutation, git-state mutation, hook
+    bypass). CLAUDE.md's "start read-only unless" bullet
+    replaced with a citation-and-summary of ADR 0087.
+    docs/design.md's Initial Scope section extended with an
+    inline pointer, and ADR 0087 added to the Decisions
+    catalog alongside ADR 0086. No code change — the envelope
+    describes decisions already in the codebase.
 - [ ] `H-ADR-003` Retire or permanently bless the `[tui].sessions_grouping`
   legacy alias.
   - Scope: ADR 0031 promised the alias survives "until a follow-on ADR
