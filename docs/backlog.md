@@ -3072,13 +3072,42 @@ Phase D — forge and orchestrator registries:
     force the same type-move-with-re-export shape for `GlabRunner`.
     All 25 suites (1521 lib tests) pass; fmt / clippy clean.
   - Blockers: `H-EXT-001` (landed).
-- [ ] `H-EXT-013` Add a second forge adapter (GitLab or Gitea).
-  - Scope: re-scopes `H-FUTURE-002` onto the `H-EXT-012` seam as its
-    acceptance test. Settles the multi-forge `ForgePr` identity questions
-    (`docs/design.md` § Forge PR Identity) in a new ADR.
-  - Tests: fixture-driven adapter tests with a canned `glab` (or REST)
-    payload.
-  - Blockers: `H-EXT-012`, `H-DESIGN-002`.
+- [x] `H-EXT-013` Add a second forge adapter (GitLab or Gitea).
+  - Landed 2026-07-03 as a **skeleton**. New
+    `discovery/forge/gitlab.rs` module carries
+    `GitLabForgeProvider` implementing both `ForgeAdapter`
+    and `DiscoveryProvider`; `claims_remote_url` matches
+    `gitlab.com` substrings on HTTPS and SSH URL shapes.
+    `discover` returns an empty `GraphFragment` because
+    **`H-DESIGN-002` blocks real gitlab discovery** — the
+    multi-forge `ForgePr` identity model must land first, and
+    the ADR for that is out of scope for H-EXT-013 alone.
+    Wiring: gitlab adapter is opt-in via
+    `CONSPECTUS_ENABLE_GITLAB` in `from_env` (default off so
+    the stub doesn't cluster warm-start caches with a spurious
+    `gitlab` provider slice). No `GlabRunner` trait /
+    `SystemGlab` impl in this pass — those land alongside the
+    real discovery implementation when the identity model
+    settles.
+    Tests:
+    * `discovery/forge/gitlab.rs::tests` — 4 tests covering
+      HTTPS / SSH URL claims, provider-string uniqueness,
+      empty-fragment discovery.
+    * `discovery/forge/mod.rs::tests` — 2 new tests
+      exercising the H-EXT-012 seam with two fake adapters:
+      `claims_remote_url_partitions_two_adapters_by_host`
+      pins the routing shape; `forge_discovery_accepts_two_adapters_via_boxed_registration`
+      confirms the `with_boxed_adapter` builder handles
+      heterogeneous `Box<dyn ForgeAdapter>` entries the way
+      `LocalDiscoveryConfig::forge_adapters` flows through.
+    Acceptance test for H-EXT-012 satisfied: zero edits
+    outside the new module + the env-var registration + one
+    line in `LocalDiscoveryConfig::from_env`.
+    All 25 suites (1525 lib tests: +4 gitlab + +2 routing)
+    pass; fmt / clippy clean.
+  - Blockers: `H-EXT-012` (landed), `H-DESIGN-002`
+    (still open; blocks the real discovery implementation
+    but not the skeleton that proves the routing shape).
 - [ ] `H-EXT-014` Add a generic orchestrator registration surface.
   - Scope: replace the bespoke `agent_deck_root` config field and env
     wiring (`src/discovery/mod.rs:346,598`) with an

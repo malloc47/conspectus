@@ -527,9 +527,10 @@ impl LocalDiscoveryConfig {
         }
 
         // H-EXT-012: forge adapters live in a registry list.
-        // GitHub is the single default entry; a fifth forge
-        // (GitLab per H-EXT-013) becomes a `push` here without
-        // touching `discover_local_warm_with`.
+        // GitHub is the default entry; a second forge (GitLab
+        // per H-EXT-013) is opt-in via `CONSPECTUS_ENABLE_GITLAB`
+        // because the skeleton adapter doesn't yet emit real
+        // PRs (H-DESIGN-002 blocks real gitlab discovery).
         // `CONSPECTUS_DISABLE_FORGE` still zeroes the list for
         // wire compatibility.
         let mut forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> = Vec::new();
@@ -537,6 +538,9 @@ impl LocalDiscoveryConfig {
             forge_adapters.push(Box::new(forge::github::GitHubForgeProvider::with_runner(
                 forge::SystemGh::new(),
             )));
+            if env::var_os("CONSPECTUS_ENABLE_GITLAB").is_some() {
+                forge_adapters.push(Box::new(forge::gitlab::GitLabForgeProvider::new()));
+            }
         }
 
         // H-EXT-007: codex_log-specific `codex_log_window_seconds`

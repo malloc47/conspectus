@@ -26,6 +26,7 @@ use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge
 use crate::model::GraphSnapshot;
 
 pub mod github;
+pub mod gitlab;
 
 pub use github::{GhPullRequestParser, PullRequestRecord, PullRequestState};
 
@@ -470,5 +471,83 @@ mod tests {
             .expect("discovery succeeds");
 
         assert_eq!(fragment.nodes, vec![pr_alpha, pr_beta]);
+    }
+
+    // H-EXT-013 routing tests: prove that
+    // `claims_remote_url` correctly partitions two adapters
+    // that claim different hosts. Uses two `StaticAdapter`s
+    // (test-only) whose `claims_remote_url` overrides target
+    // distinct hosts; asserts each adapter's `claims_remote_url`
+    // fires only for its own URLs.
+    struct HostedStaticAdapter {
+        provider: &'static str,
+        host_match: &'static str,
+    }
+
+    impl ForgeAdapter for HostedStaticAdapter {
+        fn provider(&self) -> &str {
+            self.provider
+        }
+
+        fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+            Ok(GraphFragment::empty())
+        }
+
+        fn claims_remote_url(&self, remote_url: &str) -> bool {
+            remote_url.contains(self.host_match)
+        }
+    }
+
+    #[test]
+    fn claims_remote_url_partitions_two_adapters_by_host() {
+        let github_adapter = HostedStaticAdapter {
+            provider: "github-fake",
+            host_match: "github.example",
+        };
+        let gitlab_adapter = HostedStaticAdapter {
+            provider: "gitlab-fake",
+            host_match: "gitlab.example",
+        };
+
+        let github_url = "git@github.example:foo/bar.git";
+        let gitlab_url = "https://gitlab.example/foo/bar.git";
+
+        // Each adapter claims only its own URLs.
+        assert!(github_adapter.claims_remote_url(github_url));
+        assert!(!github_adapter.claims_remote_url(gitlab_url));
+        assert!(!gitlab_adapter.claims_remote_url(github_url));
+        assert!(gitlab_adapter.claims_remote_url(gitlab_url));
+
+        // Non-matching URL is claimed by neither.
+        let neither = "https://elsewhere.example/foo/bar";
+        assert!(!github_adapter.claims_remote_url(neither));
+        assert!(!gitlab_adapter.claims_remote_url(neither));
+    }
+
+    #[test]
+    fn forge_discovery_accepts_two_adapters_via_boxed_registration() {
+        // Register both adapters through the coordinator using
+        // the H-EXT-012 `with_boxed_adapter` builder. Confirms
+        // that `ForgeDiscovery` can carry a heterogeneous set
+        // of `Box<dyn ForgeAdapter>`s (which is how
+        // `LocalDiscoveryConfig::forge_adapters` flows through
+        // to the coordinator).
+        let github: Box<dyn ForgeAdapter> = Box::new(HostedStaticAdapter {
+            provider: "github-fake",
+            host_match: "github.example",
+        });
+        let gitlab: Box<dyn ForgeAdapter> = Box::new(HostedStaticAdapter {
+            provider: "gitlab-fake",
+            host_match: "gitlab.example",
+        });
+        let coordinator = ForgeDiscovery::new()
+            .with_boxed_adapter(github)
+            .with_boxed_adapter(gitlab);
+        // Empty fragments merge cleanly; no panic proves the
+        // coordinator dispatches both adapters.
+        let fragment = coordinator
+            .discover(&DiscoveryContext::default())
+            .expect("discover");
+        assert!(fragment.nodes.is_empty());
     }
 }
