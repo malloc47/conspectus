@@ -175,20 +175,26 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
         backend: mux_node.backend.clone(),
         native_id: mux_node.native_id.clone(),
     };
-    match target.backend.as_str() {
-        "tmux" => {
-            if app
-                .config()
-                .current_tmux_session
-                .as_deref()
-                .is_some_and(|current| current == target.native_id)
-            {
-                return Err(AttachDisabled::CurrentTmuxSession(target.native_id));
-            }
-            Ok(target)
-        }
-        other => Err(AttachDisabled::UnsupportedBackend(other.to_string())),
+    // H-EXT-009: check backend against the compile-time
+    // registered backend list instead of a hardcoded "tmux"
+    // match. The current-tmux-session self-attach check stays
+    // tmux-specific because `current_tmux_session` on
+    // `RunConfig` is the pre-H-EXT-009 tmux-native
+    // `$TMUX`-derived name; H-EXT-011 generalizes it to
+    // `current_mux_session` with a backend field.
+    if !crate::discovery::tmux::KNOWN_MUX_BACKENDS.contains(&target.backend.as_str()) {
+        return Err(AttachDisabled::UnsupportedBackend(target.backend.clone()));
     }
+    if target.backend == crate::discovery::tmux::TMUX_BACKEND
+        && app
+            .config()
+            .current_tmux_session
+            .as_deref()
+            .is_some_and(|current| current == target.native_id)
+    {
+        return Err(AttachDisabled::CurrentTmuxSession(target.native_id));
+    }
+    Ok(target)
 }
 
 /// Resolve the viewer target for the current selection. Mirrors
@@ -439,7 +445,10 @@ pub fn attach_disabled_reason(reason: &AttachDisabled) -> String {
             "attach: mux node missing from snapshot — try `r` to refresh".to_string()
         }
         AttachDisabled::UnsupportedBackend(name) => {
-            format!("attach: mux backend `{name}` not supported (only tmux)")
+            // H-EXT-009: report the registered backend set
+            // instead of a hardcoded "only tmux."
+            let registered = crate::discovery::tmux::KNOWN_MUX_BACKENDS.join(", ");
+            format!("attach: mux backend `{name}` not registered (available: {registered})")
         }
         AttachDisabled::CurrentTmuxSession(name) => {
             format!("attach: refusing to attach current tmux session `{name}`")

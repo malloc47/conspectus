@@ -2947,15 +2947,30 @@ Phase C — mux backend abstraction:
     All 25 suites (1516 lib tests) pass byte-identically;
     fmt / clippy clean.
   - Blockers: `H-EXT-001` (landed).
-- [ ] `H-EXT-009` Capability-gate mux actions instead of naming tmux.
-  - Scope: replace the "only tmux" attach gate
-    (`src/tui/actions.rs:190,442`) and the pin `backend == "tmux"`
-    validation (`src/pins.rs:260,326`) with registry + capability checks;
-    error messages report the missing capability, not the missing tool.
-    Pin schema keeps `backend` as declared data per ADR 0057.
-  - Tests: attach/pin validation tests updated to capability-flavored
-    messages; unsupported-capability path covered per action.
-  - Blockers: `H-EXT-008`.
+- [x] `H-EXT-009` Capability-gate mux actions instead of naming tmux.
+  - Landed 2026-07-03. New static
+    `pub const KNOWN_MUX_BACKENDS: &[&str] = &[TMUX_BACKEND]`
+    in `discovery::tmux` holds the compile-time list of
+    supported backend keys. `pin` parse (in
+    `src/pins.rs::validate_entry`) and attach-target resolve
+    (in `src/tui/actions.rs::resolve_attach_target`) both
+    consult this array instead of comparing to the literal
+    `"tmux"`. Error strings report the registered backend set
+    (via `KNOWN_MUX_BACKENDS.join(", ")`) instead of
+    hardcoding "only tmux."
+    The runtime "does this backend actually support attach /
+    rename / etc." check stays where it already lives — on
+    the `MuxBackend` impl's `Unsupported` outcome variant.
+    `resolve_attach_target`'s self-attach check remains tied
+    to the tmux backend today because `RunConfig.current_tmux_session`
+    is derived from `$TMUX`; H-EXT-011 generalizes it to
+    `current_mux_session` with a backend field.
+    A new backend added to `KNOWN_MUX_BACKENDS` (H-EXT-010's
+    zellij per the docstring) picks up pin validation +
+    attach dispatch automatically. Existing pin + attach
+    tests pass byte-identical. All 25 suites green;
+    fmt / clippy clean.
+  - Blockers: `H-EXT-008` (landed).
 - [ ] `H-EXT-010` Add a zellij mux backend (discovery + attach).
   - Scope: re-scopes `H-FUTURE-001` onto the `H-EXT-008` seam:
     `zellij list-sessions` parsing, attach argv, no-namespace semantics;

@@ -25,6 +25,15 @@ use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
 /// equivalence explicit and keeps the literal in one place.
 pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 
+/// Compile-time list of mux backend keys this build supports
+/// (H-EXT-009). Pin parsing and attach-target resolution
+/// consult this instead of comparing to the literal `"tmux"`
+/// string so a new backend (zellij per H-EXT-010) is one array
+/// entry away. Runtime capability checks (does this backend
+/// *actually* support attach / rename / etc.) come from the
+/// [`MuxBackend`] impl's outcome returns.
+pub const KNOWN_MUX_BACKENDS: &[&str] = &[TMUX_BACKEND];
+
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
 /// session roots can safely contain spaces.
 pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}";

@@ -257,7 +257,11 @@ fn validate_entry(entry: &PinEntry) -> Result<(), PinParseError> {
             cwd: entry.cwd.clone(),
         });
     }
-    if entry.mux.backend != TMUX_MUX_BACKEND {
+    // H-EXT-009: validate against the compile-time registered
+    // backend list instead of the historical "only tmux" match.
+    // A future backend (H-EXT-010 zellij) becomes a
+    // `KNOWN_MUX_BACKENDS` entry and lands here automatically.
+    if !crate::discovery::tmux::KNOWN_MUX_BACKENDS.contains(&entry.mux.backend.as_str()) {
         return Err(PinParseError::UnsupportedMuxBackend {
             entry_id: entry.id.clone(),
             backend: entry.mux.backend.clone(),
@@ -321,10 +325,15 @@ impl fmt::Display for PinParseError {
             Self::RelativeCwd { entry_id, cwd } => {
                 write!(f, "pin `{entry_id}` cwd `{cwd}` must be an absolute path")
             }
-            Self::UnsupportedMuxBackend { entry_id, backend } => write!(
-                f,
-                "pin `{entry_id}` has unsupported mux.backend `{backend}` (only `tmux` is supported in v1)"
-            ),
+            Self::UnsupportedMuxBackend { entry_id, backend } => {
+                // H-EXT-009: report the registered backend set
+                // instead of a hardcoded "only tmux."
+                let registered = crate::discovery::tmux::KNOWN_MUX_BACKENDS.join(", ");
+                write!(
+                    f,
+                    "pin `{entry_id}` has unsupported mux.backend `{backend}` (registered backends: {registered})"
+                )
+            }
             Self::DuplicateId(id) => write!(f, "duplicate pin id `{id}`"),
             Self::DuplicateMux { id, mux } => {
                 write!(f, "pin `{id}` collides with another pin on mux `{mux}`")
