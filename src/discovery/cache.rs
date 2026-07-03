@@ -26,17 +26,16 @@ use crate::config::ServerIntervals;
 use crate::discovery::providers;
 use crate::model::GraphSnapshot;
 
-/// The four interval classes ADR 0038 / ADR 0079 define for the
-/// `[server.intervals]` table. Granular per-emit provider strings
-/// (`git`, `git::cwd`, `tmux`, `github`, `claude-code`, …)
-/// collapse to one of these classes via [`provider_class`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ProviderClass {
-    Git,
-    Mux,
-    Harness,
-    Forge,
-}
+/// Re-export so existing `cache::ProviderClass` call sites keep
+/// compiling. The type moved to
+/// [`crate::discovery::providers`] in H-EXT-001 because the class
+/// is a provider attribute — every
+/// [`crate::discovery::providers::ProviderDescriptor`] with
+/// [`crate::discovery::providers::ProviderKind::Heavy`] carries
+/// one. The inherent methods below live in this module (not on
+/// the type's home) so the `ServerIntervals` dependency stays
+/// localized to the freshness-gate module.
+pub use crate::discovery::providers::ProviderClass;
 
 impl ProviderClass {
     /// Per-class TTL pulled from the resolved
@@ -118,40 +117,39 @@ impl ProviderClass {
 
 /// Map a granular per-emit provider string to its interval
 /// class. `None` means "unmapped" — the caller treats unmapped
-/// keys as always-rerun (see [`MUTATOR_PROVIDERS`]).
+/// keys as always-rerun (see [`mutator_providers`]).
 ///
-/// Keep this in sync with the table in ADR 0079; the test
-/// `every_known_provider_string_maps_to_a_class` pins the
-/// production set so a new provider that forgets to register
-/// here breaks CI rather than silently joining the always-rerun
-/// bucket.
+/// H-EXT-001 (ADR 0088) folded the classification table into the
+/// [`crate::discovery::providers::REGISTRY`]. This function is a
+/// thin delegate that re-exports the registry lookup at its
+/// long-standing call path.
 pub fn provider_class(provider: &str) -> Option<ProviderClass> {
-    match provider {
-        s if s == providers::GIT
-            || s == providers::GIT_CWD
-            || s == providers::ATELIER
-            || s == providers::GENERIC_WORKSPACE
-            || s == providers::AGENT_DECK =>
-        {
-            Some(ProviderClass::Git)
-        }
-        s if s == providers::TMUX => Some(ProviderClass::Mux),
-        s if s == providers::CLAUDE_CODE
-            || s == providers::CODEX
-            || s == providers::OPENCODE
-            || s == providers::AIDER =>
-        {
-            Some(ProviderClass::Harness)
-        }
-        s if s == providers::GITHUB => Some(ProviderClass::Forge),
-        _ => None,
-    }
+    providers::provider_class(provider)
 }
 
 /// Mutator passes whose output depends on the merged snapshot.
 /// Always evicted from the prior before merging; always re-run
 /// after fresh discovery + warm-start merge land. See ADR 0079
 /// for the rationale.
+///
+/// H-EXT-001 (ADR 0088) derives the list from the registry so a
+/// new mutator provider added to
+/// [`crate::discovery::providers::REGISTRY`] joins the eviction
+/// bucket automatically.
+pub fn mutator_providers() -> Vec<&'static str> {
+    providers::mutator_keys()
+}
+
+/// Backwards-compatible const alias for the pre-H-EXT-001
+/// callers that read the mutator list as a `&'static [&'static str]`.
+/// Callers that only need iteration should prefer
+/// [`mutator_providers`]; this constant stays for callers that
+/// index into a slice (`for key in MUTATOR_PROVIDERS`).
+///
+/// The runtime value must stay in sync with
+/// [`crate::discovery::providers::REGISTRY`]; a change here
+/// without a matching descriptor registration is caught by
+/// [`tests::mutator_const_matches_registry`].
 pub const MUTATOR_PROVIDERS: &[&str] = &[
     providers::CROSS_LINK,
     providers::CODEX_LOG,
@@ -303,7 +301,8 @@ mod tests {
         // Production set per the commit that wired adapter
         // instrumentation across the codebase. Adding a new heavy
         // provider should either update this list AND
-        // `provider_class`, or accept the always-evict fallback.
+        // `provider_class` (via the registry descriptor per
+        // ADR 0088), or accept the always-evict fallback.
         let known = [
             "git",
             "git::cwd",
@@ -323,6 +322,17 @@ mod tests {
                 "ADR 0079: provider key `{key}` must map to a class"
             );
         }
+    }
+
+    /// H-EXT-001 / ADR 0088: the pre-registry `MUTATOR_PROVIDERS`
+    /// constant and the registry-derived
+    /// [`super::mutator_providers`] must agree. Guards against a
+    /// mutator entry that lands in one place without the other.
+    #[test]
+    fn mutator_const_matches_registry() {
+        let derived = super::mutator_providers();
+        let expected: Vec<&str> = MUTATOR_PROVIDERS.to_vec();
+        assert_eq!(derived, expected);
     }
 
     #[test]

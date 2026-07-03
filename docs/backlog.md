@@ -2648,18 +2648,27 @@ dependency graph.
 
 Phase A — registry backbone (no behavior change):
 
-- [ ] `H-EXT-001` Add a provider descriptor registry.
-  - Scope: replace `discovery/providers.rs` bare consts, the
-    `cache::provider_class` match, the `discover_local_warm_with`
-    hand-wiring, and `LocalDiscoveryConfig::from_env` per-provider env
-    plumbing with one descriptor table (key, TTL class, enable/root env
-    vars, constructor) consumed by discovery wiring, the freshness gate,
-    the daemon scheduler, and `from_env`. Snapshot provider strings stay
-    byte-identical (`canonical_strings_are_stable` pins this). Record the
-    registration convention as an ADR.
-  - Tests: existing cache/eviction/scheduler suites pass unchanged; add a
-    registry round-trip test (every descriptor maps to a class and back).
-  - Blockers: none.
+- [x] `H-EXT-001` Add a provider descriptor registry.
+  - Landed 2026-07-03 (metadata-only scope; ADR 0088).
+    `discovery/providers.rs` now owns a
+    `ProviderDescriptor { key, kind }` table with 15 entries
+    (11 heavy + 4 mutator). `ProviderClass` moves to the same
+    module (inherent methods stay in `cache.rs` to keep the
+    `ServerIntervals` dependency localized). `cache::provider_class`
+    becomes a one-line delegate; `cache::mutator_providers()`
+    is derived from the registry; `MUTATOR_PROVIDERS` stays as
+    a `&[&str]` alias for slice-indexing callers and is
+    pinned to the registry-derived list by a new
+    `mutator_const_matches_registry` test. Descriptor
+    round-trip and constant-agreement tests added; the
+    pre-H-REF-009 `canonical_strings_are_stable` pin is
+    unchanged.
+    Constructor callback + env-var opt-out plumbing stay on
+    `LocalDiscoveryConfig` — deferred to the per-entity
+    H-EXT-002/004/008/012/014 stories, which extend the
+    descriptor with a family-specific adapter reference once
+    the trait shape is decided. ADR 0088 records the
+    registration convention and what's deferred.
 - [ ] `H-EXT-002` Route harness pure-data lookups through the adapter
   registry.
   - Scope: fold `launch_argv_for` / `resume_argv_for` / `launch_options_for`

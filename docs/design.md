@@ -1185,6 +1185,21 @@ migration helper and harmless if it fails.
     sanctioned categories or supersede this ADR. Replaces the
     "start read-only unless a task explicitly calls for
     persistence or link CRUD" wording in CLAUDE.md.
+  - ADR 0088 (Accepted): the provider descriptor registry.
+    `discovery/providers.rs` owns a single
+    `&[ProviderDescriptor]` table naming every discovery
+    adapter and mutator pass; the freshness gate
+    (`cache::provider_class`), the mutator list
+    (`cache::mutator_providers`), and future H-EXT surfaces
+    derive from it. Descriptor stays metadata-only for
+    H-EXT-001 (`key` + `kind` where `kind` is `Heavy(class)`
+    or `Mutator`); per-entity constructor callbacks and
+    env-var opt-out plumbing land in H-EXT-002/004/008/012/014
+    when the adapter trait shape per family is decided.
+    `ProviderClass` moves from `cache` to `providers`
+    (semantic fit — the class is a provider attribute);
+    `cache` re-exports it so existing call sites compile
+    unchanged.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
