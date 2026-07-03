@@ -20,7 +20,7 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
 
-use crate::discovery::tmux::{SystemTmux, TmuxRunner};
+use crate::discovery::tmux::{MuxBackend, SystemTmux};
 use crate::model::MuxSessionId;
 use crate::pins::{PinEntry, PinLaunch, PinMux, PinStoreKind, PinWriteOutcome, TMUX_MUX_BACKEND};
 use crate::resolve::resolve_snapshot;
@@ -99,7 +99,7 @@ trait LoopMode {
     /// Reference to the mode's mux runner. Used by
     /// [`refresh_mux_preview_if_needed`] at the end of each
     /// iteration.
-    fn tmux(&self) -> &dyn TmuxRunner;
+    fn tmux(&self) -> &dyn MuxBackend;
 }
 
 /// Shared event loop driver (H-TUI-004 wave 2). Consumes any
@@ -142,7 +142,7 @@ fn run_loop(
 /// routes every action to the real handler (exec, tmux ops,
 /// store writes).
 struct LiveMode {
-    tmux: Box<dyn TmuxRunner>,
+    tmux: Box<dyn MuxBackend>,
     result_tx: mpsc::Sender<DiscoveryResult>,
     result_rx: mpsc::Receiver<DiscoveryResult>,
     pending_refresh: bool,
@@ -304,7 +304,7 @@ impl LoopMode for LiveMode {
         Ok(())
     }
 
-    fn tmux(&self) -> &dyn TmuxRunner {
+    fn tmux(&self) -> &dyn MuxBackend {
         self.tmux.as_ref()
     }
 }
@@ -314,7 +314,7 @@ impl LoopMode for LiveMode {
 /// reloads the fixture on `Action::Refresh`.
 #[cfg(any(test, debug_assertions, feature = "snapshot"))]
 struct StaticMode {
-    tmux: Box<dyn TmuxRunner>,
+    tmux: Box<dyn MuxBackend>,
     snapshot: crate::model::GraphSnapshot,
     fixture_path: Option<std::path::PathBuf>,
 }
@@ -481,7 +481,7 @@ impl LoopMode for StaticMode {
         Ok(())
     }
 
-    fn tmux(&self) -> &dyn TmuxRunner {
+    fn tmux(&self) -> &dyn MuxBackend {
         self.tmux.as_ref()
     }
 }
@@ -868,7 +868,7 @@ fn handle_rename_overlay_key(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
@@ -896,7 +896,7 @@ fn remove_pin_action(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
 ) {
     let Some(selection) = app.selection().cloned() else {
         app.update(Msg::SetStatus(Some(
@@ -1060,7 +1060,7 @@ fn plan_mux_preview_capture(
 fn refresh_mux_preview_if_needed(
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     prev: Option<MuxSessionId>,
 ) {
     let Some(effect) = plan_mux_preview_capture(app, config, prev) else {
@@ -1130,7 +1130,7 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
             // practice.
         }
         Effect::RunMux(_) => {
-            // Mux ops need a live `TmuxRunner`; the pure executor
+            // Mux ops need a live `MuxBackend`; the pure executor
             // silently drops them. Same rationale as `Effect::Exec`
             // above — no static-mode path emits `RunMux` today, so
             // this branch is a safety net.
@@ -1139,7 +1139,7 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
             // Some `WriteStore` variants (`PinCreate`,
             // `CommitAliasRename`) chain a tmux rename through the
             // executor, so all store writes flow through
-            // `execute_effects_live` where the `TmuxRunner`
+            // `execute_effects_live` where the `MuxBackend`
             // reference lives. The pure executor drops them the
             // same way it drops `RunMux` / `Exec`.
         }
@@ -1151,7 +1151,7 @@ fn execute_pure_effect(app: &mut App, effect: Effect) {
 /// `.conspectus.toml` (ADR 0085 contract 2 Phase D). Handles the
 /// full post-write flow: refresh so the row tree reflects the
 /// change, then post a status message summarizing the outcome.
-fn execute_store_op(app: &mut App, tmux: &dyn TmuxRunner, op: crate::tui::effect::StoreOp) {
+fn execute_store_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect::StoreOp) {
     use crate::tui::effect::StoreOp;
     match op {
         StoreOp::PinCreate(request) => execute_pin_create(app, tmux, request),
@@ -1230,7 +1230,7 @@ fn execute_pin_bind(app: &mut App, request: crate::tui::widgets::pins::PinBindRe
 
 fn execute_pin_create(
     app: &mut App,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     request: crate::tui::widgets::pins::PinCreateRequest,
 ) {
     match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
@@ -1303,7 +1303,7 @@ fn execute_pin_edit(app: &mut App, request: crate::tui::widgets::pins::PinEditRe
 /// doesn't leak through.
 fn execute_commit_alias_rename(
     app: &mut App,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     session_id: crate::model::AgentSessionId,
     new_display_name: Option<String>,
 ) {
@@ -1417,14 +1417,14 @@ pub(super) fn execute_effects(app: &mut App, effects: Vec<Effect>) {
 /// Live-loop executor. Handles every [`Effect`] variant, including
 /// `Effect::Exec` (which requires `&mut DefaultTerminal` and the
 /// process launcher) and `Effect::RunMux` (which requires a live
-/// [`TmuxRunner`] reference). This is the sole code in the TUI
-/// that touches `&mut Terminal`, `std::process`, or `TmuxRunner`
+/// [`MuxBackend`] reference). This is the sole code in the TUI
+/// that touches `&mut Terminal`, `std::process`, or `MuxBackend`
 /// for reducer-emitted effects.
 pub(super) fn execute_effects_live(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     effects: Vec<Effect>,
 ) {
     for effect in effects {
@@ -1437,10 +1437,10 @@ pub(super) fn execute_effects_live(
     }
 }
 
-/// Dispatch a [`MuxOp`] against the executor's `TmuxRunner`. The
+/// Dispatch a [`MuxOp`] against the executor's `MuxBackend`. The
 /// only place in the TUI where a reducer-emitted mux op talks to
 /// tmux (ADR 0085 contract 2 Phase C).
-fn execute_mux_op(app: &mut App, tmux: &dyn TmuxRunner, op: crate::tui::effect::MuxOp) {
+fn execute_mux_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect::MuxOp) {
     use crate::tui::effect::MuxOp;
     match op {
         MuxOp::CapturePreview { mux, native_id } => {
@@ -1549,7 +1549,7 @@ pub(super) fn dispatch_live(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     msg: Msg,
 ) {
     let effects = app.update(msg);
@@ -1820,7 +1820,7 @@ fn handle_pins_overlay_key(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     key: ratatui::crossterm::event::KeyEvent,
 ) {
     use crate::tui::{Overlay, OverlayOutcome};
@@ -1884,7 +1884,7 @@ fn pin_create_success_toast(is_adopt: bool, pin_id: &str) -> String {
 }
 
 fn apply_pin_adopt_mux_rename(
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
     request: &crate::tui::widgets::pins::PinCreateRequest,
 ) -> Option<String> {
     let source = request.adopt_source_mux_name.as_deref()?;
@@ -2092,7 +2092,7 @@ fn default_action(
     terminal: &mut DefaultTerminal,
     app: &mut App,
     config: &RunConfig,
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
 ) {
     match selected_default_action(app) {
         SelectedDefault::ToggleExpand => dispatch(app, Msg::ToggleExpand),
@@ -3759,7 +3759,7 @@ mod tests {
 
     /// H-TUI-002 Phase C (ADR 0085 contract 2): mux ops flow through
     /// the executor. The reducer emits `Effect::RunMux(...)` and the
-    /// executor is the only code holding a `TmuxRunner` reference.
+    /// executor is the only code holding a `MuxBackend` reference.
     mod mux_effect_executor {
         use super::*;
         use crate::discovery::tmux::{FakeTmux, TmuxCaptureOutcome};

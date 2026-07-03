@@ -42,7 +42,7 @@ pub enum Effect {
     /// treat it as a no-op.
     Exec(ExecSpec),
     /// Run a mux backend op (ADR 0085 contract 2 Phase C). The
-    /// executor owns the `TmuxRunner` reference for the duration of
+    /// executor owns the `MuxBackend` reference for the duration of
     /// the call; the reducer never talks to tmux directly. Pure
     /// contexts silently drop `RunMux` — snapshot mode has no live
     /// backend and tests use FakeTmux directly against
@@ -95,7 +95,7 @@ pub enum ExecSpec {
 
 /// A mux backend op the executor should run. The reducer emits this
 /// via `Effect::RunMux(...)`; the executor holds the sole
-/// `TmuxRunner` reference and performs the call. Further variants
+/// `MuxBackend` reference and performs the call. Further variants
 /// (`RenameSession`, `NewSession`, `SendKeys`) migrate over as
 /// their current call sites (rename overlay commit, pin adopt/
 /// create) get carved out of the runtime and into reducer arms —

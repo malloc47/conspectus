@@ -328,7 +328,12 @@ pub fn discover_local_warm_with(
     // config now so `apply_mutators` below can still borrow the
     // remaining fields without a partial-move issue.
     let mut config = config;
-    let tmux_runner = config.tmux_runner.take();
+    // H-EXT-008: mux backends live in a registry list; take the
+    // tmux entry (if any) by key so the discovery path can wrap
+    // it in `TmuxDiscovery`. Future backends (zellij per
+    // H-EXT-010) get pulled the same way inside their own
+    // per-backend discovery wrappers.
+    let tmux_runner = config.take_mux_backend_by_key(tmux::TMUX_BACKEND);
     let forge_runner = config.forge_runner.take();
 
     let mut providers = LocalDiscovery::new()
@@ -432,7 +437,14 @@ fn apply_mutators(
 /// Configuration that controls which providers run during local discovery.
 pub struct LocalDiscoveryConfig {
     pub harness_state_roots: BTreeMap<String, PathBuf>,
-    pub tmux_runner: Option<Box<dyn tmux::TmuxRunner>>,
+    /// Registered mux backends (H-EXT-008, ADR 0089). Adding a
+    /// second backend (zellij per H-EXT-010, screen etc.) is a
+    /// matter of pushing another entry. Each backend implements
+    /// [`tmux::MuxBackend`] and returns its own `backend_key`.
+    /// v1 ships with a single tmux entry populated by
+    /// [`Self::from_env`]; multi-backend hosts push additional
+    /// entries via [`Self::with_mux_backend`].
+    pub mux_backends: Vec<Box<dyn tmux::MuxBackend>>,
     pub forge_runner: Option<Box<dyn forge::GhRunner>>,
     pub process_tree_enabled: bool,
     pub hook_sidecar_root: Option<PathBuf>,
@@ -471,12 +483,10 @@ impl LocalDiscoveryConfig {
             harness_state_roots.insert(harness::opencode::HARNESS_KEY.to_string(), path);
         }
 
-        let tmux_runner: Option<Box<dyn tmux::TmuxRunner>> =
-            if env::var_os("CONSPECTUS_DISABLE_TMUX").is_some() {
-                None
-            } else {
-                Some(Box::new(tmux::SystemTmux::new()))
-            };
+        let mut mux_backends: Vec<Box<dyn tmux::MuxBackend>> = Vec::new();
+        if env::var_os("CONSPECTUS_DISABLE_TMUX").is_none() {
+            mux_backends.push(Box::new(tmux::SystemTmux::new()));
+        }
 
         let forge_runner: Option<Box<dyn forge::GhRunner>> =
             if env::var_os("CONSPECTUS_DISABLE_FORGE").is_some() {
@@ -498,7 +508,7 @@ impl LocalDiscoveryConfig {
 
         Self {
             harness_state_roots,
-            tmux_runner,
+            mux_backends,
             forge_runner,
             process_tree_enabled: env::var_os("CONSPECTUS_DISABLE_PROCTREE").is_none(),
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
@@ -511,7 +521,7 @@ impl LocalDiscoveryConfig {
     pub fn empty() -> Self {
         Self {
             harness_state_roots: BTreeMap::new(),
-            tmux_runner: None,
+            mux_backends: Vec::new(),
             forge_runner: None,
             process_tree_enabled: false,
             hook_sidecar_root: None,
@@ -531,14 +541,56 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    pub fn with_tmux_runner(mut self, runner: impl tmux::TmuxRunner + 'static) -> Self {
-        self.tmux_runner = Some(Box::new(runner));
+    /// Push a mux backend onto the registry (H-EXT-008, ADR 0089).
+    /// Backends can be added in any order; discovery iterates them
+    /// in registration order and picks the first one whose
+    /// [`tmux::MuxBackend::backend_key`] matches a pin or session's
+    /// `backend` field.
+    pub fn with_mux_backend(mut self, backend: impl tmux::MuxBackend + 'static) -> Self {
+        self.mux_backends.push(Box::new(backend));
         self
     }
 
+    /// Deprecated alias for [`Self::with_mux_backend`] (H-EXT-008).
+    /// Kept so pre-H-EXT-008 test call sites and scenario builders
+    /// keep compiling without a mass rename in this commit.
+    pub fn with_tmux_runner(self, runner: impl tmux::MuxBackend + 'static) -> Self {
+        self.with_mux_backend(runner)
+    }
+
+    /// Clear every backend whose `backend_key()` matches the tmux
+    /// backend string. Retained under the historical name because
+    /// tests use it as `.without_tmux()` (H-EXT-008 rewired it
+    /// against the backend list; the disable env var
+    /// `CONSPECTUS_DISABLE_TMUX` still produces the same result
+    /// through `from_env`).
     pub fn without_tmux(mut self) -> Self {
-        self.tmux_runner = None;
+        self.mux_backends
+            .retain(|b| b.backend_key() != tmux::TMUX_BACKEND);
         self
+    }
+
+    /// Find the first registered backend whose `backend_key()`
+    /// matches `key` (H-EXT-008). Used by CLI + TUI dispatch to
+    /// resolve a pin's / mux session's `backend` field to a
+    /// concrete runner.
+    pub fn mux_backend_by_key(&self, key: &str) -> Option<&dyn tmux::MuxBackend> {
+        self.mux_backends
+            .iter()
+            .find(|b| b.backend_key() == key)
+            .map(|b| b.as_ref())
+    }
+
+    /// Consume and return the first registered backend whose
+    /// `backend_key()` matches `key` (H-EXT-008). Used by
+    /// `discover_local_warm_with` when routing a backend into a
+    /// `TmuxDiscovery` wrapper that owns it.
+    pub fn take_mux_backend_by_key(&mut self, key: &str) -> Option<Box<dyn tmux::MuxBackend>> {
+        let idx = self
+            .mux_backends
+            .iter()
+            .position(|b| b.backend_key() == key)?;
+        Some(self.mux_backends.remove(idx))
     }
 
     pub fn with_forge_runner(mut self, runner: impl forge::GhRunner + 'static) -> Self {

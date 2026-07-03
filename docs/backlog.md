@@ -2900,22 +2900,53 @@ Phase B — harness experience parity:
 
 Phase C — mux backend abstraction:
 
-- [ ] `H-EXT-008` Extract a `MuxBackend` trait from `TmuxRunner`.
-  - Scope: backend-neutral trait — `backend_key()`, `discover()`, and
-    capability methods with `Unsupported` defaults (`attach_argv`,
-    `rename_session`, `new_session`, `send_keys`, `capture_pane`,
-    `current_session_context`), plus a namespace concept generalizing
-    tmux's `socket_name`. Absorbs `H-REF-004`'s shared external-runner
-    seam (outcome enums, unavailable classification, fake plumbing shared
-    with `GhRunner`). `SystemTmux` becomes the first impl; all
-    `&dyn TmuxRunner` call sites (TUI runtime, CLI rename, pin launch,
-    preview) resolve a backend by the node's/pin's `backend` field through
-    a backend registry; `LocalDiscoveryConfig.tmux_runner` becomes a
-    backend list. Needs an ADR (supersedes parts of ADR 0057's launch
-    wording).
-  - Tests: existing tmux runner + pin + rename suites pass; shared-seam
-    test that missing-binary classification matches across backends.
-  - Blockers: `H-EXT-001`.
+- [x] `H-EXT-008` Extract a `MuxBackend` trait from `TmuxRunner`.
+  - Landed 2026-07-03 (ADR 0089). `TmuxRunner` trait renamed
+    to `MuxBackend`. New required method
+    `backend_key(&self) -> &'static str` returns the stable
+    string every consumer keys off (pin `mux.backend`,
+    `MuxSessionNode.backend`, provider stamps). `SystemTmux`
+    is the first impl, returning `"tmux"` (aliased to
+    `providers::TMUX`). Existing capability methods
+    (`capture_pane`, `rename_session`, `new_session`,
+    `attach_session`, `send_keys`) keep their `Unsupported`
+    defaults so a new backend implements only what it
+    supports; H-EXT-009 completes the capability-gate
+    migration by replacing the pre-existing
+    `backend == "tmux"` string checks in
+    `src/tui/actions.rs` and `src/pins.rs` with
+    outcome-based gating.
+    `LocalDiscoveryConfig.tmux_runner:
+    Option<Box<dyn TmuxRunner>>` migrates to
+    `mux_backends: Vec<Box<dyn MuxBackend>>`. New builders:
+    `with_mux_backend(runner)` pushes; deprecated
+    `with_tmux_runner(runner)` alias keeps existing test
+    call sites compiling. `without_tmux()` retained;
+    semantics migrated to "clear entries whose
+    `backend_key() == "tmux"`." New accessors
+    `mux_backend_by_key(key)` (reference) and
+    `take_mux_backend_by_key(key)` (consuming). Discovery
+    path pulls the tmux backend via
+    `config.take_mux_backend_by_key(TMUX_BACKEND)`.
+    Trait rename rippled through all 23+ `&dyn TmuxRunner` /
+    `Box<dyn TmuxRunner>` call sites (CLI, TUI runtime,
+    preview, effect executor). Impls of `MuxBackend` gain
+    a `backend_key` method: `SystemTmux` → `"tmux"`,
+    `FakeTmux` → `"tmux"`, `Box<dyn MuxBackend>` delegates
+    to inner, test-only `ReadOnlyRunner` / `MinimalRunner`
+    → `"test-*"`.
+    Outcome enums (`TmuxOutcome`, `TmuxCaptureOutcome`,
+    etc.) keep their `Tmux`-prefixed names for now; their
+    variant shapes are already backend-neutral so the
+    rename is a mechanical follow-up orthogonal to the
+    trait-shape work here. `socket_name → namespace`
+    generalization and the `TmuxDiscovery`-wrapper collapse
+    are also deferred to land alongside H-EXT-010.
+    ADR 0089 records the shape, alternatives, and
+    consequences. Added to the Decisions catalog.
+    All 25 suites (1516 lib tests) pass byte-identically;
+    fmt / clippy clean.
+  - Blockers: `H-EXT-001` (landed).
 - [ ] `H-EXT-009` Capability-gate mux actions instead of naming tmux.
   - Scope: replace the "only tmux" attach gate
     (`src/tui/actions.rs:190,442`) and the pin `backend == "tmux"`

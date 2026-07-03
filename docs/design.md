@@ -1200,6 +1200,24 @@ migration helper and harmless if it fails.
     (semantic fit — the class is a provider attribute);
     `cache` re-exports it so existing call sites compile
     unchanged.
+  - ADR 0089 (Accepted): the mux-backend trait. `TmuxRunner`
+    renames to `MuxBackend`; every backend implementation
+    (SystemTmux today, zellij next per H-EXT-010) returns a
+    `backend_key()` string that pin entries
+    (`mux.backend`), `MuxSessionNode.backend`, and the
+    `LocalDiscoveryConfig::mux_backend_by_key` /
+    `take_mux_backend_by_key` accessors all key off.
+    `LocalDiscoveryConfig.tmux_runner: Option<Box<...>>` becomes
+    `mux_backends: Vec<Box<dyn MuxBackend>>` so a second
+    backend is `.with_mux_backend(...)` away. Capability
+    methods keep their `Unsupported` defaults; H-EXT-009 will
+    migrate the pre-existing `backend == "tmux"` string checks
+    in `src/tui/actions.rs` and `src/pins.rs` to
+    outcome-based capability gating. Outcome enum names,
+    `TmuxDiscovery` wrapper, and `socket_name → namespace`
+    generalization stay put for now and land alongside
+    H-EXT-010. Supersedes tmux-specific launch prose in
+    ADR 0057 (annotation follow-up).
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

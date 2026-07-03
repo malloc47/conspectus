@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use crate::discovery::tmux::{TmuxCaptureOutcome, TmuxRunner};
+use crate::discovery::tmux::{MuxBackend, TmuxCaptureOutcome};
 use crate::model::MuxSessionId;
 
 /// In-memory cache of recent capture-pane results keyed by mux id.
@@ -76,7 +76,7 @@ impl PreviewStore {
 /// Run a single capture against the runner and translate it into a
 /// [`PreviewContent`]. Pure (modulo the runner call); callers
 /// supply the runner so tests inject [`crate::discovery::tmux::FakeTmux`].
-pub fn capture_via(runner: &dyn TmuxRunner, native_id: &str) -> PreviewContent {
+pub fn capture_via(runner: &dyn MuxBackend, native_id: &str) -> PreviewContent {
     // Today's preview path always queries the default socket;
     // non-default-socket previews are part of the deferred
     // H-PIN-F-001 discovery story.

@@ -8,7 +8,7 @@
 //!
 //! GitHub discovery delegates to the `gh` CLI through an injectable
 //! [`GhRunner`] seam, mirroring how tmux discovery uses
-//! [`TmuxRunner`](crate::discovery::tmux::TmuxRunner).
+//! [`MuxBackend`](crate::discovery::tmux::MuxBackend).
 //! Production runs use [`SystemGh`]; tests use [`FakeGh`] or any custom
 //! implementation so they never need a real `gh` install or network call.
 //! See ADR 0011 for the rationale.
@@ -87,7 +87,7 @@ pub(crate) fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
 }
 
 /// Pluggable interface for invoking `gh` (or a fake equivalent). Mirrors
-/// the [`TmuxRunner`](crate::discovery::tmux::TmuxRunner) seam so tests
+/// the [`MuxBackend`](crate::discovery::tmux::MuxBackend) seam so tests
 /// stay offline.
 pub trait GhRunner: Send + Sync {
     /// Run `gh pr list --json <fields>` for the given working directory.

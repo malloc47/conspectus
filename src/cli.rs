@@ -21,7 +21,7 @@ use conspectus::declared::{
 };
 use conspectus::discovery::harness::launch_argv_for;
 use conspectus::discovery::tmux::{
-    SystemTmux, TmuxAttachOutcome, TmuxNewSessionOutcome, TmuxRenameOutcome, TmuxRunner,
+    MuxBackend, SystemTmux, TmuxAttachOutcome, TmuxNewSessionOutcome, TmuxRenameOutcome,
     TmuxSendKeysOutcome,
 };
 use conspectus::hook::{HookStore, HookTmuxRecord};
@@ -3988,7 +3988,7 @@ fn execute_rename_plan(
     plan: &RenamePlan,
     store: Option<DeclaredStoreFlag>,
     scan_roots: &[PathBuf],
-    tmux: &dyn TmuxRunner,
+    tmux: &dyn MuxBackend,
 ) -> Result<()> {
     let endpoint = declared_endpoint_from_node_id(&NodeId::AgentSession(
         plan.agent_alias_write.session.clone(),
@@ -4037,7 +4037,7 @@ fn execute_rename_plan(
     Ok(())
 }
 
-fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn TmuxRunner) -> Result<()> {
+fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn MuxBackend) -> Result<()> {
     let outcome = tmux
         // Default-socket rename — `conspectus rename` is the alias
         // overlay surface (ADR 0029) that runs on whatever socket
@@ -5002,7 +5002,7 @@ impl PinLaunchArgs {
         self.run_with_runner(intent, &runner)
     }
 
-    fn run_with_runner(self, intent: PinLaunchIntent, runner: &dyn TmuxRunner) -> Result<()> {
+    fn run_with_runner(self, intent: PinLaunchIntent, runner: &dyn MuxBackend) -> Result<()> {
         let snapshot = discover_and_resolve(&self.scan_roots)?;
         let Some(pin) = snapshot.pins.iter().find(|pin| pin.id == self.id) else {
             bail!("no pin `{}` in any discovered store", self.id);
@@ -5172,7 +5172,7 @@ fn resolve_resume_argv_with_cache(
     }
 }
 
-fn attach_and_report(runner: &dyn TmuxRunner, socket: Option<&str>, name: &str) -> Result<()> {
+fn attach_and_report(runner: &dyn MuxBackend, socket: Option<&str>, name: &str) -> Result<()> {
     let outcome = runner
         .attach_session(socket, name)
         .map_err(|err| anyhow!("tmux attach failed: {err}"))?;

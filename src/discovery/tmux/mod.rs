@@ -1,7 +1,7 @@
 //! Terminal multiplexer (tmux) discovery boundaries.
 //!
 //! Production discovery shells out to `tmux list-sessions -F <format>` via
-//! [`SystemTmux`]. Tests inject [`FakeTmux`] (or any other [`TmuxRunner`]) so
+//! [`SystemTmux`]. Tests inject [`FakeTmux`] (or any other [`MuxBackend`]) so
 //! they never need a real tmux server. [`TmuxDiscovery`] is the
 //! [`DiscoveryProvider`] that asks a runner for sessions, parses the rows, and
 //! emits provider-neutral `MuxSession` nodes.
@@ -29,7 +29,32 @@ pub const TMUX_BACKEND: &str = crate::discovery::providers::TMUX;
 /// session roots can safely contain spaces.
 pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}";
 
-pub trait TmuxRunner: Send + Sync {
+/// Backend-neutral mux abstraction (H-EXT-008, ADR 0089).
+///
+/// Every mux backend Conspectus supports (tmux today, zellij next
+/// per H-EXT-010) implements this trait. The trait's capability
+/// methods default to `Unsupported` outcomes so a new backend can
+/// implement only the operations it actually supports; callers
+/// gate on the outcome (H-EXT-009) instead of naming a specific
+/// backend.
+///
+/// `backend_key` is the string every consumer keys off. Pin
+/// entries carry `mux.backend = "<backend_key>"` per ADR 0057;
+/// discovery stamps `MuxSessionNode.backend` with the same
+/// string. Two backends must never share a key.
+///
+/// The outcome enums (`TmuxOutcome`, `TmuxCaptureOutcome`, …)
+/// keep their `Tmux`-prefixed names in this Phase-C step —
+/// their variant shapes (`Sessions`, `NoTarget`, `NameCollision`,
+/// `Unavailable`, `Failed`, `Unsupported`) are backend-neutral,
+/// so the rename is a mechanical follow-up and orthogonal to
+/// the trait-shape work here.
+pub trait MuxBackend: Send + Sync {
+    /// Backend identity. Stamped on pin entries
+    /// (`mux.backend`) and `MuxSessionNode.backend`. Every
+    /// implementor returns a `&'static` literal.
+    fn backend_key(&self) -> &'static str;
+
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome>;
 
     /// Capture the visible content of pane `target` (e.g. a session
@@ -143,7 +168,7 @@ pub enum TmuxRenameOutcome {
     Unsupported,
 }
 
-/// Outcome of [`TmuxRunner::new_session`].
+/// Outcome of [`MuxBackend::new_session`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TmuxNewSessionOutcome {
     /// `tmux new-session -d -s <name> -c <cwd> <argv...>` succeeded.
@@ -161,7 +186,7 @@ pub enum TmuxNewSessionOutcome {
     Unsupported,
 }
 
-/// Outcome of [`TmuxRunner::attach_session`].
+/// Outcome of [`MuxBackend::attach_session`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TmuxAttachOutcome {
     /// Tmux ran and exited normally (operator detached, or the
@@ -178,7 +203,7 @@ pub enum TmuxAttachOutcome {
     Unsupported,
 }
 
-/// Outcome of [`TmuxRunner::send_keys`].
+/// Outcome of [`MuxBackend::send_keys`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TmuxSendKeysOutcome {
     /// `tmux send-keys -t <target> <literal> [Enter]` succeeded.
@@ -272,7 +297,11 @@ fn effective_socket(socket_name: Option<&str>) -> Option<&str> {
     }
 }
 
-impl TmuxRunner for SystemTmux {
+impl MuxBackend for SystemTmux {
+    fn backend_key(&self) -> &'static str {
+        TMUX_BACKEND
+    }
+
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
         let output = Command::new(&self.binary)
             .args(["list-sessions", "-F", format])
@@ -734,31 +763,35 @@ impl FakeTmux {
     }
 
     /// Snapshot of `(socket_name, target, new_name)` triples
-    /// recorded by [`TmuxRunner::rename_session`].
+    /// recorded by [`MuxBackend::rename_session`].
     pub fn rename_calls(&self) -> Vec<FakeTmuxRenameCall> {
         self.rename_calls.lock().unwrap().clone()
     }
 
     /// Snapshot of `(socket_name, name, cwd, argv)` tuples recorded
-    /// by [`TmuxRunner::new_session`].
+    /// by [`MuxBackend::new_session`].
     pub fn new_session_calls(&self) -> Vec<FakeTmuxNewSessionCall> {
         self.new_session_calls.lock().unwrap().clone()
     }
 
     /// Snapshot of `(socket_name, name)` pairs recorded by
-    /// [`TmuxRunner::attach_session`].
+    /// [`MuxBackend::attach_session`].
     pub fn attach_calls(&self) -> Vec<FakeTmuxAttachCall> {
         self.attach_calls.lock().unwrap().clone()
     }
 
     /// Snapshot of `(socket_name, target, literal, press_enter)`
-    /// tuples recorded by [`TmuxRunner::send_keys`].
+    /// tuples recorded by [`MuxBackend::send_keys`].
     pub fn send_keys_calls(&self) -> Vec<FakeTmuxSendKeysCall> {
         self.send_keys_calls.lock().unwrap().clone()
     }
 }
 
-impl TmuxRunner for FakeTmux {
+impl MuxBackend for FakeTmux {
+    fn backend_key(&self) -> &'static str {
+        TMUX_BACKEND
+    }
+
     fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
         Ok(self.outcome.clone())
     }
@@ -842,7 +875,11 @@ impl TmuxRunner for FakeTmux {
     }
 }
 
-impl TmuxRunner for Box<dyn TmuxRunner> {
+impl MuxBackend for Box<dyn MuxBackend> {
+    fn backend_key(&self) -> &'static str {
+        (**self).backend_key()
+    }
+
     fn list_sessions(&self, format: &str) -> Result<TmuxOutcome> {
         (**self).list_sessions(format)
     }
@@ -978,7 +1015,7 @@ fn looks_like_interactive_client(client_name: &str) -> bool {
 }
 
 #[derive(Clone, Debug)]
-pub struct TmuxDiscovery<R: TmuxRunner> {
+pub struct TmuxDiscovery<R: MuxBackend> {
     runner: R,
 }
 
@@ -996,7 +1033,7 @@ impl TmuxDiscovery<SystemTmux> {
     }
 }
 
-impl<R: TmuxRunner> TmuxDiscovery<R> {
+impl<R: MuxBackend> TmuxDiscovery<R> {
     pub fn with_runner(runner: R) -> Self {
         Self { runner }
     }
@@ -1033,7 +1070,7 @@ pub enum TmuxStatus {
     Failed { code: Option<i32>, message: String },
 }
 
-impl<R: TmuxRunner + 'static> DiscoveryProvider for TmuxDiscovery<R> {
+impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
     fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
         let outcome = self.rows()?;
         let mut nodes = Vec::with_capacity(outcome.rows.len());
@@ -1419,7 +1456,11 @@ mod tests {
     #[test]
     fn default_rename_session_impl_returns_unsupported() {
         struct ReadOnlyRunner;
-        impl TmuxRunner for ReadOnlyRunner {
+        impl MuxBackend for ReadOnlyRunner {
+            fn backend_key(&self) -> &'static str {
+                "test-read-only"
+            }
+
             fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
                 Ok(TmuxOutcome::Sessions(String::new()))
             }
@@ -1574,7 +1615,11 @@ mod tests {
     #[test]
     fn default_trait_impls_for_new_methods_return_unsupported() {
         struct MinimalRunner;
-        impl TmuxRunner for MinimalRunner {
+        impl MuxBackend for MinimalRunner {
+            fn backend_key(&self) -> &'static str {
+                "test-minimal"
+            }
+
             fn list_sessions(&self, _format: &str) -> Result<TmuxOutcome> {
                 Ok(TmuxOutcome::Sessions(String::new()))
             }
