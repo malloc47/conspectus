@@ -1870,18 +1870,16 @@ cross-references below.
     matches are still mode-specific inside trait impls, not
     deduped; the loop skeleton, event poll, overlay routing,
     draw pipeline, and mux-preview refresh are all shared).
-  - Wave 3 (deferred to its own story): split runtime.rs (~4200
-    lines) into loop driver (LoopMode / LiveMode / StaticMode /
-    run_loop / draw_frame / overlay_key_from_event / UiEvent),
-    keymap (Action enum / translate / remap_for_focus /
-    cycle_view / SelectedDefault / selected_default_action),
-    and effect executor (execute_effects_live / execute_effects
-    / execute_exec_spec / execute_mux_op / execute_store_op +
-    branches) modules. Involves cascading visibility changes
-    for ~30 runtime helpers referenced by LoopMode impls and
-    moving ~1000 lines of translate/keymap tests. Non-trivial
-    mechanical refactor; better as its own story than bundled
-    with the behavioral work.
+  - Wave 3 (partial, landed 2026-07-02, keymap extracted):
+    `tui/keymap.rs` module created with Action / translate /
+    remap_for_focus / cycle_view / SelectedDefault /
+    selected_default_action. runtime.rs shrinks by ~370 lines
+    and re-exports these via `pub(super) use crate::tui::keymap`
+    so the ~1000-line test module in runtime.rs keeps working
+    unchanged. Loop driver and effect executor stay in
+    runtime.rs; extracting them requires cascading visibility
+    changes across ~30 runtime helpers referenced by LoopMode
+    impls and is deferred as an optional follow-up.
   - Tests: live, fixture, and ADR 0067 snapshot suites unchanged.
   - Blockers: `H-TUI-002` (landed). Waves 1 + 2 landed. Wave 3
     is optional cleanup and can happen alongside `H-HYG-009`
