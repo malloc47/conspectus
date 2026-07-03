@@ -175,10 +175,26 @@ richer state-backed node naturally.
 Both readers open SQLite with `OpenFlags::SQLITE_OPEN_READ_ONLY |
 SQLITE_OPEN_NO_MUTEX`, issue `PRAGMA query_only = ON` immediately after
 connect, and keep connections short-lived. Conspectus does not use
-`immutable=1` because we want to observe fresh writes through the WAL. The
-log reader never selects `feedback_log_body`; the state reader caps and
-normalizes `first_user_message` exactly like the opencode preview path. No
-write paths are introduced.
+`immutable=1` because we want to observe fresh writes through the WAL.
+No write paths are introduced.
+
+Payload access follows the three-tier invariant recorded in
+ADR 0086:
+
+- The **log reader** is a Tier 3 rebuildable-observation reader.
+  `feedback_log_body` is never selected.
+- The **state reader**'s `threads.first_user_message` read is a
+  Tier 2 operator-facing preview surface: capped and normalized
+  before it reaches the operator, following the same shape as
+  the opencode preview path.
+
+The earlier wording of this ADR implied a blanket "readers never
+select privacy-sensitive payload columns" rule. That rule was
+already narrower than the codebase, since opencode's preview
+query and the native transcript viewer (ADR 0052) intentionally
+surface payload for operator display. ADR 0086 grades reader
+purposes into three tiers and places each of Conspectus's
+current readers explicitly; this ADR's readers are placed above.
 
 ### opencode
 

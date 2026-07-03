@@ -396,12 +396,20 @@ JSON, node detail, and visualization exports should preserve them.
 
 Read-only harness state and log databases are equivalent rebuildable
 observations owned by the harness itself rather than by Conspectus.
-Conspectus opens them with read-only flags and `query_only` enabled, never
-selects privacy-sensitive payload columns, and treats their evidence on the
-same freshness rules as hook sidecars: fresh log-derived current-session
-evidence outranks command/fd evidence and demotes stale launch-argv
-candidates for the same mux; stale rows are ignored for active attribution
-(ADR 0048).
+Conspectus opens them with read-only flags and `query_only` enabled, and
+treats their evidence on the same freshness rules as hook sidecars: fresh
+log-derived current-session evidence outranks command/fd evidence and
+demotes stale launch-argv candidates for the same mux; stale rows are
+ignored for active attribution (ADR 0048).
+
+Payload access follows the three-tier invariant in ADR 0086.
+Attribution and identity readers (Tier 1) never touch payload
+columns; operator-facing content features like the sessions
+view's preview column and the native transcript viewer (Tier 2,
+ADR 0013 / ADR 0023 / ADR 0052) read payload but cap and
+normalize it and only surface it under an operator gesture;
+hook sidecars and rebuildable state records (Tier 3, ADR 0028)
+stay payload-free.
 
 Additive discovery:
 
@@ -1138,6 +1146,18 @@ migration helper and harmless if it fails.
     tui-realm or component framework, no retained-mode rewrite, no
     async reducer, no actor-per-pane. Governs the H-TUI-001..005
     convergence work and every future TUI feature.
+  - ADR 0086 (Accepted): payload access follows a three-tier
+    invariant graded by reader purpose. Tier 1 (attribution and
+    identity readers): never read payload. Tier 2 (operator-
+    facing content features like the sessions preview column and
+    the native transcript viewer): may read payload subject to
+    capping / normalization / an operator gesture and an ADR
+    entry documenting the surface. Tier 3 (hook sidecars and
+    rebuildable state records): stay payload-free. Supersedes
+    the earlier "never selects privacy-sensitive payload
+    columns" wording in ADR 0048, which was already narrower
+    than the codebase (opencode preview + native viewer are
+    compliant Tier 2 surfaces).
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root

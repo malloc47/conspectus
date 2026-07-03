@@ -2888,19 +2888,22 @@ below need a real decision or real writing and are tracked here. All are
 documentation/tenet work — none block feature stories, but `H-ADR-001` and
 `H-ADR-002` should land before external contributors read the guardrails.
 
-- [ ] `H-ADR-001` Restate the payload-privacy tenet precisely.
-  - Scope: ADR 0048 states harness-DB readers "never select
-    privacy-sensitive payload columns" (echoed in `docs/design.md`), but
-    the opencode preview query selects `json_extract(data, '$.text')`
-    from opencode's message table (ADR 0013 / ADR 0023 lineage), and the
-    preview + native viewer (ADR 0052) intentionally surface transcript
-    content. Amend ADR 0048 (or add a small tenet ADR) stating the actual
-    invariant: attribution/identity readers never read payload;
-    operator-facing content features may, normalized and truncated for
-    display; hook-sidecar and state readers stay payload-free. Update the
-    design.md wording to match.
-  - Tests: docs-only; `git diff --check`.
-  - Blockers: none.
+- [x] `H-ADR-001` Restate the payload-privacy tenet precisely.
+  - Landed 2026-07-03. New standalone tenet ADR 0086 grades
+    payload access into three tiers by reader purpose:
+    Tier 1 (attribution / identity readers, never read
+    payload), Tier 2 (operator-facing content features like
+    the sessions preview column and the native transcript
+    viewer — may read payload subject to capping /
+    normalization / an operator gesture and an ADR entry),
+    Tier 3 (hook sidecars and rebuildable state records, stay
+    payload-free). ADR 0048's §Lock and privacy hygiene section
+    was scoped to cite the new tenet and place its readers
+    explicitly (state reader Tier 2, log reader Tier 3).
+    `docs/design.md`'s state-persistence section replaces the
+    sweeping "never selects privacy-sensitive payload
+    columns" wording with a citation of ADR 0086. ADR 0086
+    added to the Decisions catalog.
 - [ ] `H-ADR-002` Replace "read-only first" with a defined mutation
   envelope.
   - Scope: the guardrail in CLAUDE.md / design.md predates the sanctioned
