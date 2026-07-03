@@ -389,23 +389,35 @@ fn apply_mutators(
     config: &LocalDiscoveryConfig,
     context: &DiscoveryContext,
 ) {
-    let codex_pids_per_mux = if config.process_tree_enabled {
+    let harness_pids_per_mux = if config.process_tree_enabled {
         cross_link::infer(snapshot);
         cross_link::active_harness_pids_per_mux(snapshot, &cross_link::LinuxProcSnapshot)
     } else {
         cross_link::infer_without_process_tree(snapshot);
         std::collections::BTreeMap::new()
     };
-    if !config.codex_log_disabled
-        && let Some(codex_state_root) = config.harness_state_roots.get(harness::codex::HARNESS_KEY)
-    {
-        codex_log::apply_codex_log_attribution(
-            snapshot,
-            codex_state_root,
-            &codex_pids_per_mux,
-            codex_log::current_epoch(),
-            config.codex_log_window_seconds,
-        );
+    // H-EXT-007: iterate registered adapters and let each one
+    // apply its aux-attribution pass (opt-in via trait override
+    // + state root configured + not in disabled_aux_harnesses).
+    // The pre-H-EXT-007 hardcoded codex-log branch now lives on
+    // `CodexAdapter::apply_aux_attribution`.
+    let now_epoch = codex_log::current_epoch();
+    for adapter in harness::registered_adapters() {
+        if config
+            .disabled_aux_harnesses
+            .contains(adapter.harness_key())
+        {
+            continue;
+        }
+        let Some(state_root) = config.harness_state_roots.get(adapter.harness_key()) else {
+            continue;
+        };
+        let ctx = harness::AuxAttributionContext {
+            state_root,
+            harness_pids_per_mux: &harness_pids_per_mux,
+            now_epoch,
+        };
+        adapter.apply_aux_attribution(snapshot, &ctx);
     }
     if let Some(root) = &config.hook_sidecar_root {
         hook_sidecar::apply_hook_sidecars(snapshot, root, hook_sidecar::current_epoch());
@@ -431,15 +443,14 @@ pub struct LocalDiscoveryConfig {
     /// concrete path with `CONSPECTUS_AGENT_DECK_ROOT`.
     pub agent_deck_root: Option<PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
-    /// When `true`, skip the codex log-derived attribution linker entirely.
-    /// Even with the codex state root configured. Mirrors the
-    /// `CONSPECTUS_DISABLE_TMUX` / `_FORGE` / `_PROCTREE` opt-out pattern.
-    pub codex_log_disabled: bool,
-    /// Maximum log-row age (seconds) the codex log linker accepts. Defaults
-    /// to [`codex_log::DEFAULT_WINDOW_SECONDS`]. Overridable via the
-    /// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var. See the constant docs
-    /// for the dual query-cost / pid-reuse rationale.
-    pub codex_log_window_seconds: i64,
+    /// Harness keys whose optional aux-attribution mutator pass
+    /// (H-EXT-007) should be skipped, even when the harness has a
+    /// state root configured. Populated by
+    /// [`Self::from_env`] from `CONSPECTUS_DISABLE_<KEY>_LOG` /
+    /// `CONSPECTUS_DISABLE_CODEX_LOG` (the pre-H-EXT-007 codex-log
+    /// disable env var, kept as-is for wire compatibility) and by
+    /// callers via [`Self::without_aux_harness`].
+    pub disabled_aux_harnesses: BTreeSet<String>,
 }
 
 impl LocalDiscoveryConfig {
@@ -474,11 +485,16 @@ impl LocalDiscoveryConfig {
                 Some(Box::new(forge::SystemGh::new()))
             };
 
-        let codex_log_window_seconds = env::var("CONSPECTUS_CODEX_LOG_WINDOW_SECONDS")
-            .ok()
-            .and_then(|raw| raw.parse::<i64>().ok())
-            .filter(|secs| *secs >= 0)
-            .unwrap_or(codex_log::DEFAULT_WINDOW_SECONDS);
+        // H-EXT-007: codex_log-specific `codex_log_window_seconds`
+        // env parsing moves into `CodexAdapter::apply_aux_attribution`.
+        // The pre-H-EXT-007 disable flag (`CONSPECTUS_DISABLE_CODEX_LOG`)
+        // stays as a general "disable this harness's aux
+        // attribution" knob via the `disabled_aux_harnesses` set,
+        // preserving wire compatibility with operator env configs.
+        let mut disabled_aux_harnesses: BTreeSet<String> = BTreeSet::new();
+        if env::var_os("CONSPECTUS_DISABLE_CODEX_LOG").is_some() {
+            disabled_aux_harnesses.insert(harness::codex::HARNESS_KEY.to_string());
+        }
 
         Self {
             harness_state_roots,
@@ -488,8 +504,7 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             agent_deck_root: default_agent_deck_root(),
             declared_config_loader: Some(ConfigLoader::from_env()),
-            codex_log_disabled: env::var_os("CONSPECTUS_DISABLE_CODEX_LOG").is_some(),
-            codex_log_window_seconds,
+            disabled_aux_harnesses,
         }
     }
 
@@ -502,8 +517,7 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: None,
             agent_deck_root: None,
             declared_config_loader: None,
-            codex_log_disabled: false,
-            codex_log_window_seconds: codex_log::DEFAULT_WINDOW_SECONDS,
+            disabled_aux_harnesses: BTreeSet::new(),
         }
     }
 
@@ -542,13 +556,14 @@ impl LocalDiscoveryConfig {
         self
     }
 
-    pub fn without_codex_log(mut self) -> Self {
-        self.codex_log_disabled = true;
-        self
-    }
-
-    pub fn with_codex_log_window(mut self, seconds: i64) -> Self {
-        self.codex_log_window_seconds = seconds.max(0);
+    /// Skip a registered harness's aux-attribution mutator pass
+    /// (H-EXT-007). Adds the key to
+    /// [`Self::disabled_aux_harnesses`]; the caller doesn't need
+    /// to know whether the harness actually has an aux surface
+    /// (a `None` `apply_aux_attribution` override + a disable
+    /// flag are both no-ops at run time).
+    pub fn without_aux_harness(mut self, harness_key: impl Into<String>) -> Self {
+        self.disabled_aux_harnesses.insert(harness_key.into());
         self
     }
 

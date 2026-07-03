@@ -148,6 +148,34 @@ pub fn no_match(_command: &str) -> bool {
     false
 }
 
+/// Per-adapter aux-attribution surface (H-EXT-007). Passed to
+/// [`HarnessAdapter::apply_aux_attribution`] so an adapter with
+/// a state / log DB (ADR 0048's codex-log shape today) can
+/// mutate the merged snapshot without special-casing at the
+/// caller. The context is built once per warm-start invocation
+/// in `discovery::mod::apply_mutators` and reused across
+/// every registered adapter.
+pub struct AuxAttributionContext<'a> {
+    /// This harness's state root (typically
+    /// `LocalDiscoveryConfig.harness_state_roots.get(harness_key)`).
+    /// Adapters that need to open a per-harness DB build the
+    /// concrete path from this root.
+    pub state_root: &'a Path,
+    /// Per-mux `(harness_key, pid)` set produced by
+    /// `cross_link::active_harness_pids_per_mux` — the same input
+    /// the pre-H-EXT-007 codex-log branch consumed. Adapters
+    /// that need to correlate their state DB to a live process
+    /// walk this by `harness_key` and use the paired pids.
+    pub harness_pids_per_mux:
+        &'a std::collections::BTreeMap<crate::model::MuxSessionId, Vec<(String, i64)>>,
+    /// Wall-clock epoch at which the mutator pass started. Aux
+    /// readers use this as the `ts` floor for time-bounded
+    /// state / log queries (see
+    /// `crate::discovery::codex_log::DEFAULT_WINDOW_SECONDS`
+    /// for the codex-log rationale).
+    pub now_epoch: i64,
+}
+
 const CODEX_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-bypass-approvals-and-sandbox"];
 const CLAUDE_SKIP_PERMISSIONS_ARGV: &[&str] = &["--dangerously-skip-permissions"];
 
@@ -258,6 +286,28 @@ pub trait HarnessAdapter: Send + Sync {
     /// escape-hatch external viewer.
     fn transcript_parser(&self) -> Option<&'static dyn crate::viewer::parser::HarnessParser> {
         None
+    }
+
+    /// Apply this harness's optional aux-attribution mutator
+    /// pass (H-EXT-007). Called once per warm-start invocation
+    /// after the primary mutators run. Adapters with a state /
+    /// log DB (ADR 0048's codex-log shape) implement this to
+    /// stamp additional candidate links onto the merged
+    /// snapshot; the default is a no-op, appropriate for
+    /// adapters without an aux surface.
+    ///
+    /// The pre-H-EXT-007 codex-log special case in
+    /// `discovery::mod::apply_mutators` moves into the codex
+    /// adapter's override, so a fifth harness with an aux
+    /// reader needs only its own trait impl — no new
+    /// `LocalDiscoveryConfig` field, no named branch at the
+    /// caller.
+    fn apply_aux_attribution(
+        &self,
+        snapshot: &mut crate::model::GraphSnapshot,
+        ctx: &AuxAttributionContext<'_>,
+    ) {
+        let _ = (snapshot, ctx);
     }
 
     /// Build a hook sidecar record from a harness's SessionStart

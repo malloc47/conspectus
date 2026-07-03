@@ -251,7 +251,11 @@ impl ScenarioWorld {
             .with_harness_state_root(OPENCODE_HARNESS_KEY, self.harness.opencode_state_root())
             .with_harness_state_root(AIDER_HARNESS_KEY, self.root.clone())
             .with_hook_sidecar_root(&self.hook_root)
-            .without_codex_log();
+            // H-EXT-007: codex's aux-attribution mutator pass
+            // pulls from live `~/.codex/logs_*.sqlite`; skip it
+            // in the scenario TUI so dev_scenarios stays
+            // hermetic.
+            .without_aux_harness(crate::discovery::harness::codex::HARNESS_KEY);
         if !self.tmux_rows.is_empty() {
             config = config.with_tmux_runner(FakeTmux::with_sessions(self.tmux_stdout()));
         }

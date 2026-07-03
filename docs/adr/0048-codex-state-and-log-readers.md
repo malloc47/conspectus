@@ -110,8 +110,12 @@ LIMIT 1
 ```
 
 `:ts_floor` is `now() - 24 hours` by default, overridable via the
-`CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var and the
-`LocalDiscoveryConfig::with_codex_log_window` builder. Unlike ADR 0028
+`CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var. (Pre-H-EXT-007 this
+was also settable through the
+`LocalDiscoveryConfig::with_codex_log_window` builder; H-EXT-007
+folded the codex-log knob into
+`CodexAdapter::apply_aux_attribution` and dropped the builder as
+unused.) Unlike ADR 0028
 hook-sidecar records, which arrive asynchronously and can become orphaned
 from process lifetimes, codex log evidence is anchored to a live OS pid:
 the candidate set comes from `cross_link::active_harness_pids_per_mux`,

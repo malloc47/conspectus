@@ -101,6 +101,31 @@ impl HarnessAdapter for CodexAdapter {
         Some(&crate::viewer::parser::codex::CodexParser)
     }
 
+    /// H-EXT-007: run the codex-log ADR 0048 aux reader as the
+    /// codex adapter's aux attribution pass. Reads the
+    /// `CONSPECTUS_CODEX_LOG_WINDOW_SECONDS` env var directly so
+    /// the pre-H-EXT-007 `LocalDiscoveryConfig.codex_log_window_seconds`
+    /// field can retire — the knob is codex-specific and belongs
+    /// on the adapter, not on the top-level config.
+    fn apply_aux_attribution(
+        &self,
+        snapshot: &mut crate::model::GraphSnapshot,
+        ctx: &super::AuxAttributionContext<'_>,
+    ) {
+        let window_seconds = std::env::var("CONSPECTUS_CODEX_LOG_WINDOW_SECONDS")
+            .ok()
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .filter(|secs| *secs >= 0)
+            .unwrap_or(crate::discovery::codex_log::DEFAULT_WINDOW_SECONDS);
+        crate::discovery::codex_log::apply_codex_log_attribution(
+            snapshot,
+            ctx.state_root,
+            ctx.harness_pids_per_mux,
+            ctx.now_epoch,
+            window_seconds,
+        );
+    }
+
     fn launch_options(&self) -> &'static [super::HarnessLaunchOption] {
         super::CODEX_LAUNCH_OPTIONS
     }
