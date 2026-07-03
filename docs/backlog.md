@@ -1892,9 +1892,37 @@ cross-references below.
     reducer (extend the existing `PageDown(u16)` pattern or add a
     post-layout `Msg::ViewportChanged`) and reconcile scroll there, so
     `draw` is strictly `&App → buffer`.
+  - Wave 1 (landed 2026-07-02, drop Cell): the three fields
+    move from `Cell<u16>` / `Cell<Option<usize>>` to plain
+    `u16` / `Option<usize>`. `ui::draw` signature becomes
+    `&mut App`; `adjust_left_scroll` / `adjust_explorer_scroll`
+    become `&mut self`. Reconciliation logic is unchanged; the
+    architectural smell of hidden state mutation via interior
+    mutability is gone. `draw_right_panel` splits its explorer
+    borrow into a derive-locals scope, mutates
+    `explorer_scroll` via `&mut self`, then re-fetches the
+    explorer state for the preview render. ~45 `ui.rs`
+    snapshot-test call sites and `render_to_buffer` helper
+    updated. Not yet strictly `&App → buffer`.
+  - Wave 2 (next, reducer reconciliation): move the scroll
+    computation into the reducer via
+    `Msg::LeftViewportChanged { viewport_height,
+    selected_line }` and
+    `Msg::ExplorerViewportChanged { viewport_height,
+    cursor_first, cursor_last }`. Requires pre-layout viewport
+    measurement (either duplicating the outer split in the
+    runtime or adding a measure pass to `ui::draw`). Once the
+    reducer owns reconciliation, `draw` reverts to `&App` and
+    reads pre-computed scroll offsets as pure accessors. The
+    explorer path is trickier because `cursor_first` /
+    `cursor_last` depend on Paragraph wrap counts which are
+    computed at layout time — a shared wrap-count helper on
+    `App` would let both the reducer and draw pass agree
+    without duplicating the math.
   - Tests: scroll-behavior snapshots unchanged; reducer unit tests for
     reconciliation at list boundaries.
-  - Blockers: `H-TUI-002` friendlier first, not hard.
+  - Blockers: `H-TUI-002` friendlier first, not hard. Wave 1
+    landed.
 - [ ] `H-TUI-006` Unify overlay dispatch under the `Overlay` trait.
   - Scope: after `H-TUI-003`, four of the seven modal stack entries
     (Controls, Pins, Rename, Search) still use specialized runtime
