@@ -36,6 +36,7 @@ use ratatui::widgets::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::model::{MuxSessionId, NodeId};
+use crate::tui::Msg;
 use crate::tui::SessionsGrouping;
 use crate::tui::Theme;
 use crate::tui::View;
@@ -54,12 +55,22 @@ use crate::tui::rows::{
 /// phase-08 layout note).
 pub(super) const NARROW_LAYOUT_THRESHOLD: u16 = 100;
 
-/// Render one frame. H-TUI-005 wave 1: takes `&mut App` because
-/// scroll reconciliation writes back through the row-panel draw
-/// paths. The ADR 0085 contract 5 target is a strict
-/// `&App → buffer` — wave 2 will move the reconciliation into
-/// the reducer via `Msg::LeftViewportChanged` and revert this to
-/// `&App`.
+/// Render one frame.
+///
+/// Takes `&mut App` because the draw path dispatches
+/// [`Msg::LeftViewportChanged`] / [`Msg::ExplorerViewportChanged`]
+/// mid-frame so the reducer can reconcile scroll offsets (H-TUI-005
+/// waves 1 + 2). The reconciliation math itself lives in the
+/// reducer; draw only measures viewport height + the post-wrap
+/// explorer cursor row span and dispatches those measurements as
+/// Msgs. A strict `&App → buffer` shape would require restructuring
+/// draw into separate measure + render passes so the runtime can
+/// dispatch the Msgs upstream — that's an ADR 0085 contract-5
+/// optional cleanup, not a correctness need. The mutation surface
+/// today is bounded to those two Msg dispatches; every subsequent
+/// draw helper (`draw_header` / `draw_status_bar` / overlays /
+/// toast) takes `&App` and is byte-identical over the same App
+/// state.
 pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     let area = frame.area();
     let layout = Layout::default()
@@ -609,11 +620,17 @@ fn draw_left_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
         lines.push(primary);
     }
 
-    let scroll = if let Some(line_idx) = selected_primary_line {
-        app.adjust_left_scroll(line_idx, inner.height)
-    } else {
-        0
-    };
+    // H-TUI-005 wave 2: the reducer owns scroll reconciliation.
+    // Dispatch the post-layout viewport height and read the
+    // pre-computed offset as a pure getter. `selected_primary_line`
+    // stays computed above as an assertion anchor — the reducer
+    // arm derives the same index from
+    // `visible_rows().position(...)` internally.
+    let _ = selected_primary_line;
+    app.update(Msg::LeftViewportChanged {
+        viewport_height: inner.height,
+    });
+    let scroll = app.left_scroll();
 
     let total_lines = lines.len();
     let (content_area, scrollbar_area) = scrollbar_layout(inner, total_lines);
@@ -1930,7 +1947,19 @@ fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
                 Constraint::Min(0),
             ])
             .split(inner);
-        let scroll = app.adjust_explorer_scroll(cursor_first_row, cursor_last_row, split[0].height);
+        // H-TUI-005 wave 2: the reducer owns scroll reconciliation.
+        // Draw measures the post-wrap cursor row span (that math
+        // needs the widget-rendered lines) and dispatches the
+        // measurement as a Msg; the reducer runs the same offset
+        // math it used to run in the renderer and updates
+        // `explorer_scroll`. Draw then reads the pre-computed
+        // offset as a pure getter.
+        app.update(Msg::ExplorerViewportChanged {
+            cursor_first_row,
+            cursor_last_row,
+            viewport_height: split[0].height,
+        });
+        let scroll = app.explorer_scroll();
         let (explorer_content_area, explorer_scrollbar_area) =
             scrollbar_layout(split[0], wrapped_rows);
         frame.render_widget(

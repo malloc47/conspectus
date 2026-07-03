@@ -412,6 +412,33 @@ pub enum Msg {
     /// many rows constitute one page. Pass 1 if unknown.
     PageDown(u16),
     PageUp(u16),
+    /// Left panel: post-layout viewport dimensions
+    /// (H-TUI-005 wave 2). The draw path dispatches this before
+    /// building the left panel's line list so the reducer can
+    /// reconcile `left_scroll` from the current selection and
+    /// viewport height instead of the renderer poking a `Cell`
+    /// mid-frame. Carries the tree pane's inner height (rows).
+    /// The reducer computes the selected row's line index from
+    /// the visible-row projection — each visible row contributes
+    /// exactly one primary line, so the visible-row position is
+    /// the line index.
+    LeftViewportChanged {
+        viewport_height: u16,
+    },
+    /// Explorer (right panel): post-layout cursor row span and
+    /// viewport dimensions (H-TUI-005 wave 2). The draw path
+    /// dispatches this after computing the post-wrap row span of
+    /// the explorer cursor so the reducer can reconcile
+    /// `explorer_scroll`. Unlike the left panel, cursor row
+    /// positions depend on `Paragraph::wrap` output for the
+    /// widget-rendered lines, so the draw path measures and the
+    /// reducer records; the split keeps scroll reconciliation
+    /// itself out of the render pipeline.
+    ExplorerViewportChanged {
+        cursor_first_row: usize,
+        cursor_last_row: usize,
+        viewport_height: u16,
+    },
     /// Left panel: first/last visible row.
     Home,
     End,
@@ -1776,8 +1803,10 @@ impl App {
         clamped
     }
 
-    /// Test-only accessor for the current scroll offset.
-    #[cfg(test)]
+    /// Pure getter for the current left-panel scroll offset. The
+    /// reducer owns updates (via
+    /// [`Msg::LeftViewportChanged`] per H-TUI-005 wave 2); the
+    /// renderer reads this to size `Paragraph::scroll`.
     pub fn left_scroll(&self) -> u16 {
         self.left_scroll
     }
@@ -1825,8 +1854,10 @@ impl App {
         clamped
     }
 
-    /// Test-only accessor for the current explorer scroll offset.
-    #[cfg(test)]
+    /// Pure getter for the current explorer scroll offset. The
+    /// reducer owns updates (via
+    /// [`Msg::ExplorerViewportChanged`] per H-TUI-005 wave 2);
+    /// the renderer reads this to size `Paragraph::scroll`.
     pub fn explorer_scroll(&self) -> u16 {
         self.explorer_scroll
     }
@@ -1902,6 +1933,37 @@ impl App {
             Msg::PageUp(viewport) => {
                 self.pending_pin_remove = None;
                 self.move_selection(-i32::from(viewport.max(1)));
+            }
+            Msg::LeftViewportChanged { viewport_height } => {
+                // H-TUI-005 wave 2: the draw path dispatches this
+                // before building the left panel's line list so
+                // scroll reconciliation lives in the reducer, not
+                // in `draw`. Each visible row contributes exactly
+                // one primary line, so the selected row's line
+                // index equals its position in the visible
+                // projection. No selection → no reconciliation
+                // (empty tree keeps scroll at 0).
+                let Some(selected) = self.selection.clone() else {
+                    return effects;
+                };
+                let Some(line_idx) = self.visible_rows().iter().position(|r| r.id == selected)
+                else {
+                    return effects;
+                };
+                self.adjust_left_scroll(line_idx, viewport_height);
+            }
+            Msg::ExplorerViewportChanged {
+                cursor_first_row,
+                cursor_last_row,
+                viewport_height,
+            } => {
+                // H-TUI-005 wave 2: draw computes the post-wrap
+                // cursor row span (Paragraph::wrap output isn't
+                // pure over App state — it depends on pane width
+                // and font metrics), and this Msg carries the
+                // measured span into the reducer's
+                // adjust_explorer_scroll math.
+                self.adjust_explorer_scroll(cursor_first_row, cursor_last_row, viewport_height);
             }
             Msg::Home => {
                 self.pending_pin_remove = None;
