@@ -1845,8 +1845,31 @@ cross-references below.
     to file reload, snapshot mode runs the body once. Absorbs
     `H-HYG-008`'s dual-loop unification; then split `runtime.rs` into
     loop driver / keymap / effect executor modules.
+  - Wave 1 (landed 2026-07-02, shared helpers + UiEvent
+    scaffolding): introduced `UiEvent { Input(Event), Tick,
+    Discovery(DiscoveryResult) }` enum (dead-code allowed until
+    wave 2 wires it into a `next_ui_event` stream). Extracted
+    two shared helpers both loops now use: `draw_frame(app,
+    terminal)` (the toast prep + viewer-or-ui render block that
+    was byte-identical in both loops) and
+    `overlay_key_from_event(app, event)` (the modal-stack-aware
+    input routing that returns `Some(Action::*OverlayKey(key))`
+    or `None` for the caller's per-mode fallback). Dedupes ~160
+    lines from runtime.rs, sets up the destination surface area
+    without changing loop structure.
+  - Wave 2 (next, unify loop bodies): both loops become one
+    driver over `next_ui_event(...)`. The differences (live
+    loop's discovery worker + refresh timer, fixture mode's
+    `Action::Refresh` file reload, scenario TUI's mutating-
+    action gate) move into a per-mode configuration passed to
+    the shared driver.
+  - Wave 3 (next, runtime.rs module split): once the loop is
+    unified, split runtime.rs into loop driver (event union +
+    subscriptions), keymap (translate + remap_for_focus +
+    Action enum), and effect executor (execute_effects_live +
+    execute_effects) modules.
   - Tests: live, fixture, and ADR 0067 snapshot suites unchanged.
-  - Blockers: `H-TUI-002`.
+  - Blockers: `H-TUI-002` (landed). Wave 1 landed.
 - [ ] `H-TUI-005` Move scroll reconciliation into the reducer.
   - Scope: `left_scroll` / `explorer_scroll` / `last_visible_index` are
     `Cell`s mutated during `draw`. Deliver viewport dimensions to the
