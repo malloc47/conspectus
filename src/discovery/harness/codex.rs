@@ -60,8 +60,12 @@ impl CodexAdapter {
 }
 
 impl HarnessAdapter for CodexAdapter {
-    fn harness_key(&self) -> &str {
+    fn harness_key(&self) -> &'static str {
         HARNESS_KEY
+    }
+
+    fn launch_options(&self) -> &'static [super::HarnessLaunchOption] {
+        super::CODEX_LAUNCH_OPTIONS
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {

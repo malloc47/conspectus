@@ -41,10 +41,13 @@ use crate::tui::widgets::input::{InputOutcome, TextInputState};
 use crate::tui::widgets::multi_select::{MultiSelectOutcome, MultiSelectState};
 use crate::tui::{Grouping, Sort, View};
 
-/// Static harness option set surfaced in the harness sub-editor.
-/// Matches the four supported harness keys today; future additions
-/// land here.
-pub const HARNESS_OPTIONS: &[&str] = &["claude-code", "codex", "opencode", "aider"];
+/// Registered harness keys surfaced in the harness sub-editor.
+/// H-EXT-002: derives from the adapter registry
+/// ([`crate::discovery::harness::harness_keys`]) so registering a
+/// new adapter appears in the filter menu automatically.
+pub fn harness_options() -> &'static [&'static str] {
+    crate::discovery::harness::harness_keys()
+}
 
 /// Display order of the mux-state sub-editor entries.
 pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
@@ -320,14 +323,14 @@ impl ControlsOverlayState {
 
 fn build_harness_editor(filter: &RowFilter) -> MultiSelectState {
     let selected: Vec<usize> = match &filter.harness {
-        Some(HarnessFilter::Any(values)) => HARNESS_OPTIONS
+        Some(HarnessFilter::Any(values)) => harness_options()
             .iter()
             .enumerate()
             .filter_map(|(idx, opt)| values.iter().any(|v| v == opt).then_some(idx))
             .collect(),
         None => Vec::new(),
     };
-    MultiSelectState::new(" harness ", HARNESS_OPTIONS.len(), &selected)
+    MultiSelectState::new(" harness ", harness_options().len(), &selected)
 }
 
 fn build_mux_state_editor(filter: &RowFilter) -> MultiSelectState {
@@ -353,7 +356,7 @@ fn build_max_age_editor(filter: &RowFilter) -> TextInputState {
 fn indices_to_harness_values(indices: &[usize]) -> Vec<String> {
     indices
         .iter()
-        .filter_map(|idx| HARNESS_OPTIONS.get(*idx).map(|s| s.to_string()))
+        .filter_map(|idx| harness_options().get(*idx).map(|s| s.to_string()))
         .collect()
 }
 
@@ -536,7 +539,7 @@ fn render_sub_editor(editor: &SubEditor, area: Rect, buf: &mut Buffer, theme: &T
     match editor {
         SubEditor::Harness(state) => {
             use crate::tui::widgets::multi_select::MultiSelectWidget;
-            MultiSelectWidget::new(state, HARNESS_OPTIONS)
+            MultiSelectWidget::new(state, harness_options())
                 .theme(theme)
                 .render(area, buf);
         }

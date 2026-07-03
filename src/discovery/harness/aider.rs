@@ -28,7 +28,7 @@ impl AiderAdapter {
 }
 
 impl HarnessAdapter for AiderAdapter {
-    fn harness_key(&self) -> &str {
+    fn harness_key(&self) -> &'static str {
         HARNESS_KEY
     }
 

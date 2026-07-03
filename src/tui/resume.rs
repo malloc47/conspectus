@@ -3,15 +3,17 @@
 //! harness-specific and best-effort — unsupported harnesses degrade
 //! to a disabled-action reason.
 //!
-//! Supported harnesses:
-//!   claude-code: `claude --resume <session_key>`
-//!   codex:       `codex exec --resume <session_key>`
-//!   opencode:    `opencode --session <session_key>`
-//!   aider:       unsupported (per-cwd chat history, no
-//!                single-command "resume this session" path)
+//! H-EXT-002: the per-harness resume command is derived from
+//! [`crate::discovery::harness::resume_argv_for`] (which delegates
+//! to the registered [`crate::discovery::harness::HarnessAdapter::resume_argv`]).
+//! Supported harnesses today: claude-code, codex, opencode.
+//! Aider is unsupported because it tracks chat history per-cwd
+//! rather than per-session.
 
+use std::path::Path;
 use std::process::Command;
 
+use crate::discovery::harness::resume_argv_for;
 use crate::model::AgentSessionId;
 
 /// Outcome of a resume target resolution.
@@ -37,25 +39,34 @@ pub fn resume_disabled_reason(target: &ResumeTarget) -> String {
 }
 
 /// Resolve the resume command for an agent session.
+///
+/// H-EXT-002: delegates to
+/// [`crate::discovery::harness::resume_argv_for`] so the per-
+/// harness "does this expose a resume command" answer lives on
+/// the adapter (not in a hand-rolled match here). The command
+/// string surfaced to the operator is the argv joined by
+/// spaces — same shape as before, and `launch_resume` splits it
+/// back on whitespace to spawn.
 pub fn resolve_resume_target(session: &AgentSessionId) -> ResumeTarget {
-    match session.harness_key.as_str() {
-        "claude-code" => ResumeTarget::Launch {
-            command: format!("claude --resume {}", session.session_key),
-            label: session.session_key.clone(),
-        },
-        "codex" => ResumeTarget::Launch {
-            command: format!("codex exec --resume {}", session.session_key),
-            label: session.session_key.clone(),
-        },
-        "opencode" => ResumeTarget::Launch {
-            command: format!("opencode --session {}", session.session_key),
-            label: session.session_key.clone(),
-        },
-        "aider" => ResumeTarget::Unsupported {
+    // The three supported adapters ignore `cwd`; the trait
+    // signature carries it for future adapters (aider-style
+    // per-cwd history) that need context. An empty path is
+    // safe for the ignore-cwd cases.
+    let cwd = Path::new("");
+    match resume_argv_for(&session.harness_key, &session.session_key, cwd) {
+        Some(argv) => {
+            let command = argv
+                .into_iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            ResumeTarget::Launch {
+                command,
+                label: session.session_key.clone(),
+            }
+        }
+        None => ResumeTarget::Unsupported {
             harness_key: session.harness_key.clone(),
-        },
-        other => ResumeTarget::Unsupported {
-            harness_key: other.to_string(),
         },
     }
 }

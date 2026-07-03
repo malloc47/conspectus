@@ -86,8 +86,20 @@ impl ClaudeCodeAdapter {
 }
 
 impl HarnessAdapter for ClaudeCodeAdapter {
-    fn harness_key(&self) -> &str {
+    fn harness_key(&self) -> &'static str {
         HARNESS_KEY
+    }
+
+    /// H-TBL-014: the row-label column is tight, so `claude-code`
+    /// renders as `claude`. Kept here alongside the adapter
+    /// (H-EXT-002) instead of the rows-module match arm that
+    /// pre-registry callers used.
+    fn display_label(&self) -> &'static str {
+        "claude"
+    }
+
+    fn launch_options(&self) -> &'static [super::HarnessLaunchOption] {
+        super::CLAUDE_CODE_LAUNCH_OPTIONS
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {

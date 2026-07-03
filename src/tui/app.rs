@@ -25,7 +25,7 @@ use crate::tui::explorer::{
 };
 use crate::tui::preview::{PreviewContent, PreviewEntry, PreviewStore};
 use crate::tui::rows::{Row, RowId, RowKind, RowTree};
-use crate::tui::widgets::controls::HARNESS_OPTIONS;
+use crate::tui::widgets::controls::harness_options;
 use crate::tui::widgets::path_omnibox::PathCandidate;
 use crate::tui::widgets::pins::{
     PinBindOption, PinCreateDefaults, PinCreateMode, PinMutationTarget,
@@ -1453,8 +1453,10 @@ impl App {
     }
 
     fn known_harness_keys(&self) -> BTreeSet<String> {
-        let mut keys: BTreeSet<String> =
-            HARNESS_OPTIONS.iter().map(|key| key.to_string()).collect();
+        let mut keys: BTreeSet<String> = harness_options()
+            .iter()
+            .map(|key| key.to_string())
+            .collect();
         if let Some(database) = self.database.as_ref() {
             for node in &database.snapshot().nodes {
                 if let crate::model::GraphNode::AgentSession(session) = node

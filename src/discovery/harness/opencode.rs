@@ -46,7 +46,7 @@ impl OpenCodeAdapter {
 }
 
 impl HarnessAdapter for OpenCodeAdapter {
-    fn harness_key(&self) -> &str {
+    fn harness_key(&self) -> &'static str {
         HARNESS_KEY
     }
 

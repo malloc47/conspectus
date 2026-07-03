@@ -425,14 +425,12 @@ pub fn format_workspace_display(
 }
 
 /// Translate a harness key to the short label rendered in the row.
-/// Today's discovery emits `claude-code`, `codex`, and `opencode`;
-/// the operator-facing label collapses `claude-code` to `claude` so
-/// the column stays tight per H-TBL-014.
+/// H-EXT-002: delegates to the adapter registry so
+/// `claude-code`'s `claude` collapse (H-TBL-014) lives on
+/// [`crate::discovery::harness::ClaudeCodeAdapter::display_label`]
+/// rather than in a match table here.
 pub fn harness_label(harness_key: &str) -> String {
-    match harness_key {
-        "claude-code" => "claude".to_string(),
-        other => other.to_string(),
-    }
+    crate::discovery::harness::display_label_for(harness_key)
 }
 
 /// Format an activity epoch as a human-readable recency string
