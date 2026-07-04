@@ -58,7 +58,7 @@ impl DiscoveryProvider for AtelierWorkspaceDiscovery {
             }
         }
 
-        let mut fragment = snapshot_fragment(merge_fragments(fragments));
+        let mut fragment = GraphFragment::from(merge_fragments(fragments));
         crate::discovery::stamp_fragment(
             &mut fragment,
             crate::discovery::providers::ATELIER,
@@ -81,10 +81,10 @@ impl AtelierWorkspaceDiscovery {
                 )
             })?;
         let config = AtelierWorkspaceConfig::load(config_path)?;
-        let workspace_id = WorkspaceId::new(path_string(&workspace_root));
+        let workspace_id = WorkspaceId::new(crate::discovery::path_to_string(&workspace_root));
         let workspace_node = GraphNode::Workspace(WorkspaceNode {
             id: workspace_id.clone(),
-            root: path_string(&workspace_root),
+            root: crate::discovery::path_to_string(&workspace_root),
             provider: Some("atelier".to_string()),
             name: Some(config.workspace.name.clone()),
         });
@@ -98,8 +98,9 @@ impl AtelierWorkspaceDiscovery {
             let member_path_kind = workspace_member_path_kind(&repo_root);
 
             if let Some(probe) = self.git_probe.probe(&repo_root)? {
-                let repo_id =
-                    NodeId::Repo(crate::model::RepoId::new(path_string(&probe.common_dir)));
+                let repo_id = NodeId::Repo(crate::model::RepoId::new(
+                    crate::discovery::path_to_string(&probe.common_dir),
+                ));
                 let canonical_checkout_root = canonicalized_or_original(&probe.worktree_root);
                 repo_links.push(atelier_workspace_repo_link(
                     workspace.clone(),
@@ -117,7 +118,7 @@ impl AtelierWorkspaceDiscovery {
             } else {
                 repo_links.push(atelier_workspace_repo_link(
                     workspace.clone(),
-                    NodeId::Repo(crate::model::RepoId::new(path_string(
+                    NodeId::Repo(crate::model::RepoId::new(crate::discovery::path_to_string(
                         &provider_source_path,
                     ))),
                     WorkspaceRepoMemberMetadata {
@@ -146,7 +147,7 @@ impl AtelierWorkspaceDiscovery {
         snapshot.diagnostics.extend(fork_fragment.diagnostics);
 
         snapshot.canonicalize();
-        Ok(snapshot_fragment(snapshot))
+        Ok(GraphFragment::from(snapshot))
     }
 }
 
@@ -336,7 +337,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                     harness_key: None,
                     native_id: None,
                     state_scope: None,
-                    path: Some(path_string(&record.root)),
+                    path: Some(crate::discovery::path_to_string(&record.root)),
                     metadata: record_metadata(record, None),
                 },
             },
@@ -358,7 +359,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
         }
 
         for repo in &record.repos {
-            let repo_id = RepoId::new(path_string(&repo.source));
+            let repo_id = RepoId::new(crate::discovery::path_to_string(&repo.source));
             let repo_node = NodeId::Repo(repo_id.clone());
             fragment
                 .nodes
@@ -374,10 +375,13 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
             ));
 
             if let Some(fork_worktree) = &repo.fork_worktree {
-                let worktree_id = CheckoutId::new(repo_id.clone(), path_string(fork_worktree));
+                let worktree_id = CheckoutId::new(
+                    repo_id.clone(),
+                    crate::discovery::path_to_string(fork_worktree),
+                );
                 fragment.nodes.push(GraphNode::Checkout(CheckoutNode {
                     id: worktree_id.clone(),
-                    root: path_string(fork_worktree),
+                    root: crate::discovery::path_to_string(fork_worktree),
                     git_dir: None,
                     current_branch: repo
                         .branch
@@ -396,11 +400,13 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
             }
 
             if repo.link {
-                let worktree_id =
-                    CheckoutId::new(repo_id.clone(), path_string(&repo.parent_worktree));
+                let worktree_id = CheckoutId::new(
+                    repo_id.clone(),
+                    crate::discovery::path_to_string(&repo.parent_worktree),
+                );
                 fragment.nodes.push(GraphNode::Checkout(CheckoutNode {
                     id: worktree_id.clone(),
-                    root: path_string(&repo.parent_worktree),
+                    root: crate::discovery::path_to_string(&repo.parent_worktree),
                     git_dir: None,
                     current_branch: None,
                 }));
@@ -468,7 +474,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
         }
     }
 
-    snapshot_fragment(fragment.into_snapshot())
+    GraphFragment::from(fragment.into_snapshot())
 }
 
 fn harness_lineage_link(
@@ -493,7 +499,7 @@ fn harness_lineage_link(
                 harness_key: Some(harness.key.clone()),
                 native_id: Some(session_id.to_string()),
                 state_scope: None,
-                path: Some(path_string(fork_root)),
+                path: Some(crate::discovery::path_to_string(fork_root)),
                 metadata: fields.clone(),
             },
         },
@@ -696,16 +702,18 @@ fn atelier_workspace_repo_link(
     );
     fields.insert(
         "logical_path".to_string(),
-        serde_json::Value::String(path_string(member.logical_path)),
+        serde_json::Value::String(crate::discovery::path_to_string(member.logical_path)),
     );
     fields.insert(
         "provider_source_path".to_string(),
-        serde_json::Value::String(path_string(member.provider_source_path)),
+        serde_json::Value::String(crate::discovery::path_to_string(
+            member.provider_source_path,
+        )),
     );
     if let Some(canonical_checkout_root) = member.canonical_checkout_root {
         fields.insert(
             "canonical_checkout_root".to_string(),
-            serde_json::Value::String(path_string(canonical_checkout_root)),
+            serde_json::Value::String(crate::discovery::path_to_string(canonical_checkout_root)),
         );
     }
     fields.insert(
@@ -752,24 +760,11 @@ fn workspace_member_path_kind(path: &Path) -> &'static str {
     }
 }
 
-fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
-    GraphFragment {
-        nodes: snapshot.nodes,
-        candidate_links: snapshot.candidate_links,
-        diagnostics: snapshot.diagnostics,
-        node_provenance: snapshot.node_provenance,
-    }
-}
-
 fn relation_name(relation: &RelationKind) -> String {
     serde_json::to_string(relation)
         .expect("relation serializes")
         .trim_matches('"')
         .to_string()
-}
-
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
 }
 
 fn absolutize(base: &Path, path: &Path) -> PathBuf {
@@ -886,9 +881,9 @@ path = "/source/repo-b"
             .clone();
         assert_eq!(
             repo_a_fields.get("logical_path"),
-            Some(&serde_json::Value::String(path_string(
-                &fixture.root().join("repo-a")
-            )))
+            Some(&serde_json::Value::String(
+                crate::discovery::path_to_string(&fixture.root().join("repo-a"))
+            ))
         );
         assert_eq!(
             repo_a_fields.get("provider_source_path"),
@@ -896,13 +891,15 @@ path = "/source/repo-b"
         );
         assert_eq!(
             repo_a_fields.get("canonical_checkout_root"),
-            Some(&serde_json::Value::String(path_string(
-                &fixture
-                    .root()
-                    .join("repo-a")
-                    .canonicalize()
-                    .expect("canonical repo-a")
-            )))
+            Some(&serde_json::Value::String(
+                crate::discovery::path_to_string(
+                    &fixture
+                        .root()
+                        .join("repo-a")
+                        .canonicalize()
+                        .expect("canonical repo-a")
+                )
+            ))
         );
         assert_eq!(
             repo_a_fields.get("member_path_kind"),

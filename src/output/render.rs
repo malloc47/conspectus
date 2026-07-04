@@ -1279,12 +1279,8 @@ pub fn confidence_code_from_tag(tag: &str) -> &'static str {
 
 // (kept below for context; format_relative_age moved earlier in the file)
 
-pub fn current_epoch() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
+// H-HYG-001: re-export the canonical `current_epoch`.
+pub use crate::discovery::current_epoch;
 
 // -----------------------------------------------------------------------------
 // Tests

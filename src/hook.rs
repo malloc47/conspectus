@@ -132,13 +132,13 @@ pub fn default_root() -> Option<PathBuf> {
     })
 }
 
-pub fn current_epoch() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
-        .unwrap_or(0)
-}
+// H-HYG-001: `hook::current_epoch` re-exports the canonical
+// helper from `crate::discovery::current_epoch`. Pre-H-HYG-001
+// there were 5 verbatim copies scattered across the codebase;
+// this preserves the public call path
+// (`conspectus::hook::current_epoch()`) while collapsing the
+// body to a single definition.
+pub use crate::discovery::current_epoch;
 
 /// Build a hook sidecar record from a harness's SessionStart
 /// hook payload (H-EXT-005). Looks up the harness key against

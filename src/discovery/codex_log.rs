@@ -33,7 +33,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OpenFlags, params};
 
@@ -75,13 +74,11 @@ const ADAPTER_NAME: &str = crate::discovery::providers::CODEX_LOG;
 pub const DEFAULT_WINDOW_SECONDS: i64 = 24 * 60 * 60;
 const PROCESS_UUID_PREFIX: &str = "pid:";
 
-/// Convenience wall-clock for the production discovery path.
-pub fn current_epoch() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or_default())
-        .unwrap_or_default()
-}
+// H-HYG-001: re-export the canonical `current_epoch`. Kept as
+// a re-export at this module path because
+// `codex_log::current_epoch` is the identifier `apply_mutators`
+// invokes.
+pub use crate::discovery::current_epoch;
 
 /// Apply Codex log-derived current-session attribution to a snapshot.
 ///

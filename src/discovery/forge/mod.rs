@@ -23,7 +23,6 @@ use std::process::Command;
 use anyhow::{Context, Result};
 
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
-use crate::model::GraphSnapshot;
 
 pub mod github;
 pub mod gitlab;
@@ -100,16 +99,7 @@ impl DiscoveryProvider for ForgeDiscovery {
             fragments.push(adapter.discover(context)?);
         }
 
-        Ok(snapshot_fragment(merge_fragments(fragments)))
-    }
-}
-
-pub(crate) fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
-    GraphFragment {
-        nodes: snapshot.nodes,
-        candidate_links: snapshot.candidate_links,
-        diagnostics: snapshot.diagnostics,
-        node_provenance: snapshot.node_provenance,
+        Ok(GraphFragment::from(merge_fragments(fragments)))
     }
 }
 

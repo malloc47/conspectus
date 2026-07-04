@@ -114,7 +114,7 @@ impl DiscoveryProvider for AgentDeckDiscovery {
             let workspace_path = entry.path();
             fragments.push(self.discover_workspace(&workspace_path, &title_map)?);
         }
-        let mut fragment = snapshot_fragment(merge_fragments(fragments));
+        let mut fragment = GraphFragment::from(merge_fragments(fragments));
         crate::discovery::stamp_fragment(
             &mut fragment,
             crate::discovery::providers::AGENT_DECK,
@@ -238,7 +238,7 @@ impl AgentDeckDiscovery {
             let Some(probe) = self.git_probe.probe(&logical_path)? else {
                 continue;
             };
-            let repo_id = RepoId::new(path_string(&probe.common_dir));
+            let repo_id = RepoId::new(crate::discovery::path_to_string(&probe.common_dir));
             members.push(AgentDeckMember {
                 repo: NodeId::Repo(repo_id),
                 logical_path,
@@ -251,7 +251,7 @@ impl AgentDeckDiscovery {
             return Ok(GraphFragment::empty());
         }
 
-        let workspace_root = path_string(workspace_path);
+        let workspace_root = crate::discovery::path_to_string(workspace_path);
         let workspace_id = WorkspaceId::new(workspace_root.clone());
         let workspace_node = GraphNode::Workspace(WorkspaceNode {
             id: workspace_id.clone(),
@@ -273,7 +273,7 @@ impl AgentDeckDiscovery {
             ));
         }
         fragment.canonicalize();
-        Ok(snapshot_fragment(fragment))
+        Ok(GraphFragment::from(fragment))
     }
 }
 
@@ -300,7 +300,7 @@ fn workspace_repo_link(
     let relation = RelationKind::WorkspaceContainsRepo;
     let relation_name = relation.snake_case();
     let target = member.repo;
-    let logical_path = path_string(&member.logical_path);
+    let logical_path = crate::discovery::path_to_string(&member.logical_path);
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         "logical_path".to_string(),
@@ -308,7 +308,9 @@ fn workspace_repo_link(
     );
     fields.insert(
         "canonical_checkout_root".to_string(),
-        serde_json::Value::String(path_string(&member.canonical_checkout_root)),
+        serde_json::Value::String(crate::discovery::path_to_string(
+            &member.canonical_checkout_root,
+        )),
     );
     fields.insert(
         "member_path_kind".to_string(),
@@ -334,19 +336,6 @@ fn workspace_repo_link(
         },
         state: LinkState::Active,
     }
-}
-
-fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
-    GraphFragment {
-        nodes: snapshot.nodes,
-        candidate_links: snapshot.candidate_links,
-        diagnostics: snapshot.diagnostics,
-        node_provenance: snapshot.node_provenance,
-    }
-}
-
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
 }
 
 fn canonicalized_or_original(path: &Path) -> PathBuf {
@@ -479,7 +468,10 @@ mod tests {
         assert_eq!(workspaces.len(), 1);
         assert_eq!(workspaces[0].provider.as_deref(), Some(AGENT_DECK_PROVIDER));
         assert_eq!(workspaces[0].name.as_deref(), Some("abc"));
-        assert_eq!(workspaces[0].root, path_string(&workspace_id_dir));
+        assert_eq!(
+            workspaces[0].root,
+            crate::discovery::path_to_string(&workspace_id_dir)
+        );
 
         let membership: Vec<&GraphLink> = fragment
             .candidate_links

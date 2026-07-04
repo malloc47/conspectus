@@ -34,7 +34,7 @@ impl DiscoveryProvider for GenericWorkspaceDiscovery {
             fragments.push(self.discover_root(root)?);
         }
 
-        let mut fragment = snapshot_fragment(merge_fragments(fragments));
+        let mut fragment = GraphFragment::from(merge_fragments(fragments));
         crate::discovery::stamp_fragment(
             &mut fragment,
             crate::discovery::providers::GENERIC_WORKSPACE,
@@ -75,7 +75,9 @@ impl GenericWorkspaceDiscovery {
             };
 
             repo_members.push(WorkspaceMember {
-                repo: NodeId::Repo(crate::model::RepoId::new(path_string(&probe.common_dir))),
+                repo: NodeId::Repo(crate::model::RepoId::new(crate::discovery::path_to_string(
+                    &probe.common_dir,
+                ))),
                 logical_path: path,
                 canonical_checkout_root: canonicalized_or_original(&probe.worktree_root),
                 path_kind: if file_type.is_symlink() {
@@ -91,10 +93,10 @@ impl GenericWorkspaceDiscovery {
             return Ok(GraphFragment::empty());
         }
 
-        let workspace_id = WorkspaceId::new(path_string(root));
+        let workspace_id = WorkspaceId::new(crate::discovery::path_to_string(root));
         let workspace_node = GraphNode::Workspace(WorkspaceNode {
             id: workspace_id.clone(),
-            root: path_string(root),
+            root: crate::discovery::path_to_string(root),
             provider: None,
             name: root
                 .file_name()
@@ -117,7 +119,7 @@ impl GenericWorkspaceDiscovery {
         }
 
         fragment.canonicalize();
-        Ok(snapshot_fragment(fragment))
+        Ok(GraphFragment::from(fragment))
     }
 }
 
@@ -165,7 +167,7 @@ fn workspace_repo_link(
     let relation = RelationKind::WorkspaceContainsRepo;
     let relation_name = relation_name(&relation);
     let target = member.repo;
-    let logical_path = path_string(&member.logical_path);
+    let logical_path = crate::discovery::path_to_string(&member.logical_path);
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         "logical_path".to_string(),
@@ -173,7 +175,9 @@ fn workspace_repo_link(
     );
     fields.insert(
         "canonical_checkout_root".to_string(),
-        serde_json::Value::String(path_string(&member.canonical_checkout_root)),
+        serde_json::Value::String(crate::discovery::path_to_string(
+            &member.canonical_checkout_root,
+        )),
     );
     fields.insert(
         "member_path_kind".to_string(),
@@ -202,24 +206,11 @@ fn workspace_repo_link(
     }
 }
 
-fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
-    GraphFragment {
-        nodes: snapshot.nodes,
-        candidate_links: snapshot.candidate_links,
-        diagnostics: snapshot.diagnostics,
-        node_provenance: snapshot.node_provenance,
-    }
-}
-
 fn relation_name(relation: &RelationKind) -> String {
     serde_json::to_string(relation)
         .expect("relation serializes")
         .trim_matches('"')
         .to_string()
-}
-
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
 }
 
 fn canonicalized_or_original(path: &Path) -> PathBuf {
@@ -301,7 +292,9 @@ mod tests {
             .iter()
             .find(|link| {
                 link.source_metadata.fields.get("logical_path")
-                    == Some(&serde_json::Value::String(path_string(direct.path())))
+                    == Some(&serde_json::Value::String(
+                        crate::discovery::path_to_string(direct.path()),
+                    ))
             })
             .expect("direct member link")
             .source_metadata
@@ -313,18 +306,20 @@ mod tests {
         );
         assert_eq!(
             direct_fields.get("canonical_checkout_root"),
-            Some(&serde_json::Value::String(path_string(
-                &direct.path().canonicalize().expect("direct canonical path")
-            )))
+            Some(&serde_json::Value::String(
+                crate::discovery::path_to_string(
+                    &direct.path().canonicalize().expect("direct canonical path")
+                )
+            ))
         );
 
         let symlink_fields = links
             .iter()
             .find(|link| {
                 link.source_metadata.fields.get("logical_path")
-                    == Some(&serde_json::Value::String(path_string(
-                        &linked_logical_path,
-                    )))
+                    == Some(&serde_json::Value::String(
+                        crate::discovery::path_to_string(&linked_logical_path),
+                    ))
             })
             .expect("symlink member link")
             .source_metadata
@@ -336,12 +331,14 @@ mod tests {
         );
         assert_eq!(
             symlink_fields.get("canonical_checkout_root"),
-            Some(&serde_json::Value::String(path_string(
-                &linked_target
-                    .path()
-                    .canonicalize()
-                    .expect("linked canonical path")
-            )))
+            Some(&serde_json::Value::String(
+                crate::discovery::path_to_string(
+                    &linked_target
+                        .path()
+                        .canonicalize()
+                        .expect("linked canonical path")
+                )
+            ))
         );
     }
 
@@ -392,13 +389,13 @@ mod tests {
         assert!(
             links
                 .iter()
-                .any(|link| link.id.contains(&path_string(&first))),
+                .any(|link| link.id.contains(&crate::discovery::path_to_string(&first))),
             "first logical path should disambiguate a duplicate target: {links:#?}",
         );
         assert!(
             links
                 .iter()
-                .any(|link| link.id.contains(&path_string(&second))),
+                .any(|link| link.id.contains(&crate::discovery::path_to_string(&second))),
             "second logical path should disambiguate a duplicate target: {links:#?}",
         );
     }

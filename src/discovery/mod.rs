@@ -187,6 +187,30 @@ impl GraphFragment {
     }
 }
 
+/// H-HYG-001: consolidate 7 verbatim `snapshot_fragment`
+/// helpers scattered across discovery adapter modules. Every
+/// copy peeled the four struct fields off a `GraphSnapshot`;
+/// this `From` impl makes the conversion callable via `.into()`
+/// / `GraphFragment::from(snapshot)`.
+impl From<GraphSnapshot> for GraphFragment {
+    fn from(snapshot: GraphSnapshot) -> Self {
+        GraphFragment {
+            nodes: snapshot.nodes,
+            candidate_links: snapshot.candidate_links,
+            diagnostics: snapshot.diagnostics,
+            node_provenance: snapshot.node_provenance,
+        }
+    }
+}
+
+/// H-HYG-001: consolidate 5 verbatim `path_string` helpers
+/// scattered across discovery adapters + dev_scenarios. Every
+/// copy did `path.to_string_lossy().to_string()`; this shared
+/// helper is the single canonical version.
+pub fn path_to_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 pub trait DiscoveryProvider {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment>;
 }
@@ -404,7 +428,7 @@ pub fn discover_local_warm_with(
 
     let mut fresh = providers.discover_skipping(&context, &gate.fresh)?;
     let cwd_git_fragment = observed_cwd_git_fragment(&fresh);
-    fresh = merge_fragments([snapshot_fragment(fresh), cwd_git_fragment]);
+    fresh = merge_fragments([GraphFragment::from(fresh), cwd_git_fragment]);
 
     // Phase-2 backstop merge with the evicted prior. The fresh
     // fragment wins on every collision; the prior fills in
@@ -860,7 +884,7 @@ pub fn merge_with_prior(fresh: GraphSnapshot, prior: GraphSnapshot) -> GraphSnap
     // re-resolves and reloads pins/aliases from the live config
     // loader after this helper returns. Keeping that off the
     // warm-start path avoids round-tripping stale derived state.
-    merge_fragments([snapshot_fragment(fresh), snapshot_fragment(prior)])
+    merge_fragments([GraphFragment::from(fresh), GraphFragment::from(prior)])
 }
 
 fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
@@ -904,7 +928,7 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
         }
     }
 
-    let mut fragment = snapshot_fragment(merge_fragments(fragments));
+    let mut fragment = GraphFragment::from(merge_fragments(fragments));
     fragment.diagnostics.extend(diagnostics);
     // Tag observed-cwd-derived nodes/links as a distinct provider so
     // partial eviction (P7-005) can refresh them without touching the
@@ -913,15 +937,6 @@ fn observed_cwd_git_fragment(snapshot: &GraphSnapshot) -> GraphFragment {
     // through both paths.
     stamp_fragment(&mut fragment, providers::GIT_CWD, current_epoch());
     fragment
-}
-
-fn snapshot_fragment(snapshot: GraphSnapshot) -> GraphFragment {
-    GraphFragment {
-        nodes: snapshot.nodes,
-        candidate_links: snapshot.candidate_links,
-        diagnostics: snapshot.diagnostics,
-        node_provenance: snapshot.node_provenance,
-    }
 }
 
 fn normalize_scan_root(root: &Path) -> Result<PathBuf> {

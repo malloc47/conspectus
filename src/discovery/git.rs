@@ -170,7 +170,7 @@ impl DiscoveryProvider for GitDiscovery {
             }
         }
 
-        let mut fragment = snapshot_fragment(merge_fragments(fragments));
+        let mut fragment = GraphFragment::from(merge_fragments(fragments));
         crate::discovery::stamp_fragment(&mut fragment, crate::discovery::providers::GIT, epoch);
         Ok(fragment)
     }
@@ -194,8 +194,11 @@ impl GitProbeResult {
 }
 
 pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
-    let repo_id = RepoId::new(path_string(&probe.common_dir));
-    let checkout_id = CheckoutId::new(repo_id.clone(), path_string(&probe.worktree_root));
+    let repo_id = RepoId::new(crate::discovery::path_to_string(&probe.common_dir));
+    let checkout_id = CheckoutId::new(
+        repo_id.clone(),
+        crate::discovery::path_to_string(&probe.worktree_root),
+    );
     let repo_node = repo_node(repo_id.clone(), probe);
     let checkout_node = checkout_node(checkout_id.clone(), probe);
     let mut nodes = vec![
@@ -243,7 +246,8 @@ pub fn fragment_from_probe(probe: &GitProbeResult) -> GraphFragment {
 
 fn repo_node(repo_id: RepoId, probe: &GitProbeResult) -> RepoNode {
     let mut repo = RepoNode::new(repo_id);
-    repo.source_paths.push(path_string(&probe.worktree_root));
+    repo.source_paths
+        .push(crate::discovery::path_to_string(&probe.worktree_root));
     repo.remotes = probe
         .remotes
         .iter()
@@ -255,10 +259,13 @@ fn repo_node(repo_id: RepoId, probe: &GitProbeResult) -> RepoNode {
 fn checkout_node(checkout_id: CheckoutId, probe: &GitProbeResult) -> CheckoutNode {
     CheckoutNode {
         id: checkout_id,
-        root: path_string(&probe.worktree_root),
-        git_dir: Some(path_string(&probe.git_dir)),
+        root: crate::discovery::path_to_string(&probe.worktree_root),
+        git_dir: Some(crate::discovery::path_to_string(&probe.git_dir)),
         current_branch: probe.branch_ref.as_ref().map(|branch| {
-            BranchId::new(RepoId::new(path_string(&probe.common_dir)), branch.clone())
+            BranchId::new(
+                RepoId::new(crate::discovery::path_to_string(&probe.common_dir)),
+                branch.clone(),
+            )
         }),
     }
 }
@@ -302,19 +309,6 @@ fn relation_name(relation: &RelationKind) -> String {
         .expect("relation serializes")
         .trim_matches('"')
         .to_string()
-}
-
-fn snapshot_fragment(snapshot: crate::model::GraphSnapshot) -> GraphFragment {
-    GraphFragment {
-        nodes: snapshot.nodes,
-        candidate_links: snapshot.candidate_links,
-        diagnostics: snapshot.diagnostics,
-        node_provenance: snapshot.node_provenance,
-    }
-}
-
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

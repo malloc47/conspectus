@@ -23,7 +23,7 @@ use crate::discovery::harness::fixtures::{
 };
 use crate::discovery::harness::opencode::HARNESS_KEY as OPENCODE_HARNESS_KEY;
 use crate::discovery::tmux::FakeTmux;
-use crate::discovery::{LocalDiscoveryConfig, discover_local_with};
+use crate::discovery::{LocalDiscoveryConfig, discover_local_with, path_to_string};
 use crate::filter::RowFilter;
 use crate::hook::{HookRecord, HookStore, HookTmuxRecord, SCHEMA_VERSION};
 use crate::model::GraphSnapshot;
@@ -278,7 +278,7 @@ impl ScenarioWorld {
         self.harness
             .write_codex_session(
                 &CodexSessionRecord::new(session_key)
-                    .with_cwd(path_string(cwd))
+                    .with_cwd(path_to_string(cwd))
                     .with_timestamp("2026-01-02T03:04:05Z"),
             )
             .map(|_| ())
@@ -287,7 +287,7 @@ impl ScenarioWorld {
     fn write_claude_code_session(&self, session_key: &str, cwd: &Path) -> Result<()> {
         self.harness
             .write_claude_code_session(
-                &ClaudeCodeSessionRecord::new(session_key, path_string(cwd))
+                &ClaudeCodeSessionRecord::new(session_key, path_to_string(cwd))
                     .with_timestamp("2026-01-02T03:04:05Z"),
             )
             .map(|_| ())
@@ -350,7 +350,7 @@ impl ScenarioWorld {
         fs::write(seed.join("README.md"), "showcase bare\n")?;
         git(&seed, &["add", "README.md"])?;
         git(&seed, &["commit", "-m", "initial"])?;
-        git(&seed, &["remote", "add", "bare", &path_string(&bare)])?;
+        git(&seed, &["remote", "add", "bare", &path_to_string(&bare)])?;
         git(&seed, &["push", "bare", "main"])?;
         fs::remove_dir_all(&seed)?;
 
@@ -363,7 +363,7 @@ impl ScenarioWorld {
                 "add",
                 "-b",
                 branch,
-                &path_string(&worktree),
+                &path_to_string(&worktree),
                 "main",
             ],
         )?;
@@ -433,7 +433,7 @@ impl ScenarioWorld {
         assistant_message: Option<&str>,
     ) -> Result<()> {
         let mut record = OpenCodeSessionRecord::new(session_id)
-            .with_directory(path_string(cwd))
+            .with_directory(path_to_string(cwd))
             .with_title(title)
             .with_created(epoch_ms)
             .with_updated(epoch_ms + 1000);
@@ -502,7 +502,7 @@ impl TmuxReplayRow {
     }
 
     fn with_cwd(mut self, cwd: &Path) -> Self {
-        self.cwd = Some(path_string(cwd));
+        self.cwd = Some(path_to_string(cwd));
         self
     }
 
@@ -520,7 +520,7 @@ impl TmuxReplayRow {
     ) -> Self {
         self.active_pane_command = Some(command.into());
         self.active_pane_pid = Some(pid);
-        self.active_pane_current_path = Some(path_string(cwd));
+        self.active_pane_current_path = Some(path_to_string(cwd));
         self.active_pane_start_command = Some(start_command.into());
         self
     }
@@ -601,7 +601,7 @@ fn build_hook_supersession(world: &mut ScenarioWorld) -> Result<()> {
             schema_version: SCHEMA_VERSION,
             harness_key: "claude-code".to_string(),
             session_key: session_key.to_string(),
-            cwd: Some(path_string(&work)),
+            cwd: Some(path_to_string(&work)),
             pid: Some(123),
             ppid: Some(456),
             tmux: Some(HookTmuxRecord {
@@ -682,7 +682,7 @@ fn build_process_cardinality(world: &mut ScenarioWorld) -> Result<()> {
             schema_version: SCHEMA_VERSION,
             harness_key: "claude-code".to_string(),
             session_key: session_key.to_string(),
-            cwd: Some(path_string(&work)),
+            cwd: Some(path_to_string(&work)),
             pid: Some(pid),
             ppid: Some(ppid),
             tmux: Some(HookTmuxRecord {
@@ -874,8 +874,8 @@ path = "{}"
 name = "repo-b"
 path = "{}"
 "#,
-            path_string(&repo_a),
-            path_string(&repo_b),
+            path_to_string(&repo_a),
+            path_to_string(&repo_b),
         ),
     )?;
     world.write_fork_index_at(
@@ -938,7 +938,7 @@ fn add_agent_sessions_to_showcase(
     // illustrate (ADR 0070).
     // claude-code session in the normal project repo (1 hour ago).
     world.harness.write_claude_code_session(
-        &ClaudeCodeSessionRecord::new("showcase-claude", path_string(project))
+        &ClaudeCodeSessionRecord::new("showcase-claude", path_to_string(project))
             .with_summary("claude-code in project repo")
             .with_assistant_message("Showcase: claude-code in project repo")
             .with_timestamp("2026-06-14T15:00:00Z"),
@@ -949,7 +949,7 @@ fn add_agent_sessions_to_showcase(
     // checkout) so the agent-deck workspace appears in the
     // Sessions / Graph view alongside atelier.
     world.harness.write_claude_code_session(
-        &ClaudeCodeSessionRecord::new("showcase-deck-launcher", path_string(deck_dir))
+        &ClaudeCodeSessionRecord::new("showcase-deck-launcher", path_to_string(deck_dir))
             .with_summary("agent-deck composite launcher")
             .with_assistant_message("Showcase: agent-deck composite launcher")
             .with_timestamp("2026-06-14T15:30:00Z"),
@@ -959,13 +959,13 @@ fn add_agent_sessions_to_showcase(
     // the fork index above. Spread across two days.
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-codex-parent")
-            .with_cwd(path_string(&atelier.member_repo_a))
+            .with_cwd(path_to_string(&atelier.member_repo_a))
             .with_assistant_message("Showcase: codex parent in atelier fork lineage")
             .with_timestamp("2026-06-12T10:00:00Z"),
     )?;
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-codex-child")
-            .with_cwd(path_string(&atelier.fork_worktree))
+            .with_cwd(path_to_string(&atelier.fork_worktree))
             .with_assistant_message("Showcase: codex child forked from parent")
             .with_timestamp("2026-06-13T11:00:00Z")
             .with_forked_from("showcase-codex-parent"),
@@ -973,7 +973,7 @@ fn add_agent_sessions_to_showcase(
     // codex session in the bare repo's worktree (yesterday).
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-bare-codex")
-            .with_cwd(path_string(bare_worktree))
+            .with_cwd(path_to_string(bare_worktree))
             .with_assistant_message("Showcase: codex resume via /proc fd evidence")
             .with_timestamp("2026-06-13T14:30:00Z"),
     )?;
@@ -992,7 +992,7 @@ fn add_agent_sessions_to_showcase(
     let orphan_dir = world.mkdir("orphan")?;
     world.harness.write_codex_session(
         &CodexSessionRecord::new("showcase-orphan")
-            .with_cwd(path_string(&orphan_dir))
+            .with_cwd(path_to_string(&orphan_dir))
             .with_assistant_message("Showcase: orphan session with no checkout")
             .with_timestamp("2026-06-08T09:00:00Z"),
     )?;
@@ -1021,13 +1021,13 @@ fn add_mux_layout_to_showcase(
             .with_active_pane("claude", 1102, project, "claude"),
     );
     world.harness.write_claude_code_session(
-        &ClaudeCodeSessionRecord::new("showcase-claude-ambig-a", path_string(project))
+        &ClaudeCodeSessionRecord::new("showcase-claude-ambig-a", path_to_string(project))
             .with_summary("ambiguous mux candidate A")
             .with_assistant_message("Showcase: ambiguous mux candidate A")
             .with_timestamp("2026-06-14T15:40:00Z"),
     )?;
     world.harness.write_claude_code_session(
-        &ClaudeCodeSessionRecord::new("showcase-claude-ambig-b", path_string(project))
+        &ClaudeCodeSessionRecord::new("showcase-claude-ambig-b", path_to_string(project))
             .with_summary("ambiguous mux candidate B")
             .with_assistant_message("Showcase: ambiguous mux candidate B")
             .with_timestamp("2026-06-14T15:42:00Z"),
@@ -1051,7 +1051,7 @@ fn add_mux_layout_to_showcase(
                 "codex resume an-older-session-id",
             ),
     );
-    world.add_fd_paths(1103, [path_string(&bare_transcript)]);
+    world.add_fd_paths(1103, [path_to_string(&bare_transcript)]);
     // Agent-deck-style mux launched from the workspace composite
     // dir (30 min ago).
     world.add_tmux_row(
@@ -1087,7 +1087,7 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
     // mirrors the hook-supersession scenario shape, anchored a few
     // minutes ago.
     world.harness.write_claude_code_session(
-        &ClaudeCodeSessionRecord::new("showcase-hook-current", path_string(project))
+        &ClaudeCodeSessionRecord::new("showcase-hook-current", path_to_string(project))
             .with_summary("hook-supersession current session")
             .with_assistant_message("Showcase: hook-supersession current session")
             .with_timestamp("2026-06-14T15:55:00Z"),
@@ -1096,7 +1096,7 @@ fn add_hook_supersession_to_showcase(world: &mut ScenarioWorld, project: &Path) 
         schema_version: SCHEMA_VERSION,
         harness_key: "claude-code".to_string(),
         session_key: "showcase-hook-current".to_string(),
-        cwd: Some(path_string(project)),
+        cwd: Some(path_to_string(project)),
         pid: Some(1101),
         ppid: Some(1100),
         tmux: Some(HookTmuxRecord {
@@ -1138,10 +1138,6 @@ fn git(root: &Path, args: &[&str]) -> Result<()> {
         );
     }
     Ok(())
-}
-
-fn path_string(path: &Path) -> String {
-    path.to_string_lossy().to_string()
 }
 
 #[cfg(test)]
