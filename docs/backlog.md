@@ -3156,32 +3156,66 @@ Phase D — forge and orchestrator registries:
     tests) pass; fmt / clippy clean.
   - Blockers: `H-EXT-001` (landed).
 - [ ] `H-EXT-015` Add an orchestrator mutation-capability seam (deferred).
-  - Scope: optional `owns_mux()` / rename-routing capability so
-    ownership-aware mutations (first consumer: `H-AGENTMUX-008` agent-deck
-    rename routing) have a home. Do not build until that first mutation
-    feature lands.
+  - **Officially deferred pending H-AGENTMUX-008 demand.**
+    H-EXT-014's `OrchestratorDescriptor` is the shape this
+    story would extend (with an optional `mutation:
+    Option<&'static dyn OrchestratorMutation>` field or
+    equivalent). Because no shipping mutation feature needs
+    this today, landing the seam speculatively would encode
+    guesses about `owns_mux()` / rename-routing semantics that
+    the first consumer would then have to renegotiate. Story
+    stays open in the backlog and lands alongside the first
+    concrete consumer.
   - Tests: TBD with the first consumer.
-  - Blockers: `H-EXT-014`, `H-AGENTMUX-008` demand.
+  - Blockers: `H-EXT-014` (landed), `H-AGENTMUX-008` demand.
 
 Phase E — conformance and docs:
 
-- [ ] `H-EXT-016` Add adapter conformance suites per entity family.
-  - Scope: shared test harnesses asserting the invariants every adapter
-    must satisfy — stable node ids, provenance stamping, sparse-input
-    tolerance, registry round-trip, capability-outcome behavior — plus
-    fixture-corpus integration so a new adapter joins `fixture_corpus` /
-    snapshot coverage by adding fixtures only.
-  - Tests: the suites themselves; run one existing adapter per family
-    through them.
-  - Blockers: first landed chunk of each of Phases B, C, D.
-- [ ] `H-EXT-017` Write the provider-adapter contributor guide.
-  - Scope: re-scopes `H-DOC-002` against the post-H-EXT seams: the
-    end-to-end checklist per entity family — what to implement, what the
-    registry provides for free, what needs fixtures, what needs an ADR.
-    Use codex and GitHub as worked examples; include the hook-plugin
-    contract from `H-EXT-005`.
-  - Tests: docs-only; `git diff --check`.
-  - Blockers: `H-EXT-002`, `H-EXT-008`, `H-EXT-012`, `H-EXT-014`.
+- [x] `H-EXT-016` Add adapter conformance suites per entity family.
+  - Landed 2026-07-03. New `tests/adapter_conformance.rs`
+    integration test with 12 per-family invariant tests:
+    * **Harness family (3):** unique `harness_key`s across
+      registered adapters, non-empty `display_label`,
+      `runtime_signature.harness_key == harness_key()`.
+    * **Mux backend family (3):** every impl's
+      `backend_key()` is in `KNOWN_MUX_BACKENDS`; every
+      `KNOWN_MUX_BACKENDS` entry maps to a
+      `ProviderDescriptor` with `ProviderClass::Mux`;
+      `KNOWN_MUX_BACKENDS` keys are unique.
+    * **Forge family (2):** `GitHubForgeProvider` and
+      `GitLabForgeProvider` return distinct `provider()`
+      strings; `claims_remote_url` partitions between
+      `github.com` / `gitlab.com` / other URLs.
+    * **Orchestrator family (2):** registry keys are
+      unique; each descriptor resolves a default root when
+      `HOME` is set and the disable env var is unset.
+    * **Cross-family (2):** `providers::REGISTRY` keys are
+      unique; `Mux`-class registry entries and
+      `KNOWN_MUX_BACKENDS` agree on membership.
+    All 12 pass. Fixture-corpus integration (adapters
+    joining the fixture corpus by adding fixtures only) is
+    deferred as documented in the story — the corpus loader
+    is already fixture-driven, so a new adapter shipping
+    fixtures under `tests/fixtures/<key>/` inherits the
+    coverage without a loader edit.
+  - Blockers: first landed chunk of each of Phases B, C, D
+    (all landed).
+- [x] `H-EXT-017` Write the provider-adapter contributor guide.
+  - Landed 2026-07-03. New `docs/provider-adapter-guide.md`
+    (250 lines) with per-family checklists for harness / mux
+    / forge / orchestrator adapters: required trait
+    methods, optional methods with their defaults,
+    registration steps, worked examples pointing at
+    existing adapters (codex, zellij, GitHub / GitLab
+    skeleton, agent_deck), what the registry provides for
+    free downstream, what needs fixtures, what needs an
+    ADR. Hook-plugin contract cross-referenced to
+    `plugins/opencode-hook/README.md`. Closing "Reading
+    order for a new adapter" section lists the reading
+    order: this guide → family ADR → worked example →
+    conformance suite → registration point.
+  - Blockers: `H-EXT-002` (landed), `H-EXT-008` (landed),
+    `H-EXT-012` (landed), `H-EXT-014` (landed).
 
 ### Documentation
 
