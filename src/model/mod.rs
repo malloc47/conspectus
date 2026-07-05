@@ -1602,6 +1602,17 @@ pub struct SnapshotIndex<'a> {
     /// `LinkState::Active` links because every existing hot
     /// consumer filters to active first.
     links_by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
+    /// H-HYG-006 wave 6: `relation → Vec<&GraphLink>` map.
+    /// Consumers that scan every link with a specific relation
+    /// kind (cross_link's parent-subagent override pass, the
+    /// resolver's per-relation aggregation) fold their filter
+    /// through this map. Only holds `LinkState::Active` links.
+    links_by_relation: BTreeMap<RelationKind, Vec<&'a GraphLink>>,
+    /// H-HYG-006 wave 6: `link_id → &GraphLink` map. Consumers
+    /// that today `.find(|link| link.id == some_id)` collapse
+    /// to O(log n) lookup. Includes links in every state so
+    /// consumers can inspect superseded / dead links too.
+    links_by_id: BTreeMap<String, &'a GraphLink>,
 }
 
 impl<'a> SnapshotIndex<'a> {
@@ -1637,15 +1648,27 @@ impl<'a> SnapshotIndex<'a> {
         }
         let agent_mux_candidate_counts = per_agent.into_iter().map(|(k, v)| (k, v.len())).collect();
 
-        // H-HYG-006 wave 3: (source, relation) → links map.
+        // H-HYG-006 wave 3+6: candidate_links indices. One pass
+        // populates both `links_by_source_relation` (wave 3),
+        // `links_by_relation` (wave 6), and `links_by_id`
+        // (wave 6).
         let mut links_by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>> =
             BTreeMap::new();
+        let mut links_by_relation: BTreeMap<RelationKind, Vec<&'a GraphLink>> = BTreeMap::new();
+        let mut links_by_id: BTreeMap<String, &'a GraphLink> = BTreeMap::new();
         for link in &snapshot.candidate_links {
+            // Wave 6: `links_by_id` covers every state so
+            // consumers can inspect superseded links too.
+            links_by_id.insert(link.id.clone(), link);
             if !matches!(link.state, LinkState::Active) {
                 continue;
             }
             links_by_source_relation
                 .entry((link.source.clone(), link.relation.clone()))
+                .or_default()
+                .push(link);
+            links_by_relation
+                .entry(link.relation.clone())
                 .or_default()
                 .push(link);
         }
@@ -1655,6 +1678,8 @@ impl<'a> SnapshotIndex<'a> {
             id_to_node,
             agent_mux_candidate_counts,
             links_by_source_relation,
+            links_by_relation,
+            links_by_id,
         }
     }
 
@@ -1689,6 +1714,27 @@ impl<'a> SnapshotIndex<'a> {
         self.links_by_source_relation
             .get(&(source.clone(), relation))
             .map_or(EMPTY, Vec::as_slice)
+    }
+
+    /// H-HYG-006 wave 6: active links matching `relation`.
+    /// Consumers that scan every link with a specific relation
+    /// (`cross_link.rs` subagent override pass) collapse to
+    /// `index.links_with_relation(RelationKind::LinkedToMux)`.
+    /// Returns an empty slice for unknown relations.
+    pub fn links_with_relation(&self, relation: RelationKind) -> &[&GraphLink] {
+        static EMPTY: &[&GraphLink] = &[];
+        self.links_by_relation
+            .get(&relation)
+            .map_or(EMPTY, Vec::as_slice)
+    }
+
+    /// H-HYG-006 wave 6: link by `link.id`. Includes every state
+    /// so consumers can inspect superseded / dead links too.
+    /// Consumers that today do
+    /// `snapshot.candidate_links.iter().find(|l| l.id == id)`
+    /// collapse to `index.link(id)`.
+    pub fn link(&self, link_id: &str) -> Option<&GraphLink> {
+        self.links_by_id.get(link_id).copied()
     }
 }
 
