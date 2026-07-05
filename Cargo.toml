@@ -16,8 +16,7 @@
 # via per-module `#![allow]` where it's the intentional shape.
 [lints.clippy]
 redundant_clone = "deny"
-# Deferred to H-HYG-005 follow-ups: match_same_arms 36.
-# Landed:
+# Landed waves:
 # - wave 2: match_wildcard_for_single_variants — every
 #   `_ => …` / `other => …` arm over a two-variant enum
 #   (LinkEndpoint::Node vs LinkEndpoint::Unresolved) got its
@@ -30,6 +29,18 @@ redundant_clone = "deny"
 #   `.unwrap_or_else(g)` collapsed to `map_or(a, f)` /
 #   `map_or_else(g, f)`; `.map(f).unwrap_or(false)` cases
 #   collapsed to `is_some_and(f)`.
+# Kept as `allow` on purpose:
+# - `match_same_arms` — the 36 current warnings are a
+#   documentation shape (per-tuple lookup tables in
+#   `tui/detail.rs`, `tui/explorer.rs`, per-variant match
+#   arms in `discovery/pins.rs`, etc.) where one arm per
+#   input case is more readable than a merged
+#   `A | B | C =>` pattern. The audit called this out
+#   as a judgment-call lint; enforcing it globally would
+#   push these into a merged form that loses the row-by-
+#   row readability. Leave as allow; keep per-site `|`
+#   collapses as drive-bys when the arms genuinely
+#   document a single logical case.
 match_same_arms = "allow"
 match_wildcard_for_single_variants = "deny"
 uninlined_format_args = "deny"
