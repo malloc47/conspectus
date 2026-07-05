@@ -77,7 +77,9 @@ pub fn build_fork_rows_from_snapshot(
         None
     };
     let candidate_counts = if filter_active {
-        Some(collect_agent_mux_candidate_counts(snapshot))
+        Some(crate::tui::rows::collect_agent_mux_candidate_counts(
+            snapshot,
+        ))
     } else {
         None
     };
@@ -280,33 +282,6 @@ fn collect_resolved_child_agents_per_fork(
         children.sort_by(|a, b| a.node_id.cmp(&b.node_id));
     }
     per_fork
-}
-
-/// Per-agent count of distinct active `linked_to_mux` mux
-/// targets. Links with `LinkEndpoint::Unresolved` targets are
-/// excluded because only concrete node targets can contribute to
-/// the count.
-fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
-    let mut per_agent: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
-    for link in &snapshot.candidate_links {
-        if !matches!(link.state, LinkState::Active) {
-            continue;
-        }
-        if !matches!(link.relation, RelationKind::LinkedToMux) {
-            continue;
-        }
-        let NodeId::AgentSession(_) = &link.source else {
-            continue;
-        };
-        let LinkEndpoint::Node { id: target_id } = &link.target else {
-            continue;
-        };
-        per_agent
-            .entry(link.source.to_string())
-            .or_default()
-            .insert(target_id.to_string());
-    }
-    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }
 
 /// Per-fork count of active `child_session` candidates targeting

@@ -3,15 +3,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
+use crate::filter::RowFilter;
 use crate::model::{
-    AgentSessionId, AgentSessionNode, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
-    MuxSessionId, MuxSessionNode, NodeId, PinBinding, RelationKind,
+    GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionId, MuxSessionNode, NodeId,
+    PinBinding, RelationKind,
 };
 use crate::output::render::{node_short_id_from_display, unique_prefix_len};
 use crate::tui::rows::{
-    AgentSessionRow, MuxIndicator, MuxSessionRow, Row, RowId, RowKind, RowTree, ViewLabel,
-    format_recency, harness_label, shorten_home,
+    MuxSessionRow, Row, RowId, RowKind, RowTree, ViewLabel, format_recency, shorten_home,
 };
 
 pub struct UnionBuildInputs<'a> {
@@ -22,7 +21,7 @@ pub struct UnionBuildInputs<'a> {
 
 #[derive(Clone, Debug)]
 enum UnionData<'a> {
-    Agent(AgentData<'a>),
+    Agent(super::AgentData<'a>),
     Mux(MuxData<'a>),
 }
 
@@ -33,14 +32,6 @@ impl UnionData<'_> {
             Self::Mux(row) => &row.node_id,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-struct AgentData<'a> {
-    node_id: String,
-    id: AgentSessionId,
-    node: &'a AgentSessionNode,
-    alias: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -65,7 +56,7 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
     let now: Option<i64> = None;
 
     let rows = collect_union_rows(snapshot);
-    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    let candidate_counts = super::collect_agent_mux_candidate_counts(snapshot);
     let pin_id_by_bound_mux = collect_pin_id_by_bound_mux(snapshot);
 
     let full_ids: Vec<String> = rows
@@ -87,11 +78,12 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
     for row in &rows {
         match row {
             UnionData::Agent(agent) => {
-                if !session_matches_filter(agent, &candidate_counts, now, &inputs.filter) {
+                if !super::session_matches_filter(agent, &candidate_counts, now, &inputs.filter) {
                     continue;
                 }
-                tree.rows.push(agent_row(
+                tree.rows.push(super::agent_row(
                     agent,
+                    0, // H-HYG-002: union rows always sit at depth 0.
                     &candidate_counts,
                     short_ids
                         .get(agent.node_id.as_str())
@@ -135,64 +127,6 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
     tree
 }
 
-fn agent_row(
-    agent: &AgentData<'_>,
-    candidate_counts: &HashMap<String, usize>,
-    short_id: String,
-    home: Option<&Path>,
-    now: Option<i64>,
-) -> Row {
-    let node_id = NodeId::AgentSession(agent.id.clone());
-    let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
-    Row {
-        id: RowId::AgentSession(node_id.clone()),
-        depth: 0,
-        expandable: false,
-        kind: RowKind::AgentSession(AgentSessionRow {
-            session: agent.id.clone(),
-            short_id,
-            harness_label: harness_label(&agent.id.harness_key),
-            cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
-            project_display: None,
-            recency: format_recency(now, agent.node.last_active_epoch),
-            activity_epoch: agent.node.last_active_epoch,
-            mux_state: mux_indicator(candidate_count),
-            preview: agent.node.last_message_preview.clone(),
-            title: agent.node.title.clone(),
-            alias: agent.alias.clone(),
-            title_disambiguates: false,
-            primary_node: node_id,
-            pin_id: None,
-        }),
-    }
-}
-
-fn mux_indicator(candidate_count: usize) -> MuxIndicator {
-    match candidate_count {
-        0 => MuxIndicator::Unmuxed,
-        1 => MuxIndicator::Attached,
-        n => MuxIndicator::Ambiguous { candidate_count: n },
-    }
-}
-
-fn session_matches_filter(
-    agent: &AgentData<'_>,
-    candidate_counts: &HashMap<String, usize>,
-    now: Option<i64>,
-    filter: &RowFilter,
-) -> bool {
-    if !filter.has_narrowing_predicates() {
-        return true;
-    }
-    let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
-    filter.matches_session(&SessionMatchInputs {
-        harness_key: &agent.id.harness_key,
-        now_epoch: now,
-        last_active_epoch: agent.node.last_active_epoch,
-        mux_state: MuxStateKey::from_candidate_count(candidate_count),
-    })
-}
-
 // -----------------------------------------------------------------------------
 // In-memory collectors
 // -----------------------------------------------------------------------------
@@ -209,7 +143,7 @@ fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionData<'_>> {
                     .aliases
                     .get(&NodeId::AgentSession(id.clone()))
                     .map(|s| s.to_string());
-                rows.push(UnionData::Agent(AgentData {
+                rows.push(UnionData::Agent(super::AgentData {
                     node_id: NodeId::AgentSession(id.clone()).to_string(),
                     id,
                     node: agent,
@@ -297,29 +231,6 @@ fn collect_pin_id_by_bound_mux(snapshot: &GraphSnapshot) -> HashMap<String, Stri
 
 fn strip_backend_prefix(pin_mux_native_id: &str) -> Option<&str> {
     pin_mux_native_id.strip_prefix("tmux:")
-}
-
-fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
-    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
-    for link in &snapshot.candidate_links {
-        if !matches!(link.state, LinkState::Active) {
-            continue;
-        }
-        if !matches!(link.relation, RelationKind::LinkedToMux) {
-            continue;
-        }
-        let NodeId::AgentSession(_) = &link.source else {
-            continue;
-        };
-        let LinkEndpoint::Node { id: target_id } = &link.target else {
-            continue;
-        };
-        per_agent
-            .entry(link.source.to_string())
-            .or_default()
-            .insert(target_id.to_string());
-    }
-    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }
 
 #[cfg(test)]

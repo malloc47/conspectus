@@ -45,7 +45,7 @@ pub fn build_pr_rows_from_snapshot(
     let preferred_branch = collect_preferred_branch_per_pr(snapshot);
     let checkout_roots_per_branch = collect_checkout_roots_per_branch(snapshot);
     let agents = collect_agents_with_cwd(snapshot);
-    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    let candidate_counts = crate::tui::rows::collect_agent_mux_candidate_counts(snapshot);
 
     let body_full_ids: Vec<String> = prs
         .iter()
@@ -296,27 +296,4 @@ fn collect_agents_with_cwd(snapshot: &GraphSnapshot) -> Vec<AgentRow<'_>> {
             .then_with(|| a.node.id.session_key.cmp(&b.node.id.session_key))
     });
     rows
-}
-
-fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
-    let mut per_agent: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
-    for link in &snapshot.candidate_links {
-        if !matches!(link.state, LinkState::Active) {
-            continue;
-        }
-        if !matches!(link.relation, RelationKind::LinkedToMux) {
-            continue;
-        }
-        let NodeId::AgentSession(_) = &link.source else {
-            continue;
-        };
-        let LinkEndpoint::Node { id: target_id } = &link.target else {
-            continue;
-        };
-        per_agent
-            .entry(link.source.to_string())
-            .or_default()
-            .insert(target_id.to_string());
-    }
-    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
 }

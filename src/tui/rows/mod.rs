@@ -483,6 +483,128 @@ pub enum RecencyBucket {
     Cold,
 }
 
+// H-HYG-002: shared row-assembly helpers. Pre-H-HYG-002 the
+// same `agent_row` / `mux_indicator` / `session_matches_filter`
+// / `collect_agent_mux_candidate_counts` bodies were duplicated
+// across `rows/{union,prs,forks}.rs` (plus a near-twin in
+// `rows/mux.rs`) and `output/{prs,forks}.rs`. They live here now
+// as `pub(crate)` helpers the per-view builders share.
+//
+// `rows/mux.rs::agent_row` stays put because it uses a different
+// input struct (`AttachedAgent`) — near-twin, not identical.
+
+/// Snapshot of an `AgentSessionNode` prepared for the sessions
+/// / union / prs / forks row builders. The `node_id` field is
+/// the stringified `NodeId::AgentSession(agent.id)` used to
+/// index the `candidate_counts` map.
+#[derive(Clone, Debug)]
+pub(crate) struct AgentData<'a> {
+    pub node_id: String,
+    pub id: crate::model::AgentSessionId,
+    pub node: &'a crate::model::AgentSessionNode,
+    pub alias: Option<String>,
+}
+
+/// Build an `AgentSession` row for a single `AgentData`. Every
+/// non-mux row-tree builder consumes this — the mux builder
+/// uses its own near-twin (`rows/mux.rs::agent_row`) because
+/// it works over a different input struct.
+pub(crate) fn agent_row(
+    agent: &AgentData<'_>,
+    depth: u8,
+    candidate_counts: &std::collections::HashMap<String, usize>,
+    short_id: String,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Row {
+    let node_id = NodeId::AgentSession(agent.id.clone());
+    let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
+    Row {
+        id: RowId::AgentSession(node_id.clone()),
+        depth,
+        expandable: false,
+        kind: RowKind::AgentSession(AgentSessionRow {
+            session: agent.id.clone(),
+            short_id,
+            pin_id: None,
+            harness_label: harness_label(&agent.id.harness_key),
+            cwd_display: agent.node.cwd.as_deref().map(|cwd| shorten_home(cwd, home)),
+            project_display: None,
+            recency: format_recency(now, agent.node.last_active_epoch),
+            activity_epoch: agent.node.last_active_epoch,
+            mux_state: mux_indicator(candidate_count),
+            preview: agent.node.last_message_preview.clone(),
+            title: agent.node.title.clone(),
+            alias: agent.alias.clone(),
+            title_disambiguates: false,
+            primary_node: node_id,
+        }),
+    }
+}
+
+/// Map a `LinkedToMux` candidate count to a
+/// [`MuxIndicator`] variant.
+pub(crate) fn mux_indicator(candidate_count: usize) -> MuxIndicator {
+    match candidate_count {
+        0 => MuxIndicator::Unmuxed,
+        1 => MuxIndicator::Attached,
+        n => MuxIndicator::Ambiguous { candidate_count: n },
+    }
+}
+
+/// True when `agent` should render given `filter`. Non-narrowing
+/// filters always match; otherwise defer to
+/// `RowFilter::matches_session` with a
+/// [`SessionMatchInputs`] built from the agent's fields.
+pub(crate) fn session_matches_filter(
+    agent: &AgentData<'_>,
+    candidate_counts: &std::collections::HashMap<String, usize>,
+    now: Option<i64>,
+    filter: &crate::filter::RowFilter,
+) -> bool {
+    use crate::filter::{MuxStateKey, SessionMatchInputs};
+    if !filter.has_narrowing_predicates() {
+        return true;
+    }
+    let candidate_count = candidate_counts.get(&agent.node_id).copied().unwrap_or(0);
+    filter.matches_session(&SessionMatchInputs {
+        harness_key: &agent.id.harness_key,
+        now_epoch: now,
+        last_active_epoch: agent.node.last_active_epoch,
+        mux_state: MuxStateKey::from_candidate_count(candidate_count),
+    })
+}
+
+/// Collect `LinkedToMux` candidate counts per agent session,
+/// deduped by target mux. Used by the union / prs / forks / mux
+/// row builders and by the output/{prs,forks} tables.
+pub(crate) fn collect_agent_mux_candidate_counts(
+    snapshot: &crate::model::GraphSnapshot,
+) -> std::collections::HashMap<String, usize> {
+    use crate::model::{LinkEndpoint, LinkState, RelationKind};
+    use std::collections::{HashMap, HashSet};
+    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
+    for link in &snapshot.candidate_links {
+        if !matches!(link.state, LinkState::Active) {
+            continue;
+        }
+        if !matches!(link.relation, RelationKind::LinkedToMux) {
+            continue;
+        }
+        let NodeId::AgentSession(_) = &link.source else {
+            continue;
+        };
+        let LinkEndpoint::Node { id: target_id } = &link.target else {
+            continue;
+        };
+        per_agent
+            .entry(link.source.to_string())
+            .or_default()
+            .insert(target_id.to_string());
+    }
+    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
+}
+
 pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<RecencyBucket> {
     let now = now?;
     let then = activity_epoch?;
