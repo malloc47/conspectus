@@ -1369,38 +1369,33 @@ area is already being touched. Group prefixes:
 
 ### Refactors And Dedup
 
-- [ ] `H-REF-001` Extract a shared `DeclaredEndpoint` codec.
-  - Scope: collapse the mirrored `parse_endpoint` (`src/cli.rs:703`) and
-    `endpoint_label` (`src/cli.rs:745`) into one codec module (likely in
-    `src/declared.rs` or a new `src/declared/endpoint_codec.rs`) so adding an
-    endpoint variant requires one change. Reuse the same codec for declared
-    TOML field names and CLI surface so they cannot drift.
-  - Tests: round-trip property tests for every `DeclaredEndpoint` variant;
-    CLI integration tests for unknown fields and missing required fields.
+- [x] `H-REF-001` Extract a shared `DeclaredEndpoint` codec.
+  - Landed 2026-07-05 (`91963c8`). `parse_endpoint` +
+    `endpoint_label` retired from cli.rs; replaced by
+    `DeclaredEndpoint::parse_compact` / `compact_label`
+    methods. Round-trip tests for all 10 variants + syntax
+    error + missing-field error tests in `declared_tests.rs`.
   - Blockers: none.
-- [ ] `H-REF-002` Share the relation-kind string codec.
-  - Scope: `parse_relation_kind` (`src/cli.rs:656`) and `relation_label`
-    (`src/cli.rs:681`) are exhaustive mirrors. Move the mapping next to
-    `RelationKind` in `src/model/mod.rs` (or derive via serde) so the CLI,
-    declared store, and table renderer all read one source of truth.
-  - Tests: round-trip unit tests for every variant; serde compatibility
-    test against existing JSON snapshots.
+- [x] `H-REF-002` Share the relation-kind string codec.
+  - Landed 2026-07-05 (`3dd6a2c`). Added
+    `RelationKind::from_snake_case` inverse method next to
+    the existing `snake_case()`. `parse_relation_kind` /
+    `relation_label` deleted from cli.rs. 22-variant
+    round-trip test + unknown-label test in `model_tests.rs`.
   - Blockers: none.
-- [ ] `H-REF-003` Generalize the resolver scoring tier helpers.
-  - Scope: `MuxTier` / `mux_score` (`src/resolve/mod.rs:117`) and
-    `PrProvenanceTier` / `pr_score` (`src/resolve/mod.rs:177`) duplicate the
-    provenance-to-tier mapping. Introduce a `ProvenanceTier` ordering on
-    `Provenance` itself, then have each comparator add only its
-    relation-specific tie-breakers (recency, draft, state). Keeps relation
-    comparators short and consistent.
-  - Tests: existing resolver table-driven tests must continue to pass
-    byte-for-byte against current snapshots.
+- [x] `H-REF-003` Generalize the resolver scoring tier helpers.
+  - Landed 2026-07-05 (`581f3c0`). `MuxTier` +
+    `PrProvenanceTier` collapsed into shared
+    `ProvenanceTier` enum with `from_provenance` +
+    `label` methods. Both scoring fns now use the shared
+    type; discriminant values byte-identical to pre-H-REF-003
+    so resolver behavior is preserved.
   - Blockers: none.
 - [x] `H-REF-004` Unify the external-tool runner seam.
   - Outcome: folded into `H-EXT-008` (see `docs/extensibility-assessment.md`
     Phase C) — the shared runner seam lands as part of extracting the
     `MuxBackend` trait rather than as a standalone refactor. Tracked there.
-- [ ] `H-REF-005` Split `src/declared.rs` (1370 lines) by concern.
+- [ ] `H-REF-005` Split `src/declared.rs` (835 lines post-H-HYG-011 test extraction) by concern.
   - Scope: separate (a) TOML models + parse/validate, (b) read-modify-write
     helpers and file I/O, and (c) snapshot-aware helpers
     (`endpoint_project_root`, `declared_endpoint_from_node_id`,
@@ -1417,44 +1412,55 @@ area is already being touched. Group prefixes:
     hierarchy. Keep `main` and top-level dispatch in `cli.rs`.
   - Tests: existing CLI smoke tests must continue to pass.
   - Blockers: `H-REF-001`, `H-REF-002`.
-- [ ] `H-REF-007` Factor harness adapter state-root scanning.
-  - Scope: codex, claude-code, opencode, and aider adapters each
-    re-implement "look up state root from context, walk a known directory
-    layout, emit `AgentSessionNode`s, swallow malformed rows." Extract a
-    small shared helper that takes a parser closure so the per-adapter
-    files only describe the layout. Avoid changing the public adapter
-    trait shape.
-  - Tests: existing harness adapter tests; add one shared-helper test for
-    missing state roots.
+- [x] `H-REF-007` Factor harness adapter state-root scanning.
+  - Landed 2026-07-05 (`ac7c1d3`). New
+    `discovery::harness::discover_with_state_root(context,
+    harness_key, inner)` shared envelope wraps the "look up
+    state root; empty on absence; run inner; stamp fragment"
+    pattern. Codex, claude-code, opencode adapters each
+    collapse their `discover` fn from 10 lines to 4 (single
+    delegating call). Aider stays put per its per-repo shape.
+    2 new tests in `harness_tests.rs` (short-circuit +
+    stamping).
   - Blockers: none.
-- [ ] `H-REF-008` Replace string field names in `SourceMetadata.fields`.
-  - Scope: discovery providers populate `source_metadata.fields` with
-    stringly-typed keys (`mux_activity_epoch`, `updated_epoch`,
-    `match_kind`, `fork_root`, `lineage_kind`, …). Resolvers read those
-    keys back with the same strings. Introduce typed accessors (constants
-    or a small `SourceField` enum with `as_str`) so the producer and
-    consumer sides cannot drift silently.
-  - Tests: resolver tests still pass; add a compile-time check (or doc
-    test) that every known key has a constant.
-  - Blockers: `H-REF-003` benefits from this but is independent.
-- [ ] `H-REF-009` Centralize provider identifier constants.
-  - Scope: provider keys (`"github"`, `"atelier"`, `"codex"`, …) appear as
-    string literals across discovery, declared, model tests, and fixtures.
-    Most harness adapters already expose `HARNESS_KEY`; finish the pattern
-    for forge, mux, and atelier providers, and use the constants in
-    declared parsing and CLI matching.
-  - Tests: existing tests; add one assertion that the registry of harness
-    keys matches the adapters wired into `discover_local_at_roots`.
+- [x] `H-REF-008` Replace string field names in `SourceMetadata.fields`.
+  - Landed 2026-07-05 (`4b3d816`). New `crate::model::source_field`
+    module with constants MATCH_KIND, MUX_ACTIVITY_EPOCH,
+    UPDATED_EPOCH, FORK_ROOT, LINEAGE_KIND, STATE, IS_DRAFT,
+    LOGICAL_PATH, SCOPE. Migrated 13 files across discovery,
+    resolve, and output layers to use the constants for both
+    `.insert("<key>".to_string(), ...)` producers and
+    `.get("<key>")` consumers. `every_source_field_constant_matches_its_string_literal`
+    test guards against constant renames.
+  - Blockers: `H-REF-003` (landed).
+- [x] `H-REF-009` Centralize provider identifier constants.
+  - Landed 2026-07-05 (`5b58aaf`). Migrated all major
+    provider-key string literals to the `providers::*`
+    constants defined by H-EXT-001:
+    * `discovery/mod.rs::discover_local_warm_with` uses
+      `providers::GIT`, `ATELIER`, `GENERIC_WORKSPACE`,
+      `CLAUDE_CODE`/`CODEX`/`OPENCODE`/`AIDER`, `TMUX`,
+      `ZELLIJ`, `GITHUB`.
+    * `discovery/orchestrator::REGISTRY` agent_deck entry
+      uses `providers::AGENT_DECK`.
+    * `discovery/atelier.rs` producer-side literals use
+      `providers::ATELIER`.
+    * Added `providers::GITLAB` const;
+      `forge/gitlab.rs::GITLAB_PROVIDER` points at it.
   - Blockers: none.
-- [ ] `H-REF-010` Audit and shrink the curated `conspectus::api` surface.
-  - Scope: `api.rs` re-exports `DeclaredStoreKind`, `DeclaredStoreSelection`,
-    `DeclaredSection`, and similar persistence internals that consumers
-    likely should not reach for. Decide which are truly part of the
-    library contract (ADR 0015) and either `#[doc(hidden)]` the rest or
-    move them out of `api.rs`. Confirm every re-export has a doctest or
-    explanation.
-  - Tests: existing doctest; add one that asserts the public surface from
-    `api::*` for the cases consumers actually have.
+- [x] `H-REF-010` Audit and shrink the curated `conspectus::api` surface.
+  - Landed 2026-07-05 (`06c8423`). `api.rs` re-organized
+    into 3 tiers with module docstring naming the tiering:
+    (1) core API (graph model, discovery, resolution,
+    render); (2) persistence + orchestration (declared /
+    aliases / rename write paths); (3) `#[doc(hidden)]`
+    internal support (`AliasWriteError`,
+    `AliasWriteOutcome`, `AliasesDocument`, `AliasesSection`,
+    `DeclaredSection`, `DeclaredStoreKind`,
+    `DeclaredStoreSelection`, `select_store_for_declaration`,
+    etc.). Every item still `pub use` so dev_scenarios +
+    integration tests keep compiling; only the rustdoc
+    surface is reduced.
   - Blockers: none.
 
 ### Code Hygiene And Simplification (H-HYG-*)
