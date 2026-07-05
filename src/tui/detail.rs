@@ -707,14 +707,14 @@ fn mux_session_fields(
     for process in processes_for_mux(snapshot, &mux_id) {
         fields.push(linked(
             "process",
-            process_link_label(snapshot, &process).unwrap_or_else(|| format!("{}", process)),
+            process_link_label(snapshot, &process).unwrap_or_else(|| format!("{process}")),
             Some(process),
         ));
     }
     for session in attached_sessions {
         fields.push(linked(
             "session",
-            agent_session_link_label(snapshot, session).unwrap_or_else(|| format!("{}", session)),
+            agent_session_link_label(snapshot, session).unwrap_or_else(|| format!("{session}")),
             Some(session.clone()),
         ));
     }
@@ -860,14 +860,14 @@ fn runtime_process_fields(
     for mux in muxes_for_process(snapshot, &process_id) {
         fields.push(linked(
             "mux",
-            link_target_label_by_id(snapshot, &mux).unwrap_or_else(|| format!("{}", mux)),
+            link_target_label_by_id(snapshot, &mux).unwrap_or_else(|| format!("{mux}")),
             Some(mux),
         ));
     }
     for (session, relation) in sessions_for_process(snapshot, &process_id) {
         let mut field = linked(
             "session",
-            agent_session_link_label(snapshot, &session).unwrap_or_else(|| format!("{}", session)),
+            agent_session_link_label(snapshot, &session).unwrap_or_else(|| format!("{session}")),
             Some(session),
         );
         if relation == RelationKind::ProcessCandidatesSession {
@@ -1250,7 +1250,7 @@ fn session_process_fields(snapshot: &GraphSnapshot, session_id: &NodeId) -> Vec<
     for (process, relation) in processes_for_session(snapshot, session_id) {
         let mut field = linked(
             "process",
-            process_link_label(snapshot, &process).unwrap_or_else(|| format!("{}", process)),
+            process_link_label(snapshot, &process).unwrap_or_else(|| format!("{process}")),
             Some(process),
         );
         if relation == RelationKind::ProcessCandidatesSession {

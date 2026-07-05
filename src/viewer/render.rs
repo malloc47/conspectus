@@ -234,7 +234,7 @@ fn compose_line<'a>(
     let mut spans: Vec<Span<'a>> = Vec::with_capacity(3 + body.spans.len());
     if show_chip {
         let label = chip_label(turn);
-        let pill = format!(" {label:>width$} ", width = gutter_inner_width);
+        let pill = format!(" {label:>gutter_inner_width$} ");
         spans.push(Span::styled(
             pill,
             Style::new().fg(chip_color).add_modifier(theme.badge),
@@ -682,7 +682,7 @@ mod tests {
     /// space + separator's leading space give two cells between
     /// the label and the rule).
     fn chip_pill(label: &str, inner_width: usize) -> String {
-        format!(" {label:>width$} ", width = inner_width)
+        format!(" {label:>inner_width$} ")
     }
 
     #[test]

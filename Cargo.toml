@@ -16,17 +16,20 @@
 # via per-module `#![allow]` where it's the intentional shape.
 [lints.clippy]
 redundant_clone = "deny"
-# Deferred to H-HYG-005 follow-ups (current counts as of latest
-# wave landing): match_same_arms 36, uninlined_format_args 12,
+# Deferred to H-HYG-005 follow-ups: match_same_arms 36,
 # map_unwrap_or 69 combined.
-# match_wildcard_for_single_variants: landed wave 2 — every
-# `_ => …` / `other => …` arm over a two-variant enum
-# (`LinkEndpoint::Node` vs `LinkEndpoint::Unresolved`) got its
-# explicit variant so a hypothetical third variant surfaces at
-# compile time instead of silently falling through.
+# Landed:
+# - wave 2: match_wildcard_for_single_variants — every
+#   `_ => …` / `other => …` arm over a two-variant enum
+#   (LinkEndpoint::Node vs LinkEndpoint::Unresolved) got its
+#   explicit variant so a hypothetical third variant surfaces
+#   at compile time instead of silently falling through.
+# - wave 3: uninlined_format_args — every `format!("{}", x)`
+#   / `println!("{}", x)` converted to inline capture
+#   `format!("{x}")` (auto-fixed via `cargo clippy --fix`).
 match_same_arms = "allow"
 match_wildcard_for_single_variants = "deny"
-uninlined_format_args = "allow"
+uninlined_format_args = "deny"
 map_unwrap_or = "allow"
 
 [package]

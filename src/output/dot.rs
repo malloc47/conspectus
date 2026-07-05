@@ -157,12 +157,7 @@ pub fn render_graph_dot(snapshot: &GraphSnapshot, opts: DotOptions) -> Result<St
         if members.is_empty() {
             continue;
         }
-        writeln!(
-            out,
-            "  subgraph cluster_{cluster_idx}_{kind} {{",
-            cluster_idx = cluster_idx,
-            kind = kind
-        )?;
+        writeln!(out, "  subgraph cluster_{cluster_idx}_{kind} {{")?;
         writeln!(
             out,
             "    label=\"{}\"; style=dashed; color=\"#90a4ae\"; fontcolor=\"#455a64\";",

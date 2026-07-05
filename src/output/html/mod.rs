@@ -95,32 +95,20 @@ fn render_html_with_payload(payload: &Payload) -> Result<String> {
     write!(
         out,
         "</script>\n\
-         <script>\n{layout_base}\n</script>\n\
-         <script>\n{cose_base}\n</script>\n\
-         <script>\n{cytoscape}\n</script>\n\
-         <script>\n{fcose}\n</script>\n\
-         <script>\n{dagre}\n</script>\n\
-         <script>\n{driver}\n</script>\n\
-         <script>\n{view_state}\n</script>\n\
-         <script>\n{nav_helpers}\n</script>\n\
-         <script>\n{navigation}\n</script>\n\
-         <script>\n{filter_panel}\n</script>\n\
-         <script>\n{inspector}\n</script>\n\
-         <script>\n{app}\n</script>\n\
+         <script>\n{LAYOUT_BASE_JS}\n</script>\n\
+         <script>\n{COSE_BASE_JS}\n</script>\n\
+         <script>\n{CYTOSCAPE_JS}\n</script>\n\
+         <script>\n{FCOSE_JS}\n</script>\n\
+         <script>\n{DAGRE_JS}\n</script>\n\
+         <script>\n{DRIVER_JS}\n</script>\n\
+         <script>\n{VIEW_STATE_JS}\n</script>\n\
+         <script>\n{NAV_HELPERS_JS}\n</script>\n\
+         <script>\n{NAVIGATION_JS}\n</script>\n\
+         <script>\n{FILTER_PANEL_JS}\n</script>\n\
+         <script>\n{INSPECTOR_JS}\n</script>\n\
+         <script>\n{APP_JS}\n</script>\n\
          </body>\n\
          </html>\n",
-        layout_base = LAYOUT_BASE_JS,
-        cose_base = COSE_BASE_JS,
-        cytoscape = CYTOSCAPE_JS,
-        fcose = FCOSE_JS,
-        dagre = DAGRE_JS,
-        driver = DRIVER_JS,
-        view_state = VIEW_STATE_JS,
-        nav_helpers = NAV_HELPERS_JS,
-        navigation = NAVIGATION_JS,
-        filter_panel = FILTER_PANEL_JS,
-        inspector = INSPECTOR_JS,
-        app = APP_JS,
     )?;
     Ok(out)
 }

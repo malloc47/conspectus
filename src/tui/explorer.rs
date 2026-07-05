@@ -1645,7 +1645,7 @@ fn relative_epoch(_epoch: i64) -> String {
     // strings. Until the explorer wiring story routes that helper in,
     // we surface the raw epoch so tests are deterministic and the
     // renderer can substitute the proper relative string later.
-    format!("{}s", _epoch)
+    format!("{_epoch}s")
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -1815,7 +1815,7 @@ fn finalize_group(
             let neighbor_kind_label = neighbor_node.map(kind_label).unwrap_or("unknown");
             let neighbor_label = neighbor_node
                 .map(|n| neighbor_display_label(n, home))
-                .unwrap_or_else(|| format!("{}", neighbor_id));
+                .unwrap_or_else(|| format!("{neighbor_id}"));
             let preview = neighbor_node
                 .map(|n| core_fields(snapshot, n, home))
                 .unwrap_or_default();

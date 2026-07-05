@@ -1593,8 +1593,7 @@ fn refresh_with_config(app: &mut App, config: &RunConfig) {
         }
         Err(err) => {
             app.update(Msg::SetRefreshFailure(format!(
-                "last refresh failed; {}",
-                err
+                "last refresh failed; {err}"
             )));
         }
     }
