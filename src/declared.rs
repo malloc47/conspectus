@@ -116,6 +116,156 @@ pub enum DeclaredEndpoint {
     },
 }
 
+impl DeclaredEndpoint {
+    /// H-REF-001: shared codec entrypoint. Parses the compact
+    /// `type:key=value,…` CLI form callers use for
+    /// `conspectus declared` operations. Pre-H-REF-001 the
+    /// parse + label sides lived only in `cli.rs`; centralizing
+    /// them here means adding a new endpoint variant is one
+    /// change instead of three.
+    ///
+    /// Field names match the declared TOML field names so the
+    /// CLI syntax and the TOML store cannot drift.
+    pub fn parse_compact(raw: &str) -> Result<Self, String> {
+        let (kind, fields) = raw.split_once(':').ok_or_else(endpoint_syntax_error)?;
+        let fields = parse_endpoint_fields(fields)?;
+        match kind {
+            "repo" => Ok(DeclaredEndpoint::Repo {
+                common_dir: required_field(&fields, "common_dir")?,
+            }),
+            "checkout" => Ok(DeclaredEndpoint::Checkout {
+                repo_common_dir: required_field(&fields, "repo_common_dir")?,
+                root: required_field(&fields, "root")?,
+            }),
+            "workspace" => Ok(DeclaredEndpoint::Workspace {
+                root: required_field(&fields, "root")?,
+            }),
+            "agent_session" => Ok(DeclaredEndpoint::AgentSession {
+                harness_key: required_field(&fields, "harness_key")?,
+                state_scope: required_field(&fields, "state_scope")?,
+                session_key: required_field(&fields, "session_key")?,
+            }),
+            "mux_session" => Ok(DeclaredEndpoint::MuxSession {
+                native_id: required_field(&fields, "native_id")?,
+            }),
+            "pin" => Ok(DeclaredEndpoint::Pin {
+                id: required_field(&fields, "id")?,
+            }),
+            "runtime_process" => Ok(DeclaredEndpoint::RuntimeProcess {
+                observation_key: required_field(&fields, "observation_key")?,
+            }),
+            "branch" => Ok(DeclaredEndpoint::Branch {
+                repo_common_dir: required_field(&fields, "repo_common_dir")?,
+                refname: required_field(&fields, "refname")?,
+            }),
+            "fork" => Ok(DeclaredEndpoint::Fork {
+                provider_source_key: required_field(&fields, "provider_source_key")?,
+            }),
+            "forge_pr" => Ok(DeclaredEndpoint::ForgePr {
+                provider: required_field(&fields, "provider")?,
+                host: required_field(&fields, "host")?,
+                owner: required_field(&fields, "owner")?,
+                repo: required_field(&fields, "repo")?,
+                number: required_field(&fields, "number")?
+                    .parse()
+                    .map_err(|_| "endpoint field `number` must be an integer".to_string())?,
+            }),
+            _ => Err(endpoint_syntax_error()),
+        }
+    }
+
+    /// H-REF-001: canonical compact-form label for this
+    /// endpoint. Mirror of [`Self::parse_compact`] so
+    /// `endpoint.compact_label().parse_compact()` round-trips
+    /// for every variant.
+    pub fn compact_label(&self) -> String {
+        match self {
+            DeclaredEndpoint::Repo { common_dir } => {
+                format!("repo:common_dir={common_dir}")
+            }
+            DeclaredEndpoint::Checkout {
+                repo_common_dir,
+                root,
+            } => {
+                format!("checkout:repo_common_dir={repo_common_dir},root={root}")
+            }
+            DeclaredEndpoint::Workspace { root } => {
+                format!("workspace:root={root}")
+            }
+            DeclaredEndpoint::AgentSession {
+                harness_key,
+                state_scope,
+                session_key,
+            } => {
+                format!(
+                    "agent_session:harness_key={harness_key},state_scope={state_scope},session_key={session_key}"
+                )
+            }
+            DeclaredEndpoint::MuxSession { native_id } => {
+                format!("mux_session:native_id={native_id}")
+            }
+            DeclaredEndpoint::Pin { id } => {
+                format!("pin:id={id}")
+            }
+            DeclaredEndpoint::RuntimeProcess { observation_key } => {
+                format!("runtime_process:observation_key={observation_key}")
+            }
+            DeclaredEndpoint::Branch {
+                repo_common_dir,
+                refname,
+            } => {
+                format!("branch:repo_common_dir={repo_common_dir},refname={refname}")
+            }
+            DeclaredEndpoint::Fork {
+                provider_source_key,
+            } => {
+                format!("fork:provider_source_key={provider_source_key}")
+            }
+            DeclaredEndpoint::ForgePr {
+                provider,
+                host,
+                owner,
+                repo,
+                number,
+            } => {
+                format!(
+                    "forge_pr:provider={provider},host={host},owner={owner},repo={repo},number={number}"
+                )
+            }
+        }
+    }
+}
+
+fn parse_endpoint_fields(raw: &str) -> Result<std::collections::BTreeMap<&str, &str>, String> {
+    if raw.is_empty() {
+        return Err(endpoint_syntax_error());
+    }
+    let mut fields = std::collections::BTreeMap::new();
+    for part in raw.split(',') {
+        let (key, value) = part.split_once('=').ok_or_else(endpoint_syntax_error)?;
+        if key.is_empty() || value.is_empty() {
+            return Err(endpoint_syntax_error());
+        }
+        fields.insert(key, value);
+    }
+    Ok(fields)
+}
+
+fn required_field(
+    fields: &std::collections::BTreeMap<&str, &str>,
+    key: &str,
+) -> Result<String, String> {
+    fields
+        .get(key)
+        .map(|value| (*value).to_string())
+        .ok_or_else(|| format!("missing endpoint field `{key}`"))
+}
+
+fn endpoint_syntax_error() -> String {
+    "invalid endpoint syntax; expected type:key=value,... using declared TOML field names"
+        .to_string()
+}
+
 pub fn parse_declared_document(text: &str) -> Result<DeclaredDocument, DeclaredParseError> {
     let document: DeclaredDocument =
         toml::from_str(text).map_err(|err| DeclaredParseError::MalformedToml(err.to_string()))?;

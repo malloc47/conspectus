@@ -682,3 +682,79 @@ fn declared_link(id: &str) -> DeclaredLink {
 fn path_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().to_string()
 }
+
+/// H-REF-001: every `DeclaredEndpoint` variant must
+/// round-trip through the compact-form codec exposed on the
+/// enum. Regressions here mean the CLI parse (`parse_compact`)
+/// and the CLI label (`compact_label`) have drifted.
+#[test]
+fn declared_endpoint_compact_form_round_trips_for_every_variant() {
+    let variants = [
+        DeclaredEndpoint::Repo {
+            common_dir: "/r/.git".to_string(),
+        },
+        DeclaredEndpoint::Checkout {
+            repo_common_dir: "/r/.git".to_string(),
+            root: "/r".to_string(),
+        },
+        DeclaredEndpoint::Workspace {
+            root: "/ws".to_string(),
+        },
+        DeclaredEndpoint::AgentSession {
+            harness_key: "codex".to_string(),
+            state_scope: "/state".to_string(),
+            session_key: "s1".to_string(),
+        },
+        DeclaredEndpoint::MuxSession {
+            native_id: "tmux:editor".to_string(),
+        },
+        DeclaredEndpoint::Pin {
+            id: "pin-1".to_string(),
+        },
+        DeclaredEndpoint::RuntimeProcess {
+            observation_key: "proc-1".to_string(),
+        },
+        DeclaredEndpoint::Branch {
+            repo_common_dir: "/r/.git".to_string(),
+            refname: "refs/heads/main".to_string(),
+        },
+        DeclaredEndpoint::Fork {
+            provider_source_key: "github:owner:repo".to_string(),
+        },
+        DeclaredEndpoint::ForgePr {
+            provider: "github".to_string(),
+            host: "github.com".to_string(),
+            owner: "octo".to_string(),
+            repo: "widget".to_string(),
+            number: 42,
+        },
+    ];
+    for endpoint in &variants {
+        let label = endpoint.compact_label();
+        let parsed =
+            DeclaredEndpoint::parse_compact(&label).expect("compact form parses back for variant");
+        assert_eq!(
+            &parsed, endpoint,
+            "compact form did not round-trip for variant"
+        );
+    }
+}
+
+#[test]
+fn declared_endpoint_parse_compact_rejects_unknown_kind() {
+    let err = DeclaredEndpoint::parse_compact("wonderful:key=value").expect_err("unknown kind");
+    assert!(
+        err.contains("invalid endpoint syntax"),
+        "expected syntax error, got {err:?}"
+    );
+}
+
+#[test]
+fn declared_endpoint_parse_compact_reports_missing_required_field() {
+    let err =
+        DeclaredEndpoint::parse_compact("repo:not_a_field=x").expect_err("missing required field");
+    assert!(
+        err.contains("missing endpoint field `common_dir`"),
+        "expected required-field error, got {err:?}"
+    );
+}
