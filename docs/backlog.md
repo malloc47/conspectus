@@ -1417,42 +1417,49 @@ area is already being touched. Group prefixes:
   - Tests: existing declared and CLI tests must continue to pass without
     snapshot diffs.
   - Blockers: `H-REF-001` is friendlier to do first.
-- [ ] `H-REF-006` Slim `src/cli.rs` (5006 lines post-H-HYG-011) into
-  per-command modules.
-  - **Waves 1–3 landed 2026-07-05**:
-    * Wave 1 (`388aa8d`): converted `src/cli.rs` →
-      `src/cli/mod.rs` directory module. Extracted the
-      small `columns` subcommand into `cli/columns.rs` as
-      a proof-of-shape. `ColorFlag`, `PagerOptions`,
-      `print_paged`, `resolve_color_from_env` promoted to
-      `pub(super)` for shared reach.
-    * Wave 2 (`07023bc`): extracted `RenameArgs` subtree
-      into `cli/rename.rs` alongside rename-specific
-      helpers `execute_rename_plan`, `run_mux_rename`,
-      `node_kind_label`. Promoted `DeclaredStoreFlag`,
-      `discover_for_store_selection`, `candidate_store_paths`,
-      `resolve_alias_store` to `pub(super)`. Retired
-      trivial `alias_candidate_store_paths` wrapper.
-      `cli/mod.rs` shrunk 4970 → 4714 (−256 lines).
-    * Wave 3 (`4319e7f`): extracted `DevArgs` subtree into
-      `cli/dev.rs` (gated at module level via
-      `#![cfg(debug_assertions)]`). Promoted `OutputFormat`,
-      `InclusionFlag`, `LayoutFlag`, `ViewFlag`, `SortFlag`,
-      `FilterArgs`, `view_from_flag`,
-      `apply_grouping_to_tui_config` to `pub(super)`.
-      `cli/mod.rs` shrunk 4714 → 4516 (−198 lines).
-    Cumulative: `cli/mod.rs` 5006 → 4516 (−490 lines,
-    ~10%). Three per-command modules landed.
-  - **Remaining waves** (rolling): extract further
-    subcommand subtrees per commit. Candidates by size:
-    * `hook` (~786 lines, 581-1367) — self-contained but
-      has many private hook-related helpers to move too.
-    * `declared` (~400 lines contiguous + scattered
-      helpers at 3200, 4400-4700). Largest surface;
-      benefits from moving scattered helpers along.
-    * `pin` subtree.
-    * `graph`, `table`, `node`, `serve`, `refresh`,
-      `status`, `snapshot`, `tui` subtrees.
+- [x] `H-REF-006` Slim `src/cli.rs` into per-command modules.
+  - **Landed 2026-07-05 across 12 waves** (~85%
+    reduction). `cli.rs` split into a `src/cli/` directory
+    module with 12 per-command submodules; `cli/mod.rs`
+    dropped from 5006 → 758 lines.
+  - Wave landing shape:
+    * Wave 1 (`388aa8d`): `cli.rs` → `cli/mod.rs` directory
+      module; `columns` extracted as a proof-of-shape.
+    * Wave 2 (`07023bc`): `rename` subtree + 3 helpers.
+    * Wave 3 (`4319e7f`): `dev` subtree
+      (`#![cfg(debug_assertions)]`).
+    * Wave 4 (`7c3e6b8`): `hook` subtree — largest single
+      wave (~788 lines) with 30+ hook-specific helpers.
+    * Waves 5-6 (`6cc4f58`): `node` + `graph`.
+    * Wave 7 (`ba45720`): `serve` + `refresh` + `status`
+      into `cli/lifecycle.rs`.
+    * Wave 8 (`d4604ff`): `table` subtree + 3 helpers.
+    * Wave 9 (`17afcb6`): `alias` subtree +
+      `format_alias_endpoint` (shared with declared).
+    * Wave 10 (`f1ba88c`): `pin` subtree — 10 subcommands +
+      all pin-specific helpers (~1150 lines).
+    * Wave 11 (`7811154`): `declared` subtree +
+      `resolve_write_store` + `DeclaredEndpointArg` parser
+      + `run_confirm_or_ignore` shared helper.
+    * Wave 12 (`3667e9d`): `tui` subtree + `SnapshotPaneFlag`
+      / `SessionsGroupingFlag` value enums + duration
+      parsers.
+  - `cli/mod.rs` retained: `Cli`/`Command` clap enum, shared
+    flag enums (`ColorFlag`, `InclusionFlag`, `LayoutFlag`,
+    `OutputFormat`, `SortFlag`, `ViewFlag`, `FilterArgs`,
+    `DeclaredStoreFlag`), daemon-fallback discovery helpers
+    (`try_daemon_snapshot`, `warm_start_discover_and_resolve`,
+    `cache_resolved_snapshot`, `current_unix_epoch_for_table`),
+    pager plumbing (`PagerOptions`,
+    `pager_candidates_with_env`), and the store-selection
+    helpers shared across pin, declared, and rename
+    (`resolve_alias_store`, `discover_for_store_selection`,
+    `candidate_store_paths`, `effective_scan_roots`,
+    `project_store_path`, `store_label`, `provenance_label`).
+  - Every wave: `cargo fmt --check`, `cargo clippy
+    --all-targets --all-features -- -D warnings`, and
+    `cargo test --all-targets --all-features` clean, with
+    the pre-H-REF-006 test suite passing byte-identically.
   - Blockers: `H-REF-001` (landed), `H-REF-002` (landed).
 - [x] `H-REF-007` Factor harness adapter state-root scanning.
   - Landed 2026-07-05 (`ac7c1d3`). New
