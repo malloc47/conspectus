@@ -523,6 +523,50 @@ pub struct AgentSessionNode {
     pub session_kind: Option<SessionKind>,
 }
 
+// H-HYG-011: builder helpers on `AgentSessionNode` mirror
+// `RepoNode::new` / `with_*` so 83 pre-H-HYG-011 struct
+// literals migrate opportunistically without a big-bang
+// rewrite. Add per touched file, not en masse.
+impl AgentSessionNode {
+    /// Minimal ctor. All optional fields default to `None`.
+    pub fn new(id: AgentSessionId, harness_key: impl Into<String>) -> Self {
+        Self {
+            id,
+            harness_key: harness_key.into(),
+            cwd: None,
+            title: None,
+            last_message_preview: None,
+            last_active_epoch: None,
+            session_kind: None,
+        }
+    }
+
+    pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub fn with_last_message_preview(mut self, preview: impl Into<String>) -> Self {
+        self.last_message_preview = Some(preview.into());
+        self
+    }
+
+    pub fn with_last_active_epoch(mut self, epoch: i64) -> Self {
+        self.last_active_epoch = Some(epoch);
+        self
+    }
+
+    pub fn with_session_kind(mut self, kind: SessionKind) -> Self {
+        self.session_kind = Some(kind);
+        self
+    }
+}
+
 #[derive(
     Clone,
     Debug,
@@ -570,6 +614,68 @@ pub struct MuxSessionNode {
     pub activity_epoch: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_epoch: Option<i64>,
+}
+
+// H-HYG-011: builder helpers on `MuxSessionNode` mirror
+// `RepoNode::new` / `with_*`. Migrate 53 pre-H-HYG-011
+// struct literals opportunistically.
+impl MuxSessionNode {
+    /// Minimal ctor. All optional fields default to `None`.
+    pub fn new(id: MuxSessionId, backend: impl Into<String>, native_id: impl Into<String>) -> Self {
+        Self {
+            id,
+            backend: backend.into(),
+            native_id: native_id.into(),
+            cwd: None,
+            active_pane_command: None,
+            active_pane_pid: None,
+            active_pane_current_path: None,
+            active_pane_start_command: None,
+            client_attached: None,
+            activity_epoch: None,
+            created_epoch: None,
+        }
+    }
+
+    pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
+        self.cwd = Some(cwd.into());
+        self
+    }
+
+    pub fn with_active_pane_command(mut self, command: impl Into<String>) -> Self {
+        self.active_pane_command = Some(command.into());
+        self
+    }
+
+    pub fn with_active_pane_pid(mut self, pid: i64) -> Self {
+        self.active_pane_pid = Some(pid);
+        self
+    }
+
+    pub fn with_active_pane_current_path(mut self, path: impl Into<String>) -> Self {
+        self.active_pane_current_path = Some(path.into());
+        self
+    }
+
+    pub fn with_active_pane_start_command(mut self, command: impl Into<String>) -> Self {
+        self.active_pane_start_command = Some(command.into());
+        self
+    }
+
+    pub fn with_client_attached(mut self, attached: bool) -> Self {
+        self.client_attached = Some(attached);
+        self
+    }
+
+    pub fn with_activity_epoch(mut self, epoch: i64) -> Self {
+        self.activity_epoch = Some(epoch);
+        self
+    }
+
+    pub fn with_created_epoch(mut self, epoch: i64) -> Self {
+        self.created_epoch = Some(epoch);
+        self
+    }
 }
 
 #[derive(

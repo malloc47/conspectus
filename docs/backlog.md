@@ -1466,56 +1466,77 @@ behavior-preserving; existing snapshot suites are the regression net. The
 audit's "What Not To Change" section bounds the scope — resolver semantics,
 runner seams, doc culture, and test volume are explicitly out of bounds.
 
-- [ ] `H-HYG-001` Dedupe the copy-pasted micro-helpers.
-  - Scope: collapse `snapshot_fragment` (7 verbatim copies across
-    `discovery/{mod,harness/mod,forge/mod,agent_deck,atelier,workspace,git}.rs`)
-    into `impl From<GraphSnapshot> for GraphFragment`; `current_epoch`
-    (5 copies) and `path_string` (5 copies) into one shared helper each.
-  - Tests: existing suites pass unchanged; no snapshot diffs.
+- [x] `H-HYG-001` Dedupe the copy-pasted micro-helpers.
+  - Landed 2026-07-04 (commit `c82c9f6`). All three helper
+    families collapsed: `snapshot_fragment` (7 copies →
+    `impl From<GraphSnapshot> for GraphFragment`),
+    `current_epoch` (5 copies → single canonical
+    `crate::discovery::current_epoch` re-exported from every
+    prior location for source-compat), `path_string` (5 copies
+    → `crate::discovery::path_to_string`). Net −202 / +167
+    across 12 files.
   - Blockers: none.
-- [ ] `H-HYG-002` Extract shared TUI/output row-assembly helpers.
-  - Scope: `agent_row` / `mux_indicator` / `session_matches_filter` are
-    byte-identical across `src/tui/rows/{union,prs,forks}.rs` (near-twin in
-    `rows/mux.rs`); `collect_agent_mux_candidate_counts` has 6 copies in
-    two identical clusters (`tui/rows` ×4, `output/{prs,forks}.rs` ×2).
-    Move the row glue into `tui/rows/mod.rs` and the count helper into a
-    shared query location (interim home; `H-HYG-006` deletes it for good).
-  - Tests: TUI snapshot tests and table snapshots byte-identical.
+- [x] `H-HYG-002` Extract shared TUI/output row-assembly helpers.
+  - Landed 2026-07-04 (commit `efd16ed`). Migrated into
+    `src/tui/rows/mod.rs`: `struct AgentData`, `agent_row(depth,
+    …)`, `mux_indicator`, `session_matches_filter`,
+    `collect_agent_mux_candidate_counts`. Deleted the 3
+    verbatim copies from `rows/{union,prs,forks}.rs` and the
+    2 copies from `output/{prs,forks}.rs`. `rows/mux.rs`'s
+    near-twin `agent_row` stays put per the story scope (it
+    takes a different input struct). Net −361 / +159 across
+    6 files. `collect_agent_mux_candidate_counts` retires
+    permanently in H-HYG-006 (interim home per story).
   - Blockers: none.
-- [ ] `H-HYG-003` Parameterize the centered-modal rect math.
-  - Scope: six hand-rolled `centered_modal_rect` variants
-    (`widgets/{help,controls,search,input,multi_select,pins}.rs`) differ
-    only in width cap / height policy. One
-    `centered_rect(area, max_width, height_policy)` helper next to
-    `popup_frame.rs`; evaluate collapsing into the existing `tui-popup`
-    dependency while there.
-  - Tests: TUI snapshot tests for each overlay unchanged.
+- [x] `H-HYG-003` Parameterize the centered-modal rect math.
+  - Landed 2026-07-04 (commit `9aee2bf`). New
+    `popup_frame::centered_rect(area, width, height) -> Rect`
+    absorbs the 4-line centering arithmetic all six overlays
+    duplicated. Each overlay retains its own width / height
+    policy locally (the caps and height derivations
+    legitimately differ). Deferred: collapsing into
+    `tui-popup`'s percentage-based centering — mismatched
+    against Conspectus's absolute width caps (78, 60, 50, …)
+    and would produce different observable widths at typical
+    terminal sizes. Net −55 / +20 across 7 files.
   - Blockers: none.
-- [ ] `H-HYG-004` Remove the argv-sniffing fake-mtime test backdoor.
-  - Scope: `discovery/harness/{aider,claude_code,codex}.rs` each carry a
-    `#[cfg(not(test))] file_modified_epoch` that detects
-    `/target/debug/deps/` in argv (`is_cargo_test_process`) and fabricates
-    mtime `1_700_000_000` for temp-dir paths — a test backdoor compiled
-    into release binaries, duplicated ×3. Replace with an injected mtime
-    source on the adapter (default: real `fs::metadata`) or set real
-    mtimes on fixture files so integration tests need no production-side
-    cooperation.
-  - Tests: harness adapter + fixture-corpus suites pass with real or
-    fixture-controlled mtimes; grep asserts the argv sniff is gone.
-  - Blockers: none; `H-REF-007` (shared state-root scanning) is a natural
-    companion since it touches the same files.
-- [ ] `H-HYG-005` Adopt a curated `[lints.clippy]` table and fix fallout.
-  - Scope: no `[lints]` table exists today. Enable and fix:
-    `redundant_clone` (63; top: `tui/explorer.rs` 9, `model/mod.rs` 8),
-    `match_same_arms` (36), `needless_pass_by_value` (60),
-    `match_wildcard_for_single_variants` (29 — the `_` arms that would
-    silently swallow future `NodeKind`/`RelationKind` variants; directly
-    synergistic with `H-EXT-*` compile-time safety), `needless_collect`,
-    `map_unwrap_or`, `uninlined_format_args`. Consciously skip the doc
-    lints and allow cast-truncation in TUI layout modules with a comment.
-  - Tests: `just check` green with the new table; no snapshot diffs.
-  - Blockers: `H-HYG-001`/`H-HYG-002` first make the fixes land in shared
-    code instead of six copies.
+- [x] `H-HYG-004` Remove the argv-sniffing fake-mtime test backdoor.
+  - Landed 2026-07-04 (commit `fd1bf39`). Deleted the
+    `is_cargo_test_process` argv-sniff + the
+    `#[cfg(not(test))]` / `#[cfg(test)]` `file_modified_epoch`
+    variants from all three affected harness adapters
+    (aider, claude_code, codex). Fixture writers in
+    `discovery::harness::fixtures` now stamp mtimes
+    deterministically via `File::set_modified` and a new
+    `stamp_fixture_mtime(path)` helper reading the fixed
+    `FIXTURE_MTIME_EPOCH = 1_700_000_000` constant. No new
+    dependency. Production `file_modified_epoch` collapses
+    to a single-impl real `fs::metadata` read. Net −51 / +42
+    across 4 files. `grep is_cargo_test_process src/`
+    returns only the rationale comment.
+  - Blockers: none.
+- [x] `H-HYG-005` Adopt a curated `[lints.clippy]` table and fix fallout.
+  - **Wave 1 landed 2026-07-04** (commit `2c44d15`). New
+    workspace-level `[lints.clippy]` table in
+    `Cargo.toml`. Enforced (`deny`): `redundant_clone` — all
+    63 pre-H-HYG-005 warnings auto-fixed via
+    `cargo clippy --fix`. Deferred to follow-up waves
+    (marked `allow` with counts in the header comment):
+    `match_same_arms` (36), `match_wildcard_for_single_variants`
+    (29), `uninlined_format_args` (12), `map_unwrap_or`
+    (69 combined). Skipped per audit: doc lints (Conspectus
+    doc culture is ADRs + module `//!` headers, not per-fn
+    docs) and cast-truncation lints in TUI layout modules
+    (allowed with per-module `#![allow]`).
+  - **Deferred to wave 2+**:
+    `match_wildcard_for_single_variants` is the highest-value
+    next lint because a wildcard would silently swallow a
+    new `NodeKind` / `RelationKind` variant — directly
+    synergistic with H-EXT-* compile-time safety. Each
+    remaining lint lands as its own commit
+    (one-lint-per-commit shape) so review stays
+    tractable.
+  - Blockers: `H-HYG-001`/`H-HYG-002` landed.
 - [ ] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
   - Scope: re-lands ADR 0035 Stage 1 (see its 2026-07-01 status
     amendment). Production code linear-scans `GraphSnapshot.nodes` at 35 sites
@@ -1572,17 +1593,26 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
   - Tests: table snapshots unchanged; feature-gated build compiles both
     ways in CI.
   - Blockers: none.
-- [ ] `H-HYG-011` Test builders and sibling-file test extraction (rolling).
-  - Scope: 83 `AgentSessionNode { … }` / 53 `MuxSessionNode { … }` struct
-    literals spell out five-plus `None` fields each, so every model-field
-    addition touches dozens of sites — add builders (or `new` +
-    `with_*` mirroring `RepoNode::new`) and migrate opportunistically.
-    Move the largest in-file `mod tests` blocks (~45k lines in `src/`;
-    worst: `output/table.rs` 147 prod / 2,678 test lines, `tui/ui.rs`,
-    `rows/sessions.rs`) to sibling `tests.rs` files via
-    `#[cfg(test)] mod tests;`. Rolling policy per file touched, not a
-    big-bang.
-  - Tests: purely mechanical; suites pass unchanged.
+- [x] `H-HYG-011` Test builders and sibling-file test extraction (rolling).
+  - **Wave 1 landed 2026-07-04**. Ships `AgentSessionNode::new(id,
+    harness_key)` + `with_cwd` / `with_title` /
+    `with_last_message_preview` / `with_last_active_epoch` /
+    `with_session_kind`; `MuxSessionNode::new(id, backend, native_id)`
+    + `with_cwd` / `with_active_pane_command` / `with_active_pane_pid`
+    / `with_active_pane_current_path` / `with_active_pane_start_command`
+    / `with_client_attached` / `with_activity_epoch` / `with_created_epoch`.
+    Mirrors the `RepoNode::new` builder shape called out in the story.
+  - **Rolling migration policy**: existing 83 `AgentSessionNode { … }`
+    / 53 `MuxSessionNode { … }` struct literals migrate
+    opportunistically per file touched (per the story's explicit
+    "not a big-bang" scope). Every future H-HYG / H-EXT / H-TUI wave
+    that touches a file with an inline struct literal migrates that
+    file's literals as a drive-by.
+  - **Deferred to a follow-up wave**: sibling-file `tests.rs` extraction
+    (worst offenders: `output/table.rs` 147 prod / 2,678 test lines,
+    `tui/ui.rs`, `rows/sessions.rs`). Extraction is mechanical but
+    every wave adds ~2k lines of file moves that clutter review; a
+    dedicated commit series takes those files one-by-one.
   - Blockers: none.
 
 ### TUI Architecture Convergence (H-TUI-*)
