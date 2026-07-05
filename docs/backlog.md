@@ -1548,7 +1548,20 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
   - Tests: row/detail/explorer snapshots byte-identical; add an index
     consistency unit test (index agrees with a linear scan on a dense
     fixture).
-  - Blockers: `H-HYG-002` friendlier first. `H-TUI-001` builds on this
+  - **Sizing note (2026-07-04)**: this is the biggest single H-HYG
+    story — ADR 0035 Stage 1 is the shape blueprint but the concrete
+    migration touches ~60 sites across row builders, detail, explorer,
+    and every consumer that today linear-scans nodes / candidate_links.
+    Land as a dedicated multi-commit series: (a) `SnapshotIndex`
+    struct + `new(&snapshot)` builder + `id_to_node` map only;
+    (b) migrate the sessions row tree + a consistency unit test;
+    (c) migrate mux / prs / forks / union row trees;
+    (d) migrate detail + explorer + node_show;
+    (e) retire `collect_agent_mux_candidate_counts` (H-HYG-002's
+    interim home) once its consumers all read through the index.
+    Sequencing waves keeps each commit reviewable and the
+    row-snapshot regression net actionable.
+  - Blockers: `H-HYG-002` landed. `H-TUI-001` builds on this
     substrate to make row trees fully derived view-models.
 - [ ] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
   help.
@@ -1563,6 +1576,17 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     dispatcher executes.
   - Tests: existing key-handling unit tests; one drift test asserting
     every dispatched action appears in the table and vice versa.
+  - **Sizing note (2026-07-04)**: this is a substantial refactor —
+    ~265 `KeyCode::` match arms plus the parallel `keymap_sections`
+    plus `remap_for_focus`. Land as a dedicated multi-commit series:
+    (a) `(mode/focus, key, Action, help text)` table shape + drift
+    test infrastructure only; (b) migrate `runtime.rs` dispatch
+    (76 arms); (c) migrate `widgets/pins.rs` dispatch (137 arms);
+    (d) rewire `remap_for_focus` as a table-derived transform;
+    (e) migrate `widgets/help.rs::keymap_sections` to consume the
+    same table. Each wave is behavior-preserving; the drift test
+    from wave (a) catches regressions across the intermediate
+    landings.
   - Blockers: none; works standalone, and the `H-TUI-003` modal stack
     later supplies the table's mode column.
 - [x] `H-HYG-008` Unify the dual event loops, then split `runtime.rs`.
@@ -1580,6 +1604,13 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     the split boundary.
   - Tests: `conspectus tui --snapshot` runs and TUI snapshot suites
     byte-identical.
+  - **Sizing note (2026-07-04)**: 6k+ lines of file moves across two
+    files. Land as a dedicated multi-commit series to keep each
+    landing reviewable: (a) `tui/ui.rs` view-panel split (sessions,
+    mux, prs, forks, union each as its own module); (b) `widgets/pins.rs`
+    model / render split; (c) sibling-file `tests.rs` extraction for
+    any large `mod tests` blocks that carry along. Snapshot suites are
+    the regression net between waves.
   - Blockers: none; independent of `H-TUI-004`.
 - [ ] `H-HYG-010` Finish the `output::render` migration and settle
   `dev_scenarios` gating.
@@ -1592,6 +1623,18 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     record that shipping it is intentional.
   - Tests: table snapshots unchanged; feature-gated build compiles both
     ways in CI.
+  - **Sizing note (2026-07-04)**: partial state observed. The
+    `dev_scenarios` half is already effectively addressed — the
+    module is gated with `#[cfg(any(test, debug_assertions))]` in
+    `lib.rs:7` and the CLI dispatch is `#[cfg(debug_assertions)]` in
+    `cli.rs:142`, so release builds already exclude it. Follow-up
+    decision needed: promote to a proper `[feature]` per ADR 0067
+    precedent (would drop the debug-assertion coupling) or amend
+    the story to record the existing gate as sufficient. The
+    `output::table` shim migration remains: ~20 callers through
+    `output::table::*` need to move to `output::render::*` after
+    `render` / `render_with` themselves migrate out of table.rs into
+    render.rs. Land as a dedicated commit series.
   - Blockers: none.
 - [x] `H-HYG-011` Test builders and sibling-file test extraction (rolling).
   - **Wave 1 landed 2026-07-04**. Ships `AgentSessionNode::new(id,
