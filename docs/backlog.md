@@ -1395,7 +1395,19 @@ area is already being touched. Group prefixes:
   - Outcome: folded into `H-EXT-008` (see `docs/extensibility-assessment.md`
     Phase C) — the shared runner seam lands as part of extracting the
     `MuxBackend` trait rather than as a standalone refactor. Tracked there.
-- [ ] `H-REF-005` Split `src/declared.rs` (835 lines post-H-HYG-011 test extraction) by concern.
+- [x] `H-REF-005` Split `src/declared.rs` by concern.
+  - Landed 2026-07-05 (`f234df5`). Directory-based module
+    with three submodules: `mod.rs` (TOML types + endpoint
+    codec + parse/validate + error types, 413 lines),
+    `store.rs` (read-modify-write helpers + store types +
+    file I/O, 253 lines), `snapshot.rs` (graph-driven
+    decision helpers, 251 lines). Every pre-H-REF-005
+    `crate::declared::*` public identifier re-exported from
+    `mod.rs` so callers compile unchanged. `write_atomic`
+    kept as `pub(crate)` at the module path because pins,
+    aliases, and tui_state share it. Test module moved
+    into the new directory as `tests.rs`.
+  - Blockers: `H-REF-001` (landed).
   - Scope: separate (a) TOML models + parse/validate, (b) read-modify-write
     helpers and file I/O, and (c) snapshot-aware helpers
     (`endpoint_project_root`, `declared_endpoint_from_node_id`,
@@ -1405,13 +1417,43 @@ area is already being touched. Group prefixes:
   - Tests: existing declared and CLI tests must continue to pass without
     snapshot diffs.
   - Blockers: `H-REF-001` is friendlier to do first.
-- [ ] `H-REF-006` Slim `src/cli.rs` (5982 lines; ~2760 production) into
+- [ ] `H-REF-006` Slim `src/cli.rs` (5006 lines post-H-HYG-011) into
   per-command modules.
-  - Scope: move the `declared` subcommand tree, endpoint/relation codec
-    helpers, and shared output formatting into a `src/cli/` module
-    hierarchy. Keep `main` and top-level dispatch in `cli.rs`.
-  - Tests: existing CLI smoke tests must continue to pass.
-  - Blockers: `H-REF-001`, `H-REF-002`.
+  - **Waves 1–3 landed 2026-07-05**:
+    * Wave 1 (`388aa8d`): converted `src/cli.rs` →
+      `src/cli/mod.rs` directory module. Extracted the
+      small `columns` subcommand into `cli/columns.rs` as
+      a proof-of-shape. `ColorFlag`, `PagerOptions`,
+      `print_paged`, `resolve_color_from_env` promoted to
+      `pub(super)` for shared reach.
+    * Wave 2 (`07023bc`): extracted `RenameArgs` subtree
+      into `cli/rename.rs` alongside rename-specific
+      helpers `execute_rename_plan`, `run_mux_rename`,
+      `node_kind_label`. Promoted `DeclaredStoreFlag`,
+      `discover_for_store_selection`, `candidate_store_paths`,
+      `resolve_alias_store` to `pub(super)`. Retired
+      trivial `alias_candidate_store_paths` wrapper.
+      `cli/mod.rs` shrunk 4970 → 4714 (−256 lines).
+    * Wave 3 (`4319e7f`): extracted `DevArgs` subtree into
+      `cli/dev.rs` (gated at module level via
+      `#![cfg(debug_assertions)]`). Promoted `OutputFormat`,
+      `InclusionFlag`, `LayoutFlag`, `ViewFlag`, `SortFlag`,
+      `FilterArgs`, `view_from_flag`,
+      `apply_grouping_to_tui_config` to `pub(super)`.
+      `cli/mod.rs` shrunk 4714 → 4516 (−198 lines).
+    Cumulative: `cli/mod.rs` 5006 → 4516 (−490 lines,
+    ~10%). Three per-command modules landed.
+  - **Remaining waves** (rolling): extract further
+    subcommand subtrees per commit. Candidates by size:
+    * `hook` (~786 lines, 581-1367) — self-contained but
+      has many private hook-related helpers to move too.
+    * `declared` (~400 lines contiguous + scattered
+      helpers at 3200, 4400-4700). Largest surface;
+      benefits from moving scattered helpers along.
+    * `pin` subtree.
+    * `graph`, `table`, `node`, `serve`, `refresh`,
+      `status`, `snapshot`, `tui` subtrees.
+  - Blockers: `H-REF-001` (landed), `H-REF-002` (landed).
 - [x] `H-REF-007` Factor harness adapter state-root scanning.
   - Landed 2026-07-05 (`ac7c1d3`). New
     `discovery::harness::discover_with_state_root(context,
