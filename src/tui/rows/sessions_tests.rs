@@ -74,19 +74,11 @@ fn agent_session_with_activity(
 }
 
 fn mux_node(backend: &str, native_id: &str) -> GraphNode {
-    GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new(native_id),
-        backend: backend.to_string(),
-        native_id: native_id.to_string(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    })
+    GraphNode::MuxSession(MuxSessionNode::new(
+        MuxSessionId::new(native_id),
+        backend.to_string(),
+        native_id.to_string(),
+    ))
 }
 
 fn linked_to_mux(

@@ -552,15 +552,13 @@ mod tests {
     use crate::model::{AgentSessionId, MuxSessionId};
 
     fn session(key: &str) -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("claude-code", "/state", key),
-            harness_key: "claude-code".to_string(),
-            cwd: Some("/work".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        })
+        GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", key),
+                "claude-code".to_string(),
+            )
+            .with_cwd("/work".to_string()),
+        )
     }
 
     fn mux(native_id: &str) -> GraphNode {
@@ -1344,15 +1342,13 @@ mod tests {
         let temp = tempdir().expect("tempdir");
 
         let opencode_session = |key: &str| -> GraphNode {
-            GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("opencode", "/oc-state", key),
-                harness_key: "opencode".to_string(),
-                cwd: Some("/work/proj".to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            })
+            GraphNode::AgentSession(
+                AgentSessionNode::new(
+                    AgentSessionId::new("opencode", "/oc-state", key),
+                    "opencode".to_string(),
+                )
+                .with_cwd("/work/proj".to_string()),
+            )
         };
 
         let opencode_mux = GraphNode::MuxSession(MuxSessionNode {

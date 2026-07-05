@@ -393,31 +393,24 @@ mod tests {
     use crate::model::{AgentSessionNode, GraphNode, MuxSessionNode, RelationKind};
 
     fn session_node() -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "s1"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/work".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        })
+        GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", "s1"),
+                "codex".to_string(),
+            )
+            .with_cwd("/work".to_string()),
+        )
     }
 
     fn mux_node(native_id: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(native_id),
-            backend: "tmux".to_string(),
-            native_id: native_id.to_string(),
-            cwd: Some("/work".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(native_id),
+                "tmux".to_string(),
+                native_id.to_string(),
+            )
+            .with_cwd("/work".to_string()),
+        )
     }
 
     fn write_file(path: &Path, contents: &str) {

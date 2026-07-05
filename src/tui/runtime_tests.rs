@@ -526,15 +526,8 @@ fn write_pin_bind_writes_declared_override() {
     let session_id = crate::model::AgentSessionId::new("codex", "/state", "session-a");
     let mut snapshot = crate::model::GraphSnapshot::empty();
     snapshot.nodes.push(crate::model::GraphNode::AgentSession(
-        crate::model::AgentSessionNode {
-            id: session_id,
-            harness_key: "codex".to_string(),
-            cwd: Some("/workspace".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        },
+        crate::model::AgentSessionNode::new(session_id, "codex".to_string())
+            .with_cwd("/workspace".to_string()),
     ));
     snapshot.pins.push(crate::model::PinCandidate {
         id: "ingest".to_string(),
@@ -913,31 +906,21 @@ mod selected_default_action_tests {
     use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 
     fn session_node(harness: &str, scope: &str, key: &str, cwd: &str) -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new(harness, scope, key),
-            harness_key: harness.to_string(),
-            cwd: Some(cwd.to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        })
+        GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new(harness, scope, key),
+                harness.to_string(),
+            )
+            .with_cwd(cwd.to_string()),
+        )
     }
 
     fn mux_node(backend: &str, native: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("{backend}:{native}")),
-            backend: backend.to_string(),
-            native_id: native.to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new(format!("{backend}:{native}")),
+            backend.to_string(),
+            native.to_string(),
+        ))
     }
 
     fn linked_to_mux(session: &NodeId, mux: &NodeId, suffix: &str) -> GraphLink {
@@ -1197,17 +1180,13 @@ mod projection_zero_discovery {
             git_dir: None,
             current_branch: None,
         }));
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", "abc"),
-                harness_key: "codex".to_string(),
-                cwd: Some("/p/proj".to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", "abc"),
+                "codex".to_string(),
+            )
+            .with_cwd("/p/proj".to_string()),
+        ));
         let snapshot = resolve_snapshot(snapshot);
         let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs {
             snapshot: &snapshot,

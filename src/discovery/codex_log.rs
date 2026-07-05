@@ -146,15 +146,10 @@ pub fn apply_codex_log_attribution(
             _ => false,
         });
         if !existing_session {
-            synthesized.push(AgentSessionNode {
-                id: session_id.clone(),
-                harness_key: CODEX_HARNESS_KEY.to_string(),
-                cwd: None,
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: Some(observation.ts),
-                session_kind: None,
-            });
+            synthesized.push(
+                AgentSessionNode::new(session_id.clone(), CODEX_HARNESS_KEY.to_string())
+                    .with_last_active_epoch(observation.ts),
+            );
         }
 
         emitted.push(build_link(
@@ -608,31 +603,26 @@ mod tests {
     }
 
     fn agent_session_node(state_scope: &str, key: &str) -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new(CODEX_HARNESS_KEY, state_scope, key),
-            harness_key: CODEX_HARNESS_KEY.to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        })
+        GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new(CODEX_HARNESS_KEY, state_scope, key),
+            CODEX_HARNESS_KEY.to_string(),
+        ))
     }
 
     fn mux_node(native_id: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("tmux:{native_id}")),
-            backend: "tmux".to_string(),
-            native_id: native_id.to_string(),
-            cwd: Some("/work".to_string()),
-            active_pane_command: Some("codex".to_string()),
-            active_pane_pid: Some(100),
-            active_pane_current_path: Some("/work".to_string()),
-            active_pane_start_command: Some("codex --resume stale-session".to_string()),
-            client_attached: None,
-            activity_epoch: Some(now()),
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(format!("tmux:{native_id}")),
+                "tmux".to_string(),
+                native_id.to_string(),
+            )
+            .with_cwd("/work".to_string())
+            .with_active_pane_command("codex".to_string())
+            .with_active_pane_pid(100)
+            .with_active_pane_current_path("/work".to_string())
+            .with_active_pane_start_command("codex --resume stale-session".to_string())
+            .with_activity_epoch(now()),
+        )
     }
 
     fn stale_command_match_link(

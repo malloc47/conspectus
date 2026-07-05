@@ -561,15 +561,10 @@ mod resume_resolver {
     }
 
     fn make_session(harness: &str, key: &str) -> AgentSessionNode {
-        AgentSessionNode {
-            id: AgentSessionId::new(harness, "/state", key),
-            harness_key: harness.to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }
+        AgentSessionNode::new(
+            AgentSessionId::new(harness, "/state", key),
+            harness.to_string(),
+        )
     }
 
     fn parent_link(snap: &mut GraphSnapshot, harness: &str, child: &str, parent: &str) {

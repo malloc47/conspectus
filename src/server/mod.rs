@@ -1528,30 +1528,27 @@ mod tests {
     }
 
     fn agent_session(session_key: &str) -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("claude-code", "/state", session_key),
-            harness_key: "claude-code".to_string(),
-            cwd: Some("/work".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: Some(1_700_000_000),
-            session_kind: None,
-        })
+        GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", session_key),
+                "claude-code".to_string(),
+            )
+            .with_cwd("/work".to_string())
+            .with_last_active_epoch(1_700_000_000),
+        )
     }
 
     fn mux_session(native_id: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("tmux:{native_id}")),
-            backend: "tmux".to_string(),
-            native_id: native_id.to_string(),
-            cwd: Some("/work".to_string()),
-            active_pane_command: Some("claude".to_string()),
-            active_pane_pid: None,
-            active_pane_current_path: Some("/work".to_string()),
-            active_pane_start_command: None,
-            client_attached: Some(true),
-            activity_epoch: None,
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(format!("tmux:{native_id}")),
+                "tmux".to_string(),
+                native_id.to_string(),
+            )
+            .with_cwd("/work".to_string())
+            .with_active_pane_command("claude".to_string())
+            .with_active_pane_current_path("/work".to_string())
+            .with_client_attached(true),
+        )
     }
 }

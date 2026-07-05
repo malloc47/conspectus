@@ -1543,31 +1543,24 @@ fn suppresses_cwd_prefix_match_like_exact_cwd_match() {
 // ----- H-MUXPROC-021: source-freshness demotion -----
 
 fn agent_session_with_epoch(id: &str, last_active_epoch: i64) -> GraphNode {
-    GraphNode::AgentSession(crate::model::AgentSessionNode {
-        id: AgentSessionId::new("codex", "global", id),
-        harness_key: "codex".to_string(),
-        cwd: None,
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(last_active_epoch),
-        session_kind: None,
-    })
+    GraphNode::AgentSession(
+        crate::model::AgentSessionNode::new(
+            AgentSessionId::new("codex", "global", id),
+            "codex".to_string(),
+        )
+        .with_last_active_epoch(last_active_epoch),
+    )
 }
 
 fn mux_with_epoch(name: &str, activity_epoch: i64) -> GraphNode {
-    GraphNode::MuxSession(crate::model::MuxSessionNode {
-        id: MuxSessionId::new(name),
-        backend: "tmux".to_string(),
-        native_id: name.to_string(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: Some(activity_epoch),
-        created_epoch: None,
-    })
+    GraphNode::MuxSession(
+        crate::model::MuxSessionNode::new(
+            MuxSessionId::new(name),
+            "tmux".to_string(),
+            name.to_string(),
+        )
+        .with_activity_epoch(activity_epoch),
+    )
 }
 
 /// Two sources both link to the same mux. One's `last_active_epoch`
@@ -1794,19 +1787,11 @@ fn demote_stale_source_no_action_when_mux_activity_unknown() {
     let snapshot = GraphSnapshot {
         nodes: vec![
             // Mux node has no activity_epoch.
-            GraphNode::MuxSession(crate::model::MuxSessionNode {
-                id: MuxSessionId::new("tmux:work"),
-                backend: "tmux".to_string(),
-                native_id: "tmux:work".to_string(),
-                cwd: None,
-                active_pane_command: None,
-                active_pane_pid: None,
-                active_pane_current_path: None,
-                active_pane_start_command: None,
-                client_attached: None,
-                activity_epoch: None,
-                created_epoch: None,
-            }),
+            GraphNode::MuxSession(crate::model::MuxSessionNode::new(
+                MuxSessionId::new("tmux:work"),
+                "tmux".to_string(),
+                "tmux:work".to_string(),
+            )),
             agent_session_with_epoch("fresh", mux_epoch),
             agent_session_with_epoch("stale", stale_epoch),
         ],

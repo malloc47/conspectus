@@ -594,34 +594,24 @@ mod tests {
     }
 
     fn session_node(harness: &str, scope: &str, key: &str, cwd: &str) -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new(harness, scope, key),
-            harness_key: harness.to_string(),
-            cwd: Some(cwd.to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        })
+        GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new(harness, scope, key),
+                harness.to_string(),
+            )
+            .with_cwd(cwd.to_string()),
+        )
     }
 
     /// Mirror real-world `TmuxDiscovery` shape: the node's `id`
     /// is backend-prefixed (`tmux:editor`) while `native_id` is
     /// the raw session name (`editor`).
     fn mux_node(backend: &str, native: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("{backend}:{native}")),
-            backend: backend.to_string(),
-            native_id: native.to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new(format!("{backend}:{native}")),
+            backend.to_string(),
+            native.to_string(),
+        ))
     }
 
     fn linked_to_mux(

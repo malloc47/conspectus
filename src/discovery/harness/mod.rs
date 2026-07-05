@@ -706,15 +706,10 @@ mod tests {
             }
 
             Ok(GraphFragment {
-                nodes: vec![GraphNode::AgentSession(AgentSessionNode {
-                    id: AgentSessionId::new("state-aware", "scope", "s1"),
-                    harness_key: "state-aware".to_string(),
-                    cwd: None,
-                    title: None,
-                    last_message_preview: None,
-                    last_active_epoch: None,
-                    session_kind: None,
-                })],
+                nodes: vec![GraphNode::AgentSession(AgentSessionNode::new(
+                    AgentSessionId::new("state-aware", "scope", "s1"),
+                    "state-aware".to_string(),
+                ))],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
@@ -785,24 +780,14 @@ mod tests {
 
     #[test]
     fn harness_discovery_merges_fragments_deterministically() {
-        let session_alpha = GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "scope", "alpha"),
-            harness_key: "codex".to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        });
-        let session_beta = GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "scope", "beta"),
-            harness_key: "codex".to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        });
+        let session_alpha = GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "scope", "alpha"),
+            "codex".to_string(),
+        ));
+        let session_beta = GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "scope", "beta"),
+            "codex".to_string(),
+        ));
 
         let fragment = HarnessDiscovery::new()
             .with_adapter(StaticAdapter {

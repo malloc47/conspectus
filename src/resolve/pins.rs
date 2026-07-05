@@ -389,19 +389,14 @@ mod tests {
         // `discovery/tmux/mod.rs:1038`). Test fixtures must match
         // so the resolver's `mux_index` can reconstruct the
         // prefixed key — otherwise default-socket pins never bind.
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("tmux:{name}")),
-            backend: "tmux".to_string(),
-            native_id: name.to_string(),
-            cwd: Some("/home/me/work/repo".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(format!("tmux:{name}")),
+                "tmux".to_string(),
+                name.to_string(),
+            )
+            .with_cwd("/home/me/work/repo".to_string()),
+        )
     }
 
     fn agent_session_node(harness: &str, session_key: &str, cwd: &str) -> GraphNode {
@@ -765,19 +760,14 @@ mod tests {
         // for non-default sockets, just `<name>` for default). The
         // resolver's `mux_index` reconstructs the full lookup key
         // as `format!("{}:{}", backend, native_id)`.
-        snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new("tmux:scratch:ingest"),
-            backend: "tmux".to_string(),
-            native_id: "scratch:ingest".to_string(),
-            cwd: Some("/home/me/work/repo".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        }));
+        snap.nodes.push(GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new("tmux:scratch:ingest"),
+                "tmux".to_string(),
+                "scratch:ingest".to_string(),
+            )
+            .with_cwd("/home/me/work/repo".to_string()),
+        ));
         snap.nodes
             .push(agent_session_node("codex", "alpha", "/home/me/work/repo"));
         snap.candidate_links.push(linked_to_mux(
@@ -816,19 +806,14 @@ mod tests {
 
         let mut snap = GraphSnapshot::empty();
         // Production-shaped mux node: prefixed id, bare native_id.
-        snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new("tmux:editor"),
-            backend: "tmux".to_string(),
-            native_id: "editor".to_string(),
-            cwd: Some("/home/op/work".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        }));
+        snap.nodes.push(GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new("tmux:editor"),
+                "tmux".to_string(),
+                "editor".to_string(),
+            )
+            .with_cwd("/home/op/work".to_string()),
+        ));
         snap.nodes
             .push(agent_session_node("codex", "alpha", "/home/op/work"));
         snap.candidate_links.push(linked_to_mux(

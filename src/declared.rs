@@ -996,15 +996,13 @@ mod tests {
                     git_dir: None,
                     current_branch: None,
                 }),
-                GraphNode::AgentSession(AgentSessionNode {
-                    id: AgentSessionId::new("codex", "/state", "s1"),
-                    harness_key: "codex".to_string(),
-                    cwd: Some(path_string(&child)),
-                    title: None,
-                    last_message_preview: None,
-                    last_active_epoch: None,
-                    session_kind: None,
-                }),
+                GraphNode::AgentSession(
+                    AgentSessionNode::new(
+                        AgentSessionId::new("codex", "/state", "s1"),
+                        "codex".to_string(),
+                    )
+                    .with_cwd(path_string(&child)),
+                ),
             ],
             ..GraphSnapshot::empty()
         };
@@ -1041,19 +1039,14 @@ mod tests {
                     git_dir: None,
                     current_branch: None,
                 }),
-                GraphNode::MuxSession(MuxSessionNode {
-                    id: MuxSessionId::new("tmux:editor"),
-                    backend: "tmux".to_string(),
-                    native_id: "tmux:editor".to_string(),
-                    cwd: Some(path_string(&child)),
-                    active_pane_command: None,
-                    active_pane_pid: None,
-                    active_pane_current_path: None,
-                    active_pane_start_command: None,
-                    client_attached: None,
-                    activity_epoch: None,
-                    created_epoch: None,
-                }),
+                GraphNode::MuxSession(
+                    MuxSessionNode::new(
+                        MuxSessionId::new("tmux:editor"),
+                        "tmux".to_string(),
+                        "tmux:editor".to_string(),
+                    )
+                    .with_cwd(path_string(&child)),
+                ),
             ],
             ..GraphSnapshot::empty()
         };

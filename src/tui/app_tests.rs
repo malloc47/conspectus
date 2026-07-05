@@ -23,15 +23,13 @@ fn make_snapshot_with(sessions: &[(&str, &str, &str)]) -> GraphSnapshot {
             git_dir: None,
             current_branch: None,
         }));
-        snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new(*harness, "/state", *key),
-            harness_key: harness.to_string(),
-            cwd: Some(cwd.to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }));
+        snap.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new(*harness, "/state", *key),
+                harness.to_string(),
+            )
+            .with_cwd(cwd.to_string()),
+        ));
     }
     resolve_snapshot(snap)
 }
@@ -456,15 +454,10 @@ fn placeholder_detail_target_upgrades_to_mux_for_stale_mux_in_mux_view() {
 fn placeholder_detail_target_upgrades_to_last_session_in_sessions_view() {
     let mut snap = pin_only_snapshot(Some(PinBinding::Unbound));
     let session_id = AgentSessionId::new("codex", "/state", "alpha");
-    snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
-        id: session_id.clone(),
-        harness_key: "codex".to_string(),
-        cwd: Some("/p/project".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: None,
-        session_kind: None,
-    }));
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(session_id.clone(), "codex".to_string())
+            .with_cwd("/p/project".to_string()),
+    ));
     snap.diagnostics.push(crate::model::Diagnostic::PinUnbound {
         pin_id: "ingest".to_string(),
         expected_mux_native_id: "tmux:ingest".to_string(),
@@ -1412,28 +1405,24 @@ fn snapshot_session_with_mux() -> GraphSnapshot {
         git_dir: None,
         current_branch: None,
     }));
-    snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("claude-code", "/state", "abc"),
-        harness_key: "claude-code".to_string(),
-        cwd: Some("/p/proj".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(1_700_000_000),
-        session_kind: None,
-    }));
-    snap.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: crate::model::MuxSessionId::new("work"),
-        backend: "tmux".to_string(),
-        native_id: "work".to_string(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: Some(true),
-        activity_epoch: Some(1_700_000_000),
-        created_epoch: Some(1_700_000_000),
-    }));
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "abc"),
+            "claude-code".to_string(),
+        )
+        .with_cwd("/p/proj".to_string())
+        .with_last_active_epoch(1_700_000_000),
+    ));
+    snap.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(
+            crate::model::MuxSessionId::new("work"),
+            "tmux".to_string(),
+            "work".to_string(),
+        )
+        .with_client_attached(true)
+        .with_activity_epoch(1_700_000_000)
+        .with_created_epoch(1_700_000_000),
+    ));
     let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
     let mux_id = NodeId::MuxSession(crate::model::MuxSessionId::new("work"));
     snap.candidate_links.push(crate::model::GraphLink {
@@ -1613,15 +1602,12 @@ fn explorer_drill_mirrors_left_pane_to_neighbor_when_present_in_tree() {
     // Add a second agent session and a parent_session link
     // session_a → session_b so the explorer's downstream group
     // exposes the sibling as a drillable neighbor.
-    let session_b = AgentSessionNode {
-        id: AgentSessionId::new("claude-code", "/state", "child"),
-        harness_key: "claude-code".to_string(),
-        cwd: Some("/p/proj".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(1_700_000_000),
-        session_kind: None,
-    };
+    let session_b = AgentSessionNode::new(
+        AgentSessionId::new("claude-code", "/state", "child"),
+        "claude-code".to_string(),
+    )
+    .with_cwd("/p/proj".to_string())
+    .with_last_active_epoch(1_700_000_000);
     let parent_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
     let child_id = NodeId::AgentSession(session_b.id.clone());
     snap.nodes.push(GraphNode::AgentSession(session_b));
@@ -2054,15 +2040,15 @@ fn open_value_modal_when_cursor_has_a_long_value() {
             git_dir: None,
             current_branch: None,
         }));
-        snap.nodes.push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("claude-code", "/state", "abc"),
-            harness_key: "claude-code".to_string(),
-            cwd: Some("/p/proj".to_string()),
-            title: None,
-            last_message_preview: Some("a".repeat(120)),
-            last_active_epoch: Some(1_700_000_000),
-            session_kind: None,
-        }));
+        snap.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("claude-code", "/state", "abc"),
+                "claude-code".to_string(),
+            )
+            .with_cwd("/p/proj".to_string())
+            .with_last_message_preview("a".repeat(120))
+            .with_last_active_epoch(1_700_000_000),
+        ));
         resolve_snapshot(snap)
     };
     let tree = build_tree(&snap);
@@ -2229,15 +2215,12 @@ fn explorer_state_resets_when_left_tree_selection_changes() {
     // the explorer to that new node — the right pane is the
     // detail surface for whatever the left pane points at.
     let snap = snapshot_session_with_mux();
-    let other_session = AgentSessionNode {
-        id: AgentSessionId::new("claude-code", "/state", "second"),
-        harness_key: "claude-code".to_string(),
-        cwd: Some("/p/proj".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(1_700_000_000),
-        session_kind: None,
-    };
+    let other_session = AgentSessionNode::new(
+        AgentSessionId::new("claude-code", "/state", "second"),
+        "claude-code".to_string(),
+    )
+    .with_cwd("/p/proj".to_string())
+    .with_last_active_epoch(1_700_000_000);
     let mut snap = snap;
     snap.nodes.push(GraphNode::AgentSession(other_session));
     let snap = resolve_snapshot(snap);

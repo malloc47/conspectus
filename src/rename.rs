@@ -158,31 +158,18 @@ mod tests {
     };
 
     fn session(harness: &str, key: &str) -> AgentSessionNode {
-        AgentSessionNode {
-            id: AgentSessionId::new(harness, "/state", key),
-            harness_key: harness.to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }
+        AgentSessionNode::new(
+            AgentSessionId::new(harness, "/state", key),
+            harness.to_string(),
+        )
     }
 
     fn mux(name: &str) -> MuxSessionNode {
-        MuxSessionNode {
-            id: MuxSessionId::new(name),
-            backend: "tmux".to_string(),
-            native_id: name.to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        }
+        MuxSessionNode::new(
+            MuxSessionId::new(name),
+            "tmux".to_string(),
+            name.to_string(),
+        )
     }
 
     fn linked_to_mux(id: &str, source: &AgentSessionId, target: &MuxSessionId) -> GraphLink {

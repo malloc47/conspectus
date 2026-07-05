@@ -223,19 +223,10 @@ fn agent_session_bound_to_healthy_pin_shows_pin_summary() {
 fn mux_targeted_by_stale_pin_shows_pin_summary() {
     let mut snapshot = GraphSnapshot::empty();
     let mux = MuxSessionId::new("tmux:ingest");
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: mux.clone(),
-        backend: "tmux".to_string(),
-        native_id: "ingest".to_string(),
-        cwd: Some("/home/op/src/x".to_string()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(mux.clone(), "tmux".to_string(), "ingest".to_string())
+            .with_cwd("/home/op/src/x".to_string()),
+    ));
     snapshot.pins.push(PinCandidate {
         id: "ingest".to_string(),
         display_name: "ingest".to_string(),
@@ -279,19 +270,13 @@ fn sections_emit_mux_section_when_ambiguous_mux_carries_warning() {
     let mux_a = MuxSessionId::new("editor");
     let mux_b = MuxSessionId::new("scratch");
     for native in ["editor", "scratch"] {
-        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(native),
-            backend: "tmux".to_string(),
-            native_id: native.to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        }));
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(MuxSessionNode::new(
+                MuxSessionId::new(native),
+                "tmux".to_string(),
+                native.to_string(),
+            )));
     }
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     for (idx, mux) in [mux_a, mux_b].into_iter().enumerate() {
@@ -372,19 +357,10 @@ fn agent_session_detail_uses_full_native_session_id() {
 fn mux_session_detail_uses_full_native_session_name() {
     let long_native_id = "agentdeck_worktrunk-multi-repo_d459b661-extra-long-copyable-session-name";
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new(long_native_id),
-        backend: "tmux".into(),
-        native_id: long_native_id.into(),
-        cwd: Some("/home/op/src/worktrunk".into()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(MuxSessionId::new(long_native_id), "tmux", long_native_id)
+            .with_cwd("/home/op/src/worktrunk"),
+    ));
     let snapshot = resolve_snapshot(snapshot);
     let target = NodeId::MuxSession(MuxSessionId::new(long_native_id));
     let detail = build(&snapshot, &target, Some(home().as_path()));
@@ -441,32 +417,20 @@ fn ambiguous_mux_annotates_with_warning_and_count() {
     snapshot
         .nodes
         .push(agent("codex", "abc", Some("/home/op/src/x"), None));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("editor"),
-        backend: "tmux".into(),
-        native_id: "editor".into(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("scratch"),
-        backend: "tmux".into(),
-        native_id: "scratch".into(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("editor"),
+            "tmux",
+            "editor",
+        )));
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("scratch"),
+            "tmux",
+            "scratch",
+        )));
     snapshot.candidate_links.push(GraphLink {
         id: "mux-1".into(),
         source: session_id.clone(),
@@ -587,19 +551,9 @@ fn agent_session_pr_field_walks_worktree_branch_pr_chain() {
 fn mux_session_detail_counts_attached_agents() {
     let mux_id = MuxSessionId::new("editor");
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: mux_id.clone(),
-        backend: "tmux".into(),
-        native_id: "editor".into(),
-        cwd: Some("/home/op/src/x".into()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(mux_id.clone(), "tmux", "editor").with_cwd("/home/op/src/x"),
+    ));
     snapshot
         .nodes
         .push(agent("codex", "a", Some("/home/op/src/x"), None));
@@ -672,19 +626,13 @@ fn process_links_surface_on_agent_and_mux_details() {
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     let process_id = NodeId::RuntimeProcess(RuntimeProcessId::new("tmux:editor:pid:4242"));
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("editor"),
-        backend: "tmux".into(),
-        native_id: "editor".into(),
-        cwd: Some("/home/op/src/x".into()),
-        active_pane_command: None,
-        active_pane_pid: Some(4242),
-        active_pane_current_path: Some("/home/op/src/x".into()),
-        active_pane_start_command: Some("codex".into()),
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(MuxSessionId::new("editor"), "tmux", "editor")
+            .with_cwd("/home/op/src/x")
+            .with_active_pane_pid(4242)
+            .with_active_pane_current_path("/home/op/src/x")
+            .with_active_pane_start_command("codex"),
+    ));
     snapshot
         .nodes
         .push(agent("codex", "abc", Some("/home/op/src/x"), None));
@@ -731,19 +679,13 @@ fn runtime_process_detail_links_back_to_mux_and_session() {
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     let process_id = NodeId::RuntimeProcess(RuntimeProcessId::new("tmux:editor:pid:4242"));
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("editor"),
-        backend: "tmux".into(),
-        native_id: "editor".into(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("editor"),
+            "tmux",
+            "editor",
+        )));
     snapshot.nodes.push(agent("codex", "abc", None, None));
     snapshot
         .nodes
@@ -793,19 +735,9 @@ fn agent_session_mux_row_carries_mux_detail_for_expansion() {
     let mux_id = MuxSessionId::new("editor");
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     let mut snapshot = GraphSnapshot::empty();
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: mux_id.clone(),
-        backend: "tmux".into(),
-        native_id: "editor".into(),
-        cwd: Some("/home/op/src/x".into()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(mux_id.clone(), "tmux", "editor").with_cwd("/home/op/src/x"),
+    ));
     snapshot
         .nodes
         .push(agent("codex", "abc", Some("/home/op/src/x"), None));
@@ -851,19 +783,13 @@ fn outgoing_and_incoming_link_summaries_populate_from_snapshot() {
     snapshot
         .nodes
         .push(agent("codex", "abc", Some("/home/op/x"), None));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("editor"),
-        backend: "tmux".into(),
-        native_id: "editor".into(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("editor"),
+            "tmux",
+            "editor",
+        )));
     snapshot.candidate_links.push(GraphLink {
         id: "link-1".into(),
         source: session_id.clone(),
@@ -1167,19 +1093,13 @@ fn ambiguous_mux_section_aggregates_workspace_scoped_sessions() {
             .push(agent("claude-code", key, Some("/home/op/ws"), None));
     }
     for native in ["editor", "scratch"] {
-        snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(native),
-            backend: "tmux".to_string(),
-            native_id: native.to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        }));
+        snapshot
+            .nodes
+            .push(GraphNode::MuxSession(MuxSessionNode::new(
+                MuxSessionId::new(native),
+                "tmux".to_string(),
+                native.to_string(),
+            )));
     }
     let mut next_link = 0_usize;
     let mut link = |source: &NodeId, target: &NodeId, relation: RelationKind| -> GraphLink {
@@ -1250,19 +1170,13 @@ fn ambiguous_mux_section_suppressed_when_no_session_in_scope_is_ambiguous() {
     snapshot
         .nodes
         .push(agent("codex", "a", Some("/home/op/ws"), None));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("only"),
-        backend: "tmux".to_string(),
-        native_id: "only".to_string(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot
+        .nodes
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("only"),
+            "tmux".to_string(),
+            "only".to_string(),
+        )));
     snapshot.candidate_links.push(GraphLink {
         id: "assoc".to_string(),
         source: session.clone(),

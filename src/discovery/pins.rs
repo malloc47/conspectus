@@ -356,17 +356,13 @@ mux = {mux_table}
         let context = context_at(&[&scan_root]);
 
         let mut snapshot = GraphSnapshot::empty();
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", "s1"),
-                harness_key: "codex".to_string(),
-                cwd: Some(nested.to_string_lossy().into_owned()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", "s1"),
+                "codex".to_string(),
+            )
+            .with_cwd(nested.to_string_lossy().into_owned()),
+        ));
 
         apply_pins(&mut snapshot, &context, &loader);
 

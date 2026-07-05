@@ -767,31 +767,24 @@ mod tests {
     use crate::resolve::resolve_snapshot;
 
     fn agent_node(harness: &str, scope: &str, key: &str) -> GraphNode {
-        GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new(harness, scope, key),
-            harness_key: harness.to_string(),
-            cwd: Some("/work".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        })
+        GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new(harness, scope, key),
+                harness.to_string(),
+            )
+            .with_cwd("/work".to_string()),
+        )
     }
 
     fn mux_node(backend: &str, name: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("{backend}:{name}")),
-            backend: backend.to_string(),
-            native_id: name.to_string(),
-            cwd: Some("/work".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(format!("{backend}:{name}")),
+                backend.to_string(),
+                name.to_string(),
+            )
+            .with_cwd("/work".to_string()),
+        )
     }
 
     fn linked_to_mux(id: &str, source: NodeId, target: NodeId) -> GraphLink {
@@ -887,15 +880,14 @@ mod tests {
     #[test]
     fn node_show_renders_alias_in_place_of_title() {
         let mut snapshot = GraphSnapshot {
-            nodes: vec![GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("opencode", "/state", "alpha"),
-                harness_key: "opencode".to_string(),
-                cwd: Some("/work".to_string()),
-                title: Some("harness title that should be hidden".to_string()),
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            })],
+            nodes: vec![GraphNode::AgentSession(
+                AgentSessionNode::new(
+                    AgentSessionId::new("opencode", "/state", "alpha"),
+                    "opencode".to_string(),
+                )
+                .with_cwd("/work".to_string())
+                .with_title("harness title that should be hidden".to_string()),
+            )],
             ..GraphSnapshot::empty()
         };
         let id = snapshot.nodes[0].id();
@@ -917,15 +909,14 @@ mod tests {
     #[test]
     fn node_show_falls_back_to_title_when_no_alias() {
         let snapshot = GraphSnapshot {
-            nodes: vec![GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("opencode", "/state", "alpha"),
-                harness_key: "opencode".to_string(),
-                cwd: Some("/work".to_string()),
-                title: Some("Phase 8 mockup".to_string()),
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            })],
+            nodes: vec![GraphNode::AgentSession(
+                AgentSessionNode::new(
+                    AgentSessionId::new("opencode", "/state", "alpha"),
+                    "opencode".to_string(),
+                )
+                .with_cwd("/work".to_string())
+                .with_title("Phase 8 mockup".to_string()),
+            )],
             ..GraphSnapshot::empty()
         };
         let id = snapshot.nodes[0].id();

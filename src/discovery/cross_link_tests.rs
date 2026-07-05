@@ -321,24 +321,20 @@ fn plain_shell_active_pane_suppresses_cwd_only_mux_links() {
 fn cwd_match_generated_across_harnesses_when_no_pid_match() {
     let mut snapshot = GraphSnapshot {
         nodes: vec![
-            GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("opencode", "/state", "a"),
-                harness_key: "opencode".to_string(),
-                cwd: Some("/work/repo".to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }),
-            GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", "b"),
-                harness_key: "codex".to_string(),
-                cwd: Some("/work/repo".to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }),
+            GraphNode::AgentSession(
+                AgentSessionNode::new(
+                    AgentSessionId::new("opencode", "/state", "a"),
+                    "opencode".to_string(),
+                )
+                .with_cwd("/work/repo".to_string()),
+            ),
+            GraphNode::AgentSession(
+                AgentSessionNode::new(
+                    AgentSessionId::new("codex", "/state", "b"),
+                    "codex".to_string(),
+                )
+                .with_cwd("/work/repo".to_string()),
+            ),
             mux_with_active_command("one", Some("/work/repo"), "opencode"),
         ],
         ..GraphSnapshot::empty()
@@ -420,37 +416,35 @@ fn active_pane_command_session_match_suppresses_cwd_only_mux_links() {
 
 #[test]
 fn opencode_file_activity_supersedes_stale_command_session_id() {
-    let stale = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("opencode", "/state", "ses_stale"),
-        harness_key: "opencode".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(1_000),
-        session_kind: None,
-    });
-    let current = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("opencode", "/state", "ses_current"),
-        harness_key: "opencode".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(5_020),
-        session_kind: None,
-    });
-    let mux = GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("tmux:one"),
-        backend: "tmux".to_string(),
-        native_id: "one".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        active_pane_command: Some("opencode".to_string()),
-        active_pane_pid: None,
-        active_pane_current_path: Some("/work/repo".to_string()),
-        active_pane_start_command: Some("opencode -s ses_stale".to_string()),
-        client_attached: None,
-        activity_epoch: Some(5_030),
-        created_epoch: Some(5_000),
-    });
+    let stale = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "/state", "ses_stale"),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_last_active_epoch(1_000),
+    );
+    let current = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "/state", "ses_current"),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_last_active_epoch(5_020),
+    );
+    let mux = GraphNode::MuxSession(
+        MuxSessionNode::new(
+            MuxSessionId::new("tmux:one"),
+            "tmux".to_string(),
+            "one".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_active_pane_command("opencode".to_string())
+        .with_active_pane_current_path("/work/repo".to_string())
+        .with_active_pane_start_command("opencode -s ses_stale".to_string())
+        .with_activity_epoch(5_030)
+        .with_created_epoch(5_000),
+    );
     let mut snapshot = GraphSnapshot {
         nodes: vec![stale, current, mux],
         ..GraphSnapshot::empty()
@@ -910,15 +904,13 @@ fn multiple_agent_processes_allow_multiple_session_attribution() {
     let mut snapshot = GraphSnapshot {
         nodes: vec![
             session(codex_id, Some("/work/repo")),
-            GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("claude-code", "/state", claude_id),
-                harness_key: "claude-code".to_string(),
-                cwd: Some("/work/repo".to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }),
+            GraphNode::AgentSession(
+                AgentSessionNode::new(
+                    AgentSessionId::new("claude-code", "/state", claude_id),
+                    "claude-code".to_string(),
+                )
+                .with_cwd("/work/repo".to_string()),
+            ),
             mux_with_active_process("editor", Some("/work/repo"), "bash", 100),
         ],
         ..GraphSnapshot::empty()
@@ -1109,24 +1101,22 @@ fn ambiguous_same_cwd_activity_matches_remain_candidates() {
 
 #[test]
 fn active_pane_resume_target_prefers_lineage_child_when_more_recent() {
-    let parent = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("codex", "/state", "parent"),
-        harness_key: "codex".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(1_000),
-        session_kind: None,
-    });
-    let child = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("codex", "/state", "child"),
-        harness_key: "codex".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(2_000),
-        session_kind: None,
-    });
+    let parent = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "parent"),
+            "codex".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_last_active_epoch(1_000),
+    );
+    let child = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "child"),
+            "codex".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_last_active_epoch(2_000),
+    );
     let mut snapshot = GraphSnapshot {
         nodes: vec![
             parent,
@@ -1153,24 +1143,22 @@ fn active_pane_resume_target_prefers_lineage_child_when_more_recent() {
 
 #[test]
 fn active_pane_argv_match_prefers_parent_when_more_recent_than_child() {
-    let parent = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("codex", "/state", "parent"),
-        harness_key: "codex".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(2_000),
-        session_kind: None,
-    });
-    let child = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("codex", "/state", "child"),
-        harness_key: "codex".to_string(),
-        cwd: Some("/work/repo".to_string()),
-        title: None,
-        last_message_preview: None,
-        last_active_epoch: Some(1_000),
-        session_kind: None,
-    });
+    let parent = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "parent"),
+            "codex".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_last_active_epoch(2_000),
+    );
+    let child = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "child"),
+            "codex".to_string(),
+        )
+        .with_cwd("/work/repo".to_string())
+        .with_last_active_epoch(1_000),
+    );
     let mut snapshot = GraphSnapshot {
         nodes: vec![
             parent,

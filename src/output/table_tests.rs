@@ -2050,15 +2050,14 @@ fn agent_label_uses_session_key_not_title() {
     // The label now always renders `harness:session_key` (with
     // the UUID truncator) and title belongs to the opt-in
     // `title` column.
-    let node = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("opencode", "global", "ses_abc123"),
-        harness_key: "opencode".to_string(),
-        cwd: Some("/work".to_string()),
-        title: Some("a very long conversation topic".to_string()),
-        last_message_preview: None,
-        last_active_epoch: None,
-        session_kind: None,
-    });
+    let node = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "global", "ses_abc123"),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work".to_string())
+        .with_title("a very long conversation topic".to_string()),
+    );
     let snapshot = GraphSnapshot {
         nodes: vec![node],
         ..GraphSnapshot::empty()
@@ -2110,15 +2109,14 @@ fn agent_label_preserves_short_session_keys_verbatim() {
 
 #[test]
 fn sessions_title_column_renders_set_value_or_dash() {
-    let with_title = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("opencode", "global", "ses_a"),
-        harness_key: "opencode".to_string(),
-        cwd: Some("/work".to_string()),
-        title: Some("clipboard sync over SSH".to_string()),
-        last_message_preview: None,
-        last_active_epoch: None,
-        session_kind: None,
-    });
+    let with_title = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "global", "ses_a"),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work".to_string())
+        .with_title("clipboard sync over SSH".to_string()),
+    );
     let without = agent_session("codex", "no-title", Some("/work"));
     let snapshot = GraphSnapshot {
         nodes: vec![with_title, without],
@@ -2150,15 +2148,14 @@ fn sessions_title_column_renders_set_value_or_dash() {
 
 #[test]
 fn sessions_title_column_prefers_alias_over_harness_title() {
-    let session = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("opencode", "global", "ses_a"),
-        harness_key: "opencode".to_string(),
-        cwd: Some("/work".to_string()),
-        title: Some("harness title that should be hidden".to_string()),
-        last_message_preview: None,
-        last_active_epoch: None,
-        session_kind: None,
-    });
+    let session = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "global", "ses_a"),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work".to_string())
+        .with_title("harness title that should be hidden".to_string()),
+    );
     let session_id = session.id();
     let mut snapshot = GraphSnapshot {
         nodes: vec![session],
@@ -2190,15 +2187,14 @@ fn sessions_title_column_prefers_alias_over_harness_title() {
 
 #[test]
 fn union_title_column_renders_only_for_agent_rows() {
-    let titled_agent = GraphNode::AgentSession(AgentSessionNode {
-        id: AgentSessionId::new("opencode", "global", "ses_a"),
-        harness_key: "opencode".to_string(),
-        cwd: Some("/work".to_string()),
-        title: Some("agent title".to_string()),
-        last_message_preview: None,
-        last_active_epoch: None,
-        session_kind: None,
-    });
+    let titled_agent = GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("opencode", "global", "ses_a"),
+            "opencode".to_string(),
+        )
+        .with_cwd("/work".to_string())
+        .with_title("agent title".to_string()),
+    );
     let mux = mux_session("tmux", "editor", Some("/work"));
     let snapshot = GraphSnapshot {
         nodes: vec![titled_agent, mux],

@@ -245,19 +245,14 @@ mod tests {
     };
 
     fn mux(name: &str) -> GraphNode {
-        GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new(format!("tmux:{name}")),
-            backend: "tmux".to_string(),
-            native_id: name.to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: Some(1_700_000_050),
-            created_epoch: None,
-        })
+        GraphNode::MuxSession(
+            MuxSessionNode::new(
+                MuxSessionId::new(format!("tmux:{name}")),
+                "tmux".to_string(),
+                name.to_string(),
+            )
+            .with_activity_epoch(1_700_000_050),
+        )
     }
 
     #[test]

@@ -24,17 +24,15 @@ fn seeded_app() -> App {
         git_dir: None,
         current_branch: None,
     }));
-    snapshot
-        .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: Some("Phase 8 walkthrough".to_string()),
-            last_message_preview: Some("could you give me a bit more context?".to_string()),
-            last_active_epoch: None,
-            session_kind: None,
-        }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_title("Phase 8 walkthrough".to_string())
+        .with_last_message_preview("could you give me a bit more context?".to_string()),
+    ));
     let snapshot = resolve_snapshot(snapshot);
 
     let tree = build_sessions_tree(SessionsBuildInputs {
@@ -76,31 +74,22 @@ fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
         git_dir: None,
         current_branch: None,
     }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_last_message_preview("stale msg".to_string()),
+    ));
+    let mux_graph_id = MuxSessionId::new(native_id);
     snapshot
         .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: None,
-            last_message_preview: Some("stale msg".to_string()),
-            last_active_epoch: None,
-            session_kind: None,
-        }));
-    let mux_graph_id = MuxSessionId::new(native_id);
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: mux_graph_id.clone(),
-        backend: "tmux".to_string(),
-        native_id: native_id.to_string(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            mux_graph_id.clone(),
+            "tmux".to_string(),
+            native_id.to_string(),
+        )));
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     let mux_id = NodeId::MuxSession(mux_graph_id.clone());
     snapshot.candidate_links.push(GraphLink {
@@ -370,17 +359,15 @@ fn seeded_app_with_harness_chips() -> App {
         git_dir: None,
         current_branch: None,
     }));
-    snapshot
-        .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: Some("Phase 8 walkthrough".to_string()),
-            last_message_preview: Some("could you give me a bit more context?".to_string()),
-            last_active_epoch: None,
-            session_kind: None,
-        }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_title("Phase 8 walkthrough".to_string())
+        .with_last_message_preview("could you give me a bit more context?".to_string()),
+    ));
     let snapshot = resolve_snapshot(snapshot);
 
     let tree = build_sessions_tree(SessionsBuildInputs {
@@ -516,17 +503,13 @@ fn two_repo_app() -> App {
             git_dir: None,
             current_branch: None,
         }));
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", name),
-                harness_key: "codex".to_string(),
-                cwd: Some(common),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", name),
+                "codex".to_string(),
+            )
+            .with_cwd(common),
+        ));
     }
     let snapshot = resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {
@@ -1249,30 +1232,23 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
         git_dir: None,
         current_branch: None,
     }));
-    snapshot
-        .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: mux_graph_id.clone(),
-        backend: "tmux".to_string(),
-        native_id: long_native.to_string(),
-        cwd: Some("/home/op/src/proj".to_string()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: Some(true),
-        activity_epoch: Some(1_700_000_000),
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string()),
+    ));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(
+            mux_graph_id.clone(),
+            "tmux".to_string(),
+            long_native.to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_client_attached(true)
+        .with_activity_epoch(1_700_000_000),
+    ));
     snapshot.candidate_links.push(GraphLink {
         id: "session-mux".to_string(),
         source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
@@ -1356,30 +1332,23 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
         git_dir: None,
         current_branch: None,
     }));
-    snapshot
-        .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: mux_graph_id.clone(),
-        backend: "tmux".to_string(),
-        native_id: "editor".to_string(),
-        cwd: Some("/home/op/src/proj".to_string()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: Some(true),
-        activity_epoch: Some(1_700_000_000),
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string()),
+    ));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(
+            mux_graph_id.clone(),
+            "tmux".to_string(),
+            "editor".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_client_attached(true)
+        .with_activity_epoch(1_700_000_000),
+    ));
     snapshot.candidate_links.push(GraphLink {
         id: "session-mux".to_string(),
         source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
@@ -2160,30 +2129,21 @@ fn no_live_preview_muxed_session_shows_privacy_banner() {
         git_dir: None,
         current_branch: None,
     }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string())
+        .with_last_message_preview("stale msg".to_string()),
+    ));
     snapshot
         .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: None,
-            last_message_preview: Some("stale msg".to_string()),
-            last_active_epoch: None,
-            session_kind: None,
-        }));
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: MuxSessionId::new("editor"),
-        backend: "tmux".to_string(),
-        native_id: "editor".to_string(),
-        cwd: None,
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+        .push(GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("editor"),
+            "tmux".to_string(),
+            "editor".to_string(),
+        )));
     let session_id = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
     let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
     snapshot.candidate_links.push(GraphLink {
@@ -2395,56 +2355,30 @@ fn contextual_status_offers_ambiguous_attach_hint_with_choose_affordance() {
         git_dir: None,
         current_branch: None,
     }));
-    snapshot
-        .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "abc"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }));
-    snapshot
-        .nodes
-        .push(GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "def"),
-            harness_key: "codex".to_string(),
-            cwd: Some("/home/op/src/proj".to_string()),
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        }));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "abc"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string()),
+    ));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "def"),
+            "codex".to_string(),
+        )
+        .with_cwd("/home/op/src/proj".to_string()),
+    ));
     let editor = MuxSessionId::new("tmux:editor");
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: editor.clone(),
-        backend: "tmux".to_string(),
-        native_id: "editor".to_string(),
-        cwd: Some("/home/op/src/proj".to_string()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(editor.clone(), "tmux".to_string(), "editor".to_string())
+            .with_cwd("/home/op/src/proj".to_string()),
+    ));
     let scratch = MuxSessionId::new("tmux:scratch");
-    snapshot.nodes.push(GraphNode::MuxSession(MuxSessionNode {
-        id: scratch.clone(),
-        backend: "tmux".to_string(),
-        native_id: "scratch".to_string(),
-        cwd: Some("/home/op/src/proj".to_string()),
-        active_pane_command: None,
-        active_pane_pid: None,
-        active_pane_current_path: None,
-        active_pane_start_command: None,
-        client_attached: None,
-        activity_epoch: None,
-        created_epoch: None,
-    }));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(scratch.clone(), "tmux".to_string(), "scratch".to_string())
+            .with_cwd("/home/op/src/proj".to_string()),
+    ));
     // The first session has cwd-evidence links to two muxes; the
     // second session sits in the same cwd and pins each mux as
     // well. That gives both muxes "multiple distinct sessions"
@@ -2755,17 +2689,13 @@ fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
         current_branch: None,
     }));
     for i in 0..20 {
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
-                harness_key: "codex".to_string(),
-                cwd: Some(repo_root.to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                "codex".to_string(),
+            )
+            .with_cwd(repo_root.to_string()),
+        ));
     }
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {
@@ -3072,17 +3002,13 @@ fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
         current_branch: None,
     }));
     for i in 0..20 {
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
-                harness_key: "codex".to_string(),
-                cwd: Some(repo_root.to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                "codex".to_string(),
+            )
+            .with_cwd(repo_root.to_string()),
+        ));
     }
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {
@@ -3193,17 +3119,13 @@ fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
         current_branch: None,
     }));
     for i in 0..40 {
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
-                harness_key: "codex".to_string(),
-                cwd: Some(repo_root.to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                "codex".to_string(),
+            )
+            .with_cwd(repo_root.to_string()),
+        ));
     }
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {
@@ -3286,17 +3208,13 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
         current_branch: None,
     }));
     for i in 0..30 {
-        snapshot
-            .nodes
-            .push(GraphNode::AgentSession(AgentSessionNode {
-                id: AgentSessionId::new("codex", "/state", format!("s{i:02}")),
-                harness_key: "codex".to_string(),
-                cwd: Some(repo_root.to_string()),
-                title: None,
-                last_message_preview: None,
-                last_active_epoch: None,
-                session_kind: None,
-            }));
+        snapshot.nodes.push(GraphNode::AgentSession(
+            AgentSessionNode::new(
+                AgentSessionId::new("codex", "/state", format!("s{i:02}")),
+                "codex".to_string(),
+            )
+            .with_cwd(repo_root.to_string()),
+        ));
     }
     let snapshot = crate::resolve::resolve_snapshot(snapshot);
     let tree = build_sessions_tree(SessionsBuildInputs {

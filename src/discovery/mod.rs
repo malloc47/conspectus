@@ -990,33 +990,20 @@ mod tests {
         );
         let discovery = LocalDiscovery::new()
             .with_provider(StaticProvider(GraphFragment {
-                nodes: vec![GraphNode::AgentSession(AgentSessionNode {
-                    id: AgentSessionId::new("codex", "global", "s1"),
-                    harness_key: "codex".to_string(),
-                    cwd: None,
-                    title: None,
-                    last_message_preview: None,
-                    last_active_epoch: None,
-                    session_kind: None,
-                })],
+                nodes: vec![GraphNode::AgentSession(AgentSessionNode::new(
+                    AgentSessionId::new("codex", "global", "s1"),
+                    "codex".to_string(),
+                ))],
                 candidate_links: vec![link.clone()],
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
             }))
             .with_provider(StaticProvider(GraphFragment {
-                nodes: vec![GraphNode::MuxSession(MuxSessionNode {
-                    id: MuxSessionId::new("tmux:s1"),
-                    backend: "tmux".to_string(),
-                    native_id: "s1".to_string(),
-                    cwd: None,
-                    active_pane_command: None,
-                    active_pane_pid: None,
-                    active_pane_current_path: None,
-                    active_pane_start_command: None,
-                    client_attached: None,
-                    activity_epoch: None,
-                    created_epoch: None,
-                })],
+                nodes: vec![GraphNode::MuxSession(MuxSessionNode::new(
+                    MuxSessionId::new("tmux:s1"),
+                    "tmux".to_string(),
+                    "s1".to_string(),
+                ))],
                 candidate_links: Vec::new(),
                 diagnostics: Vec::new(),
                 node_provenance: BTreeMap::new(),
@@ -1033,19 +1020,11 @@ mod tests {
 
     #[test]
     fn merge_fragments_deduplicates_nodes_and_links_by_identity() {
-        let node = GraphNode::MuxSession(MuxSessionNode {
-            id: MuxSessionId::new("tmux:s1"),
-            backend: "tmux".to_string(),
-            native_id: "s1".to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        });
+        let node = GraphNode::MuxSession(MuxSessionNode::new(
+            MuxSessionId::new("tmux:s1"),
+            "tmux".to_string(),
+            "s1".to_string(),
+        ));
         let source = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
         let target = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));
         let link = GraphLink::new(
@@ -1082,28 +1061,15 @@ mod tests {
         // dedup-on-node-id semantics one block above. The
         // unique-to-fragment-B node carries its provider through.
         let mux_id = MuxSessionId::new("tmux:s1");
-        let mux_node = GraphNode::MuxSession(MuxSessionNode {
-            id: mux_id.clone(),
-            backend: "tmux".to_string(),
-            native_id: "s1".to_string(),
-            cwd: None,
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        });
-        let agent_node = GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "alpha"),
-            harness_key: "codex".to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        });
+        let mux_node = GraphNode::MuxSession(MuxSessionNode::new(
+            mux_id.clone(),
+            "tmux".to_string(),
+            "s1".to_string(),
+        ));
+        let agent_node = GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "alpha"),
+            "codex".to_string(),
+        ));
         let mux_node_id = NodeId::MuxSession(mux_id);
         let agent_node_id = agent_node.id();
 
@@ -1173,41 +1139,18 @@ mod tests {
         // the live scan did not see (e.g. a repo from yesterday's
         // cwd) without overriding anything the live scan refreshed.
         let mux_id = MuxSessionId::new("tmux:keep");
-        let fresh_mux = GraphNode::MuxSession(MuxSessionNode {
-            id: mux_id.clone(),
-            backend: "tmux".to_string(),
-            native_id: "keep".to_string(),
-            cwd: Some("/fresh/cwd".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        });
-        let prior_mux = GraphNode::MuxSession(MuxSessionNode {
-            id: mux_id.clone(),
-            backend: "tmux".to_string(),
-            native_id: "keep".to_string(),
-            cwd: Some("/stale/cwd".to_string()),
-            active_pane_command: None,
-            active_pane_pid: None,
-            active_pane_current_path: None,
-            active_pane_start_command: None,
-            client_attached: None,
-            activity_epoch: None,
-            created_epoch: None,
-        });
-        let prior_only = GraphNode::AgentSession(AgentSessionNode {
-            id: AgentSessionId::new("codex", "/state", "from-cache"),
-            harness_key: "codex".to_string(),
-            cwd: None,
-            title: None,
-            last_message_preview: None,
-            last_active_epoch: None,
-            session_kind: None,
-        });
+        let fresh_mux = GraphNode::MuxSession(
+            MuxSessionNode::new(mux_id.clone(), "tmux".to_string(), "keep".to_string())
+                .with_cwd("/fresh/cwd".to_string()),
+        );
+        let prior_mux = GraphNode::MuxSession(
+            MuxSessionNode::new(mux_id.clone(), "tmux".to_string(), "keep".to_string())
+                .with_cwd("/stale/cwd".to_string()),
+        );
+        let prior_only = GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "/state", "from-cache"),
+            "codex".to_string(),
+        ));
         let prior_only_id = prior_only.id();
 
         let mut fresh = GraphSnapshot::empty();
