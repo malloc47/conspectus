@@ -1595,6 +1595,13 @@ pub struct SnapshotIndex<'a> {
     /// count from `index.mux_candidate_count(agent_node_id)`.
     /// Deduped by target mux id.
     agent_mux_candidate_counts: std::collections::HashMap<String, usize>,
+    /// H-HYG-006 wave 3: `(source, relation) → Vec<&GraphLink>`
+    /// map. Consumers that today linear-scan `candidate_links`
+    /// looking for a specific source-relation combination fold
+    /// the filter through this map instead. Only holds
+    /// `LinkState::Active` links because every existing hot
+    /// consumer filters to active first.
+    links_by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>>,
 }
 
 impl<'a> SnapshotIndex<'a> {
@@ -1630,10 +1637,24 @@ impl<'a> SnapshotIndex<'a> {
         }
         let agent_mux_candidate_counts = per_agent.into_iter().map(|(k, v)| (k, v.len())).collect();
 
+        // H-HYG-006 wave 3: (source, relation) → links map.
+        let mut links_by_source_relation: BTreeMap<(NodeId, RelationKind), Vec<&'a GraphLink>> =
+            BTreeMap::new();
+        for link in &snapshot.candidate_links {
+            if !matches!(link.state, LinkState::Active) {
+                continue;
+            }
+            links_by_source_relation
+                .entry((link.source.clone(), link.relation.clone()))
+                .or_default()
+                .push(link);
+        }
+
         Self {
             snapshot,
             id_to_node,
             agent_mux_candidate_counts,
+            links_by_source_relation,
         }
     }
 
@@ -1655,6 +1676,19 @@ impl<'a> SnapshotIndex<'a> {
     /// Retires `tui::rows::collect_agent_mux_candidate_counts`.
     pub fn agent_mux_candidate_counts(&self) -> &std::collections::HashMap<String, usize> {
         &self.agent_mux_candidate_counts
+    }
+
+    /// H-HYG-006 wave 3: active `(source, relation)` links.
+    /// Returns an empty slice for unknown `(source, relation)`
+    /// combinations. Consumers that today do
+    /// `snapshot.candidate_links.iter().filter(|link| link.source
+    /// == id && link.relation == RelationKind::Foo)` collapse to
+    /// `index.links_for(&id, RelationKind::Foo)`.
+    pub fn links_for(&self, source: &NodeId, relation: RelationKind) -> &[&GraphLink] {
+        static EMPTY: &[&GraphLink] = &[];
+        self.links_by_source_relation
+            .get(&(source.clone(), relation))
+            .map_or(EMPTY, Vec::as_slice)
     }
 }
 
