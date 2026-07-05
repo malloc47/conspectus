@@ -31,6 +31,7 @@ pub mod detail;
 pub mod effect;
 pub mod explorer;
 pub mod icons;
+pub mod keybindings;
 pub mod keymap;
 pub mod modal;
 pub mod preview;
