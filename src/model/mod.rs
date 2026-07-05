@@ -1566,6 +1566,57 @@ mod node_provenance_serde {
     }
 }
 
+/// Indexed view over a [`GraphSnapshot`] (H-HYG-006 wave 1;
+/// ADR 0035 Stage 1). Built once per snapshot publish so
+/// consumers don't linear-scan `snapshot.nodes` /
+/// `snapshot.candidate_links` per render.
+///
+/// **Wave 1 scope**: only the `id → &GraphNode` map is
+/// populated. Follow-up waves add:
+/// - source_node → links-by-relation (wave 3+).
+/// - session → mux candidate counts (wave 5 retires
+///   `tui::rows::collect_agent_mux_candidate_counts`).
+/// - preferred-mux per session (H-TUI-001 substrate).
+///
+/// Cheap to build: one BTreeMap walk over `snapshot.nodes`.
+/// Callers that don't need the index still work — every
+/// site migrates opportunistically per the wave sequencing
+/// in the story.
+#[derive(Debug)]
+pub struct SnapshotIndex<'a> {
+    /// Borrow of the source snapshot so links + resolved_relationships
+    /// stay accessible through the same handle during migration.
+    pub snapshot: &'a GraphSnapshot,
+    id_to_node: BTreeMap<NodeId, &'a GraphNode>,
+}
+
+impl<'a> SnapshotIndex<'a> {
+    /// Build the index by walking `snapshot.nodes` once.
+    pub fn new(snapshot: &'a GraphSnapshot) -> Self {
+        let mut id_to_node = BTreeMap::new();
+        for node in &snapshot.nodes {
+            id_to_node.insert(node.id(), node);
+        }
+        Self {
+            snapshot,
+            id_to_node,
+        }
+    }
+
+    /// Look up a node by id. `None` for ids that aren't in
+    /// this snapshot.
+    pub fn node(&self, id: &NodeId) -> Option<&GraphNode> {
+        self.id_to_node.get(id).copied()
+    }
+
+    /// Number of indexed nodes. Consistent with `snapshot.nodes.len()`
+    /// unless the snapshot has duplicate ids (which is invalid; a
+    /// wave-2 consistency test asserts this).
+    pub fn node_count(&self) -> usize {
+        self.id_to_node.len()
+    }
+}
+
 impl GraphSnapshot {
     pub fn empty() -> Self {
         Self::default()
@@ -2386,6 +2437,43 @@ mod tests {
     /// and `AliasOverlay::entries`. If a future variant adds a
     /// payload type whose archive impl is missing, this test catches
     /// it before any consumer hits the failure.
+    /// H-HYG-006 wave 1: `SnapshotIndex::node(id)` agrees with a
+    /// linear scan for every node in a dense fixture. Guards
+    /// against index-drift once follow-up waves add more
+    /// derived maps.
+    #[test]
+    fn snapshot_index_agrees_with_linear_scan_on_dense_fixture() {
+        let repo = RepoId::new("/r/.git");
+        let nodes = vec![
+            GraphNode::Repo(RepoNode::new(repo)),
+            GraphNode::AgentSession(AgentSessionNode::new(
+                AgentSessionId::new("codex", "/h", "sess-a"),
+                "codex",
+            )),
+            GraphNode::MuxSession(MuxSessionNode::new(
+                MuxSessionId::new("tmux:editor"),
+                "tmux",
+                "editor",
+            )),
+        ];
+        let mut snapshot = GraphSnapshot::empty();
+        snapshot.nodes = nodes.clone();
+        let index = SnapshotIndex::new(&snapshot);
+        // Every node id resolves through the index.
+        for node in &nodes {
+            let id = node.id();
+            let by_index = index.node(&id);
+            let by_scan = snapshot.nodes.iter().find(|n| n.id() == id);
+            assert!(
+                by_index.is_some() && by_index.map(GraphNode::id) == by_scan.map(GraphNode::id),
+                "index disagrees with linear scan for {id:?}"
+            );
+        }
+        assert_eq!(index.node_count(), snapshot.nodes.len());
+        // Unknown id resolves to None.
+        assert!(index.node(&NodeId::Pin(PinId::new("missing"))).is_none());
+    }
+
     #[test]
     fn every_node_id_variant_archives_and_round_trips() {
         let repo = RepoId::new("/r/.git");
