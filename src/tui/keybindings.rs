@@ -162,6 +162,81 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         action: || Action::CycleGrouping(1),
         help_text: "Cycle grouping (Ctrl-G)",
     },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::CONTROL,
+            code: KeyCode::Char('c'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::Quit)),
+        help_text: "Quit (Ctrl-C)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Char('q'),
+        },
+        action: || Action::Msg(Box::new(crate::tui::Msg::Quit)),
+        help_text: "Quit (q)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('S'),
+        action: || Action::Resume,
+        help_text: "Resume the selected un-muxed agent session",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('R'),
+        action: || Action::OpenRename,
+        help_text: "Rename the selected agent session or pin",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::Exact {
+            modifiers: KeyModifiers::NONE,
+            code: KeyCode::Delete,
+        },
+        action: || Action::RemovePin,
+        help_text: "Remove the selected pin",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('N'),
+        action: || Action::OpenPinCreate,
+        help_text: "Create a new pin",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('B'),
+        action: || Action::OpenPinRebind,
+        help_text: "Rebind the selected pin",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('A'),
+        action: || Action::OpenPinAdopt,
+        help_text: "Adopt the selected mux row as a pin",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('L'),
+        action: || Action::LaunchPin,
+        help_text: "Launch the selected pin",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('F'),
+        action: || Action::ClearFilters,
+        help_text: "Clear every active filter",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('E'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleEdgeMeta)),
+        help_text: "Toggle explorer edge-meta visibility",
+    },
 ];
 
 /// H-HYG-007 wave 2 entrypoint: `translate_via_table(modifiers,

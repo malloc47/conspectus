@@ -219,29 +219,20 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     }
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Msg(Box::new(Msg::Quit))),
-            (_, KeyCode::Char('q')) => Some(Action::Msg(Box::new(Msg::Quit))),
+            // H-HYG-007 wave 2 continued: Quit, Refresh, Attach,
+            // Resume, Rename, RemovePin, and pin CRUD shortcuts
+            // migrated to `keybindings::KEYBINDINGS` and dispatched
+            // via `translate_via_table` above. Non-migrated:
+            // - `r` (Refresh) — parametric guard against Ctrl-R stays as
+            //   arm below.
+            // - `a` (Attach) — same guard reason.
+            // - `b` (PinBindHint) — same guard reason; the KeyMatcher
+            //   shape doesn't yet model "any non-Ctrl modifier."
             (m, KeyCode::Char('r')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Refresh),
             (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
-            (KeyModifiers::SHIFT, KeyCode::Char('S'))
-            | (KeyModifiers::NONE, KeyCode::Char('S')) => Some(Action::Resume),
-            (KeyModifiers::SHIFT, KeyCode::Char('R'))
-            | (KeyModifiers::NONE, KeyCode::Char('R')) => Some(Action::OpenRename),
-            (_, KeyCode::Delete) => Some(Action::RemovePin),
             (m, KeyCode::Char('b')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::PinBindHint)
             }
-            // ADR 0057 direct pin shortcuts. `p` opens the discoverable
-            // menu (added in the modal split); these capitals reach
-            // each action without a menu pick.
-            (KeyModifiers::SHIFT, KeyCode::Char('N'))
-            | (KeyModifiers::NONE, KeyCode::Char('N')) => Some(Action::OpenPinCreate),
-            (KeyModifiers::SHIFT, KeyCode::Char('B'))
-            | (KeyModifiers::NONE, KeyCode::Char('B')) => Some(Action::OpenPinRebind),
-            (KeyModifiers::SHIFT, KeyCode::Char('A'))
-            | (KeyModifiers::NONE, KeyCode::Char('A')) => Some(Action::OpenPinAdopt),
-            (KeyModifiers::SHIFT, KeyCode::Char('L'))
-            | (KeyModifiers::NONE, KeyCode::Char('L')) => Some(Action::LaunchPin),
             // ADR 0031 / F8-005 accelerator surface (reshuffled
             // alongside H-VIEWER-NATIVE-008 to give the more
             // discoverable `v` to the session viewer):
@@ -263,20 +254,10 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             // also has direct shortcuts so the modal is the
             // discoverable surface rather than a required step.
             (m, KeyCode::Char('p')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::OpenPins),
-            (KeyModifiers::SHIFT, KeyCode::Char('F'))
-            | (KeyModifiers::NONE, KeyCode::Char('F')) => Some(Action::ClearFilters),
-            // T8-042: `E` toggles the explorer's edge-meta visibility
-            // (provenance · confidence · state on link rows).
-            // Focus-agnostic: the meta visibility is a global UI
-            // preference that applies to the right pane regardless
-            // of which pane currently has focus.
-            (KeyModifiers::SHIFT, KeyCode::Char('E'))
-            | (KeyModifiers::NONE, KeyCode::Char('E')) => {
-                Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
-            }
-            // H-HYG-007 wave 2: `1`–`5` view switch + `Ctrl-G`
-            // grouping cycle migrated to `keybindings::KEYBINDINGS`
-            // and dispatched via `translate_via_table` above.
+            // H-HYG-007 wave 2: `F` (clear filters) and `E`
+            // (toggle edge-meta) migrated to KEYBINDINGS + view
+            // switch + grouping cycle. Dispatched via
+            // `translate_via_table` above.
             (m, KeyCode::Char(']')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::CycleView(1))
             }
