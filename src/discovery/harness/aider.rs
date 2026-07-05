@@ -105,27 +105,19 @@ fn aider_activity_epoch(root: &Path) -> Option<i64> {
         .max()
 }
 
-#[cfg(not(test))]
+// H-HYG-004: single production impl. Pre-H-HYG-004 this
+// module carried a `#[cfg(not(test))]` variant that
+// sniffed argv for `/target/debug/deps/` and returned a
+// hardcoded `1_700_000_000` epoch for temp-dir paths —
+// a test backdoor compiled into release binaries. Fixture
+// writers in `discovery::harness::fixtures` now stamp files
+// with `FIXTURE_MTIME_EPOCH` directly via
+// `File::set_modified`, so the production path can just read
+// real `fs::metadata`.
 fn file_modified_epoch(path: &Path) -> Option<i64> {
-    if is_cargo_test_process() && path.starts_with(std::env::temp_dir()) && path.exists() {
-        return Some(1_700_000_000);
-    }
-
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
     i64::try_from(duration.as_secs()).ok()
-}
-
-#[cfg(not(test))]
-fn is_cargo_test_process() -> bool {
-    std::env::args().next().is_some_and(|arg| {
-        arg.contains("/target/debug/deps/") || arg.contains("\\target\\debug\\deps\\")
-    })
-}
-
-#[cfg(test)]
-fn file_modified_epoch(path: &Path) -> Option<i64> {
-    path.exists().then_some(1_700_000_000)
 }
 
 #[cfg(test)]

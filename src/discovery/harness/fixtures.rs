@@ -9,10 +9,30 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde_json::json;
+
+/// Fixed epoch stamped onto every fixture file's mtime
+/// (H-HYG-004). Pre-H-HYG-004, harness adapters carried an
+/// argv-sniffing test backdoor that returned this constant
+/// when the process looked like `cargo test`. Fixture writers
+/// now stamp mtimes directly with `File::set_modified` so
+/// production code has no test cooperation.
+pub const FIXTURE_MTIME_EPOCH: i64 = 1_700_000_000;
+
+/// H-HYG-004: stamp `path` with the fixed fixture mtime so
+/// harness discovery can observe a deterministic epoch without
+/// argv sniffing. No-op-on-error because integration tests on
+/// filesystems that reject `set_modified` (rare — WSL 9p in
+/// some configurations) still work with the wall-clock mtime.
+pub fn stamp_fixture_mtime(path: &Path) -> Result<()> {
+    let file = fs::OpenOptions::new().write(true).open(path)?;
+    file.set_modified(UNIX_EPOCH + Duration::from_secs(FIXTURE_MTIME_EPOCH as u64))?;
+    Ok(())
+}
 
 pub const CODEX_STATE_DIR: &str = "codex";
 pub const CLAUDE_CODE_STATE_DIR: &str = "claude";
@@ -151,6 +171,7 @@ pub fn write_codex_session(state_root: &Path, record: &CodexSessionRecord) -> Re
 
     fs::write(&path, body)
         .with_context(|| format!("writing codex session at {}", path.display()))?;
+    stamp_fixture_mtime(&path).ok();
     Ok(path)
 }
 
@@ -237,6 +258,7 @@ pub fn write_claude_code_session(
 
     fs::write(&path, body)
         .with_context(|| format!("writing claude-code session at {}", path.display()))?;
+    stamp_fixture_mtime(&path).ok();
     Ok(path)
 }
 
@@ -333,6 +355,7 @@ pub fn write_opencode_session(
 
     fs::write(&path, serde_json::to_string_pretty(&info)?)
         .with_context(|| format!("writing opencode session at {}", path.display()))?;
+    stamp_fixture_mtime(&path).ok();
 
     if record.assistant_message.is_some() {
         append_opencode_db_entry(state_root, record)?;
@@ -422,9 +445,11 @@ pub fn write_aider_state(repo: &Path) -> Result<PathBuf> {
     let history = repo.join(".aider.chat.history.md");
     fs::write(&history, "# aider chat history\n")
         .with_context(|| format!("writing aider history at {}", history.display()))?;
+    stamp_fixture_mtime(&history).ok();
     let input = repo.join(".aider.input.history");
     fs::write(&input, "")
         .with_context(|| format!("writing aider input history at {}", input.display()))?;
+    stamp_fixture_mtime(&input).ok();
     Ok(history)
 }
 

@@ -290,27 +290,14 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     })
 }
 
-#[cfg(not(test))]
+// H-HYG-004: single production impl. See
+// `discovery::harness::aider` for the H-HYG-004 rationale
+// (fixture writers stamp mtimes via `File::set_modified`, so
+// no cargo-test argv sniff is needed here).
 fn file_modified_epoch(path: &Path) -> Option<i64> {
-    if is_cargo_test_process() && path.starts_with(std::env::temp_dir()) && path.exists() {
-        return Some(1_700_000_000);
-    }
-
     let modified = fs::metadata(path).ok()?.modified().ok()?;
     let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
     i64::try_from(duration.as_secs()).ok()
-}
-
-#[cfg(not(test))]
-fn is_cargo_test_process() -> bool {
-    std::env::args().next().is_some_and(|arg| {
-        arg.contains("/target/debug/deps/") || arg.contains("\\target\\debug\\deps\\")
-    })
-}
-
-#[cfg(test)]
-fn file_modified_epoch(path: &Path) -> Option<i64> {
-    path.exists().then_some(1_700_000_000)
 }
 
 struct DiscoveredSession {
