@@ -8488,7 +8488,7 @@ Cross-cutting expectations across every Tier A swap:
 - Snapshot-replayable reducer (ADR 0067) stays the source of truth;
   no widget that owns the event loop is adopted into the runtime.
 
-- [ ] `H-WIDG-001` Adopt `ratatui-macros` for `Span` / `Line` /
+- [x] `H-WIDG-001` Adopt `ratatui-macros` for `Span` / `Line` /
   `Text` / layout boilerplate.
   - Motivation: `ratatui-macros` 0.7 ships `span!` / `line!` /
     `text!` / `constraints!` / `vertical!` / `horizontal!` / `row!`
@@ -8553,12 +8553,22 @@ Cross-cutting expectations across every Tier A swap:
     would allocate via `format!`. All 1670 tests stay green per
     slice; snapshots regenerated where rendering changed. Net
     workstream-wide LOC reduction: **−312** across the six
-    commits. Remaining opportunistic work for full story closure:
-    sweep the small widget files (`badge.rs` 2 sites, `toast.rs`
-    2 sites, `multi_select.rs` 3 sites, `value_modal.rs` 5 sites,
-    `input.rs` 3 sites) and apply `vertical!` / `horizontal!` /
-    `constraints!` to the layout hot spots (`detail.rs`
-    detail-pane split, `ui.rs` outer panel split).
+    commits.
+  - Follow-on landings (2026-07-05):
+      - `f022014`: `widgets/badge.rs` + `widgets/value_modal.rs`
+        cleaned with `span!` / `line!`. `input.rs` skipped (its
+        two `Line::from(some_string.clone())` sites are the same
+        no-gain pattern as the ui.rs `Span::raw(CONST)` sites);
+        `toast.rs` and `multi_select.rs` no longer carry any
+        Span/Line/Text call sites per the audit.
+      - `93308b9`: `src/tui/ui.rs` layout hot spots migrated to
+        `vertical!` / `horizontal!` — four call sites (outer draw
+        split, responsive body panel split with narrow-vertical /
+        wide-horizontal branch, and two detail-pane header
+        splits). `Constraint` / `Direction` / `Layout` imports
+        retire from `ui.rs`. `detail.rs` has no
+        `Layout::default()` construction today (uses Frame area
+        directly), so its story-scope layout work is a no-op.
   - Blockers: none. Land before the other tiers so the new code
     written for swaps lands in the macro idiom from day one.
 
