@@ -105,7 +105,7 @@ pub fn conflict_graph() -> GraphSnapshot {
     );
     let declared = GraphLink::new(
         "mux-declared",
-        source.clone(),
+        source,
         LinkEndpoint::Node { id: second.id() },
         RelationKind::LinkedToMux,
         Provenance::LocalDeclared,
@@ -160,7 +160,7 @@ pub fn mux_candidates_graph() -> GraphSnapshot {
 
     let cached_link = GraphLink::new(
         "mux-cached",
-        source.clone(),
+        source,
         LinkEndpoint::Node { id: cached.id() },
         RelationKind::LinkedToMux,
         Provenance::Cached,
@@ -328,7 +328,7 @@ pub fn ignored_and_overridden_graph() -> GraphSnapshot {
 
     let mut overridden = GraphLink::new(
         "mux-overridden",
-        source.clone(),
+        source,
         LinkEndpoint::Node {
             id: overridden_target.id(),
         },

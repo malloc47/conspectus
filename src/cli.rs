@@ -2596,7 +2596,7 @@ impl TuiArgs {
             theme: outcome.config.tui.theme.clone(),
             show_edge_meta: outcome.config.tui.detail.show_edge_meta,
             show_harness_chips: outcome.config.tui.show_harness_chips,
-            intervals: outcome.config.server.intervals.clone(),
+            intervals: outcome.config.server.intervals,
             no_cache: self.no_cache,
             refresh: self.refresh,
         };
@@ -4058,11 +4058,9 @@ fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn MuxBackend) -> Result<()>
             rename.new_name
         ),
         TmuxRenameOutcome::Unavailable(reason) => bail!("tmux unavailable: {}", reason.as_str()),
-        TmuxRenameOutcome::Failed { code, message } => bail!(
-            "tmux rename-session failed (exit code {:?}): {}",
-            code,
-            message
-        ),
+        TmuxRenameOutcome::Failed { code, message } => {
+            bail!("tmux rename-session failed (exit code {code:?}): {message}")
+        }
         TmuxRenameOutcome::Unsupported => bail!("tmux runner does not support rename_session"),
     }
 }
@@ -4526,13 +4524,13 @@ impl PinShowArgs {
         println!("cwd          {}", pin.cwd);
         println!("mux          {}", pin.mux.native_id());
         if let Some(socket) = pin.mux.socket_name.as_deref() {
-            println!("socket_name  {}", socket);
+            println!("socket_name  {socket}");
         }
         if let Some(argv) = pin.launch_argv.as_ref() {
             println!("launch_argv  {}", argv.join(" "));
         }
         if let Some(reason) = pin.reason.as_deref() {
-            println!("reason       {}", reason);
+            println!("reason       {reason}");
         }
         println!("provenance   {}", provenance_label(pin.provenance));
         println!("store        {}", pin.store_path);
@@ -4759,7 +4757,7 @@ impl PinBindArgs {
         let source_endpoint = DeclaredEndpoint::AgentSession {
             harness_key: target.harness_key.clone(),
             state_scope: target.state_scope.clone(),
-            session_key: target.session_key.clone(),
+            session_key: target.session_key,
         };
         let target_endpoint = DeclaredEndpoint::MuxSession {
             native_id: pin.mux.native_id(),
@@ -4768,8 +4766,8 @@ impl PinBindArgs {
             id: format!("pin:{}:bound", pin.id),
             relation: RelationKind::LinkedToMux,
             state: DeclaredLinkState::Active,
-            source: source_endpoint.clone(),
-            target: target_endpoint.clone(),
+            source: source_endpoint,
+            target: target_endpoint,
             reason: self.reason,
             overridden_by: None,
             // Operator-facing breadcrumb tying the declared link to
@@ -4784,8 +4782,7 @@ impl PinBindArgs {
             Some(&link.target),
             &self.scan_roots,
         )?;
-        let outcome =
-            upsert_declared_link(&path, link.clone()).map_err(|err| anyhow!(err.to_string()))?;
+        let outcome = upsert_declared_link(&path, link).map_err(|err| anyhow!(err.to_string()))?;
         let verb = if outcome.changed {
             "wrote"
         } else {

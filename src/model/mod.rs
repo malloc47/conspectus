@@ -2059,12 +2059,10 @@ mod tests {
         let mut snap = GraphSnapshot::empty();
         snap.nodes
             .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-        snap.nodes.push(GraphNode::Checkout(CheckoutNode::new(
-            checkout_id.clone(),
-            "/r",
-        )));
+        snap.nodes
+            .push(GraphNode::Checkout(CheckoutNode::new(checkout_id, "/r")));
         snap.nodes.push(GraphNode::Workspace(WorkspaceNode {
-            id: workspace_id.clone(),
+            id: workspace_id,
             root: "/ws".to_string(),
             provider: Some("agent-deck".to_string()),
             name: Some("ws".to_string()),
@@ -2093,7 +2091,7 @@ mod tests {
         }));
         snap.nodes
             .push(GraphNode::RuntimeProcess(RuntimeProcessNode {
-                id: runtime_id.clone(),
+                id: runtime_id,
                 observation_key: "proc-1".to_string(),
                 pid: Some(42),
                 parent_pid: None,
@@ -2106,13 +2104,13 @@ mod tests {
                 observed_epoch: Some(4),
             }));
         snap.nodes.push(GraphNode::Branch(BranchNode {
-            id: branch_id.clone(),
+            id: branch_id,
             refname: "refs/heads/main".to_string(),
             current_commit: Some("abc".to_string()),
             upstream: Some("origin/main".to_string()),
         }));
         snap.nodes.push(GraphNode::Fork(ForkNode {
-            id: fork_id.clone(),
+            id: fork_id,
             provider: "github".to_string(),
             provider_source_key: "github:owner:repo".to_string(),
             name: Some("repo".to_string()),
@@ -2120,7 +2118,7 @@ mod tests {
             capabilities: vec!["read".to_string()],
         }));
         snap.nodes.push(GraphNode::ForgePr(ForgePrNode {
-            id: pr_id.clone(),
+            id: pr_id,
             provider: "github".to_string(),
             host: "github.com".to_string(),
             owner: "owner".to_string(),
@@ -2204,7 +2202,7 @@ mod tests {
             provenance: Provenance::LocalPin,
             store_path: "/r/.conspectus.toml".to_string(),
             binding: Some(PinBinding::Bound {
-                mux: mux_id.clone(),
+                mux: mux_id,
                 session: agent_id.clone(),
             }),
         });
@@ -2293,7 +2291,7 @@ mod tests {
             NodeId::MuxSession(MuxSessionId::new("tmux:editor")),
             NodeId::Pin(PinId::new("pin-1")),
             NodeId::RuntimeProcess(RuntimeProcessId::new("proc-1")),
-            NodeId::Branch(BranchId::new(repo.clone(), "refs/heads/main")),
+            NodeId::Branch(BranchId::new(repo, "refs/heads/main")),
             NodeId::Fork(ForkId::new("github:owner:repo")),
             NodeId::ForgePr(ForgePrId::new("github", "github.com", "o", "r", 1)),
         ];

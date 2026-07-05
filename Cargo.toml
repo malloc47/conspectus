@@ -1,3 +1,32 @@
+# Curated clippy lints (H-HYG-005). Adds a whole-workspace
+# `[lints.clippy]` table so drive-by fixes land in one place
+# instead of six copies of the same pattern. Levels:
+#
+# - `deny`: enforced by CI (`cargo clippy -D warnings`); no
+#   remaining warnings in the workspace.
+# - `allow`: known targeted lint; too many current-workspace
+#   warnings to fix in H-HYG-005's first landing. Follow-up
+#   commits will flip these to `deny` incrementally. See the
+#   H-HYG-005 backlog entry for the current counts.
+#
+# Consciously skipped (per audit): the doc lints (missing_docs,
+# missing_errors_doc, etc.) — Conspectus has an explicit doc
+# culture around ADRs and per-module `//!` headers rather than
+# per-fn docs. Cast-truncation is allowed in TUI layout modules
+# via per-module `#![allow]` where it's the intentional shape.
+[lints.clippy]
+redundant_clone = "deny"
+# Deferred to H-HYG-005 follow-ups (current counts as of first
+# landing): match_same_arms 36, match_wildcard_for_single_variants
+# 29, uninlined_format_args 12, map_unwrap_or 69 combined.
+# `match_wildcard_for_single_variants` is the most valuable to
+# land next — it catches wildcards that would silently swallow
+# a new `NodeKind` / `RelationKind` variant.
+match_same_arms = "allow"
+match_wildcard_for_single_variants = "allow"
+uninlined_format_args = "allow"
+map_unwrap_or = "allow"
+
 [package]
 name = "conspectus"
 version = "0.1.0"

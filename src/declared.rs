@@ -1090,7 +1090,7 @@ mod tests {
             })],
             candidate_links: vec![GraphLink {
                 id: "pr-branch".to_string(),
-                source: NodeId::ForgePr(pr_id.clone()),
+                source: NodeId::ForgePr(pr_id),
                 target: LinkEndpoint::Node {
                     id: NodeId::Branch(branch_id),
                 },

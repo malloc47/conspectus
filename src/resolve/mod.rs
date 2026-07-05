@@ -1157,7 +1157,7 @@ mod tests {
         );
         let checkout_link = GraphLink::new(
             "checkout",
-            session.clone(),
+            session,
             LinkEndpoint::Node {
                 id: checkout("/workspace/repo"),
             },

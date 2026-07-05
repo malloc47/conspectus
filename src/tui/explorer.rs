@@ -2088,19 +2088,19 @@ mod tests {
         snapshot.candidate_links.push(link(
             "to-workspace",
             session_id.clone(),
-            workspace_id.clone(),
+            workspace_id,
             RelationKind::AssociatedWith,
         ));
         snapshot.candidate_links.push(link(
             "to-repo",
             session_id.clone(),
-            repo_id.clone(),
+            repo_id,
             RelationKind::AssociatedWith,
         ));
         snapshot.candidate_links.push(link(
             "to-mux",
             session_id.clone(),
-            mux_id.clone(),
+            mux_id,
             RelationKind::LinkedToMux,
         ));
         let snapshot = resolve_snapshot(snapshot);
@@ -2473,10 +2473,10 @@ mod tests {
             .push(cwd_link("focused-b", focused_id.clone(), mux_b.clone()));
         snapshot
             .candidate_links
-            .push(cwd_link("other-a", other_id.clone(), mux_a.clone()));
+            .push(cwd_link("other-a", other_id.clone(), mux_a));
         snapshot
             .candidate_links
-            .push(cwd_link("other-b", other_id.clone(), mux_b.clone()));
+            .push(cwd_link("other-b", other_id, mux_b));
 
         let snapshot = resolve_snapshot(snapshot);
 
@@ -2541,14 +2541,14 @@ mod tests {
         let proc2 = NodeId::RuntimeProcess(RuntimeProcessId::new("obs:2"));
         let mut high = link(
             "p1",
-            proc1.clone(),
+            proc1,
             session_id.clone(),
             RelationKind::ProcessIdentifiesSession,
         );
         high.provenance = Provenance::StrongDiscovered;
         let mut low = link(
             "p2",
-            proc2.clone(),
+            proc2,
             session_id.clone(),
             RelationKind::ProcessCandidatesSession,
         );
@@ -2933,7 +2933,7 @@ mod tests {
         let mut snapshot = GraphSnapshot::empty();
         snapshot.nodes.push(GraphNode::ForgePr(pr.clone()));
         let snapshot = resolve_snapshot(snapshot);
-        let target = NodeId::ForgePr(pr.id.clone());
+        let target = NodeId::ForgePr(pr.id);
         let view = build(&snapshot, &target, Some(home().as_path()));
         let pr_field = view
             .core_fields

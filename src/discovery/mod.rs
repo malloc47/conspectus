@@ -983,8 +983,8 @@ mod tests {
         let mux = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));
         let link = GraphLink::new(
             "session-mux",
-            session.clone(),
-            LinkEndpoint::Node { id: mux.clone() },
+            session,
+            LinkEndpoint::Node { id: mux },
             RelationKind::LinkedToMux,
             Provenance::StrongDiscovered,
         );

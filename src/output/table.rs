@@ -615,7 +615,7 @@ mod tests {
             nodes: vec![
                 agent_session("codex", "alpha", Some("/work/a")),
                 GraphNode::ForgePr(ForgePrNode {
-                    id: pr_id.clone(),
+                    id: pr_id,
                     provider: "github".to_string(),
                     host: "github.com".to_string(),
                     owner: "octo".to_string(),
@@ -1288,7 +1288,7 @@ mod tests {
 
         let repo_id = RepoId::new("/workspace/repo/.git");
         let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature".to_string());
-        let worktree_id = CheckoutId::new(repo_id.clone(), "/workspace/repo");
+        let worktree_id = CheckoutId::new(repo_id, "/workspace/repo");
 
         let worktree_to_branch = GraphLink {
             id: "wt-branch".to_string(),
@@ -1571,7 +1571,7 @@ mod tests {
 
         let mut declared_link = linked_to_mux_link(
             "declared-link",
-            session_id.clone(),
+            session_id,
             mux_id,
             Provenance::LocalDeclared,
             Confidence::High,
@@ -1679,7 +1679,7 @@ mod tests {
         let repo_id = RepoId::new("/workspace/repo/.git");
         let pr_id = ForgePrId::new("github", "github.com", "octo", "repo", 7);
         let branch_id = BranchId::new(repo_id.clone(), "refs/heads/feature".to_string());
-        let worktree_id = CheckoutId::new(repo_id.clone(), "/workspace/repo");
+        let worktree_id = CheckoutId::new(repo_id, "/workspace/repo");
 
         let worktree_node = GraphNode::Checkout(CheckoutNode {
             id: worktree_id.clone(),
@@ -1692,7 +1692,7 @@ mod tests {
 
         let mut pr_to_branch = branch_has_pr_link(
             "pr-link",
-            pr_id.clone(),
+            pr_id,
             branch_id.clone(),
             Provenance::StrongDiscovered,
         );

@@ -1315,18 +1315,14 @@ fn execute_commit_alias_rename(
     };
     let snapshot = database.snapshot().clone();
 
-    let plan = match crate::rename::plan_session_rename(
-        &snapshot,
-        &session_id,
-        new_display_name.clone(),
-        false,
-    ) {
-        Ok(plan) => plan,
-        Err(err) => {
-            let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
-            return;
-        }
-    };
+    let plan =
+        match crate::rename::plan_session_rename(&snapshot, &session_id, new_display_name, false) {
+            Ok(plan) => plan,
+            Err(err) => {
+                let _ = app.update(Msg::SetStatus(Some(format!("rename failed: {err}"))));
+                return;
+            }
+        };
 
     let endpoint = crate::declared::declared_endpoint_from_node_id(
         &crate::model::NodeId::AgentSession(session_id.clone()),
@@ -1351,7 +1347,7 @@ fn execute_commit_alias_rename(
         Some(name) => crate::aliases::upsert_alias_entry(
             &store_path,
             crate::aliases::AliasEntry {
-                node: endpoint.clone(),
+                node: endpoint,
                 display_name: name.clone(),
                 reason: None,
             },
@@ -1980,7 +1976,7 @@ fn write_pin_bind(
     let source = crate::declared::DeclaredEndpoint::AgentSession {
         harness_key: target.harness_key.clone(),
         state_scope: target.state_scope.clone(),
-        session_key: target.session_key.clone(),
+        session_key: target.session_key,
     };
     let target_endpoint = crate::declared::DeclaredEndpoint::MuxSession {
         native_id: pin.mux.native_id(),

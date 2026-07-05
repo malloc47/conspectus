@@ -4576,7 +4576,7 @@ mod tests {
             id: "session-mux".to_string(),
             source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             target: LinkEndpoint::Node {
-                id: NodeId::MuxSession(mux_graph_id.clone()),
+                id: NodeId::MuxSession(mux_graph_id),
             },
             relation: RelationKind::LinkedToMux,
             provenance: Provenance::Discovered,
@@ -4683,7 +4683,7 @@ mod tests {
             id: "session-mux".to_string(),
             source: NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc")),
             target: LinkEndpoint::Node {
-                id: NodeId::MuxSession(mux_graph_id.clone()),
+                id: NodeId::MuxSession(mux_graph_id),
             },
             relation: RelationKind::LinkedToMux,
             provenance: Provenance::Discovered,

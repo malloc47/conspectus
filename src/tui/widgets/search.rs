@@ -332,7 +332,7 @@ fn build_match_line(
     // spaces so the label column stays aligned across the result
     // list — operators don't see the label jiggle row by row.
     spans.push(search_kind_glyph_span(&m.id, theme, is_cursor));
-    spans.push(span!(span_style(false, Style::default()); "{}", label.clone()));
+    spans.push(span!(span_style(false, Style::default()); "{}", label));
 
     // If we can show a snippet (haystack present and either
     // distinct from the label or carrying a match range), append
@@ -614,7 +614,7 @@ mod tests {
         // the actual match — the rendered line should expose the
         // matching preview snippet alongside the alias.
         let row = agent_row("nice", Some("nice"));
-        let mut row_with_preview = row.clone();
+        let mut row_with_preview = row;
         if let crate::tui::rows::RowKind::AgentSession(s) = &mut row_with_preview.kind {
             s.preview = Some("lots of stuff and then puffin shows up here".to_string());
         }

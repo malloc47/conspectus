@@ -713,12 +713,10 @@ mod tests {
         upsert_alias_entry(&project, sample_entry("alpha", "project-name")).expect("project");
         upsert_alias_entry(&user, sample_entry("alpha", "user-name")).expect("user");
 
-        let (found_path, entry) = load_alias_entry_for_node(
-            &[project.clone(), user.clone()],
-            &sample_entry("alpha", "x").node,
-        )
-        .expect("ok")
-        .expect("found");
+        let (found_path, entry) =
+            load_alias_entry_for_node(&[project.clone(), user], &sample_entry("alpha", "x").node)
+                .expect("ok")
+                .expect("found");
 
         assert_eq!(found_path, project);
         assert_eq!(entry.display_name, "project-name");

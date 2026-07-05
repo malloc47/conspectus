@@ -808,7 +808,7 @@ mod tests {
         let encoded = to_toml(&document).expect("serialize");
         let decoded = parse_pins_document(&encoded).expect("parse");
 
-        assert_eq!(decoded.entries(), &[entry.clone()]);
+        assert_eq!(decoded.entries(), &[entry]);
         assert!(encoded.contains("socket_name = \"scratch\""));
         assert!(encoded.contains("argv = [\"codex\"]"));
     }
@@ -953,7 +953,7 @@ mod tests {
         let document = PinsDocument {
             pins: Some(PinsSection {
                 schema_version: PINS_SCHEMA_VERSION,
-                entries: vec![a.clone(), b.clone()],
+                entries: vec![a, b],
             }),
         };
         let encoded = to_toml(&document).expect("serialize");

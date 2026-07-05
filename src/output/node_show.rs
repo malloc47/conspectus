@@ -1140,7 +1140,7 @@ mod tests {
             candidate_links: vec![linked_to_mux("link-1", agent_id.clone(), mux_id.clone())],
             resolved_relationships: vec![crate::model::ResolvedRelationship {
                 source: agent_id.clone(),
-                target: mux_id.clone(),
+                target: mux_id,
                 relation: RelationKind::LinkedToMux,
                 selected_link_id: Some("link-1".to_string()),
                 competing_link_ids: vec![],

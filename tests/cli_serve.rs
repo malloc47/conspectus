@@ -477,8 +477,7 @@ fn serve_socket_snapshot_command_errors_before_first_cycle() {
         Some("error") => {
             assert_eq!(
                 response["error"]["code"], "snapshot_unavailable",
-                "pre-first-cycle errors must use the snapshot_unavailable code; got {}",
-                response
+                "pre-first-cycle errors must use the snapshot_unavailable code; got {response}"
             );
         }
         Some("ok") => {

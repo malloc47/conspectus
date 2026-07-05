@@ -810,7 +810,7 @@ fn pin_group_key(
         repo_display_path: data.repo_display_path(&repo_id),
         repo_id,
     });
-    let worktree = Some(worktree_id.root.clone());
+    let worktree = Some(worktree_id.root);
     Some(GroupKey {
         workspace: None,
         repo,
@@ -868,7 +868,7 @@ fn resolve_group_key(
     // always included so the bucket ordering is stable; the
     // rendering pass collapses the worktree level for Graph and
     // Repo when the repo has a single worktree.
-    let worktree = Some(worktree_id.root.clone());
+    let worktree = Some(worktree_id.root);
 
     Some(GroupKey {
         workspace: None,
@@ -4086,7 +4086,7 @@ mod tests {
                 Provenance::LocalPin,
                 Some(PinBinding::Bound {
                     mux: mux_id,
-                    session: session_id.clone(),
+                    session: session_id,
                 }),
             ),
             pin_candidate(

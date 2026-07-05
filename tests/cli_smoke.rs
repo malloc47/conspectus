@@ -2125,7 +2125,7 @@ fn declared_create_then_graph_shows_local_declared_candidate() {
         .expect("candidates")
         .iter()
         .any(|link| link["provenance"] == "local_declared");
-    assert!(has_local_declared, "candidates:\n{}", output);
+    assert!(has_local_declared, "candidates:\n{output}");
 }
 
 #[test]

@@ -127,7 +127,7 @@ impl PathOmniboxState {
             .into_iter()
             .filter(|suggestion| suggestion.path.as_str() != value)
             .nth(self.selected)
-            .map(|suggestion| suggestion.path.clone())
+            .map(|suggestion| suggestion.path)
     }
 }
 

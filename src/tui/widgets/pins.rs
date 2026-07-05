@@ -3670,7 +3670,7 @@ mod tests {
             ctx.pin_create_defaults.clone(),
             ctx.pin_adopt_defaults.clone(),
             ctx.known_harness_keys.clone(),
-            ctx.known_mux_names.clone(),
+            ctx.known_mux_names,
         );
 
         for _ in 0.."scratch".len() {
@@ -3754,7 +3754,7 @@ mod tests {
             ctx.pin_create_defaults.clone(),
             ctx.pin_adopt_defaults.clone(),
             ctx.known_harness_keys.clone(),
-            ctx.known_mux_names.clone(),
+            ctx.known_mux_names,
         );
 
         for _ in 0.."scratch".len() {

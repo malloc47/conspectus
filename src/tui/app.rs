@@ -1270,7 +1270,7 @@ impl App {
                 let id = pin_id_candidate(&display);
                 let mux_name = self.unique_pin_mux_name(&id);
                 PinCreateDefaults {
-                    id: id.clone(),
+                    id,
                     display_name: display,
                     harness: session.session.harness_key.clone(),
                     cwd,
@@ -3942,7 +3942,7 @@ mod tests {
             snapshot: GraphDb::from_snapshot(&snap),
             tree,
             loaded_at_epoch: 1_700_000_010,
-            initial_selection_hint: Some(hint.clone()),
+            initial_selection_hint: Some(hint),
         });
 
         assert_eq!(
@@ -4019,7 +4019,7 @@ mod tests {
         app.update(Msg::NavDown);
         app.update(Msg::NavDown);
         assert_eq!(app.last_visible_index, Some(2));
-        assert_eq!(app.selection.as_ref(), Some(&RowId::Group(dup_id.clone())));
+        assert_eq!(app.selection.as_ref(), Some(&RowId::Group(dup_id)));
 
         // From the second duplicate, NavDown must advance to the
         // row *after* it, not snap back to the row after the first
@@ -4699,7 +4699,7 @@ mod tests {
         snap.nodes.push(GraphNode::AgentSession(session_b));
         snap.candidate_links.push(crate::model::GraphLink {
             id: "sibling".to_string(),
-            source: parent_id.clone(),
+            source: parent_id,
             target: LinkEndpoint::Node {
                 id: child_id.clone(),
             },
@@ -4732,7 +4732,7 @@ mod tests {
                 _ => None,
             })
             .expect("parent agent session row in tree");
-        app.set_selection(parent_row.clone());
+        app.set_selection(parent_row);
         app.update(Msg::CycleFocus);
         // Walk to a link row whose neighbor is the child session.
         let rows = app.explorer().expect("state").rows();

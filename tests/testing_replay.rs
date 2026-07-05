@@ -245,8 +245,7 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
     assert_eq!(
         active_hook_links.len(),
         1,
-        "exactly one active hook-sidecar LinkedToMux link expected, got {:?}",
-        active_hook_links
+        "exactly one active hook-sidecar LinkedToMux link expected, got {active_hook_links:?}"
     );
 
     let overridden_hook_links: Vec<_> = result
@@ -262,8 +261,7 @@ fn same_pane_hook_supersession_freshest_wins_and_tui_shows_active() {
     assert_eq!(
         overridden_hook_links.len(),
         1,
-        "exactly one overridden hook-sidecar LinkedToMux link expected, got {:?}",
-        overridden_hook_links
+        "exactly one overridden hook-sidecar LinkedToMux link expected, got {overridden_hook_links:?}"
     );
 
     let session_b_row =
@@ -347,7 +345,7 @@ fn invariant_ignored_mux_candidates_remain_evidence_but_never_resolve() {
         .id
         .clone();
 
-    let mut snapshot = result.snapshot.clone();
+    let mut snapshot = result.snapshot;
     let ignored_link = snapshot
         .candidate_links
         .iter_mut()

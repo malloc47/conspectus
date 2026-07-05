@@ -14,10 +14,7 @@ pub fn redact_freshness_epoch(text: &str) -> String {
     for line in text.split_inclusive('\n') {
         if let Some(idx) = line.find("\"freshness_epoch\":") {
             let (head, tail) = line.split_at(idx + "\"freshness_epoch\":".len());
-            let trailing = tail
-                .find([',', '\n', '}'])
-                .map(|i| &tail[i..])
-                .unwrap_or("");
+            let trailing = tail.find([',', '\n', '}']).map_or("", |i| &tail[i..]);
             out.push_str(head);
             out.push_str(" \"<redacted>\"");
             out.push_str(trailing);

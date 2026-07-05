@@ -183,7 +183,7 @@ pub fn resolve_attach_target(app: &App) -> Result<AttachTarget, AttachDisabled> 
     // `$TMUX`-derived name; H-EXT-011 generalizes it to
     // `current_mux_session` with a backend field.
     if !crate::discovery::tmux::KNOWN_MUX_BACKENDS.contains(&target.backend.as_str()) {
-        return Err(AttachDisabled::UnsupportedBackend(target.backend.clone()));
+        return Err(AttachDisabled::UnsupportedBackend(target.backend));
     }
     if target.backend == crate::discovery::tmux::TMUX_BACKEND
         && app
@@ -830,9 +830,7 @@ mod tests {
         snapshot.candidate_links.push(GraphLink {
             id: "assoc".to_string(),
             source: session_id.clone(),
-            target: crate::model::LinkEndpoint::Node {
-                id: checkout_id.clone(),
-            },
+            target: crate::model::LinkEndpoint::Node { id: checkout_id },
             relation: RelationKind::AssociatedWith,
             provenance: Provenance::Discovered,
             confidence: crate::model::Confidence::Medium,

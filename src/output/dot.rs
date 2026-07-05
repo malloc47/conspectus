@@ -434,7 +434,7 @@ fn unresolved_label(e: &UnresolvedEndpoint) -> String {
         bits.push(h.clone());
     }
     if let Some(n) = &e.native_id {
-        bits.push(truncate(n, 16).to_string());
+        bits.push(truncate(n, 16));
     }
     format!("?\\n{}", bits.join(":"))
 }

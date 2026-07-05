@@ -2044,7 +2044,7 @@ mod tests {
         // Worktree → Branch (CheckedOutBranch)
         snapshot.candidate_links.push(GraphLink {
             id: "wt-branch".into(),
-            source: NodeId::Checkout(CheckoutId::new(repo_id.clone(), cwd.to_string())),
+            source: NodeId::Checkout(CheckoutId::new(repo_id, cwd.to_string())),
             target: LinkEndpoint::Node {
                 id: NodeId::Branch(branch_id.clone()),
             },
