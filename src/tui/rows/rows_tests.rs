@@ -1,0 +1,116 @@
+// Extracted from mod.rs H-HYG-011 rolling wave via #[path = "rows_tests.rs"] mod tests;
+use super::*;
+use std::path::PathBuf;
+
+#[test]
+fn shorten_home_replaces_exact_home_prefix() {
+    let home = PathBuf::from("/home/op");
+    assert_eq!(shorten_home("/home/op", Some(&home)), "~");
+    assert_eq!(shorten_home("/home/op/src/x", Some(&home)), "~/src/x");
+}
+
+#[test]
+fn shorten_home_keeps_non_home_paths_intact() {
+    let home = PathBuf::from("/home/op");
+    assert_eq!(shorten_home("/var/log", Some(&home)), "/var/log");
+    // Prefix match must respect path boundaries — `/home/operator`
+    // is NOT `/home/op/erator`.
+    assert_eq!(
+        shorten_home("/home/operator", Some(&home)),
+        "/home/operator"
+    );
+}
+
+#[test]
+fn shorten_home_with_trailing_slash_in_home_still_matches() {
+    let home = PathBuf::from("/home/op/");
+    assert_eq!(shorten_home("/home/op/src", Some(&home)), "~/src");
+}
+
+#[test]
+fn shorten_home_no_home_is_identity() {
+    assert_eq!(shorten_home("/home/op/x", None), "/home/op/x");
+}
+
+#[test]
+fn harness_label_shortens_claude_code() {
+    assert_eq!(harness_label("claude-code"), "claude");
+    assert_eq!(harness_label("codex"), "codex");
+    assert_eq!(harness_label("opencode"), "opencode");
+}
+
+#[test]
+fn format_recency_buckets_seconds_minutes_hours_days() {
+    let now = Some(1_000_000);
+    assert_eq!(format_recency(now, Some(999_990)), Some("10s".to_string()));
+    assert_eq!(
+        format_recency(now, Some(1_000_000 - 120)),
+        Some("2m".to_string())
+    );
+    assert_eq!(
+        format_recency(now, Some(1_000_000 - 3 * 3600)),
+        Some("3h".to_string())
+    );
+    assert_eq!(
+        format_recency(now, Some(1_000_000 - 5 * 86400)),
+        Some("5d".to_string())
+    );
+}
+
+#[test]
+fn format_recency_clamps_future_timestamps_to_zero() {
+    let now = Some(1_000_000);
+    assert_eq!(format_recency(now, Some(1_000_500)), Some("0s".to_string()));
+}
+
+#[test]
+fn format_recency_is_none_when_either_side_missing() {
+    assert_eq!(format_recency(None, Some(100)), None);
+    assert_eq!(format_recency(Some(100), None), None);
+}
+
+#[test]
+fn recency_bucket_picks_bucket_per_age() {
+    let now = Some(1_000_000);
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 60)),
+        Some(RecencyBucket::Fresh),
+        "1m ago is Fresh",
+    );
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 5 * 60)),
+        Some(RecencyBucket::Active),
+        "exactly 5m ago crosses Fresh→Active",
+    );
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 30 * 60)),
+        Some(RecencyBucket::Active),
+        "30m ago is Active",
+    );
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 60 * 60)),
+        Some(RecencyBucket::Recent),
+        "exactly 1h ago crosses Active→Recent",
+    );
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 12 * 60 * 60)),
+        Some(RecencyBucket::Recent),
+        "12h ago is Recent",
+    );
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 24 * 60 * 60)),
+        Some(RecencyBucket::Cold),
+        "exactly 1d ago crosses Recent→Cold",
+    );
+    assert_eq!(
+        recency_bucket(now, Some(1_000_000 - 7 * 24 * 60 * 60)),
+        Some(RecencyBucket::Cold),
+        "7d ago is Cold",
+    );
+}
+
+#[test]
+fn recency_bucket_is_none_when_either_side_missing() {
+    assert_eq!(recency_bucket(None, Some(100)), None);
+    assert_eq!(recency_bucket(Some(100), None), None);
+}
