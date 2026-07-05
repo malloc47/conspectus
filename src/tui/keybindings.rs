@@ -429,6 +429,53 @@ pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Act
     None
 }
 
+/// H-HYG-007 wave 5: render a KeyBinding's key as an operator-
+/// friendly label suitable for a help overlay row (e.g. `Ctrl-C`,
+/// `Enter`, `q`, `↓`). Used by the coherence drift test — every
+/// key label produced here must appear somewhere in
+/// [`crate::tui::widgets::help::keymap_sections`]'s output so
+/// the table and help stay in sync.
+pub fn key_label(key: &KeyMatcher) -> String {
+    match key {
+        KeyMatcher::Exact { modifiers, code } => {
+            let mut buf = String::new();
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                buf.push_str("Ctrl-");
+            }
+            if modifiers.contains(KeyModifiers::SHIFT)
+                && !matches!(code, KeyCode::Char(c) if c.is_ascii_uppercase())
+            {
+                buf.push_str("Shift-");
+            }
+            buf.push_str(&code_label(*code));
+            buf
+        }
+        KeyMatcher::UpperChar(c) => c.to_string(),
+        KeyMatcher::AnyModExceptCtrl(c) => c.to_string(),
+        KeyMatcher::AnyMod(code) => code_label(*code),
+    }
+}
+
+fn code_label(code: KeyCode) -> String {
+    match code {
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Backspace => "Backspace".to_string(),
+        KeyCode::Delete => "Delete".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::PageUp => "PgUp".to_string(),
+        KeyCode::PageDown => "PgDn".to_string(),
+        KeyCode::Up => "Up".to_string(),
+        KeyCode::Down => "Down".to_string(),
+        KeyCode::Left => "Left".to_string(),
+        KeyCode::Right => "Right".to_string(),
+        KeyCode::Esc => "Esc".to_string(),
+        KeyCode::Tab => "Tab".to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

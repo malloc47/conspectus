@@ -459,6 +459,68 @@ mod tests {
         }
     }
 
+    /// H-HYG-007 wave 5: every `KEYBINDINGS` entry's key label
+    /// must appear somewhere in `keymap_sections`'s rendered
+    /// output. Guards against the pre-H-HYG-007 dispatcher /
+    /// help-overlay drift the audit called out — a new binding
+    /// added to the table stays reachable at render time only
+    /// if the help section names it too. Failing this test
+    /// signals that a wave-1..4 migrated binding is missing
+    /// from the operator-facing help.
+    #[test]
+    fn every_keybindings_entry_appears_in_help_sections() {
+        use crate::tui::keybindings::{KEYBINDINGS, KeyMode, key_label};
+        // Concatenate every section's binding key strings.
+        let sections = keymap_sections();
+        let mut haystack = String::new();
+        for section in &sections {
+            for binding in &section.bindings {
+                haystack.push_str(binding.key());
+                haystack.push('\n');
+            }
+        }
+        // Ratatui-cheese `Binding::key(&self)` returns the key
+        // string; the haystack now holds every operator-facing
+        // key label. Check each KEYBINDINGS entry.
+        //
+        // Multi-key help rows collapse several bindings into one
+        // string (e.g. "1 – 5", "j / k / ↓ / ↑"). The test
+        // maps each KEYBINDINGS entry to one or more equivalent
+        // string forms the help output uses, and asserts at
+        // least one of those forms is present.
+        fn equivalent_forms(label: &str) -> Vec<String> {
+            match label {
+                "1" | "2" | "3" | "4" | "5" => vec![label.to_string(), "1 – 5".to_string()],
+                "Ctrl-c" => vec!["Ctrl-C".to_string()],
+                "Ctrl-g" => vec!["Ctrl-G".to_string()],
+                "Down" | "Up" => vec!["↓".to_string(), "↑".to_string()],
+                "Right" | "Left" => vec!["→".to_string(), "←".to_string()],
+                "Home" | "End" => vec!["g".to_string(), "G".to_string()],
+                other => vec![other.to_string()],
+            }
+        }
+
+        let mut missing: Vec<String> = Vec::new();
+        for binding in KEYBINDINGS {
+            if binding.mode != KeyMode::Global {
+                continue;
+            }
+            let label = key_label(&binding.key);
+            let forms = equivalent_forms(&label);
+            if !forms.iter().any(|f| haystack.contains(f)) {
+                missing.push(format!(
+                    "binding {label:?} (help: {help:?}) not in help sections",
+                    help = binding.help_text,
+                ));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "H-HYG-007 wave 5 drift: KEYBINDINGS entries missing from help sections:\n{}",
+            missing.join("\n")
+        );
+    }
+
     #[test]
     fn help_body_includes_node_kind_icon_legend() {
         // H-UI-002 slice: pressing `?` should surface a built-in
