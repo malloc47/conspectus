@@ -1542,29 +1542,36 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     where the truncation is intentional).
   - Blockers: `H-HYG-001`/`H-HYG-002` landed.
 - [ ] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
-  - Scope: re-lands ADR 0035 Stage 1 (see its 2026-07-01 status
-    amendment). Production code linear-scans `GraphSnapshot.nodes` at 35 sites
-    and `candidate_links` at 25, and every view rebuilds ad-hoc maps per
-    render. Build an index once per snapshot publish (id→node,
-    source→links-by-relation, session→mux candidate counts, preferred-mux)
-    and thread it through row builders, detail, and explorer. Deletes the
-    `collect_agent_mux_candidate_counts` family permanently.
-  - Tests: row/detail/explorer snapshots byte-identical; add an index
-    consistency unit test (index agrees with a linear scan on a dense
-    fixture).
-  - **Sizing note (2026-07-04)**: this is the biggest single H-HYG
-    story — ADR 0035 Stage 1 is the shape blueprint but the concrete
-    migration touches ~60 sites across row builders, detail, explorer,
-    and every consumer that today linear-scans nodes / candidate_links.
-    Land as a dedicated multi-commit series: (a) `SnapshotIndex`
-    struct + `new(&snapshot)` builder + `id_to_node` map only;
-    (b) migrate the sessions row tree + a consistency unit test;
-    (c) migrate mux / prs / forks / union row trees;
-    (d) migrate detail + explorer + node_show;
-    (e) retire `collect_agent_mux_candidate_counts` (H-HYG-002's
-    interim home) once its consumers all read through the index.
-    Sequencing waves keeps each commit reviewable and the
-    row-snapshot regression net actionable.
+  - **Waves 1–3 landed 2026-07-04**:
+    * Wave 1 (`e952bc4`): `SnapshotIndex<'a>` struct +
+      `new(&snapshot)` builder + `id_to_node` map + consistency
+      unit test (`snapshot_index_agrees_with_linear_scan_on_dense_fixture`).
+    * Wave 2 (`29c781a`): `agent_mux_candidate_counts()` map
+      + migrated 5 consumers (`tui/rows/{union,prs,forks}.rs`
+      + `output/{prs,forks}.rs`). Retired
+      `tui::rows::collect_agent_mux_candidate_counts` — the
+      H-HYG-002 interim home is gone. `rows/mux.rs` retains a
+      local copy per H-HYG-002's "near-twin stays put" scope
+      (wave 5 retires it too).
+    * Wave 3 (`a840fc1`): `links_for(source, relation) →
+      &[&GraphLink]` (source_node → links-by-relation index).
+      Substrate only — no callers migrated yet.
+  - **Remaining waves**:
+    * Wave 4 (preferred-mux per session lookup — H-TUI-001
+      substrate): depends on the resolver's per-session mux
+      picker, which is currently scoped as
+      "resolver semantics — out of scope for H-HYG" per the
+      audit. Land alongside H-TUI-001 when that story lifts
+      the row trees off `RunConfig` and into derived
+      view-models.
+    * Wave 5 (retirement pass — migrate the remaining
+      `snapshot.candidate_links.iter().filter(source ==
+      id && relation == Foo)` sites in
+      `discovery/cross_link.rs`, `resolve/`, `tui/detail.rs`,
+      `tui/explorer.rs`, `output/node_show.rs` to
+      `index.links_for(&id, RelationKind::Foo)`; retire the
+      `rows/mux.rs` local `collect_agent_mux_candidate_counts`
+      copy).
   - Blockers: `H-HYG-002` landed. `H-TUI-001` builds on this
     substrate to make row trees fully derived view-models.
 - [ ] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
