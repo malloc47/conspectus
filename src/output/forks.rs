@@ -77,9 +77,11 @@ pub fn build_fork_rows_from_snapshot(
         None
     };
     let candidate_counts = if filter_active {
-        Some(crate::tui::rows::collect_agent_mux_candidate_counts(
-            snapshot,
-        ))
+        Some(
+            crate::model::SnapshotIndex::new(snapshot)
+                .agent_mux_candidate_counts()
+                .clone(),
+        )
     } else {
         None
     };

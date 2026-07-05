@@ -36,7 +36,9 @@ pub fn build_prs_tree(inputs: PrsBuildInputs<'_>) -> RowTree {
 
     let prs = collect_prs(snapshot);
     let agents = collect_agents(snapshot);
-    let candidate_counts = super::collect_agent_mux_candidate_counts(snapshot);
+    let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
+        .agent_mux_candidate_counts()
+        .clone();
     let branches = collect_preferred_branch_per_pr(snapshot);
     let checkout_roots = collect_checkout_roots_per_branch(snapshot);
 

@@ -44,7 +44,9 @@ pub fn build_forks_tree(inputs: ForksBuildInputs<'_>) -> RowTree {
         .map(|agent| (agent.node_id.as_str(), agent))
         .collect();
 
-    let candidate_counts = super::collect_agent_mux_candidate_counts(snapshot);
+    let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
+        .agent_mux_candidate_counts()
+        .clone();
     let child_counts = collect_child_counts(snapshot);
     let child_links = collect_resolved_child_links(snapshot);
     let parent_labels = collect_parent_labels(snapshot);

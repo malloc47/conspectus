@@ -56,7 +56,9 @@ pub fn build_union_tree(inputs: UnionBuildInputs<'_>) -> RowTree {
     let now: Option<i64> = None;
 
     let rows = collect_union_rows(snapshot);
-    let candidate_counts = super::collect_agent_mux_candidate_counts(snapshot);
+    let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
+        .agent_mux_candidate_counts()
+        .clone();
     let pin_id_by_bound_mux = collect_pin_id_by_bound_mux(snapshot);
 
     let full_ids: Vec<String> = rows

@@ -1588,18 +1588,52 @@ pub struct SnapshotIndex<'a> {
     /// stay accessible through the same handle during migration.
     pub snapshot: &'a GraphSnapshot,
     id_to_node: BTreeMap<NodeId, &'a GraphNode>,
+    /// H-HYG-006 wave 2: per-agent count of distinct active
+    /// `LinkedToMux` mux targets. Retires the
+    /// `tui::rows::collect_agent_mux_candidate_counts` helper
+    /// (H-HYG-002's interim home) — consumers now read the
+    /// count from `index.mux_candidate_count(agent_node_id)`.
+    /// Deduped by target mux id.
+    agent_mux_candidate_counts: std::collections::HashMap<String, usize>,
 }
 
 impl<'a> SnapshotIndex<'a> {
-    /// Build the index by walking `snapshot.nodes` once.
+    /// Build the index by walking `snapshot.nodes` +
+    /// `snapshot.candidate_links` once.
     pub fn new(snapshot: &'a GraphSnapshot) -> Self {
         let mut id_to_node = BTreeMap::new();
         for node in &snapshot.nodes {
             id_to_node.insert(node.id(), node);
         }
+
+        // H-HYG-006 wave 2: precompute per-agent mux candidate
+        // counts once so row builders don't re-scan per render.
+        let mut per_agent: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        for link in &snapshot.candidate_links {
+            if !matches!(link.state, LinkState::Active) {
+                continue;
+            }
+            if !matches!(link.relation, RelationKind::LinkedToMux) {
+                continue;
+            }
+            let NodeId::AgentSession(_) = &link.source else {
+                continue;
+            };
+            let LinkEndpoint::Node { id: target_id } = &link.target else {
+                continue;
+            };
+            per_agent
+                .entry(link.source.to_string())
+                .or_default()
+                .insert(target_id.to_string());
+        }
+        let agent_mux_candidate_counts = per_agent.into_iter().map(|(k, v)| (k, v.len())).collect();
+
         Self {
             snapshot,
             id_to_node,
+            agent_mux_candidate_counts,
         }
     }
 
@@ -1614,6 +1648,13 @@ impl<'a> SnapshotIndex<'a> {
     /// wave-2 consistency test asserts this).
     pub fn node_count(&self) -> usize {
         self.id_to_node.len()
+    }
+
+    /// H-HYG-006 wave 2: per-agent `LinkedToMux` candidate count
+    /// keyed by `NodeId::AgentSession(...).to_string()`.
+    /// Retires `tui::rows::collect_agent_mux_candidate_counts`.
+    pub fn agent_mux_candidate_counts(&self) -> &std::collections::HashMap<String, usize> {
+        &self.agent_mux_candidate_counts
     }
 }
 

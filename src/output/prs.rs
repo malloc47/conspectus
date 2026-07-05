@@ -45,7 +45,9 @@ pub fn build_pr_rows_from_snapshot(
     let preferred_branch = collect_preferred_branch_per_pr(snapshot);
     let checkout_roots_per_branch = collect_checkout_roots_per_branch(snapshot);
     let agents = collect_agents_with_cwd(snapshot);
-    let candidate_counts = crate::tui::rows::collect_agent_mux_candidate_counts(snapshot);
+    let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
+        .agent_mux_candidate_counts()
+        .clone();
 
     let body_full_ids: Vec<String> = prs
         .iter()

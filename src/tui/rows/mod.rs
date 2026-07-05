@@ -575,35 +575,14 @@ pub(crate) fn session_matches_filter(
     })
 }
 
-/// Collect `LinkedToMux` candidate counts per agent session,
-/// deduped by target mux. Used by the union / prs / forks / mux
-/// row builders and by the output/{prs,forks} tables.
-pub(crate) fn collect_agent_mux_candidate_counts(
-    snapshot: &crate::model::GraphSnapshot,
-) -> std::collections::HashMap<String, usize> {
-    use crate::model::{LinkEndpoint, LinkState, RelationKind};
-    use std::collections::{HashMap, HashSet};
-    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
-    for link in &snapshot.candidate_links {
-        if !matches!(link.state, LinkState::Active) {
-            continue;
-        }
-        if !matches!(link.relation, RelationKind::LinkedToMux) {
-            continue;
-        }
-        let NodeId::AgentSession(_) = &link.source else {
-            continue;
-        };
-        let LinkEndpoint::Node { id: target_id } = &link.target else {
-            continue;
-        };
-        per_agent
-            .entry(link.source.to_string())
-            .or_default()
-            .insert(target_id.to_string());
-    }
-    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
-}
+// H-HYG-006 wave 2: `collect_agent_mux_candidate_counts` retired.
+// Its consumers now consult
+// `crate::model::SnapshotIndex::new(snapshot).agent_mux_candidate_counts()`
+// so the count computation happens once per snapshot publish
+// instead of once per row-tree build. `rows/mux.rs` retains a
+// local copy because its consumer builds a different-shaped
+// row tree; that copy retires alongside H-HYG-006 wave 3+
+// when the mux row builder migrates to the index too.
 
 pub fn recency_bucket(now: Option<i64>, activity_epoch: Option<i64>) -> Option<RecencyBucket> {
     let now = now?;
