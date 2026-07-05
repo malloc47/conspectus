@@ -34,7 +34,7 @@ use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 /// Aliased through the descriptor registry once H-DESIGN-002
 /// settles; for now it lives here as a `pub const` so tests
 /// can compare against a single source-of-truth string.
-pub const GITLAB_PROVIDER: &str = "gitlab";
+pub const GITLAB_PROVIDER: &str = crate::discovery::providers::GITLAB;
 
 /// GitLab CLI host used for `claims_remote_url` matching.
 /// Enterprise / self-hosted GitLab is a follow-up alongside

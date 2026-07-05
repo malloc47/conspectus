@@ -85,7 +85,7 @@ impl AtelierWorkspaceDiscovery {
         let workspace_node = GraphNode::Workspace(WorkspaceNode {
             id: workspace_id.clone(),
             root: crate::discovery::path_to_string(&workspace_root),
-            provider: Some("atelier".to_string()),
+            provider: Some(crate::discovery::providers::ATELIER.to_string()),
             name: Some(config.workspace.name.clone()),
         });
         let workspace = NodeId::Workspace(workspace_id);
@@ -291,7 +291,7 @@ impl AtelierForkRecord {
         let root = absolutize(workspace_root, &entry.root);
 
         Self {
-            provider: "atelier".to_string(),
+            provider: crate::discovery::providers::ATELIER.to_string(),
             source_key: entry.name.clone(),
             name: entry.name,
             parent: entry.parent,

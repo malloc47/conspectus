@@ -94,7 +94,7 @@ impl OrchestratorDescriptor {
 /// Order is stable (registration order); pin adapters slot
 /// into this array in the order H-AGENTMUX-* decides.
 pub const REGISTRY: &[OrchestratorDescriptor] = &[OrchestratorDescriptor {
-    key: "agent_deck",
+    key: crate::discovery::providers::AGENT_DECK,
     env_root_var: "CONSPECTUS_AGENT_DECK_ROOT",
     env_disable_var: "CONSPECTUS_DISABLE_AGENT_DECK",
     home_relative_default: Some(".agent-deck/multi-repo-worktrees"),

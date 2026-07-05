@@ -376,14 +376,22 @@ pub fn discover_local_warm_with(
         std::mem::take(&mut config.forge_adapters);
 
     let mut providers = LocalDiscovery::new()
-        .with_keyed_provider(&["git"], git::GitDiscovery::new())
-        .with_keyed_provider(&["atelier"], atelier::AtelierWorkspaceDiscovery::new())
+        .with_keyed_provider(&[providers::GIT], git::GitDiscovery::new())
         .with_keyed_provider(
-            &["generic_workspace"],
+            &[providers::ATELIER],
+            atelier::AtelierWorkspaceDiscovery::new(),
+        )
+        .with_keyed_provider(
+            &[providers::GENERIC_WORKSPACE],
             workspace::GenericWorkspaceDiscovery::new(),
         )
         .with_keyed_provider(
-            &["claude-code", "codex", "opencode", "aider"],
+            &[
+                providers::CLAUDE_CODE,
+                providers::CODEX,
+                providers::OPENCODE,
+                providers::AIDER,
+            ],
             harness::HarnessDiscovery::with_default_adapters(),
         );
 
@@ -402,13 +410,15 @@ pub fn discover_local_warm_with(
     }
 
     if let Some(runner) = tmux_runner {
-        providers =
-            providers.with_keyed_provider(&["tmux"], tmux::TmuxDiscovery::with_runner(runner));
+        providers = providers
+            .with_keyed_provider(&[providers::TMUX], tmux::TmuxDiscovery::with_runner(runner));
     }
 
     if let Some(runner) = zellij_runner {
-        providers = providers
-            .with_keyed_provider(&["zellij"], zellij::ZellijDiscovery::with_runner(runner));
+        providers = providers.with_keyed_provider(
+            &[providers::ZELLIJ],
+            zellij::ZellijDiscovery::with_runner(runner),
+        );
     }
 
     if !forge_adapters.is_empty() {
@@ -423,7 +433,7 @@ pub fn discover_local_warm_with(
         }
         // Provider key list matches the pre-H-EXT-012 single
         // `"github"` string until a second forge lands.
-        providers = providers.with_keyed_provider(&["github"], coordinator);
+        providers = providers.with_keyed_provider(&[providers::GITHUB], coordinator);
     }
 
     let mut fresh = providers.discover_skipping(&context, &gate.fresh)?;
@@ -788,13 +798,13 @@ impl LocalDiscoveryConfig {
     /// (H-EXT-014). Kept so pre-H-EXT-014 test call sites
     /// (`.with_agent_deck_root(...)`) keep compiling.
     pub fn with_agent_deck_root(self, root: impl Into<PathBuf>) -> Self {
-        self.with_orchestrator_root("agent_deck", root)
+        self.with_orchestrator_root(providers::AGENT_DECK, root)
     }
 
     /// Deprecated alias for
     /// [`Self::without_orchestrator`]`("agent_deck")`.
     pub fn without_agent_deck(self) -> Self {
-        self.without_orchestrator("agent_deck")
+        self.without_orchestrator(providers::AGENT_DECK)
     }
 
     pub fn with_declared_config_loader(mut self, loader: ConfigLoader) -> Self {

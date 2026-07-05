@@ -75,6 +75,10 @@ pub const ZELLIJ: &str = "zellij";
 /// GitHub forge metadata via the `gh` runner. Class: `forge`.
 pub const GITHUB: &str = "github";
 
+/// GitLab forge metadata (H-EXT-013 skeleton; real discovery
+/// pending H-DESIGN-002). Class: `forge`.
+pub const GITLAB: &str = "gitlab";
+
 // ---------------------------------------------------------------
 // Harness providers — class: `harness` (ADR 0079)
 // ---------------------------------------------------------------
