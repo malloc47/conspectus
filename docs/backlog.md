@@ -1556,6 +1556,11 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     * Wave 3 (`a840fc1`): `links_for(source, relation) →
       &[&GraphLink]` (source_node → links-by-relation index).
       Substrate only — no callers migrated yet.
+    * Wave 5 (`7817c41`): retired the last local copy of
+      `collect_agent_mux_candidate_counts` — the near-twin in
+      `tui/rows/mux.rs` that H-HYG-002 explicitly left in place.
+      The `H-HYG-006` interim `collect_agent_mux_candidate_counts`
+      helper family is fully gone.
   - **Remaining waves**:
     * Wave 4 (preferred-mux per session lookup — H-TUI-001
       substrate): depends on the resolver's per-session mux
@@ -1564,18 +1569,44 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
       audit. Land alongside H-TUI-001 when that story lifts
       the row trees off `RunConfig` and into derived
       view-models.
-    * Wave 5 (retirement pass — migrate the remaining
-      `snapshot.candidate_links.iter().filter(source ==
-      id && relation == Foo)` sites in
-      `discovery/cross_link.rs`, `resolve/`, `tui/detail.rs`,
-      `tui/explorer.rs`, `output/node_show.rs` to
-      `index.links_for(&id, RelationKind::Foo)`; retire the
-      `rows/mux.rs` local `collect_agent_mux_candidate_counts`
-      copy).
+    * Wave 6 (SnapshotIndex expansion): the 25 remaining
+      `snapshot.candidate_links.iter()` scans use shapes the
+      wave-3 `(source, relation)` index doesn't cover
+      (by-link-id, by-target, resolver-selected). Each needs a
+      focused per-shape index expansion; land as demand-driven
+      commits when a hot consumer needs them.
   - Blockers: `H-HYG-002` landed. `H-TUI-001` builds on this
     substrate to make row trees fully derived view-models.
 - [ ] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
-  help.
+  help. **Waves 1–3 landed 2026-07-04..05**:
+  * Wave 1 (`83d6889`): new `src/tui/keybindings.rs` module.
+    `KeyBinding { mode, key: KeyMatcher, action: fn() -> Action,
+    help_text }` + `KeyMode::Global` + `KeyMatcher::{Exact,
+    UpperChar}` + `pub const KEYBINDINGS: &[KeyBinding]`. Pilot
+    seeds 6 view-switching bindings. 3 drift tests
+    (`every_binding_has_nonempty_help_text`,
+    `no_two_bindings_match_the_same_global_key`,
+    `view_switch_bindings_produce_correct_action`).
+  * Wave 2 (`6826b20`): `keybindings::translate_via_table`
+    entrypoint; `keymap::translate` short-circuits through it
+    before its own hand-matched arms. 6 arms migrated from
+    `keymap::translate`. Behavior-preserving.
+  * Wave 3 (`e069833`): 11 more bindings migrated
+    (Quit / Resume / Rename / pin CRUD `N`/`B`/`A`/`L` /
+    `F` / `E`). `keymap::translate` fallback arm count
+    reduced from 52 to 32.
+  **Remaining waves** (waves 4–5+):
+  * Wave 4: expand `KeyMatcher` with an `AnyExceptCtrl(c)`
+    variant so bindings like `r`/`a`/`b` (which admit any
+    non-Ctrl modifier) migrate.
+  * Wave 5: rewire `widgets/help.rs::keymap_sections` to
+    derive from `KEYBINDINGS` (currently hand-maintained;
+    the drift test scaffold from wave 1 will enforce
+    coherence).
+  * Wave 6+ (runtime dispatcher + pins overlay): 76 arms in
+    `runtime.rs` + 137 in `widgets/pins.rs` remain
+    unmigrated. Substantial per-arm judgment for
+    overlay-owned keys; land as follow-up work.
   - Scope: key handling is hand-matched (`KeyCode::` ×128 in `runtime.rs`,
     ×137 in `widgets/pins.rs`), `remap_for_focus` re-maps actions across
     ~200 lines, and `widgets/help.rs::keymap_sections` hand-maintains a
@@ -1606,7 +1637,30 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     as an event union + subscriptions rather than a parameterized
     refresh source, and the `runtime.rs` split follows it. Tracked
     there.
-- [ ] `H-HYG-009` Split the TUI monolith files by concern.
+- [ ] `H-HYG-009` Split the TUI monolith files by concern. **Waves 1–2
+  landed 2026-07-05**:
+  * Wave 1 (`2dd21d6`): extracted `tui/ui.rs`'s 3,378-line
+    `mod tests` to sibling `tui/ui_tests.rs` via
+    `#[path = "ui_tests.rs"] mod tests;`. `ui.rs` shrunk
+    from 6,674 → 3,296 lines. Test module still lives at
+    `tui::ui::tests` at compile time so `use super::*;`
+    resolves unchanged.
+  * Wave 2 (`65c7a85`): same shape for
+    `widgets/pins.rs` — extracted 1,498 test lines to
+    sibling `pins_tests.rs`. `pins.rs` shrunk from 4,266 →
+    2,770 lines.
+  * The story's original scope was a view/panel split by
+    "3 `match view` sites", but a survey turned up only 1
+    dispatch (`view_kind_key`) — the natural boundary the
+    story assumed doesn't exist. Test extraction is the
+    highest-value split available and lands the same
+    "reviewable smaller files" outcome without a synthetic
+    view partition.
+  **Remaining wave** (wave 3): split `widgets/pins.rs`'s
+  production side by concern (pins menu model vs. form
+  rendering) per the `H-TUI-003` Overlay contract boundary.
+  Land alongside `H-TUI-003` when the modal stack contract
+  supplies the split axis.
   - Scope: `tui/ui.rs` (~3.2k production lines) splits by view/panel —
     dispatch is already centralized in 3 `match view` sites so extraction
     is clean; `widgets/pins.rs` (~2.8k) separates the pins menu model
@@ -1683,11 +1737,18 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     "not a big-bang" scope). Every future H-HYG / H-EXT / H-TUI wave
     that touches a file with an inline struct literal migrates that
     file's literals as a drive-by.
-  - **Deferred to a follow-up wave**: sibling-file `tests.rs` extraction
-    (worst offenders: `output/table.rs` 147 prod / 2,678 test lines,
-    `tui/ui.rs`, `rows/sessions.rs`). Extraction is mechanical but
-    every wave adds ~2k lines of file moves that clutter review; a
-    dedicated commit series takes those files one-by-one.
+  - **Sibling-file `tests.rs` extraction (rolling wave, 2026-07-05)**:
+    started opportunistically as the H-HYG-009 shape stabilized.
+    Landed so far:
+    * `output/table.rs` 147 prod / 2,678 test → sibling
+      `table_tests.rs` (`106d5b6`).
+    * `tui/ui.rs` 3,296 prod / 3,380 test → sibling `ui_tests.rs`
+      (via H-HYG-009 wave 1 `2dd21d6`).
+    * `widgets/pins.rs` 2,770 prod / 1,498 test → sibling
+      `pins_tests.rs` (via H-HYG-009 wave 2 `65c7a85`).
+    Remaining candidates: `rows/sessions.rs` + any other file
+    whose test module dominates its production content. Land as
+    drive-bys when touched.
   - Blockers: none.
 
 ### TUI Architecture Convergence (H-TUI-*)
