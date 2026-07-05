@@ -314,44 +314,9 @@ impl DevScenarioTuiArgs {
     }
 }
 
-#[derive(Debug, Args)]
-struct ColumnsArgs {
-    /// Row-type whose registered columns to list. Accepts the same
-    /// tokens as `conspectus table <ROWS>` (sessions, mux, union,
-    /// prs, forks).
-    row_type: String,
-    /// Skip the pager even when stdout is a TTY.
-    #[arg(long)]
-    no_pager: bool,
-    /// Force output through a pager even when stdout is not a TTY.
-    #[arg(long, conflicts_with = "no_pager")]
-    pager: bool,
-    /// When to colorize the output. `auto` (default) emits ANSI only
-    /// when stdout is a TTY (and respects `NO_COLOR`, `CLICOLOR`,
-    /// `CLICOLOR_FORCE`, `TERM=dumb`); `always` forces color on;
-    /// `never` forces it off.
-    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
-    color: ColorFlag,
-}
-
-impl ColumnsArgs {
-    fn run(self) -> Result<()> {
-        let projection = match config::Projection::parse(&self.row_type) {
-            Ok(value) => value,
-            Err(err) => {
-                eprintln!("conspectus: {err}");
-                std::process::exit(2);
-            }
-        };
-        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        let listing = conspectus::output::render::render_columns_listing(projection, color);
-        print_paged(
-            &listing,
-            PagerOptions::from_flags(self.pager, self.no_pager),
-        );
-        Ok(())
-    }
-}
+// H-REF-006 wave 1: `ColumnsArgs` moved to `cli/columns.rs`.
+mod columns;
+use columns::ColumnsArgs;
 
 #[derive(Debug, Args)]
 struct ServeArgs {
@@ -1871,7 +1836,7 @@ fn row_config(projection: config::Projection, config: &config::Config) -> &confi
 /// the value enum exists to give clap a stable parse surface and so
 /// we can document the per-token semantics in `--help`.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum ColorFlag {
+pub(super) enum ColorFlag {
     /// Auto-detect: color when stdout is a TTY and no env opt-out
     /// is set. See [`resolve_color`] for the full precedence table.
     #[default]
@@ -1888,7 +1853,7 @@ enum ColorFlag {
 /// environment and dispatch. `stdout_is_tty` lets callers pass an
 /// explicit boolean (typically `io::stdout().is_terminal()`) so this
 /// function stays trivially testable.
-fn resolve_color_from_env(flag: ColorFlag, stdout_is_tty: bool) -> bool {
+pub(super) fn resolve_color_from_env(flag: ColorFlag, stdout_is_tty: bool) -> bool {
     resolve_color(
         flag,
         std::env::var("NO_COLOR").ok(),
@@ -1970,7 +1935,7 @@ fn resolve_table_width(
 
 /// Whether and how to page rendered output (H-TBL-013).
 #[derive(Debug, Clone, Copy)]
-struct PagerOptions {
+pub(super) struct PagerOptions {
     /// `--pager` forces pager even when stdout is not a TTY (useful
     /// for `PAGER=cat` integration tests).
     force_on: bool,
@@ -1979,7 +1944,7 @@ struct PagerOptions {
 }
 
 impl PagerOptions {
-    fn from_flags(pager: bool, no_pager: bool) -> Self {
+    pub(super) fn from_flags(pager: bool, no_pager: bool) -> Self {
         Self {
             force_on: pager,
             force_off: no_pager,
@@ -2004,7 +1969,7 @@ impl PagerOptions {
 /// when the env var is not already set so a single-screen output
 /// prints inline and ANSI passes through); otherwise `more`;
 /// otherwise direct.
-fn print_paged(content: &str, options: PagerOptions) {
+pub(super) fn print_paged(content: &str, options: PagerOptions) {
     if !options.should_page(&io::stdout()) {
         print!("{content}");
         return;
@@ -2689,7 +2654,6 @@ fn parse_tui_duration(input: &str) -> Result<Duration, String> {
 }
 
 #[cfg(test)]
-#[path = "cli_tests.rs"]
 mod tests;
 
 #[derive(Debug, Args)]
