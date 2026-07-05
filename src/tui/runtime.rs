@@ -159,9 +159,22 @@ impl LoopMode for LiveMode {
         app: &mut App,
         config: &RunConfig,
     ) -> Result<()> {
-        // Initial synchronous discovery.
-        refresh(app, config);
-        refresh_mux_preview_if_needed(app, config, self.tmux.as_ref(), None);
+        // T8-007: initial discovery runs on the same background
+        // worker path as timer refreshes and `r`, so the first
+        // frame paints immediately with the `graph_db.is_none()`
+        // "Loading discovery…" placeholder while the scan runs.
+        // Provider status still populates synchronously so the
+        // status-bar chips render on frame one.
+        populate_provider_status(app, config);
+        self.pending_refresh = true;
+        self.last_refresh = Instant::now();
+        spawn_discovery_worker(app.config(), &self.result_tx);
+        // `refresh_mux_preview_if_needed` is a no-op until a
+        // snapshot lands (its `resolve_attach_target` guard
+        // returns `NoSelection` when `graph_db` is None), so we
+        // skip the call here — the first post-`drain` iteration
+        // in the run loop will invoke it once the worker
+        // delivers.
         Ok(())
     }
 
