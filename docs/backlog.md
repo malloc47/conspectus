@@ -1516,26 +1516,30 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     returns only the rationale comment.
   - Blockers: none.
 - [x] `H-HYG-005` Adopt a curated `[lints.clippy]` table and fix fallout.
-  - **Wave 1 landed 2026-07-04** (commit `2c44d15`). New
-    workspace-level `[lints.clippy]` table in
-    `Cargo.toml`. Enforced (`deny`): `redundant_clone` — all
-    63 pre-H-HYG-005 warnings auto-fixed via
-    `cargo clippy --fix`. Deferred to follow-up waves
-    (marked `allow` with counts in the header comment):
-    `match_same_arms` (36), `match_wildcard_for_single_variants`
-    (29), `uninlined_format_args` (12), `map_unwrap_or`
-    (69 combined). Skipped per audit: doc lints (Conspectus
-    doc culture is ADRs + module `//!` headers, not per-fn
-    docs) and cast-truncation lints in TUI layout modules
-    (allowed with per-module `#![allow]`).
-  - **Deferred to wave 2+**:
-    `match_wildcard_for_single_variants` is the highest-value
-    next lint because a wildcard would silently swallow a
-    new `NodeKind` / `RelationKind` variant — directly
-    synergistic with H-EXT-* compile-time safety. Each
-    remaining lint lands as its own commit
-    (one-lint-per-commit shape) so review stays
-    tractable.
+  - **Full stream landed 2026-07-04** across 5 waves:
+    * Wave 1 (`2c44d15`): `[lints.clippy]` table shape +
+      `redundant_clone = "deny"` (63 warnings auto-fixed).
+    * Wave 2 (`04c0aff`): `match_wildcard_for_single_variants
+      = "deny"` (29 warnings; every wildcard over
+      `LinkEndpoint` given an explicit variant so a
+      hypothetical third variant surfaces at compile time
+      — synergistic with H-EXT-* compile-time safety).
+    * Wave 3 (`2f24fa8`): `uninlined_format_args = "deny"`
+      (12 warnings auto-fixed).
+    * Wave 4 (`7caa2ec`): `map_unwrap_or = "deny"` (69
+      warnings: `.map(f).unwrap_or(a)` → `map_or(a, f)`;
+      `.map(f).unwrap_or_else(g)` → `map_or_else(g, f)`;
+      `.map(f).unwrap_or(false)` → `is_some_and(f)`).
+    * Wave 5 (`4db88f9`): `match_same_arms` documented as
+      intentional `allow` — the 36 current warnings sit in
+      documentation-shaped match tables where merging arms
+      into `|` patterns would sacrifice per-row readability.
+      Rationale committed to `Cargo.toml` comment.
+  - Skipped per audit (durable): doc lints
+    (Conspectus doc culture is ADRs + module `//!` headers,
+    not per-fn docs) and cast-truncation lints in TUI
+    layout modules (allowed with per-module `#![allow]`
+    where the truncation is intentional).
   - Blockers: `H-HYG-001`/`H-HYG-002` landed.
 - [ ] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
   - Scope: re-lands ADR 0035 Stage 1 (see its 2026-07-01 status
