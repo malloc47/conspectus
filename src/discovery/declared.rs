@@ -519,7 +519,9 @@ mod tests {
                 assert_eq!(evidence.node_type, "mux_session");
                 assert_eq!(evidence.native_id.as_deref(), Some("tmux:missing"));
             }
-            other => panic!("expected unresolved target, got {other:?}"),
+            other @ LinkEndpoint::Node { .. } => {
+                panic!("expected unresolved target, got {other:?}")
+            }
         }
     }
 

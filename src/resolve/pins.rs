@@ -501,7 +501,9 @@ mod tests {
                 assert_eq!(evidence.node_type, "mux_session");
                 assert_eq!(evidence.native_id.as_deref(), Some("tmux:ingest"));
             }
-            other => panic!("expected unresolved mux target, got {other:?}"),
+            other @ LinkEndpoint::Node { .. } => {
+                panic!("expected unresolved mux target, got {other:?}")
+            }
         }
         assert!(snap.aliases.is_empty());
         assert_eq!(diagnostics.len(), 1);

@@ -403,7 +403,7 @@ fn collect_mux_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, MuxInfo> 
             .iter()
             .filter_map(|link| match &link.target {
                 LinkEndpoint::Node { id } => Some(id.to_string()),
-                _ => None,
+                LinkEndpoint::Unresolved { .. } => None,
             })
             .collect::<BTreeSet<_>>()
             .len();

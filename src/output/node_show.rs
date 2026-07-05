@@ -564,7 +564,7 @@ fn write_candidate_links(out: &mut String, snapshot: &GraphSnapshot, id: &NodeId
         .iter()
         .filter(|link| match &link.target {
             LinkEndpoint::Node { id: target_id } => target_id == id,
-            _ => false,
+            LinkEndpoint::Unresolved { .. } => false,
         })
         .collect();
     incoming.sort_by(|a, b| a.id.cmp(&b.id));

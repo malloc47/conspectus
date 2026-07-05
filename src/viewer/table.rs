@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(segs.len(), 1);
         match &segs[0] {
             BodySegment::Markdown(s) => assert_eq!(*s, body),
-            _ => panic!("expected markdown segment"),
+            BodySegment::Table(_) => panic!("expected markdown segment"),
         }
     }
 
@@ -432,18 +432,18 @@ mod tests {
         assert_eq!(segs.len(), 3, "expected md + table + md, got {segs:?}");
         match &segs[0] {
             BodySegment::Markdown(s) => assert!(s.starts_with("intro line"), "got {s:?}"),
-            _ => panic!(),
+            BodySegment::Table(_) => panic!(),
         }
         match &segs[1] {
             BodySegment::Table(t) => {
                 assert_eq!(t.header, vec!["a", "b"]);
                 assert_eq!(t.rows, vec![vec!["1".to_string(), "2".to_string()]]);
             }
-            _ => panic!(),
+            BodySegment::Markdown(_) => panic!(),
         }
         match &segs[2] {
             BodySegment::Markdown(s) => assert!(s.trim_start().starts_with("outro"), "got {s:?}"),
-            _ => panic!(),
+            BodySegment::Table(_) => panic!(),
         }
     }
 

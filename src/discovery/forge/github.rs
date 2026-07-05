@@ -825,7 +825,9 @@ mod tests {
                     Some(&Value::String("github.com".to_string()))
                 );
             }
-            other => panic!("expected unresolved branch evidence, got {other:?}"),
+            other @ LinkEndpoint::Node { .. } => {
+                panic!("expected unresolved branch evidence, got {other:?}")
+            }
         }
     }
 

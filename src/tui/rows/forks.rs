@@ -275,7 +275,7 @@ fn collect_parent_labels(snapshot: &GraphSnapshot) -> HashMap<String, String> {
                 .as_deref()
                 .map(short_session_label)
                 .map(|label| format!("?{label}")),
-            _ => None,
+            LinkEndpoint::Node { .. } => None,
         };
         if let Some(label) = label {
             out.insert(fork_node_id, label);

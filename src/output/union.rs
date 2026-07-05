@@ -276,7 +276,7 @@ fn collect_preferred_mux_per_agent(snapshot: &GraphSnapshot) -> HashMap<SessionK
             .iter()
             .filter_map(|link| match &link.target {
                 LinkEndpoint::Node { id } => Some(id.to_string()),
-                _ => None,
+                LinkEndpoint::Unresolved { .. } => None,
             })
             .collect::<BTreeSet<_>>()
             .len();

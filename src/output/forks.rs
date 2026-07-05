@@ -226,7 +226,7 @@ fn collect_parent_session_per_fork(snapshot: &GraphSnapshot) -> HashMap<String, 
                     .map(|native| format!("?{}", short_session_id(native)))
                     .unwrap_or_else(|| "?".to_string()),
             ),
-            _ => None,
+            LinkEndpoint::Node { .. } => None,
         };
         if let Some(label) = label {
             out.insert(fork_id, ParentInfo { label });

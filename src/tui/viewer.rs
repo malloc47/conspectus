@@ -299,7 +299,7 @@ mod tests {
                     plan.args[0]
                 );
             }
-            other => panic!("expected Launch, got {other:?}"),
+            other @ ViewerTarget::Disabled(_) => panic!("expected Launch, got {other:?}"),
         }
     }
 

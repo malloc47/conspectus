@@ -1236,7 +1236,7 @@ fn attached_sessions_for_mux<'a>(snapshot: &'a GraphSnapshot, mux_id: &NodeId) -
         .filter(|link| link.relation == RelationKind::LinkedToMux)
         .filter(|link| match &link.target {
             LinkEndpoint::Node { id } => id == mux_id,
-            _ => false,
+            LinkEndpoint::Unresolved { .. } => false,
         })
         .map(|link| &link.source)
         .collect();

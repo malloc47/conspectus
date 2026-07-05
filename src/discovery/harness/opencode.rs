@@ -929,7 +929,9 @@ mod tests {
         assert_eq!(lineage.len(), 1);
         let target = match &lineage[0].target {
             LinkEndpoint::Node { id } => id,
-            other => panic!("expected resolved target, got {other:?}"),
+            other @ LinkEndpoint::Unresolved { .. } => {
+                panic!("expected resolved target, got {other:?}")
+            }
         };
         let NodeId::AgentSession(parent_id) = target else {
             panic!("expected AgentSession target");
@@ -975,7 +977,9 @@ mod tests {
         assert_eq!(lineage.len(), 1);
         let evidence = match &lineage[0].target {
             LinkEndpoint::Unresolved { evidence } => evidence,
-            other => panic!("expected unresolved endpoint, got {other:?}"),
+            other @ LinkEndpoint::Node { .. } => {
+                panic!("expected unresolved endpoint, got {other:?}")
+            }
         };
         assert_eq!(evidence.harness_key.as_deref(), Some(HARNESS_KEY));
         assert_eq!(evidence.native_id.as_deref(), Some("pruned-parent"));

@@ -771,7 +771,7 @@ mod tests {
                 assert_eq!(row_type, "sessions");
                 assert!(available.contains(&"agent"));
             }
-            other => panic!("expected UnknownColumn, got {other:?}"),
+            other @ ColumnsError::EmptyToken => panic!("expected UnknownColumn, got {other:?}"),
         }
     }
 
@@ -789,7 +789,7 @@ mod tests {
                 assert!(available.contains(&"checkout"));
                 assert!(!available.contains(&"worktree"));
             }
-            other => panic!("unexpected error: {other:?}"),
+            other @ ColumnsError::EmptyToken => panic!("unexpected error: {other:?}"),
         }
     }
 
