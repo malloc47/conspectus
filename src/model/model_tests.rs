@@ -623,3 +623,45 @@ fn every_node_id_variant_archives_and_round_trips() {
         assert_eq!(&decoded, id);
     }
 }
+
+/// H-REF-002: every `RelationKind` variant must round-trip
+/// through the snake_case codec. Adding a new variant that
+/// misses one side surfaces here.
+#[test]
+fn relation_kind_snake_case_round_trips_for_every_variant() {
+    let variants = [
+        RelationKind::AssociatedWith,
+        RelationKind::BelongsToRepo,
+        RelationKind::CheckedOutBranch,
+        RelationKind::WorkspaceContainsRepo,
+        RelationKind::BranchHasForgePr,
+        RelationKind::LinkedToMux,
+        RelationKind::RootedIn,
+        RelationKind::ForksWorkspace,
+        RelationKind::ForksRepo,
+        RelationKind::CreatedCheckout,
+        RelationKind::ReferencedCheckout,
+        RelationKind::ParentSession,
+        RelationKind::ChildSession,
+        RelationKind::CreatedBranch,
+        RelationKind::AssociatedBranch,
+        RelationKind::ParentFork,
+        RelationKind::RootedAtPath,
+        RelationKind::MuxContainsProcess,
+        RelationKind::ProcessIdentifiesSession,
+        RelationKind::ProcessCandidatesSession,
+        RelationKind::PinTargetsMux,
+        RelationKind::PinRealizedBySession,
+    ];
+    for r in &variants {
+        let label = r.snake_case();
+        let parsed = RelationKind::from_snake_case(label).expect("round-trips");
+        assert_eq!(&parsed, r, "snake_case round-trip mismatch for {r:?}");
+    }
+}
+
+#[test]
+fn relation_kind_from_snake_case_rejects_unknown() {
+    let err = RelationKind::from_snake_case("nothing").expect_err("unknown label");
+    assert!(err.contains("invalid relation"), "got {err:?}");
+}

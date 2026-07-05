@@ -962,6 +962,43 @@ impl RelationKind {
             Self::PinRealizedBySession => "pin_realized_by_session",
         }
     }
+
+    /// H-REF-002: inverse of [`Self::snake_case`]. Parses the
+    /// stable snake_case label back to its `RelationKind`.
+    /// Returns `Err` with an operator-friendly message for
+    /// unknown labels. Callers (CLI, declared parser, table
+    /// renderer) all consult this so an added variant is a
+    /// single change instead of parallel updates in three
+    /// files.
+    pub fn from_snake_case(raw: &str) -> Result<Self, String> {
+        match raw {
+            "associated_with" => Ok(Self::AssociatedWith),
+            "belongs_to_repo" => Ok(Self::BelongsToRepo),
+            "checked_out_branch" => Ok(Self::CheckedOutBranch),
+            "workspace_contains_repo" => Ok(Self::WorkspaceContainsRepo),
+            "branch_has_forge_pr" => Ok(Self::BranchHasForgePr),
+            "linked_to_mux" => Ok(Self::LinkedToMux),
+            "rooted_in" => Ok(Self::RootedIn),
+            "forks_workspace" => Ok(Self::ForksWorkspace),
+            "forks_repo" => Ok(Self::ForksRepo),
+            "created_checkout" => Ok(Self::CreatedCheckout),
+            "referenced_checkout" => Ok(Self::ReferencedCheckout),
+            "parent_session" => Ok(Self::ParentSession),
+            "child_session" => Ok(Self::ChildSession),
+            "created_branch" => Ok(Self::CreatedBranch),
+            "associated_branch" => Ok(Self::AssociatedBranch),
+            "parent_fork" => Ok(Self::ParentFork),
+            "rooted_at_path" => Ok(Self::RootedAtPath),
+            "mux_contains_process" => Ok(Self::MuxContainsProcess),
+            "process_identifies_session" => Ok(Self::ProcessIdentifiesSession),
+            "process_candidates_session" => Ok(Self::ProcessCandidatesSession),
+            "pin_targets_mux" => Ok(Self::PinTargetsMux),
+            "pin_realized_by_session" => Ok(Self::PinRealizedBySession),
+            _ => Err(format!(
+                "invalid relation `{raw}`; expected a declared relation such as linked_to_mux"
+            )),
+        }
+    }
 }
 
 #[derive(

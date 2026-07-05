@@ -2813,7 +2813,7 @@ struct DeclaredCreateArgs {
     #[arg(long)]
     id: String,
     /// Relationship kind, such as linked_to_mux or branch_has_forge_pr.
-    #[arg(long, value_parser = parse_relation_kind)]
+    #[arg(long, value_parser = RelationKind::from_snake_case)]
     relation: RelationKind,
     /// Source endpoint as type:key=value,... using declared TOML field names.
     #[arg(long)]
@@ -4789,7 +4789,7 @@ fn render_declared_record(
         provenance_label(provenance).to_string(),
         state_label(link.state).to_string(),
         link.id.clone(),
-        relation_label(&link.relation).to_string(),
+        link.relation.snake_case().to_string(),
         link.source.compact_label(),
         link.target.compact_label(),
         link.reason.clone().unwrap_or_default(),
@@ -4840,37 +4840,9 @@ impl FromStr for DeclaredEndpointArg {
     }
 }
 
-fn parse_relation_kind(raw: &str) -> std::result::Result<RelationKind, String> {
-    match raw {
-        "associated_with" => Ok(RelationKind::AssociatedWith),
-        "belongs_to_repo" => Ok(RelationKind::BelongsToRepo),
-        "checked_out_branch" => Ok(RelationKind::CheckedOutBranch),
-        "workspace_contains_repo" => Ok(RelationKind::WorkspaceContainsRepo),
-        "branch_has_forge_pr" => Ok(RelationKind::BranchHasForgePr),
-        "linked_to_mux" => Ok(RelationKind::LinkedToMux),
-        "rooted_in" => Ok(RelationKind::RootedIn),
-        "forks_workspace" => Ok(RelationKind::ForksWorkspace),
-        "forks_repo" => Ok(RelationKind::ForksRepo),
-        "created_checkout" => Ok(RelationKind::CreatedCheckout),
-        "referenced_checkout" => Ok(RelationKind::ReferencedCheckout),
-        "parent_session" => Ok(RelationKind::ParentSession),
-        "child_session" => Ok(RelationKind::ChildSession),
-        "created_branch" => Ok(RelationKind::CreatedBranch),
-        "associated_branch" => Ok(RelationKind::AssociatedBranch),
-        "parent_fork" => Ok(RelationKind::ParentFork),
-        "rooted_at_path" => Ok(RelationKind::RootedAtPath),
-        "mux_contains_process" => Ok(RelationKind::MuxContainsProcess),
-        "process_identifies_session" => Ok(RelationKind::ProcessIdentifiesSession),
-        "process_candidates_session" => Ok(RelationKind::ProcessCandidatesSession),
-        _ => Err(format!(
-            "invalid relation `{raw}`; expected a declared relation such as linked_to_mux"
-        )),
-    }
-}
-
-fn relation_label(relation: &RelationKind) -> &'static str {
-    relation.snake_case()
-}
+// H-REF-002: `parse_relation_kind` + `relation_label` moved to
+// `RelationKind::from_snake_case` / `snake_case` methods in
+// `crate::model`. Callers use the methods directly.
 
 // H-REF-001: `parse_endpoint` + `endpoint_label` moved to
 // `DeclaredEndpoint::parse_compact` / `compact_label` in
