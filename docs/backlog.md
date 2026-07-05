@@ -1863,7 +1863,7 @@ cross-references below.
     four `projection_zero_discovery::*` tests plus the existing
     TUI snapshot suite. `H-HYG-006` (`SnapshotIndex`) is a follow-on
     optimization; H-TUI-001 does not depend on it.
-- [ ] `H-TUI-002` Adopt effects-as-data in the reducer.
+- [x] `H-TUI-002` Adopt effects-as-data in the reducer.
   - Governed by ADR 0085 contract 2. Lands in phases so each wave
     ships with tests and no half-migrated state.
   - Phase A (landed 2026-07-01): scaffolding + first migrations.
