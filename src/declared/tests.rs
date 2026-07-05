@@ -1,10 +1,18 @@
-// Extracted from declared.rs H-HYG-011 rolling wave via #[path = "declared_tests.rs"] mod tests;
+// Extracted from declared.rs H-HYG-011 rolling wave.
 use super::*;
+// H-REF-005: tests were flat when declared was one file; the
+// split into store/snapshot submodules means the tests now
+// import types the trimmed `mod.rs` no longer transitively
+// exposes.
+use crate::config::{ConfigLoader, PROJECT_CONFIG_FILENAME};
 use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, CheckoutId, CheckoutNode, Confidence, ForgePrId,
-    ForkId, ForkNode, Freshness, GraphLink, LinkState, MuxSessionId, MuxSessionNode, RepoId,
-    RepoNode, SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
+    ForkId, ForkNode, Freshness, GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState,
+    MuxSessionId, MuxSessionNode, NodeId,
+    RelationKind::{self, RootedAtPath},
+    RepoId, RepoNode, SourceMetadata, UnresolvedEndpoint, WorkspaceId, WorkspaceNode,
 };
+use std::path::Path;
 use tempfile::TempDir;
 
 fn sample_document() -> DeclaredDocument {
