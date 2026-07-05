@@ -338,7 +338,10 @@ fn build_lineage_link(
 
     let mut fields: Metadata = Metadata::new();
     fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
-    fields.insert("lineage_kind".to_string(), json!(lineage_kind));
+    fields.insert(
+        crate::model::source_field::LINEAGE_KIND.to_string(),
+        json!(lineage_kind),
+    );
     fields.insert(
         "parent_native_id".to_string(),
         json!(parent_session_key.to_string()),

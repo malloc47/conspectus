@@ -313,7 +313,7 @@ fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
         if let Some(path) = link
             .source_metadata
             .fields
-            .get("logical_path")
+            .get(crate::model::source_field::LOGICAL_PATH)
             .and_then(serde_json::Value::as_str)
         {
             roots
@@ -496,7 +496,7 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
     let source = NodeId::MuxSession(mux.id.clone());
     let mut fields = crate::model::Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH.to_string()),
     );
     insert_process_fields(&mut fields, evidence);
@@ -698,7 +698,7 @@ fn runtime_process_link(
 ) -> GraphLink {
     let mut fields = crate::model::Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(evidence_label.to_string()),
     );
     insert_process_fields(&mut fields, evidence);
@@ -893,7 +893,7 @@ fn fd_runtime_process_endpoint_metadata(
 ) -> crate::model::Metadata {
     let mut metadata = crate::model::Metadata::new();
     metadata.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(evidence.link_evidence.to_string()),
     );
     metadata.insert(
@@ -1764,13 +1764,13 @@ fn linked_to_mux(
     let target = NodeId::MuxSession(mux.id.clone());
     let mut fields = crate::model::Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(evidence.to_string()),
     );
 
     if let Some(activity) = mux.activity_epoch {
         fields.insert(
-            "mux_activity_epoch".to_string(),
+            crate::model::source_field::MUX_ACTIVITY_EPOCH.to_string(),
             serde_json::Value::Number(activity.into()),
         );
     }
@@ -1797,7 +1797,7 @@ fn fork_association_link(session: &AgentSessionNode, fork: &NodeId, root: &str) 
     let source = NodeId::AgentSession(session.id.clone());
     let mut fields = crate::model::Metadata::new();
     fields.insert(
-        "fork_root".to_string(),
+        crate::model::source_field::FORK_ROOT.to_string(),
         serde_json::Value::String(root.to_string()),
     );
     GraphLink {

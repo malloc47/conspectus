@@ -605,7 +605,10 @@ fn build_fork_lineage_link(
 ) -> GraphLink {
     let mut fields: Metadata = Metadata::new();
     fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
-    fields.insert("lineage_kind".to_string(), json!("fork"));
+    fields.insert(
+        crate::model::source_field::LINEAGE_KIND.to_string(),
+        json!("fork"),
+    );
     fields.insert("parent_session_id".to_string(), json!(parent_session_id));
     if let Some(uuid) = forked_from_message_uuid {
         fields.insert("forked_from_message_uuid".to_string(), json!(uuid));
@@ -671,7 +674,10 @@ fn build_lineage_link(
 
     let mut fields: Metadata = Metadata::new();
     fields.insert("harness_key".to_string(), json!(HARNESS_KEY));
-    fields.insert("lineage_kind".to_string(), json!(lineage_kind));
+    fields.insert(
+        crate::model::source_field::LINEAGE_KIND.to_string(),
+        json!(lineage_kind),
+    );
     fields.insert("parent_uuid".to_string(), json!(parent_uuid));
 
     let child_session_key = entry.node.id.session_key.as_str();

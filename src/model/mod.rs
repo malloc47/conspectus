@@ -1259,6 +1259,13 @@ pub struct SourceMetadata {
     pub adapter: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// H-REF-008: keys populated in this map come from
+    /// [`source_field`] constants. Producers stamp
+    /// `Metadata::insert(source_field::MATCH_KIND, …)`;
+    /// consumers read via
+    /// `metadata.get(source_field::MATCH_KIND)`. New keys
+    /// gain a constant so producer/consumer sides can't
+    /// silently drift.
     #[serde(default, skip_serializing_if = "Metadata::is_empty")]
     #[rkyv(with = MetadataAsJson)]
     pub fields: Metadata,
@@ -1268,6 +1275,50 @@ pub struct SourceMetadata {
     /// a timestamp.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub freshness_epoch: Option<i64>,
+}
+
+/// H-REF-008: canonical field-name constants for
+/// [`SourceMetadata::fields`]. Every producer that stamps a
+/// value into the map and every consumer that reads one back
+/// should reference the constants here so a typo or rename
+/// surfaces at compile time instead of silently dropping the
+/// evidence.
+///
+/// Missing constants can be added in the same commit that
+/// introduces the field — the compile-time drift check is
+/// the `every_source_field_constant_matches_its_string_literal`
+/// unit test in the model module.
+pub mod source_field {
+    /// Resolver-visible match kind for mux + PR + session ↔
+    /// process links. Populated by discovery adapters (hook
+    /// sidecar, cross_link, codex_log) and read by the
+    /// resolver's per-relation scoring.
+    pub const MATCH_KIND: &str = "match_kind";
+    /// Millisecond activity epoch used as a per-mux tie-break
+    /// axis by the resolver.
+    pub const MUX_ACTIVITY_EPOCH: &str = "mux_activity_epoch";
+    /// Second-precision epoch used by the forge PR scoring.
+    pub const UPDATED_EPOCH: &str = "updated_epoch";
+    /// Filesystem root associated with a fork lineage link.
+    pub const FORK_ROOT: &str = "fork_root";
+    /// `"fork"` | `"spawn"` (etc) lineage classifier stamped
+    /// by harness adapters onto `ParentSession` /
+    /// `ChildSession` links.
+    pub const LINEAGE_KIND: &str = "lineage_kind";
+    /// Forge PR state (`"open"` / `"closed"` / `"merged"`)
+    /// stamped by the GitHub adapter and consumed by the PR
+    /// comparator.
+    pub const STATE: &str = "state";
+    /// Forge PR draft flag stamped by the GitHub adapter.
+    pub const IS_DRAFT: &str = "is_draft";
+    /// Canonical filesystem-facing name atelier / agent-deck /
+    /// generic workspace producers stamp onto their
+    /// `WorkspaceContainsRepo` evidence so the detail-panel
+    /// member row shows the workspace-visible label.
+    pub const LOGICAL_PATH: &str = "logical_path";
+    /// Free-form evidence provenance scope stamp (per-adapter
+    /// substring; used by cross_link tie-breakers).
+    pub const SCOPE: &str = "scope";
 }
 
 /// Per-node producing-provider metadata (P7-002 / ADR 0037). The

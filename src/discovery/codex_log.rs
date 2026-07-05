@@ -333,7 +333,7 @@ fn build_link(
 
     let mut fields = Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String("codex_log_current_thread_match".to_string()),
     );
     fields.insert(
@@ -469,7 +469,7 @@ fn codex_process_link(
 ) -> GraphLink {
     let mut fields = Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(
             crate::resolve::evidence::CODEX_LOG_PROCESS_THREAD_MATCH.to_string(),
         ),
@@ -529,7 +529,7 @@ fn demote_stale_codex_command_matches(snapshot: &mut GraphSnapshot, fresh: &Grap
         let match_kind = link
             .source_metadata
             .fields
-            .get("match_kind")
+            .get(crate::model::source_field::MATCH_KIND)
             .and_then(serde_json::Value::as_str)
             .or(link.source_metadata.evidence.as_deref());
         if match_kind != Some(crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH) {

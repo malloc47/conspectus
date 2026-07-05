@@ -665,3 +665,20 @@ fn relation_kind_from_snake_case_rejects_unknown() {
     let err = RelationKind::from_snake_case("nothing").expect_err("unknown label");
     assert!(err.contains("invalid relation"), "got {err:?}");
 }
+
+/// H-REF-008: every `source_field::*` constant equals its own
+/// canonical snake_case name. Guards against a rename that
+/// desyncs producers from consumers.
+#[test]
+fn every_source_field_constant_matches_its_string_literal() {
+    use crate::model::source_field::*;
+    assert_eq!(MATCH_KIND, "match_kind");
+    assert_eq!(MUX_ACTIVITY_EPOCH, "mux_activity_epoch");
+    assert_eq!(UPDATED_EPOCH, "updated_epoch");
+    assert_eq!(FORK_ROOT, "fork_root");
+    assert_eq!(LINEAGE_KIND, "lineage_kind");
+    assert_eq!(STATE, "state");
+    assert_eq!(IS_DRAFT, "is_draft");
+    assert_eq!(LOGICAL_PATH, "logical_path");
+    assert_eq!(SCOPE, "scope");
+}

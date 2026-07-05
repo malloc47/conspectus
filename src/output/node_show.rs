@@ -352,7 +352,7 @@ fn workspace_member_displays(
         let display = link
             .source_metadata
             .fields
-            .get("logical_path")
+            .get(crate::model::source_field::LOGICAL_PATH)
             .and_then(|v| v.as_str())
             .and_then(|p| {
                 std::path::Path::new(p)

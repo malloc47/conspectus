@@ -535,7 +535,7 @@ fn harness_lineage_metadata(
         serde_json::Value::String(harness.key.clone()),
     );
     fields.insert(
-        "lineage_kind".to_string(),
+        crate::model::source_field::LINEAGE_KIND.to_string(),
         serde_json::Value::String(lineage_kind_name(harness).to_string()),
     );
     fields.insert(
@@ -701,7 +701,7 @@ fn atelier_workspace_repo_link(
         serde_json::Value::String(member.repo_name.to_string()),
     );
     fields.insert(
-        "logical_path".to_string(),
+        crate::model::source_field::LOGICAL_PATH.to_string(),
         serde_json::Value::String(crate::discovery::path_to_string(member.logical_path)),
     );
     fields.insert(

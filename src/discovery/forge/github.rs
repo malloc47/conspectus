@@ -249,9 +249,15 @@ fn branch_link_fields(record: &PullRequestRecord) -> Metadata {
         "state".to_string(),
         Value::String(record.state.as_str().to_string()),
     );
-    fields.insert("is_draft".to_string(), Value::Bool(record.is_draft));
+    fields.insert(
+        crate::model::source_field::IS_DRAFT.to_string(),
+        Value::Bool(record.is_draft),
+    );
     if let Some(updated) = record.updated_epoch {
-        fields.insert("updated_epoch".to_string(), Value::Number(updated.into()));
+        fields.insert(
+            crate::model::source_field::UPDATED_EPOCH.to_string(),
+            Value::Number(updated.into()),
+        );
     }
     fields
 }

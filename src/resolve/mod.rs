@@ -408,7 +408,7 @@ fn has_compatible_session_mux_link(
         let match_kind = link
             .source_metadata
             .fields
-            .get("match_kind")
+            .get(crate::model::source_field::MATCH_KIND)
             .and_then(serde_json::Value::as_str)
             .or(link.source_metadata.evidence.as_deref());
         let process_id = link
@@ -449,7 +449,7 @@ fn process_mux_link(
     };
     let mut fields = crate::model::Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(match_kind.to_string()),
     );
     fields.insert(
@@ -648,7 +648,7 @@ fn is_cwd_evidence(link: &GraphLink) -> bool {
     let match_kind = link
         .source_metadata
         .fields
-        .get("match_kind")
+        .get(crate::model::source_field::MATCH_KIND)
         .and_then(|v| v.as_str())
         .or(link.source_metadata.evidence.as_deref());
     matches!(match_kind, Some("exact_cwd_match" | "cwd_prefix_match"))
@@ -713,7 +713,7 @@ fn process_identity_score(link: &GraphLink) -> ProcessIdentityScore {
     let match_kind = link
         .source_metadata
         .fields
-        .get("match_kind")
+        .get(crate::model::source_field::MATCH_KIND)
         .and_then(serde_json::Value::as_str)
         .or(link.source_metadata.evidence.as_deref());
 
@@ -728,7 +728,7 @@ fn process_identity_score(link: &GraphLink) -> ProcessIdentityScore {
             .or_else(|| {
                 link.source_metadata
                     .fields
-                    .get("mux_activity_epoch")
+                    .get(crate::model::source_field::MUX_ACTIVITY_EPOCH)
                     .and_then(serde_json::Value::as_i64)
             })
             .unwrap_or(i64::MIN),
@@ -830,7 +830,7 @@ fn mux_score(link: &GraphLink) -> MuxScore {
     let match_kind = link
         .source_metadata
         .fields
-        .get("match_kind")
+        .get(crate::model::source_field::MATCH_KIND)
         .and_then(serde_json::Value::as_str)
         .or(link.source_metadata.evidence.as_deref());
 
@@ -841,7 +841,7 @@ fn mux_score(link: &GraphLink) -> MuxScore {
         activity_epoch: link
             .source_metadata
             .fields
-            .get("mux_activity_epoch")
+            .get(crate::model::source_field::MUX_ACTIVITY_EPOCH)
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(i64::MIN),
     }
@@ -947,13 +947,13 @@ fn pr_score(link: &GraphLink) -> PrScore {
         is_draft: link
             .source_metadata
             .fields
-            .get("is_draft")
+            .get(crate::model::source_field::IS_DRAFT)
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         updated_epoch: link
             .source_metadata
             .fields
-            .get("updated_epoch")
+            .get(crate::model::source_field::UPDATED_EPOCH)
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(i64::MIN),
         confidence: link.confidence,

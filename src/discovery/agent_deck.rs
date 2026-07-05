@@ -303,7 +303,7 @@ fn workspace_repo_link(
     let logical_path = crate::discovery::path_to_string(&member.logical_path);
     let mut fields = crate::model::Metadata::new();
     fields.insert(
-        "logical_path".to_string(),
+        crate::model::source_field::LOGICAL_PATH.to_string(),
         serde_json::Value::String(logical_path.clone()),
     );
     fields.insert(

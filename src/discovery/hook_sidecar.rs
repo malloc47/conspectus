@@ -160,7 +160,7 @@ fn is_weaker_mux_evidence(link: &GraphLink) -> bool {
     matches!(
         link.source_metadata
             .fields
-            .get("match_kind")
+            .get(crate::model::source_field::MATCH_KIND)
             .and_then(serde_json::Value::as_str)
             .or(link.source_metadata.evidence.as_deref()),
         Some("active_pane_command_session_match" | "exact_cwd_match" | "cwd_prefix_match")
@@ -295,7 +295,7 @@ fn linked_to_mux(
     };
     let mut fields = Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String(match_kind.to_string()),
     );
     fields.insert(
@@ -466,7 +466,7 @@ fn hook_process_link(
 ) -> GraphLink {
     let mut fields = Metadata::new();
     fields.insert(
-        "match_kind".to_string(),
+        crate::model::source_field::MATCH_KIND.to_string(),
         serde_json::Value::String("hook_process_observation".to_string()),
     );
     fields.insert(
