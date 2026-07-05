@@ -8906,8 +8906,21 @@ Cross-cutting expectations across every Tier A swap:
     the tree state machine specifically.
   - Blockers: explorer re-think on the agenda.
 
-- [ ] `H-WIDG-012` Opportunistic `ratatui-macros` sweep across
+- [x] `H-WIDG-012` Opportunistic `ratatui-macros` sweep across
   the remaining small widgets and the layout helpers.
+  - **Absorbed 2026-07-05 into the H-WIDG-001 closure** (`f022014`
+    + `93308b9`). Scope was byte-identical to H-WIDG-001's parked
+    remainders:
+      - Small widget sweep — `badge.rs` and `value_modal.rs`
+        swept; `input.rs` skipped per the no-gain convention;
+        `toast.rs` retired entirely by H-WIDG-003; `multi_select.rs`
+        retired by H-WIDG-002 (both landed pre-2026-07-05).
+      - Layout-macro sweep — `ui.rs`'s four `Layout::default()`
+        chains migrated to `vertical!` / `horizontal!`;
+        `detail.rs` audit confirmed no `Layout::default()`
+        construction (uses Frame area directly).
+    Retained here as `[x]` rather than deleted so the story ID
+    stays discoverable; canonical writeup lives on H-WIDG-001.
   - Motivation: `H-WIDG-001` closed the five files in the critical
     path (help / controls / search / pins / ui — `−204 LOC` net),
     but left two opportunistic remainders parked: the five small
