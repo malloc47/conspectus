@@ -104,212 +104,6 @@ enum Command {
     Dev(DevArgs),
 }
 
-#[cfg(debug_assertions)]
-#[derive(Debug, Args)]
-struct DevArgs {
-    #[command(subcommand)]
-    command: DevCommand,
-}
-
-#[cfg(debug_assertions)]
-impl DevArgs {
-    fn run(self) -> Result<()> {
-        match self.command {
-            DevCommand::Scenario(args) => args.run(),
-        }
-    }
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Subcommand)]
-enum DevCommand {
-    /// Materialize and inspect named replay scenarios.
-    Scenario(DevScenarioArgs),
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Args)]
-struct DevScenarioArgs {
-    #[command(subcommand)]
-    command: DevScenarioCommand,
-}
-
-#[cfg(debug_assertions)]
-impl DevScenarioArgs {
-    fn run(self) -> Result<()> {
-        match self.command {
-            DevScenarioCommand::List => {
-                for scenario in conspectus::dev_scenarios::SCENARIOS {
-                    println!("{}\t{}", scenario.name, scenario.description);
-                }
-                Ok(())
-            }
-            DevScenarioCommand::Graph(args) => args.run(),
-            DevScenarioCommand::Table(args) => args.run(),
-            DevScenarioCommand::Node(args) => args.run(),
-            DevScenarioCommand::Tui(args) => args.run(),
-        }
-    }
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Subcommand)]
-enum DevScenarioCommand {
-    /// List available scenario names.
-    List,
-    /// Render resolved graph JSON for a scenario.
-    Graph(DevScenarioGraphArgs),
-    /// Render a table row-type for a scenario.
-    Table(DevScenarioTableArgs),
-    /// Show one node from a scenario.
-    Node(DevScenarioNodeArgs),
-    /// Open the interactive TUI on a static scenario graph.
-    Tui(DevScenarioTuiArgs),
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Args)]
-struct DevScenarioGraphArgs {
-    name: String,
-    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
-    format: OutputFormat,
-    #[arg(long, value_enum, default_value_t = InclusionFlag::Include)]
-    candidates: InclusionFlag,
-    #[arg(long = "diagnostic-nodes", value_enum, default_value_t = InclusionFlag::Include)]
-    diagnostic_nodes: InclusionFlag,
-}
-
-#[cfg(debug_assertions)]
-impl DevScenarioGraphArgs {
-    fn run(self) -> Result<()> {
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
-        match self.format {
-            OutputFormat::Json => println!("{}", world.render_graph_json()?),
-            OutputFormat::Dot => {
-                let opts = conspectus::output::DotOptions {
-                    candidates: self.candidates.into(),
-                    diagnostic_nodes: self.diagnostic_nodes.into(),
-                };
-                println!(
-                    "{}",
-                    conspectus::output::render_graph_dot(&world.snapshot()?, opts)?
-                );
-            }
-            OutputFormat::Html => {
-                let opts = conspectus::output::HtmlOptions {
-                    candidates: self.candidates.into(),
-                    diagnostic_nodes: self.diagnostic_nodes.into(),
-                };
-                print!(
-                    "{}",
-                    conspectus::output::render_graph_html(&world.snapshot()?, opts)?
-                );
-            }
-        }
-        Ok(())
-    }
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Args)]
-struct DevScenarioTableArgs {
-    name: String,
-    /// Row-type to render: sessions, mux, union, prs, or forks.
-    rows: String,
-    /// Force untruncated output.
-    #[arg(long)]
-    wide: bool,
-    /// Render at exactly this many columns.
-    #[arg(long, value_name = "N")]
-    width: Option<usize>,
-    /// Row layout.
-    #[arg(long, value_enum, default_value_t = LayoutFlag::Columnar)]
-    layout: LayoutFlag,
-}
-
-#[cfg(debug_assertions)]
-impl DevScenarioTableArgs {
-    fn run(self) -> Result<()> {
-        let projection = config::Projection::parse(&self.rows).map_err(|err| anyhow!(err))?;
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
-        let options = match (self.layout, self.width, self.wide) {
-            (LayoutFlag::Columnar, Some(width), _) => {
-                conspectus::output::render::RenderOptions::columnar_width(width)
-            }
-            (LayoutFlag::Columnar, None, _) => conspectus::output::render::RenderOptions::wide(),
-            (LayoutFlag::Card, Some(width), _) => {
-                conspectus::output::render::RenderOptions::card_width(width)
-            }
-            (LayoutFlag::Card, None, _) => conspectus::output::render::RenderOptions::card(),
-        };
-        let table = world.render_table(projection, options)?;
-        print!("{table}");
-        Ok(())
-    }
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Args)]
-struct DevScenarioNodeArgs {
-    name: String,
-    id: String,
-    /// When to colorize the output.
-    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
-    color: ColorFlag,
-}
-
-#[cfg(debug_assertions)]
-impl DevScenarioNodeArgs {
-    fn run(self) -> Result<()> {
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
-        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        print!("{}", world.render_node_show(&self.id, color)?);
-        Ok(())
-    }
-}
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Args)]
-struct DevScenarioTuiArgs {
-    name: String,
-    /// Initial left-panel organization.
-    #[arg(long, value_enum, default_value_t = ViewFlag::Sessions)]
-    view: ViewFlag,
-    /// Row sort within each group.
-    #[arg(long, value_enum, default_value_t = SortFlag::Hierarchy)]
-    sort: SortFlag,
-    /// Filter / grouping flags. Accepted grouping values depend on
-    /// `--view`, matching normal `conspectus tui`.
-    #[command(flatten)]
-    filter_args: FilterArgs,
-    /// When to colorize the output.
-    #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
-    color: ColorFlag,
-}
-
-#[cfg(debug_assertions)]
-impl DevScenarioTuiArgs {
-    fn run(self) -> Result<()> {
-        let world = conspectus::dev_scenarios::materialize(&self.name)?;
-        let view = view_from_flag(self.view);
-        let filter = self.filter_args.to_row_filter()?;
-        let grouping = self
-            .filter_args
-            .to_grouping(view)?
-            .unwrap_or_else(|| conspectus::tui::Grouping::default_for(view));
-        let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        let snapshot = world.snapshot()?;
-        let mut config = world.tui_config(view, color);
-        config.default_sort = match self.sort {
-            SortFlag::Hierarchy => conspectus::tui::Sort::Hierarchy,
-            SortFlag::Recency => conspectus::tui::Sort::Recency,
-        };
-        config.initial_filter = filter;
-        apply_grouping_to_tui_config(&mut config, grouping);
-        conspectus::tui::run_static(config, snapshot)
-    }
-}
-
 // H-REF-006 wave 1: `ColumnsArgs` moved to `cli/columns.rs`.
 mod columns;
 use columns::ColumnsArgs;
@@ -317,6 +111,14 @@ use columns::ColumnsArgs;
 // H-REF-006 wave 2: `RenameArgs` + subtree moved to `cli/rename.rs`.
 mod rename;
 use rename::RenameArgs;
+
+// H-REF-006 wave 3: `DevArgs` subtree moved to `cli/dev.rs`.
+// Gated at the module level via `#![cfg(debug_assertions)]`
+// inside `dev.rs`; release builds don't compile it.
+#[cfg(debug_assertions)]
+mod dev;
+#[cfg(debug_assertions)]
+use dev::DevArgs;
 
 #[derive(Debug, Args)]
 struct ServeArgs {
@@ -1646,7 +1448,7 @@ struct TableRowsArgs {
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum LayoutFlag {
+pub(super) enum LayoutFlag {
     #[default]
     Columnar,
     Card,
@@ -2238,7 +2040,7 @@ impl Default for TuiArgs {
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum ViewFlag {
+pub(super) enum ViewFlag {
     #[default]
     Sessions,
     Mux,
@@ -2248,7 +2050,7 @@ enum ViewFlag {
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum SortFlag {
+pub(super) enum SortFlag {
     #[default]
     Hierarchy,
     Recency,
@@ -2289,7 +2091,7 @@ impl SessionsGroupingFlag {
 /// grouping validation can produce actionable errors against the
 /// view's enum.
 #[derive(Debug, Args, Default, Clone)]
-struct FilterArgs {
+pub(super) struct FilterArgs {
     /// Narrow to one or more harness keys. Repeatable; values
     /// accumulate into a set. Comparison is case-insensitive and
     /// trim-aware.
@@ -2313,7 +2115,7 @@ impl FilterArgs {
     /// Convert the raw flag values into a [`conspectus::filter::RowFilter`].
     /// Returns an error when a value fails to parse (max-age
     /// duration, mux-state spelling).
-    fn to_row_filter(&self) -> Result<conspectus::filter::RowFilter> {
+    pub(super) fn to_row_filter(&self) -> Result<conspectus::filter::RowFilter> {
         use conspectus::filter::{HarnessFilter, MuxStateFilter, MuxStateKey, RowFilter};
         let harness = if self.harness.is_empty() {
             None
@@ -2354,7 +2156,7 @@ impl FilterArgs {
     /// `Ok(None)` when the flag wasn't provided; returns an error
     /// when the value isn't valid for `view` so the caller can list
     /// the legal values in the message.
-    fn to_grouping(
+    pub(super) fn to_grouping(
         &self,
         view: conspectus::tui::View,
     ) -> Result<Option<conspectus::tui::Grouping>> {
@@ -2387,7 +2189,7 @@ fn view_flag_label(view: conspectus::tui::View) -> &'static str {
     }
 }
 
-fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
+pub(super) fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
     match flag {
         ViewFlag::Sessions => conspectus::tui::View::Sessions,
         ViewFlag::Mux => conspectus::tui::View::Mux,
@@ -2398,7 +2200,7 @@ fn view_from_flag(flag: ViewFlag) -> conspectus::tui::View {
 }
 
 #[cfg(debug_assertions)]
-fn apply_grouping_to_tui_config(
+pub(super) fn apply_grouping_to_tui_config(
     config: &mut conspectus::tui::RunConfig,
     grouping: conspectus::tui::Grouping,
 ) {
@@ -4399,14 +4201,14 @@ fn format_pin_diagnostic(diagnostic: &conspectus::model::Diagnostic) -> String {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum OutputFormat {
+pub(super) enum OutputFormat {
     Json,
     Dot,
     Html,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
-enum InclusionFlag {
+pub(super) enum InclusionFlag {
     Include,
     Exclude,
 }
