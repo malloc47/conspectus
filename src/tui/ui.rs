@@ -26,8 +26,8 @@
 
 use ansi_to_tui::IntoText;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
-use ratatui::macros::span;
+use ratatui::layout::{Margin, Rect};
+use ratatui::macros::{horizontal, span, vertical};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
@@ -73,14 +73,7 @@ pub(super) const NARROW_LAYOUT_THRESHOLD: u16 = 100;
 /// state.
 pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     let area = frame.area();
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(3),
-            Constraint::Length(1),
-        ])
-        .split(area);
+    let layout = vertical![==1, >=3, ==1].split(area);
 
     draw_header(app, frame, layout[0]);
     draw_body(app, frame, layout[1]);
@@ -532,15 +525,11 @@ fn snapshot_counts(database: Option<&GraphDb>) -> (usize, usize) {
 // -----------------------------------------------------------------------------
 
 fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
-    let direction = if area.width < NARROW_LAYOUT_THRESHOLD {
-        Direction::Vertical
+    let split = if area.width < NARROW_LAYOUT_THRESHOLD {
+        vertical![==50%, ==50%].split(area)
     } else {
-        Direction::Horizontal
+        horizontal![==50%, ==50%].split(area)
     };
-    let split = Layout::default()
-        .direction(direction)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
     draw_left_panel(app, frame, split[0]);
     draw_right_panel(app, frame, split[1]);
 }
@@ -1937,14 +1926,7 @@ fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
             .saturating_add(1)
             .min(max_header_height)
             .max(3);
-        let split = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(header_height),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ])
-            .split(inner);
+        let split = vertical![==header_height, ==1, >=0].split(inner);
         // H-TUI-005 wave 2: the reducer owns scroll reconciliation.
         // Draw measures the post-wrap cursor row span (that math
         // needs the widget-rendered lines) and dispatches the
@@ -1987,23 +1969,17 @@ fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
     }
 
     let mux_runtime = mux_runtime_rows(app);
-    let split = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            // Give the header exactly the height its fields need
-            // (title + blank + one row per HeaderField), clamped
-            // so the preview zone keeps a minimum of two rows.
-            Constraint::Length(header_zone_height(
-                detail,
-                app.detail_links_expanded(),
-                &mux_runtime,
-                inner.height,
-                inner.width,
-            )),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .split(inner);
+    // Give the header exactly the height its fields need
+    // (title + blank + one row per HeaderField), clamped
+    // so the preview zone keeps a minimum of two rows.
+    let header_h = header_zone_height(
+        detail,
+        app.detail_links_expanded(),
+        &mux_runtime,
+        inner.height,
+        inner.width,
+    );
+    let split = vertical![==header_h, ==1, >=0].split(inner);
 
     draw_detail_header(
         detail,

@@ -10,6 +10,7 @@ use crate::tui::SessionsGrouping;
 use crate::tui::app::Msg;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};
 use crate::tui::{RunConfig, View};
+use ratatui::layout::{Constraint, Direction, Layout};
 
 fn seeded_app() -> App {
     let mut snapshot = GraphSnapshot::empty();
