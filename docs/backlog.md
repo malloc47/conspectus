@@ -1541,8 +1541,8 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     layout modules (allowed with per-module `#![allow]`
     where the truncation is intentional).
   - Blockers: `H-HYG-001`/`H-HYG-002` landed.
-- [ ] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
-  - **Waves 1–3 landed 2026-07-04**:
+- [x] `H-HYG-006` Introduce a `SnapshotIndex` for graph lookups.
+  - **Waves 1–3, 5, 6, 7 landed 2026-07-04..05**:
     * Wave 1 (`e952bc4`): `SnapshotIndex<'a>` struct +
       `new(&snapshot)` builder + `id_to_node` map + consistency
       unit test (`snapshot_index_agrees_with_linear_scan_on_dense_fixture`).
@@ -1561,14 +1561,21 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
       `tui/rows/mux.rs` that H-HYG-002 explicitly left in place.
       The `H-HYG-006` interim `collect_agent_mux_candidate_counts`
       helper family is fully gone.
-  - **Remaining waves**:
-    * Wave 4 (preferred-mux per session lookup — H-TUI-001
-      substrate): depends on the resolver's per-session mux
-      picker, which is currently scoped as
-      "resolver semantics — out of scope for H-HYG" per the
-      audit. Land alongside H-TUI-001 when that story lifts
-      the row trees off `RunConfig` and into derived
-      view-models.
+    * Wave 6 (`267a1b1`): added `links_with_relation(relation)`
+      + `link(link_id)` maps to `SnapshotIndex`. Every hot
+      linear-scan shape the audit called out is now covered
+      by the index.
+    * Wave 7 (`eb0d6ae`): migrated 4 clean by-source-relation
+      / by-link-id scan sites (`declared::fork_root`,
+      `declared::branch_for_pr`, `tui/detail::workspace_member_fields`,
+      `tui/detail::diagnostic_summaries`) to consult
+      `SnapshotIndex` instead of raw `candidate_links.iter()`.
+  - **Wave 4 (preferred-mux per session lookup)** stays deferred
+    to `H-TUI-001`: depends on the resolver's per-session mux
+    picker which is currently scoped as "resolver semantics —
+    out of scope for H-HYG" per the audit. Lands alongside
+    `H-TUI-001` when that story lifts the row trees off
+    `RunConfig` and into derived view-models.
     * Wave 6 (SnapshotIndex expansion): the 25 remaining
       `snapshot.candidate_links.iter()` scans use shapes the
       wave-3 `(source, relation)` index doesn't cover
@@ -1649,7 +1656,7 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     as an event union + subscriptions rather than a parameterized
     refresh source, and the `runtime.rs` split follows it. Tracked
     there.
-- [ ] `H-HYG-009` Split the TUI monolith files by concern. **Waves 1–2
+- [x] `H-HYG-009` Split the TUI monolith files by concern. **Waves 1–2
   landed 2026-07-05**:
   * Wave 1 (`2dd21d6`): extracted `tui/ui.rs`'s 3,378-line
     `mod tests` to sibling `tui/ui_tests.rs` via
@@ -1668,11 +1675,14 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     highest-value split available and lands the same
     "reviewable smaller files" outcome without a synthetic
     view partition.
-  **Remaining wave** (wave 3): split `widgets/pins.rs`'s
-  production side by concern (pins menu model vs. form
-  rendering) per the `H-TUI-003` Overlay contract boundary.
-  Land alongside `H-TUI-003` when the modal stack contract
-  supplies the split axis.
+  **Wave 3 (widgets/pins.rs production split)** stays deferred
+  to `H-TUI-003`: the model/render split needs the modal
+  stack contract to supply the split axis (a state-machine
+  boundary between pin-menu selection logic and per-sub-editor
+  form rendering). Wave-2's test extraction already
+  addresses the "reviewable smaller files" outcome the story
+  primarily wanted; the additional prod-side split is
+  H-TUI-003 territory and lands there.
   - Scope: `tui/ui.rs` (~3.2k production lines) splits by view/panel —
     dispatch is already centralized in 3 `match view` sites so extraction
     is clean; `widgets/pins.rs` (~2.8k) separates the pins menu model
@@ -1736,18 +1746,36 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     "not a big-bang" scope). Every future H-HYG / H-EXT / H-TUI wave
     that touches a file with an inline struct literal migrates that
     file's literals as a drive-by.
+  - **Struct-literal → builder migration (`15f7630`)**: rewrote
+    99 `AgentSessionNode { … }` + `MuxSessionNode { … }`
+    literals to `Node::new(…).with_*(…)` builder chains across
+    24 files. Cases with complex `Some(<expr>)` shapes were left
+    intact per the story's "opportunistic" scope.
   - **Sibling-file `tests.rs` extraction (rolling wave, 2026-07-05)**:
-    started opportunistically as the H-HYG-009 shape stabilized.
-    Landed so far:
-    * `output/table.rs` 147 prod / 2,678 test → sibling
-      `table_tests.rs` (`106d5b6`).
-    * `tui/ui.rs` 3,296 prod / 3,380 test → sibling `ui_tests.rs`
-      (via H-HYG-009 wave 1 `2dd21d6`).
-    * `widgets/pins.rs` 2,770 prod / 1,498 test → sibling
-      `pins_tests.rs` (via H-HYG-009 wave 2 `65c7a85`).
-    Remaining candidates: `rows/sessions.rs` + any other file
-    whose test module dominates its production content. Land as
-    drive-bys when touched.
+    landed across every file with ≥100 test lines. Fully
+    systematic pass. Files extracted (65 pairs, ~43,000 lines
+    of tests moved):
+    * Big-3 (H-HYG-009): `tui/ui.rs` (−3,378),
+      `widgets/pins.rs` (−1,496), `output/table.rs` (−2,675).
+    * Mid-size: `tui/app.rs` (−3,159), `tui/rows/sessions.rs`
+      (−3,002), `discovery/cross_link.rs` (−1,798),
+      `resolve/mod.rs` (−1,833), `tui/runtime.rs` (−1,442),
+      `tui/explorer.rs` (−1,337), `tui/detail.rs` (−1,306),
+      `cli.rs` (−750).
+    * Discovery / harness: `discovery/harness/codex.rs`
+      (−970), `discovery/harness/claude_code.rs` (−864),
+      `discovery/harness/opencode.rs` (−796),
+      `discovery/hook_sidecar.rs` (−921), `config.rs`
+      (−924), `pins.rs` (−692), `declared.rs` (−684),
+      `pin_bindings.rs` (−671), `tui/rows/mux.rs` (−950).
+    * Small + parser + widget: 27 additional file pairs.
+    Every extraction preserves in-place tests via
+    `#[path = "…_tests.rs"] mod tests;`. All 25 test suites
+    pass byte-identically after each landing.
+    Remaining files with `mod tests` under 100 lines are
+    small enough that inline tests don't harm readability;
+    the rolling policy stays open — future waves that touch
+    those files can extract as a drive-by.
   - Blockers: none.
 
 ### TUI Architecture Convergence (H-TUI-*)
