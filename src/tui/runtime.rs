@@ -130,9 +130,11 @@ fn run_loop(
         }
     }
 
-    // Persist final state on clean shutdown so in-session
-    // changes (sort, filter, grouping) that didn't trigger a
-    // view switch are saved.
+    // Belt-and-suspenders shutdown persist: the view / grouping /
+    // filter / sort reducer arms emit `Effect::Persist` per ADR
+    // 0085 contract 2 Phase E, so this final call is redundant
+    // on the happy path. Kept so any state a future non-reducer
+    // path mutates just before shutdown still lands on disk.
     app.persist_state();
     Ok(())
 }

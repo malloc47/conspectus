@@ -2335,23 +2335,26 @@ fn post_toast_supersedes_prior_toast() {
 }
 
 #[test]
-fn switch_to_view_persists_through_enabled_cache() {
+fn switch_view_msg_persists_through_enabled_cache() {
     // F8-013: when persistence is enabled, every view switch must
-    // funnel through `crate::tui_state::write_tui_state`. We pin
-    // the seam by enabling a cache pointed at a tempdir and
-    // asserting the on-disk file appears with the new view.
+    // funnel through `crate::tui_state::write_tui_state`. Phase E
+    // moves the persist call out of `switch_to_view` and into the
+    // `Msg::SwitchView` reducer arm (via `Effect::Persist`), so we
+    // pin the seam by dispatching the Msg and running the effects
+    // executor.
     let dir = tempfile::TempDir::new().expect("tempdir");
     let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
     let cache_for_assert = cache.clone();
 
     let mut app = App::new(RunConfig::defaults());
     app.enable_view_persistence(cache);
-    app.switch_to_view(View::Mux);
+    let effects = app.update(Msg::SwitchView(View::Mux));
+    crate::tui::runtime::execute_effects(&mut app, effects);
 
     assert_eq!(
         crate::tui_state::read_last_view(&cache_for_assert),
         Some(View::Mux),
-        "switch_to_view must persist through the enabled cache",
+        "SwitchView Msg must emit Persist and land the state on disk",
     );
 }
 
@@ -2440,17 +2443,20 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
 }
 
 #[test]
-fn switch_to_view_without_persistence_does_not_write() {
+fn switch_view_msg_without_persistence_does_not_write() {
     // Negative pin: when persistence is disabled (the default,
     // matching snapshot mode and `--no-resume-view`), the on-disk
-    // file must not appear. Guards against accidental
-    // unconditional writes leaking into snapshot tests.
+    // file must not appear even after the effect executor runs.
+    // Guards against accidental unconditional writes leaking into
+    // snapshot tests. Phase E routes the persist through the
+    // reducer + executor, so we drive the flow the same way.
     let dir = tempfile::TempDir::new().expect("tempdir");
     let cache = crate::tui_state::TuiStateCache::default().with_xdg_state_home(dir.path());
 
     let mut app = App::new(RunConfig::defaults());
     // Deliberately skip `enable_view_persistence`.
-    app.switch_to_view(View::Prs);
+    let effects = app.update(Msg::SwitchView(View::Prs));
+    crate::tui::runtime::execute_effects(&mut app, effects);
 
     assert!(
         crate::tui_state::read_last_view(&cache).is_none(),
@@ -3081,16 +3087,32 @@ mod reducer_effects {
     // arms mutate App state and re-derive the row tree from the
     // held snapshot in one shot; no effects are emitted (the
     // tree swap happens inline).
+    // Phase E (ADR 0085 contract 2): view / grouping / filter /
+    // sort switches emit `Effect::Persist` so the F8-013 sidecar
+    // stays in sync mid-session. Pre-Phase-E these arms emitted
+    // no effects and relied on the runtime shutdown fallback for
+    // persistence — see `runtime.rs`'s shutdown persist for the
+    // pre-Phase-E path that Phase E retires from the happy path.
+
     #[test]
-    fn switch_view_msg_updates_active_view_and_emits_no_effect() {
+    fn switch_view_msg_updates_active_view_and_emits_persist() {
         let mut app = App::new(RunConfig::defaults());
         let effects = app.update(Msg::SwitchView(View::Mux));
         assert_eq!(app.active_view(), View::Mux);
-        assert!(effects.is_empty());
+        assert_eq!(effects, vec![Effect::Persist]);
     }
 
     #[test]
-    fn set_grouping_msg_updates_grouping_and_emits_no_effect() {
+    fn switch_view_msg_to_current_view_is_noop_and_emits_no_effect() {
+        let mut app = App::new(RunConfig::defaults());
+        let before = app.active_view();
+        let effects = app.update(Msg::SwitchView(before));
+        assert_eq!(app.active_view(), before);
+        assert!(effects.is_empty(), "same-view switch is a no-op");
+    }
+
+    #[test]
+    fn set_grouping_msg_updates_grouping_and_emits_persist() {
         let mut app = App::new(RunConfig::defaults());
         let effects = app.update(Msg::SetGrouping(crate::tui::Grouping::Sessions(
             crate::tui::SessionsGrouping::Workspace,
@@ -3099,11 +3121,11 @@ mod reducer_effects {
             app.grouping(),
             crate::tui::Grouping::Sessions(crate::tui::SessionsGrouping::Workspace)
         );
-        assert!(effects.is_empty());
+        assert_eq!(effects, vec![Effect::Persist]);
     }
 
     #[test]
-    fn set_filter_msg_updates_filter_and_emits_no_effect() {
+    fn set_filter_msg_updates_filter_and_emits_persist() {
         let mut app = App::new(RunConfig::defaults());
         let filter = crate::filter::RowFilter {
             harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
@@ -3111,15 +3133,15 @@ mod reducer_effects {
         };
         let effects = app.update(Msg::SetFilter(filter.clone()));
         assert_eq!(app.filter(), &filter);
-        assert!(effects.is_empty());
+        assert_eq!(effects, vec![Effect::Persist]);
     }
 
     #[test]
-    fn set_sort_msg_updates_sort_and_emits_no_effect() {
+    fn set_sort_msg_updates_sort_and_emits_persist() {
         let mut app = App::new(RunConfig::defaults());
         let effects = app.update(Msg::SetSort(crate::tui::Sort::Recency));
         assert_eq!(app.sort(), crate::tui::Sort::Recency);
-        assert!(effects.is_empty());
+        assert_eq!(effects, vec![Effect::Persist]);
     }
 
     #[test]

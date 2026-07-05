@@ -685,6 +685,10 @@ impl App {
     /// view's state into `view_states` and loading the target's
     /// state (or fresh defaults on first visit). Per ADR 0031 sort
     /// stays global, so callers don't touch it here.
+    ///
+    /// Persistence is the caller's concern — the [`Msg::SwitchView`]
+    /// reducer arm emits [`Effect::Persist`] after invoking this,
+    /// per ADR 0085 contract 2 Phase E.
     pub(crate) fn switch_to_view(&mut self, target: View) {
         let from = self.active_view;
         if from == target {
@@ -698,12 +702,6 @@ impl App {
             .unwrap_or_else(|| ViewStateSlot::defaults_for(target));
         self.restore_active_state(loaded);
         self.active_view = target;
-        // F8-013: persist the full UI state best-effort. When the
-        // runtime hasn't enabled persistence (snapshot mode,
-        // `--no-resume-view`, or any test path), the cache is `None`
-        // and the call is a no-op. Failures here never abort the
-        // switch.
-        self.persist_state();
         self.force_recency_for_flat_sessions();
         self.status_message = None;
     }
@@ -2122,8 +2120,12 @@ impl App {
                 )));
             }
             Msg::SwitchView(view) => {
+                let before = self.active_view;
                 self.switch_to_view(view);
                 self.rebuild_tree_in_place();
+                if self.active_view != before {
+                    effects.push(Effect::Persist);
+                }
             }
             Msg::SetGrouping(g) => {
                 self.grouping = g;
@@ -2131,10 +2133,12 @@ impl App {
                     self.force_recency_for_flat_sessions();
                 }
                 self.rebuild_tree_in_place();
+                effects.push(Effect::Persist);
             }
             Msg::SetFilter(filter) => {
                 self.filter = filter;
                 self.rebuild_tree_in_place();
+                effects.push(Effect::Persist);
             }
             Msg::SetSort(sort) => {
                 let sort = if matches!(
@@ -2147,6 +2151,7 @@ impl App {
                 };
                 self.sort = sort;
                 self.rebuild_tree_in_place();
+                effects.push(Effect::Persist);
             }
             Msg::CommitRename(value) => match self.selection.clone() {
                 Some(RowId::AgentSession(crate::model::NodeId::AgentSession(id))) => {

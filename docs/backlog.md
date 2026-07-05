@@ -1956,10 +1956,20 @@ cross-references below.
     `edit_pin_action`, `commit_rename`, and `commit_pin_rename`
     deleted; five new reducer-level `(state', effects)` tests
     bring the phase's coverage to 19 cases.
-  - Phase E (preview capture + persistence completion):
-    `Effect::CapturePreview(MuxTarget)` runs from the executor's
-    per-tick sweep; `Effect::Persist` is already in the catalog
-    and gets emitted from view / grouping / filter changes.
+  - Phase E (landed 2026-07-05, persistence completion): the
+    `Msg::SwitchView`, `Msg::SetGrouping`, `Msg::SetFilter`, and
+    `Msg::SetSort` reducer arms now emit `Effect::Persist` after
+    mutating state and rebuilding the tree, closing the F8-013
+    sidecar synchronization gap. Direct `self.persist_state()`
+    call moved out of `App::switch_to_view` — the runtime-loop
+    shutdown persist stays as a belt-and-suspenders safety net
+    for future non-reducer paths that mutate state near shutdown.
+    Reducer test coverage grows to 28 cases (four `emits_persist`
+    variants plus a `SwitchView` no-op guard for same-view
+    dispatches). Preview capture (`Effect::CapturePreview` via
+    `Effect::RunMux(MuxOp::CapturePreview)`) already landed in
+    Phase C.1 — the "per-tick executor sweep" wording in the
+    original Phase E scope was retrospectively covered there.
   - Phase F (landed 2026-07-02, collapse update layers):
     `ControlsAction` enum deleted. Four new Msg variants
     (`SwitchView`, `SetGrouping`, `SetFilter`, `SetSort`) carry
