@@ -25,9 +25,10 @@ use conspectus::pins::{
     load_pin_entry_by_id, remove_pin_entry, select_store_for_pin, upsert_pin_entry, user_pin_store,
 };
 
+use super::declared::resolve_write_store;
 use super::{
     DeclaredStoreFlag, discover_for_store_selection, effective_scan_roots, provenance_label,
-    resolve_write_store, store_label,
+    store_label,
 };
 
 // =====================================================================
