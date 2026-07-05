@@ -79,6 +79,17 @@ pub enum KeyMatcher {
     /// actions that accepted both the shifted and the
     /// unshifted forms.
     UpperChar(char),
+    /// Char match admitting any modifier except CONTROL.
+    /// Pre-H-HYG-007 the dispatcher wrote this as
+    /// `(m, KeyCode::Char('r')) if !m.contains(CONTROL)`
+    /// so `r` fires but `Ctrl-R` (which may be reserved
+    /// by the terminal) doesn't.
+    AnyModExceptCtrl(char),
+    /// Non-char code match ignoring modifiers. Used for
+    /// arrow keys and nav keys where the pre-H-HYG-007
+    /// dispatcher wrote `(_, KeyCode::Down)` — any
+    /// modifier is fine.
+    AnyMod(KeyCode),
 }
 
 impl KeyMatcher {
@@ -95,6 +106,11 @@ impl KeyMatcher {
                 }
                 _ => false,
             },
+            KeyMatcher::AnyModExceptCtrl(ch) => match code {
+                KeyCode::Char(c) if c == *ch => !modifiers.contains(KeyModifiers::CONTROL),
+                _ => false,
+            },
+            KeyMatcher::AnyMod(k) => code == *k,
         }
     }
 }
@@ -236,6 +252,162 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         key: KeyMatcher::UpperChar('E'),
         action: || Action::Msg(Box::new(crate::tui::Msg::ToggleEdgeMeta)),
         help_text: "Toggle explorer edge-meta visibility",
+    },
+    // H-HYG-007 wave 4: parametric-guard shortcuts. Each
+    // matcher fires on any non-Ctrl modifier + the char, so
+    // `Ctrl-R` etc. reserved by the terminal doesn't collide.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('r'),
+        action: || Action::Refresh,
+        help_text: "Refresh discovery now",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('a'),
+        action: || Action::Attach,
+        help_text: "Attach to the selected mux",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('b'),
+        action: || Action::PinBindHint,
+        help_text: "Open bind picker for ambiguous pin row",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('v'),
+        action: || Action::View,
+        help_text: "Open the selected session's transcript viewer",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('f'),
+        action: || Action::OpenControls,
+        help_text: "Open the controls overlay (view / grouping / filters / sort)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('p'),
+        action: || Action::OpenPins,
+        help_text: "Open the pins overlay",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl(']'),
+        action: || Action::CycleView(1),
+        help_text: "Cycle to the next view",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('['),
+        action: || Action::CycleView(-1),
+        help_text: "Cycle to the previous view",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('/'),
+        action: || Action::OpenSearch,
+        help_text: "Open the in-view search overlay",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('?'),
+        action: || Action::OpenHelp,
+        help_text: "Show the help overlay",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('l'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::ExpandRow)),
+        help_text: "Expand the selected row's children",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('h'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
+        help_text: "Collapse the selected row's children",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('e'),
+        action: || Action::Msg(Box::new(crate::tui::Msg::ToggleLinkedDetails)),
+        help_text: "Toggle explorer linked-details",
+    },
+    // Arrow / nav keys — any modifier is fine.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Down),
+        action: || Action::Msg(Box::new(crate::tui::Msg::NavDown)),
+        help_text: "Move cursor down",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Up),
+        action: || Action::Msg(Box::new(crate::tui::Msg::NavUp)),
+        help_text: "Move cursor up",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Right),
+        action: || Action::Msg(Box::new(crate::tui::Msg::ExpandRow)),
+        help_text: "Expand the selected row (Right arrow)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Left),
+        action: || Action::Msg(Box::new(crate::tui::Msg::CollapseRow)),
+        help_text: "Collapse the selected row (Left arrow)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Enter),
+        action: || Action::DefaultAction,
+        help_text: "Default action on the selected row",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Backspace),
+        action: || Action::Msg(Box::new(crate::tui::Msg::ExplorerBack)),
+        help_text: "Pop one drilldown hop in the explorer",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Home),
+        action: || Action::Msg(Box::new(crate::tui::Msg::Home)),
+        help_text: "Jump to the first row",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::End),
+        action: || Action::Msg(Box::new(crate::tui::Msg::End)),
+        help_text: "Jump to the last row",
+    },
+    // `j` / `k` also fire NavDown / NavUp per Vim convention.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Char('j')),
+        action: || Action::Msg(Box::new(crate::tui::Msg::NavDown)),
+        help_text: "Move cursor down (j)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Char('k')),
+        action: || Action::Msg(Box::new(crate::tui::Msg::NavUp)),
+        help_text: "Move cursor up (k)",
+    },
+    // `g` / `G` also fire Home / End per Vim convention.
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Char('g')),
+        action: || Action::Msg(Box::new(crate::tui::Msg::Home)),
+        help_text: "Jump to the first row (g)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
+        key: KeyMatcher::AnyMod(KeyCode::Char('G')),
+        action: || Action::Msg(Box::new(crate::tui::Msg::End)),
+        help_text: "Jump to the last row (G)",
     },
 ];
 

@@ -219,90 +219,19 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
     }
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
-            // H-HYG-007 wave 2 continued: Quit, Refresh, Attach,
-            // Resume, Rename, RemovePin, and pin CRUD shortcuts
-            // migrated to `keybindings::KEYBINDINGS` and dispatched
-            // via `translate_via_table` above. Non-migrated:
-            // - `r` (Refresh) — parametric guard against Ctrl-R stays as
-            //   arm below.
-            // - `a` (Attach) — same guard reason.
-            // - `b` (PinBindHint) — same guard reason; the KeyMatcher
-            //   shape doesn't yet model "any non-Ctrl modifier."
-            (m, KeyCode::Char('r')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Refresh),
-            (m, KeyCode::Char('a')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::Attach),
-            (m, KeyCode::Char('b')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::PinBindHint)
-            }
-            // ADR 0031 / F8-005 accelerator surface (reshuffled
-            // alongside H-VIEWER-NATIVE-008 to give the more
-            // discoverable `v` to the session viewer):
-            //   `v` opens the session transcript viewer (was `T`).
-            //   `f` opens the controls overlay (was `v`).
-            //   `F` clears every active filter (unchanged).
-            //   `1`–`5` switch view; `]`/`[` cycle views;
-            //   `Ctrl-G` cycles grouping.
-            // The pre-existing `f` → "jump to Filters section"
-            // shortcut was retired; the controls overlay places
-            // the cursor at the top and the operator navigates
-            // from there.
-            (m, KeyCode::Char('v')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::View),
-            (m, KeyCode::Char('f')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::OpenControls)
-            }
-            // ADR 0057 §TUI: `p` opens the dedicated pins management
-            // modal. Sibling of `f` (view/filter controls); pin CRUD
-            // also has direct shortcuts so the modal is the
-            // discoverable surface rather than a required step.
-            (m, KeyCode::Char('p')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::OpenPins),
-            // H-HYG-007 wave 2: `F` (clear filters) and `E`
-            // (toggle edge-meta) migrated to KEYBINDINGS + view
-            // switch + grouping cycle. Dispatched via
-            // `translate_via_table` above.
-            (m, KeyCode::Char(']')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::CycleView(1))
-            }
-            (m, KeyCode::Char('[')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::CycleView(-1))
-            }
-            (m, KeyCode::Char('/')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::OpenSearch)
-            }
-            (m, KeyCode::Char('?')) if !m.contains(KeyModifiers::CONTROL) => Some(Action::OpenHelp),
-            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => {
-                Some(Action::Msg(Box::new(Msg::NavDown)))
-            }
-            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(Action::Msg(Box::new(Msg::NavUp))),
-            // Vi-style tree expand/collapse on the left pane. `l` /
-            // `→` open the selected row's children, `h` / `←`
-            // collapse them. Enter is still the default-action key
-            // (T8-043); these bindings give the operator an explicit
-            // expand/collapse path now that Enter no longer plays
-            // that role for every row kind.
-            (m, KeyCode::Char('l')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::Msg(Box::new(Msg::ExpandRow)))
-            }
-            (m, KeyCode::Char('h')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::Msg(Box::new(Msg::CollapseRow)))
-            }
-            (_, KeyCode::Right) => Some(Action::Msg(Box::new(Msg::ExpandRow))),
-            (_, KeyCode::Left) => Some(Action::Msg(Box::new(Msg::CollapseRow))),
+            // H-HYG-007 wave 4: all single-char parametric guards
+            // (r/a/b/v/f/p/[/]//?/l/h/e) + arrow / nav keys
+            // (j/k/Down/Up/Right/Left/Enter/Backspace/Home/End/g/G)
+            // migrated to `keybindings::KEYBINDINGS` via
+            // `KeyMatcher::AnyModExceptCtrl` and `KeyMatcher::AnyMod`.
+            // Dispatched via `translate_via_table` above.
+            //
+            // Remaining hand-matched:
+            // - `PageDown` / `PageUp` — need `viewport_height` in
+            //   the action payload, which the table's
+            //   `fn() -> Action` signature doesn't carry.
             (_, KeyCode::PageDown) => Some(Action::Msg(Box::new(Msg::PageDown(viewport_height)))),
             (_, KeyCode::PageUp) => Some(Action::Msg(Box::new(Msg::PageUp(viewport_height)))),
-            (_, KeyCode::Home) | (_, KeyCode::Char('g')) => Some(Action::Msg(Box::new(Msg::Home))),
-            (_, KeyCode::End) | (_, KeyCode::Char('G')) => Some(Action::Msg(Box::new(Msg::End))),
-            // T8-043: `Enter` resolves to the selected row's default
-            // action when the left pane has focus (attach mux rows,
-            // view un-muxed sessions, expand/collapse groups). Right
-            // pane focus is remapped to `ExplorerActivate` in
-            // `remap_for_focus`.
-            (_, KeyCode::Enter) => Some(Action::DefaultAction),
-            // Backspace on the explorer pops a drilldown hop. The
-            // reducer no-ops on left focus / empty stack and surfaces
-            // a status hint when appropriate.
-            (_, KeyCode::Backspace) => Some(Action::Msg(Box::new(Msg::ExplorerBack))),
-            (m, KeyCode::Char('e')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::Msg(Box::new(Msg::ToggleLinkedDetails)))
-            }
             // T8-030: `o` opens the full-value modal on the cursor
             // row. The reducer no-ops gracefully if the cursor isn't
             // on a row with a truncated value.
