@@ -1634,18 +1634,39 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
     record that shipping it is intentional.
   - Tests: table snapshots unchanged; feature-gated build compiles both
     ways in CI.
-  - **Sizing note (2026-07-04)**: partial state observed. The
-    `dev_scenarios` half is already effectively addressed — the
-    module is gated with `#[cfg(any(test, debug_assertions))]` in
-    `lib.rs:7` and the CLI dispatch is `#[cfg(debug_assertions)]` in
-    `cli.rs:142`, so release builds already exclude it. Follow-up
-    decision needed: promote to a proper `[feature]` per ADR 0067
-    precedent (would drop the debug-assertion coupling) or amend
-    the story to record the existing gate as sufficient. The
-    `output::table` shim migration remains: ~20 callers through
-    `output::table::*` need to move to `output::render::*` after
-    `render` / `render_with` themselves migrate out of table.rs into
-    render.rs. Land as a dedicated commit series.
+  - **Discovery (2026-07-04)**: attempted the shim consolidation and
+    hit a real architectural boundary. `output/render.rs` module
+    docstring names an invariant enforced by a
+    `substrate_has_no_model_deps` unit test: "this module has **no
+    `crate::model::*` dependencies**". The `render_with` / `render` /
+    `indicator` / `node_short_id` functions the story would migrate
+    to render.rs all take `GraphSnapshot` / typed node structs /
+    typed `Provenance` / typed `Confidence` and therefore *cannot*
+    live in the substrate — moving them there trips the invariant
+    test (verified). So table.rs is not really a shim; it's the
+    projection-dispatch layer sitting outside the substrate. The
+    story's "keep the two genuinely table-specific fns" is likely
+    scoped down to (a) shrink the re-export `pub use` block since
+    those items are already reachable through `output::render::*`,
+    (b) migrate the ~20 external call sites from `output::table::X`
+    to `output::render::X` for the items that live there directly.
+    The `render` / `render_with` / `indicator` dispatch stays in
+    table.rs (or moves to `output/dispatch.rs` — an additional
+    module, not the substrate).
+  - **dev_scenarios half** is effectively addressed: the module
+    is gated with `#[cfg(any(test, debug_assertions))]` in
+    `lib.rs:7` and the CLI dispatch is `#[cfg(debug_assertions)]`
+    in `cli.rs:142`. Follow-up decision needed: promote to a
+    `[feature]` per ADR 0067 precedent (would drop the debug-
+    assertion coupling) or amend the story to record the existing
+    gate as sufficient.
+  - **Landing shape for the follow-up**: (a) rename table.rs's
+    header to "projection dispatch" (not "re-export shim");
+    (b) trim the `pub use` block to only items whose canonical
+    location is outside render.rs; (c) migrate ~20 callers off
+    `output::table::` for items whose canonical location is
+    `output::render::`; (d) settle the `dev_scenarios` gate
+    (feature vs. debug_assertions).
   - Blockers: none.
 - [x] `H-HYG-011` Test builders and sibling-file test extraction (rolling).
   - **Wave 1 landed 2026-07-04**. Ships `AgentSessionNode::new(id,
