@@ -241,12 +241,10 @@ fn emit_pins_group_for_mux(
 
 fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> MuxGroup {
     let pin_node = NodeId::Pin(PinId::new(pin.id.clone()));
-    let native_id = pin
-        .mux
-        .socket_name
-        .as_ref()
-        .map(|socket| format!("{socket}:{}", pin.mux.name))
-        .unwrap_or_else(|| pin.mux.name.clone());
+    let native_id = pin.mux.socket_name.as_ref().map_or_else(
+        || pin.mux.name.clone(),
+        |socket| format!("{socket}:{}", pin.mux.name),
+    );
     MuxGroup {
         parent_row: MuxSessionRow {
             mux: MuxSessionId::new(pin.mux.native_id()),

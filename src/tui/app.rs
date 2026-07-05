@@ -1264,8 +1264,7 @@ impl App {
                     .unwrap_or_default();
                 let display = session
                     .display_label()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| session.session.session_key.clone());
+                    .map_or_else(|| session.session.session_key.clone(), str::to_string);
                 let display = pin_create_default_name_candidate(&display);
                 let id = pin_id_candidate(&display);
                 let mux_name = self.unique_pin_mux_name(&id);
@@ -2348,8 +2347,7 @@ impl App {
         let current = self
             .selection
             .as_ref()
-            .map(|id| self.current_visible_index(&visible, id))
-            .unwrap_or(0);
+            .map_or(0, |id| self.current_visible_index(&visible, id));
         let len = visible.len() as i32;
         let target = (current as i32 + delta).clamp(0, len - 1) as usize;
         self.selection = Some(visible[target].clone());
@@ -4860,8 +4858,7 @@ mod tests {
         app.update(Msg::ExplorerBack);
         assert!(
             app.status_message()
-                .map(|s| s.contains("no drill history"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("no drill history"))
         );
         // Focus stays put when there's nothing to back out of.
         assert_eq!(app.focus(), Focus::Left);
@@ -4882,8 +4879,7 @@ mod tests {
         assert_eq!(app.focus(), Focus::Right);
         assert!(
             app.status_message()
-                .map(|s| s.contains("press Backspace again"))
-                .unwrap_or(false),
+                .is_some_and(|s| s.contains("press Backspace again")),
             "first backspace should surface the confirmation hint; got: {:?}",
             app.status_message()
         );
@@ -4906,8 +4902,7 @@ mod tests {
         app.update(Msg::ExplorerBack);
         assert!(
             app.status_message()
-                .map(|s| s.contains("press Backspace again"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("press Backspace again"))
         );
         // Intervening navigation cancels the arming.
         app.update(Msg::ExplorerNavDown);
@@ -4916,8 +4911,7 @@ mod tests {
         assert_eq!(app.focus(), Focus::Right);
         assert!(
             app.status_message()
-                .map(|s| s.contains("press Backspace again"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("press Backspace again"))
         );
     }
 
@@ -4956,8 +4950,7 @@ mod tests {
         assert_eq!(app.focus(), Focus::Right);
         assert!(
             app.status_message()
-                .map(|s| s.contains("press Backspace again"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("press Backspace again"))
         );
         // Third backspace shifts focus to the left pane.
         app.update(Msg::ExplorerBack);
@@ -4986,15 +4979,13 @@ mod tests {
         assert!(app.edge_meta_visible());
         assert!(
             app.status_message()
-                .map(|s| s.contains("edge meta visible"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("edge meta visible"))
         );
         app.update(Msg::ToggleEdgeMeta);
         assert!(!app.edge_meta_visible());
         assert!(
             app.status_message()
-                .map(|s| s.contains("edge meta hidden"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("edge meta hidden"))
         );
     }
 
@@ -5100,8 +5091,7 @@ mod tests {
         app.update(Msg::ExplorerToggleGroup);
         assert!(
             app.status_message()
-                .map(|s| s.contains("nothing to expand"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("nothing to expand"))
         );
     }
 
@@ -5172,8 +5162,7 @@ mod tests {
         assert!(app.value_modal().is_none());
         assert!(
             app.status_message()
-                .map(|s| s.contains("no truncated"))
-                .unwrap_or(false)
+                .is_some_and(|s| s.contains("no truncated"))
         );
     }
 

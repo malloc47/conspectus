@@ -414,8 +414,7 @@ fn node_label(node: &GraphNode) -> String {
         GraphNode::RuntimeProcess(n) => {
             let role = n
                 .role
-                .map(|r| format!("{r:?}"))
-                .unwrap_or_else(|| "process".to_string());
+                .map_or_else(|| "process".to_string(), |r| format!("{r:?}"));
             let pid = n.pid.map(|p| p.to_string()).unwrap_or_default();
             let cmd = n.command.as_deref().unwrap_or("");
             format!("{role} {pid}\\n{}", truncate(cmd, 30))
@@ -614,8 +613,7 @@ fn short_id(full: &str) -> String {
     // Use the suffix after the last `:` for compactness; ids are
     // structured prefix:scope:native.
     full.rsplit_once(':')
-        .map(|(_, tail)| tail.to_string())
-        .unwrap_or_else(|| full.to_string())
+        .map_or_else(|| full.to_string(), |(_, tail)| tail.to_string())
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {

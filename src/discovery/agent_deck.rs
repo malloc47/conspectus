@@ -84,10 +84,10 @@ impl AgentDeckDiscovery {
 }
 
 fn default_profiles_root(multi_repo_worktrees_root: &Path) -> PathBuf {
-    multi_repo_worktrees_root
-        .parent()
-        .map(|parent| parent.join("profiles"))
-        .unwrap_or_else(|| PathBuf::from("profiles"))
+    multi_repo_worktrees_root.parent().map_or_else(
+        || PathBuf::from("profiles"),
+        |parent| parent.join("profiles"),
+    )
 }
 
 impl DiscoveryProvider for AgentDeckDiscovery {

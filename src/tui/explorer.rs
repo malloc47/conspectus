@@ -211,11 +211,9 @@ impl Direction {
 fn sort_relationship_groups(groups: &mut [RelationshipGroup]) {
     groups.sort_by(|a, b| {
         let ord_a = crate::tui::icons::NodeKind::from_snake_case(&a.neighbor_kind)
-            .map(|k| k.ordinal())
-            .unwrap_or(usize::MAX);
+            .map_or(usize::MAX, |k| k.ordinal());
         let ord_b = crate::tui::icons::NodeKind::from_snake_case(&b.neighbor_kind)
-            .map(|k| k.ordinal())
-            .unwrap_or(usize::MAX);
+            .map_or(usize::MAX, |k| k.ordinal());
         ord_a
             .cmp(&ord_b)
             .then_with(|| {
@@ -230,8 +228,7 @@ fn group_neighbor_label(group: &RelationshipGroup) -> &str {
     group
         .links
         .first()
-        .map(|l| l.neighbor_label.as_str())
-        .unwrap_or("")
+        .map_or("", |l| l.neighbor_label.as_str())
 }
 
 /// Surface-language verb for a `(RelationKind, Direction)` pair
@@ -857,8 +854,7 @@ fn build_breadcrumb_hops(hops: &[BreadcrumbHop], theme: &Theme) -> Vec<RenderedB
             let raw_tag = hop
                 .short_label
                 .split_once(':')
-                .map(|(_, tag)| tag)
-                .unwrap_or(hop.short_label.as_str());
+                .map_or(hop.short_label.as_str(), |(_, tag)| tag);
             let tag = if counts.get(hop.short_label.as_str()).copied().unwrap_or(0) > 1 {
                 let id_text = hop.focused.to_string();
                 let tail: String = id_text.chars().rev().take(4).collect();
@@ -1694,8 +1690,7 @@ fn build_explorer(
                 .nodes
                 .iter()
                 .find(|n| n.id() == *id)
-                .map(kind_label)
-                .unwrap_or("unknown")
+                .map_or("unknown", kind_label)
                 .to_string(),
             NeighborEndpoint::Unresolved(e) => e.node_type.clone(),
         };
@@ -1812,10 +1807,11 @@ fn finalize_group(
                 EdgeStateLabel::AltOf(relation.clone())
             };
             let neighbor_node = snapshot.nodes.iter().find(|n| n.id() == neighbor_id);
-            let neighbor_kind_label = neighbor_node.map(kind_label).unwrap_or("unknown");
-            let neighbor_label = neighbor_node
-                .map(|n| neighbor_display_label(n, home))
-                .unwrap_or_else(|| format!("{neighbor_id}"));
+            let neighbor_kind_label = neighbor_node.map_or("unknown", kind_label);
+            let neighbor_label = neighbor_node.map_or_else(
+                || format!("{neighbor_id}"),
+                |n| neighbor_display_label(n, home),
+            );
             let preview = neighbor_node
                 .map(|n| core_fields(snapshot, n, home))
                 .unwrap_or_default();
@@ -2112,8 +2108,7 @@ mod tests {
             .iter()
             .map(|g| {
                 crate::tui::icons::NodeKind::from_snake_case(&g.neighbor_kind)
-                    .map(|k| k.ordinal())
-                    .unwrap_or(usize::MAX)
+                    .map_or(usize::MAX, |k| k.ordinal())
             })
             .collect();
         for pair in ordinals.windows(2) {

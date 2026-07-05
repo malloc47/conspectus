@@ -149,15 +149,13 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
                 dash()
             }
         }
-        "branch" => ctx
-            .branch
-            .map(|(_repo, refname)| strip_branch_prefix(refname).to_string())
-            .unwrap_or_else(dash),
+        "branch" => ctx.branch.map_or_else(dash, |(_repo, refname)| {
+            strip_branch_prefix(refname).to_string()
+        }),
         "repo" => format!("{}/{}", pr.owner, pr.repo),
         "updated" => pr
             .updated_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(dash),
+            .map_or_else(dash, |epoch| format_relative_age(epoch, current_epoch())),
         "attached" => {
             if ctx.attached.is_empty() {
                 dash()

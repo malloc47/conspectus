@@ -503,8 +503,7 @@ fn node_labels(node: &GraphNode) -> (String, String) {
         GraphNode::RuntimeProcess(n) => {
             let role = n
                 .role
-                .map(|r| format!("{r:?}"))
-                .unwrap_or_else(|| "process".to_string());
+                .map_or_else(|| "process".to_string(), |r| format!("{r:?}"));
             let pid = n.pid.map(|p| format!(" pid {p}")).unwrap_or_default();
             (
                 format!("{role}{pid}"),

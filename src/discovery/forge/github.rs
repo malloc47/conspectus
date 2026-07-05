@@ -294,11 +294,10 @@ fn parse_row(value: &Value) -> Option<PullRequestRecord> {
     let number = row.get("number").and_then(|v| v.as_u64())?;
     let head_ref = string_field(row.get("headRefName"))?;
 
-    let state = row
-        .get("state")
-        .and_then(|v| v.as_str())
-        .map(PullRequestState::parse)
-        .unwrap_or_else(|| PullRequestState::Other(String::new()));
+    let state = row.get("state").and_then(|v| v.as_str()).map_or_else(
+        || PullRequestState::Other(String::new()),
+        PullRequestState::parse,
+    );
 
     let url = string_field(row.get("url"));
     let base_ref = string_field(row.get("baseRefName"));
@@ -438,7 +437,7 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
     } else if let Some(rest) = trimmed.strip_prefix("http://") {
         split_host_and_path(rest)?
     } else if let Some(rest) = trimmed.strip_prefix("ssh://") {
-        let after_user = rest.split_once('@').map(|(_, after)| after).unwrap_or(rest);
+        let after_user = rest.split_once('@').map_or(rest, |(_, after)| after);
         split_host_and_path(after_user)?
     } else if let Some(rest) = trimmed.strip_prefix("git@") {
         let (host, path) = rest.split_once(':')?;

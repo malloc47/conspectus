@@ -188,14 +188,10 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         "checkout" => ctx.row.checkout_root.clone().unwrap_or_else(dash),
         "branch" => ctx
             .branch_refname
-            .map(|r| strip_branch_prefix(r).to_string())
-            .unwrap_or_else(dash),
+            .map_or_else(dash, |r| strip_branch_prefix(r).to_string()),
         "repo" => ctx.row.repo_common_dir.clone().unwrap_or_else(dash),
-        "fork" => ctx.fork.map(|f| f.label.clone()).unwrap_or_else(dash),
-        "declared" => ctx
-            .declared
-            .map(|d| d.state_label.clone())
-            .unwrap_or_else(dash),
+        "fork" => ctx.fork.map_or_else(dash, |f| f.label.clone()),
+        "declared" => ctx.declared.map_or_else(dash, |d| d.state_label.clone()),
         "preview" => agent.last_message_preview.clone().unwrap_or_else(dash),
         "title" => ctx
             .row
@@ -205,8 +201,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
             .unwrap_or_else(dash),
         "activity" => agent
             .last_active_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(dash),
+            .map_or_else(dash, |epoch| format_relative_age(epoch, current_epoch())),
         _ => dash(),
     }
 }
@@ -225,10 +220,7 @@ fn row_matches(
     if !options.filter.has_narrowing_predicates() {
         return true;
     }
-    let candidate_count = mux_lookup
-        .get(&row.key())
-        .map(|m| m.candidate_count)
-        .unwrap_or(0);
+    let candidate_count = mux_lookup.get(&row.key()).map_or(0, |m| m.candidate_count);
     let inputs = SessionMatchInputs {
         harness_key: &row.agent.harness_key,
         now_epoch: options.now_epoch,
@@ -539,16 +531,14 @@ fn collect_lineage_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, Linea
                 id: NodeId::AgentSession(parent_id),
             } => short_session_id(&parent_id.session_key),
             LinkEndpoint::Node { .. } => continue,
-            LinkEndpoint::Unresolved { evidence } => evidence
-                .native_id
-                .as_deref()
-                .map(|native| format!("?{}", short_session_id(native)))
-                .unwrap_or_else(|| "?".to_string()),
+            LinkEndpoint::Unresolved { evidence } => evidence.native_id.as_deref().map_or_else(
+                || "?".to_string(),
+                |native| format!("?{}", short_session_id(native)),
+            ),
         };
         let has_grandparent = parent_key
             .as_ref()
-            .map(|pk| preferred.contains_key(pk))
-            .unwrap_or(false);
+            .is_some_and(|pk| preferred.contains_key(pk));
         out.insert(
             key.clone(),
             LineageInfo {
@@ -647,8 +637,7 @@ fn collect_workspace_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, Str
         };
         let root = workspace_lookup
             .get(&resolved.target)
-            .map(|w| w.root.clone())
-            .unwrap_or_else(|| workspace_id.root.clone());
+            .map_or_else(|| workspace_id.root.clone(), |w| w.root.clone());
         per_session
             .entry(session_key_of(source_id))
             .or_default()
@@ -664,8 +653,7 @@ fn collect_workspace_lookup(snapshot: &GraphSnapshot) -> HashMap<SessionKey, Str
                 members
                     .get(&ws_id)
                     .filter(|names| names.len() >= 2)
-                    .map(|names| names.join("+"))
-                    .unwrap_or(ws_root)
+                    .map_or(ws_root, |names| names.join("+"))
             })
             .collect();
         out.insert(key, displays.join(","));

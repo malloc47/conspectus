@@ -348,8 +348,7 @@ fn derive_process_mux_links(snapshot: &GraphSnapshot) -> Vec<GraphLink> {
                     session_link,
                     human_processes_by_mux
                         .get(&mux_link.source)
-                        .map(BTreeSet::len)
-                        .unwrap_or(0),
+                        .map_or(0, BTreeSet::len),
                 );
                 if has_better_session_mux_link_for_target(&snapshot.candidate_links, &link) {
                     continue;
@@ -612,10 +611,7 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
         if !is_cwd_evidence(link) {
             continue;
         }
-        let distinct_session_count = mux_all_keys
-            .get(&rel.target)
-            .map(|keys| keys.len())
-            .unwrap_or(0);
+        let distinct_session_count = mux_all_keys.get(&rel.target).map_or(0, |keys| keys.len());
         if distinct_session_count > 1 {
             indices_to_suppress.push(idx);
         }

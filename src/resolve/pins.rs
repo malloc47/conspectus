@@ -72,10 +72,9 @@ pub fn apply_pin_bindings(snapshot: &mut GraphSnapshot) -> Vec<Diagnostic> {
         };
 
         let mux_node_id = NodeId::MuxSession(mux.id.clone());
-        let candidates = linked_to_mux_by_mux
+        let candidates: &[&GraphLink] = linked_to_mux_by_mux
             .get(&mux_node_id)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[]);
+            .map_or(&[][..], |v| v.as_slice());
 
         let mut harness_filtered: Vec<&GraphLink> = candidates
             .iter()

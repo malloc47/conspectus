@@ -228,8 +228,10 @@ fn inferred_state_scope(record: &HookRecord) -> String {
                 .and_then(Path::parent)
                 .and_then(Path::parent)
         })
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| "hook_sidecar".to_string())
+        .map_or_else(
+            || "hook_sidecar".to_string(),
+            |path| path.to_string_lossy().to_string(),
+        )
 }
 
 fn path_ancestor_named(path: &str, name: &str) -> Option<String> {

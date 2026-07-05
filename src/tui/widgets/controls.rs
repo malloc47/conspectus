@@ -787,8 +787,7 @@ fn harness_value(filter: &RowFilter) -> String {
 fn max_age_value(filter: &RowFilter) -> String {
     filter
         .max_age
-        .map(format_duration_for_input)
-        .unwrap_or_else(|| "—".to_string())
+        .map_or_else(|| "—".to_string(), format_duration_for_input)
 }
 
 fn mux_state_value(filter: &RowFilter) -> String {

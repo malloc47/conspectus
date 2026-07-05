@@ -177,12 +177,10 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         },
         "activity" => mux
             .activity_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(dash),
+            .map_or_else(dash, |epoch| format_relative_age(epoch, current_epoch())),
         "created" => mux
             .created_epoch
-            .map(|epoch| format_relative_age(epoch, current_epoch()))
-            .unwrap_or_else(dash),
+            .map_or_else(dash, |epoch| format_relative_age(epoch, current_epoch())),
         "preview" => ctx
             .attached
             .and_then(|entries| entries.iter().find_map(|a| a.preview.clone()))

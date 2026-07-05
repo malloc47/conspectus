@@ -227,15 +227,14 @@ fn valid_byte_range(
 pub fn items_from_rows<'a>(rows: &'a [Row]) -> Vec<SearchItem<'a>> {
     rows.iter()
         .map(|row| match &row.kind {
-            RowKind::AgentSession(session) => {
-                SearchItem {
-                    id: row.id.clone(),
-                    label: Cow::Owned(session.display_label().map(str::to_string).unwrap_or_else(
-                        || format!("{}:{}", session.harness_label, session.short_id),
-                    )),
-                    haystack: Cow::Owned(agent_haystack(session)),
-                }
-            }
+            RowKind::AgentSession(session) => SearchItem {
+                id: row.id.clone(),
+                label: Cow::Owned(session.display_label().map_or_else(
+                    || format!("{}:{}", session.harness_label, session.short_id),
+                    str::to_string,
+                )),
+                haystack: Cow::Owned(agent_haystack(session)),
+            },
             RowKind::Group(group) => SearchItem {
                 id: row.id.clone(),
                 label: Cow::Owned(group.display_path.clone()),

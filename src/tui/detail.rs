@@ -972,8 +972,10 @@ fn workspace_member_fields(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> V
                 .and_then(|link| link.source_metadata.fields.get("logical_path"))
                 .and_then(|v| v.as_str())
                 .and_then(|p| std::path::Path::new(p).file_name())
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| format!("{}", rel.target));
+                .map_or_else(
+                    || format!("{}", rel.target),
+                    |n| n.to_string_lossy().to_string(),
+                );
             (rel.target.clone(), display)
         })
         .collect();

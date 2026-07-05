@@ -428,9 +428,7 @@ pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
 }
 
 pub fn launch_options_for(harness_key: &str) -> &'static [HarnessLaunchOption] {
-    adapter_for(harness_key)
-        .map(|a| a.launch_options())
-        .unwrap_or(&[])
+    adapter_for(harness_key).map_or(&[], |a| a.launch_options())
 }
 
 pub fn launch_option_for(harness_key: &str, option_id: &str) -> Option<HarnessLaunchOption> {

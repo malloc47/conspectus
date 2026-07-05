@@ -113,8 +113,7 @@ fn agent_matches_filter(
     };
     let candidate_count = preferred_mux
         .get(&session_key_of(agent))
-        .map(|m| m.candidate_count)
-        .unwrap_or(0);
+        .map_or(0, |m| m.candidate_count);
     options.filter.matches_session(&SessionMatchInputs {
         harness_key: &agent.harness_key,
         now_epoch: options.now_epoch,

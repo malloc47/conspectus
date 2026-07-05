@@ -1093,8 +1093,10 @@ fn freshest_human_session(
         .filter(|session| matches.contains(&session.id))
         .filter(|session| session.session_kind != Some(SessionKind::Subagent))
         .max_by_key(|session| (session.last_active_epoch.unwrap_or(0), session.id.clone()))
-        .map(|session| BTreeSet::from([session.id.clone()]))
-        .unwrap_or_else(|| matches.clone())
+        .map_or_else(
+            || matches.clone(),
+            |session| BTreeSet::from([session.id.clone()]),
+        )
 }
 
 fn session_file_activity_match(
@@ -1270,8 +1272,7 @@ impl ProcessPaneEvidence {
     {
         crate::discovery::harness::registered_adapters()
             .find(|a| a.harness_key() == self.harness_key)
-            .map(|a| predicate(a.runtime_signature()))
-            .unwrap_or(false)
+            .is_some_and(|a| predicate(a.runtime_signature()))
     }
 
     fn role(&self) -> RuntimeProcessRole {

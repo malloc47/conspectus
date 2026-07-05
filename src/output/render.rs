@@ -734,8 +734,7 @@ pub fn header_label(registry: &[ColumnSpec], key: &str) -> String {
     registry
         .iter()
         .find(|spec| spec.key == key)
-        .map(|spec| spec.header.to_string())
-        .unwrap_or_else(|| key.to_uppercase())
+        .map_or_else(|| key.to_uppercase(), |spec| spec.header.to_string())
 }
 
 // -----------------------------------------------------------------------------
@@ -980,7 +979,7 @@ fn render_card(
             out.push('\n');
         }
         for (col_idx, cell) in row.iter().enumerate() {
-            let key = header.get(col_idx).map(String::as_str).unwrap_or("");
+            let key = header.get(col_idx).map_or("", String::as_str);
             let key_pad = key_width.saturating_sub(display_width(key));
             // `KEY:` is the label half — bolded when color is on.
             push_styled(&mut out, key, card_key_style(), options.color);
@@ -1084,8 +1083,7 @@ pub fn fit_to_width(naturals: &[usize], header: &[String], target: usize) -> Vec
         .map(|(idx, &natural)| {
             let header_width = header
                 .get(idx)
-                .map(|s| display_width(s))
-                .unwrap_or(MIN_COLUMN_BUDGET);
+                .map_or(MIN_COLUMN_BUDGET, |s| display_width(s));
             natural.min(header_width.max(MIN_COLUMN_BUDGET))
         })
         .collect();

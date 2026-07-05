@@ -787,8 +787,7 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         let kind_glyph_width = app
             .detail()
             .and_then(|d| NodeKind::from_snake_case(d.kind_label))
-            .map(|_| 2)
-            .unwrap_or(0);
+            .map_or(0, |_| 2);
         let fixed_width = 1
             + focus_marker_width(app, Focus::Right)
             + kind_glyph_width
@@ -1085,8 +1084,7 @@ fn render_left_row(
             // truncation in `append_group_body_spans`.
             let summary_reservation = group_summary
                 .filter(|s| s.agents > 0)
-                .map(|_| align.count_width + 5)
-                .unwrap_or(0);
+                .map_or(0, |_| align.count_width + 5);
             let head_width = spans_width(&spans);
             let label_cell_width = align.label_width.max(group_row_label_width(row));
             let secondary_budget = width
@@ -1222,9 +1220,10 @@ fn render_session_spans(session: &AgentSessionRow, theme: &Theme, now: i64) -> V
     spans.push(harness_badge(&session.harness_label, theme));
     spans.push(Span::raw("  "));
     let recency = session.recency.clone().unwrap_or_else(|| "—".to_string());
-    let recency_style = recency_bucket(Some(now), session.activity_epoch)
-        .map(|bucket| bucket.style(theme))
-        .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
+    let recency_style = recency_bucket(Some(now), session.activity_epoch).map_or_else(
+        || Style::default().add_modifier(theme.placeholder),
+        |bucket| bucket.style(theme),
+    );
     spans.push(span!(recency_style; "{recency:>4}"));
     spans.push(Span::raw("  "));
     if placeholder {
@@ -1376,9 +1375,10 @@ fn render_mux_session_spans(
     }
 
     let recency = mux.recency.clone().unwrap_or_else(|| "—".to_string());
-    let recency_style = recency_bucket(Some(now), mux.activity_epoch)
-        .map(|bucket| bucket.style(theme))
-        .unwrap_or_else(|| Style::default().add_modifier(theme.placeholder));
+    let recency_style = recency_bucket(Some(now), mux.activity_epoch).map_or_else(
+        || Style::default().add_modifier(theme.placeholder),
+        |bucket| bucket.style(theme),
+    );
     spans.push(Span::raw("  "));
     spans.push(span!(
         recency_style;
@@ -1909,13 +1909,11 @@ fn draw_right_panel(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
         // first row drives "scroll up if cursor moves above the
         // top," the last row drives "scroll down if cursor moves
         // past the bottom."
-        let (cursor_first_row, cursor_last_row) = cursor_line
-            .map(|idx| {
-                let first = per_line_rows.iter().take(idx).sum::<usize>();
-                let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
-                (first, first + height - 1)
-            })
-            .unwrap_or((0, 0));
+        let (cursor_first_row, cursor_last_row) = cursor_line.map_or((0, 0), |idx| {
+            let first = per_line_rows.iter().take(idx).sum::<usize>();
+            let height = per_line_rows.get(idx).copied().unwrap_or(1).max(1);
+            (first, first + height - 1)
+        });
         // Reserve a usable minimum for the preview zone so a full
         // Related list cannot collapse the preview to 1–2 lines.
         // Below this floor on very small terminals the layout
@@ -2649,8 +2647,7 @@ fn header_field_line_count(field: &HeaderField, panel_width: u16, indent: usize)
     let value_width = UnicodeWidthStr::width(field.value.as_str());
     let annotation_width = field
         .annotation
-        .map(|annotation| 1 + UnicodeWidthStr::width(annotation))
-        .unwrap_or(0);
+        .map_or(0, |annotation| 1 + UnicodeWidthStr::width(annotation));
     let total = LABEL_WIDTH + value_width + annotation_width;
     if total <= effective_width {
         return 1;
@@ -3167,7 +3164,7 @@ fn default_action_status_hint(app: &App) -> String {
             let pin = app
                 .graph_db()
                 .and_then(|db| db.snapshot().pins.iter().find(|pin| pin.id == pin_id));
-            let display = pin.map(|pin| pin.display_name.as_str()).unwrap_or(pin_id);
+            let display = pin.map_or(pin_id, |pin| pin.display_name.as_str());
             let launch_hint = match pin.and_then(|p| p.binding.as_ref()) {
                 Some(crate::model::PinBinding::StaleMux { mux }) => format!(
                     "Enter to relaunch `{display}` in existing mux `{}`",
@@ -3768,8 +3765,7 @@ mod tests {
         let left_border = header_band
             .lines()
             .nth(1)
-            .map(|l| l.split('│').next().unwrap_or(""))
-            .unwrap_or("");
+            .map_or("", |l| l.split('│').next().unwrap_or(""));
         assert!(
             left_border.contains('▸'),
             "marker should sit in the left pane's title when left is focused: \

@@ -2142,8 +2142,7 @@ mod tests {
             let value_col = line[colon + 1..]
                 .chars()
                 .position(|c| !c.is_whitespace())
-                .map(|i| colon + 1 + i)
-                .unwrap_or(line.len());
+                .map_or(line.len(), |i| colon + 1 + i);
             value_starts.push(value_col);
         }
         let first = value_starts[0];

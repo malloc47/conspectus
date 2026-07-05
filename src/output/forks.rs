@@ -156,7 +156,7 @@ fn cell(key: &str, ctx: &CellCtx<'_>) -> String {
         },
         "provider" => ctx.row.node.provider.clone(),
         "scope" => ctx.row.node.scope.clone().unwrap_or_else(dash),
-        "parent" => ctx.parent.map(|p| p.label.clone()).unwrap_or_else(dash),
+        "parent" => ctx.parent.map_or_else(dash, |p| p.label.clone()),
         "children" => {
             if ctx.child_count == 0 {
                 dash()
@@ -219,13 +219,12 @@ fn collect_parent_session_per_fork(snapshot: &GraphSnapshot) -> HashMap<String, 
             LinkEndpoint::Node {
                 id: NodeId::AgentSession(agent_id),
             } => Some(short_session_id(&agent_id.session_key)),
-            LinkEndpoint::Unresolved { evidence } => Some(
-                evidence
-                    .native_id
-                    .as_deref()
-                    .map(|native| format!("?{}", short_session_id(native)))
-                    .unwrap_or_else(|| "?".to_string()),
-            ),
+            LinkEndpoint::Unresolved { evidence } => {
+                Some(evidence.native_id.as_deref().map_or_else(
+                    || "?".to_string(),
+                    |native| format!("?{}", short_session_id(native)),
+                ))
+            }
             LinkEndpoint::Node { .. } => None,
         };
         if let Some(label) = label {

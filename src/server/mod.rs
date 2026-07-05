@@ -168,9 +168,7 @@ pub fn socket_path() -> PathBuf {
     }
     // SAFETY: getuid() is async-signal-safe and never fails.
     let uid = unsafe { libc::getuid() };
-    let base = std::env::var_os("TMPDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let base = std::env::var_os("TMPDIR").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     base.join(format!("conspectus-{uid}")).join("server.sock")
 }
 

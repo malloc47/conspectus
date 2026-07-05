@@ -932,8 +932,7 @@ fn emit_checkout_bucket(
     let session_bearing_count = ctx
         .session_bearing_worktrees
         .get(&repo_bucket.repo_id)
-        .map(BTreeSet::len)
-        .unwrap_or(0);
+        .map_or(0, BTreeSet::len);
     let checkout_should_render =
         matches!(ctx.grouping, SessionsGrouping::Checkout) || session_bearing_count >= 2;
     let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {

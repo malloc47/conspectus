@@ -85,12 +85,10 @@ pub fn build_forks_tree(inputs: ForksBuildInputs<'_>) -> RowTree {
             depth: 0,
             expandable: !visible_children.is_empty(),
             kind: RowKind::Fork(ForkRow {
-                fork_label: fork
-                    .node
-                    .name
-                    .as_ref()
-                    .map(|name| format!("{}:{name}", fork.node.provider))
-                    .unwrap_or_else(|| fork.node.provider_source_key.clone()),
+                fork_label: fork.node.name.as_ref().map_or_else(
+                    || fork.node.provider_source_key.clone(),
+                    |name| format!("{}:{name}", fork.node.provider),
+                ),
                 provider: fork.node.provider.clone(),
                 scope: fork.node.scope.clone(),
                 parent_label: parent_labels.get(&fork.node_id).cloned(),

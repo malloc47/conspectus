@@ -275,9 +275,7 @@ impl Widget for SearchBody<'_> {
         for idx in scroll..(scroll + visible_rows).min(self.state.matches().len()) {
             let m = &self.state.matches()[idx];
             let item = id_to_item.get(&m.id);
-            let label = item
-                .map(|i| i.label.to_string())
-                .unwrap_or_else(|| "<missing>".to_string());
+            let label = item.map_or_else(|| "<missing>".to_string(), |i| i.label.to_string());
             let is_cursor = idx == self.state.cursor();
             let line = build_match_line(
                 label,
@@ -338,7 +336,7 @@ fn build_match_line(
     // distinct from the label or carrying a match range), append
     // `· …<context>…` after the label so the operator sees *why*
     // the row matched.
-    let haystack = item.map(|i| i.haystack.as_ref()).unwrap_or("");
+    let haystack = item.map_or("", |i| i.haystack.as_ref());
     let matched_range = m.matched_range.clone().unwrap_or(0..0);
     let snippet_distinct = haystack != label;
     if !haystack.is_empty() && snippet_distinct {

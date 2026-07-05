@@ -16,8 +16,7 @@
 # via per-module `#![allow]` where it's the intentional shape.
 [lints.clippy]
 redundant_clone = "deny"
-# Deferred to H-HYG-005 follow-ups: match_same_arms 36,
-# map_unwrap_or 69 combined.
+# Deferred to H-HYG-005 follow-ups: match_same_arms 36.
 # Landed:
 # - wave 2: match_wildcard_for_single_variants — every
 #   `_ => …` / `other => …` arm over a two-variant enum
@@ -27,10 +26,14 @@ redundant_clone = "deny"
 # - wave 3: uninlined_format_args — every `format!("{}", x)`
 #   / `println!("{}", x)` converted to inline capture
 #   `format!("{x}")` (auto-fixed via `cargo clippy --fix`).
+# - wave 4: map_unwrap_or — every `x.map(f).unwrap_or(a)` /
+#   `.unwrap_or_else(g)` collapsed to `map_or(a, f)` /
+#   `map_or_else(g, f)`; `.map(f).unwrap_or(false)` cases
+#   collapsed to `is_some_and(f)`.
 match_same_arms = "allow"
 match_wildcard_for_single_variants = "deny"
 uninlined_format_args = "deny"
-map_unwrap_or = "allow"
+map_unwrap_or = "deny"
 
 [package]
 name = "conspectus"
