@@ -769,14 +769,25 @@ fn compare_session_mux(left: &GraphLink, right: &GraphLink) -> std::cmp::Orderin
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct MuxScore {
-    tier: MuxTier,
+    tier: ProvenanceTier,
     evidence_rank: u8,
     confidence: Confidence,
     activity_epoch: i64,
 }
 
+/// H-REF-003: shared `Provenance` → tier mapping used by every
+/// relation comparator's provenance axis. Pre-H-REF-003 the
+/// resolver had two parallel enums (`MuxTier` +
+/// `PrProvenanceTier`) with identical variants, identical
+/// ordering, and identical labels. A new `Provenance` variant
+/// meant three coordinated changes; now it means one.
+///
+/// Higher-tier discriminants win the comparator, which matches
+/// [`crate::model::Provenance::precedence`] but is spelled as a
+/// separate scoring enum so the comparators' arithmetic
+/// stays local to the resolver.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum MuxTier {
+enum ProvenanceTier {
     Cached = 0,
     Convention = 1,
     Discovered = 2,
@@ -787,7 +798,7 @@ enum MuxTier {
     LocalDeclared = 7,
 }
 
-impl MuxTier {
+impl ProvenanceTier {
     fn label(self) -> &'static str {
         match self {
             Self::Cached => "cached",
@@ -798,6 +809,19 @@ impl MuxTier {
             Self::GlobalDeclared => "global_declared",
             Self::LocalPin => "local_pin",
             Self::LocalDeclared => "local_declared",
+        }
+    }
+
+    fn from_provenance(provenance: Provenance) -> Self {
+        match provenance {
+            Provenance::LocalDeclared => Self::LocalDeclared,
+            Provenance::LocalPin => Self::LocalPin,
+            Provenance::GlobalDeclared => Self::GlobalDeclared,
+            Provenance::GlobalPin => Self::GlobalPin,
+            Provenance::StrongDiscovered => Self::StrongDiscovered,
+            Provenance::Discovered => Self::Discovered,
+            Provenance::Convention => Self::Convention,
+            Provenance::Cached => Self::Cached,
         }
     }
 }
@@ -811,7 +835,7 @@ fn mux_score(link: &GraphLink) -> MuxScore {
         .or(link.source_metadata.evidence.as_deref());
 
     MuxScore {
-        tier: mux_tier(link.provenance),
+        tier: ProvenanceTier::from_provenance(link.provenance),
         evidence_rank: mux_evidence_rank(match_kind),
         confidence: link.confidence,
         activity_epoch: link
@@ -857,18 +881,8 @@ fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
     }
 }
 
-fn mux_tier(provenance: Provenance) -> MuxTier {
-    match provenance {
-        Provenance::LocalDeclared => MuxTier::LocalDeclared,
-        Provenance::LocalPin => MuxTier::LocalPin,
-        Provenance::GlobalDeclared => MuxTier::GlobalDeclared,
-        Provenance::GlobalPin => MuxTier::GlobalPin,
-        Provenance::StrongDiscovered => MuxTier::StrongDiscovered,
-        Provenance::Discovered => MuxTier::Discovered,
-        Provenance::Convention => MuxTier::Convention,
-        Provenance::Cached => MuxTier::Cached,
-    }
-}
+// H-REF-003: `mux_tier` retired — replaced by
+// `ProvenanceTier::from_provenance` shared with `pr_score`.
 
 /// Branch ↔ pull-request ordering: declared links win first, then
 /// open (non-draft) state, with closed/merged and draft demoted to
@@ -892,39 +906,15 @@ fn compare_branch_pr(left: &GraphLink, right: &GraphLink) -> std::cmp::Ordering 
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct PrScore {
-    provenance_tier: PrProvenanceTier,
+    provenance_tier: ProvenanceTier,
     state_rank: PrStateRank,
     is_draft: bool,
     updated_epoch: i64,
     confidence: Confidence,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-enum PrProvenanceTier {
-    Cached = 0,
-    Convention = 1,
-    Discovered = 2,
-    StrongDiscovered = 3,
-    GlobalPin = 4,
-    GlobalDeclared = 5,
-    LocalPin = 6,
-    LocalDeclared = 7,
-}
-
-impl PrProvenanceTier {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Cached => "cached",
-            Self::Convention => "convention",
-            Self::Discovered => "discovered",
-            Self::StrongDiscovered => "strong_discovered",
-            Self::GlobalPin => "global_pin",
-            Self::GlobalDeclared => "global_declared",
-            Self::LocalPin => "local_pin",
-            Self::LocalDeclared => "local_declared",
-        }
-    }
-}
+// H-REF-003: `PrProvenanceTier` retired — replaced by the
+// shared `ProvenanceTier` above (identical variants + labels).
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum PrStateRank {
@@ -947,7 +937,7 @@ impl PrStateRank {
 
 fn pr_score(link: &GraphLink) -> PrScore {
     PrScore {
-        provenance_tier: pr_provenance_tier(link.provenance),
+        provenance_tier: ProvenanceTier::from_provenance(link.provenance),
         state_rank: pr_state_rank(
             link.source_metadata
                 .fields
@@ -984,18 +974,8 @@ fn pr_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
     ]
 }
 
-fn pr_provenance_tier(provenance: Provenance) -> PrProvenanceTier {
-    match provenance {
-        Provenance::LocalDeclared => PrProvenanceTier::LocalDeclared,
-        Provenance::LocalPin => PrProvenanceTier::LocalPin,
-        Provenance::GlobalDeclared => PrProvenanceTier::GlobalDeclared,
-        Provenance::GlobalPin => PrProvenanceTier::GlobalPin,
-        Provenance::StrongDiscovered => PrProvenanceTier::StrongDiscovered,
-        Provenance::Discovered => PrProvenanceTier::Discovered,
-        Provenance::Convention => PrProvenanceTier::Convention,
-        Provenance::Cached => PrProvenanceTier::Cached,
-    }
-}
+// H-REF-003: `pr_provenance_tier` retired — replaced by
+// `ProvenanceTier::from_provenance` shared with `mux_score`.
 
 fn pr_state_rank(raw: Option<&str>) -> PrStateRank {
     match raw.map(str::to_ascii_lowercase).as_deref() {
