@@ -130,16 +130,8 @@ impl HarnessAdapter for OpenCodeAdapter {
     }
 
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        let Some(state_root) = context.harness_state_root(self.harness_key()) else {
-            return Ok(GraphFragment::empty());
-        };
-        let mut fragment = discover_state(state_root)?;
-        crate::discovery::stamp_fragment(
-            &mut fragment,
-            HARNESS_KEY,
-            crate::discovery::current_epoch(),
-        );
-        Ok(fragment)
+        // H-REF-007: delegate to the shared state-root envelope.
+        super::discover_with_state_root(context, HARNESS_KEY, discover_state)
     }
 
     fn launch_argv(&self) -> Vec<std::ffi::OsString> {

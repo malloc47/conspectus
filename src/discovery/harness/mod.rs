@@ -402,6 +402,36 @@ static REGISTERED_ADAPTERS: std::sync::LazyLock<Vec<Box<dyn HarnessAdapter>>> =
         ]
     });
 
+/// H-REF-007: shared state-root discovery envelope. Codex,
+/// claude-code, and openCode all repeat the same three steps:
+/// (1) look up their state root through the discovery context;
+/// (2) if it's absent, return an empty fragment; (3) run the
+/// harness-specific fs walk and stamp the resulting fragment
+/// with the harness key + wall-clock epoch.
+///
+/// This helper folds that envelope so each adapter's
+/// `HarnessAdapter::discover` becomes a one-line delegation to
+/// its harness-specific `discover_state` fn.
+pub fn discover_with_state_root<F>(
+    context: &DiscoveryContext,
+    harness_key: &'static str,
+    inner: F,
+) -> Result<GraphFragment>
+where
+    F: FnOnce(&Path) -> Result<GraphFragment>,
+{
+    let Some(state_root) = context.harness_state_root(harness_key) else {
+        return Ok(GraphFragment::empty());
+    };
+    let mut fragment = inner(state_root)?;
+    crate::discovery::stamp_fragment(
+        &mut fragment,
+        harness_key,
+        crate::discovery::current_epoch(),
+    );
+    Ok(fragment)
+}
+
 /// Iterate every registered harness adapter (H-EXT-002). Used by
 /// TUI filter menus, launch / resume dispatch, row-label lookup,
 /// and the launch-options aggregator. Order is stable and

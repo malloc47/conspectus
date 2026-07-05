@@ -278,3 +278,44 @@ fn default_trait_impl_returns_none() {
     }
     assert!(NoOpAdapter.resume_argv("abc", Path::new("/p")).is_none());
 }
+
+/// H-REF-007: when a state root is not present in the discovery
+/// context, `discover_with_state_root` short-circuits with an
+/// empty fragment instead of invoking `inner`.
+#[test]
+fn discover_with_state_root_returns_empty_when_state_root_missing() {
+    // A discovery context with no harness state roots at all.
+    let context = DiscoveryContext::from_root("/tmp");
+    let mut invoked = false;
+    let fragment = discover_with_state_root(&context, "codex", |_| {
+        invoked = true;
+        Ok(GraphFragment::empty())
+    })
+    .expect("no error");
+    assert!(fragment.nodes.is_empty());
+    assert!(fragment.candidate_links.is_empty());
+    assert!(!invoked, "inner must not run when state root is absent");
+}
+
+/// H-REF-007: when a state root is present, the inner walker
+/// receives the resolved path and the resulting fragment is
+/// stamped with the harness key.
+#[test]
+fn discover_with_state_root_stamps_provider_when_state_root_present() {
+    use tempfile::TempDir;
+    let temp = TempDir::new().expect("temp dir");
+    let context =
+        DiscoveryContext::from_root(temp.path()).with_harness_state_root("codex", temp.path());
+    let invoked = std::cell::Cell::new(false);
+    let fragment = discover_with_state_root(&context, "codex", |root| {
+        assert_eq!(root, temp.path());
+        invoked.set(true);
+        Ok(GraphFragment::empty())
+    })
+    .expect("no error");
+    assert!(invoked.get(), "inner must run when state root is present");
+    // Fragment is empty but stamp_fragment ran (nothing observable
+    // on an empty fragment; behavior verified by the callers'
+    // snapshot tests).
+    assert!(fragment.nodes.is_empty());
+}
