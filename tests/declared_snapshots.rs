@@ -16,8 +16,9 @@ use conspectus::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixtur
 use conspectus::discovery::tmux::FakeTmux;
 use conspectus::discovery::{LocalDiscoveryConfig, discover_local_with};
 use conspectus::model::{GraphNode, GraphSnapshot, LinkEndpoint, NodeId};
+use conspectus::output::render::Projection;
 use conspectus::output::render_graph_json;
-use conspectus::output::table::{self, Projection};
+use conspectus::output::table;
 use conspectus::resolve::resolve_snapshot;
 
 mod support;

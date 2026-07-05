@@ -8,8 +8,9 @@ use conspectus::model::{
     LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, PinCandidate,
     PinMuxRef, Provenance, RelationKind, SourceMetadata,
 };
+use conspectus::output::render::{Projection, RenderOptions};
 use conspectus::output::render_graph_json;
-use conspectus::output::table::{Projection, RenderOptions, render_with};
+use conspectus::output::table::render_with;
 use conspectus::resolve::resolve_snapshot;
 
 fn agent(key: &str, cwd: &str) -> GraphNode {

@@ -1272,7 +1272,7 @@ fn compare_sessions(
 
 /// Tracks the per-tree short-id prefix length so all rows share a
 /// consistent floor and grow only as collisions force. Mirrors
-/// `output::table::unique_prefix_len` but tailored to the agent
+/// `output::render::unique_prefix_len` but tailored to the agent
 /// session set.
 struct ShortIds {
     prefix_len: usize,

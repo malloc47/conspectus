@@ -27,7 +27,8 @@ use crate::discovery::{LocalDiscoveryConfig, discover_local_with, path_to_string
 use crate::filter::RowFilter;
 use crate::hook::{HookRecord, HookStore, HookTmuxRecord, SCHEMA_VERSION};
 use crate::model::GraphSnapshot;
-use crate::output::table::{self, RenderOptions};
+use crate::output::render::RenderOptions;
+use crate::output::table;
 use crate::resolve::resolve_snapshot;
 use crate::tui::rows::RowTree;
 use crate::tui::rows::sessions::{SessionsBuildInputs, build_sessions_tree};

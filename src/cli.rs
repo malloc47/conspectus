@@ -239,13 +239,13 @@ impl DevScenarioTableArgs {
         let world = conspectus::dev_scenarios::materialize(&self.name)?;
         let options = match (self.layout, self.width, self.wide) {
             (LayoutFlag::Columnar, Some(width), _) => {
-                conspectus::output::table::RenderOptions::columnar_width(width)
+                conspectus::output::render::RenderOptions::columnar_width(width)
             }
-            (LayoutFlag::Columnar, None, _) => conspectus::output::table::RenderOptions::wide(),
+            (LayoutFlag::Columnar, None, _) => conspectus::output::render::RenderOptions::wide(),
             (LayoutFlag::Card, Some(width), _) => {
-                conspectus::output::table::RenderOptions::card_width(width)
+                conspectus::output::render::RenderOptions::card_width(width)
             }
-            (LayoutFlag::Card, None, _) => conspectus::output::table::RenderOptions::card(),
+            (LayoutFlag::Card, None, _) => conspectus::output::render::RenderOptions::card(),
         };
         let table = world.render_table(projection, options)?;
         print!("{table}");
@@ -345,7 +345,7 @@ impl ColumnsArgs {
             }
         };
         let color = resolve_color_from_env(self.color, io::stdout().is_terminal());
-        let listing = conspectus::output::table::render_columns_listing(projection, color);
+        let listing = conspectus::output::render::render_columns_listing(projection, color);
         print_paged(
             &listing,
             PagerOptions::from_flags(self.pager, self.no_pager),
@@ -1736,11 +1736,11 @@ impl TableRowsArgs {
         let render_width = resolve_table_width(self.wide, self.width, &io::stdout());
         let mut options = match (self.layout, render_width) {
             (LayoutFlag::Columnar, Some(w)) => {
-                conspectus::output::table::RenderOptions::columnar_width(w)
+                conspectus::output::render::RenderOptions::columnar_width(w)
             }
-            (LayoutFlag::Columnar, None) => conspectus::output::table::RenderOptions::wide(),
-            (LayoutFlag::Card, Some(w)) => conspectus::output::table::RenderOptions::card_width(w),
-            (LayoutFlag::Card, None) => conspectus::output::table::RenderOptions::card(),
+            (LayoutFlag::Columnar, None) => conspectus::output::render::RenderOptions::wide(),
+            (LayoutFlag::Card, Some(w)) => conspectus::output::render::RenderOptions::card_width(w),
+            (LayoutFlag::Card, None) => conspectus::output::render::RenderOptions::card(),
         };
         if let Some(columns) = columns {
             options = options.with_columns(columns);
@@ -1848,12 +1848,12 @@ fn resolve_columns_selection(
     projection: config::Projection,
     cli_spec: Option<&str>,
     config_names: Option<&[String]>,
-) -> Result<Option<Vec<&'static str>>, conspectus::output::table::ColumnsError> {
+) -> Result<Option<Vec<&'static str>>, conspectus::output::render::ColumnsError> {
     if let Some(spec) = cli_spec {
-        return conspectus::output::table::parse_columns_spec(projection, spec).map(Some);
+        return conspectus::output::render::parse_columns_spec(projection, spec).map(Some);
     }
     if let Some(names) = config_names {
-        return conspectus::output::table::resolve_explicit_columns(projection, names).map(Some);
+        return conspectus::output::render::resolve_explicit_columns(projection, names).map(Some);
     }
     Ok(None)
 }

@@ -1,10 +1,17 @@
 // Extracted from table.rs H-HYG-011 rolling wave via #[path = "table_tests.rs"] mod tests;
 use super::*;
+// H-HYG-010: render substrate items formerly re-exported from super
 use crate::model::{
     AgentSessionId, AgentSessionNode, BranchId, Confidence, ForgePrId, ForgePrNode, ForkNode,
     Freshness, GraphLink, GraphNode, LinkEndpoint, LinkState, Metadata, MuxSessionId,
     MuxSessionNode, NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata,
     WorkspaceId, WorkspaceNode,
+};
+use crate::output::render::{
+    ColumnsError, MIN_COLUMN_BUDGET, Projection, RenderOptions, SHORT_ID_FLOOR, columns_for,
+    default_columns, display_width, fit_to_width, format_relative_age, parse_columns_spec,
+    render_columns_listing, resolve_explicit_columns, strip_branch_prefix, truncate_to_width,
+    unique_prefix_len,
 };
 use crate::resolve::resolve_snapshot;
 

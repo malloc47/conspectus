@@ -1,7 +1,16 @@
-//! Plain-text table renderer over a [`GraphSnapshot`].
+//! Projection dispatch for plain-text table output over a
+//! [`GraphSnapshot`] (H-HYG-010, ADR 0006).
 //!
-//! See ADR 0006 for the projection vocabulary. Three projections are
-//! supported:
+//! This module owns the per-projection dispatch — the small
+//! surface that takes a `(snapshot, projection, options)`
+//! triple and picks the right per-projection row builder.
+//! It sits **outside** the [`super::render`] substrate because
+//! the substrate is model-free by contract
+//! (`substrate_has_no_model_deps` test enforces the invariant)
+//! and this module by design touches typed `GraphSnapshot` /
+//! `Provenance` / `Confidence` / `NodeId`.
+//!
+//! Supported projections (ADR 0006):
 //!
 //! - [`Projection::Agent`] — one row per `AgentSession`, showing the
 //!   preferred mux and preferred PR.
@@ -19,24 +28,18 @@
 //! - An ambiguity marker `*` follows the cell when the resolver chose
 //!   among multiple plausible candidates for that source/relation.
 //!
-//! Shared rendering primitives — [`RenderOptions`], the column
-//! registry, [`render_rows`], the ADR 0022 color palette — live in
-//! [`super::render`] (P10-003 / ADR 0043). This module re-exports the
-//! public ones so external callers (`cli`, `node_show`, `tui`) keep
-//! compiling against the same surface.
+//! Shared rendering primitives — [`super::render::RenderOptions`],
+//! the column registry, [`super::render::render_rows`], the
+//! ADR 0022 color palette — live in [`super::render`] and are
+//! reached directly. Pre-H-HYG-010 this module re-exported them;
+//! callers now go through `output::render::*` for those items
+//! and through `output::table::*` only for the projection-
+//! dispatch entrypoints below.
 
 use crate::model::{Confidence, GraphSnapshot, NodeId, Provenance};
 
-// Re-exports of the backend-agnostic surface that external callers
-// reach for through `output::table::*`. New code should prefer
-// `output::render::*` directly.
-pub use super::render::{
-    COLUMN_GAP, COLUMN_GAP_WIDTH, ColumnSpec, ColumnsError, Layout, MIN_COLUMN_BUDGET, Projection,
-    RenderOptions, SHORT_ID_FLOOR, columns_for, current_epoch, default_columns, display_width,
-    fit_to_width, format_relative_age, header_label, header_style, natural_widths,
-    node_short_id_from_display, parse_columns_spec, push_styled, render_columns_listing,
-    render_rows, resolve_explicit_columns, strip_branch_prefix, truncate_to_width,
-    unique_prefix_len,
+use super::render::{
+    Projection, RenderOptions, default_columns, node_short_id_from_display, render_rows,
 };
 
 /// FNV-1a 64-bit hash of a [`NodeId`]'s `Display` form. Used to derive
