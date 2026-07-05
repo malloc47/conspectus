@@ -2695,14 +2695,7 @@ fn modal_rect_for_content(area: Rect, width: u16, content_lines: usize, min_heig
     let max_height = area.height;
     let desired = content_lines.saturating_add(2) as u16;
     let height = desired.clamp(min_height, max_height.max(min_height));
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
+    super::popup_frame::centered_rect(area, width, height)
 }
 
 fn pins_menu_content_lines() -> usize {

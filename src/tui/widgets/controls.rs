@@ -829,16 +829,9 @@ pub fn centered_modal_rect(area: Rect) -> Rect {
 fn centered_modal_rect_for_content(area: Rect, content_lines: usize) -> Rect {
     let width = std::cmp::min(64, area.width.saturating_sub(4)).max(40);
     let max_height = area.height;
-    let desired = content_lines.saturating_add(2);
-    let height = (desired as u16).clamp(8, max_height.max(8));
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
+    let desired = (content_lines.saturating_add(2)) as u16;
+    let height = desired.clamp(8, max_height.max(8));
+    super::popup_frame::centered_rect(area, width, height)
 }
 
 fn max_controls_content_lines() -> usize {

@@ -335,19 +335,11 @@ pub const STATUS_LEGEND: &str = "Space toggle · Enter confirm · Esc cancel";
 /// modal so the two primitives feel like one family. Height grows
 /// to fit the items plus a 2-row border (top + bottom).
 pub fn centered_modal_rect(area: Rect, item_count: usize) -> Rect {
-    let width = std::cmp::min(60, area.width.saturating_sub(4));
-    let width = width.max(20);
+    let width = std::cmp::min(60, area.width.saturating_sub(4)).max(20);
     let max_height = area.height.saturating_sub(4);
     let desired_height = (item_count as u16).saturating_add(2);
     let height = desired_height.clamp(3, max_height.max(3));
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
+    super::popup_frame::centered_rect(area, width, height)
 }
 
 #[cfg(test)]

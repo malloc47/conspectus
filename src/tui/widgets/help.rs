@@ -441,16 +441,8 @@ fn blank(lines: &mut Vec<Line<'static>>) {
 pub fn centered_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(78, area.width.saturating_sub(4)).max(40);
     let max_height = area.height.saturating_sub(2);
-    let desired = 28;
-    let height = (desired as u16).clamp(10, max_height.max(10));
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
+    let height = 28u16.clamp(10, max_height.max(10));
+    super::popup_frame::centered_rect(area, width, height)
 }
 
 #[cfg(test)]

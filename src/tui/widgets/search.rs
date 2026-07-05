@@ -422,14 +422,7 @@ fn centered_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(70, area.width.saturating_sub(4)).max(30);
     let max_height = area.height.saturating_sub(4);
     let height = max_height.clamp(8, 20.max(max_height));
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
+    super::popup_frame::centered_rect(area, width, height)
 }
 
 fn compute_scroll(cursor: usize, visible_rows: usize, total: usize) -> usize {

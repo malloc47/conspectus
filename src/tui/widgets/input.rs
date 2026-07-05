@@ -172,17 +172,8 @@ impl Widget for TextInputBody<'_> {
 
 /// 3-row × min(60, width-4) centered modal, per ADR 0030.
 pub fn centered_modal_rect(area: Rect) -> Rect {
-    let width = std::cmp::min(60, area.width.saturating_sub(4));
-    let width = width.max(20);
-    let height: u16 = 3;
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
+    let width = std::cmp::min(60, area.width.saturating_sub(4)).max(20);
+    super::popup_frame::centered_rect(area, width, 3)
 }
 
 struct VisibleWindow {
