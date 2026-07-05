@@ -10688,23 +10688,32 @@ than recursive inline detail panes.
   - Blockers: `P8-004`, `P8-006`; adding a heavyweight matcher
     still requires following ADR 0024's dependency policy.
 
-- [ ] `T8-007` Move TUI discovery onto a background thread with
+- [x] `T8-007` Move TUI discovery onto a background thread with
     timer-driven refresh.
-  - Scope: replace the synchronous `discover_local_at_roots`
-    call in `src/tui/runtime.rs::refresh` with a background
-    discovery worker. Use `std::thread::spawn` + `mpsc` per ADR
-    0024 (no async runtime). Add a timer that fires
-    `Action::Refresh` on `config.refresh_interval`. Preserve
-    provider diagnostics for the status-bar chips (depends on
-    `T8-003` exposing the chip slot). Shape so a future Phase 7
-    server snapshot can replace the worker without touching
-    `app.rs`.
-  - Tests: unit/integration tests with a fake discovery handle
-    covering initial load, refresh on `r`, refresh failure
-    preserving prior graph, and selection retention across the
-    refresh.
-  - Blockers: `P8-008` v1 slice (the sync path), `T8-003` for
-    diagnostic surfacing.
+  - **Landed across four incremental waves**, closed by
+    `d513994` on 2026-07-05:
+      - Background worker + mpsc plumbing (`spawn_discovery_worker`
+        + `DiscoveryResult` channel + non-blocking `drain`).
+      - Timer-driven auto-refresh (`refresh_interval` gate
+        + `pending_refresh` in-flight flag).
+      - `Action::Refresh` on `r` shares the same async spawn
+        path.
+      - `Msg::SetRefreshFailure` posts a status message and
+        preserves the last-good snapshot on error.
+      - Selection retention across refresh via the reducer's
+        `Msg::SetData` handling (per P8-006).
+      - Provider diagnostics populate through
+        `populate_provider_status` on both init and each drain.
+      - Wave closer (`d513994`): `LiveMode::init` now spawns
+        the initial discovery on the same background worker
+        path instead of blocking the first frame draw. Startup
+        input latency drops from "discovery-scan-time" (~200-
+        800ms on real repos) to ~zero; the operator sees the
+        frame paint immediately with the pre-existing "Loading
+        discovery…" placeholder while the worker runs.
+  - Shape lets a Phase 7 daemon snapshot transport swap in as a
+    peer `DiscoveryResult` producer without touching `app.rs`.
+  - Blockers: none (retroactively cleared).
 
 - [ ] `T8-002` Align `conspectus table sessions` columns with the
     TUI sessions row tree once view-models converge.
