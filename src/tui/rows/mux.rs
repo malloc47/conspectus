@@ -584,7 +584,12 @@ fn collect_muxes(snapshot: &GraphSnapshot) -> Vec<MuxData<'_>> {
 /// matching relation are surfaced — drops false-positive
 /// attachments under non-winning cwd evidence.
 fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<AttachedAgent>> {
-    let candidate_counts = collect_agent_mux_candidate_counts(snapshot);
+    // H-HYG-006 wave 5: consult the shared SnapshotIndex instead
+    // of maintaining a local `collect_agent_mux_candidate_counts`
+    // copy. The clone is cheap for typical graph sizes.
+    let candidate_counts = crate::model::SnapshotIndex::new(snapshot)
+        .agent_mux_candidate_counts()
+        .clone();
     let selected_link_ids: HashSet<&str> = snapshot
         .resolved_relationships
         .iter()
@@ -659,28 +664,10 @@ fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<Atta
     out
 }
 
-fn collect_agent_mux_candidate_counts(snapshot: &GraphSnapshot) -> HashMap<String, usize> {
-    let mut per_agent: HashMap<String, HashSet<String>> = HashMap::new();
-    for link in &snapshot.candidate_links {
-        if !matches!(link.state, LinkState::Active) {
-            continue;
-        }
-        if !matches!(link.relation, RelationKind::LinkedToMux) {
-            continue;
-        }
-        let NodeId::AgentSession(_) = &link.source else {
-            continue;
-        };
-        let LinkEndpoint::Node { id: target_id } = &link.target else {
-            continue;
-        };
-        per_agent
-            .entry(link.source.to_string())
-            .or_default()
-            .insert(target_id.to_string());
-    }
-    per_agent.into_iter().map(|(k, v)| (k, v.len())).collect()
-}
+// H-HYG-006 wave 5: local `collect_agent_mux_candidate_counts`
+// retired. Consumers consult
+// `crate::model::SnapshotIndex::agent_mux_candidate_counts()`
+// instead.
 
 fn agent_row(
     agent: &AttachedAgent,
