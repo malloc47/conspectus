@@ -206,6 +206,17 @@ pub fn remap_for_focus(action: Action, focus: Focus) -> Option<Action> {
 /// `viewport_height` is the rendered height of the row tree in
 /// rows, used to size PageUp/PageDown jumps. Pass 1 if unknown.
 pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
+    // H-HYG-007 wave 2: consult the declarative KEYBINDINGS
+    // table first. Bindings the table owns (view switching +
+    // grouping cycle, per wave 1) return here; unmigrated
+    // bindings fall through to the pre-H-HYG-007 match arms
+    // below and land in the table as later waves migrate them.
+    if let Event::Key(key) = &event
+        && key.kind == KeyEventKind::Press
+        && let Some(action) = crate::tui::keybindings::translate_via_table(key.modifiers, key.code)
+    {
+        return Some(action);
+    }
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => match (key.modifiers, key.code) {
             (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(Action::Msg(Box::new(Msg::Quit))),
@@ -263,27 +274,14 @@ pub fn translate(event: Event, viewport_height: u16) -> Option<Action> {
             | (KeyModifiers::NONE, KeyCode::Char('E')) => {
                 Some(Action::Msg(Box::new(Msg::ToggleEdgeMeta)))
             }
-            (KeyModifiers::CONTROL, KeyCode::Char('g')) => Some(Action::CycleGrouping(1)),
+            // H-HYG-007 wave 2: `1`–`5` view switch + `Ctrl-G`
+            // grouping cycle migrated to `keybindings::KEYBINDINGS`
+            // and dispatched via `translate_via_table` above.
             (m, KeyCode::Char(']')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::CycleView(1))
             }
             (m, KeyCode::Char('[')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::CycleView(-1))
-            }
-            (m, KeyCode::Char('1')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::SwitchView(View::Sessions))
-            }
-            (m, KeyCode::Char('2')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::SwitchView(View::Mux))
-            }
-            (m, KeyCode::Char('3')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::SwitchView(View::Union))
-            }
-            (m, KeyCode::Char('4')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::SwitchView(View::Prs))
-            }
-            (m, KeyCode::Char('5')) if !m.contains(KeyModifiers::CONTROL) => {
-                Some(Action::SwitchView(View::Forks))
             }
             (m, KeyCode::Char('/')) if !m.contains(KeyModifiers::CONTROL) => {
                 Some(Action::OpenSearch)

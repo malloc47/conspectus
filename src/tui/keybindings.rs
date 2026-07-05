@@ -164,6 +164,24 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
 ];
 
+/// H-HYG-007 wave 2 entrypoint: `translate_via_table(modifiers,
+/// code) → Option<Action>`. Called first by
+/// [`crate::tui::keymap::translate`]; a hit here returns before
+/// the pre-H-HYG-007 hand-matched arms fire. Bindings unregistered
+/// in [`KEYBINDINGS`] fall through so wave-by-wave migration
+/// stays behavior-preserving.
+pub fn translate_via_table(modifiers: KeyModifiers, code: KeyCode) -> Option<Action> {
+    for binding in KEYBINDINGS {
+        if binding.mode != KeyMode::Global {
+            continue;
+        }
+        if binding.key.matches(modifiers, code) {
+            return Some((binding.action)());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
