@@ -16,8 +16,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 use tui_popup::KnownSize;
 
@@ -125,17 +125,10 @@ impl Widget for ValueModalWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let modal = centered_modal_rect(area);
-        let title_text = format!(" {} ", self.state.label);
-        let title = Line::from(vec![
-            Span::raw(" "),
-            Span::styled(
-                title_text,
-                Style::default()
-                    .fg(self.theme.panel_focus_accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-        ]);
+        let label_style = Style::default()
+            .fg(self.theme.panel_focus_accent)
+            .add_modifier(Modifier::BOLD);
+        let title = line![" ", span!(label_style; " {} ", self.state.label), " "];
         let body = ValueModalBody {
             state: self.state,
             inner_width: modal.width.saturating_sub(2) as usize,

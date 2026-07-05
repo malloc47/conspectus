@@ -14,6 +14,7 @@
 //! every pill is the same width regardless of label length, and it
 //! keeps the recency / mux indicator columns aligned downstream.
 
+use ratatui::macros::span;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -39,7 +40,7 @@ pub fn harness_badge(label: &str, theme: &Theme) -> Span<'static> {
         .fg(theme.harness_color(label))
         .add_modifier(theme.badge);
     let body_width = label.chars().count().max(MAX_HARNESS_LABEL_LEN);
-    Span::styled(format!(" {label:<body_width$} "), style)
+    span!(style; " {label:<body_width$} ")
 }
 
 /// Visible cell width of [`harness_badge`]'s output for a given
