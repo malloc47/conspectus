@@ -1577,36 +1577,48 @@ runner seams, doc culture, and test volume are explicitly out of bounds.
       commits when a hot consumer needs them.
   - Blockers: `H-HYG-002` landed. `H-TUI-001` builds on this
     substrate to make row trees fully derived view-models.
-- [ ] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
-  help. **Waves 1–3 landed 2026-07-04..05**:
+- [x] `H-HYG-007` Declarative keybinding table for dispatch, overlays, and
+  help. **Waves 1–5 landed 2026-07-04..05**:
   * Wave 1 (`83d6889`): new `src/tui/keybindings.rs` module.
     `KeyBinding { mode, key: KeyMatcher, action: fn() -> Action,
     help_text }` + `KeyMode::Global` + `KeyMatcher::{Exact,
     UpperChar}` + `pub const KEYBINDINGS: &[KeyBinding]`. Pilot
-    seeds 6 view-switching bindings. 3 drift tests
-    (`every_binding_has_nonempty_help_text`,
-    `no_two_bindings_match_the_same_global_key`,
-    `view_switch_bindings_produce_correct_action`).
+    seeds 6 view-switching bindings. 3 drift tests.
   * Wave 2 (`6826b20`): `keybindings::translate_via_table`
-    entrypoint; `keymap::translate` short-circuits through it
-    before its own hand-matched arms. 6 arms migrated from
-    `keymap::translate`. Behavior-preserving.
+    entrypoint; `keymap::translate` short-circuits through
+    it. 6 arms migrated. Behavior-preserving.
   * Wave 3 (`e069833`): 11 more bindings migrated
-    (Quit / Resume / Rename / pin CRUD `N`/`B`/`A`/`L` /
-    `F` / `E`). `keymap::translate` fallback arm count
-    reduced from 52 to 32.
-  **Remaining waves** (waves 4–5+):
-  * Wave 4: expand `KeyMatcher` with an `AnyExceptCtrl(c)`
-    variant so bindings like `r`/`a`/`b` (which admit any
-    non-Ctrl modifier) migrate.
-  * Wave 5: rewire `widgets/help.rs::keymap_sections` to
-    derive from `KEYBINDINGS` (currently hand-maintained;
-    the drift test scaffold from wave 1 will enforce
-    coherence).
-  * Wave 6+ (runtime dispatcher + pins overlay): 76 arms in
-    `runtime.rs` + 137 in `widgets/pins.rs` remain
-    unmigrated. Substantial per-arm judgment for
-    overlay-owned keys; land as follow-up work.
+    (Quit / Resume / Rename / pin CRUD / ClearFilters /
+    ToggleEdgeMeta). `keymap::translate` fallback arm count
+    52 → 32.
+  * Wave 4 (`9ca5585`): expanded `KeyMatcher` with
+    `AnyModExceptCtrl(char)` + `AnyMod(KeyCode)` variants.
+    Migrated 22 remaining single-char / arrow / nav
+    bindings. `keymap::translate` fallback arm count
+    32 → **2** (only `PageDown` / `PageUp` remain — they
+    carry `viewport_height` in their payload).
+  * Wave 5 (`74fed0d`): `key_label(&KeyMatcher) -> String`
+    helper + `every_keybindings_entry_appears_in_help_sections`
+    drift test in `widgets/help.rs`. Every KEYBINDINGS entry
+    must appear in `keymap_sections`'s rendered output;
+    handles multi-key help rows (`1 – 5`, `↓ / ↑`, etc.)
+    via known-equivalent-form mapping. Enforces the
+    dispatcher / help coherence the audit called out.
+  **Scope closed to the migratable surface**: post-H-HYG-009-wave-2
+  (which extracted `widgets/pins.rs`'s test module), pins.rs
+  has 40 KeyCode arms and runtime.rs has ~18 production
+  arms; both are overlay-owned per-`handle_key` dispatchers
+  (transcript viewer + PinCreate / PinBind / PinEdit /
+  PinRemove / Pins overlays) that use their own message
+  types (`ViewerMsg`, `PinCreateOutcome`, etc.), not
+  `Action`. Migrating these needs overlay-scoped mode +
+  per-overlay message dispatch in KEYBINDINGS — a bigger
+  architectural change than what H-HYG-007's `Action`-
+  centric table shape supports. That extension belongs
+  alongside `H-TUI-003`'s modal stack contract (which
+  supplies the mode column the table would need), so the
+  remaining overlay migrations are deferred there.
+  Global (non-overlay-owned) keymap coverage is complete.
   - Scope: key handling is hand-matched (`KeyCode::` ×128 in `runtime.rs`,
     ×137 in `widgets/pins.rs`), `remap_for_focus` re-maps actions across
     ~200 lines, and `widgets/help.rs::keymap_sections` hand-maintains a
