@@ -546,11 +546,13 @@ fn node_cwd(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
 }
 
 fn fork_root(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
-    snapshot.candidate_links.iter().find_map(|link| {
-        if &link.source == id
-            && link.relation == RootedAtPath
-            && let LinkEndpoint::Unresolved { evidence } = &link.target
-        {
+    // H-HYG-006 wave 7: consult SnapshotIndex instead of a
+    // linear scan. The index is (re)built here per call; a
+    // future shared-index passthrough optimization can remove
+    // the rebuild if the helper becomes hot.
+    let index = crate::model::SnapshotIndex::new(snapshot);
+    index.links_for(id, RootedAtPath).iter().find_map(|link| {
+        if let LinkEndpoint::Unresolved { evidence } = &link.target {
             return evidence.path.clone();
         }
         None
@@ -558,17 +560,20 @@ fn fork_root(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
 }
 
 fn branch_for_pr(id: &NodeId, snapshot: &GraphSnapshot) -> Option<String> {
-    snapshot.candidate_links.iter().find_map(|link| {
-        if &link.source == id
-            && link.relation == RelationKind::BranchHasForgePr
-            && let LinkEndpoint::Node {
+    // H-HYG-006 wave 7: same shape as fork_root.
+    let index = crate::model::SnapshotIndex::new(snapshot);
+    index
+        .links_for(id, RelationKind::BranchHasForgePr)
+        .iter()
+        .find_map(|link| {
+            if let LinkEndpoint::Node {
                 id: NodeId::Branch(branch),
             } = &link.target
-        {
-            return Some(branch.repo.common_dir.clone());
-        }
-        None
-    })
+            {
+                return Some(branch.repo.common_dir.clone());
+            }
+            None
+        })
 }
 
 fn nearest_known_root(path: &Path, snapshot: &GraphSnapshot) -> Option<PathBuf> {

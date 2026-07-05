@@ -956,6 +956,9 @@ fn workspace_fields(
 /// `Repo` node so attach_linked_details can inline repo data and the
 /// left-tree navigation can focus the repo directly.
 fn workspace_member_fields(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> Vec<HeaderField> {
+    // H-HYG-006 wave 7: use SnapshotIndex for the by-link-id
+    // lookup instead of a linear scan.
+    let index = crate::model::SnapshotIndex::new(snapshot);
     let mut entries: Vec<(NodeId, String)> = snapshot
         .resolved_relationships
         .iter()
@@ -968,7 +971,7 @@ fn workspace_member_fields(snapshot: &GraphSnapshot, workspace_id: &NodeId) -> V
             let display = rel
                 .selected_link_id
                 .as_deref()
-                .and_then(|id| snapshot.candidate_links.iter().find(|link| link.id == id))
+                .and_then(|id| index.link(id))
                 .and_then(|link| link.source_metadata.fields.get("logical_path"))
                 .and_then(|v| v.as_str())
                 .and_then(|p| std::path::Path::new(p).file_name())
@@ -1456,13 +1459,16 @@ fn resolved_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<ResolvedSumm
 }
 
 fn diagnostic_summaries(snapshot: &GraphSnapshot, id: &NodeId) -> Vec<DiagnosticSummary> {
+    // H-HYG-006 wave 7: SnapshotIndex handles the by-link-id
+    // lookup below.
+    let index = crate::model::SnapshotIndex::new(snapshot);
     snapshot
         .diagnostics
         .iter()
         .filter_map(|diag| match diag {
             Diagnostic::UnresolvedEndpoint { link_id, relation } => {
                 // Match diagnostics whose link is sourced at this node.
-                if let Some(link) = snapshot.candidate_links.iter().find(|l| &l.id == link_id)
+                if let Some(link) = index.link(link_id)
                     && link.source == *id
                 {
                     Some(DiagnosticSummary::UnresolvedEndpoint {
