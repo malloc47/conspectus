@@ -1414,3 +1414,96 @@ mod overlay_routing {
         assert!(overlay_key_from_event(&app, &Event::Key(key)).is_none());
     }
 }
+
+mod pin_launch_scan_root {
+    //! Regression coverage for the CWD-drift bug: launching a pin
+    //! from a TUI started outside the pin's project root used to
+    //! fail because the subprocess re-discovered pins using its
+    //! inherited CWD. Fixed by passing the pin's `cwd` field as
+    //! `--scan-root` on the subprocess argv.
+
+    use super::*;
+
+    fn seed_app_with_pin(pin_id: &str, cwd: &str) -> App {
+        let mut snapshot = crate::model::GraphSnapshot::empty();
+        snapshot.pins.push(crate::model::PinCandidate {
+            id: pin_id.to_string(),
+            display_name: pin_id.to_string(),
+            harness: "codex".to_string(),
+            cwd: cwd.to_string(),
+            mux: crate::model::PinMuxRef {
+                backend: TMUX_MUX_BACKEND.to_string(),
+                name: pin_id.to_string(),
+                socket_name: None,
+            },
+            launch_argv: None,
+            reason: None,
+            provenance: crate::model::Provenance::LocalPin,
+            store_path: format!("{cwd}/.conspectus.toml"),
+            binding: None,
+        });
+        let resolved = crate::resolve::resolve_snapshot(snapshot);
+        let mut app = App::new(RunConfig::defaults());
+        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+            &resolved, &app,
+        ));
+        app.update(Msg::SetData {
+            snapshot: crate::tui::app::GraphDb::new(resolved),
+            tree,
+            loaded_at_epoch: 0,
+            initial_selection_hint: None,
+        });
+        app
+    }
+
+    #[test]
+    fn resolve_pin_scan_root_returns_pin_cwd() {
+        let app = seed_app_with_pin("ingest", "/workspace/ingest");
+        assert_eq!(
+            resolve_pin_scan_root(&app, "ingest"),
+            Some("/workspace/ingest".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_pin_scan_root_none_for_unknown_pin() {
+        let app = seed_app_with_pin("ingest", "/workspace/ingest");
+        assert_eq!(resolve_pin_scan_root(&app, "does-not-exist"), None);
+    }
+
+    #[test]
+    fn resolve_pin_scan_root_none_before_snapshot_loads() {
+        let app = App::new(RunConfig::defaults());
+        assert_eq!(resolve_pin_scan_root(&app, "ingest"), None);
+    }
+
+    #[test]
+    fn pin_launch_argv_includes_scan_root_when_present() {
+        let argv = pin_launch_argv("ingest", Some("/workspace/ingest"));
+        assert_eq!(
+            argv,
+            vec![
+                "pin".to_string(),
+                "launch".to_string(),
+                "ingest".to_string(),
+                "--no-attach".to_string(),
+                "--scan-root".to_string(),
+                "/workspace/ingest".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn pin_launch_argv_omits_scan_root_when_absent() {
+        let argv = pin_launch_argv("ingest", None);
+        assert_eq!(
+            argv,
+            vec![
+                "pin".to_string(),
+                "launch".to_string(),
+                "ingest".to_string(),
+                "--no-attach".to_string(),
+            ]
+        );
+    }
+}

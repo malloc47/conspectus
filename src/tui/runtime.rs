@@ -2136,6 +2136,38 @@ fn default_action(
 /// nested process to exit (typically when the operator detaches
 /// from tmux), then re-enters the alt screen and refreshes the
 /// row tree.
+/// Look up the pin's `cwd` from the loaded snapshot so
+/// [`execute_launch_pin`] can pass it as `--scan-root` on the
+/// subprocess. Returns `None` when no snapshot is loaded yet or
+/// the pin id isn't present — the subprocess still runs, it just
+/// falls back to its inherited-CWD discovery (matching pre-fix
+/// behavior on the honest miss).
+fn resolve_pin_scan_root(app: &App, pin_id: &str) -> Option<String> {
+    app.graph_db()
+        .and_then(|db| db.snapshot().pins.iter().find(|p| p.id == pin_id).cloned())
+        .map(|p| p.cwd)
+}
+
+/// Build the argv the TUI passes when re-execing into
+/// `conspectus pin launch`. When `scan_root` is present it becomes
+/// a `--scan-root <path>` pair so the subprocess discovers pins
+/// from the pin's project root instead of the TUI's inherited
+/// CWD. Split out from [`execute_launch_pin`] so the argv shape
+/// is unit-testable without running the actual subprocess.
+fn pin_launch_argv(pin_id: &str, scan_root: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "pin".to_string(),
+        "launch".to_string(),
+        pin_id.to_string(),
+        "--no-attach".to_string(),
+    ];
+    if let Some(root) = scan_root {
+        args.push("--scan-root".to_string());
+        args.push(root.to_string());
+    }
+    args
+}
+
 /// Executor branch for `ExecSpec::LaunchPin`: suspend the alt
 /// screen, re-exec into `conspectus pin launch <id> --no-attach`,
 /// refresh so the row tree reflects the just-created session, then
@@ -2150,11 +2182,22 @@ fn execute_launch_pin(
     pin_id: &str,
     target: Option<&PinLaunchTarget>,
 ) {
+    // Pass the pin's own `cwd` as `--scan-root` on the subprocess
+    // so `conspectus pin launch` discovers from the pin's project
+    // root, not the TUI's inherited CWD. Without this, launching a
+    // pin from a TUI started in a directory that isn't the pin's
+    // project root fails with "no pin `<id>` in any discovered
+    // store" — the subprocess re-discovers using its own CWD, and
+    // project-scoped pin stores (`.conspectus.toml`) don't live
+    // outside their project. User-scoped pins are unaffected
+    // either way; passing the extra scan-root is safe there too.
+    let pin_scan_root = resolve_pin_scan_root(app, pin_id);
+    let args = pin_launch_argv(pin_id, pin_scan_root.as_deref());
     ratatui::restore();
     let output = std::process::Command::new(
         std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
     )
-    .args(["pin", "launch", pin_id, "--no-attach"])
+    .args(&args)
     .output();
     *terminal = ratatui::init();
     let _ = terminal.clear();
