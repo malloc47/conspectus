@@ -3144,6 +3144,62 @@ mod reducer_effects {
         assert_eq!(effects, vec![Effect::Persist]);
     }
 
+    // H-WIDG-007: in-flight-ops substrate. The reducer stores one
+    // op per `InFlightKind`; start with the same kind twice replaces
+    // the prior record; finish removes the matching kind.
+
+    #[test]
+    fn in_flight_start_adds_op_and_emits_no_effect() {
+        use crate::tui::app::InFlightKind;
+        let mut app = App::new(RunConfig::defaults());
+        let effects = app.update(Msg::InFlightStart {
+            kind: InFlightKind::Discovery,
+            label: "Discovering".to_string(),
+        });
+        assert_eq!(app.in_flight_ops().len(), 1);
+        assert_eq!(app.in_flight_ops()[0].kind, InFlightKind::Discovery);
+        assert_eq!(app.in_flight_ops()[0].label, "Discovering");
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn in_flight_start_same_kind_replaces_prior_record() {
+        use crate::tui::app::InFlightKind;
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::InFlightStart {
+            kind: InFlightKind::Discovery,
+            label: "First".to_string(),
+        });
+        app.update(Msg::InFlightStart {
+            kind: InFlightKind::Discovery,
+            label: "Second".to_string(),
+        });
+        assert_eq!(app.in_flight_ops().len(), 1);
+        assert_eq!(app.in_flight_ops()[0].label, "Second");
+    }
+
+    #[test]
+    fn in_flight_finish_removes_matching_kind_and_emits_no_effect() {
+        use crate::tui::app::InFlightKind;
+        let mut app = App::new(RunConfig::defaults());
+        app.update(Msg::InFlightStart {
+            kind: InFlightKind::Discovery,
+            label: "Discovering".to_string(),
+        });
+        let effects = app.update(Msg::InFlightFinish(InFlightKind::Discovery));
+        assert!(app.in_flight_ops().is_empty());
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn in_flight_finish_unknown_kind_is_noop() {
+        use crate::tui::app::InFlightKind;
+        let mut app = App::new(RunConfig::defaults());
+        let effects = app.update(Msg::InFlightFinish(InFlightKind::Discovery));
+        assert!(app.in_flight_ops().is_empty());
+        assert!(effects.is_empty());
+    }
+
     #[test]
     fn launch_pin_by_id_without_snapshot_emits_exec_with_no_attach_target() {
         use crate::tui::effect::ExecSpec;

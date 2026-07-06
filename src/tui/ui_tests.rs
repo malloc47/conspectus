@@ -2460,6 +2460,61 @@ fn contextual_status_for_group_row_advertises_expand_collapse_folding() {
 }
 
 #[test]
+fn status_bar_renders_spinner_chip_for_in_flight_discovery() {
+    // H-WIDG-007: an in-flight discovery op surfaces an animated
+    // Braille-spinner chip + "Discovering" label in the status bar.
+    // The reducer stamps `started_at` so we can't assert on the
+    // exact glyph frame (elapsed-derived), but every Braille
+    // spinner glyph is in the `⠋⠙⠹⠸⠼⠴⠦⠧` set — grep for the label
+    // as the reliable presence check.
+    let mut app = seeded_app();
+    app.update(Msg::InFlightStart {
+        kind: crate::tui::app::InFlightKind::Discovery,
+        label: "Discovering".to_string(),
+    });
+    app.update(Msg::SetStatus(None));
+
+    let area = Rect::new(0, 0, 220, 24);
+    let buffer = render_to_buffer(&mut app, area);
+    let text = buffer_to_string(&buffer);
+    assert!(
+        text.contains("Discovering"),
+        "in-flight discovery chip should render: {text}"
+    );
+    // Spot-check that at least one Braille glyph from the spinner
+    // set appears in the buffer.
+    let has_spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
+        .iter()
+        .any(|g| text.contains(g));
+    assert!(
+        has_spinner,
+        "in-flight chip should render a Braille spinner glyph: {text}"
+    );
+}
+
+#[test]
+fn status_bar_hides_spinner_after_in_flight_finish() {
+    // Finish removes the tracker; the chip disappears.
+    let mut app = seeded_app();
+    app.update(Msg::InFlightStart {
+        kind: crate::tui::app::InFlightKind::Discovery,
+        label: "Discovering".to_string(),
+    });
+    app.update(Msg::InFlightFinish(
+        crate::tui::app::InFlightKind::Discovery,
+    ));
+    app.update(Msg::SetStatus(None));
+
+    let area = Rect::new(0, 0, 220, 24);
+    let buffer = render_to_buffer(&mut app, area);
+    let text = buffer_to_string(&buffer);
+    assert!(
+        !text.contains("Discovering"),
+        "finished op should not render its chip: {text}"
+    );
+}
+
+#[test]
 fn status_bar_renders_stale_chip_when_refresh_failure_recorded() {
     // T8-014: a recorded refresh failure surfaces a `stale` chip
     // ahead of any provider chips so the operator notices the

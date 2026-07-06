@@ -17,6 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::rc::Rc;
+use std::time::Instant;
 
 use crate::model::{Diagnostic, GraphNode, GraphSnapshot, MuxSessionId, NodeId, PinBinding, PinId};
 use crate::tui::detail::{DetailInputs, NodeDetail, build_node_detail};
@@ -154,6 +155,11 @@ pub struct App {
     /// `None` when the last refresh succeeded (or on first launch).
     /// The status bar renders this as a stale/error marker.
     refresh_failure: Option<String>,
+    /// In-flight async operations the status bar surfaces as
+    /// animated spinner chips (H-WIDG-007). Ordered `Vec` so the
+    /// render order matches the emit order; entries are keyed by
+    /// `InFlightKind` for idempotent start/finish semantics.
+    in_flight_ops: Vec<InFlightOp>,
     /// Cache of recent tmux pane captures, keyed by mux id. The
     /// renderer reads this for the right-panel preview when the
     /// selection points at a muxed agent session or a mux node.
@@ -275,6 +281,35 @@ impl ViewStateSlot {
 pub enum Focus {
     Left,
     Right,
+}
+
+/// Discriminant for an async operation the TUI wants to signal to
+/// the operator (H-WIDG-007 substrate). Grows with each new async
+/// surface — forge-metadata fetches, transcript loads, agent-deck
+/// queries. The reducer stores at most one `InFlightOp` per kind, so
+/// starting a new op with the same kind replaces any prior in-flight
+/// record (used e.g. when a periodic discovery worker spawns while a
+/// prior one is still in flight — the timer path already gates on
+/// `pending_refresh`, but the model here is intentionally
+/// idempotent).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum InFlightKind {
+    /// A discovery worker is scanning the local filesystem + forge +
+    /// mux for a fresh graph snapshot. Emitted by `LiveMode::init`,
+    /// the timer-driven refresh, and `Action::Refresh`.
+    Discovery,
+}
+
+/// One in-flight async operation the status bar surfaces with a
+/// spinner + label chip. `started_at` drives the spinner-frame
+/// selection at draw time; the reducer stamps it via
+/// `Instant::now()` when handling `Msg::InFlightStart` so the model
+/// stays a pure state machine over the input Msgs.
+#[derive(Debug, Clone)]
+pub struct InFlightOp {
+    pub kind: InFlightKind,
+    pub label: String,
+    pub started_at: Instant,
 }
 
 /// Right-pane graph explorer state. Owns the focused node's view
@@ -522,6 +557,19 @@ pub enum Msg {
     /// good snapshot remains in place; this message surfaces a
     /// stale indicator in the header or status bar (T8-003).
     SetRefreshFailure(String),
+    /// Start tracking a new in-flight async operation (H-WIDG-007).
+    /// The reducer stamps `Instant::now()` and stores the op; the
+    /// status bar renders one animated spinner chip per active op.
+    /// Idempotent by `InFlightKind`: starting the same kind twice
+    /// replaces the prior record's `started_at` and label.
+    InFlightStart {
+        kind: InFlightKind,
+        label: String,
+    },
+    /// Mark an in-flight async operation complete (H-WIDG-007).
+    /// Removes the matching kind from the tracker; a no-op if no
+    /// op with that kind is currently in flight.
+    InFlightFinish(InFlightKind),
     /// Nested-reducer entry point for the transcript viewer
     /// (ADR 0085 contract 3, H-TUI-003 wave 7). The reducer arm
     /// pops the top viewer state, runs it through
@@ -642,6 +690,7 @@ impl App {
             status_message: None,
             provider_status: ProviderStatus::default(),
             refresh_failure: None,
+            in_flight_ops: Vec::new(),
             preview_store: PreviewStore::new(),
             left_scroll: 0,
             explorer_scroll: 0,
@@ -1766,6 +1815,12 @@ impl App {
         self.refresh_failure.as_deref()
     }
 
+    /// In-flight async operations tracked for status-bar spinner
+    /// chips (H-WIDG-007). Empty when nothing is in flight.
+    pub fn in_flight_ops(&self) -> &[InFlightOp] {
+        &self.in_flight_ops
+    }
+
     /// Look up a cached mux preview. Returns `None` if the mux
     /// hasn't been captured yet.
     pub fn mux_preview(&self, mux: &MuxSessionId) -> Option<&PreviewEntry> {
@@ -2008,6 +2063,21 @@ impl App {
             }
             Msg::SetRefreshFailure(reason) => {
                 self.refresh_failure = Some(reason);
+            }
+            Msg::InFlightStart { kind, label } => {
+                let op = InFlightOp {
+                    kind: kind.clone(),
+                    label,
+                    started_at: Instant::now(),
+                };
+                if let Some(existing) = self.in_flight_ops.iter_mut().find(|o| o.kind == kind) {
+                    *existing = op;
+                } else {
+                    self.in_flight_ops.push(op);
+                }
+            }
+            Msg::InFlightFinish(kind) => {
+                self.in_flight_ops.retain(|o| o.kind != kind);
             }
             Msg::Viewer(vmsg) => {
                 use crate::viewer::input::{ViewerEffect, reduce};

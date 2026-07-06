@@ -370,6 +370,8 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
         span!(theme.placeholder; " · {hints}"),
     ];
 
+    push_in_flight_chips(app, theme, &mut spans);
+
     if stale {
         spans.push(span!(
             Style::default().fg(theme.warning).add_modifier(Modifier::BOLD);
@@ -381,6 +383,40 @@ fn draw_status_bar(app: &App, frame: &mut Frame<'_>, area: Rect) {
 
     let widget = Paragraph::new(Line::from(spans));
     frame.render_widget(widget, area);
+}
+
+/// Braille-dot spinner frames (~120ms per frame at cadence
+/// `SPINNER_FRAME_MS`). Cycles through the eight-position pattern
+/// commonly used by cli.rs / npm / systemd loaders.
+const SPINNER_FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+const SPINNER_FRAME_MS: u128 = 120;
+
+/// Pick a spinner glyph based on how long an op has been in flight.
+/// Advances one frame per [`SPINNER_FRAME_MS`]; wraps modulo the
+/// eight-frame cycle.
+fn spinner_glyph(started_at: std::time::Instant) -> &'static str {
+    let elapsed_ms = started_at.elapsed().as_millis();
+    let idx = ((elapsed_ms / SPINNER_FRAME_MS) as usize) % SPINNER_FRAMES.len();
+    SPINNER_FRAMES[idx]
+}
+
+/// Append one spinner chip per in-flight async op (H-WIDG-007).
+/// Each chip shows a Braille spinner glyph advanced by wall-clock
+/// elapsed time plus the op's label. The runtime redraws at least
+/// every ~100ms via the poll timeout, so the spinner animates at a
+/// natural cadence without a separate tick source.
+fn push_in_flight_chips(app: &App, theme: &Theme, spans: &mut Vec<Span<'static>>) {
+    let ops = app.in_flight_ops();
+    if ops.is_empty() {
+        return;
+    }
+    let style = Style::default()
+        .fg(theme.panel_focus_accent)
+        .add_modifier(Modifier::BOLD);
+    for op in ops {
+        spans.push(Span::raw("  "));
+        spans.push(span!(style; "{} {}", spinner_glyph(op.started_at), op.label));
+    }
 }
 
 /// Append right-side provider status chips to `spans` from

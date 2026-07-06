@@ -168,7 +168,7 @@ impl LoopMode for LiveMode {
         populate_provider_status(app, config);
         self.pending_refresh = true;
         self.last_refresh = Instant::now();
-        spawn_discovery_worker(app.config(), &self.result_tx);
+        spawn_tracked_discovery(app, &self.result_tx);
         // `refresh_mux_preview_if_needed` is a no-op until a
         // snapshot lands (its `resolve_attach_target` guard
         // returns `NoSelection` when `graph_db` is None), so we
@@ -183,6 +183,9 @@ impl LoopMode for LiveMode {
         // blocking. Only the most recent result wins.
         while let Ok(result) = self.result_rx.try_recv() {
             self.pending_refresh = false;
+            app.update(Msg::InFlightFinish(
+                crate::tui::app::InFlightKind::Discovery,
+            ));
             match result {
                 Ok(snapshot) => {
                     // Build the tree against `App`'s current
@@ -221,7 +224,7 @@ impl LoopMode for LiveMode {
         if !self.pending_refresh && self.last_refresh.elapsed() >= self.refresh_interval {
             self.pending_refresh = true;
             self.last_refresh = Instant::now();
-            spawn_discovery_worker(app.config(), &self.result_tx);
+            spawn_tracked_discovery(app, &self.result_tx);
         }
         Ok(())
     }
@@ -240,7 +243,7 @@ impl LoopMode for LiveMode {
                 if !self.pending_refresh {
                     self.pending_refresh = true;
                     self.last_refresh = Instant::now();
-                    spawn_discovery_worker(app.config(), &self.result_tx);
+                    spawn_tracked_discovery(app, &self.result_tx);
                 }
             }
             Some(Action::Attach) => {
@@ -755,6 +758,18 @@ fn spawn_discovery_worker(config: &RunConfig, tx: &mpsc::Sender<DiscoveryResult>
     std::thread::spawn(move || {
         let result = discover_and_resolve(&config);
         let _ = tx.send(result);
+    });
+}
+
+/// Spawn a discovery worker + register the corresponding
+/// `InFlightKind::Discovery` marker so the status bar renders a
+/// spinner chip while the worker runs (H-WIDG-007). The marker is
+/// cleared when `drain` receives the worker's result.
+fn spawn_tracked_discovery(app: &mut App, tx: &mpsc::Sender<DiscoveryResult>) {
+    spawn_discovery_worker(app.config(), tx);
+    app.update(Msg::InFlightStart {
+        kind: crate::tui::app::InFlightKind::Discovery,
+        label: "Discovering".to_string(),
     });
 }
 
