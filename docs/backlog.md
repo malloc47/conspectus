@@ -8781,19 +8781,37 @@ Cross-cutting expectations across every Tier A swap:
     multi-line. Adopt the moment one does; do not preempt.
   - Blockers: a downstream story that demands multi-line input.
 
-- [ ] `H-WIDG-007` Adopt `tui-skeleton` for background-load
+- [x] `H-WIDG-007` Adopt `tui-skeleton` for background-load
   placeholders.
-  - Motivation: T8-007 (background discovery on its own thread)
-    needs visible loading state so the operator knows the snapshot
-    is refreshing instead of frozen. `tui-skeleton` 0.3 ships
-    Block / Table / List / Text / KvTable / BarChart variants with
-    Breathe / Sweep / Plasma / Noise animation modes; stateless
-    (animates from elapsed-ms passed by the caller). Drop-in for
-    every row tree and detail-pane shape Conspectus renders.
-  - Scope: paired with T8-007. Use `SkeletonList` for the row
-    tree and `SkeletonKvTable` for the detail pane during the
-    refresh window.
-  - Blockers: `T8-007`.
+  - **Landed 2026-07-06 (`0d1bc63`) as an in-tree substrate**,
+    deviating from the literal `tui-skeleton` scope. See commit
+    message for the full rationale; short version:
+      - The story's row-panel / detail-panel skeleton scope had
+        two frictions: (a) adding a crate requires an ADR per
+        ADR 0024 for a ~1s initial-load window, and (b)
+        replacing the operator's visible rows with skeleton
+        shapes every 30s refresh would regress UX.
+      - Operator's forward-looking need — 10s+ forge fetches and
+        transcript loads on selected nodes — is better served
+        by a general "in-flight async op" substrate visible in
+        the status bar, not by skeletons over the main panels.
+  - What landed:
+      - `InFlightKind` + `InFlightOp` model + `App::in_flight_ops`
+        storage.
+      - `Msg::InFlightStart { kind, label }` and
+        `Msg::InFlightFinish(kind)` reducer arms.
+      - Runtime dispatches these around all three discovery-spawn
+        sites via a new `spawn_tracked_discovery` helper.
+      - Status-bar chip: Braille spinner glyph
+        (`⠋⠙⠹⠸⠼⠴⠦⠧`, ~120ms/frame) + label, styled
+        `panel_focus_accent + BOLD`.
+      - Reducer test coverage grows 28 → 32; UI tests pin
+        chip presence + hide-after-finish.
+  - Follow-on when new async surfaces land: extend `InFlightKind`
+    with variants like `ForgeFetch(NodeId)` /
+    `TranscriptLoad(NodeId)` and dispatch a start/finish pair
+    around each spawn.
+  - Blockers: `T8-007` (retroactively landed).
 
 - [ ] `H-WIDG-008` Adopt `throbber-widgets-tui` for in-flight
   spinners.
