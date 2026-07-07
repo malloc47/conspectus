@@ -1031,27 +1031,27 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
 }
 
 #[test]
-fn enter_on_rename_without_target_emits_placeholder() {
+fn enter_on_edit_without_target_emits_placeholder() {
     let ctx = PinsContext::default();
     let mut state = PinsOverlayState::new();
-    state.cursor = PinsCursor::Action(2); // rename
+    state.cursor = PinsCursor::Action(2); // edit
     let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
     assert_eq!(
         outcome,
         PinsOutcome::ApplyAndStay(crate::tui::Msg::SetStatus(Some(pin_placeholder_status(
-            "rename"
+            "edit"
         ))))
     );
 }
 
 #[test]
-fn enter_on_rename_with_target_opens_edit_form() {
+fn enter_on_edit_with_target_opens_edit_form() {
     let ctx = PinsContext {
         pin_target: Some(pin_target()),
         ..PinsContext::default()
     };
     let mut state = PinsOverlayState::new();
-    state.cursor = PinsCursor::Action(2); // rename
+    state.cursor = PinsCursor::Action(2); // edit
     let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
     assert_eq!(outcome, PinsOutcome::Continue);
     assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Edit(_))));
@@ -1064,7 +1064,7 @@ fn edit_form_confirms_target_fields() {
         ..PinsContext::default()
     };
     let mut state = PinsOverlayState::new();
-    state.cursor = PinsCursor::Action(2); // rename
+    state.cursor = PinsCursor::Action(2); // edit
     state.handle_key(&ctx, key(KeyCode::Enter));
 
     let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
@@ -1085,13 +1085,85 @@ fn edit_form_confirms_target_fields() {
 }
 
 #[test]
+fn edit_form_lets_operator_change_harness_and_cwd() {
+    // H-PIN-EDIT: harness + cwd were unreachable in the edit form
+    // before this wave (carried through from target as read-only).
+    // Now they're position 2 and 3 in the field list; operators
+    // can retype them and the resulting PinEditRequest carries the
+    // new values.
+    let ctx = PinsContext {
+        pin_target: Some(pin_target()),
+        ..PinsContext::default()
+    };
+    let mut state = PinsOverlayState::new();
+    state.cursor = PinsCursor::Action(2); // edit
+    state.handle_key(&ctx, key(KeyCode::Enter));
+
+    // Advance cursor from id (0) → display (1) → harness (2).
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Down));
+    // Clear existing harness text and type a new value. TextInputState
+    // handles Backspace one char at a time.
+    for _ in 0.."codex".len() {
+        state.handle_key(&ctx, key(KeyCode::Backspace));
+    }
+    for ch in "opencode".chars() {
+        state.handle_key(&ctx, key(KeyCode::Char(ch)));
+    }
+    // Advance to cwd (3) and rewrite it too.
+    state.handle_key(&ctx, key(KeyCode::Down));
+    for _ in 0.."/workspace/project".len() {
+        state.handle_key(&ctx, key(KeyCode::Backspace));
+    }
+    for ch in "/new/root".chars() {
+        state.handle_key(&ctx, key(KeyCode::Char(ch)));
+    }
+
+    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    match outcome {
+        PinsOutcome::ApplyAndClose(crate::tui::Msg::PinEdit(request)) => {
+            assert_eq!(request.harness, "opencode");
+            assert_eq!(request.cwd, "/new/root");
+            // Untouched fields stay put.
+            assert_eq!(request.id, "ingest");
+            assert_eq!(request.display_name, "Ingest");
+        }
+        other => panic!("expected PinEdit outcome, got {other:?}"),
+    }
+}
+
+#[test]
+fn edit_form_requires_harness_and_cwd_to_be_non_empty() {
+    // Blank harness → validation error, stay in form. Same for cwd.
+    let ctx = PinsContext {
+        pin_target: Some(pin_target()),
+        ..PinsContext::default()
+    };
+    let mut state = PinsOverlayState::new();
+    state.cursor = PinsCursor::Action(2); // edit
+    state.handle_key(&ctx, key(KeyCode::Enter));
+
+    // Advance to harness (position 2) and clear it entirely.
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Down));
+    for _ in 0.."codex".len() {
+        state.handle_key(&ctx, key(KeyCode::Backspace));
+    }
+
+    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    assert_eq!(outcome, PinsOutcome::Continue);
+    // The sub_editor stays open so the operator can fix the error.
+    assert!(matches!(state.sub_editor(), Some(PinsSubEditor::Edit(_))));
+}
+
+#[test]
 fn edit_form_cancel_does_not_emit_action() {
     let ctx = PinsContext {
         pin_target: Some(pin_target()),
         ..PinsContext::default()
     };
     let mut state = PinsOverlayState::new();
-    state.cursor = PinsCursor::Action(2); // rename
+    state.cursor = PinsCursor::Action(2); // edit
     state.handle_key(&ctx, key(KeyCode::Enter));
 
     let outcome = state.handle_key(&ctx, key(KeyCode::Esc));

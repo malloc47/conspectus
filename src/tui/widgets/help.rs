@@ -190,7 +190,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "p",
-                    "Open the pins overlay (create / rename / remove / bind / rebind / adopt)",
+                    "Open the pins overlay (create / edit / remove / bind / rebind / adopt)",
                 ),
                 Binding::new("?", "This help"),
             ],

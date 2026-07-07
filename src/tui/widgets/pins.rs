@@ -47,7 +47,7 @@ const PIN_CREATE_CWD_SUFFIX_WIDTH: usize = 32;
 /// Discoverable pin action group. Each entry maps 1:1 to a CLI
 /// `conspectus pin <subcommand>` so the modal stays a thin
 /// presentation of the underlying surface.
-pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "launch", "rename", "remove", "bind", "rebind"];
+pub const PIN_ACTION_OPTIONS: &[&str] = &["create", "launch", "edit", "remove", "bind", "rebind"];
 
 /// Read-only snapshot the pins overlay renders against. Borrowed
 /// each frame so the overlay never holds a stale copy.
@@ -250,6 +250,8 @@ pub struct PinEditState {
     cursor: usize,
     id: TextInputState,
     display_name: TextInputState,
+    harness: TextInputState,
+    cwd: TextInputState,
     mux_name: TextInputState,
     mux_socket: TextInputState,
     launch_argv: TextInputState,
@@ -432,7 +434,7 @@ impl PinsOverlayState {
     /// rename direct shortcut.
     pub fn open_with_edit(target: PinMutationTarget) -> Self {
         Self {
-            // "rename" is index 2 in PIN_ACTION_OPTIONS.
+            // "edit" is index 2 in PIN_ACTION_OPTIONS.
             cursor: PinsCursor::Action(2),
             sub_editor: Some(PinsSubEditor::Edit(Box::new(PinEditState::new(target)))),
         }
@@ -520,7 +522,7 @@ impl PinsOverlayState {
                     label,
                 ))))
             }
-        } else if label == "rename" {
+        } else if label == "edit" {
             if let Some(target) = ctx.pin_target.clone() {
                 self.sub_editor = Some(PinsSubEditor::Edit(Box::new(PinEditState::new(target))));
                 PinsOutcome::Continue
@@ -1492,13 +1494,15 @@ fn derived_mux_name_for_mode(mode: PinCreateMode, name: &str, derived_id: &str) 
 }
 
 impl PinEditState {
-    const FIELD_COUNT: usize = 5;
+    const FIELD_COUNT: usize = 7;
 
     fn new(target: PinMutationTarget) -> Self {
         Self {
             cursor: 0,
             id: TextInputState::new(" id ", target.id.clone()),
             display_name: TextInputState::new(" display ", target.display_name.clone()),
+            harness: TextInputState::new(" harness ", target.harness.clone()),
+            cwd: TextInputState::new(" cwd ", target.cwd.clone()),
             mux_name: TextInputState::new(" mux ", target.mux_name.clone()),
             mux_socket: TextInputState::new(
                 " socket ",
@@ -1557,9 +1561,11 @@ impl PinEditState {
         match self.cursor {
             0 => Some(&mut self.id),
             1 => Some(&mut self.display_name),
-            2 => Some(&mut self.mux_name),
-            3 => Some(&mut self.mux_socket),
-            4 => Some(&mut self.launch_argv),
+            2 => Some(&mut self.harness),
+            3 => Some(&mut self.cwd),
+            4 => Some(&mut self.mux_name),
+            5 => Some(&mut self.mux_socket),
+            6 => Some(&mut self.launch_argv),
             _ => None,
         }
     }
@@ -1567,6 +1573,8 @@ impl PinEditState {
     fn request(&self) -> Result<PinEditRequest, String> {
         let id = required(self.id.value(), "id")?;
         let display_name = required(self.display_name.value(), "display")?;
+        let harness = required(self.harness.value(), "harness")?;
+        let cwd = required(self.cwd.value(), "cwd")?;
         let mux_name = required(self.mux_name.value(), "mux.name")?;
         let mux_socket = optional(self.mux_socket.value());
         let launch_argv = optional(self.launch_argv.value())
@@ -1576,8 +1584,8 @@ impl PinEditState {
             original_id: self.target.id.clone(),
             id,
             display_name,
-            harness: self.target.harness.clone(),
-            cwd: self.target.cwd.clone(),
+            harness,
+            cwd,
             mux_name,
             mux_socket,
             launch_argv,
@@ -2466,26 +2474,26 @@ impl Widget for PinEditWidget<'_> {
                 self.state.display_name.value(),
                 self.state.cursor,
             ),
+            pin_create_field(2, "harness", self.state.harness.value(), self.state.cursor),
+            pin_create_field(3, "cwd", self.state.cwd.value(), self.state.cursor),
             pin_create_field(
-                2,
+                4,
                 "mux.name",
                 self.state.mux_name.value(),
                 self.state.cursor,
             ),
             pin_create_field(
-                3,
+                5,
                 "mux.socket",
                 self.state.mux_socket.value(),
                 self.state.cursor,
             ),
             pin_create_field(
-                4,
+                6,
                 "launch argv",
                 self.state.launch_argv.value(),
                 self.state.cursor,
             ),
-            line![format!("  harness     {}", self.state.target.harness)],
-            line![format!("  cwd         {}", self.state.target.cwd)],
             line![format!("  store       {}", self.state.target.store_path)],
         ];
         if let Some(error) = &self.state.error {
