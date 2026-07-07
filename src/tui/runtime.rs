@@ -876,9 +876,19 @@ fn open_rename_overlay(app: &mut App) {
             session_row.display_label().unwrap_or("").to_string(),
         ),
         (RowId::Pin { .. }, Some(RowKind::Pin(pin))) => (" rename pin ", pin.display_name.clone()),
+        (RowId::MuxSession(_), Some(RowKind::MuxSession(mux))) => {
+            // Seed with the bare tmux name (post-`<socket>:` prefix
+            // when a non-default socket is in play) so the operator
+            // types what tmux itself will show.
+            let bare = mux
+                .native_id
+                .rsplit_once(':')
+                .map_or(mux.native_id.as_str(), |(_, name)| name);
+            (" rename mux ", bare.to_string())
+        }
         _ => {
             app.update(Msg::SetStatus(Some(
-                "rename: select an agent session or pin row first".to_string(),
+                "rename: select an agent session, mux, or pin row first".to_string(),
             )));
             return;
         }
@@ -1192,6 +1202,9 @@ fn execute_store_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect
             session_id,
             new_display_name,
         } => execute_commit_alias_rename(app, tmux, session_id, new_display_name),
+        StoreOp::CommitMuxRename { mux_id, new_name } => {
+            execute_commit_mux_rename(app, tmux, mux_id, new_name)
+        }
     }
 }
 
@@ -1428,6 +1441,107 @@ fn execute_commit_alias_rename(
         None => alias_status,
     };
     let _ = app.update(Msg::SetStatus(Some(final_status)));
+}
+
+/// Executor branch for `StoreOp::CommitMuxRename`. Graph-aware
+/// cascade: `plan_mux_rename` finds pins whose `mux.name` matches
+/// the mux's current bare native id (and socket), and this executor
+/// rewrites each of those pin store TOMLs before firing the tmux
+/// `rename-session` so pin bindings survive the rename. Default-
+/// socket only for v1; non-default-socket variants land with
+/// H-PIN-014.
+fn execute_commit_mux_rename(
+    app: &mut App,
+    tmux: &dyn MuxBackend,
+    mux_id: crate::model::MuxSessionId,
+    new_name: String,
+) {
+    let Some(database) = app.graph_db() else {
+        let _ = app.update(Msg::SetStatus(Some(
+            "mux rename: no graph database available".to_string(),
+        )));
+        return;
+    };
+    let snapshot = database.snapshot().clone();
+
+    let plan = match crate::rename::plan_mux_rename(&snapshot, &mux_id, new_name) {
+        Ok(plan) => plan,
+        Err(err) => {
+            let _ = app.update(Msg::SetStatus(Some(format!("mux rename failed: {err}"))));
+            return;
+        }
+    };
+
+    // Rewrite each affected pin store first. If any write fails we
+    // still attempt the tmux rename — the pin store update is
+    // idempotent on the next run and the operator is more likely to
+    // want the tmux rename effective than to want it reverted.
+    let mut pin_updates_written = 0usize;
+    let mut pin_update_failures = Vec::new();
+    for update in &plan.pin_mux_name_updates {
+        match rewrite_pin_mux_name(update) {
+            Ok(changed) => {
+                if changed {
+                    pin_updates_written += 1;
+                }
+            }
+            Err(err) => {
+                pin_update_failures.push(format!("{}: {err}", update.pin_id));
+            }
+        }
+    }
+
+    // Chain the tmux rename. Default-socket only per the v1 note
+    // above; the socket-aware variant lands with H-PIN-014.
+    let bare_current = plan
+        .mux_rename
+        .mux
+        .native_id
+        .rsplit_once(':')
+        .map_or(plan.mux_rename.mux.native_id.as_str(), |(_, name)| name);
+    let mux_status = match tmux.rename_session(None, bare_current, &plan.mux_rename.new_name) {
+        Ok(crate::discovery::tmux::TmuxRenameOutcome::Renamed) => {
+            format!("renamed mux to `{}`", plan.mux_rename.new_name)
+        }
+        Ok(other) => format!("tmux rename returned {other:?}"),
+        Err(err) => format!("tmux rename errored: {err}"),
+    };
+
+    let mut parts = vec![mux_status];
+    if pin_updates_written > 0 {
+        parts.push(format!(
+            "cascaded to {pin_updates_written} pin{}",
+            if pin_updates_written == 1 { "" } else { "s" }
+        ));
+    }
+    for failure in &pin_update_failures {
+        parts.push(format!("pin update failed: {failure}"));
+    }
+
+    let config = app.config().clone();
+    refresh(app, &config);
+    let _ = app.update(Msg::SetStatus(Some(parts.join(" · "))));
+}
+
+/// Load the pin entry by id, rewrite its `mux.name`, and write it
+/// back through `upsert_pin_entry`. Returns `Ok(true)` when the
+/// store actually changed; `Ok(false)` when the pin was already
+/// pointing at the new name (idempotent). Errors from either half
+/// bubble up as `String`s so the caller can list them in the
+/// aggregate status message.
+fn rewrite_pin_mux_name(update: &crate::rename::PinMuxNameUpdate) -> Result<bool, String> {
+    let store_paths = [std::path::PathBuf::from(&update.store_path)];
+    let loaded = crate::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("pin `{}` not found in store", update.pin_id))?;
+    let (_path, mut entry) = loaded;
+    if entry.mux.name == update.new_mux_name {
+        return Ok(false);
+    }
+    entry.mux.name = update.new_mux_name.clone();
+    let outcome =
+        crate::pins::upsert_pin_entry(&update.store_path, entry).map_err(|err| err.to_string())?;
+    Ok(outcome.changed)
 }
 
 /// Pure executor (ADR 0085 contract 2). Runs the effects a reducer

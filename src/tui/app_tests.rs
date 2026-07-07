@@ -3081,6 +3081,65 @@ mod reducer_effects {
         );
     }
 
+    fn app_with_mux_selection(mux_name: &str) -> (App, crate::model::MuxSessionId) {
+        let mut snapshot = crate::model::GraphSnapshot::empty();
+        let mux_id = crate::model::MuxSessionId::new(mux_name);
+        snapshot.nodes.push(crate::model::GraphNode::MuxSession(
+            crate::model::MuxSessionNode::new(
+                mux_id.clone(),
+                "tmux".to_string(),
+                mux_name.to_string(),
+            ),
+        ));
+        let resolved = crate::resolve::resolve_snapshot(snapshot);
+        let mut app = App::new(RunConfig::defaults());
+        // Build the tree in the mux view so a mux row appears.
+        app.update(Msg::SwitchView(View::Mux));
+        let tree = crate::tui::rows::build_tree_for_view(crate::tui::rows::TreeInputs::from_app(
+            &resolved, &app,
+        ));
+        app.update(Msg::SetData {
+            snapshot: crate::tui::app::GraphDb::new(resolved),
+            tree,
+            loaded_at_epoch: 0,
+            initial_selection_hint: None,
+        });
+        app.set_selection(crate::tui::rows::RowId::MuxSession(
+            crate::model::NodeId::MuxSession(mux_id.clone()),
+        ));
+        (app, mux_id)
+    }
+
+    #[test]
+    fn commit_rename_with_mux_selection_emits_commit_mux_rename() {
+        use crate::tui::effect::StoreOp;
+        let (mut app, mux_id) = app_with_mux_selection("editor");
+        let effects = app.update(Msg::CommitRename("workshop".to_string()));
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::WriteStore(StoreOp::CommitMuxRename {
+                mux_id: m,
+                new_name,
+            }) => {
+                assert_eq!(m, &mux_id);
+                assert_eq!(new_name, "workshop");
+            }
+            other => panic!("expected CommitMuxRename, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn commit_rename_with_empty_value_on_mux_emits_toast() {
+        let (mut app, _mux_id) = app_with_mux_selection("editor");
+        let effects = app.update(Msg::CommitRename("   ".to_string()));
+        assert_eq!(
+            effects,
+            vec![Effect::Toast(
+                "mux rename: name cannot be empty".to_string()
+            )]
+        );
+    }
+
     // ADR 0085 contracts 1 + 4 (H-TUI-002 Phase F): projection
     // changes now flow through the reducer as first-class Msgs
     // instead of the runtime's `ControlsAction` bridge. The

@@ -206,7 +206,7 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
         mode: KeyMode::Global,
         key: KeyMatcher::UpperChar('R'),
         action: || Action::OpenRename,
-        help_text: "Rename the selected agent session or pin",
+        help_text: "Rename the selected agent session, mux, or pin",
     },
     KeyBinding {
         mode: KeyMode::Global,

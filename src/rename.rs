@@ -149,6 +149,134 @@ fn active_mux_candidates(snapshot: &GraphSnapshot, session: &NodeId) -> Vec<MuxS
     by_target.into_keys().collect()
 }
 
+/// Graph-aware plan for renaming a mux session. Beyond the tmux
+/// native-name change, this cascades to any pin whose `mux.name`
+/// matches the current native id + socket so pin bindings survive
+/// the rename.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MuxRenamePlan {
+    pub mux_rename: MuxNativeRename,
+    pub pin_mux_name_updates: Vec<PinMuxNameUpdate>,
+}
+
+/// A single pin whose `mux.name` must be rewritten to track a mux
+/// native-name change. `store_path` names the TOML file the executor
+/// writes; `pin_id` narrows the entry inside that file.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PinMuxNameUpdate {
+    pub pin_id: String,
+    pub store_path: String,
+    pub new_mux_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MuxRenamePlanError {
+    /// The desired new name is empty (or whitespace-only).
+    EmptyName,
+    /// The desired new name is identical to the current one — the
+    /// plan would produce no change. Callers report this to the
+    /// operator as a no-op rather than firing tmux.
+    NoOp,
+    /// The mux id doesn't resolve to a discovered mux node in the
+    /// snapshot. Distinguishes "mux vanished mid-session" from other
+    /// failures.
+    MuxNotFound,
+}
+
+impl std::fmt::Display for MuxRenamePlanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyName => write!(f, "mux rename requires a non-empty name"),
+            Self::NoOp => write!(f, "mux rename: new name matches current name"),
+            Self::MuxNotFound => write!(f, "mux not present in the discovered snapshot"),
+        }
+    }
+}
+
+impl std::error::Error for MuxRenamePlanError {}
+
+/// Build a [`MuxRenamePlan`] for `mux_id` with `new_name`.
+///
+/// `new_name` is the bare tmux session name — no `tmux:` prefix, no
+/// `<socket>:` prefix. Callers who want to change the socket use the
+/// separate pin-rebind form, not this plan.
+///
+/// Every pin whose `mux.name` matches the mux's current bare name
+/// (and whose `mux.socket_name` matches the mux's socket) picks up a
+/// [`PinMuxNameUpdate`] so the executor rewrites the pin store in
+/// lockstep with the tmux rename.
+pub fn plan_mux_rename(
+    snapshot: &GraphSnapshot,
+    mux_id: &MuxSessionId,
+    new_name: String,
+) -> Result<MuxRenamePlan, MuxRenamePlanError> {
+    if new_name.trim().is_empty() {
+        return Err(MuxRenamePlanError::EmptyName);
+    }
+
+    let mux = snapshot
+        .nodes
+        .iter()
+        .find_map(|node| match node {
+            crate::model::GraphNode::MuxSession(m) if &m.id == mux_id => Some(m),
+            _ => None,
+        })
+        .ok_or(MuxRenamePlanError::MuxNotFound)?;
+
+    // `MuxSessionNode.native_id` drops the backend prefix (e.g.
+    // `editor` for a default-socket tmux session, `scratch:editor`
+    // for a non-default socket). Split off the leading `<socket>:`
+    // if present so we compare against the bare tmux name — which
+    // is what `PinMux.name` stores.
+    let (mux_socket, bare_current) = split_socket_and_name(&mux.native_id);
+
+    if bare_current == new_name {
+        return Err(MuxRenamePlanError::NoOp);
+    }
+
+    let mut pin_mux_name_updates = Vec::new();
+    for pin in &snapshot.pins {
+        if pin.mux.backend != mux.backend {
+            continue;
+        }
+        if pin.mux.name != bare_current {
+            continue;
+        }
+        // Socket comparison: pin's `socket_name` may be `None` /
+        // `Some("default")` (both resolve to default) or an explicit
+        // non-default name. Match against the mux's parsed socket.
+        let pin_socket_effective = pin.mux.effective_socket();
+        if pin_socket_effective != mux_socket {
+            continue;
+        }
+        pin_mux_name_updates.push(PinMuxNameUpdate {
+            pin_id: pin.id.clone(),
+            store_path: pin.store_path.clone(),
+            new_mux_name: new_name.clone(),
+        });
+    }
+
+    Ok(MuxRenamePlan {
+        mux_rename: MuxNativeRename {
+            mux: mux_id.clone(),
+            new_name,
+        },
+        pin_mux_name_updates,
+    })
+}
+
+/// Split a `MuxSessionNode.native_id` like `scratch:editor` into
+/// `(Some("scratch"), "editor")`, or `editor` into `(None, "editor")`.
+/// The bare tmux name is the second element — what
+/// `PinMux.name` stores and what the operator types in the rename
+/// modal.
+fn split_socket_and_name(native_id: &str) -> (Option<&str>, &str) {
+    match native_id.split_once(':') {
+        Some((socket, name)) => (Some(socket), name),
+        None => (None, native_id),
+    }
+}
+
 #[cfg(test)]
 #[path = "rename_tests.rs"]
 mod tests;

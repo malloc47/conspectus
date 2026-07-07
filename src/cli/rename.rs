@@ -24,7 +24,9 @@ use conspectus::aliases::{AliasEntry, remove_alias_entry, upsert_alias_entry};
 use conspectus::declared::declared_endpoint_from_node_id;
 use conspectus::discovery::tmux::{MuxBackend, SystemTmux, TmuxRenameOutcome};
 use conspectus::model::NodeId;
-use conspectus::rename::{MuxNativeRename, RenamePlan, plan_session_rename};
+use conspectus::rename::{
+    MuxNativeRename, MuxRenamePlan, RenamePlan, plan_mux_rename, plan_session_rename,
+};
 
 use super::{
     DeclaredStoreFlag, candidate_store_paths, discover_for_store_selection, resolve_alias_store,
@@ -165,14 +167,44 @@ impl RenameMuxArgs {
             ),
         };
 
-        run_mux_rename(
-            &MuxNativeRename {
-                mux: mux_id,
-                new_name,
-            },
-            &SystemTmux::new(),
-        )
+        // H-RENAME-MUX: graph-aware cascade — rewrite any pin whose
+        // `mux.name` matches the current mux native id + socket so
+        // pin bindings survive the tmux rename.
+        let plan = match plan_mux_rename(&snapshot, &mux_id, new_name) {
+            Ok(plan) => plan,
+            Err(err) => bail!("mux rename planning failed: {err}"),
+        };
+        execute_mux_rename_plan(&plan, &SystemTmux::new())
     }
+}
+
+/// Execute a [`MuxRenamePlan`]: rewrite each affected pin store,
+/// then chain the tmux `rename-session` so the live tmux name
+/// tracks the pin's declared intent.
+fn execute_mux_rename_plan(plan: &MuxRenamePlan, tmux: &dyn MuxBackend) -> Result<()> {
+    for update in &plan.pin_mux_name_updates {
+        let store_paths = [PathBuf::from(&update.store_path)];
+        let loaded = conspectus::pins::load_pin_entry_by_id(&store_paths, &update.pin_id)
+            .map_err(|err| anyhow!("read pin store `{}`: {err}", update.store_path))?
+            .ok_or_else(|| {
+                anyhow!(
+                    "pin `{}` not found in store `{}`",
+                    update.pin_id,
+                    update.store_path
+                )
+            })?;
+        let (_path, mut entry) = loaded;
+        if entry.mux.name != update.new_mux_name {
+            entry.mux.name = update.new_mux_name.clone();
+            conspectus::pins::upsert_pin_entry(&update.store_path, entry)
+                .map_err(|err| anyhow!("write pin store `{}`: {err}", update.store_path))?;
+            println!(
+                "cascaded to pin `{}` (mux.name in `{}`)",
+                update.pin_id, update.store_path
+            );
+        }
+    }
+    run_mux_rename(&plan.mux_rename, tmux)
 }
 
 /// Execute the alias-write side of `plan`, then (when present) the

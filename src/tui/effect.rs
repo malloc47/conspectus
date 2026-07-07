@@ -148,4 +148,15 @@ pub enum StoreOp {
         session_id: AgentSessionId,
         new_display_name: Option<String>,
     },
+    /// Commit the rename-overlay's confirm on a mux-session row.
+    /// The executor plans the rename against the held snapshot,
+    /// rewrites any pin whose `mux.name` matches the mux's
+    /// current native id (graph-aware cascade), and chains a tmux
+    /// `rename-session` so the live tmux name tracks the pin's
+    /// intent in lockstep. Default-socket only for v1;
+    /// non-default-socket renames land with H-PIN-014.
+    CommitMuxRename {
+        mux_id: MuxSessionId,
+        new_name: String,
+    },
 }

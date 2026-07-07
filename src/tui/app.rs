@@ -2266,6 +2266,18 @@ impl App {
                         },
                     )));
                 }
+                Some(RowId::MuxSession(crate::model::NodeId::MuxSession(mux_id))) => {
+                    let new_name = value.trim().to_string();
+                    if new_name.is_empty() {
+                        effects.push(Effect::Toast(
+                            "mux rename: name cannot be empty".to_string(),
+                        ));
+                        return effects;
+                    }
+                    effects.push(Effect::WriteStore(
+                        crate::tui::effect::StoreOp::CommitMuxRename { mux_id, new_name },
+                    ));
+                }
                 _ => effects.push(Effect::Toast(
                     "rename: lost selection before commit".to_string(),
                 )),

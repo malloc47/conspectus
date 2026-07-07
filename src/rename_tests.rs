@@ -198,3 +198,143 @@ fn empty_display_name_is_rejected() {
         plan_session_rename(&snapshot, &id, Some("   ".to_string()), false).expect_err("empty");
     assert_eq!(err, RenamePlanError::EmptyDisplayName);
 }
+
+// --- H-RENAME-MUX: graph-aware mux rename tests -----------------
+
+use crate::model::PinCandidate;
+
+fn pin_bound_to(pin_id: &str, mux_name: &str, socket: Option<&str>) -> PinCandidate {
+    PinCandidate {
+        id: pin_id.to_string(),
+        display_name: pin_id.to_string(),
+        harness: "codex".to_string(),
+        cwd: "/workspace".to_string(),
+        mux: crate::model::PinMuxRef {
+            backend: "tmux".to_string(),
+            name: mux_name.to_string(),
+            socket_name: socket.map(str::to_string),
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: crate::model::Provenance::LocalPin,
+        store_path: format!("/workspace/.conspectus.toml.{pin_id}"),
+        binding: None,
+    }
+}
+
+#[test]
+fn plan_mux_rename_with_no_pins_writes_only_the_mux() {
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
+
+    assert_eq!(plan.mux_rename.mux, mux_id);
+    assert_eq!(plan.mux_rename.new_name, "workshop");
+    assert!(plan.pin_mux_name_updates.is_empty());
+}
+
+#[test]
+fn plan_mux_rename_cascades_to_matching_pin() {
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+    snapshot.pins.push(pin_bound_to("ingest", "editor", None));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
+
+    assert_eq!(plan.pin_mux_name_updates.len(), 1);
+    let update = &plan.pin_mux_name_updates[0];
+    assert_eq!(update.pin_id, "ingest");
+    assert_eq!(update.new_mux_name, "workshop");
+    assert_eq!(update.store_path, "/workspace/.conspectus.toml.ingest");
+}
+
+#[test]
+fn plan_mux_rename_ignores_pins_pointed_at_a_different_mux() {
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+    snapshot.pins.push(pin_bound_to("other", "workshop", None));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
+    assert!(plan.pin_mux_name_updates.is_empty());
+}
+
+#[test]
+fn plan_mux_rename_cascades_to_every_matching_pin() {
+    // ADR 0057 discourages multiple pins on the same mux but the
+    // plan handles it gracefully — every pin whose mux triple
+    // matches picks up an update entry.
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+    snapshot.pins.push(pin_bound_to("ingest-a", "editor", None));
+    snapshot.pins.push(pin_bound_to("ingest-b", "editor", None));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
+    let ids: Vec<_> = plan
+        .pin_mux_name_updates
+        .iter()
+        .map(|u| u.pin_id.clone())
+        .collect();
+    assert_eq!(ids, vec!["ingest-a".to_string(), "ingest-b".to_string()]);
+}
+
+#[test]
+fn plan_mux_rename_rejects_empty_name() {
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+
+    let err =
+        plan_mux_rename(&snapshot, &mux_id, "   ".to_string()).expect_err("expected empty error");
+    assert_eq!(err, MuxRenamePlanError::EmptyName);
+}
+
+#[test]
+fn plan_mux_rename_rejects_noop() {
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+
+    let err = plan_mux_rename(&snapshot, &mux_id, "editor".to_string()).expect_err("expected noop");
+    assert_eq!(err, MuxRenamePlanError::NoOp);
+}
+
+#[test]
+fn plan_mux_rename_rejects_missing_mux() {
+    let snapshot = GraphSnapshot::empty();
+    let ghost = MuxSessionId::new("phantom");
+
+    let err =
+        plan_mux_rename(&snapshot, &ghost, "workshop".to_string()).expect_err("expected not-found");
+    assert_eq!(err, MuxRenamePlanError::MuxNotFound);
+}
+
+#[test]
+fn plan_mux_rename_socket_mismatch_skips_pin() {
+    // Pin declares socket="scratch"; mux is a default-socket
+    // (parsed socket = None). The socket-effective comparison
+    // guards against cross-socket cascade.
+    let mut snapshot = GraphSnapshot::empty();
+    let m = mux("editor");
+    let mux_id = m.id.clone();
+    snapshot.nodes.push(GraphNode::MuxSession(m));
+    snapshot
+        .pins
+        .push(pin_bound_to("ingest", "editor", Some("scratch")));
+
+    let plan = plan_mux_rename(&snapshot, &mux_id, "workshop".to_string()).expect("plan");
+    assert!(
+        plan.pin_mux_name_updates.is_empty(),
+        "pin on a different socket must not cascade"
+    );
+}

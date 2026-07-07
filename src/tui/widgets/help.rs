@@ -209,7 +209,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "R",
-                    "Rename the selected agent session or pin's display name",
+                    "Rename the selected agent session (alias), mux (tmux + pin cascade), or pin's display name",
                 ),
                 Binding::new(
                     "v",
