@@ -1,6 +1,9 @@
 // Extracted from snapshot.rs H-HYG-011 rolling wave via #[path = "snapshot_tests.rs"] mod tests;
 use super::*;
 
+/// Default reflow threshold used by the `pane_rect` layout tests.
+const DEFAULT: u16 = crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD;
+
 #[test]
 fn parse_key_script_handles_literals_and_named_keys() {
     let keys = parse_key_script("vj<Enter>").expect("parse");
@@ -58,16 +61,16 @@ fn buffer_to_ansi_emits_styled_text_with_reset_per_line() {
 #[test]
 fn pane_rect_returns_full_area_for_all() {
     let area = Rect::new(0, 0, 160, 40);
-    assert_eq!(pane_rect(area, SnapshotPane::All), area);
+    assert_eq!(pane_rect(area, SnapshotPane::All, DEFAULT), area);
 }
 
 #[test]
 fn pane_rect_carves_header_and_status_as_single_rows() {
     let area = Rect::new(0, 0, 160, 40);
-    let header = pane_rect(area, SnapshotPane::Header);
+    let header = pane_rect(area, SnapshotPane::Header, DEFAULT);
     assert_eq!(header.height, 1);
     assert_eq!(header.y, 0);
-    let status = pane_rect(area, SnapshotPane::Status);
+    let status = pane_rect(area, SnapshotPane::Status, DEFAULT);
     assert_eq!(status.height, 1);
     assert_eq!(status.y, 39);
 }
@@ -75,8 +78,8 @@ fn pane_rect_carves_header_and_status_as_single_rows() {
 #[test]
 fn pane_rect_splits_body_horizontally_when_wide() {
     let area = Rect::new(0, 0, 160, 40);
-    let left = pane_rect(area, SnapshotPane::Left);
-    let right = pane_rect(area, SnapshotPane::Right);
+    let left = pane_rect(area, SnapshotPane::Left, DEFAULT);
+    let right = pane_rect(area, SnapshotPane::Right, DEFAULT);
     assert_eq!(left.x, 0);
     assert!(left.width > 0);
     assert!(right.x >= left.width);
@@ -109,12 +112,28 @@ fn fixture_load_error_reports_path() {
 
 #[test]
 fn pane_rect_splits_body_vertically_when_narrow() {
-    // Below NARROW_LAYOUT_THRESHOLD (100): body splits top/bottom.
+    // Below the default narrow_layout_threshold (100): body splits
+    // top/bottom.
     let area = Rect::new(0, 0, 60, 40);
-    let left = pane_rect(area, SnapshotPane::Left);
-    let right = pane_rect(area, SnapshotPane::Right);
+    let left = pane_rect(area, SnapshotPane::Left, DEFAULT);
+    let right = pane_rect(area, SnapshotPane::Right, DEFAULT);
     assert_eq!(left.x, 0);
     assert_eq!(right.x, 0);
     assert_eq!(left.width, 60);
     assert!(right.y > left.y);
+}
+
+#[test]
+fn pane_rect_split_direction_follows_configured_threshold() {
+    // H-LAYOUT-001: the reflow breakpoint is configurable. A 60-col
+    // body stacks vertically at the default threshold (100) but stays
+    // side-by-side once the threshold is lowered below the width.
+    let area = Rect::new(0, 0, 60, 40);
+
+    let stacked = pane_rect(area, SnapshotPane::Right, DEFAULT);
+    assert!(stacked.y > 1, "default threshold stacks a 60-col body");
+
+    let side_by_side = pane_rect(area, SnapshotPane::Right, 50);
+    assert_eq!(side_by_side.y, 1, "lowered threshold keeps side-by-side");
+    assert!(side_by_side.x > 0, "right pane sits beside the left pane");
 }

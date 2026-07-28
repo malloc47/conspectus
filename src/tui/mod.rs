@@ -119,6 +119,11 @@ pub struct RunConfig {
     /// totals, so the aggregate is opt-in only. Sourced from
     /// `[tui].show_harness_chips` in the on-disk config.
     pub show_harness_chips: bool,
+    /// Terminal width (columns) below which the body reflows from
+    /// side-by-side panes to a vertical stack (H-LAYOUT-001). Sourced
+    /// from `[tui] narrow_layout_threshold`; the renderer reads this
+    /// instead of a hard-coded constant.
+    pub narrow_layout_threshold: u16,
     /// Per-class warm-start TTL intervals from `[server.intervals]`
     /// (ADR 0079). The discovery loop reads the persisted cache and
     /// skips re-running providers whose class TTL has not expired.
@@ -157,6 +162,7 @@ impl RunConfig {
             theme: Theme::default(),
             show_edge_meta: false,
             show_harness_chips: false,
+            narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             no_cache: false,
             refresh: false,

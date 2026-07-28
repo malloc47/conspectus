@@ -50,11 +50,6 @@ use crate::tui::rows::{
     format_recency, recency_bucket,
 };
 
-/// Terminal width threshold below which the body switches from a
-/// side-by-side split to a vertical stack (left-on-top per the
-/// phase-08 layout note).
-pub(super) const NARROW_LAYOUT_THRESHOLD: u16 = 100;
-
 /// Render one frame.
 ///
 /// Takes `&mut App` because the draw path dispatches
@@ -561,7 +556,8 @@ fn snapshot_counts(database: Option<&GraphDb>) -> (usize, usize) {
 // -----------------------------------------------------------------------------
 
 fn draw_body(app: &mut App, frame: &mut Frame<'_>, area: Rect) {
-    let split = if area.width < NARROW_LAYOUT_THRESHOLD {
+    let threshold = app.config().narrow_layout_threshold;
+    let split = if area.width < threshold {
         vertical![==50%, ==50%].split(area)
     } else {
         horizontal![==50%, ==50%].split(area)

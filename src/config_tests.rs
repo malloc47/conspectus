@@ -59,6 +59,70 @@ fn tui_detail_show_edge_meta_defaults_to_false_when_absent() {
 }
 
 #[test]
+fn tui_narrow_layout_threshold_defaults_to_canonical_constant() {
+    let temp = TempDir::new().expect("temp dir");
+    let loader = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(temp.path().join("xdg"));
+    let outcome = loader.load_from(temp.path());
+
+    assert!(outcome.diagnostics.is_empty());
+    assert_eq!(
+        outcome.config.tui.narrow_layout_threshold,
+        crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
+    );
+}
+
+#[test]
+fn tui_narrow_layout_threshold_loads_from_config() {
+    // H-LAYOUT-001: `[tui] narrow_layout_threshold` overrides the
+    // side-by-side → stacked reflow breakpoint.
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui]\nnarrow_layout_threshold = 80\n",
+    );
+
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+
+    assert!(outcome.diagnostics.is_empty());
+    assert_eq!(outcome.config.tui.narrow_layout_threshold, 80);
+}
+
+#[test]
+fn tui_narrow_layout_threshold_out_of_range_diagnoses_and_keeps_default() {
+    // A value that can't fit in the u16 layout width (or is < 1)
+    // produces a targeted diagnostic and leaves the default in place
+    // rather than failing the whole file parse.
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[tui]\nnarrow_layout_threshold = 0\n",
+    );
+
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+
+    assert_eq!(
+        outcome.config.tui.narrow_layout_threshold,
+        crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("narrow_layout_threshold")),
+        "expected a narrow_layout_threshold diagnostic: {:?}",
+        outcome.diagnostics,
+    );
+}
+
+#[test]
 fn project_config_parses_empty_table_subsections() {
     let temp = TempDir::new().expect("temp dir");
     let project = temp.path().join("project");

@@ -30,6 +30,14 @@ pub const PROJECT_CONFIG_FILENAME: &str = ".conspectus.toml";
 /// the user-level config lives.
 pub const USER_CONFIG_RELATIVE: &str = "conspectus/config.toml";
 
+/// Default terminal width (columns) at/above which the TUI keeps its
+/// side-by-side left/right panes, and below which it reflows them to a
+/// vertical stack (H-LAYOUT-001). Operators override this with
+/// `[tui] narrow_layout_threshold`. This is the canonical home for the
+/// value; the renderer reads the resolved [`TuiConfig`] field rather
+/// than a hard-coded constant.
+pub const DEFAULT_NARROW_LAYOUT_THRESHOLD: u16 = 100;
+
 /// Resolved configuration after project + user + defaults are merged.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
@@ -75,7 +83,11 @@ impl Default for ServerIntervals {
 }
 
 /// Settings under `[tui]` in `.conspectus.toml` / user config.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+///
+/// `Default` is hand-written (rather than derived) so
+/// `narrow_layout_threshold` starts at
+/// [`DEFAULT_NARROW_LAYOUT_THRESHOLD`] instead of `0`.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TuiConfig {
     /// Scan roots for `conspectus tui` discovery. Empty means "use
     /// the process cwd" (the v1-default behavior). `~` and `~/<rel>`
@@ -100,6 +112,24 @@ pub struct TuiConfig {
     /// totals. Operators who want the aggregate set
     /// `[tui] show_harness_chips = true` in their config.
     pub show_harness_chips: bool,
+    /// Terminal width (columns) below which the body reflows from
+    /// side-by-side panes to a vertical stack (H-LAYOUT-001). Sourced
+    /// from `[tui] narrow_layout_threshold`; defaults to
+    /// [`DEFAULT_NARROW_LAYOUT_THRESHOLD`].
+    pub narrow_layout_threshold: u16,
+}
+
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self {
+            scan_roots: Vec::new(),
+            views: TuiViewsConfig::default(),
+            detail: TuiDetailConfig::default(),
+            theme: Theme::default(),
+            show_harness_chips: false,
+            narrow_layout_threshold: DEFAULT_NARROW_LAYOUT_THRESHOLD,
+        }
+    }
 }
 
 /// Settings under `[tui.detail]` in `.conspectus.toml` / user config
@@ -277,6 +307,12 @@ struct TuiFile {
     /// motivation.
     #[serde(default)]
     show_harness_chips: Option<bool>,
+    /// `[tui] narrow_layout_threshold` — terminal columns below which
+    /// the body reflows to a vertical stack (H-LAYOUT-001). Read as a
+    /// signed integer so an out-of-range value produces a targeted
+    /// diagnostic instead of failing the whole file parse.
+    #[serde(default)]
+    narrow_layout_threshold: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -702,6 +738,23 @@ fn merge_tui(
 
     if let Some(show_harness_chips) = file.show_harness_chips {
         config.show_harness_chips = show_harness_chips;
+    }
+
+    if let Some(raw) = file.narrow_layout_threshold {
+        // Require a positive value that fits in the u16 width the
+        // layout math uses. Zero would stack unconditionally and is
+        // almost certainly a mistake, so it diagnoses too.
+        match u16::try_from(raw) {
+            Ok(value) if value >= 1 => config.narrow_layout_threshold = value,
+            _ => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui] narrow_layout_threshold` value `{raw}`; \
+                     expected an integer between 1 and {}",
+                    u16::MAX
+                ),
+            }),
+        }
     }
 
     if let Some(theme_file) = file.theme {

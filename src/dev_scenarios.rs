@@ -236,6 +236,7 @@ impl ScenarioWorld {
             theme: crate::tui::Theme::default(),
             show_edge_meta: false,
             show_harness_chips: false,
+            narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             no_cache: true,
             refresh: true,

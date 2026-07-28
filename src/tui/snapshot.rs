@@ -138,7 +138,7 @@ pub fn run(config: RunConfig, snap: SnapshotConfig) -> Result<()> {
     let buffer = terminal.backend().buffer();
 
     let area = Rect::new(0, 0, snap.width, snap.height);
-    let region = pane_rect(area, snap.pane);
+    let region = pane_rect(area, snap.pane, app.config().narrow_layout_threshold);
     let out = buffer_to_ansi(buffer, region);
 
     let mut stdout = std::io::stdout().lock();
@@ -295,7 +295,7 @@ fn action_label(action: &Action) -> &'static str {
 /// renderer applies in `ui::draw`. Kept in sync with the constraints
 /// in `ui::draw` and `ui::draw_body`; the renderer's constants are
 /// pulled in via `pub(super)` so the two never drift.
-fn pane_rect(area: Rect, pane: SnapshotPane) -> Rect {
+fn pane_rect(area: Rect, pane: SnapshotPane, narrow_layout_threshold: u16) -> Rect {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -312,7 +312,7 @@ fn pane_rect(area: Rect, pane: SnapshotPane) -> Rect {
         SnapshotPane::Header => header,
         SnapshotPane::Status => status,
         SnapshotPane::Left | SnapshotPane::Right => {
-            let direction = if body.width < ui::NARROW_LAYOUT_THRESHOLD {
+            let direction = if body.width < narrow_layout_threshold {
                 Direction::Vertical
             } else {
                 Direction::Horizontal
