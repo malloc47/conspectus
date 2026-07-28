@@ -560,11 +560,15 @@ fn mux_or_harness_slice_fingerprint(fresh: &GraphSnapshot) -> Option<u64> {
 
     // Serialize each in-slice node to JSON, sort the byte
     // strings so `Vec` order can't affect the fingerprint.
+    // Timestamp fields that legitimately churn without changing
+    // the /proc walk output (mux activity, session file mtime,
+    // last-attached epoch) are zeroed on a clone before
+    // serialization — see `fingerprint_normalized_node`.
     let mut node_bytes: Vec<Vec<u8>> = fresh
         .nodes
         .iter()
         .filter(|node| mux_harness_node_ids.contains(&node.id()))
-        .filter_map(|node| serde_json::to_vec(node).ok())
+        .filter_map(|node| serde_json::to_vec(&fingerprint_normalized_node(node)).ok())
         .collect();
     node_bytes.sort();
 
@@ -599,6 +603,41 @@ fn mux_or_harness_slice_fingerprint(fresh: &GraphSnapshot) -> Option<u64> {
         bytes.hash(&mut hasher);
     }
     Some(hasher.finish())
+}
+
+/// Return a clone of `node` with per-cycle timestamp churn zeroed
+/// so the mux/harness slice fingerprint (H-SERVE-PERF-003) doesn't
+/// treat legitimate but /proc-walk-irrelevant activity as a real
+/// content change.
+///
+/// Fields excluded from the fingerprint:
+///
+/// * `MuxSessionNode.activity_epoch` — advances on any tmux pane
+///   activity (typing, output redraw); the /proc walk cares
+///   about *which* pane pids exist, not when they last echoed.
+/// * `MuxSessionNode.last_attached_epoch` — advances when the
+///   operator attaches. Same argument.
+/// * `AgentSessionNode.last_active_epoch` — session file mtime.
+///   Bumps whenever an active session appends a message; the
+///   /proc walk's inputs (session ids, cwd) are unaffected.
+///
+/// Fields kept: node ids, cwd, active_pane_command,
+/// active_pane_pid, active_pane_current_path, client_attached,
+/// created_epoch (stable per session lifetime), title, harness_key.
+/// A change to any of those legitimately warrants a re-walk.
+fn fingerprint_normalized_node(node: &GraphNode) -> GraphNode {
+    let mut cloned = node.clone();
+    match &mut cloned {
+        GraphNode::MuxSession(mux) => {
+            mux.activity_epoch = None;
+            mux.last_attached_epoch = None;
+        }
+        GraphNode::AgentSession(session) => {
+            session.last_active_epoch = None;
+        }
+        _ => {}
+    }
+    cloned
 }
 
 /// Always-rerun mutator block extracted from

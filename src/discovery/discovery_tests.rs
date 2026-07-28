@@ -777,6 +777,88 @@ fn slice_fingerprint_ignores_freshness_epoch_changes_only() {
 }
 
 #[test]
+fn slice_fingerprint_ignores_mux_activity_epoch_advances() {
+    // H-SERVE-PERF-008: MuxSessionNode.activity_epoch bumps on
+    // every tmux pane keystroke; treating that as a real content
+    // change defeats the /proc walk gate on any operator with a
+    // live tmux (i.e. all of them). Two snapshots that differ
+    // only in activity_epoch / last_attached_epoch must hash equal.
+    let mut cycle_a = snapshot_with_mux_session("s1", "s1", 1_000);
+    let mut cycle_b = snapshot_with_mux_session("s1", "s1", 1_000);
+
+    for node in &mut cycle_a.nodes {
+        if let GraphNode::MuxSession(mux) = node {
+            mux.activity_epoch = Some(5_000);
+            mux.last_attached_epoch = Some(5_000);
+        }
+    }
+    for node in &mut cycle_b.nodes {
+        if let GraphNode::MuxSession(mux) = node {
+            mux.activity_epoch = Some(9_000);
+            mux.last_attached_epoch = Some(9_000);
+        }
+    }
+
+    assert_eq!(
+        mux_or_harness_slice_fingerprint(&cycle_a),
+        mux_or_harness_slice_fingerprint(&cycle_b),
+        "activity_epoch / last_attached_epoch must not affect the fingerprint"
+    );
+}
+
+#[test]
+fn slice_fingerprint_ignores_agent_last_active_epoch_advances() {
+    // Session file mtime advances whenever an active session
+    // appends a message; the /proc walk output is unaffected by
+    // that so it must not force a re-walk.
+    let mut cycle_a = snapshot_with_mux_session("s1", "s1", 1_000);
+    let mut cycle_b = snapshot_with_mux_session("s1", "s1", 1_000);
+
+    for node in &mut cycle_a.nodes {
+        if let GraphNode::AgentSession(session) = node {
+            session.last_active_epoch = Some(5_000);
+        }
+    }
+    for node in &mut cycle_b.nodes {
+        if let GraphNode::AgentSession(session) = node {
+            session.last_active_epoch = Some(9_999);
+        }
+    }
+
+    assert_eq!(
+        mux_or_harness_slice_fingerprint(&cycle_a),
+        mux_or_harness_slice_fingerprint(&cycle_b),
+        "last_active_epoch must not affect the fingerprint"
+    );
+}
+
+#[test]
+fn slice_fingerprint_differs_when_mux_active_pane_pid_changes() {
+    // active_pane_pid *does* matter — a new pid means a fresh
+    // process to attribute in the walk. Must not be zeroed by
+    // the fingerprint normalizer.
+    let mut cycle_a = snapshot_with_mux_session("s1", "s1", 1_000);
+    let mut cycle_b = cycle_a.clone();
+
+    for node in &mut cycle_a.nodes {
+        if let GraphNode::MuxSession(mux) = node {
+            mux.active_pane_pid = Some(12345);
+        }
+    }
+    for node in &mut cycle_b.nodes {
+        if let GraphNode::MuxSession(mux) = node {
+            mux.active_pane_pid = Some(67890);
+        }
+    }
+
+    assert_ne!(
+        mux_or_harness_slice_fingerprint(&cycle_a),
+        mux_or_harness_slice_fingerprint(&cycle_b),
+        "active_pane_pid change must invalidate the fingerprint"
+    );
+}
+
+#[test]
 fn slice_fingerprint_differs_when_new_session_appears() {
     // Adding a mux session to the slice is a real state change —
     // the walk must fire on the next cycle.
