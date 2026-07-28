@@ -189,3 +189,53 @@ fn empty_prior_produces_empty_gate() {
     assert!(gate.stale.is_empty());
     assert!(gate.always_evict.is_empty());
 }
+
+#[test]
+fn is_mux_or_harness_provider_covers_mux_and_harness_keys_only() {
+    // H-SERVE-PERF-001a: the process-tree refresh decision keys off
+    // whether a mux/harness provider ran. Mux + harness keys are in;
+    // git/forge and the mutator keys themselves are out.
+    for key in [
+        providers::TMUX,
+        providers::ZELLIJ,
+        providers::CLAUDE_CODE,
+        providers::CODEX,
+        providers::OPENCODE,
+        providers::AIDER,
+    ] {
+        assert!(
+            is_mux_or_harness_provider(key),
+            "{key} should be mux/harness"
+        );
+    }
+    for key in [
+        providers::GIT,
+        providers::GITHUB,
+        providers::ATELIER,
+        providers::CROSS_LINK,
+        providers::CODEX_LOG,
+    ] {
+        assert!(
+            !is_mux_or_harness_provider(key),
+            "{key} should not be mux/harness"
+        );
+    }
+}
+
+#[test]
+fn process_tree_mutators_are_a_subset_of_all_mutators() {
+    // The class-gated slice must be a strict subset of the always-run
+    // mutator set (hook_sidecar / declared stay always-run).
+    let all: std::collections::BTreeSet<&str> = MUTATOR_PROVIDERS.iter().copied().collect();
+    for key in PROCESS_TREE_MUTATORS {
+        assert!(all.contains(key), "{key} must be a known mutator");
+    }
+    assert!(
+        !PROCESS_TREE_MUTATORS.contains(&providers::HOOK_SIDECAR),
+        "hook_sidecar reads files, not /proc — stays always-run",
+    );
+    assert!(
+        !PROCESS_TREE_MUTATORS.contains(&providers::DECLARED),
+        "declared reads config, not /proc — stays always-run",
+    );
+}

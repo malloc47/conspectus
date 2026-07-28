@@ -2,8 +2,11 @@
 
 ## Status
 
-Accepted (design); implementation tracked as `H-SERVE-PERF-001`
-follow-ups in `docs/backlog.md`.
+Accepted. The class-gated process-tree mutator (the primary win) is
+implemented in `discover_local_warm_with` / `apply_mutators`
+(`src/discovery/mod.rs`) with the gating helpers in
+`src/discovery/cache.rs`. The config-reuse micro-optimization was
+evaluated and dropped as negligible (see Consequences).
 
 ## Context
 
@@ -124,6 +127,12 @@ not change within a daemon lifetime.
 - `resolve_snapshot` + `publish_snapshot` still run every cycle. That
   cost is left in place for now; the process-tree walk is the larger
   contributor and the lower-risk win.
+- **Config reuse dropped.** `LocalDiscoveryConfig` is *consumed* by
+  `discover_local_warm_with` (it drains the boxed mux/forge backends),
+  so it must be rebuilt each call regardless; and `from_env()` only
+  reads env vars and constructs cheap structs (no I/O). Caching a
+  consumed value is awkward for negligible gain, so this
+  micro-optimization was not pursued.
 
 ## Alternatives Considered
 

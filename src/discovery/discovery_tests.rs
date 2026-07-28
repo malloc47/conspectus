@@ -356,6 +356,86 @@ fn discover_local_warm_with_evicts_stale_slice_and_re_runs_cold() {
 }
 
 #[test]
+fn warm_start_preserves_process_tree_links_on_a_git_only_cycle() {
+    // H-SERVE-PERF-001a (ADR 0091): the process-tree pass is
+    // class-gated. When no mux/harness provider runs this cycle (the
+    // empty config runs nothing, standing in for a git/forge-only
+    // tick), the prior cross_link agent↔mux link must survive without
+    // a fresh `/proc` walk re-deriving it — otherwise agent↔pane
+    // links would flicker out between mux/harness ticks.
+    use crate::config::ServerIntervals;
+    use crate::model::SourceMetadata;
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let now = current_epoch();
+
+    let agent_id = AgentSessionId::new("codex", "global", "s1");
+    let mux_id = MuxSessionId::new("tmux:s1");
+    let agent_node = NodeId::AgentSession(agent_id.clone());
+    let mux_node = NodeId::MuxSession(mux_id.clone());
+
+    let mut prior = GraphSnapshot::empty();
+    prior
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            agent_id,
+            "codex".to_string(),
+        )));
+    prior.nodes.push(GraphNode::MuxSession(MuxSessionNode::new(
+        mux_id,
+        "tmux".to_string(),
+        "s1".to_string(),
+    )));
+    // Mux + harness slices are fresh so a warm cycle would skip them.
+    prior.node_provenance.insert(
+        agent_node.clone(),
+        NodeProvenance {
+            provider: "codex".to_string(),
+            freshness_epoch: Some(now),
+        },
+    );
+    prior.node_provenance.insert(
+        mux_node.clone(),
+        NodeProvenance {
+            provider: "tmux".to_string(),
+            freshness_epoch: Some(now),
+        },
+    );
+
+    // The cross_link agent↔mux link the process-tree pass produced on
+    // a prior cycle, stamped fresh.
+    let mut link = GraphLink::new(
+        "cross-link-s1",
+        agent_node,
+        LinkEndpoint::Node { id: mux_node },
+        RelationKind::LinkedToMux,
+        Provenance::StrongDiscovered,
+    );
+    link.source_metadata = SourceMetadata {
+        adapter: crate::discovery::providers::CROSS_LINK.to_string(),
+        freshness_epoch: Some(now),
+        ..SourceMetadata::default()
+    };
+    prior.candidate_links.push(link);
+
+    let snapshot = discover_local_warm_with(
+        [temp.path()],
+        LocalDiscoveryConfig::empty(),
+        prior,
+        &ServerIntervals::default(),
+    )
+    .expect("warm-start discovery");
+
+    assert!(
+        snapshot
+            .candidate_links
+            .iter()
+            .any(|l| l.id == "cross-link-s1"),
+        "prior cross_link link should survive a cycle where mux/harness did not run",
+    );
+}
+
+#[test]
 fn context_rejects_missing_scan_roots() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let missing = temp.path().join("missing");

@@ -351,7 +351,18 @@ pub fn discover_local_warm_with(
     let now = current_epoch();
     let gate = cache::compute_freshness_gate(&prior, intervals, now);
     let mut prior = prior;
+    // H-SERVE-PERF-001a (ADR 0091): defer eviction of the process-tree
+    // mutator slices. Whether they re-run depends on whether the mux
+    // or harness heavy providers actually ran this cycle, which we
+    // only know after discovery below. On a git/forge-only cycle we
+    // keep the prior agent↔pane links instead of paying a fresh
+    // `/proc` walk. Every other stale/always-evict key evicts now.
+    let deferred: std::collections::BTreeSet<&str> =
+        cache::PROCESS_TREE_MUTATORS.iter().copied().collect();
     for key in gate.keys_to_evict() {
+        if deferred.contains(key.as_str()) {
+            continue;
+        }
         prior.evict_provider(&key);
     }
 
@@ -440,13 +451,37 @@ pub fn discover_local_warm_with(
     let cwd_git_fragment = observed_cwd_git_fragment(&fresh);
     fresh = merge_fragments([GraphFragment::from(fresh), cwd_git_fragment]);
 
+    // H-SERVE-PERF-001a: did the mux or harness heavy providers
+    // actually run this cycle? Their provenance in the freshly-run
+    // result (which excludes fresh-skipped providers and the prior
+    // backstop) is the robust signal — disabled providers stamp
+    // nothing, a git-only cycle stamps only git provenance, and a
+    // mux/harness cycle stamps mux/harness provenance. When they ran,
+    // the process-tree pass refreshes; otherwise it's skipped and the
+    // prior links carry through.
+    let run_process_tree = fresh
+        .node_provenance
+        .values()
+        .any(|prov| cache::is_mux_or_harness_provider(prov.provider.as_str()));
+
     // Phase-2 backstop merge with the evicted prior. The fresh
     // fragment wins on every collision; the prior fills in
     // slices the live run did not emit (the providers we
     // skipped because they were fresh).
     let mut snapshot = merge_with_prior(fresh, prior);
 
-    apply_mutators(&mut snapshot, &config, &context);
+    // When the process-tree pass refreshes, drop the deferred prior
+    // slices so the mutator re-stamps a clean, current contribution
+    // (matching the pre-H-SERVE-PERF-001a always-evict behavior for
+    // these keys). When it's skipped, the prior slices stay in the
+    // merged snapshot untouched.
+    if run_process_tree {
+        for key in cache::PROCESS_TREE_MUTATORS {
+            snapshot.evict_provider(key);
+        }
+    }
+
+    apply_mutators(&mut snapshot, &config, &context, run_process_tree);
     Ok(snapshot)
 }
 
@@ -464,36 +499,45 @@ fn apply_mutators(
     snapshot: &mut GraphSnapshot,
     config: &LocalDiscoveryConfig,
     context: &DiscoveryContext,
+    run_process_tree: bool,
 ) {
-    let harness_pids_per_mux = if config.process_tree_enabled {
-        cross_link::infer(snapshot);
-        cross_link::active_harness_pids_per_mux(snapshot, &cross_link::LinuxProcSnapshot)
-    } else {
-        cross_link::infer_without_process_tree(snapshot);
-        std::collections::BTreeMap::new()
-    };
-    // H-EXT-007: iterate registered adapters and let each one
-    // apply its aux-attribution pass (opt-in via trait override
-    // + state root configured + not in disabled_aux_harnesses).
-    // The pre-H-EXT-007 hardcoded codex-log branch now lives on
-    // `CodexAdapter::apply_aux_attribution`.
-    let now_epoch = codex_log::current_epoch();
-    for adapter in harness::registered_adapters() {
-        if config
-            .disabled_aux_harnesses
-            .contains(adapter.harness_key())
-        {
-            continue;
+    // H-SERVE-PERF-001a (ADR 0091): the cross-link inference and the
+    // pid-fed harness aux attribution are the expensive `/proc`-walking
+    // passes. Run them only when the mux or harness slice re-ran this
+    // cycle; on a git/forge-only cycle the caller preserved the prior
+    // cross_link/codex_log slices in the merged snapshot, so skipping
+    // here keeps agent↔pane links visible without a fresh walk.
+    if run_process_tree {
+        let harness_pids_per_mux = if config.process_tree_enabled {
+            cross_link::infer(snapshot);
+            cross_link::active_harness_pids_per_mux(snapshot, &cross_link::LinuxProcSnapshot)
+        } else {
+            cross_link::infer_without_process_tree(snapshot);
+            std::collections::BTreeMap::new()
+        };
+        // H-EXT-007: iterate registered adapters and let each one
+        // apply its aux-attribution pass (opt-in via trait override
+        // + state root configured + not in disabled_aux_harnesses).
+        // The pre-H-EXT-007 hardcoded codex-log branch now lives on
+        // `CodexAdapter::apply_aux_attribution`.
+        let now_epoch = codex_log::current_epoch();
+        for adapter in harness::registered_adapters() {
+            if config
+                .disabled_aux_harnesses
+                .contains(adapter.harness_key())
+            {
+                continue;
+            }
+            let Some(state_root) = config.harness_state_roots.get(adapter.harness_key()) else {
+                continue;
+            };
+            let ctx = harness::AuxAttributionContext {
+                state_root,
+                harness_pids_per_mux: &harness_pids_per_mux,
+                now_epoch,
+            };
+            adapter.apply_aux_attribution(snapshot, &ctx);
         }
-        let Some(state_root) = config.harness_state_roots.get(adapter.harness_key()) else {
-            continue;
-        };
-        let ctx = harness::AuxAttributionContext {
-            state_root,
-            harness_pids_per_mux: &harness_pids_per_mux,
-            now_epoch,
-        };
-        adapter.apply_aux_attribution(snapshot, &ctx);
     }
     if let Some(root) = &config.hook_sidecar_root {
         hook_sidecar::apply_hook_sidecars(snapshot, root, hook_sidecar::current_epoch());

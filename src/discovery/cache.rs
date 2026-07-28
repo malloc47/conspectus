@@ -157,6 +157,28 @@ pub const MUTATOR_PROVIDERS: &[&str] = &[
     providers::DECLARED,
 ];
 
+/// Mutator passes whose expensive work is the process-tree `/proc`
+/// walk and the pid-fed harness aux attribution (H-SERVE-PERF-001a,
+/// ADR 0091). Unlike the other mutators these are **class-gated**:
+/// they only re-run when the mux or harness slice re-ran this cycle,
+/// and their prior contribution is preserved (not evicted) on
+/// git/forge-only cycles so agent↔pane links survive without a fresh
+/// `/proc` walk. `cross_link` produces the agent↔mux links;
+/// `codex_log` is the pid-fed aux attribution. `hook_sidecar` and
+/// `declared` stay always-rerun (cheap file reads, no `/proc`).
+pub const PROCESS_TREE_MUTATORS: &[&str] = &[providers::CROSS_LINK, providers::CODEX_LOG];
+
+/// Whether `provider` belongs to the mux or harness interval class —
+/// the two classes whose re-run feeds the process-tree mutators
+/// (H-SERVE-PERF-001a). Used to decide, from the freshly-run
+/// providers' provenance, whether to refresh the process-tree pass.
+pub fn is_mux_or_harness_provider(provider: &str) -> bool {
+    matches!(
+        provider_class(provider),
+        Some(ProviderClass::Mux | ProviderClass::Harness)
+    )
+}
+
 /// Decision produced by [`compute_freshness_gate`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FreshnessGate {

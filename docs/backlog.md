@@ -13531,7 +13531,7 @@ approach (not raw implementation size). Worked top-to-bottom.
     (menu-first), persisted in `tui-state.json`, and defaulting to
     Activity (the prior behavior). Pane-process start time was surveyed
     and dropped (Linux-only, extra syscalls, ~duplicates activity).
-- [ ] `H-SERVE-PERF-001` Debug `conspectus serve` resource usage.
+- [x] `H-SERVE-PERF-001` Debug `conspectus serve` resource usage.
   - Scope: the `serve` daemon (ADR 0038 / ADR 0079,
     `src/server/mod.rs`) consumes a nontrivial amount of CPU/memory at
     idle. Profile a running instance to attribute cost across the
@@ -13553,19 +13553,22 @@ approach (not raw implementation size). Worked top-to-bottom.
     cycle). Minor: `LocalDiscoveryConfig::from_env()` rebuilt per tick;
     200ms shutdown-poll floor (negligible).
   - Decision: chose the deep fix (class-gated mutators, ADR 0091).
-    Implementation remaining (follow-ups):
-    - [ ] `H-SERVE-PERF-001a` Class-gate the process-tree mutator: run
-      the `/proc` walk only when the mux or harness slice re-ran this
-      cycle; move its contribution out of the always-evict mutator
-      bucket into a slice evicted only on mux/harness re-run so prior
-      agent↔pane links survive git/forge-only cycles. Pure gating
-      helper is unit-testable; land with tests for git-only-preserves,
-      mux/harness-recomputes, and proctree-disabled paths.
-    - [ ] `H-SERVE-PERF-001b` Reuse a cached `LocalDiscoveryConfig`
-      across cycles instead of `from_env()` per tick.
-    - Deferred here rather than rushed onto `main`: the gate change
-      touches a core discovery path (ADR 0079) and wants validation
-      against a running daemon, so it lands as its own reviewed change.
+    Implementation (landed):
+    - [x] `H-SERVE-PERF-001a` Class-gate the process-tree mutator:
+      `discover_local_warm_with` defers eviction of the
+      `PROCESS_TREE_MUTATORS` slice (`cross_link`, `codex_log`),
+      derives `run_process_tree` from whether any mux/harness provider
+      actually stamped provenance this cycle, and only then evicts +
+      re-runs the `/proc`-walking cross-link + aux block in
+      `apply_mutators`. On git/forge-only cycles the prior agent↔pane
+      links carry through untouched. Covered by
+      `warm_start_preserves_process_tree_links_on_a_git_only_cycle`
+      plus `cache::` unit tests; the existing full-discovery tests
+      cover the recompute path.
+    - [~] `H-SERVE-PERF-001b` Dropped: `LocalDiscoveryConfig` is
+      consumed per call (drains boxed backends) and `from_env()` is
+      env-reads only — caching a consumed value is awkward for
+      negligible gain. See ADR 0091 Consequences.
 - [ ] `H-WT-001` Integrate first-class worktree management with pluggable
   backends.
   - Scope: product design for creating / listing / removing git
