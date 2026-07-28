@@ -395,23 +395,28 @@ fn seeded_app_with_harness_chips() -> App {
 
 #[test]
 fn left_panel_title_renders_a_view_tab_strip() {
-    // Phase 11: the left pane title lists every view as a tab
-    // strip (sessions · mux · union · prs · forks) with the
-    // active one accented. Operators see the available views at
-    // a glance instead of having to remember the 1–5
-    // accelerators.
+    // The left pane title lists the surfaced views as a tab strip
+    // with the active one accented. After H-VIEW-001 only Sessions
+    // and Mux are surfaced (Union/PRs/Forks are hidden), so the
+    // strip carries exactly those two.
     let mut app = seeded_app();
     let area = Rect::new(0, 0, 160, 24);
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);
     let title_line = text
         .lines()
-        .find(|l| l.contains("union") && l.contains("forks"))
+        .find(|l| l.contains("sessions") && l.contains("mux"))
         .expect("left pane tab strip line present");
-    for label in ["sessions", "mux", "union", "prs", "forks"] {
+    for label in ["sessions", "mux"] {
         assert!(
             title_line.contains(label),
             "tab strip missing `{label}`: {title_line}",
+        );
+    }
+    for label in ["union", "prs", "forks"] {
+        assert!(
+            !title_line.contains(label),
+            "tab strip should not list hidden view `{label}`: {title_line}",
         );
     }
 }
@@ -2083,7 +2088,7 @@ fn header_shows_updated_ns_ago_when_clock_is_ahead_of_load_epoch() {
 fn narrow_terminal_stacks_the_two_panels_vertically() {
     let mut app = seeded_app();
     app.update(Msg::NavDown);
-    // Width 60 is below NARROW_LAYOUT_THRESHOLD.
+    // Width 60 is below the default narrow_layout_threshold (100).
     let area = Rect::new(0, 0, 60, 30);
     let buffer = render_to_buffer(&mut app, area);
     let text = buffer_to_string(&buffer);

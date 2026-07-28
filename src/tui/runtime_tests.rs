@@ -620,18 +620,22 @@ fn translate_ctrl_g_cycles_grouping() {
 
 #[test]
 fn translate_digits_switch_views_directly() {
-    let cases = [
-        ('1', View::Sessions),
-        ('2', View::Mux),
-        ('3', View::Union),
-        ('4', View::Prs),
-        ('5', View::Forks),
-    ];
+    // Only Sessions/Mux are surfaced in the UI (H-VIEW-001); the
+    // `3`/`4`/`5` accelerators for the hidden Union/PRs/Forks views
+    // were removed and now translate to no action.
+    let cases = [('1', View::Sessions), ('2', View::Mux)];
     for (ch, view) in cases {
         assert_eq!(
             translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
             Some(Action::SwitchView(view)),
             "char {ch}"
+        );
+    }
+    for ch in ['3', '4', '5'] {
+        assert_eq!(
+            translate(press(KeyCode::Char(ch), KeyModifiers::NONE), 24),
+            None,
+            "hidden view char {ch}"
         );
     }
 }
@@ -650,11 +654,12 @@ fn translate_brackets_cycle_views() {
 
 #[test]
 fn cycle_view_wraps_in_both_directions() {
-    assert_eq!(cycle_view(View::Sessions, -1), View::Forks);
-    assert_eq!(cycle_view(View::Forks, 1), View::Sessions);
-    assert_eq!(cycle_view(View::Prs, 1), View::Forks);
-    assert_eq!(cycle_view(View::Mux, 1), View::Union);
-    assert_eq!(cycle_view(View::Union, -1), View::Mux);
+    // VIEW_OPTIONS is trimmed to [Sessions, Mux] (H-VIEW-001), so the
+    // cycle wraps between just those two.
+    assert_eq!(cycle_view(View::Sessions, -1), View::Mux);
+    assert_eq!(cycle_view(View::Mux, 1), View::Sessions);
+    assert_eq!(cycle_view(View::Sessions, 1), View::Mux);
+    assert_eq!(cycle_view(View::Mux, -1), View::Sessions);
 }
 
 #[test]

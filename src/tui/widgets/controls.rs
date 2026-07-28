@@ -57,13 +57,15 @@ pub const MUX_STATE_OPTIONS: &[MuxStateKey] = &[
 ];
 
 /// All views displayed in the View section, in stable order.
-pub const VIEW_OPTIONS: &[View] = &[
-    View::Sessions,
-    View::Mux,
-    View::Union,
-    View::Prs,
-    View::Forks,
-];
+///
+/// Union / PRs / Forks are intentionally omitted (H-VIEW-001): they
+/// were causing confusion and are hidden from the interactive UI until
+/// they mature. This constant is the single source of truth for the
+/// controls-overlay View section, the left-pane tab strip, and the
+/// `[` / `]` view-cycle accelerator, so trimming it here hides those
+/// views everywhere without touching the `View` enum or the
+/// `conspectus table union|prs|forks` CLI projections.
+pub const VIEW_OPTIONS: &[View] = &[View::Sessions, View::Mux];
 
 /// Sort options surfaced in the Sort section, in stable order.
 pub const SORT_OPTIONS: &[Sort] = &[Sort::Hierarchy, Sort::Recency];
