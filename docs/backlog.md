@@ -13449,6 +13449,104 @@ surfaces all read from one definition.
     consistent glyph placement.
   - Blockers: `H-VIS-003`, `H-VIS-004`, `H-VIS-005`.
 
+## Operator Requests 2026-07-27
+
+A batch of operator-requested items, listed easiest → hardest where
+"harder" means more product direction is needed to scope and set the
+approach (not raw implementation size). Worked top-to-bottom.
+
+- [ ] `H-VIEW-001` Drop the Union view and hide the PRs and Forks views
+  from the TUI.
+  - Scope: `VIEW_OPTIONS` (`src/tui/widgets/controls.rs`) is the single
+    source of truth for both the controls-overlay View section and the
+    `[` / `]` view-cycle accelerator. Reduce it to `[Sessions, Mux]` so
+    Union / PRs / Forks no longer surface in the interactive UI, which
+    was causing confusion. Keep the `View` enum, per-view config slices,
+    row builders, and the `conspectus table union|prs|forks` CLI
+    projections intact — this is a UI-surface hide, not a model
+    removal, so the work is reversible when those views mature.
+  - Tests: update the controls-overlay renderer snapshots and the
+    view-cycle tests to the shortened option set; confirm no default
+    view/grouping resolves to a now-hidden view.
+  - Blockers: none.
+- [ ] `H-LAYOUT-001` Make the column-reflow (narrow → stacked) threshold
+  configurable.
+  - Scope: `NARROW_LAYOUT_THRESHOLD` (`src/tui/ui.rs:56`, hard-coded
+    `100`) governs when `draw_body` switches the side-by-side left/right
+    panes to a vertical stack; `src/tui/snapshot.rs` reads the same
+    constant. Add a `[tui] narrow_layout_threshold` (columns) config key
+    with the current `100` as the default, thread it through `App` state
+    the way `theme` / `show_harness_chips` already flow, and have both
+    `draw_body` and the snapshot path read the resolved value.
+  - Tests: config merge test for the new key (default, override,
+    malformed → diagnostic); a `draw_body`/snapshot test proving the
+    split direction flips at the configured width.
+  - Blockers: none.
+- [ ] `H-PIN-ROOT-001` Surface pins registered in repos outside the
+  active search root.
+  - Scope: `local_pin_store_paths` (`src/discovery/pins.rs:80`) only
+    locates `.conspectus.toml` pin stores by walking up from
+    `context.roots()` and from cwds of already-discovered nodes. A pin
+    created in a repo that is neither a scan root nor referenced by any
+    discovered session/mux node is never re-read, so it disappears on
+    the next discovery cycle. Decide and implement how such pins stay
+    visible — candidate approaches: (a) remember pin store paths seen in
+    a prior snapshot / persisted sidecar, (b) treat a pin's own `cwd` as
+    an additional project-config search root once known, (c) an explicit
+    user-config registry of pin store locations. Preserve ADR 0087
+    read-only / write-envelope guarantees.
+  - Tests: discovery test where a pin store lives outside every scan
+    root and outside all node cwds and still loads; regression that
+    in-root pins are unaffected.
+  - Blockers: needs a direction decision among (a)/(b)/(c); likely a
+    short ADR.
+- [ ] `H-MUX-SORT-001` Add better recency sort options for the mux view.
+  - Scope: the mux view currently sorts by the shared `Sort::Recency`
+    signal. Enumerate the recency signals tmux exposes per session
+    (`session_created`, `session_activity`, `session_last_attached`,
+    and the active pane's process start time via the pane PID) and,
+    where a signal is reliably available, expose it as a selectable mux
+    sort option. Fold the chosen signal(s) into the `MuxSessionRow`
+    model and the sort/controls surface. Fall back gracefully when a
+    signal is missing.
+  - Tests: parser tests for the added `tmux` format fields; sort tests
+    over fixtures exercising each signal and the missing-signal
+    fallback.
+  - Blockers: depends on which signals survive the tmux capability
+    survey (part of the story) and an operator call on which become
+    selectable options.
+- [ ] `H-SERVE-PERF-001` Debug `conspectus serve` resource usage.
+  - Scope: the `serve` daemon (ADR 0038 / ADR 0079,
+    `src/server/mod.rs`) consumes a nontrivial amount of CPU/memory at
+    idle. Profile a running instance to attribute cost across the
+    per-class refresh loops (harness=5s, mux=5s, git=30s, forge=5m),
+    subprocess spawns (`tmux`, `git`, `gh`), snapshot allocation, and
+    any busy-wait in the event loop. Produce a findings note, then land
+    the low-risk wins (e.g. coalescing spawns, widening default
+    intervals, avoiding full re-scans when inputs are unchanged) behind
+    the existing config knobs.
+  - Tests: whatever the diagnosis warrants — a spawn-count assertion, an
+    idle-tick allocation check, or interval-driven scheduling tests.
+  - Blockers: diagnosis first; fix direction depends on findings.
+- [ ] `H-WT-001` Integrate first-class worktree management with pluggable
+  backends.
+  - Scope: product design for creating / listing / removing git
+    worktrees from Conspectus with a pluggable backend seam targeting
+    `worktrunk` (https://github.com/max-sixty/worktrunk) as the rich
+    backend and a thin built-in `git worktree` wrapper as the always-
+    available fallback. Must fit the graph model (worktrees as
+    checkouts and their fork/branch provenance), the ADR 0087 mutation
+    envelope (worktree create/remove is git-state mutation — the design
+    has to reconcile this with the "never mutates git state" guardrail,
+    likely via a new sanctioned category or an explicit
+    operator-initiated exception), and the existing checkout-context
+    model. Deliverable is a design section in `docs/design.md` plus one
+    or more ADRs (backend seam, mutation-envelope amendment) before any
+    implementation stories are split out.
+  - Tests: design-phase; none until implementation stories land.
+  - Blockers: the ADR 0087 mutation-envelope reconciliation is the key
+    open decision and needs operator direction.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
