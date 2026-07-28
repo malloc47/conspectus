@@ -13544,6 +13544,28 @@ approach (not raw implementation size). Worked top-to-bottom.
   - Tests: whatever the diagnosis warrants — a spawn-count assertion, an
     idle-tick allocation check, or interval-driven scheduling tests.
   - Blockers: diagnosis first; fix direction depends on findings.
+  - Diagnosis (done): recorded in ADR 0091. Dominant idle cost is the
+    process-tree `/proc` walk (`cross_link::active_harness_pids_per_mux`)
+    which `apply_mutators` runs on *every* discovery cycle, so it fires
+    ~every 2.5s (harness+mux staggered). Secondary: full re-resolve +
+    `graph.bin` re-serialize/write every cycle (a byte-level publish
+    skip does NOT help — `node_provenance.freshness_epoch` churns each
+    cycle). Minor: `LocalDiscoveryConfig::from_env()` rebuilt per tick;
+    200ms shutdown-poll floor (negligible).
+  - Decision: chose the deep fix (class-gated mutators, ADR 0091).
+    Implementation remaining (follow-ups):
+    - [ ] `H-SERVE-PERF-001a` Class-gate the process-tree mutator: run
+      the `/proc` walk only when the mux or harness slice re-ran this
+      cycle; move its contribution out of the always-evict mutator
+      bucket into a slice evicted only on mux/harness re-run so prior
+      agent↔pane links survive git/forge-only cycles. Pure gating
+      helper is unit-testable; land with tests for git-only-preserves,
+      mux/harness-recomputes, and proctree-disabled paths.
+    - [ ] `H-SERVE-PERF-001b` Reuse a cached `LocalDiscoveryConfig`
+      across cycles instead of `from_env()` per tick.
+    - Deferred here rather than rushed onto `main`: the gate change
+      touches a core discovery path (ADR 0079) and wants validation
+      against a running daemon, so it lands as its own reviewed change.
 - [ ] `H-WT-001` Integrate first-class worktree management with pluggable
   backends.
   - Scope: product design for creating / listing / removing git
@@ -13562,6 +13584,25 @@ approach (not raw implementation size). Worked top-to-bottom.
   - Tests: design-phase; none until implementation stories land.
   - Blockers: the ADR 0087 mutation-envelope reconciliation is the key
     open decision and needs operator direction.
+  - Outcome (design done): operator chose "delegate mutation to external
+    tools." Recorded as ADR 0092 and a `## Worktree Management` section
+    in `docs/design.md`. Key decisions: worktrees are `Checkout` nodes
+    (no new node type); a `WorktreeBackend` seam splits read-only `list`
+    (always available, built-in thin `git` backend via `git worktree
+    list --porcelain`) from delegated `create`/`remove` (external
+    `worktrunk`, invoked as an ADR 0087 category-4 subprocess launch).
+    ADR 0087 prohibition 6 (never mutate git state) stays unchanged —
+    Conspectus never runs `git worktree add/remove` itself.
+    Implementation stories (follow-ups):
+    - [ ] `H-WT-002` `WorktreeBackend` trait + registry + thin `git`
+      read/list backend; fold worktree records into `Checkout`
+      discovery with linked-vs-primary + branch metadata.
+    - [ ] `H-WT-003` `worktrunk` backend (create/list/remove) behind
+      `PATH` autodetection + `[worktree] backend` config; argv mapping
+      per worktrunk's CLI.
+    - [ ] `H-WT-004` `conspectus worktree list/new/rm` CLI + menu-first
+      TUI actions gated on a mutation-capable backend; refuse removal
+      of a worktree hosting a live session.
 
 ## Later
 

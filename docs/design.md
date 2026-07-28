@@ -617,6 +617,44 @@ launch, multi-harness pins, pre-launch hooks, env overrides,
 atelier-fork auto-suggestion). ADR 0058 records the continuity
 sidecar and per-harness `resume_argv` story.
 
+## Worktree Management
+
+Operators running several agents against one repo lean on git
+worktrees — one linked working tree per branch / task / agent. A
+worktree is not a new entity: it is a `Checkout` (the concrete
+editable working tree of a repo, ADR 0026), distinguished from a plain
+clone by source metadata (linked vs primary, the branch it checks out,
+locked/prunable status). Discovery already surfaces linked worktrees
+as checkouts; management adds create / list / remove on top.
+
+Management flows through a **pluggable worktree backend seam**
+(ADR 0092) with a strict read/mutate split:
+
+- **`list` is read-only and always available.** Every backend
+  enumerates a repo's worktrees; the built-in thin `git` backend does
+  this via `git worktree list --porcelain` (a read command).
+- **`create` / `remove` are mutation and delegated.** Conspectus
+  never runs `git worktree add/remove` itself — ADR 0087 prohibition 6
+  (never mutate git state) stays absolute. Instead, mutation-capable
+  backends are external dedicated tools; the v1 rich backend is
+  [`worktrunk`](https://github.com/max-sixty/worktrunk), which
+  Conspectus invokes as a Conspectus-owned subprocess launch
+  (ADR 0087 category 4). The built-in `git` backend deliberately stops
+  at read/list.
+
+Backend selection mirrors the mux-backend / forge-adapter registries
+(ADR 0089): a `[worktree] backend` config key plus `PATH`
+autodetection of `worktrunk`. When no mutation-capable backend is
+configured, create/remove are hidden (TUI) or error with a clear
+message (CLI) rather than falling back to raw git. CLI surface:
+`conspectus worktree list` (read) and `worktree new` / `rm`
+(delegated). TUI create/remove are operator-initiated, menu-first, and
+available only when a mutation backend is present. ADR 0092 records the
+seam, the envelope placement (prohibition 6 unchanged), the
+`Checkout`-not-new-node modeling decision, and the deferred questions
+(worktrunk argv mapping, refusing removal of a worktree hosting a live
+session).
+
 ## Status Views
 
 The default `conspectus session` table should be AgentSession-oriented: one row
