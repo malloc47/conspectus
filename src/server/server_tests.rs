@@ -130,3 +130,95 @@ fn mux_session(native_id: &str) -> GraphNode {
         .with_client_attached(true),
     )
 }
+
+#[test]
+fn min_cycle_gap_clamps_short_and_long_intervals_into_the_floor_ceiling_band() {
+    // Short intervals collapse to the 250ms floor so a
+    // hypothetical sub-second class stays responsive to a
+    // watcher wake without a giant throttle.
+    assert_eq!(
+        min_cycle_gap(Duration::from_millis(500)),
+        Duration::from_millis(250)
+    );
+    // Standard harness/mux interval (5s) picks up the quartered
+    // value (1.25s) unchanged — inside the band.
+    assert_eq!(
+        min_cycle_gap(Duration::from_secs(5)),
+        Duration::from_millis(1250)
+    );
+    // Long intervals (git = 30s, forge = 5m) saturate at the
+    // 2s ceiling so a rare wake still runs promptly rather
+    // than sitting on a multi-second throttle.
+    assert_eq!(
+        min_cycle_gap(Duration::from_secs(30)),
+        Duration::from_secs(2)
+    );
+    assert_eq!(
+        min_cycle_gap(Duration::from_secs(300)),
+        Duration::from_secs(2)
+    );
+}
+
+#[test]
+fn throttle_since_returns_immediately_once_the_gap_has_elapsed() {
+    // The cycle already ran long enough ago that no throttle
+    // is needed; the helper must not sleep. A generous window
+    // (100ms) keeps the assertion stable on a loaded CI box.
+    let shutdown = AtomicBool::new(false);
+    let last_end = Instant::now() - Duration::from_secs(5);
+    let before = Instant::now();
+    let broke = throttle_since(last_end, Duration::from_millis(500), &shutdown);
+    let waited = before.elapsed();
+    assert!(!broke, "no shutdown → returns false");
+    assert!(
+        waited < Duration::from_millis(100),
+        "expected no sleep, waited {waited:?}"
+    );
+}
+
+#[test]
+fn throttle_since_sleeps_the_remaining_gap_when_the_last_cycle_was_recent() {
+    // A very-recent cycle should force the caller to wait
+    // roughly `min_gap` before the next watcher wait.
+    let shutdown = AtomicBool::new(false);
+    let last_end = Instant::now();
+    let min_gap = Duration::from_millis(300);
+    let before = Instant::now();
+    let broke = throttle_since(last_end, min_gap, &shutdown);
+    let waited = before.elapsed();
+    assert!(!broke);
+    assert!(
+        waited >= min_gap - Duration::from_millis(50),
+        "expected ≥{min_gap:?} sleep, waited {waited:?}"
+    );
+    assert!(
+        waited < min_gap + Duration::from_millis(400),
+        "sleep should be bounded by min_gap + one poll window, waited {waited:?}"
+    );
+}
+
+#[test]
+fn throttle_since_returns_early_when_shutdown_flips_mid_wait() {
+    // A Ctrl-C mid-throttle should surface as `true` (break
+    // the caller's loop) within the 200ms poll granularity —
+    // not sit on the full remaining gap.
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let last_end = Instant::now();
+    let min_gap = Duration::from_secs(3);
+    let flipper = {
+        let shutdown = Arc::clone(&shutdown);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            shutdown.store(true, Ordering::Relaxed);
+        })
+    };
+    let before = Instant::now();
+    let broke = throttle_since(last_end, min_gap, &shutdown);
+    let waited = before.elapsed();
+    flipper.join().expect("flipper thread joins");
+    assert!(broke, "shutdown mid-throttle must return true");
+    assert!(
+        waited < Duration::from_millis(600),
+        "expected early return well before {min_gap:?}, waited {waited:?}"
+    );
+}

@@ -1204,6 +1204,13 @@ fn register_shutdown_signals(shutdown: &Arc<AtomicBool>) -> Result<()> {
 /// latch is polled between cycles and at every chunk of the
 /// inter-tick sleep so a Ctrl-C does not have to wait up to a
 /// full forge interval (5 minutes) to be observed.
+///
+/// A per-class minimum-cycle-gap floor throttles watcher-driven
+/// re-runs so a noisy source (e.g. Codex's SQLite `-wal`/`-shm`
+/// files churning under `~/.codex/`) can't push the loop into
+/// `wait → run_cycle → wait → run_cycle` at kilohertz cadence.
+/// The floor is [`min_cycle_gap`] of the class interval; the
+/// first `Changed` after a quiet stretch still fires immediately.
 #[allow(clippy::too_many_arguments)]
 fn class_loop(
     class: ProviderClass,
@@ -1217,10 +1224,12 @@ fn class_loop(
     shutdown: &AtomicBool,
 ) {
     let interval = class.ttl_duration(intervals);
+    let min_gap = min_cycle_gap(interval);
     eprintln!(
-        "conspectus serve: {} scheduler started; interval = {:?}",
+        "conspectus serve: {} scheduler started; interval = {:?}, min cycle gap = {:?}",
         class.name(),
-        interval
+        interval,
+        min_gap,
     );
     run_cycle(
         class,
@@ -1231,7 +1240,11 @@ fn class_loop(
         snapshot_bytes,
         snapshot_state,
     );
+    let mut last_cycle_end = Instant::now();
     while !shutdown.load(Ordering::Relaxed) {
+        if throttle_since(last_cycle_end, min_gap, shutdown) {
+            break;
+        }
         match wait_for_class_signal(watcher.as_mut(), interval, shutdown) {
             WatcherEvent::ShuttingDown => break,
             // Both Changed and Timeout trigger a cycle. The
@@ -1251,6 +1264,7 @@ fn class_loop(
                     snapshot_bytes,
                     snapshot_state,
                 );
+                last_cycle_end = Instant::now();
             }
         }
     }
@@ -1258,6 +1272,44 @@ fn class_loop(
         "conspectus serve: {} scheduler stopping after shutdown signal",
         class.name()
     );
+}
+
+/// Minimum time to wait between the end of one `run_cycle` and
+/// entering the next `wait_for_class_signal`. Prevents a
+/// constantly-firing watcher (Codex's SQLite `-wal`/`-shm`,
+/// hook drops, anything an active AI agent writes into a watched
+/// dir) from turning the class loop into a tight
+/// `wait → run_cycle → wait → run_cycle` spin. The clamp keeps
+/// short-interval classes (harness = 5s) responsive while long-
+/// interval classes (forge = 5m) don't inherit a giant floor.
+pub(crate) fn min_cycle_gap(interval: Duration) -> Duration {
+    const FLOOR: Duration = Duration::from_millis(250);
+    const CEILING: Duration = Duration::from_secs(2);
+    let quartered = interval / 4;
+    quartered.clamp(FLOOR, CEILING)
+}
+
+/// Sleep until at least `min_gap` has elapsed since
+/// `last_cycle_end`, polling `shutdown` on the same 200ms
+/// granularity as [`wait_for_class_signal`] so Ctrl-C latency
+/// stays predictable regardless of the class's throttle floor.
+/// Returns `true` when the shutdown latch flipped mid-throttle
+/// so the caller can break out immediately.
+fn throttle_since(last_cycle_end: Instant, min_gap: Duration, shutdown: &AtomicBool) -> bool {
+    let elapsed = last_cycle_end.elapsed();
+    if elapsed >= min_gap {
+        return false;
+    }
+    let poll = Duration::from_millis(200);
+    let deadline = last_cycle_end + min_gap;
+    while Instant::now() < deadline {
+        if shutdown.load(Ordering::Relaxed) {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining.min(poll));
+    }
+    false
 }
 
 /// Wait up to `interval` for the class's watcher to fire,
