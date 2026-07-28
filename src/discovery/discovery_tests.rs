@@ -833,6 +833,37 @@ fn slice_fingerprint_ignores_agent_last_active_epoch_advances() {
 }
 
 #[test]
+fn slice_fingerprint_ignores_agent_last_message_preview_and_title_churn() {
+    // H-SERVE-PERF-008 follow-up: even with last_active_epoch
+    // zeroed, the fingerprint still churned on any active box
+    // because `last_message_preview` and `title` refresh whenever
+    // an active session appends. Both are display-only — the
+    // /proc walk output is unchanged — so both must be zeroed
+    // on the fingerprint's normalized clone.
+    let mut cycle_a = snapshot_with_mux_session("s1", "s1", 1_000);
+    let mut cycle_b = snapshot_with_mux_session("s1", "s1", 1_000);
+
+    for node in &mut cycle_a.nodes {
+        if let GraphNode::AgentSession(session) = node {
+            session.last_message_preview = Some("first preview".to_string());
+            session.title = Some("first title".to_string());
+        }
+    }
+    for node in &mut cycle_b.nodes {
+        if let GraphNode::AgentSession(session) = node {
+            session.last_message_preview = Some("SECOND preview".to_string());
+            session.title = Some("updated title".to_string());
+        }
+    }
+
+    assert_eq!(
+        mux_or_harness_slice_fingerprint(&cycle_a),
+        mux_or_harness_slice_fingerprint(&cycle_b),
+        "last_message_preview and title must not affect the fingerprint"
+    );
+}
+
+#[test]
 fn slice_fingerprint_differs_when_mux_active_pane_pid_changes() {
     // active_pane_pid *does* matter — a new pid means a fresh
     // process to attribute in the walk. Must not be zeroed by

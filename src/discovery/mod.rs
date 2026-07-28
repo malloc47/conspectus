@@ -605,35 +605,48 @@ fn mux_or_harness_slice_fingerprint(fresh: &GraphSnapshot) -> Option<u64> {
     Some(hasher.finish())
 }
 
-/// Return a clone of `node` with per-cycle timestamp churn zeroed
-/// so the mux/harness slice fingerprint (H-SERVE-PERF-003) doesn't
-/// treat legitimate but /proc-walk-irrelevant activity as a real
-/// content change.
+/// Return a clone of `node` with fields that don't drive the
+/// `/proc` walk output zeroed so the mux/harness slice
+/// fingerprint (H-SERVE-PERF-003 / 008) doesn't fire on
+/// legitimate-but-walk-irrelevant churn.
 ///
-/// Fields excluded from the fingerprint:
+/// The walk's job is to enumerate harness pids per mux via
+/// `cross_link::active_harness_pids_per_mux`. Its inputs are:
 ///
-/// * `MuxSessionNode.activity_epoch` — advances on any tmux pane
-///   activity (typing, output redraw); the /proc walk cares
-///   about *which* pane pids exist, not when they last echoed.
-/// * `MuxSessionNode.last_attached_epoch` — advances when the
-///   operator attaches. Same argument.
-/// * `AgentSessionNode.last_active_epoch` — session file mtime.
-///   Bumps whenever an active session appends a message; the
-///   /proc walk's inputs (session ids, cwd) are unaffected.
+///   * set of mux sessions (identity)
+///   * per mux: `active_pane_pid`, `active_pane_command`,
+///     `active_pane_current_path`, `cwd`, `client_attached`
+///   * set of agent sessions (identity)
 ///
-/// Fields kept: node ids, cwd, active_pane_command,
-/// active_pane_pid, active_pane_current_path, client_attached,
-/// created_epoch (stable per session lifetime), title, harness_key.
-/// A change to any of those legitimately warrants a re-walk.
+/// Nothing else about a session or mux affects the walk's
+/// output. Everything else is zeroed on a clone before
+/// serialization:
+///
+///   * `MuxSessionNode.activity_epoch` — tmux pane keystrokes
+///   * `MuxSessionNode.last_attached_epoch` — operator attach
+///   * `MuxSessionNode.created_epoch` — stable in practice
+///     but not consumed
+///   * `AgentSessionNode.last_active_epoch` — session file mtime
+///   * `AgentSessionNode.last_message_preview` — display-only;
+///     bumps whenever any active session appends a message,
+///     which by itself was defeating the whole gate on live
+///     operator boxes
+///   * `AgentSessionNode.title` — display-only; can update
+///     asynchronously as claude generates summaries
+///   * `AgentSessionNode.cwd` — kept, because
+///     `observed_cwd_git_fragment` reads it
 fn fingerprint_normalized_node(node: &GraphNode) -> GraphNode {
     let mut cloned = node.clone();
     match &mut cloned {
         GraphNode::MuxSession(mux) => {
             mux.activity_epoch = None;
             mux.last_attached_epoch = None;
+            mux.created_epoch = None;
         }
         GraphNode::AgentSession(session) => {
             session.last_active_epoch = None;
+            session.last_message_preview = None;
+            session.title = None;
         }
         _ => {}
     }
