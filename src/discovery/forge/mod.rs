@@ -19,6 +19,8 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -93,15 +95,91 @@ impl ForgeDiscovery {
 
 impl DiscoveryProvider for ForgeDiscovery {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
-        let mut fragments = Vec::with_capacity(self.adapters.len());
+        // H-SERVE-PERF-005: TTL-cache the merged fragment so a
+        // busy class thread doesn't respawn `gh pr list` on every
+        // cycle. `GitHubForgeProvider` returns an empty fragment
+        // when a repo has no PRs (or `gh` is unavailable), and an
+        // empty fragment produces no `github` provenance stamps,
+        // so `compute_freshness_gate` never marks `github` fresh
+        // and every class cycle re-runs the forge coordinator →
+        // one `gh pr list` spawn per cycle per root (0.5-0.8 Hz
+        // on this operator's box). See `CachedForgeFragment` docs
+        // for the fingerprint invariants and why this is the
+        // targeted patch rather than the gate-refactor.
+        let roots: Vec<PathBuf> = context.roots().to_vec();
+        if let Some(cached) = cached_forge_lookup(&roots) {
+            return Ok(cached);
+        }
 
+        let mut fragments = Vec::with_capacity(self.adapters.len());
         for adapter in &self.adapters {
             fragments.push(adapter.discover(context)?);
         }
-
-        Ok(GraphFragment::from(merge_fragments(fragments)))
+        let merged = GraphFragment::from(merge_fragments(fragments));
+        cached_forge_store(roots, &merged);
+        Ok(merged)
     }
 }
+
+/// Time a cached [`ForgeDiscovery`] fragment is considered
+/// fresh. Matches the Forge class TTL default in
+/// `ServerIntervals` (5 minutes) — the gate that would have
+/// already skipped this provider if stamps were present.
+const FORGE_CACHE_TTL: Duration = Duration::from_secs(300);
+
+/// Process-lifetime cache of the [`ForgeDiscovery`] output.
+/// See the `discover` body for the H-SERVE-PERF-005 rationale.
+///
+/// Keyed on the sorted context roots — if scan roots change
+/// (e.g. the operator adds a `--scan-root`) the cache misses and
+/// a fresh forge cycle fires. Otherwise the same result is
+/// returned until [`FORGE_CACHE_TTL`] elapses.
+struct CachedForgeFragment {
+    context_roots: Vec<PathBuf>,
+    cached_at: Instant,
+    fragment: GraphFragment,
+}
+
+static FORGE_CACHE: Mutex<Option<CachedForgeFragment>> = Mutex::new(None);
+
+fn cached_forge_lookup(roots: &[PathBuf]) -> Option<GraphFragment> {
+    let guard = FORGE_CACHE.lock().unwrap();
+    let cached = guard.as_ref()?;
+    if cached.context_roots != roots {
+        return None;
+    }
+    if cached.cached_at.elapsed() >= FORGE_CACHE_TTL {
+        return None;
+    }
+    Some(cached.fragment.clone())
+}
+
+fn cached_forge_store(roots: Vec<PathBuf>, fragment: &GraphFragment) {
+    let mut guard = FORGE_CACHE.lock().unwrap();
+    *guard = Some(CachedForgeFragment {
+        context_roots: roots,
+        cached_at: Instant::now(),
+        fragment: fragment.clone(),
+    });
+}
+
+/// Clear the process-wide [`FORGE_CACHE`]. Tests that observe
+/// the cache short-circuit call this in setup so a prior test's
+/// entry doesn't leak into their assertions.
+#[cfg(test)]
+pub(crate) fn reset_forge_cache_for_tests() {
+    let mut guard = FORGE_CACHE.lock().unwrap();
+    *guard = None;
+}
+
+/// Serial gate for cache-observing tests — [`FORGE_CACHE`] is
+/// process-global so parallel test runs would cross-talk (test A
+/// populates with roots R, test B reads its own R and gets A's
+/// cached fragment instead of dispatching adapters). Tests that
+/// call `ForgeDiscovery::discover` must take this lock at the
+/// top of their body.
+#[cfg(test)]
+pub(crate) static FORGE_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Pluggable interface for invoking `gh` (or a fake equivalent). Mirrors
 /// the [`MuxBackend`](crate::discovery::tmux::MuxBackend) seam so tests
