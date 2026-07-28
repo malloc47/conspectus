@@ -1276,7 +1276,11 @@ fn execute_pin_create(
     tmux: &dyn MuxBackend,
     request: crate::tui::widgets::pins::PinCreateRequest,
 ) {
-    match write_pin_create(&request, &crate::config::ConfigLoader::from_env()) {
+    match write_pin_create(
+        &request,
+        &crate::config::ConfigLoader::from_env(),
+        &crate::pin_store_registry::PinStoreRegistry::from_env(),
+    ) {
         Ok((outcome, entry, store_kind)) => {
             let is_adopt = request.adopt_source_mux_name.is_some();
             let verb = if outcome.changed {
@@ -2049,6 +2053,7 @@ fn apply_pin_adopt_mux_rename(
 fn write_pin_create(
     request: &crate::tui::widgets::pins::PinCreateRequest,
     loader: &crate::config::ConfigLoader,
+    registry: &crate::pin_store_registry::PinStoreRegistry,
 ) -> Result<(PinWriteOutcome, PinEntry, PinStoreKind)> {
     let cwd = std::path::PathBuf::from(&request.cwd);
     let selection = match request.store {
@@ -2078,6 +2083,12 @@ fn write_pin_create(
         reason: None,
     };
     let outcome = crate::pins::upsert_pin_entry(&selection.path, entry.clone())?;
+    // Record the project store so a pin created in a repo outside the
+    // scan root stays visible on later discovery cycles
+    // (H-PIN-ROOT-001). Best-effort: a failed cache write must never
+    // fail the pin create itself. `record` no-ops for the user-scope
+    // store.
+    let _ = registry.record(&selection.path);
     Ok((outcome, entry, selection.kind))
 }
 

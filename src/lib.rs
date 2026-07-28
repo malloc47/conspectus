@@ -12,6 +12,7 @@ pub mod hook;
 pub mod model;
 pub mod output;
 pub mod pin_bindings;
+pub mod pin_store_registry;
 pub mod pins;
 pub mod rename;
 pub mod resolve;

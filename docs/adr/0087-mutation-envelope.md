@@ -330,3 +330,5 @@ every new-feature ADR to cite five ADRs instead of one.
   category 2.
 - ADR 0086 (payload privacy tenet) — prohibition 3 references
   this for the never-persist-payload rule.
+- ADR 0090 (pin-store registry sidecar) — rebuildable pin-store
+  index, category 2; extends this ADR by reference.

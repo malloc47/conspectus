@@ -25,7 +25,12 @@ use crate::discovery::DiscoveryContext;
 use crate::model::{Diagnostic, GraphNode, GraphSnapshot, PinCandidate, PinMuxRef, Provenance};
 use crate::pins::{PinEntry, PinsDocument, parse_pins_document};
 
-pub fn apply_pins(snapshot: &mut GraphSnapshot, context: &DiscoveryContext, loader: &ConfigLoader) {
+pub fn apply_pins(
+    snapshot: &mut GraphSnapshot,
+    context: &DiscoveryContext,
+    loader: &ConfigLoader,
+    registry_stores: &[PathBuf],
+) {
     let mut stores: Vec<PinStore> = Vec::new();
 
     if let Some(path) = loader.user_config_path()
@@ -37,7 +42,7 @@ pub fn apply_pins(snapshot: &mut GraphSnapshot, context: &DiscoveryContext, load
         });
     }
 
-    for path in local_pin_store_paths(snapshot, context, loader) {
+    for path in local_pin_store_paths(snapshot, context, loader, registry_stores) {
         stores.push(PinStore {
             path,
             provenance: Provenance::LocalPin,
@@ -81,6 +86,7 @@ fn local_pin_store_paths(
     snapshot: &GraphSnapshot,
     context: &DiscoveryContext,
     loader: &ConfigLoader,
+    registry_stores: &[PathBuf],
 ) -> Vec<PathBuf> {
     let mut seen_project_paths = BTreeSet::new();
     let mut paths = Vec::new();
@@ -89,6 +95,16 @@ fn local_pin_store_paths(
             && seen_project_paths.insert(path.clone())
         {
             paths.push(path);
+        }
+    }
+    // H-PIN-ROOT-001: registry-recorded project stores are already full
+    // `.conspectus.toml` paths, so they're appended directly (not walked
+    // up from a search root). Dedup shares the same set as the
+    // root-derived paths, and the registry read already dropped stores
+    // whose file no longer exists.
+    for path in registry_stores {
+        if path.is_file() && seen_project_paths.insert(path.clone()) {
+            paths.push(path.clone());
         }
     }
     paths

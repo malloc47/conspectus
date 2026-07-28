@@ -283,12 +283,22 @@ fn write_pin_create_writes_project_store() {
         store: PinCreateStore::Project,
     };
 
-    let (outcome, entry, kind) = write_pin_create(&request, &loader).expect("write pin");
+    let state = tempfile::TempDir::new().expect("state");
+    let registry =
+        crate::pin_store_registry::PinStoreRegistry::new().with_xdg_state_home(state.path());
+    let (outcome, entry, kind) = write_pin_create(&request, &loader, &registry).expect("write pin");
     assert!(outcome.changed);
     assert_eq!(kind, PinStoreKind::Project);
     assert_eq!(entry.id, "ingest");
     assert_eq!(entry.mux.native_id(), "tmux:scratch:ingest-mux");
     assert_eq!(outcome.path, project.path().join(".conspectus.toml"));
+
+    // H-PIN-ROOT-001: creating a project pin records its store in the
+    // registry so it survives a later scan from an unrelated root.
+    assert_eq!(
+        registry.read(),
+        vec![project.path().join(".conspectus.toml")],
+    );
 
     let written = fs::read_to_string(&outcome.path).expect("project config");
     assert!(written.contains("[pins]"));
@@ -322,11 +332,19 @@ fn write_pin_create_user_store_uses_user_config_path() {
         store: PinCreateStore::User,
     };
 
-    let (outcome, _, kind) = write_pin_create(&request, &loader).expect("write user pin");
+    let state = tempfile::TempDir::new().expect("state");
+    let registry =
+        crate::pin_store_registry::PinStoreRegistry::new().with_xdg_state_home(state.path());
+    let (outcome, _, kind) =
+        write_pin_create(&request, &loader, &registry).expect("write user pin");
     assert_eq!(kind, PinStoreKind::User);
     assert_eq!(outcome.path, xdg.join(crate::config::USER_CONFIG_RELATIVE));
     assert!(outcome.path.exists());
     assert!(!project.path().join(".conspectus.toml").exists());
+
+    // The user-scope store is consulted directly by discovery, so it's
+    // never recorded in the project-store registry.
+    assert!(registry.read().is_empty());
 }
 
 #[test]

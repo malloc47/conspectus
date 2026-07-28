@@ -13482,7 +13482,7 @@ approach (not raw implementation size). Worked top-to-bottom.
     malformed → diagnostic); a `draw_body`/snapshot test proving the
     split direction flips at the configured width.
   - Blockers: none.
-- [ ] `H-PIN-ROOT-001` Surface pins registered in repos outside the
+- [x] `H-PIN-ROOT-001` Surface pins registered in repos outside the
   active search root.
   - Scope: `local_pin_store_paths` (`src/discovery/pins.rs:80`) only
     locates `.conspectus.toml` pin stores by walking up from
@@ -13500,6 +13500,13 @@ approach (not raw implementation size). Worked top-to-bottom.
     in-root pins are unaffected.
   - Blockers: needs a direction decision among (a)/(b)/(c); likely a
     short ADR.
+  - Outcome: chose approach (a), the state-sidecar registry. Recorded
+    as ADR 0090. `src/pin_store_registry.rs` maintains
+    `$XDG_STATE_HOME/conspectus/pin-stores.json`; CLI `pin create` /
+    `pin adopt` and the TUI pin-create action record the project store
+    on write, and each discovery cycle folds the recorded (still-extant)
+    stores into the pin loader's search set. Best-effort, self-pruning,
+    read-only for `graph`/`table`.
 - [ ] `H-MUX-SORT-001` Add better recency sort options for the mux view.
   - Scope: the mux view currently sorts by the shared `Sort::Recency`
     signal. Enumerate the recency signals tmux exposes per session

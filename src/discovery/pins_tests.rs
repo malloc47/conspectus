@@ -63,10 +63,96 @@ fn empty_when_no_config_files_exist() {
     let context = context_at(&[&root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert!(snapshot.pins.is_empty());
     assert!(snapshot.diagnostics.is_empty());
+}
+
+#[test]
+fn loads_registry_recorded_pin_store_outside_every_scan_root() {
+    // H-PIN-ROOT-001: a pin lives in a repo that is neither a scan root
+    // nor referenced by any discovered node cwd. Without the registry
+    // it would be invisible; recording its store path keeps it loading.
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let xdg = tmp.path().join("xdg");
+    let scan_root = tmp.path().join("scan");
+    let outside_repo = tmp.path().join("elsewhere/repo");
+    fs::create_dir_all(&scan_root).expect("mkdir scan");
+    fs::create_dir_all(&outside_repo).expect("mkdir outside");
+    let store = outside_repo.join(PROJECT_CONFIG_FILENAME);
+    fs::write(&store, project_pin_toml("ingest", "ingest")).expect("write outside config");
+
+    let loader = loader_with(&home, &xdg);
+    // The context only knows about `scan_root`, which holds no config.
+    let context = context_at(&[&scan_root]);
+
+    // Baseline: without the registry the pin is invisible.
+    let mut baseline = GraphSnapshot::empty();
+    apply_pins(&mut baseline, &context, &loader, &[]);
+    assert!(
+        baseline.pins.is_empty(),
+        "pin outside the scan root should be invisible without the registry",
+    );
+
+    // With the store recorded in the registry it loads as a local pin.
+    let mut snapshot = GraphSnapshot::empty();
+    apply_pins(
+        &mut snapshot,
+        &context,
+        &loader,
+        std::slice::from_ref(&store),
+    );
+    assert_eq!(snapshot.pins.len(), 1);
+    assert_eq!(snapshot.pins[0].id, "ingest");
+    assert_eq!(snapshot.pins[0].provenance, Provenance::LocalPin);
+    assert!(snapshot.diagnostics.is_empty());
+}
+
+#[test]
+fn registry_store_that_no_longer_exists_is_skipped() {
+    // A stale registry entry (repo since deleted) must not error or
+    // synthesize a phantom pin.
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let xdg = tmp.path().join("xdg");
+    let scan_root = tmp.path().join("scan");
+    fs::create_dir_all(&scan_root).expect("mkdir scan");
+    let missing = tmp.path().join("gone/repo").join(PROJECT_CONFIG_FILENAME);
+
+    let loader = loader_with(&home, &xdg);
+    let context = context_at(&[&scan_root]);
+
+    let mut snapshot = GraphSnapshot::empty();
+    apply_pins(&mut snapshot, &context, &loader, &[missing]);
+    assert!(snapshot.pins.is_empty());
+    assert!(snapshot.diagnostics.is_empty());
+}
+
+#[test]
+fn registry_store_already_covered_by_scan_root_is_not_double_loaded() {
+    // When a registry entry names the same store a scan root already
+    // locates, the pin loads exactly once (no same-id shadow diagnostic).
+    let tmp = TempDir::new().expect("tmp");
+    let home = tmp.path().join("home");
+    let xdg = tmp.path().join("xdg");
+    let root = tmp.path().join("project");
+    fs::create_dir_all(&root).expect("mkdir root");
+    let store = root.join(PROJECT_CONFIG_FILENAME);
+    fs::write(&store, project_pin_toml("ingest", "ingest")).expect("write project config");
+
+    let loader = loader_with(&home, &xdg);
+    let context = context_at(&[&root]);
+
+    let mut snapshot = GraphSnapshot::empty();
+    apply_pins(&mut snapshot, &context, &loader, &[store]);
+    assert_eq!(snapshot.pins.len(), 1, "no double load");
+    assert!(
+        snapshot.diagnostics.is_empty(),
+        "no spurious shadow diagnostic: {:?}",
+        snapshot.diagnostics,
+    );
 }
 
 #[test]
@@ -86,7 +172,7 @@ fn loads_project_pin_as_local_pin() {
     let context = context_at(&[&root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert_eq!(snapshot.pins.len(), 1);
     let pin = &snapshot.pins[0];
@@ -125,7 +211,7 @@ fn loads_project_pin_from_observed_session_cwd_outside_scan_root() {
         .with_cwd(nested.to_string_lossy().into_owned()),
     ));
 
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert_eq!(snapshot.pins.len(), 1);
     assert_eq!(snapshot.pins[0].id, "observed");
@@ -152,7 +238,7 @@ fn loads_user_pin_as_global_pin() {
     let context = context_at(&[&root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert_eq!(snapshot.pins.len(), 1);
     let pin = &snapshot.pins[0];
@@ -184,7 +270,7 @@ fn local_pin_shadows_same_id_user_pin() {
     let context = context_at(&[&root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert_eq!(snapshot.pins.len(), 1);
     let pin = &snapshot.pins[0];
@@ -223,7 +309,7 @@ fn non_default_socket_round_trips_into_native_id() {
     let context = context_at(&[&root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     let pin = snapshot.pins.first().expect("pin present");
     assert_eq!(pin.mux.socket_name.as_deref(), Some("scratch"));
@@ -255,7 +341,7 @@ fn malformed_config_emits_diagnostic_and_does_not_block_other_stores() {
     let context = context_at(&[&root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert_eq!(snapshot.pins.len(), 1, "good project pin still loads");
     let pin = &snapshot.pins[0];
@@ -292,7 +378,7 @@ fn duplicate_project_root_is_only_scanned_once() {
     let context = context_at(&[&root, &root]);
 
     let mut snapshot = GraphSnapshot::empty();
-    apply_pins(&mut snapshot, &context, &loader);
+    apply_pins(&mut snapshot, &context, &loader, &[]);
 
     assert_eq!(snapshot.pins.len(), 1);
 }

@@ -501,7 +501,16 @@ fn apply_mutators(
     if let Some(loader) = &config.declared_config_loader {
         declared::apply_declared_links(snapshot, context, loader);
         aliases::apply_aliases(snapshot, context, loader);
-        pins::apply_pins(snapshot, context, loader);
+        // Fold in any project pin stores recorded by the registry
+        // sidecar (H-PIN-ROOT-001) so pins registered outside the scan
+        // root stay visible. Read fresh each cycle so a pin created
+        // during a live session appears on the next refresh.
+        let registry_stores = config
+            .pin_store_registry
+            .as_ref()
+            .map(|registry| registry.read())
+            .unwrap_or_default();
+        pins::apply_pins(snapshot, context, loader, &registry_stores);
     }
 }
 
@@ -540,6 +549,13 @@ pub struct LocalDiscoveryConfig {
     /// [`Self::without_orchestrator`].
     pub orchestrator_roots: BTreeMap<String, PathBuf>,
     pub declared_config_loader: Option<ConfigLoader>,
+    /// Resolver for the pin-store registry sidecar (H-PIN-ROOT-001,
+    /// ADR 0090). When present, each discovery cycle reads the
+    /// registered project `.conspectus.toml` store paths and folds them
+    /// into the pin loader's search set so pins registered in repos
+    /// outside the scan root stay visible. `None` disables the registry
+    /// (tests and headless fixtures that don't want state-home I/O).
+    pub pin_store_registry: Option<crate::pin_store_registry::PinStoreRegistry>,
     /// Harness keys whose optional aux-attribution mutator pass
     /// (H-EXT-007) should be skipped, even when the harness has a
     /// state root configured. Populated by
@@ -630,6 +646,7 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: hook_sidecar::default_sidecar_root(),
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
+            pin_store_registry: Some(crate::pin_store_registry::PinStoreRegistry::from_env()),
             disabled_aux_harnesses,
         }
     }
@@ -643,6 +660,7 @@ impl LocalDiscoveryConfig {
             hook_sidecar_root: None,
             orchestrator_roots: BTreeMap::new(),
             declared_config_loader: None,
+            pin_store_registry: None,
             disabled_aux_harnesses: BTreeSet::new(),
         }
     }
