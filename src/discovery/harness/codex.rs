@@ -27,7 +27,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -603,9 +603,22 @@ struct SessionMetaPayload {
 }
 
 fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
-    let body = fs::read_to_string(path).ok()?;
-    let first = body.lines().next()?;
-    let envelope: SessionMetaEnvelope = serde_json::from_str(first).ok()?;
+    // H-SERVE-PERF-006: only the first line matters (the
+    // `session_meta` envelope), so read a single line rather
+    // than the whole file. The pre-fix path used
+    // `fs::read_to_string` which loaded the entire rollout —
+    // up to 24 MB per file on active operator boxes — and
+    // discarded everything past the first newline, dominating
+    // serve idle CPU / tmpfs read volume once earlier caches
+    // eliminated the SQLite, /proc walk, gh, and GitProbe
+    // spawn costs (ADR 0091).
+    let file = fs::File::open(path).ok()?;
+    let mut first = String::new();
+    BufReader::new(file).read_line(&mut first).ok()?;
+    if first.is_empty() {
+        return None;
+    }
+    let envelope: SessionMetaEnvelope = serde_json::from_str(first.trim_end()).ok()?;
 
     if envelope.kind != "session_meta" {
         return None;
