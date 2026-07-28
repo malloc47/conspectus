@@ -31,8 +31,10 @@
 //! The reader never selects `feedback_log_body` (privacy). Connections open
 //! read-only with `query_only = ON` and stay short-lived.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 
 use rusqlite::{Connection, OpenFlags, params};
 
@@ -102,22 +104,17 @@ pub fn apply_codex_log_attribution(
     let Some(db_path) = pick_active_log_db(state_root) else {
         return;
     };
-    let Ok(connection) = Connection::open_with_flags(
-        &db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) else {
-        return;
-    };
-    let _ = connection.execute_batch("PRAGMA query_only = ON;");
-    if !logs_table_present(&connection) {
-        return;
-    }
-
     let ts_floor = now_epoch.saturating_sub(window_seconds.max(0));
     let candidates = collect_codex_pane_processes(codex_pids_per_mux);
     if candidates.is_empty() {
         return;
     }
+
+    // H-SERVE-PERF-002: consult QUERY_CACHE before opening the DB.
+    // On a cache hit no SQLite connection is opened; on a miss we
+    // open, verify the schema, re-query, and refresh the cache.
+    // See `QueryCache` docs for the fingerprint invariants.
+    let observations = observations_for_candidates(&db_path, &candidates, ts_floor);
 
     let state_scope = state_root.to_string_lossy().to_string();
     let mut emitted: Vec<GraphLink> = Vec::new();
@@ -130,7 +127,7 @@ pub fn apply_codex_log_attribution(
     let mut seen: BTreeMap<(MuxSessionId, String), bool> = BTreeMap::new();
 
     for candidate in candidates {
-        let Some(observation) = query_freshest_thread(&connection, candidate.pid, ts_floor) else {
+        let Some(observation) = observations.get(&candidate.pid).cloned() else {
             continue;
         };
         let key = (candidate.mux_id.clone(), observation.thread_id.clone());
@@ -280,11 +277,183 @@ fn mux_target(link: &GraphLink) -> Option<&MuxSessionId> {
     }
 }
 
+#[derive(Clone)]
 struct ThreadObservation {
     thread_id: String,
     process_uuid: String,
     process_uuid_suffix: Option<String>,
     ts: i64,
+}
+
+/// Cross-cycle cache for [`apply_codex_log_attribution`] (H-SERVE-PERF-002).
+///
+/// The Codex logs SQLite DB is on the harness-class hot path: every
+/// mux/harness re-run cycle re-opens `logs_<N>.sqlite` and runs one
+/// `LIKE 'pid:<pid>:%'` scan per live Codex pid. On busy operator
+/// boxes that DB is tens of megabytes and the `logs` table lacks a
+/// `(process_uuid, ts)` index, so those scans dominate serve idle
+/// CPU / tmpfs read volume (see this file's `DEFAULT_WINDOW_SECONDS`
+/// docstring and ADR 0091 for the diagnosis).
+///
+/// This cache short-circuits the query when the DB file hasn't
+/// advanced since the last cycle for the same candidate pid set —
+/// the query result is deterministic in that case. The cache stores
+/// only the pids that returned an observation; absent keys mean
+/// "queried and got nothing," mirroring `query_freshest_thread`
+/// returning `None`. When the DB advances (mtime or size changes)
+/// or a new candidate pid appears, the cache is invalidated and
+/// the query runs normally.
+///
+/// The `ts_floor` moves forward every cycle but the cache is safe
+/// across advances: `query_freshest_thread` returns the freshest row
+/// per pid (`ORDER BY ts DESC LIMIT 1`). If the freshest cached
+/// observation ages out under a later floor, all older rows have
+/// too — so filtering cached observations by the current floor
+/// yields the same result as re-querying against the same DB.
+struct QueryCache {
+    db_path: PathBuf,
+    db_mtime_ns: i128,
+    db_size: u64,
+    candidate_pids: Vec<i64>,
+    /// `ts_floor` that was in force when the cache was populated.
+    /// A later call whose `ts_floor` is >= this value can safely
+    /// reuse the cache (freshest-per-pid is unchanged; a filter
+    /// drops observations that have aged out). A later call whose
+    /// `ts_floor` is *lower* (test widens the window, or clock
+    /// skew) is a cache-miss because there may be older rows that
+    /// the original narrower query never returned.
+    cached_ts_floor: i64,
+    /// pid → freshest observation returned by `query_freshest_thread`
+    /// on the last run. Pids that returned `None` are absent from the
+    /// map so a lookup miss stays cheap.
+    observations: HashMap<i64, ThreadObservation>,
+}
+
+static QUERY_CACHE: Mutex<Option<QueryCache>> = Mutex::new(None);
+
+/// Clear the module-level [`QueryCache`]. Tests that exercise the
+/// cross-cycle short-circuit call this in setup so a previous test's
+/// cached entries don't leak into their assertions.
+#[cfg(test)]
+pub(crate) fn reset_query_cache_for_tests() {
+    let mut guard = QUERY_CACHE.lock().unwrap();
+    *guard = None;
+}
+
+/// Count of `query_freshest_thread` invocations, incremented on
+/// every SQLite query. Tests use `take_query_count_for_tests` to
+/// verify the cache short-circuit fires (a second call on an
+/// unchanged fingerprint should record zero further queries).
+#[cfg(test)]
+static QUERY_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Atomically read + reset [`QUERY_COUNT`]. Cache tests must run
+/// under [`CACHE_TEST_LOCK`] so the counter reflects only their
+/// own queries, not siblings running in parallel.
+#[cfg(test)]
+pub(crate) fn take_query_count_for_tests() -> usize {
+    QUERY_COUNT.swap(0, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Serial gate for cache-observing tests. The module-level
+/// `QUERY_CACHE` and `QUERY_COUNT` are process-global; a test that
+/// asserts on the counter would flake if a sibling cache-tickling
+/// test ran in parallel and bumped it. Non-cache tests don't need
+/// this lock — they don't inspect the counter and their tempdir
+/// paths already partition the cache map.
+#[cfg(test)]
+pub(crate) static CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn db_fingerprint(path: &Path) -> Option<(i128, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
+    let mtime_ns =
+        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
+    Some((mtime_ns, meta.len()))
+}
+
+/// Compute observations for `candidates`, reusing the module-level
+/// cache when the underlying DB and candidate pid set are unchanged
+/// since the last call. On cache hit no SQLite connection is opened.
+/// On cache miss (or first call, or metadata unreadable) opens the
+/// DB read-only, verifies the schema, runs the per-pid query, and
+/// refreshes the cache.
+///
+/// The returned map is filtered by `ts_floor` so an aged-out
+/// observation is dropped just as `query_freshest_thread` would have
+/// dropped it under the newer floor.
+fn observations_for_candidates(
+    db_path: &Path,
+    candidates: &[CodexPaneProcess],
+    ts_floor: i64,
+) -> HashMap<i64, ThreadObservation> {
+    let fingerprint = db_fingerprint(db_path);
+    let mut candidate_pids: Vec<i64> = candidates.iter().map(|c| c.pid).collect();
+    candidate_pids.sort_unstable();
+    candidate_pids.dedup();
+
+    let mut cache_guard = QUERY_CACHE.lock().unwrap();
+    if let (Some((mtime_ns, size)), Some(cached)) = (fingerprint, cache_guard.as_ref())
+        && cached.db_path == db_path
+        && cached.db_mtime_ns == mtime_ns
+        && cached.db_size == size
+        && cached.candidate_pids == candidate_pids
+        && ts_floor >= cached.cached_ts_floor
+    {
+        // Cache hit: replay observations, dropping any that have aged
+        // out under the new floor. See QueryCache docs for why this is
+        // equivalent to re-querying the unchanged DB.
+        return cached
+            .observations
+            .iter()
+            .filter(|(_, obs)| obs.ts >= ts_floor)
+            .map(|(pid, obs)| (*pid, obs.clone()))
+            .collect();
+    }
+
+    // Cache miss — open the DB, verify the schema, and query. Any
+    // failure between here and the successful query flushes the
+    // cache so the next call sees a clean state.
+    let Ok(connection) = Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        *cache_guard = None;
+        return HashMap::new();
+    };
+    let _ = connection.execute_batch("PRAGMA query_only = ON;");
+    if !logs_table_present(&connection) {
+        *cache_guard = None;
+        return HashMap::new();
+    }
+
+    let mut observations: HashMap<i64, ThreadObservation> = HashMap::new();
+    for candidate in candidates {
+        if observations.contains_key(&candidate.pid) {
+            continue;
+        }
+        if let Some(observation) = query_freshest_thread(&connection, candidate.pid, ts_floor) {
+            observations.insert(candidate.pid, observation);
+        }
+    }
+
+    if let Some((mtime_ns, size)) = fingerprint {
+        *cache_guard = Some(QueryCache {
+            db_path: db_path.to_path_buf(),
+            db_mtime_ns: mtime_ns,
+            db_size: size,
+            candidate_pids,
+            cached_ts_floor: ts_floor,
+            observations: observations.clone(),
+        });
+    } else {
+        // Metadata unreadable — flush the cache so the next successful
+        // stat re-populates it rather than serving stale entries.
+        *cache_guard = None;
+    }
+
+    observations
 }
 
 /// Query the logs DB for the freshest `thread_id` written by the process
@@ -295,6 +464,8 @@ fn query_freshest_thread(
     pid: i64,
     ts_floor: i64,
 ) -> Option<ThreadObservation> {
+    #[cfg(test)]
+    QUERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let prefix = format!("{PROCESS_UUID_PREFIX}{pid}:");
     let like_pattern = format!("{prefix}%");
     let mut stmt = connection

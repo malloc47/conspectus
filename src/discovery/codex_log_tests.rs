@@ -481,3 +481,167 @@ fn caller_supplied_window_overrides_default_bound() {
     let wide = codex_log_mux_links(&snapshot).len();
     assert_eq!(wide, 1);
 }
+
+#[test]
+fn cache_serves_second_call_without_re_querying_when_db_is_unchanged() {
+    // H-SERVE-PERF-002: after the first call populates the cache,
+    // a second call on the same DB with the same candidate pid set
+    // and same ts_floor must serve entirely from the cache — no
+    // SQLite query fires. Attributed to QUERY_COUNT so a future
+    // regression that silently bypasses the cache would show up
+    // as a nonzero second-call query count.
+    let _serial = CACHE_TEST_LOCK.lock().unwrap();
+    reset_query_cache_for_tests();
+    let _ = take_query_count_for_tests();
+
+    let temp = TempDir::new().expect("temp");
+    let state_root = temp.path();
+    write_logs_db(
+        &state_root.join("logs_2.sqlite"),
+        &[("pid:100:uuid-a", "thread-a", now() - 5)],
+    );
+
+    let pids = codex_pid_map("main", 100);
+    let mut first = build_snapshot("main");
+    apply_codex_log_attribution(&mut first, state_root, &pids, now(), DEFAULT_WINDOW_SECONDS);
+    let first_queries = take_query_count_for_tests();
+    assert!(
+        first_queries >= 1,
+        "first call must query at least once (was {first_queries})"
+    );
+    assert_eq!(codex_log_mux_links(&first).len(), 1);
+
+    // Second call on the exact same inputs — must serve from cache.
+    let mut second = build_snapshot("main");
+    apply_codex_log_attribution(
+        &mut second,
+        state_root,
+        &pids,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+    );
+    let second_queries = take_query_count_for_tests();
+    assert_eq!(
+        second_queries, 0,
+        "cache hit must skip every SQLite query on the second call"
+    );
+    // The links still land in the fresh snapshot because we replay
+    // cached observations through the same emit path.
+    assert_eq!(codex_log_mux_links(&second).len(), 1);
+}
+
+#[test]
+fn cache_invalidates_when_db_mtime_advances() {
+    // Rewriting the DB (fresh mtime, potentially different size)
+    // must invalidate the cache so the next call re-queries and
+    // picks up the new row rather than serving the stale cached
+    // observation. Verified two ways: (1) the emitted link names
+    // the new thread; (2) the query counter records a re-query.
+    let _serial = CACHE_TEST_LOCK.lock().unwrap();
+    reset_query_cache_for_tests();
+    let _ = take_query_count_for_tests();
+
+    let temp = TempDir::new().expect("temp");
+    let state_root = temp.path();
+    let db_path = state_root.join("logs_2.sqlite");
+    write_logs_db(&db_path, &[("pid:100:uuid-a", "thread-a", now() - 5)]);
+
+    let mut first = build_snapshot("main");
+    let pids = codex_pid_map("main", 100);
+    apply_codex_log_attribution(&mut first, state_root, &pids, now(), DEFAULT_WINDOW_SECONDS);
+    assert_eq!(codex_log_mux_links(&first).len(), 1);
+    let _ = take_query_count_for_tests();
+
+    // Rewrite the DB. Filesystem mtime advances, size may change —
+    // either alone flips the fingerprint.
+    fs::remove_file(&db_path).expect("remove db");
+    write_logs_db(&db_path, &[("pid:100:uuid-a", "thread-b", now() - 5)]);
+
+    let mut second = build_snapshot("main");
+    apply_codex_log_attribution(
+        &mut second,
+        state_root,
+        &pids,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+    );
+    let second_queries = take_query_count_for_tests();
+    assert!(
+        second_queries >= 1,
+        "advancing the DB must force a fresh query (was {second_queries})"
+    );
+    let links = codex_log_mux_links(&second);
+    assert_eq!(links.len(), 1);
+    let NodeId::AgentSession(id) = &links[0].source else {
+        panic!();
+    };
+    assert_eq!(id.session_key, "thread-b");
+}
+
+#[test]
+fn cache_invalidates_when_candidate_pid_set_changes() {
+    // Cache is keyed on (fingerprint, sorted candidate pid list).
+    // Adding a new candidate pid must trigger a re-query so the
+    // new pid's row (which was never queried on the first call) is
+    // picked up. Without the pid-set check the second call would
+    // silently miss the new attribution.
+    let _serial = CACHE_TEST_LOCK.lock().unwrap();
+    reset_query_cache_for_tests();
+    let _ = take_query_count_for_tests();
+
+    let temp = TempDir::new().expect("temp");
+    let state_root = temp.path();
+    write_logs_db(
+        &state_root.join("logs_2.sqlite"),
+        &[
+            ("pid:100:uuid-a", "thread-a", now() - 5),
+            ("pid:200:uuid-b", "thread-b", now() - 5),
+        ],
+    );
+
+    let pids_single = codex_pid_map("main", 100);
+    let mut first = build_snapshot("main");
+    apply_codex_log_attribution(
+        &mut first,
+        state_root,
+        &pids_single,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+    );
+    assert_eq!(codex_log_mux_links(&first).len(), 1);
+    let _ = take_query_count_for_tests();
+
+    // Second call with a superset pid list — DB unchanged but the
+    // candidate list differs. Cache must miss and re-query.
+    let mut pids_both = codex_pid_map("main", 100);
+    pids_both
+        .get_mut(&MuxSessionId::new("tmux:main".to_string()))
+        .unwrap()
+        .push((CODEX_HARNESS_KEY.to_string(), 200));
+
+    let mut second = build_snapshot("main");
+    apply_codex_log_attribution(
+        &mut second,
+        state_root,
+        &pids_both,
+        now(),
+        DEFAULT_WINDOW_SECONDS,
+    );
+    let second_queries = take_query_count_for_tests();
+    assert!(
+        second_queries >= 2,
+        "expanded pid set must trigger a fresh query per pid; got {second_queries}"
+    );
+
+    let links = codex_log_mux_links(&second);
+    let session_keys: Vec<&str> = links
+        .iter()
+        .filter_map(|link| match &link.source {
+            NodeId::AgentSession(id) => Some(id.session_key.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(session_keys.len(), 2);
+    assert!(session_keys.contains(&"thread-a"));
+    assert!(session_keys.contains(&"thread-b"));
+}
