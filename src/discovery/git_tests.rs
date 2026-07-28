@@ -168,3 +168,133 @@ impl GitFixture {
 fn path_str(path: &Path) -> &str {
     path.to_str().expect("utf8 path")
 }
+
+// ---------------------------------------------------------------------------
+// H-SERVE-PERF-004: probe cache short-circuits repeat probes on unchanged
+// repos. observed_cwd_git_fragment calls probe() once per unique session
+// cwd on every discovery cycle; without the cache each of those spawns
+// 8-15 git subprocesses. The tests here pin that the second call on an
+// unchanged repo issues zero further spawns and that mutations (branch
+// checkout, remote add) invalidate the cache correctly.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn probe_cache_serves_second_call_without_spawning_git_on_unchanged_repo() {
+    let _serial = PROBE_TEST_LOCK.lock().unwrap();
+    reset_probe_cache_for_tests();
+    let _ = take_git_spawn_count_for_tests();
+
+    let fixture = GitFixture::init();
+    let probe = GitProbe::new();
+
+    // First call: cold, must spawn multiple git subprocesses.
+    let first = probe
+        .probe(fixture.root())
+        .expect("first probe")
+        .expect("repo");
+    let first_spawns = take_git_spawn_count_for_tests();
+    assert!(
+        first_spawns >= 5,
+        "cold probe should fire ≥5 git spawns, got {first_spawns}"
+    );
+
+    // Second call: cache hit, must be zero spawns and identical result.
+    let second = probe
+        .probe(fixture.root())
+        .expect("second probe")
+        .expect("repo");
+    let second_spawns = take_git_spawn_count_for_tests();
+    assert_eq!(
+        second_spawns, 0,
+        "cache hit must skip every git spawn on the second call"
+    );
+    assert_eq!(first, second);
+}
+
+#[test]
+fn probe_cache_invalidates_on_branch_checkout() {
+    // `git checkout` updates .git/HEAD's mtime, which the
+    // fingerprint keys on. The second probe must observe the new
+    // branch_ref rather than the cached one from before checkout.
+    let _serial = PROBE_TEST_LOCK.lock().unwrap();
+    reset_probe_cache_for_tests();
+    let _ = take_git_spawn_count_for_tests();
+
+    let fixture = GitFixture::init();
+    let probe = GitProbe::new();
+    let cached = probe.probe(fixture.root()).expect("initial").expect("repo");
+    assert_eq!(cached.branch_ref.as_deref(), Some("refs/heads/main"));
+    let _ = take_git_spawn_count_for_tests();
+
+    fixture.git(&["checkout", "-b", "feature"]);
+
+    let refreshed = probe
+        .probe(fixture.root())
+        .expect("post-checkout")
+        .expect("repo");
+    let post_checkout_spawns = take_git_spawn_count_for_tests();
+    assert!(
+        post_checkout_spawns >= 5,
+        "branch checkout must invalidate the cache and force a re-probe; got {post_checkout_spawns} spawns"
+    );
+    assert_eq!(refreshed.branch_ref.as_deref(), Some("refs/heads/feature"));
+}
+
+#[test]
+fn probe_cache_invalidates_on_remote_add() {
+    // `git remote add` writes to .git/config; the config-mtime
+    // fingerprint entry catches it. Second probe must observe the
+    // new remote instead of returning the cached (empty) list.
+    let _serial = PROBE_TEST_LOCK.lock().unwrap();
+    reset_probe_cache_for_tests();
+    let _ = take_git_spawn_count_for_tests();
+
+    let fixture = GitFixture::init();
+    let probe = GitProbe::new();
+    let cached = probe.probe(fixture.root()).expect("initial").expect("repo");
+    assert!(cached.remotes.is_empty());
+    let _ = take_git_spawn_count_for_tests();
+
+    fixture.git(&["remote", "add", "origin", "git@example.com:owner/repo.git"]);
+
+    let refreshed = probe
+        .probe(fixture.root())
+        .expect("post-remote-add")
+        .expect("repo");
+    let spawns = take_git_spawn_count_for_tests();
+    assert!(
+        spawns >= 5,
+        "remote add should invalidate the cache; got {spawns} spawns"
+    );
+    assert_eq!(refreshed.remotes.len(), 1);
+    assert_eq!(refreshed.remotes[0].name, "origin");
+}
+
+#[test]
+fn probe_cache_serves_none_for_non_repo_without_respawning() {
+    // Non-repo cache path: fingerprint records `None` for every
+    // .git file + the root's mtime. Second probe on the same
+    // non-repo path must skip the `is-inside-work-tree` spawn.
+    let _serial = PROBE_TEST_LOCK.lock().unwrap();
+    reset_probe_cache_for_tests();
+    let _ = take_git_spawn_count_for_tests();
+
+    let temp = TempDir::new().expect("temp");
+    let probe = GitProbe::new();
+
+    let first = probe.probe(temp.path()).expect("first probe");
+    assert!(first.is_none());
+    let first_spawns = take_git_spawn_count_for_tests();
+    assert!(
+        first_spawns >= 1,
+        "cold non-repo probe should spawn at least once"
+    );
+
+    let second = probe.probe(temp.path()).expect("second probe");
+    assert!(second.is_none());
+    let second_spawns = take_git_spawn_count_for_tests();
+    assert_eq!(
+        second_spawns, 0,
+        "cached non-repo entry must skip every spawn on the second call"
+    );
+}
