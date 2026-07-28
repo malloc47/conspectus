@@ -5,7 +5,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -456,13 +458,23 @@ pub fn discover_local_warm_with(
     // result (which excludes fresh-skipped providers and the prior
     // backstop) is the robust signal — disabled providers stamp
     // nothing, a git-only cycle stamps only git provenance, and a
-    // mux/harness cycle stamps mux/harness provenance. When they ran,
-    // the process-tree pass refreshes; otherwise it's skipped and the
-    // prior links carry through.
-    let run_process_tree = fresh
-        .node_provenance
-        .values()
-        .any(|prov| cache::is_mux_or_harness_provider(prov.provider.as_str()));
+    // mux/harness cycle stamps mux/harness provenance.
+    //
+    // H-SERVE-PERF-003 refines this further: even when mux/harness
+    // did run, the walk is only worth firing when their slice
+    // *content* differs from last cycle. A busy-file watcher that
+    // wakes the harness class at the throttle cap on every codex
+    // SQLite write produces byte-identical fragments cycle over
+    // cycle — the /proc walk on those is pure waste. The
+    // fingerprint is computed with `freshness_epoch` stamps
+    // excluded so wall-clock churn doesn't defeat equality.
+    let current_fingerprint = mux_or_harness_slice_fingerprint(&fresh);
+    let mut fingerprint_guard = LAST_MUX_HARNESS_FINGERPRINT.lock().unwrap();
+    let run_process_tree = should_open_process_tree_gate(current_fingerprint, *fingerprint_guard);
+    if let Some(fp) = current_fingerprint {
+        *fingerprint_guard = Some(fp);
+    }
+    drop(fingerprint_guard);
 
     // Phase-2 backstop merge with the evicted prior. The fresh
     // fragment wins on every collision; the prior fills in
@@ -483,6 +495,110 @@ pub fn discover_local_warm_with(
 
     apply_mutators(&mut snapshot, &config, &context, run_process_tree);
     Ok(snapshot)
+}
+
+/// Process-wide last-seen mux/harness slice fingerprint
+/// (H-SERVE-PERF-003). Consulted by
+/// [`should_open_process_tree_gate`] to skip the `/proc` walk when
+/// the mux/harness slice content is byte-identical to the prior
+/// cycle. Reset to `None` on daemon startup (first cycle after
+/// restart always opens the gate to seed the walk). Tests can
+/// reset via [`reset_process_tree_fingerprint_for_tests`].
+static LAST_MUX_HARNESS_FINGERPRINT: Mutex<Option<u64>> = Mutex::new(None);
+
+/// Decide whether the process-tree pass should fire this cycle
+/// (H-SERVE-PERF-003).
+///
+/// * `current == None` → no mux/harness content in the fresh
+///   fragment; matches today's "no provenance stamped" path and
+///   keeps the gate closed regardless of history. The deferred
+///   prior slices carry through.
+/// * `previous == None` → first cycle after startup, or the first
+///   cycle to observe any mux/harness content. Open the gate to
+///   seed the walk + populate downstream caches (codex_log,
+///   cross_link inference).
+/// * `current == previous` → mux/harness slice is byte-identical
+///   to last cycle (with `freshness_epoch` stamps excluded). The
+///   `/proc` walk would produce the same links; skip it.
+/// * `current != previous` → real content change (session added
+///   or removed, mux window opened, activity epoch advanced).
+///   Fire the walk.
+fn should_open_process_tree_gate(current: Option<u64>, previous: Option<u64>) -> bool {
+    match (current, previous) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(c), Some(p)) => c != p,
+    }
+}
+
+/// Content fingerprint of the mux/harness slice of `fresh`. Used
+/// by [`should_open_process_tree_gate`] to detect quiet-cycle
+/// re-runs where the operator's mux/harness state is unchanged
+/// and the `/proc` walk would produce redundant work
+/// (H-SERVE-PERF-003).
+///
+/// The hash covers only nodes owned by a mux/harness provider
+/// (via `node_provenance[id].provider`) and only candidate_links
+/// whose `source_metadata.adapter` is a mux/harness provider —
+/// so noise from git/forge slices does not force a re-walk.
+/// `SourceMetadata::freshness_epoch` is zeroed before hashing so
+/// per-cycle wall-clock advances don't defeat equality; every
+/// other field (including `NodeProvenance::provider` and
+/// activity epochs recorded on the node itself) stays in.
+///
+/// Returns `None` when the mux/harness slice is empty — matches
+/// today's gate semantics (no mux/harness provenance → no walk).
+fn mux_or_harness_slice_fingerprint(fresh: &GraphSnapshot) -> Option<u64> {
+    // Set of node ids owned by a mux/harness provider, for the
+    // node-filter pass below.
+    let mux_harness_node_ids: BTreeSet<NodeId> = fresh
+        .node_provenance
+        .iter()
+        .filter(|(_, prov)| cache::is_mux_or_harness_provider(prov.provider.as_str()))
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    // Serialize each in-slice node to JSON, sort the byte
+    // strings so `Vec` order can't affect the fingerprint.
+    let mut node_bytes: Vec<Vec<u8>> = fresh
+        .nodes
+        .iter()
+        .filter(|node| mux_harness_node_ids.contains(&node.id()))
+        .filter_map(|node| serde_json::to_vec(node).ok())
+        .collect();
+    node_bytes.sort();
+
+    // Same for candidate_links owned by a mux/harness provider,
+    // with `freshness_epoch` zeroed so wall-clock churn doesn't
+    // defeat equality.
+    let mut link_bytes: Vec<Vec<u8>> = fresh
+        .candidate_links
+        .iter()
+        .filter(|link| cache::is_mux_or_harness_provider(link.source_metadata.adapter.as_str()))
+        .filter_map(|link| {
+            let mut cloned = link.clone();
+            cloned.source_metadata.freshness_epoch = None;
+            serde_json::to_vec(&cloned).ok()
+        })
+        .collect();
+    link_bytes.sort();
+
+    if node_bytes.is_empty() && link_bytes.is_empty() {
+        return None;
+    }
+
+    let mut hasher = DefaultHasher::new();
+    for bytes in &node_bytes {
+        bytes.hash(&mut hasher);
+    }
+    // Domain-separator between node section and link section so a
+    // node's serialized bytes and a link's serialized bytes can't
+    // accidentally hash-collide across the boundary.
+    b"__links__".hash(&mut hasher);
+    for bytes in &link_bytes {
+        bytes.hash(&mut hasher);
+    }
+    Some(hasher.finish())
 }
 
 /// Always-rerun mutator block extracted from

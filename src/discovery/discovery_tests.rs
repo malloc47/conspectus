@@ -667,3 +667,215 @@ fn discover_local_with_loads_project_pins_from_observed_session_cwd() {
         "project pin should load from the observed session cwd, not only the scan root"
     );
 }
+
+// ---------------------------------------------------------------------------
+// H-SERVE-PERF-003: mux/harness slice fingerprint + /proc walk gate.
+// ---------------------------------------------------------------------------
+
+fn snapshot_with_mux_session(session_key: &str, native_id: &str, epoch: i64) -> GraphSnapshot {
+    let agent_id = AgentSessionId::new("codex", "global", session_key);
+    let mux_id = MuxSessionId::new(format!("tmux:{native_id}"));
+    let agent_node = NodeId::AgentSession(agent_id.clone());
+    let mux_node = NodeId::MuxSession(mux_id.clone());
+
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            agent_id,
+            "codex".to_string(),
+        )));
+    snap.nodes.push(GraphNode::MuxSession(MuxSessionNode::new(
+        mux_id,
+        "tmux".to_string(),
+        native_id.to_string(),
+    )));
+    snap.node_provenance.insert(
+        agent_node,
+        NodeProvenance {
+            provider: "codex".to_string(),
+            freshness_epoch: Some(epoch),
+        },
+    );
+    snap.node_provenance.insert(
+        mux_node,
+        NodeProvenance {
+            provider: "tmux".to_string(),
+            freshness_epoch: Some(epoch),
+        },
+    );
+    snap
+}
+
+#[test]
+fn slice_fingerprint_returns_none_when_no_mux_or_harness_content_present() {
+    // A cycle where only git/forge providers ran has no mux/harness
+    // provenance. The gate must return None so today's "no walk"
+    // behavior is preserved regardless of history.
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            AgentSessionId::new("codex", "global", "s1"),
+            "codex".to_string(),
+        )));
+    // Deliberately stamp with a non-mux/harness provider — the node
+    // is present in `nodes` but not owned by the mux/harness slice.
+    snap.node_provenance.insert(
+        NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1")),
+        NodeProvenance {
+            provider: crate::discovery::providers::GIT.to_string(),
+            freshness_epoch: Some(1_000),
+        },
+    );
+    assert_eq!(mux_or_harness_slice_fingerprint(&snap), None);
+}
+
+#[test]
+fn slice_fingerprint_ignores_freshness_epoch_changes_only() {
+    // Same content, different `freshness_epoch` stamps. The wall
+    // clock advances every cycle; if the fingerprint tracked it,
+    // the whole optimization would collapse. Only real state
+    // changes should differ.
+    let cycle_a = snapshot_with_mux_session("s1", "s1", 1_000);
+    let mut cycle_b = snapshot_with_mux_session("s1", "s1", 2_000);
+    // Also stamp a mux/harness-owned link with the new epoch — both
+    // node and link freshness_epoch fields must be excluded.
+    let agent_node = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
+    let mux_node = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));
+    let mut link = GraphLink::new(
+        "session-mux",
+        agent_node,
+        LinkEndpoint::Node { id: mux_node },
+        RelationKind::LinkedToMux,
+        Provenance::StrongDiscovered,
+    );
+    link.source_metadata.adapter = "codex".to_string();
+    link.source_metadata.freshness_epoch = Some(2_000);
+    cycle_b.candidate_links.push(link);
+
+    // cycle_a needs the same link (without link changes, cycle_b would
+    // add content) — copy with a different epoch to prove the epoch
+    // field is what's excluded.
+    let mut cycle_a = cycle_a;
+    let agent_node = NodeId::AgentSession(AgentSessionId::new("codex", "global", "s1"));
+    let mux_node = NodeId::MuxSession(MuxSessionId::new("tmux:s1"));
+    let mut link_a = GraphLink::new(
+        "session-mux",
+        agent_node,
+        LinkEndpoint::Node { id: mux_node },
+        RelationKind::LinkedToMux,
+        Provenance::StrongDiscovered,
+    );
+    link_a.source_metadata.adapter = "codex".to_string();
+    link_a.source_metadata.freshness_epoch = Some(1_000);
+    cycle_a.candidate_links.push(link_a);
+
+    assert_eq!(
+        mux_or_harness_slice_fingerprint(&cycle_a),
+        mux_or_harness_slice_fingerprint(&cycle_b),
+        "cycles that differ only in freshness_epoch must hash equal"
+    );
+}
+
+#[test]
+fn slice_fingerprint_differs_when_new_session_appears() {
+    // Adding a mux session to the slice is a real state change —
+    // the walk must fire on the next cycle.
+    let cycle_a = snapshot_with_mux_session("s1", "s1", 1_000);
+    let mut cycle_b = cycle_a.clone();
+    let agent_id = AgentSessionId::new("codex", "global", "s2");
+    let node = NodeId::AgentSession(agent_id.clone());
+    cycle_b
+        .nodes
+        .push(GraphNode::AgentSession(AgentSessionNode::new(
+            agent_id,
+            "codex".to_string(),
+        )));
+    cycle_b.node_provenance.insert(
+        node,
+        NodeProvenance {
+            provider: "codex".to_string(),
+            freshness_epoch: Some(1_000),
+        },
+    );
+
+    assert_ne!(
+        mux_or_harness_slice_fingerprint(&cycle_a),
+        mux_or_harness_slice_fingerprint(&cycle_b),
+        "adding a new agent session must change the fingerprint"
+    );
+}
+
+#[test]
+fn slice_fingerprint_ignores_node_ordering() {
+    // Discovery providers push into `Vec`s in whatever order they
+    // iterate. If Vec order affected the fingerprint we'd get
+    // spurious cache misses. Two snapshots with the same content
+    // in different orders must hash equal.
+    let a = snapshot_with_mux_session("s1", "mux-a", 1_000);
+    let mut b = GraphSnapshot::empty();
+    // Push the mux node before the agent node — reverse of the
+    // helper's order.
+    let mux_id = MuxSessionId::new("tmux:mux-a");
+    b.nodes.push(GraphNode::MuxSession(MuxSessionNode::new(
+        mux_id.clone(),
+        "tmux".to_string(),
+        "mux-a".to_string(),
+    )));
+    let agent_id = AgentSessionId::new("codex", "global", "s1");
+    b.nodes.push(GraphNode::AgentSession(AgentSessionNode::new(
+        agent_id.clone(),
+        "codex".to_string(),
+    )));
+    b.node_provenance.insert(
+        NodeId::MuxSession(mux_id),
+        NodeProvenance {
+            provider: "tmux".to_string(),
+            freshness_epoch: Some(1_000),
+        },
+    );
+    b.node_provenance.insert(
+        NodeId::AgentSession(agent_id),
+        NodeProvenance {
+            provider: "codex".to_string(),
+            freshness_epoch: Some(1_000),
+        },
+    );
+
+    assert_eq!(
+        mux_or_harness_slice_fingerprint(&a),
+        mux_or_harness_slice_fingerprint(&b),
+        "node insertion order must not affect the fingerprint"
+    );
+}
+
+#[test]
+fn gate_stays_closed_when_slice_is_empty_regardless_of_history() {
+    // (None, _) => false. This preserves today's "no mux/harness
+    // provenance stamped → no walk" behavior even if we walked
+    // last cycle.
+    assert!(!should_open_process_tree_gate(None, None));
+    assert!(!should_open_process_tree_gate(None, Some(1234)));
+}
+
+#[test]
+fn gate_opens_on_first_cycle_with_content() {
+    // (Some, None) => true. Daemon startup / first observation of
+    // any mux/harness content must seed the walk + downstream
+    // caches (codex_log, cross_link inference).
+    assert!(should_open_process_tree_gate(Some(1234), None));
+}
+
+#[test]
+fn gate_stays_closed_when_fingerprint_matches_previous() {
+    // (Some(x), Some(x)) => false. The whole point of B: skip the
+    // walk on quiet cycles.
+    assert!(!should_open_process_tree_gate(Some(1234), Some(1234)));
+}
+
+#[test]
+fn gate_opens_when_fingerprint_changes() {
+    // (Some(x), Some(y)) => true when x != y. Real content change
+    // (session added/removed, activity epoch bumped) must fire the
+    // walk.
+    assert!(should_open_process_tree_gate(Some(1234), Some(5678)));
+}

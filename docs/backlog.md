@@ -13618,6 +13618,70 @@ approach (not raw implementation size). Worked top-to-bottom.
       Until a trigger fires this stays deferred: the dominant CPU cost
       (the `/proc` walk) is already gone via 001a, and the residual is
       a second-order, high-blast-radius win.
+- [x] `H-SERVE-PERF-002` Cache `codex_log` DB scan across cycles.
+  - Scope: after 001a a min-cycle-gap floor for watcher-driven class
+    ticks landed (`server::min_cycle_gap` clamped to `[250ms, 2s]`),
+    but the harness class still fired at ~0.8 Hz and each cycle
+    re-opened `~/.codex/logs_<N>.sqlite` and ran a
+    `LIKE 'pid:<pid>:%'` scan per live Codex pid. The `logs` table
+    has no `(process_uuid, ts)` index; on operator boxes with a
+    ~20 MB log DB that was ~168 MB/s of cached reads / ~12k syscr/s
+    on the harness thread — the dominant post-throttle residual cost.
+  - Landed: process-local `QUERY_CACHE` in `codex_log.rs` keyed by
+    (db path, mtime_ns, size, sorted candidate pid list, cached
+    ts_floor). On cache hit the DB is not opened at all; observations
+    replay through the same emit path so the resulting snapshot
+    mutations are identical to the query path. The `cached_ts_floor`
+    field guards against a widened window returning stale "no
+    observation" — a lower ts_floor invalidates the cache. Verified
+    by three new tests using a `QUERY_COUNT` counter under a serial
+    `CACHE_TEST_LOCK` (cache-hit skips SQLite entirely, mtime advance
+    forces re-query, expanded pid set forces re-query) plus the 11
+    pre-existing codex_log tests including the widening case.
+- [ ] `H-SERVE-PERF-003` Fingerprint-gated `/proc` walk (001a follow-up).
+  - Scope: today's 001a gate opens whenever *any* mux or harness
+    provider re-stamped provenance this cycle. A provider re-stamps
+    every time it runs, regardless of whether the underlying data
+    changed. On busy boxes the harness class runs at its throttle
+    cap (0.8 Hz) and the gate opens on all of those runs — even the
+    ones where the harness slice is byte-identical to last cycle.
+    The residual /proc walk still costs ~5 MB of tmpfs reads per
+    fire on top of what 001a + 002 already avoid.
+  - Direction: compute a content fingerprint over each just-run
+    harness/mux slice's fragment (nodes + candidate_links) *before*
+    `stamp_fragment` writes the freshness epoch. Compare against
+    last cycle's fingerprint (in-memory, process-local, keyed by
+    class). Change `run_process_tree` derivation from "did mux/
+    harness class re-run" to "did any of {mux, harness} slice
+    fingerprints differ from last cycle." Everything downstream of
+    the gate (cross_link infer, per-adapter aux, codex_log
+    attribution) stays identical.
+  - Invariants:
+    - `freshness_epoch` continues to advance every cycle — fingerprint
+      is computed on the *un-stamped* fragment; the epoch stamp
+      happens after regardless of gate outcome. ADR 0079 freshness
+      gate unchanged.
+    - No on-disk artifact changes. Fingerprint is process-local; the
+      graph.bin write path is untouched. ADR 0083 warm-restart
+      artifact unchanged.
+    - Node ordering must be normalized before hashing (sort by id).
+    - `freshness_epoch` is the one field that *must* be excluded from
+      the hash input; everything else that reflects real state
+      (including `last_active_epoch`) stays in.
+    - False negatives are cheap: stale process-tree links persist for
+      at most one throttle window (~1.25s) until the next real
+      change. False positives cost one extra walk — the pre-B
+      baseline.
+  - Tests: fingerprint helper unit tests (empty=empty, node-add
+    differs, `freshness_epoch`-only-change is equal, node/link
+    ordering irrelevant). Integration test parallel to
+    `warm_start_preserves_process_tree_links_on_a_git_only_cycle`:
+    two identical harness cycles → walk fires exactly once.
+  - Expected impact: on this operator's box the /proc walk currently
+    costs ~5 MB of tmpfs reads per fire. If real harness data
+    changes at ~0.1 Hz instead of the 0.8 Hz throttle cap, walk
+    frequency drops ~8×. Combined with 001a + 002 the target idle
+    CPU is 1-3%, down from 5-10% post-002 and 40% pre-any.
 - [ ] `H-WT-001` Integrate first-class worktree management with pluggable
   backends.
   - Scope: product design for creating / listing / removing git
