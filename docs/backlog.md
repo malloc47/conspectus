@@ -13569,6 +13569,55 @@ approach (not raw implementation size). Worked top-to-bottom.
       consumed per call (drains boxed backends) and `from_env()` is
       env-reads only — caching a consumed value is awkward for
       negligible gain. See ADR 0091 Consequences.
+    - [ ] `H-SERVE-PERF-001c` Cut the per-cycle resolve/publish cost
+      (deferred; revisit only on the triggers below). Every class tick
+      still runs a full `resolve_snapshot` + full rkyv
+      `serialize_to_bytes` + `write_atomic_bytes` (fsync+rename of
+      `graph.bin`) even when the graph is unchanged. A naive
+      "skip write when bytes match" does NOT fire: `stamp_fragment`
+      (`src/discovery/mod.rs:62`) re-stamps each re-run provider's
+      `freshness_epoch = current_epoch()` every cycle, so the
+      serialized bytes always differ. Any real fix needs a *semantic*
+      fingerprint that excludes the freshness epochs, which collides
+      with load-bearing invariants:
+      - The freshness gate (ADR 0079, `cache::compute_freshness_gate`)
+        reads `freshness_epoch` for TTL decisions — epochs must keep
+        advancing or a skipped publish provokes a full stale re-run
+        (more work, not less).
+      - `graph.bin` is also the warm-restart artifact (ADR 0083,
+        `warm_start_from_disk`); skipping the write diverges on-disk
+        epochs from in-memory truth, mis-gating a restarted daemon /
+        daemonless one-shot.
+      - `freshness_epoch` is the operator-facing "how recently
+        observed" signal; freezing it to force equality is a semantic
+        regression.
+      - A semantic hash is a quiet-failure hazard: too inclusive never
+        skips; too exclusive serves stale socket bytes / writes a
+        stale warm-start artifact with no loud error. Every new model
+        field becomes an identity-vs-churn decision.
+      Lowest-risk shape if pursued: fingerprint the resolved graph
+      (epochs excluded); keep updating the in-memory `SnapshotBytes` /
+      `SnapshotState` and keep advancing epochs; only skip
+      `write_atomic_bytes` when the fingerprint matches the last
+      on-disk one. Accepts that `graph.bin` epochs lag until the next
+      real change — an ADR-worthy concession to ADR 0083, not a silent
+      optimization.
+      Revisit triggers (any one):
+      - Post-001a profiling of a running daemon shows `serve` idle CPU
+        or disk I/O still materially above target, AND attribution
+        points at resolve or the graph.bin write (not something else).
+      - Graphs grow large enough that per-cycle `resolve_snapshot`
+        (O(N log N) over the whole graph) dominates a tick — then the
+        answer is memoizing resolution per unchanged slice, a larger
+        change than the write-skip.
+      - `graph.bin` write churn becomes a measured problem (e.g. SSD
+        wear / fsync latency on the operator's host, or contention
+        with other writers).
+      - The daemon moves to sub-second refresh intervals, multiplying
+        the fixed per-cycle cost enough to matter.
+      Until a trigger fires this stays deferred: the dominant CPU cost
+      (the `/proc` walk) is already gone via 001a, and the residual is
+      a second-order, high-blast-radius win.
 - [ ] `H-WT-001` Integrate first-class worktree management with pluggable
   backends.
   - Scope: product design for creating / listing / removing git
