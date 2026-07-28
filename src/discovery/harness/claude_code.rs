@@ -48,7 +48,9 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -205,30 +207,11 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
                 continue;
             }
 
-            let Some(meta) = read_session_header(&path, fallback_cwd.as_deref()) else {
-                continue;
-            };
-
-            let leaf_uuid = read_session_leaf_uuid(&path);
-            let last_message_preview = read_session_last_message_preview(&path);
-            let last_active_epoch = file_modified_epoch(&path);
-
-            entries.push(DiscoveredSession {
-                node: AgentSessionNode {
-                    id: AgentSessionId::new(HARNESS_KEY, &state_scope, &meta.session_id),
-                    harness_key: HARNESS_KEY.to_string(),
-                    cwd: meta.cwd,
-                    title: meta.summary,
-                    last_message_preview,
-                    last_active_epoch,
-                    session_kind: None,
-                },
-                parent_uuid: meta.parent_uuid,
-                cross_session_record_type: meta.cross_session_record_type,
-                forked_from_session_id: meta.forked_from_session_id,
-                forked_from_message_uuid: meta.forked_from_message_uuid,
-                leaf_uuid,
-            });
+            if let Some(discovered) =
+                scan_session_cached(&path, fallback_cwd.as_deref(), &state_scope)
+            {
+                entries.push(discovered);
+            }
         }
 
         let leaf_to_session: HashMap<&str, &str> = entries
@@ -282,16 +265,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     })
 }
 
-// H-HYG-004: single production impl. See
-// `discovery::harness::aider` for the H-HYG-004 rationale
-// (fixture writers stamp mtimes via `File::set_modified`, so
-// no cargo-test argv sniff is needed here).
-fn file_modified_epoch(path: &Path) -> Option<i64> {
-    let modified = fs::metadata(path).ok()?.modified().ok()?;
-    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    i64::try_from(duration.as_secs()).ok()
-}
-
+#[derive(Clone)]
 struct DiscoveredSession {
     node: AgentSessionNode,
     parent_uuid: Option<String>,
@@ -756,6 +730,106 @@ fn coalesce_slashes(path: &str) -> String {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// H-SERVE-PERF-007: per-session-file scan cache.
+// ---------------------------------------------------------------------------
+//
+// `discover_state` walks every `*.jsonl` under `~/.claude/projects/*/` on
+// every harness discovery cycle and does three file opens per session
+// (header + leaf_uuid tail + last_message_preview tail). Almost every
+// session is dormant — on an operator box with ~90 claude jsonls the
+// vast majority have no activity for hours, yet each cycle re-opens
+// and re-reads them all.
+//
+// Cache the extracted `DiscoveredSession` per file, keyed on
+// `(mtime_ns, size)`. A cold call stats the file, misses cache,
+// runs the three reads, and populates the entry. A warm call stats
+// only — if fingerprint matches, no `open()` fires. Dormant files
+// become effectively free.
+
+struct CachedSessionScan {
+    mtime_ns: i128,
+    size: u64,
+    result: DiscoveredSession,
+}
+
+static SESSION_SCAN_CACHE: Mutex<Option<HashMap<PathBuf, CachedSessionScan>>> = Mutex::new(None);
+
+/// Extract `DiscoveredSession` for `path`, reusing a cached scan when
+/// the file's `(mtime, size)` are unchanged since the last call.
+/// Returns `None` when the file lacks a parseable `session_meta`
+/// header (matches the pre-cache no-cache behavior).
+fn scan_session_cached(
+    path: &Path,
+    fallback_cwd: Option<&str>,
+    state_scope: &str,
+) -> Option<DiscoveredSession> {
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
+    let mtime_ns =
+        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
+    let size = meta.len();
+
+    // Cache lookup: same (path, mtime, size) → identical extract.
+    {
+        let guard = SESSION_SCAN_CACHE.lock().unwrap();
+        if let Some(map) = guard.as_ref()
+            && let Some(cached) = map.get(path)
+            && cached.mtime_ns == mtime_ns
+            && cached.size == size
+        {
+            return Some(cached.result.clone());
+        }
+    }
+
+    // Cache miss — run the full three-open scan.
+    let header = read_session_header(path, fallback_cwd)?;
+    let leaf_uuid = read_session_leaf_uuid(path);
+    let last_message_preview = read_session_last_message_preview(path);
+    let last_active_epoch = i64::try_from(duration.as_secs()).ok();
+
+    let discovered = DiscoveredSession {
+        node: AgentSessionNode {
+            id: AgentSessionId::new(HARNESS_KEY, state_scope, &header.session_id),
+            harness_key: HARNESS_KEY.to_string(),
+            cwd: header.cwd,
+            title: header.summary,
+            last_message_preview,
+            last_active_epoch,
+            session_kind: None,
+        },
+        parent_uuid: header.parent_uuid,
+        cross_session_record_type: header.cross_session_record_type,
+        forked_from_session_id: header.forked_from_session_id,
+        forked_from_message_uuid: header.forked_from_message_uuid,
+        leaf_uuid,
+    };
+
+    let mut guard = SESSION_SCAN_CACHE.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert(
+        path.to_path_buf(),
+        CachedSessionScan {
+            mtime_ns,
+            size,
+            result: discovered.clone(),
+        },
+    );
+
+    Some(discovered)
+}
+
+/// Clear the process-wide session-scan cache. Tests that observe
+/// the cache short-circuit call this in setup so a prior test's
+/// entries don't leak into their assertions.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn reset_session_scan_cache_for_tests() {
+    let mut guard = SESSION_SCAN_CACHE.lock().unwrap();
+    *guard = None;
 }
 
 #[cfg(test)]

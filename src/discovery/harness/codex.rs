@@ -25,10 +25,12 @@
 //! without a `session_meta` envelope are skipped silently so a single bad
 //! file cannot poison discovery.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
@@ -180,13 +182,11 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 
     if sessions_dir.exists() {
         visit_rollouts(&sessions_dir, &mut |path| {
-            if let Some(meta) = read_session_meta(path) {
-                let preview = read_rollout_last_message_preview(path);
-                let activity = file_modified_epoch(path);
+            if let Some(scan) = scan_rollout_cached(path) {
                 sessions
-                    .entry(meta.id.clone())
+                    .entry(scan.meta.id.clone())
                     .or_default()
-                    .merge_rollout(&meta, preview, activity);
+                    .merge_rollout(&scan.meta, scan.preview, scan.activity);
             }
         })?;
     }
@@ -589,7 +589,7 @@ struct SessionMetaEnvelope {
     payload: SessionMetaPayload,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct SessionMetaPayload {
     id: String,
     #[serde(default)]
@@ -627,14 +627,82 @@ fn read_session_meta(path: &Path) -> Option<SessionMetaPayload> {
     Some(envelope.payload)
 }
 
-// H-HYG-004: single production impl. See
-// `discovery::harness::aider` for the H-HYG-004 rationale
-// (fixture writers stamp mtimes via `File::set_modified`, so
-// no cargo-test argv sniff is needed here).
-fn file_modified_epoch(path: &Path) -> Option<i64> {
-    let modified = fs::metadata(path).ok()?.modified().ok()?;
-    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    i64::try_from(duration.as_secs()).ok()
+// ---------------------------------------------------------------------------
+// H-SERVE-PERF-007: per-rollout scan cache.
+// ---------------------------------------------------------------------------
+//
+// `discover_state`'s `visit_rollouts` loop opens every `rollout-*.jsonl`
+// under `~/.codex/sessions/**/` on every harness cycle, calling
+// `read_session_meta` (first line) + `read_rollout_last_message_preview`
+// (32 KB tail). Almost every rollout is dormant, yet each cycle re-opens
+// them all. Cache the extracted (meta, preview, activity) triple per
+// file, fingerprinted on `(mtime_ns, size)` — a warm call stats only.
+
+#[derive(Clone)]
+struct RolloutScan {
+    meta: SessionMetaPayload,
+    preview: Option<String>,
+    activity: Option<i64>,
+}
+
+struct CachedRolloutScan {
+    mtime_ns: i128,
+    size: u64,
+    result: RolloutScan,
+}
+
+static ROLLOUT_SCAN_CACHE: Mutex<Option<HashMap<PathBuf, CachedRolloutScan>>> = Mutex::new(None);
+
+fn scan_rollout_cached(path: &Path) -> Option<RolloutScan> {
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta.modified().ok()?;
+    let duration = mtime.duration_since(UNIX_EPOCH).ok()?;
+    let mtime_ns =
+        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
+    let size = meta.len();
+
+    {
+        let guard = ROLLOUT_SCAN_CACHE.lock().unwrap();
+        if let Some(map) = guard.as_ref()
+            && let Some(cached) = map.get(path)
+            && cached.mtime_ns == mtime_ns
+            && cached.size == size
+        {
+            return Some(cached.result.clone());
+        }
+    }
+
+    let payload = read_session_meta(path)?;
+    let preview = read_rollout_last_message_preview(path);
+    let activity = i64::try_from(duration.as_secs()).ok();
+
+    let scan = RolloutScan {
+        meta: payload,
+        preview,
+        activity,
+    };
+
+    let mut guard = ROLLOUT_SCAN_CACHE.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert(
+        path.to_path_buf(),
+        CachedRolloutScan {
+            mtime_ns,
+            size,
+            result: scan.clone(),
+        },
+    );
+
+    Some(scan)
+}
+
+/// Clear the process-wide rollout-scan cache. Tests that observe
+/// the cache short-circuit call this in setup.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn reset_rollout_scan_cache_for_tests() {
+    let mut guard = ROLLOUT_SCAN_CACHE.lock().unwrap();
+    *guard = None;
 }
 
 /// Extract the rollout's most recent user/assistant text content as a
