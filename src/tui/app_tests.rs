@@ -156,6 +156,7 @@ fn pins_context_seeds_pin_create_cwd_from_selected_mux_absolute() {
         filter: crate::tui::RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
@@ -196,6 +197,7 @@ fn pin_adopt_defaults_preserve_selected_live_mux_name() {
         filter: crate::tui::RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let mut app = App::new(RunConfig::defaults());
     app.update(Msg::SetData {
@@ -265,6 +267,7 @@ fn pins_context_does_not_offer_adopt_for_already_pinned_mux() {
         filter: crate::tui::RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Repo,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let mut app = App::new(RunConfig {
         default_view: View::Mux,
@@ -712,6 +715,7 @@ fn select_pin_after_mutation_selects_mux_row_in_mux_pins_group() {
         filter: crate::tui::RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Repo,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let mut app = App::new(RunConfig {
         default_view: View::Mux,
@@ -2365,6 +2369,7 @@ fn restore_persisted_state_applies_state_and_mirrors_config() {
     let mut persisted = crate::tui_state::PersistedState {
         last_view: Some(View::Sessions),
         sort: Some(crate::tui::Sort::Recency),
+        mux_recency: None,
         view_states: BTreeMap::new(),
     };
     let filter = crate::filter::RowFilter {
@@ -2405,6 +2410,7 @@ fn restore_persisted_state_preserves_explicit_cli_overrides() {
     let mut persisted = crate::tui_state::PersistedState {
         last_view: Some(View::Sessions),
         sort: Some(crate::tui::Sort::Recency),
+        mux_recency: None,
         view_states: BTreeMap::new(),
     };
     persisted.view_states.insert(

@@ -225,6 +225,11 @@ pub struct App {
     /// recency-vs-hierarchy choice is view-independent in operator
     /// practice. Seeded from [`RunConfig::default_sort`].
     sort: super::Sort,
+    /// Mux-view recency basis (H-MUX-SORT-001). Selects which epoch
+    /// `Sort::Recency` orders the mux tree by (activity / created /
+    /// last-attached). Mux-scoped: no other view reads it. Seeded from
+    /// [`RunConfig::default_mux_recency`].
+    mux_recency: super::MuxRecency,
     /// Active row filter (ADR 0031, F8-003). Mirrors the active
     /// view's slot in `view_states` so callers don't pay a map
     /// lookup per read. Kept in sync via `switch_to_view` /
@@ -653,6 +658,10 @@ pub enum Msg {
     /// sessions grouping forces recency regardless of the
     /// requested value.
     SetSort(super::Sort),
+    /// Update the mux-view recency basis (H-MUX-SORT-001). Reducer
+    /// stores the basis, forces `Sort::Recency` so the choice takes
+    /// effect, and re-derives the tree.
+    SetMuxRecency(super::MuxRecency),
 }
 
 impl App {
@@ -663,6 +672,7 @@ impl App {
             config.default_sort = super::Sort::Recency;
         }
         let sort = config.default_sort;
+        let mux_recency = config.default_mux_recency;
         let filter = config.initial_filter.clone();
         let active_view = config.default_view;
         let grouping = match active_view {
@@ -701,6 +711,7 @@ impl App {
                 crate::tui::widgets::toast::engine(),
             ),
             sort,
+            mux_recency,
             filter,
             grouping,
             view_states: BTreeMap::new(),
@@ -1223,6 +1234,7 @@ impl App {
             grouping: self.grouping,
             filter: &self.filter,
             sort: self.sort,
+            mux_recency: self.mux_recency,
         }
     }
 
@@ -1587,6 +1599,11 @@ impl App {
         self.sort
     }
 
+    /// Mux-view recency basis (H-MUX-SORT-001).
+    pub fn mux_recency(&self) -> super::MuxRecency {
+        self.mux_recency
+    }
+
     fn force_recency_for_flat_sessions(&mut self) {
         if matches!(
             self.grouping,
@@ -1636,6 +1653,13 @@ impl App {
             && let Some(sort) = persisted.sort
         {
             self.sort = sort;
+        }
+
+        // Mux recency basis (H-MUX-SORT-001): restore the operator's
+        // last choice. There's no CLI flag for it, so persistence
+        // always wins when present.
+        if let Some(basis) = persisted.mux_recency {
+            self.mux_recency = basis;
         }
 
         // Pre-populate view_states from persisted state.
@@ -1707,6 +1731,7 @@ impl App {
         crate::tui_state::PersistedState {
             last_view: Some(active_view),
             sort: Some(self.sort),
+            mux_recency: Some(self.mux_recency),
             view_states,
         }
     }
@@ -2220,6 +2245,16 @@ impl App {
                     sort
                 };
                 self.sort = sort;
+                self.rebuild_tree_in_place();
+                effects.push(Effect::Persist);
+            }
+            Msg::SetMuxRecency(basis) => {
+                // Selecting a recency basis implies recency ordering —
+                // otherwise the choice would silently do nothing under
+                // Hierarchy sort. Nudge sort to Recency so the change is
+                // immediately visible in the mux tree.
+                self.mux_recency = basis;
+                self.sort = super::Sort::Recency;
                 self.rebuild_tree_in_place();
                 effects.push(Effect::Persist);
             }

@@ -54,6 +54,7 @@ fn mux(native: &str, cwd: Option<&str>) -> GraphNode {
         client_attached: None,
         activity_epoch: None,
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }
 
@@ -71,6 +72,7 @@ fn mux_with_active_command(native: &str, cwd: Option<&str>, command: &str) -> Gr
         client_attached: None,
         activity_epoch: None,
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }
 
@@ -88,6 +90,7 @@ fn mux_with_active_process(native: &str, cwd: Option<&str>, command: &str, pid: 
         client_attached: None,
         activity_epoch: None,
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }
 

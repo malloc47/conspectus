@@ -678,11 +678,13 @@ fn static_handle_controls_overlay_key(
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
+    let mux_recency = app.mux_recency();
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
+        mux_recency,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),
@@ -1931,11 +1933,13 @@ pub(super) fn handle_controls_overlay_key(
     let grouping = app.grouping();
     let filter_snapshot = app.filter().clone();
     let sort = app.sort();
+    let mux_recency = app.mux_recency();
     let ctx = ControlsContext {
         view,
         grouping,
         filter: &filter_snapshot,
         sort,
+        mux_recency,
     };
     let outcome = match app.controls_overlay_mut() {
         Some(state) => state.handle(&ctx, key),

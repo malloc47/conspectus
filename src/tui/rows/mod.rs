@@ -279,6 +279,12 @@ pub struct MuxSessionRow {
     pub ambiguous_count: usize,
     pub recency: Option<String>,
     pub activity_epoch: Option<i64>,
+    /// `session_created` epoch, carried so the mux view can order by
+    /// the "created" recency basis (H-MUX-SORT-001).
+    pub created_epoch: Option<i64>,
+    /// `session_last_attached` epoch, carried so the mux view can
+    /// order by the "last attached" recency basis (H-MUX-SORT-001).
+    pub last_attached_epoch: Option<i64>,
     /// Unique harness labels for visible agent sessions linked to
     /// this mux. Renderers use these as the primary mux-row labels so
     /// mux rows scan like session rows without repeating session IDs.
@@ -625,6 +631,7 @@ pub(crate) struct TreeInputs<'a> {
     pub grouping: crate::tui::Grouping,
     pub filter: crate::filter::RowFilter,
     pub sort: crate::tui::Sort,
+    pub mux_recency: crate::tui::MuxRecency,
     pub cwd: Option<&'a Path>,
 }
 
@@ -640,6 +647,7 @@ impl<'a> TreeInputs<'a> {
             grouping: app.grouping(),
             filter: app.filter().clone(),
             sort: app.sort(),
+            mux_recency: app.mux_recency(),
             cwd: app.config().cwd.as_deref(),
         }
     }
@@ -658,6 +666,7 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
         grouping,
         filter,
         sort,
+        mux_recency,
         cwd,
     } = inputs;
     match view {
@@ -687,6 +696,7 @@ pub(crate) fn build_tree_for_view(inputs: TreeInputs<'_>) -> RowTree {
                 filter,
                 grouping: mux_grouping,
                 sort,
+                mux_recency,
             })
         }
         View::Union => union::build_union_tree(union::UnionBuildInputs {

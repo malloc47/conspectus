@@ -119,6 +119,10 @@ pub struct RunConfig {
     /// totals, so the aggregate is opt-in only. Sourced from
     /// `[tui].show_harness_chips` in the on-disk config.
     pub show_harness_chips: bool,
+    /// Initial mux-view recency basis (H-MUX-SORT-001). The runtime
+    /// per-session control changes it in memory; this sets the
+    /// startup default.
+    pub default_mux_recency: MuxRecency,
     /// Terminal width (columns) below which the body reflows from
     /// side-by-side panes to a vertical stack (H-LAYOUT-001). Sourced
     /// from `[tui] narrow_layout_threshold`; the renderer reads this
@@ -162,6 +166,7 @@ impl RunConfig {
             theme: Theme::default(),
             show_edge_meta: false,
             show_harness_chips: false,
+            default_mux_recency: MuxRecency::default(),
             narrow_layout_threshold: crate::config::DEFAULT_NARROW_LAYOUT_THRESHOLD,
             intervals: crate::config::ServerIntervals::default(),
             no_cache: false,
@@ -189,6 +194,57 @@ pub enum View {
 pub enum Sort {
     Hierarchy,
     Recency,
+}
+
+/// Which recency signal the **mux** view's `Sort::Recency` orders by
+/// (H-MUX-SORT-001). Mux-scoped: other views keep a single recency
+/// signal, so this basis only affects the mux row tree. Each variant
+/// maps to a `MuxSessionNode` epoch; missing signals fall back so a
+/// session without the chosen epoch still sorts deterministically.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MuxRecency {
+    /// `session_activity` — last pane activity. The default and the
+    /// historical `Recency` behavior.
+    #[default]
+    Activity,
+    /// `session_created` — when the mux session was created.
+    Created,
+    /// `session_last_attached` — when a client last attached.
+    LastAttached,
+}
+
+impl MuxRecency {
+    /// Stable snake_case token used for config, persistence, and the
+    /// controls overlay label lookup.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Activity => "activity",
+            Self::Created => "created",
+            Self::LastAttached => "last_attached",
+        }
+    }
+
+    /// Human label for the controls overlay.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Activity => "activity",
+            Self::Created => "created",
+            Self::LastAttached => "last attached",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "activity" => Some(Self::Activity),
+            "created" => Some(Self::Created),
+            "last_attached" | "last-attached" => Some(Self::LastAttached),
+            _ => None,
+        }
+    }
+
+    /// All variants in stable display order.
+    pub const ALL: [MuxRecency; 3] = [Self::Activity, Self::Created, Self::LastAttached];
 }
 
 /// Top-level grouping in the sessions tree.

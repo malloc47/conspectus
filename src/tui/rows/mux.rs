@@ -29,6 +29,9 @@ pub struct MuxBuildInputs<'a> {
     pub filter: RowFilter,
     pub grouping: MuxGrouping,
     pub sort: Sort,
+    /// Which recency signal `Sort::Recency` orders mux rows by
+    /// (H-MUX-SORT-001). Ignored under `Sort::Hierarchy`.
+    pub mux_recency: crate::tui::MuxRecency,
 }
 
 #[derive(Clone, Debug)]
@@ -146,6 +149,8 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             ambiguous_count,
             recency: format_recency(now, activity_epoch),
             activity_epoch,
+            created_epoch: mux.node.created_epoch,
+            last_attached_epoch: mux.node.last_attached_epoch,
             agent_labels: agent_labels(&visible_attached),
             single_session_preview,
             pin_id: pin_id_by_mux.get(&node_id).cloned(),
@@ -256,6 +261,8 @@ fn placeholder_mux_group_for_pin(pin: &PinCandidate, home: Option<&Path>) -> Mux
             ambiguous_count: 0,
             recency: None,
             activity_epoch: None,
+            created_epoch: None,
+            last_attached_epoch: None,
             agent_labels: vec![harness_label(&pin.harness)],
             single_session_preview: Some(shorten_home(&pin.cwd, home)),
             pin_id: Some(pin.id.clone()),
@@ -387,6 +394,20 @@ fn emit_repo_grouped(
     }
 }
 
+/// Recency ordering key for a mux row under the chosen basis
+/// (H-MUX-SORT-001). Activity blends in attached-agent activity (its
+/// `activity_epoch` is already the blended value); created and
+/// last-attached read the raw session-lifecycle epochs. A missing
+/// signal sorts oldest (`None` < `Some`), so sessions lacking the
+/// chosen epoch fall to the bottom of the recency order deterministically.
+fn recency_key(row: &MuxSessionRow, basis: crate::tui::MuxRecency) -> Option<i64> {
+    match basis {
+        crate::tui::MuxRecency::Activity => row.activity_epoch,
+        crate::tui::MuxRecency::Created => row.created_epoch,
+        crate::tui::MuxRecency::LastAttached => row.last_attached_epoch,
+    }
+}
+
 fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
     groups.sort_by(|left, right| {
         let pinned = usize::from(left.parent_row.pin_id.is_none())
@@ -403,10 +424,8 @@ fn sort_mux_groups(groups: &mut [MuxGroup], inputs: &MuxBuildInputs<'_>) {
         };
         float_order.then_with(|| match inputs.sort {
             Sort::Hierarchy => std::cmp::Ordering::Equal,
-            Sort::Recency => right
-                .parent_row
-                .activity_epoch
-                .cmp(&left.parent_row.activity_epoch)
+            Sort::Recency => recency_key(&right.parent_row, inputs.mux_recency)
+                .cmp(&recency_key(&left.parent_row, inputs.mux_recency))
                 .then_with(|| left.parent_row.native_id.cmp(&right.parent_row.native_id))
                 .then_with(|| left.parent_node_id.cmp(&right.parent_node_id)),
         })

@@ -309,6 +309,7 @@ fn mux(backend: &str, native: &str, cwd: Option<&str>) -> GraphNode {
         client_attached: Some(true),
         activity_epoch: Some(1_700_000_005),
         created_epoch: Some(1_699_000_000),
+        last_attached_epoch: None,
     })
 }
 

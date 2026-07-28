@@ -41,6 +41,7 @@ fn mux_with_command_created(
         client_attached: None,
         activity_epoch: Some(1_700_000_000),
         created_epoch,
+        last_attached_epoch: None,
     })
 }
 
@@ -816,6 +817,7 @@ fn opencode_hook_record_demotes_stale_launch_argv_for_same_mux() {
         client_attached: None,
         activity_epoch: Some(1_700_000_000),
         created_epoch: None,
+        last_attached_epoch: None,
     });
 
     let stale_argv_link = {

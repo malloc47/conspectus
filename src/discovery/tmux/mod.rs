@@ -42,7 +42,7 @@ pub const KNOWN_MUX_BACKENDS: &[&str] = &[
 
 /// Format string used with `tmux list-sessions -F`. Fields are tab-separated so
 /// session roots can safely contain spaces.
-pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}";
+pub const TMUX_LIST_FORMAT: &str = "#{session_name}\t#{session_path}\t#{session_activity}\t#{session_created}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}\t#{pane_start_command}\t#{session_attached}\t#{session_attached_list}\t#{session_last_attached}";
 
 /// Backend-neutral mux abstraction (H-EXT-008, ADR 0089).
 ///
@@ -1044,6 +1044,7 @@ pub struct TmuxSessionRow {
     pub active_pane_current_path: Option<String>,
     pub active_pane_start_command: Option<String>,
     pub client_attached: Option<bool>,
+    pub last_attached_epoch: Option<i64>,
 }
 
 pub fn parse_list_sessions(stdout: &str) -> Vec<TmuxSessionRow> {
@@ -1071,6 +1072,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
     let attached_count = optional_usize(fields.next());
     let attached_list = optional_string(fields.next());
     let client_attached = interactive_client_attached(attached_count, attached_list.as_deref());
+    let last_attached_epoch = optional_epoch(fields.next());
 
     Some(TmuxSessionRow {
         name,
@@ -1082,6 +1084,7 @@ fn parse_session_line(line: &str) -> Option<TmuxSessionRow> {
         active_pane_current_path,
         active_pane_start_command,
         client_attached,
+        last_attached_epoch,
     })
 }
 
@@ -1196,6 +1199,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for TmuxDiscovery<R> {
                 client_attached: row.client_attached,
                 activity_epoch: row.activity_epoch,
                 created_epoch: row.created_epoch,
+                last_attached_epoch: row.last_attached_epoch,
             }));
         }
 

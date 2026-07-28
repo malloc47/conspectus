@@ -37,6 +37,7 @@ fn mux_node_with_paths(
         client_attached: None,
         activity_epoch: Some(1_700_000_050),
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }
 
@@ -101,6 +102,7 @@ fn mux_view_emits_one_row_per_mux_with_agent_labels() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     assert_eq!(
@@ -138,6 +140,7 @@ fn mux_view_prefers_active_pane_cwd_for_display() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let RowKind::MuxSession(row) = &tree.rows[0].kind else {
@@ -179,6 +182,7 @@ fn mux_view_nests_session_rows_when_multiple_agents_link_to_one_mux() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     assert_eq!(tree.rows.len(), 3);
@@ -244,6 +248,7 @@ fn mux_view_drops_non_winner_linked_to_mux_candidate() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let mux_rows: Vec<_> = tree
@@ -303,6 +308,7 @@ fn mux_view_counts_same_target_evidence_as_one_attachment() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let RowKind::MuxSession(row) = &tree.rows[0].kind else {
@@ -329,6 +335,7 @@ fn mux_view_omits_single_session_preview_when_unattached() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let RowKind::MuxSession(row) = &tree.rows[0].kind else {
@@ -368,6 +375,7 @@ fn mux_view_omits_preview_when_attached_agent_has_none() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let RowKind::MuxSession(row) = &tree.rows[0].kind else {
@@ -422,6 +430,7 @@ fn float_attached_muxes_top_lifts_attached_above_unattached() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     assert_eq!(
         native_ids(&baseline),
@@ -439,6 +448,7 @@ fn float_attached_muxes_top_lifts_attached_above_unattached() {
         },
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     assert_eq!(
         native_ids(&floated),
@@ -505,6 +515,7 @@ fn recency_sort_orders_muxes_by_latest_attached_agent_activity() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     assert_eq!(native_ids(&hierarchy), vec!["alpha", "beta"]);
 
@@ -515,6 +526,7 @@ fn recency_sort_orders_muxes_by_latest_attached_agent_activity() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Recency,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     assert_eq!(native_ids(&recency), vec!["beta", "alpha"]);
 }
@@ -583,6 +595,7 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Repo,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let row_summary: Vec<(u8, String)> = tree
@@ -660,6 +673,7 @@ fn mux_view_paints_pin_id_on_bound_mux_rows() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let mut pin_ids: Vec<(String, Option<String>)> = tree
@@ -712,6 +726,7 @@ fn mux_view_flat_grouping_floats_pinned_mux_rows_to_top() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let muxes: Vec<_> = tree
@@ -781,6 +796,7 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Repo,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let row_summary: Vec<(u8, String)> = tree
@@ -857,6 +873,7 @@ fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Repo,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let pins_group_idx = tree
@@ -914,6 +931,7 @@ fn mux_view_flat_grouping_renders_unbound_pin_as_placeholder_mux_row() {
         filter: RowFilter::default(),
         grouping: MuxGrouping::Session,
         sort: Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let has_pins_group = tree
@@ -937,4 +955,85 @@ fn mux_view_flat_grouping_renders_unbound_pin_as_placeholder_mux_row() {
     assert_eq!(mux.agent_labels, vec!["claude".to_string()]);
     assert_eq!(mux.single_session_preview.as_deref(), Some("/p"));
     assert!(matches!(&mux.primary_node, NodeId::Pin(pin) if pin.id == "code"));
+}
+
+fn mux_node_with_epochs(
+    native: &str,
+    activity: i64,
+    created: i64,
+    last_attached: i64,
+) -> GraphNode {
+    let mut node = mux_node(native);
+    if let GraphNode::MuxSession(mux) = &mut node {
+        mux.activity_epoch = Some(activity);
+        mux.created_epoch = Some(created);
+        mux.last_attached_epoch = Some(last_attached);
+    }
+    node
+}
+
+fn mux_recency_order(snapshot: &GraphSnapshot, basis: crate::tui::MuxRecency) -> Vec<String> {
+    let tree = build_mux_tree(MuxBuildInputs {
+        snapshot,
+        home: None,
+        now: Some(1_700_001_000),
+        filter: RowFilter::default(),
+        grouping: MuxGrouping::Session,
+        sort: Sort::Recency,
+        mux_recency: basis,
+    });
+    tree.rows
+        .iter()
+        .filter_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) => Some(mux.native_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn mux_recency_basis_reorders_rows_by_chosen_signal() {
+    // Three muxes whose recency signals rank them differently:
+    //   activity:      a > b > c
+    //   created:       c > b > a
+    //   last_attached: b > a > c
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(mux_node_with_epochs("a", 300, 100, 200));
+    snapshot
+        .nodes
+        .push(mux_node_with_epochs("b", 200, 150, 300));
+    snapshot
+        .nodes
+        .push(mux_node_with_epochs("c", 100, 200, 100));
+    let snapshot = resolve_snapshot(snapshot);
+
+    assert_eq!(
+        mux_recency_order(&snapshot, crate::tui::MuxRecency::Activity),
+        vec!["a", "b", "c"],
+    );
+    assert_eq!(
+        mux_recency_order(&snapshot, crate::tui::MuxRecency::Created),
+        vec!["c", "b", "a"],
+    );
+    assert_eq!(
+        mux_recency_order(&snapshot, crate::tui::MuxRecency::LastAttached),
+        vec!["b", "a", "c"],
+    );
+}
+
+#[test]
+fn mux_recency_missing_signal_sorts_to_the_bottom() {
+    // `b` has no created_epoch; under the Created basis it sorts last
+    // (None < Some), deterministically, without panicking.
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(mux_node_with_epochs("a", 10, 100, 10));
+    snapshot.nodes.push(mux_node_with_epochs("c", 10, 50, 10));
+    // `b` keeps the default created_epoch: None from mux_node().
+    snapshot.nodes.push(mux_node("b"));
+    let snapshot = resolve_snapshot(snapshot);
+
+    let order = mux_recency_order(&snapshot, crate::tui::MuxRecency::Created);
+    assert_eq!(order.last().map(String::as_str), Some("b"));
 }

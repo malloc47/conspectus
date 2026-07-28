@@ -181,6 +181,7 @@ impl Ingredient for ControlsVariant {
             grouping: self.grouping,
             filter: &self.filter,
             sort: self.sort,
+            mux_recency: conspectus::tui::MuxRecency::default(),
         };
         let mut state = match self.open_state {
             ControlsOpenState::Closed => ControlsOverlayState::new(&ctx),

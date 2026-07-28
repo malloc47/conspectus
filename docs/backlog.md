@@ -13507,7 +13507,7 @@ approach (not raw implementation size). Worked top-to-bottom.
     on write, and each discovery cycle folds the recorded (still-extant)
     stores into the pin loader's search set. Best-effort, self-pruning,
     read-only for `graph`/`table`.
-- [ ] `H-MUX-SORT-001` Add better recency sort options for the mux view.
+- [x] `H-MUX-SORT-001` Add better recency sort options for the mux view.
   - Scope: the mux view currently sorts by the shared `Sort::Recency`
     signal. Enumerate the recency signals tmux exposes per session
     (`session_created`, `session_activity`, `session_last_attached`,
@@ -13522,6 +13522,15 @@ approach (not raw implementation size). Worked top-to-bottom.
   - Blockers: depends on which signals survive the tmux capability
     survey (part of the story) and an operator call on which become
     selectable options.
+  - Outcome: chose the mux-scoped sub-option approach. tmux survey
+    found `session_activity` and `session_created` already captured;
+    added `session_last_attached` (new `MuxSessionNode.last_attached_epoch`
+    + format field). New `MuxRecency { Activity, Created, LastAttached }`
+    basis selects the epoch the mux view's `Sort::Recency` orders by;
+    exposed as a mux-only "Recency by" section in the controls overlay
+    (menu-first), persisted in `tui-state.json`, and defaulting to
+    Activity (the prior behavior). Pane-process start time was surveyed
+    and dropped (Linux-only, extra syscalls, ~duplicates activity).
 - [ ] `H-SERVE-PERF-001` Debug `conspectus serve` resource usage.
   - Scope: the `serve` daemon (ADR 0038 / ADR 0079,
     `src/server/mod.rs`) consumes a nontrivial amount of CPU/memory at

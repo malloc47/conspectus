@@ -303,6 +303,7 @@ fn mux_view_mux_row_resolves_attach_target() {
         filter: RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let mut cfg = RunConfig::defaults();
     cfg.default_view = View::Mux;
@@ -328,6 +329,7 @@ fn build_mux_view_app_with_attachments(snapshot: GraphSnapshot) -> App {
         filter: RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let mut cfg = RunConfig::defaults();
     cfg.default_view = View::Mux;

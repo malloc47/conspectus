@@ -88,6 +88,7 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
     let mut state = PersistedState {
         last_view: Some(View::Mux),
         sort: Some(Sort::Recency),
+        mux_recency: None,
         view_states: BTreeMap::new(),
     };
     state.view_states.insert(
@@ -124,6 +125,25 @@ fn full_state_round_trips_sort_filter_and_view_slots() {
         sessions.filter.harness,
         Some(crate::filter::HarnessFilter::from_values(["codex"]))
     );
+}
+
+#[test]
+fn mux_recency_basis_round_trips() {
+    // H-MUX-SORT-001: the mux recency basis survives a write/read
+    // cycle so the operator's choice persists across restarts.
+    let dir = TempDir::new().expect("tempdir");
+    let cache = cache_in(&dir);
+    let state = PersistedState {
+        last_view: Some(View::Mux),
+        sort: Some(Sort::Recency),
+        mux_recency: Some(crate::tui::MuxRecency::LastAttached),
+        view_states: BTreeMap::new(),
+    };
+
+    write_tui_state(&cache, &state).expect("write");
+    let read = read_tui_state(&cache).expect("read");
+
+    assert_eq!(read.mux_recency, Some(crate::tui::MuxRecency::LastAttached));
 }
 
 #[test]

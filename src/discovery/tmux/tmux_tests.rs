@@ -92,6 +92,7 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             path: Some("/work/alpha".to_string()),
             activity_epoch: Some(1700000500),
             created_epoch: Some(1700000000),
+            last_attached_epoch: None,
             active_pane_command: None,
             active_pane_pid: None,
             active_pane_current_path: None,
@@ -99,6 +100,25 @@ fn parser_extracts_name_path_activity_and_created_epoch() {
             client_attached: None,
         }]
     );
+}
+
+#[test]
+fn parser_extracts_last_attached_epoch() {
+    // H-MUX-SORT-001: `session_last_attached` is the 11th (trailing)
+    // tab field. All ten preceding fields present, then the epoch.
+    let rows =
+        parse_list_sessions("alpha\t/work\t1700000500\t1700000000\t\t\t\t\t1\talpha\t1700000400\n");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].last_attached_epoch, Some(1700000400));
+}
+
+#[test]
+fn parser_defaults_last_attached_epoch_when_field_absent() {
+    // Older/short output without the trailing field parses cleanly
+    // with `last_attached_epoch: None`.
+    let rows = parse_list_sessions("alpha\t/work\t1700000500\t1700000000\n");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].last_attached_epoch, None);
 }
 
 #[test]

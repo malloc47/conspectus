@@ -373,6 +373,7 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
         client_attached: Some(true),
         activity_epoch: Some(2),
         created_epoch: Some(3),
+        last_attached_epoch: None,
     }));
     snap.nodes
         .push(GraphNode::RuntimeProcess(RuntimeProcessNode {

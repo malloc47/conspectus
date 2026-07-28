@@ -17,6 +17,7 @@ fn ctx_with(view: View, grouping: Grouping, filter: &RowFilter, sort: Sort) -> C
         grouping,
         filter,
         sort,
+        mux_recency: crate::tui::MuxRecency::default(),
     }
 }
 

@@ -79,6 +79,10 @@ pub struct ControlsContext<'a> {
     pub grouping: Grouping,
     pub filter: &'a RowFilter,
     pub sort: Sort,
+    /// Mux-view recency basis (H-MUX-SORT-001). Read so the overlay
+    /// can mark the active basis; only surfaced when the mux view is
+    /// active.
+    pub mux_recency: crate::tui::MuxRecency,
 }
 
 /// One landable row in the controls overlay's flat list.
@@ -100,6 +104,9 @@ pub enum ControlsCursor {
     FilterClear,
     /// Sort option at index in [`SORT_OPTIONS`].
     Sort(usize),
+    /// Mux-view-only recency basis at index in
+    /// [`crate::tui::MuxRecency::ALL`] (H-MUX-SORT-001).
+    MuxRecency(usize),
 }
 
 /// Sub-editor that owns key input while open. The host overlay
@@ -253,6 +260,13 @@ impl ControlsOverlayState {
             ControlsCursor::Sort(idx) => {
                 let sort = SORT_OPTIONS.get(idx).copied().unwrap_or(ctx.sort);
                 ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetSort(sort))
+            }
+            ControlsCursor::MuxRecency(idx) => {
+                let basis = crate::tui::MuxRecency::ALL
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(ctx.mux_recency);
+                ControlsOutcome::ApplyAndStay(crate::tui::Msg::SetMuxRecency(basis))
             }
         }
     }
@@ -477,6 +491,13 @@ fn flatten_rows(ctx: &ControlsContext<'_>) -> Vec<ControlsCursor> {
     for idx in 0..SORT_OPTIONS.len() {
         rows.push(ControlsCursor::Sort(idx));
     }
+    // Mux-only recency basis (H-MUX-SORT-001): which signal
+    // `Sort::Recency` orders the mux tree by.
+    if matches!(ctx.view, View::Mux) {
+        for idx in 0..crate::tui::MuxRecency::ALL.len() {
+            rows.push(ControlsCursor::MuxRecency(idx));
+        }
+    }
     rows
 }
 
@@ -638,6 +659,19 @@ impl ControlsOverlayWidget<'_> {
                 cursor == row,
             ));
         }
+
+        // Mux-only recency basis (H-MUX-SORT-001): which signal the
+        // Recency sort orders by. Only meaningful — and only shown —
+        // for the mux view.
+        if matches!(self.ctx.view, View::Mux) {
+            lines.push(line![""]);
+            lines.push(section_header("Recency by (Mux)"));
+            for (idx, basis) in crate::tui::MuxRecency::ALL.iter().enumerate() {
+                let row = ControlsCursor::MuxRecency(idx);
+                let active = *basis == self.ctx.mux_recency;
+                lines.push(row_line(basis.label().to_string(), active, cursor == row));
+            }
+        }
         lines
     }
 
@@ -690,6 +724,31 @@ impl ControlsOverlayWidget<'_> {
                     + filter_rows
                     + 1;
                 Some(sort_header + 1 + idx)
+            }
+            ControlsCursor::MuxRecency(idx) => {
+                let filter_rows = if matches!(self.ctx.view, View::Sessions | View::Mux) {
+                    5
+                } else {
+                    4
+                };
+                // View header + view rows + blank
+                // + grouping header + grouping rows + blank
+                // + filter header + filter rows + blank
+                // + sort header + sort rows + blank
+                // + recency header, then the basis rows.
+                let recency_header = 1
+                    + VIEW_OPTIONS.len()
+                    + 1
+                    + 1
+                    + Grouping::values_for(self.ctx.view).len()
+                    + 1
+                    + 1
+                    + filter_rows
+                    + 1
+                    + 1
+                    + SORT_OPTIONS.len()
+                    + 1;
+                Some(recency_header + 1 + idx)
             }
         }
     }
@@ -844,6 +903,13 @@ fn max_controls_content_lines() -> usize {
             } else {
                 4
             };
+            // Mux view appends a "Recency by" section: blank + header
+            // + one row per basis (H-MUX-SORT-001).
+            let mux_recency_rows = if matches!(*view, View::Mux) {
+                1 + 1 + crate::tui::MuxRecency::ALL.len()
+            } else {
+                0
+            };
             let body_lines = 1
                 + VIEW_OPTIONS.len()
                 + 1
@@ -854,7 +920,8 @@ fn max_controls_content_lines() -> usize {
                 + filter_rows
                 + 1
                 + 1
-                + SORT_OPTIONS.len();
+                + SORT_OPTIONS.len()
+                + mux_recency_rows;
             body_lines + 2
         })
         .max()

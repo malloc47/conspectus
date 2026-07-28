@@ -46,6 +46,7 @@ fn mux(native_id: &str, cwd: &str) -> GraphNode {
         client_attached: None,
         activity_epoch: None,
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }
 

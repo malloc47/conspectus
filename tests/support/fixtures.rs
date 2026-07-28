@@ -39,6 +39,7 @@ pub fn mux_only_graph() -> GraphSnapshot {
             client_attached: None,
             activity_epoch: None,
             created_epoch: None,
+            last_attached_epoch: None,
         })],
         ..GraphSnapshot::empty()
     })
@@ -385,5 +386,6 @@ fn mux_node(id: &str, native_id: &str) -> GraphNode {
         client_attached: None,
         activity_epoch: None,
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }

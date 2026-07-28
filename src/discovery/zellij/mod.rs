@@ -255,6 +255,7 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
                 client_attached: Some(row.is_current),
                 activity_epoch: None,
                 created_epoch: None,
+                last_attached_epoch: None,
             };
             fragment.nodes.push(GraphNode::MuxSession(node));
         }

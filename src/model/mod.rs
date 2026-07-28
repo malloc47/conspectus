@@ -614,6 +614,14 @@ pub struct MuxSessionNode {
     pub activity_epoch: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_epoch: Option<i64>,
+    /// Epoch of the most recent client attach to this mux session
+    /// (`tmux #{session_last_attached}`). Distinct from
+    /// `activity_epoch` (any pane activity) and `created_epoch`
+    /// (session birth): this tracks when the operator last *looked
+    /// at* the session, which drives the "last attached" mux recency
+    /// sort basis (H-MUX-SORT-001).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attached_epoch: Option<i64>,
 }
 
 // H-HYG-011: builder helpers on `MuxSessionNode` mirror
@@ -634,6 +642,7 @@ impl MuxSessionNode {
             client_attached: None,
             activity_epoch: None,
             created_epoch: None,
+            last_attached_epoch: None,
         }
     }
 
@@ -674,6 +683,11 @@ impl MuxSessionNode {
 
     pub fn with_created_epoch(mut self, epoch: i64) -> Self {
         self.created_epoch = Some(epoch);
+        self
+    }
+
+    pub fn with_last_attached_epoch(mut self, epoch: i64) -> Self {
+        self.last_attached_epoch = Some(epoch);
         self
     }
 }

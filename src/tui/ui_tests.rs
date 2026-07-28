@@ -1277,6 +1277,7 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
         filter: RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let mut config = RunConfig::defaults();
@@ -1377,6 +1378,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
         filter: RowFilter::default(),
         grouping: crate::tui::MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
 
     let mut config = RunConfig::defaults();
@@ -1642,6 +1644,8 @@ fn row_kind_glyph_span_dispatches_per_row_kind() {
         ambiguous_count: 0,
         recency: None,
         activity_epoch: None,
+        created_epoch: None,
+        last_attached_epoch: None,
         agent_labels: Vec::new(),
         single_session_preview: None,
         pin_id: None,
@@ -1873,6 +1877,8 @@ fn mux_session_row_mirrors_session_column_order() {
         ambiguous_count: 0,
         recency: Some("3s".into()),
         activity_epoch: Some(now - 3),
+        created_epoch: None,
+        last_attached_epoch: None,
         agent_labels: vec!["codex".into()],
         single_session_preview: Some("running cargo test".into()),
         pin_id: None,
@@ -1940,6 +1946,8 @@ fn placeholder_mux_row_renders_dotted_glyph_and_cwd_preview() {
         ambiguous_count: 0,
         recency: None,
         activity_epoch: None,
+        created_epoch: None,
+        last_attached_epoch: None,
         agent_labels: vec!["codex".into()],
         single_session_preview: Some("~/repo".into()),
         pin_id: Some("ingest".into()),

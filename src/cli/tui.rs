@@ -388,6 +388,10 @@ impl TuiArgs {
             theme: outcome.config.tui.theme.clone(),
             show_edge_meta: outcome.config.tui.detail.show_edge_meta,
             show_harness_chips: outcome.config.tui.show_harness_chips,
+            // H-MUX-SORT-001: startup default; the operator's last
+            // choice is restored from persisted TUI state on top of
+            // this, mirroring how `sort` flows.
+            default_mux_recency: conspectus::tui::MuxRecency::default(),
             narrow_layout_threshold: outcome.config.tui.narrow_layout_threshold,
             intervals: outcome.config.server.intervals,
             no_cache: self.no_cache,

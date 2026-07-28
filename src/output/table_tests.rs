@@ -57,6 +57,7 @@ fn mux_session(backend: &str, name: &str, cwd: Option<&str>) -> GraphNode {
         client_attached: None,
         activity_epoch: None,
         created_epoch: None,
+        last_attached_epoch: None,
     })
 }
 
@@ -1035,6 +1036,7 @@ fn mux_session_with_epochs(
         client_attached: None,
         activity_epoch,
         created_epoch,
+        last_attached_epoch: None,
     })
 }
 
@@ -2644,6 +2646,7 @@ fn filter_parity_with_tui_mux_row_tree() {
         filter,
         grouping: MuxGrouping::Session,
         sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
     });
     let tree_mux_rows = tree
         .rows

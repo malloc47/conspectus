@@ -1081,6 +1081,7 @@ mod selected_default_action_tests {
             filter: RowFilter::default(),
             grouping: crate::tui::MuxGrouping::Session,
             sort: crate::tui::Sort::Hierarchy,
+            mux_recency: crate::tui::MuxRecency::default(),
         });
         let mut cfg = RunConfig::defaults();
         cfg.default_view = View::Mux;
@@ -1217,6 +1218,7 @@ mod projection_zero_discovery {
             grouping: Grouping::Sessions(SessionsGrouping::Graph),
             filter: RowFilter::default(),
             sort: super::super::super::Sort::Hierarchy,
+            mux_recency: crate::tui::MuxRecency::default(),
             cwd: None,
         });
         let mut cfg = RunConfig::defaults();
