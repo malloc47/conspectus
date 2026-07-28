@@ -17,9 +17,11 @@
 //! sessions carry `session_kind: Subagent` on their `AgentSessionNode` so
 //! downstream TUI and resolver code can nest, filter, or suppress them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
@@ -160,7 +162,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     let state_scope = state_root.to_string_lossy().to_string();
     let mut sessions = BTreeMap::new();
 
-    for info in read_sqlite_sessions(&state_root.join("opencode.db")) {
+    for info in read_sqlite_sessions_cached(&state_root.join("opencode.db")) {
         sessions.insert(info.id.clone(), info);
     }
 
@@ -211,7 +213,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct SessionInfo {
     id: String,
     #[serde(default)]
@@ -242,7 +244,7 @@ struct SessionInfo {
     time: Option<SessionTime>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct SessionTime {
     #[serde(default)]
     created: Option<i64>,
@@ -593,6 +595,77 @@ fn read_info(path: &Path) -> Option<SessionInfo> {
             .and_then(|time| epoch_ms_to_seconds(time.updated.or(time.created)));
     }
     Some(info)
+}
+
+// ---------------------------------------------------------------------------
+// H-SERVE-PERF-010: opencode.db scan cache.
+// ---------------------------------------------------------------------------
+//
+// `read_sqlite_sessions` opens `~/.local/share/opencode/opencode.db`
+// (25 MB on the operator's box) and issues a full-table `SELECT`
+// scan of the `session` table (plus a preview lookup per session).
+// The DB uses WAL mode so the main file's mtime is stable across
+// long stretches — perfect for a mtime+size cache. On a warm daemon
+// with an idle opencode the cache hit rate is ~100%, saving the
+// ~5,000 pread64 pages per full-table scan every harness cycle.
+
+struct CachedSqliteSessions {
+    mtime_ns: i128,
+    size: u64,
+    sessions: Vec<SessionInfo>,
+}
+
+static SQLITE_SESSIONS_CACHE: Mutex<Option<HashMap<PathBuf, CachedSqliteSessions>>> =
+    Mutex::new(None);
+
+fn read_sqlite_sessions_cached(path: &Path) -> Vec<SessionInfo> {
+    let Ok(meta) = fs::metadata(path) else {
+        return Vec::new();
+    };
+    let Ok(mtime) = meta.modified() else {
+        return Vec::new();
+    };
+    let Ok(duration) = mtime.duration_since(UNIX_EPOCH) else {
+        return Vec::new();
+    };
+    let mtime_ns =
+        i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos());
+    let size = meta.len();
+
+    {
+        let guard = SQLITE_SESSIONS_CACHE.lock().unwrap();
+        if let Some(map) = guard.as_ref()
+            && let Some(cached) = map.get(path)
+            && cached.mtime_ns == mtime_ns
+            && cached.size == size
+        {
+            return cached.sessions.clone();
+        }
+    }
+
+    let sessions = read_sqlite_sessions(path);
+
+    let mut guard = SQLITE_SESSIONS_CACHE.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.insert(
+        path.to_path_buf(),
+        CachedSqliteSessions {
+            mtime_ns,
+            size,
+            sessions: sessions.clone(),
+        },
+    );
+
+    sessions
+}
+
+/// Clear the process-wide opencode SQLite scan cache. Tests that
+/// observe the cache short-circuit call this in setup.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn reset_sqlite_sessions_cache_for_tests() {
+    let mut guard = SQLITE_SESSIONS_CACHE.lock().unwrap();
+    *guard = None;
 }
 
 #[cfg(test)]
