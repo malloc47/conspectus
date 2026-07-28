@@ -811,7 +811,7 @@ fn main() -> std::io::Result<()> {
             variant: PinsVariant::Edit(pins_mock_target()),
             variant_name: "Edit form (existing pin)",
             description_text:
-                "Edit form for an existing pin: id / display / mux fields editable; harness + cwd + store shown read-only.",
+                "Edit form for an existing pin — full parity with the create form: cwd omnibox, harness cycling, launch options, then the Advanced identity block for id / display / mux fields.",
         }),
         Box::new(PinsIngredient {
             variant: PinsVariant::Rebind(pins_mock_target()),

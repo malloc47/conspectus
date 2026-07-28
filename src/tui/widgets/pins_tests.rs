@@ -1086,11 +1086,9 @@ fn edit_form_confirms_target_fields() {
 
 #[test]
 fn edit_form_lets_operator_change_harness_and_cwd() {
-    // H-PIN-EDIT: harness + cwd were unreachable in the edit form
-    // before this wave (carried through from target as read-only).
-    // Now they're position 2 and 3 in the field list; operators
-    // can retype them and the resulting PinEditRequest carries the
-    // new values.
+    // Edit puts cwd first and harness second, mirroring the create
+    // form's primary workflow order. Operators can retype either
+    // field and the resulting PinEditRequest carries the new values.
     let ctx = PinsContext {
         pin_target: Some(pin_target()),
         ..PinsContext::default()
@@ -1099,23 +1097,19 @@ fn edit_form_lets_operator_change_harness_and_cwd() {
     state.cursor = PinsCursor::Action(2); // edit
     state.handle_key(&ctx, key(KeyCode::Enter));
 
-    // Advance cursor from id (0) → display (1) → harness (2).
-    state.handle_key(&ctx, key(KeyCode::Down));
-    state.handle_key(&ctx, key(KeyCode::Down));
-    // Clear existing harness text and type a new value. TextInputState
-    // handles Backspace one char at a time.
-    for _ in 0.."codex".len() {
-        state.handle_key(&ctx, key(KeyCode::Backspace));
-    }
-    for ch in "opencode".chars() {
-        state.handle_key(&ctx, key(KeyCode::Char(ch)));
-    }
-    // Advance to cwd (3) and rewrite it too.
-    state.handle_key(&ctx, key(KeyCode::Down));
+    // Cursor starts at cwd (position 0). Clear and retype.
     for _ in 0.."/workspace/project".len() {
         state.handle_key(&ctx, key(KeyCode::Backspace));
     }
     for ch in "/new/root".chars() {
+        state.handle_key(&ctx, key(KeyCode::Char(ch)));
+    }
+    // Advance to harness (position 1) and rewrite it.
+    state.handle_key(&ctx, key(KeyCode::Down));
+    for _ in 0.."codex".len() {
+        state.handle_key(&ctx, key(KeyCode::Backspace));
+    }
+    for ch in "opencode".chars() {
         state.handle_key(&ctx, key(KeyCode::Char(ch)));
     }
 
@@ -1143,8 +1137,7 @@ fn edit_form_requires_harness_and_cwd_to_be_non_empty() {
     state.cursor = PinsCursor::Action(2); // edit
     state.handle_key(&ctx, key(KeyCode::Enter));
 
-    // Advance to harness (position 2) and clear it entirely.
-    state.handle_key(&ctx, key(KeyCode::Down));
+    // Advance to harness (position 1 in the new order) and clear.
     state.handle_key(&ctx, key(KeyCode::Down));
     for _ in 0.."codex".len() {
         state.handle_key(&ctx, key(KeyCode::Backspace));
@@ -1169,6 +1162,78 @@ fn edit_form_cancel_does_not_emit_action() {
     let outcome = state.handle_key(&ctx, key(KeyCode::Esc));
     assert_eq!(outcome, PinsOutcome::Continue);
     assert!(state.sub_editor().is_none());
+}
+
+#[test]
+fn edit_form_cycles_known_harness_keys_on_arrow() {
+    // Parity with create: on the harness field, Left/Right/Space
+    // walks through the known harness list so the operator can pick
+    // a peer without retyping.
+    let ctx = PinsContext {
+        pin_target: Some(pin_target()),
+        known_harness_keys: vec!["codex".to_string(), "opencode".to_string()],
+        ..PinsContext::default()
+    };
+    let mut state = PinsOverlayState::new();
+    state.cursor = PinsCursor::Action(2); // edit
+    state.handle_key(&ctx, key(KeyCode::Enter));
+
+    // Advance from cwd (0) to harness (1) and cycle.
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Right));
+
+    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    match outcome {
+        PinsOutcome::ApplyAndClose(crate::tui::Msg::PinEdit(request)) => {
+            assert_eq!(request.harness, "opencode");
+        }
+        other => panic!("expected PinEdit outcome, got {other:?}"),
+    }
+}
+
+#[test]
+fn edit_form_toggles_launch_options_via_arrow() {
+    // Parity with create: on a harness with launch options, the
+    // options field flips the corresponding argv fragment in/out.
+    let ctx = PinsContext {
+        pin_target: Some(PinMutationTarget {
+            id: "ingest".to_string(),
+            display_name: "Ingest".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "ingest-mux".to_string(),
+            mux_socket: None,
+            launch_argv: vec!["codex".to_string()],
+            store_path: "/workspace/project/.conspectus.toml".to_string(),
+        }),
+        known_harness_keys: vec!["codex".to_string()],
+        ..PinsContext::default()
+    };
+    let mut state = PinsOverlayState::new();
+    state.cursor = PinsCursor::Action(2); // edit
+    state.handle_key(&ctx, key(KeyCode::Enter));
+
+    // cwd (0) → harness (1) → launch options (2) — only present when
+    // the harness surfaces options.
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Down));
+    state.handle_key(&ctx, key(KeyCode::Right));
+
+    let outcome = state.handle_key(&ctx, key(KeyCode::Enter));
+    match outcome {
+        PinsOutcome::ApplyAndClose(crate::tui::Msg::PinEdit(request)) => {
+            assert!(
+                !request.launch_argv.is_empty(),
+                "toggled option should extend the argv"
+            );
+            assert!(
+                request.launch_argv.iter().any(|arg| arg.starts_with("--")),
+                "toggling the first option should inject a `--` fragment; got {:?}",
+                request.launch_argv,
+            );
+        }
+        other => panic!("expected PinEdit outcome, got {other:?}"),
+    }
 }
 
 #[test]
