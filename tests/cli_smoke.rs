@@ -6,11 +6,19 @@ use std::process::Command as ProcessCommand;
 
 /// Builds a `conspectus` binary command isolated from the host environment:
 /// HOME is pinned to an empty directory (so the harness adapters see no real
-/// `~/.codex` etc.) and tmux discovery is disabled. Tests that want harness or
-/// tmux discovery override these env vars explicitly.
+/// `~/.codex` etc.), tmux discovery is disabled, and `XDG_RUNTIME_DIR` is
+/// pointed at a nonexistent subdirectory of `home` so the CLI's
+/// `warm_start_discover_and_resolve` path (`src/cli/mod.rs:172`) cannot
+/// find and defer to a real `conspectus serve` socket. Without the
+/// runtime-dir override the tests silently pull the operator's live daemon
+/// snapshot instead of exercising the local discovery + render path they
+/// claim to pin, which surfaces as spurious failures on any box that has
+/// the daemon running. Tests that want harness or tmux discovery override
+/// these env vars explicitly.
 fn isolated_cmd(home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
     cmd.env("HOME", home);
+    cmd.env("XDG_RUNTIME_DIR", home.join("no-daemon-runtime-dir"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
@@ -868,11 +876,18 @@ fn graph_json_discovers_plain_repo_from_scan_root() {
 
 #[test]
 fn graph_json_rejects_missing_scan_root() {
+    let home = tempfile::TempDir::new().expect("home temp");
     let temp = tempfile::TempDir::new().expect("temp dir");
     let missing = temp.path().join("missing");
-    let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
 
-    cmd.arg("graph")
+    // Use isolated_cmd so `XDG_RUNTIME_DIR` steers the CLI away from
+    // any running `conspectus serve` socket; otherwise the CLI's
+    // daemon short-circuit (`src/cli/mod.rs:172`) would return the
+    // daemon's snapshot without ever validating the operator's
+    // `--scan-root` argument and this rejection assertion would
+    // flip on any box with the daemon running.
+    isolated_cmd(home.path())
+        .arg("graph")
         .arg("--format")
         .arg("json")
         .arg("--scan-root")

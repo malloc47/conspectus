@@ -17,6 +17,11 @@ use std::time::SystemTime;
 fn isolated_cmd(home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
     cmd.env("HOME", home);
+    // Point XDG_RUNTIME_DIR at a nonexistent path so the CLI cannot
+    // find and defer to a real `conspectus serve` socket — otherwise
+    // the tests silently pull the operator daemon's snapshot instead
+    // of exercising the local discovery + render path.
+    cmd.env("XDG_RUNTIME_DIR", home.join("no-daemon-runtime-dir"));
     cmd.env("XDG_CONFIG_HOME", home.join(".config"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");

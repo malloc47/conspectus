@@ -13,10 +13,23 @@ use std::path::Path;
 /// Build a command isolated from the host environment plus an
 /// explicit `XDG_DATA_HOME` so the persisted `graph.bin` lands
 /// in a predictable spot the test can stat.
+///
+/// `XDG_RUNTIME_DIR` is pointed at a nonexistent subdirectory of
+/// `home` so the CLI's `warm_start_discover_and_resolve` path
+/// (src/cli/mod.rs:172) cannot find and defer to a real
+/// `conspectus serve` socket. Without this override the tests
+/// would silently pull the operator's live daemon snapshot and
+/// never exercise the local cold-rebuild + graph.bin writer path
+/// they claim to pin. `socket_path()` builds a path under
+/// `XDG_RUNTIME_DIR`; when that directory does not exist the
+/// connect call fails, `try_daemon_snapshot()` returns `None`,
+/// and the CLI falls through to the cold rebuild the tests
+/// want to test.
 fn isolated_cmd(home: &Path, data_home: &Path) -> Command {
     let mut cmd = Command::cargo_bin("conspectus").expect("conspectus binary exists");
     cmd.env("HOME", home);
     cmd.env("XDG_DATA_HOME", data_home);
+    cmd.env("XDG_RUNTIME_DIR", home.join("no-daemon-runtime-dir"));
     cmd.env("CONSPECTUS_DISABLE_TMUX", "1");
     cmd.env("CONSPECTUS_DISABLE_FORGE", "1");
     cmd.env_remove("CONSPECTUS_CODEX_STATE");
