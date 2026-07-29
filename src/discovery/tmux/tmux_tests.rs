@@ -198,6 +198,8 @@ fn parser_drops_malformed_epoch_fields() {
 
 #[test]
 fn discovery_returns_zero_sessions_for_blank_runner_output() {
+    let _serial = TMUX_CACHE_TEST_LOCK.lock().unwrap();
+    reset_tmux_cache_for_tests();
     let discovery = TmuxDiscovery::with_runner(FakeTmux::with_sessions(""));
 
     let fragment = discovery
@@ -209,6 +211,8 @@ fn discovery_returns_zero_sessions_for_blank_runner_output() {
 
 #[test]
 fn discovery_emits_mux_session_per_row() {
+    let _serial = TMUX_CACHE_TEST_LOCK.lock().unwrap();
+    reset_tmux_cache_for_tests();
     let stdout = "alpha\t/work/alpha\t1\t0\nbeta\t/work/has space\t\t\n";
     let discovery = TmuxDiscovery::with_runner(FakeTmux::with_sessions(stdout));
 
@@ -240,6 +244,8 @@ fn discovery_emits_mux_session_per_row() {
 
 #[test]
 fn discovery_yields_empty_fragment_when_tmux_unavailable() {
+    let _serial = TMUX_CACHE_TEST_LOCK.lock().unwrap();
+    reset_tmux_cache_for_tests();
     let discovery = TmuxDiscovery::with_runner(FakeTmux::unavailable(UnavailableReason::NoServer));
 
     let fragment = discovery

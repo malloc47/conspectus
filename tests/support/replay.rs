@@ -101,6 +101,15 @@ impl ReplayWorld {
     }
 
     pub fn run_from(&self, roots: impl IntoIterator<Item = impl Into<PathBuf>>) -> ReplayResult {
+        // H-SERVE-PERF-011: `discover_local_with` dispatches
+        // `TmuxDiscovery` through a process-global TTL cache.
+        // Parallel replay tests would otherwise cross-contaminate
+        // their tmux fragments. Serialize + reset.
+        let _serial = conspectus::discovery::tmux::TMUX_CACHE_TEST_LOCK
+            .lock()
+            .unwrap();
+        conspectus::discovery::tmux::reset_tmux_cache_for_tests();
+
         let mut config = LocalDiscoveryConfig::empty()
             .with_harness_state_root(CODEX_HARNESS_KEY, self.harness.codex_state_root())
             .with_harness_state_root(

@@ -460,8 +460,14 @@ fn local_discovery_accepts_existing_non_git_roots_as_sparse_graphs() {
 fn discover_local_with_runs_harness_and_tmux_providers_and_cross_links() {
     use crate::discovery::harness::codex::HARNESS_KEY as CODEX_KEY;
     use crate::discovery::harness::fixtures::{CodexSessionRecord, HarnessFixture};
-    use crate::discovery::tmux::FakeTmux;
+    use crate::discovery::tmux::{FakeTmux, TMUX_CACHE_TEST_LOCK, reset_tmux_cache_for_tests};
     use crate::model::{GraphNode, RelationKind};
+
+    // H-SERVE-PERF-011: tmux TTL cache is process-global. Hold the
+    // serial lock + reset so a parallel-test entry can't short-
+    // circuit this test to a wrong (or stale) fragment.
+    let _serial = TMUX_CACHE_TEST_LOCK.lock().unwrap();
+    reset_tmux_cache_for_tests();
 
     let temp = tempfile::TempDir::new().expect("temp dir");
     let scan_root = temp.path().join("scan");

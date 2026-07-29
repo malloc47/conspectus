@@ -247,6 +247,14 @@ capability = "native"
 }
 
 fn assert_snapshot(fixture: &ScenarioFixture, name: &str, config: LocalDiscoveryConfig) {
+    // H-SERVE-PERF-011: `discover_local_with` dispatches
+    // `TmuxDiscovery` through a process-global TTL cache. Serialize
+    // + reset around the call so parallel snapshot tests can't
+    // cross-contaminate their tmux fragments.
+    let _serial = conspectus::discovery::tmux::TMUX_CACHE_TEST_LOCK
+        .lock()
+        .unwrap();
+    conspectus::discovery::tmux::reset_tmux_cache_for_tests();
     let snapshot = discover_local_with([fixture.path()], config).expect("discover");
     let rendered = render_graph_json(&resolve_snapshot(snapshot)).expect("render");
     let normalized = fixture.normalize(&rendered);
@@ -357,6 +365,12 @@ impl ScenarioFixture {
         root: PathBuf,
         config: LocalDiscoveryConfig,
     ) -> conspectus::model::GraphSnapshot {
+        // H-SERVE-PERF-011: same reason as `assert_snapshot` — the
+        // tmux TTL cache is process-global; serialize + reset.
+        let _serial = conspectus::discovery::tmux::TMUX_CACHE_TEST_LOCK
+            .lock()
+            .unwrap();
+        conspectus::discovery::tmux::reset_tmux_cache_for_tests();
         let config = config.with_harness_state_root(CODEX_HARNESS_KEY, self.codex_state_root());
         discover_local_with([root], config).expect("discover")
     }

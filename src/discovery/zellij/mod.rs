@@ -29,6 +29,8 @@
 use std::io;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -217,6 +219,17 @@ impl<R: MuxBackend> ZellijDiscovery<R> {
 
 impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
     fn discover(&self, _context: &DiscoveryContext) -> Result<GraphFragment> {
+        // H-SERVE-PERF-011: TTL-cache the zellij fragment. The
+        // freshness gate doesn't stop this provider from re-running
+        // on quiet cycles — when zellij has no live sessions the
+        // fragment is empty and thus produces no `zellij` provenance
+        // stamps, so `gate.fresh` never contains it and every class
+        // thread's cycle respawns the backend. Same shape as the
+        // forge H-SERVE-PERF-005 and tmux fixes.
+        if let Some(cached) = cached_zellij_fragment() {
+            return Ok(cached);
+        }
+
         // The `format` string is ignored by [`SystemZellij`];
         // pass tmux's format anyway so a mixed backend list that
         // reuses this call surface stays uniform.
@@ -265,8 +278,44 @@ impl<R: MuxBackend + 'static> DiscoveryProvider for ZellijDiscovery<R> {
             ZELLIJ_BACKEND,
             crate::discovery::current_epoch(),
         );
+        store_zellij_fragment(&fragment);
         Ok(fragment)
     }
+}
+
+const ZELLIJ_CACHE_TTL: Duration = Duration::from_secs(5);
+
+struct CachedZellijFragment {
+    cached_at: Instant,
+    fragment: GraphFragment,
+}
+
+static ZELLIJ_CACHE: Mutex<Option<CachedZellijFragment>> = Mutex::new(None);
+
+fn cached_zellij_fragment() -> Option<GraphFragment> {
+    let guard = ZELLIJ_CACHE.lock().unwrap();
+    let cached = guard.as_ref()?;
+    if cached.cached_at.elapsed() >= ZELLIJ_CACHE_TTL {
+        return None;
+    }
+    Some(cached.fragment.clone())
+}
+
+fn store_zellij_fragment(fragment: &GraphFragment) {
+    let mut guard = ZELLIJ_CACHE.lock().unwrap();
+    *guard = Some(CachedZellijFragment {
+        cached_at: Instant::now(),
+        fragment: fragment.clone(),
+    });
+}
+
+/// Clear the process-wide zellij fragment cache. Tests that
+/// observe the cache short-circuit call this in setup.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn reset_zellij_cache_for_tests() {
+    let mut guard = ZELLIJ_CACHE.lock().unwrap();
+    *guard = None;
 }
 
 #[cfg(test)]
