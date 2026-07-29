@@ -158,3 +158,60 @@ does is.
   ADR extends the gate with a class-gated mutator slice.
 - ADR 0083 (`graph.bin` zero-copy snapshot) — the artifact re-written
   each publish.
+
+## Retrospective (2026-07-28)
+
+The class-gated mutator landed as 001a and dropped CPU from 40% to
+5-10%. Operator profiling on a live daemon then surfaced a chain of
+additional cost centers that the original ADR did not anticipate.
+Each was addressed in turn.
+
+| # | Commit | What it targeted | Effect |
+| --- | --- | --- | --- |
+| 001a | `47d128d` | class-gate the process-tree mutator (`cross_link` + `codex_log`) so it only fires on cycles that actually re-ran mux/harness | 40% → 5-10% |
+| — | `0ec2836` | `class_loop` min-cycle-gap floor; without it a chatty inotify source (Codex's SQLite WAL/SHM) turned watcher-driven cycles into a `wait → run → wait` spin | included above |
+| 002 | `7516ff7` | process-lifetime cache for the codex\_log SQLite `LIKE 'pid:<pid>:%'` scan; keyed on `(mtime, size)` of `logs_<N>.sqlite` | speculative, low delta |
+| 003 | `a80a7fc` | in-memory mux/harness slice fingerprint gate on the /proc walk; only re-walk when slice content differs from last cycle | small (needed 008/009 refinement) |
+| 004 | `d27a987` | per-cwd `GitProbe::probe` cache fingerprinted on `.git/HEAD`, `.git/config`, `.git/refs/heads/`, `.git/packed-refs` mtimes; each probe otherwise spawned 8–15 `git` subprocesses | misattributed as the big win (was small) |
+| 005 | `9a691a3` | TTL cache in `ForgeDiscovery`; empty `gh pr list` results produced no `github` stamps, so the freshness gate never marked forge fresh → `gh` respawned every cycle | closes the "empty-fragment providers" hole for forge |
+| 006 | `3495367` | `codex::read_session_meta` was `fs::read_to_string` on JSONL files up to ~24 MB just to look at the first line; replaced with `BufReader::read_line` | **167 MB/s → 37 MB/s** |
+| 007 | `9b9eec3` | per-file `(mtime, size)` cache for the claude + codex session header/tail scans; on this box 93 of 96 session files were dormant but re-scanned every cycle | file opens: ~900/s → ~zero on dormant files |
+| 008 | `70becc5` | `fingerprint_normalized_node` zeros `activity_epoch`, `last_attached_epoch`, `last_active_epoch` — 003's fingerprint was mismatching every cycle on operator boxes with any live tmux | /proc walk: 0.8/s → 0.4/s |
+| 009 | `aac498c` | extend 008 to also zero `last_message_preview`, `title`, `created_epoch` — 008 was necessary but not sufficient (any active claude message append still churned the preview) | further /proc walk reduction |
+| 010 | `148763d` | mtime cache for `read_sqlite_sessions` on `opencode.db` (25 MB); same shape as 002, opencode uses WAL mode so main-file mtime is stable | **37 MB/s → 549 KB/s** (27× drop, biggest single win) |
+| 011 | `03ad86b` | TTL cache in `TmuxDiscovery` and `ZellijDiscovery`; same empty-fragment freshness-gate hole as forge | closes remaining subprocess spawn cost |
+
+**Final state on the operator's box:** ~1% CPU floor with spikes only
+on real state changes (session add/remove, pane pid turnover, mux
+attach), rchar in the low hundreds of KB/s, from 40% CPU / 617 MB/s
+at the start of the investigation. **~40× CPU reduction, ~1100× read
+reduction.**
+
+**Method lesson** (learned the hard way): for daemon perf debugging,
+run `sudo strace -c -f -p <pid>` on the live process **before**
+implementing any speculative fixes. The 001a → 005 sequence was
+guided by ADR-time hypotheses about what dominates cost, and every
+one of them was misattributed. 006 was found in ~30 seconds by
+reading the strace top-3 read sizes (three 24 MB reads matching
+codex rollout file sizes). Ground-truth attribution beats hypothesis
+for cost work — the profile is not obligated to match the design.
+
+**Not-yet-attempted follow-ups** (deferred pending trigger):
+
+- **001c** — semantic-fingerprint of the resolved graph so
+  `graph.bin` isn't re-written every cycle. Deferred because
+  `freshness_epoch` churn defeats byte-level equality and a
+  semantic fingerprint collides with ADR 0079's freshness gate
+  and ADR 0083's warm-restart artifact. The residual cost this
+  would address is small after 002–011.
+- **`try_class_cycle` per-class evict** (`src/server/mod.rs:1450`)
+  bypasses the freshness gate for the local class's providers,
+  forcing them to re-run on every class thread wake regardless of
+  TTL. Fixing this would let harness genuinely respect its 5s TTL
+  (currently runs ~1 Hz throttled) and cut harness cycle rate 4-5×.
+  Cosmetic after A-through-011 land the downstream caches.
+- **Empty-fragment freshness-gate hole** — the underlying issue that
+  005 and 011 both worked around individually. A `provider_last_run`
+  sidecar on the snapshot that participates in
+  `compute_freshness_gate` would replace both TTL caches with a
+  single, correctly-scoped fix. Bigger refactor than either patch.

@@ -13638,50 +13638,53 @@ approach (not raw implementation size). Worked top-to-bottom.
     `CACHE_TEST_LOCK` (cache-hit skips SQLite entirely, mtime advance
     forces re-query, expanded pid set forces re-query) plus the 11
     pre-existing codex_log tests including the widening case.
-- [ ] `H-SERVE-PERF-003` Fingerprint-gated `/proc` walk (001a follow-up).
-  - Scope: today's 001a gate opens whenever *any* mux or harness
-    provider re-stamped provenance this cycle. A provider re-stamps
-    every time it runs, regardless of whether the underlying data
-    changed. On busy boxes the harness class runs at its throttle
-    cap (0.8 Hz) and the gate opens on all of those runs — even the
-    ones where the harness slice is byte-identical to last cycle.
-    The residual /proc walk still costs ~5 MB of tmpfs reads per
-    fire on top of what 001a + 002 already avoid.
-  - Direction: compute a content fingerprint over each just-run
-    harness/mux slice's fragment (nodes + candidate_links) *before*
-    `stamp_fragment` writes the freshness epoch. Compare against
-    last cycle's fingerprint (in-memory, process-local, keyed by
-    class). Change `run_process_tree` derivation from "did mux/
-    harness class re-run" to "did any of {mux, harness} slice
-    fingerprints differ from last cycle." Everything downstream of
-    the gate (cross_link infer, per-adapter aux, codex_log
-    attribution) stays identical.
-  - Invariants:
-    - `freshness_epoch` continues to advance every cycle — fingerprint
-      is computed on the *un-stamped* fragment; the epoch stamp
-      happens after regardless of gate outcome. ADR 0079 freshness
-      gate unchanged.
-    - No on-disk artifact changes. Fingerprint is process-local; the
-      graph.bin write path is untouched. ADR 0083 warm-restart
-      artifact unchanged.
-    - Node ordering must be normalized before hashing (sort by id).
-    - `freshness_epoch` is the one field that *must* be excluded from
-      the hash input; everything else that reflects real state
-      (including `last_active_epoch`) stays in.
-    - False negatives are cheap: stale process-tree links persist for
-      at most one throttle window (~1.25s) until the next real
-      change. False positives cost one extra walk — the pre-B
-      baseline.
-  - Tests: fingerprint helper unit tests (empty=empty, node-add
-    differs, `freshness_epoch`-only-change is equal, node/link
-    ordering irrelevant). Integration test parallel to
-    `warm_start_preserves_process_tree_links_on_a_git_only_cycle`:
-    two identical harness cycles → walk fires exactly once.
-  - Expected impact: on this operator's box the /proc walk currently
-    costs ~5 MB of tmpfs reads per fire. If real harness data
-    changes at ~0.1 Hz instead of the 0.8 Hz throttle cap, walk
-    frequency drops ~8×. Combined with 001a + 002 the target idle
-    CPU is 1-3%, down from 5-10% post-002 and 40% pre-any.
+- [x] `H-SERVE-PERF-003` Fingerprint-gated `/proc` walk (001a
+  follow-up). In-memory fingerprint over the mux/harness slice
+  gates the walk to real content changes rather than "class re-ran"
+  (`aac498c` + `a80a7fc`). Iteratively refined by 008/009 to
+  normalize churn fields. See ADR 0091 Retrospective.
+- [x] `H-SERVE-PERF-004` Cache `GitProbe::probe` results across
+  cycles keyed on `.git/HEAD` / `config` / `refs/heads/` /
+  `packed-refs` mtimes (`d27a987`). `observed_cwd_git_fragment`
+  otherwise spawned ~150 git subprocesses per harness cycle
+  (~10 spawns × 15 unique cwds).
+- [x] `H-SERVE-PERF-005` TTL-cache `ForgeDiscovery` output
+  (`9a691a3`). Empty PR results produced no `github` provenance
+  stamps → freshness gate never marked forge fresh → every class
+  cycle respawned `gh pr list`. Same failure mode later addressed
+  for tmux/zellij in 011. A `provider_last_run` gate refactor
+  would replace both TTL caches with one correct fix; deferred.
+- [x] `H-SERVE-PERF-006` Fix `codex::read_session_meta` full-file
+  slurp (`3495367`). Was `fs::read_to_string` on JSONL rollouts up
+  to 24 MB to look at the first line; replaced with
+  `BufReader::read_line`. **167 MB/s → 37 MB/s** — the single
+  biggest win in the chain, found in ~30 seconds of `sudo strace`.
+- [x] `H-SERVE-PERF-007` Per-file `(mtime, size)` cache for claude +
+  codex session header/tail scans (`9b9eec3`). On this operator's
+  box 93 of 96 session files were dormant; caching drops
+  cold-file opens to zero on dormant paths.
+- [x] `H-SERVE-PERF-008` Refine H-SERVE-PERF-003's fingerprint to
+  zero mux `activity_epoch`, `last_attached_epoch`, and agent
+  `last_active_epoch` (`70becc5`). Without this the gate never
+  closed on any operator box with a live tmux session.
+- [x] `H-SERVE-PERF-009` Extend 008 to also zero
+  `last_message_preview`, `title`, `created_epoch` (`aac498c`).
+  008 alone still churned on any active claude session appending
+  messages.
+- [x] `H-SERVE-PERF-010` mtime-cache the opencode.db SQL scan
+  (`148763d`). `read_sqlite_sessions` full-table-scanned the 25 MB
+  DB on every harness cycle; WAL mode keeps the main-file mtime
+  stable so the cache hits ~100%. **37 MB/s → 549 KB/s** — the
+  second biggest single win.
+- [x] `H-SERVE-PERF-011` TTL-cache `TmuxDiscovery` +
+  `ZellijDiscovery` output (`03ad86b`). Same empty-fragment
+  freshness-gate hole as forge — zellij with no live sessions
+  respawned `zellij list-sessions` ~1 Hz per harness cycle.
+- Full retrospective for the H-SERVE-PERF chain (001a through 011),
+  including per-commit attribution table and remaining deferred
+  work (001c resolve/publish deferral, `try_class_cycle` gate
+  bypass, empty-fragment gate hole), lives at the bottom of
+  `docs/adr/0091-serve-idle-cost-and-class-gated-mutators.md`.
 - [ ] `H-WT-001` Integrate first-class worktree management with pluggable
   backends.
   - Scope: product design for creating / listing / removing git
