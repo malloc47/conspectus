@@ -13713,9 +13713,19 @@ approach (not raw implementation size). Worked top-to-bottom.
     ADR 0087 prohibition 6 (never mutate git state) stays unchanged —
     Conspectus never runs `git worktree add/remove` itself.
     Implementation stories (follow-ups):
-    - [ ] `H-WT-002` `WorktreeBackend` trait + registry + thin `git`
+    - [x] `H-WT-002` `WorktreeBackend` trait + registry + thin `git`
       read/list backend; fold worktree records into `Checkout`
-      discovery with linked-vs-primary + branch metadata.
+      discovery with linked-vs-primary + branch metadata. Landed in
+      five by-concern commits: CheckoutNode `WorktreeMeta`
+      (kind + lock/prune); `WorktreeBackend` trait + `SystemGitWorktree`
+      (`git worktree list --porcelain` parser); git discovery
+      enumerates each repo's worktrees (incl. out-of-root) as Checkout
+      nodes; read-only `conspectus worktree list`; and TUI detail-pane
+      field + a checkout-group marker (quiet for plain primaries).
+      One deviation from the note below: worktree checkouts are stamped
+      with the `git` provider key (produced by the git provider, on the
+      git cadence) rather than a separate `worktree` key — simpler and
+      avoids a second freshness-gate slice.
       - Scope (settled 2026-08-03): the read/list foundation only.
         Today git discovery probes worktree state for the single
         checkout it's pointed at (`GitProbeResult::is_linked_worktree`)
