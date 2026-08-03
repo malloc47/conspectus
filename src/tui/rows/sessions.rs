@@ -23,8 +23,8 @@ use std::path::{Path, PathBuf};
 use crate::filter::{MuxStateKey, RowFilter, SessionMatchInputs};
 use crate::model::{
     AgentSessionId, AgentSessionNode, CheckoutId, GraphLink, GraphNode, GraphSnapshot, LinkState,
-    NodeId, PinBinding, PinCandidate, PinId, RelationKind, RepoId, WorkspaceId,
-    path_is_ancestor_of,
+    NodeId, PinBinding, PinCandidate, PinId, RelationKind, RepoId, WorkspaceId, WorktreeKind,
+    WorktreeMeta, path_is_ancestor_of,
 };
 use crate::tui::SessionsGrouping;
 use crate::tui::rows::{
@@ -936,12 +936,25 @@ fn emit_checkout_bucket(
     let checkout_should_render =
         matches!(ctx.grouping, SessionsGrouping::Checkout) || session_bearing_count >= 2;
     let session_depth = if checkout_should_render && let Some(wt_root) = &key.worktree {
+        // H-WT-002: flag linked / locked / prunable worktrees in the
+        // checkout group header. A plain primary gets no marker so the
+        // common case stays quiet.
+        let marker = ctx
+            .data
+            .checkouts
+            .get(&NodeId::Checkout(CheckoutId::new(
+                repo_bucket.repo_id.clone(),
+                wt_root.clone(),
+            )))
+            .and_then(|node| node.worktree.as_ref())
+            .and_then(worktree_group_marker);
         push_checkout_row(
             ctx.tree,
             depth.saturating_add(1),
             &repo_bucket.repo_id,
             wt_root,
             ctx.home,
+            marker,
         );
         depth.saturating_add(2)
     } else {
@@ -1022,19 +1035,42 @@ fn push_checkout_row(
     repo: &RepoId,
     worktree_root: &str,
     home: Option<&Path>,
+    worktree_marker: Option<String>,
 ) {
     let wt_id = CheckoutId::new(repo.clone(), worktree_root.to_string());
     let node_id = NodeId::Checkout(wt_id);
+    let mut display_path = shorten_home(worktree_root, home);
+    if let Some(marker) = worktree_marker {
+        display_path.push_str(&format!(" ({marker})"));
+    }
     tree.rows.push(Row {
         id: RowId::Group(node_id.clone()),
         depth,
         expandable: true,
         kind: RowKind::Group(GroupRow {
-            display_path: shorten_home(worktree_root, home),
+            display_path,
             primary_node: Some(node_id),
             is_launch_context: false,
         }),
     });
+}
+
+/// Marker for a checkout group header (H-WT-002). Returns `None` for a
+/// plain primary worktree (the common, unremarkable case) so the
+/// sessions tree stays quiet; flags linked / locked / prunable
+/// worktrees, which are the ones worth calling out.
+fn worktree_group_marker(meta: &WorktreeMeta) -> Option<String> {
+    let mut parts = Vec::new();
+    if matches!(meta.kind, WorktreeKind::Linked) {
+        parts.push("linked");
+    }
+    if meta.locked.is_some() {
+        parts.push("locked");
+    }
+    if meta.prunable.is_some() {
+        parts.push("prunable");
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 fn emit_ungrouped(ctx: &mut EmitCtx<'_, '_>, mut sessions: Vec<SessionEntry<'_>>) {

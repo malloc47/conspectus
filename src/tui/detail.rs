@@ -29,7 +29,7 @@ use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
     GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
     PinBinding, PinCandidate, PinNode, Provenance, RelationKind, RepoNode, ResolvedRelationship,
-    RuntimeProcessNode, RuntimeProcessRole, WorkspaceNode,
+    RuntimeProcessNode, RuntimeProcessRole, WorkspaceNode, WorktreeKind, WorktreeMeta,
 };
 use crate::output::table::node_short_id;
 use crate::tui::rows::shorten_home;
@@ -885,6 +885,30 @@ fn repo_fields(snapshot: &GraphSnapshot, repo: &RepoNode, home: Option<&Path>) -
     fields
 }
 
+/// Compact worktree summary for the detail pane (H-WT-002): the
+/// primary/linked kind plus any lock / prune status with reasons.
+pub(super) fn worktree_meta_label(meta: &WorktreeMeta) -> String {
+    let mut label = match meta.kind {
+        WorktreeKind::Primary => "primary".to_string(),
+        WorktreeKind::Linked => "linked".to_string(),
+    };
+    if let Some(reason) = &meta.locked {
+        if reason.is_empty() {
+            label.push_str(" · locked");
+        } else {
+            label.push_str(&format!(" · locked ({reason})"));
+        }
+    }
+    if let Some(reason) = &meta.prunable {
+        if reason.is_empty() {
+            label.push_str(" · prunable");
+        } else {
+            label.push_str(&format!(" · prunable ({reason})"));
+        }
+    }
+    label
+}
+
 fn worktree_fields(
     snapshot: &GraphSnapshot,
     worktree: &CheckoutNode,
@@ -896,6 +920,9 @@ fn worktree_fields(
     }
     if let Some(branch) = &worktree.current_branch {
         fields.push(plain("branch", branch.refname.clone()));
+    }
+    if let Some(meta) = &worktree.worktree {
+        fields.push(plain("worktree", worktree_meta_label(meta)));
     }
     let checkout_id = NodeId::Checkout(worktree.id.clone());
     fields.extend(ambiguous_mux_fields(snapshot, &checkout_id));

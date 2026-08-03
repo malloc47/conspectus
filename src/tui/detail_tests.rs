@@ -1217,3 +1217,27 @@ fn ambiguous_mux_section_suppressed_when_no_session_in_scope_is_ambiguous() {
         "section is suppressed when scope has no ambiguity",
     );
 }
+
+#[test]
+fn worktree_meta_label_shows_kind_and_status() {
+    use crate::model::{WorktreeKind, WorktreeMeta};
+    assert_eq!(worktree_meta_label(&WorktreeMeta::primary()), "primary");
+    assert_eq!(worktree_meta_label(&WorktreeMeta::linked()), "linked");
+
+    let locked = WorktreeMeta {
+        kind: WorktreeKind::Linked,
+        locked: Some("agent running".to_string()),
+        prunable: None,
+    };
+    assert_eq!(worktree_meta_label(&locked), "linked · locked (agent running)");
+
+    let locked_no_reason = WorktreeMeta {
+        kind: WorktreeKind::Linked,
+        locked: Some(String::new()),
+        prunable: Some("gitdir gone".to_string()),
+    };
+    assert_eq!(
+        worktree_meta_label(&locked_no_reason),
+        "linked · locked · prunable (gitdir gone)",
+    );
+}

@@ -2997,3 +2997,34 @@ fn title_disambiguation_flips_deterministically_on_refresh_without_reordering() 
         "row order must stay deterministic across the refresh"
     );
 }
+
+#[test]
+fn worktree_group_marker_is_quiet_for_plain_primary() {
+    use crate::model::{WorktreeKind, WorktreeMeta};
+    // Plain primary → no marker (common case stays quiet).
+    assert_eq!(worktree_group_marker(&WorktreeMeta::primary()), None);
+    // Linked → flagged.
+    assert_eq!(
+        worktree_group_marker(&WorktreeMeta::linked()).as_deref(),
+        Some("linked"),
+    );
+    // Even a primary is flagged when locked/prunable.
+    let locked_primary = WorktreeMeta {
+        kind: WorktreeKind::Primary,
+        locked: Some("x".to_string()),
+        prunable: None,
+    };
+    assert_eq!(
+        worktree_group_marker(&locked_primary).as_deref(),
+        Some("locked"),
+    );
+    let linked_prunable = WorktreeMeta {
+        kind: WorktreeKind::Linked,
+        locked: None,
+        prunable: Some(String::new()),
+    };
+    assert_eq!(
+        worktree_group_marker(&linked_prunable).as_deref(),
+        Some("linked · prunable"),
+    );
+}
