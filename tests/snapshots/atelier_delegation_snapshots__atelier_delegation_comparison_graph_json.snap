@@ -1,6 +1,5 @@
 ---
 source: tests/atelier_delegation_snapshots.rs
-assertion_line: 108
 expression: fixture.normalize(&graph)
 ---
 {
@@ -63,6 +62,9 @@ expression: fixture.normalize(&graph)
           "common_dir": "/fixture/repo-a/.git"
         },
         "refname": "refs/heads/main"
+      },
+      "worktree": {
+        "kind": "primary"
       }
     },
     {
@@ -80,6 +82,9 @@ expression: fixture.normalize(&graph)
           "common_dir": "/fixture/repo-b/.git"
         },
         "refname": "refs/heads/main"
+      },
+      "worktree": {
+        "kind": "primary"
       }
     },
     {
