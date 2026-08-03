@@ -1,6 +1,5 @@
 ---
 source: tests/git_discovery_snapshots.rs
-assertion_line: 65
 expression: rendered
 ---
 {
@@ -24,7 +23,10 @@ expression: rendered
         "root": "/workspace/repo"
       },
       "root": "/workspace/repo",
-      "git_dir": "/workspace/repo/.git"
+      "git_dir": "/workspace/repo/.git",
+      "worktree": {
+        "kind": "primary"
+      }
     },
     {
       "type": "branch",

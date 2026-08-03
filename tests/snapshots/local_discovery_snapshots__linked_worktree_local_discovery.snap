@@ -29,6 +29,9 @@ expression: normalized
           "common_dir": "/fixture/repo/.git"
         },
         "refname": "refs/heads/linked"
+      },
+      "worktree": {
+        "kind": "linked"
       }
     },
     {

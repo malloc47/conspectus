@@ -32,6 +32,9 @@ expression: rendered
           "common_dir": "/fixture/repo/.git"
         },
         "refname": "refs/heads/main"
+      },
+      "worktree": {
+        "kind": "primary"
       }
     },
     {

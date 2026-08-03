@@ -39,6 +39,9 @@ expression: normalized
           "common_dir": "/fixture/repo-a/.git"
         },
         "refname": "refs/heads/main"
+      },
+      "worktree": {
+        "kind": "primary"
       }
     },
     {
@@ -56,6 +59,9 @@ expression: normalized
           "common_dir": "/fixture/repo-b/.git"
         },
         "refname": "refs/heads/main"
+      },
+      "worktree": {
+        "kind": "primary"
       }
     },
     {

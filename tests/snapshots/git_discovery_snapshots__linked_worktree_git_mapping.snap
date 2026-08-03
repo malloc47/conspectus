@@ -1,6 +1,5 @@
 ---
 source: tests/git_discovery_snapshots.rs
-assertion_line: 65
 expression: rendered
 ---
 {
@@ -33,6 +32,9 @@ expression: rendered
           "common_dir": "/workspace/repo/.git"
         },
         "refname": "refs/heads/feature"
+      },
+      "worktree": {
+        "kind": "linked"
       }
     },
     {
