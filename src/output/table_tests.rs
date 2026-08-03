@@ -1175,6 +1175,7 @@ fn sessions_projection_optional_branch_repo_worktree_columns() {
                 root: "/workspace/repo".to_string(),
                 git_dir: None,
                 current_branch: None,
+                worktree: None,
             }),
         ],
         candidate_links: vec![worktree_to_branch],
@@ -1549,6 +1550,7 @@ fn prs_projection_attached_shows_agent_with_matching_cwd() {
         root: "/workspace/repo".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     });
     let agent_node = agent_session("codex", "alpha", Some("/workspace/repo/crates/core"));
     let pr_node = forge_pr("octo", "repo", 7, "open", false);

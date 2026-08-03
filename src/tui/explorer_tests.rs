@@ -1254,6 +1254,7 @@ fn cwd_owner_kind_resolves_to_checkout_workspace_then_repo() {
         root: "/home/op/src/conspectus".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     // Checkout wins over Repo for the same path.
     assert_eq!(
@@ -1293,6 +1294,7 @@ fn agent_session_cwd_field_carries_kind_chip_when_resolved() {
         root: "/home/op/src/conspectus".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(agent(
         "claude-code",

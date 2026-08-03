@@ -555,6 +555,7 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
         root: "/p/foo".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::Checkout(CheckoutNode {
         id: crate::model::CheckoutId::new(
@@ -564,6 +565,7 @@ fn repo_grouping_buckets_muxes_under_repo_headers() {
         root: "/p/bar".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(mux_node_with_paths(
         "foo-a",
@@ -764,6 +766,7 @@ fn mux_view_emits_pins_group_at_top_under_repo_grouping() {
         root: "/p/foo".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(mux_node_with_paths(
         "foo-a",
@@ -841,6 +844,7 @@ fn mux_view_repo_grouping_renders_bound_pins_as_mux_rows() {
         root: "/p/foo".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(mux_node_with_paths(
         "foo-a",

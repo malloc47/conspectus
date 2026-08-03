@@ -24,6 +24,7 @@ fn seeded_app() -> App {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -74,6 +75,7 @@ fn muxed_app(native_id: &str, capture: Option<&str>) -> App {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -359,6 +361,7 @@ fn seeded_app_with_harness_chips() -> App {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -508,6 +511,7 @@ fn two_repo_app() -> App {
             root: common.clone(),
             git_dir: None,
             current_branch: None,
+            worktree: None,
         }));
         snapshot.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
@@ -1237,6 +1241,7 @@ fn mux_detail_session_section_shows_session_id_when_collapsed() {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -1338,6 +1343,7 @@ fn expanded_session_under_mux_matches_standalone_session_detail() {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2142,6 +2148,7 @@ fn no_live_preview_muxed_session_shows_privacy_banner() {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2368,6 +2375,7 @@ fn contextual_status_offers_ambiguous_attach_hint_with_choose_affordance() {
         root: "/home/op/src/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snapshot.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2756,6 +2764,7 @@ fn left_panel_scrolls_to_keep_selected_row_visible_past_viewport() {
         root: repo_root.to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     for i in 0..20 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -3069,6 +3078,7 @@ fn left_pane_renders_scrollbar_when_content_exceeds_viewport() {
         root: repo_root.to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     for i in 0..20 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -3186,6 +3196,7 @@ fn left_pane_scrollbar_thumb_reaches_bottom_at_max_scroll() {
         root: repo_root.to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     for i in 0..40 {
         snapshot.nodes.push(GraphNode::AgentSession(
@@ -3275,6 +3286,7 @@ fn left_pane_scrollbar_column_carries_only_scrollbar_glyphs() {
         root: repo_root.to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     for i in 0..30 {
         snapshot.nodes.push(GraphNode::AgentSession(

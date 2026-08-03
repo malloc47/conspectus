@@ -140,6 +140,7 @@ fn worktree(repo_common_dir: &str, root: &str) -> GraphNode {
         root: root.to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     })
 }
 

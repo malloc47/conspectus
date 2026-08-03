@@ -387,6 +387,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                         .branch
                         .as_ref()
                         .map(|branch| BranchId::new(repo_id.clone(), branch.clone())),
+                    worktree: None,
                 }));
                 fragment.candidate_links.push(atelier_link(
                     fork.clone(),
@@ -409,6 +410,7 @@ pub fn fork_records_fragment(workspace: &NodeId, records: &[AtelierForkRecord]) 
                     root: crate::discovery::path_to_string(&repo.parent_worktree),
                     git_dir: None,
                     current_branch: None,
+                    worktree: None,
                 }));
                 fragment.candidate_links.push(atelier_link(
                     fork.clone(),

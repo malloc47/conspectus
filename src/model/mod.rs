@@ -448,6 +448,13 @@ pub struct CheckoutNode {
     pub git_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_branch: Option<BranchId>,
+    /// Git-worktree facts for this checkout (H-WT-002). `None` means
+    /// the checkout was not produced by worktree enumeration (e.g. an
+    /// Atelier-declared checkout, or a graph built before worktree
+    /// discovery); `Some` carries the linked-vs-primary kind and any
+    /// lock / prune status from `git worktree list --porcelain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<WorktreeMeta>,
 }
 
 impl CheckoutNode {
@@ -457,7 +464,89 @@ impl CheckoutNode {
             root: root.into(),
             git_dir: None,
             current_branch: None,
+            worktree: None,
         }
+    }
+
+    /// Attach git-worktree metadata (H-WT-002).
+    pub fn with_worktree(mut self, meta: WorktreeMeta) -> Self {
+        self.worktree = Some(meta);
+        self
+    }
+}
+
+/// Whether a checkout is a repo's primary working tree or a linked
+/// worktree sharing its `.git` (H-WT-002). The primary worktree is the
+/// one whose `git_dir` equals the repo common dir; linked worktrees
+/// live under `.git/worktrees/<name>`.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeKind {
+    /// The repo's primary working tree.
+    Primary,
+    /// A linked worktree (`git worktree add`) sharing the repo's `.git`.
+    Linked,
+}
+
+/// Git-worktree facts for a [`CheckoutNode`] (H-WT-002), sourced from
+/// `git worktree list --porcelain`. `locked` / `prunable` are `Some`
+/// when git reports that status; the inner string is git's reason,
+/// which may be empty when git gives none.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct WorktreeMeta {
+    pub kind: WorktreeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prunable: Option<String>,
+}
+
+impl WorktreeMeta {
+    /// A linked worktree with no lock / prune status.
+    pub fn linked() -> Self {
+        Self {
+            kind: WorktreeKind::Linked,
+            locked: None,
+            prunable: None,
+        }
+    }
+
+    /// A repo's primary working tree.
+    pub fn primary() -> Self {
+        Self {
+            kind: WorktreeKind::Primary,
+            locked: None,
+            prunable: None,
+        }
+    }
+
+    pub fn is_linked(&self) -> bool {
+        matches!(self.kind, WorktreeKind::Linked)
     }
 }
 

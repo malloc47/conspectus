@@ -70,6 +70,35 @@ fn sparse_node_skips_empty_optional_fields() {
 }
 
 #[test]
+fn checkout_without_worktree_meta_skips_the_field() {
+    // H-WT-002: a checkout not produced by worktree enumeration omits
+    // the `worktree` key entirely (sparse JSON).
+    let checkout = GraphNode::Checkout(CheckoutNode::new(
+        CheckoutId::new(RepoId::new("/r/.git"), "/r"),
+        "/r",
+    ));
+    let encoded = serde_json::to_value(checkout).expect("serialize checkout");
+    assert!(encoded.get("worktree").is_none());
+}
+
+#[test]
+fn checkout_worktree_meta_round_trips_through_json() {
+    // H-WT-002: linked/primary + lock/prune status survive a JSON
+    // round-trip with a snake_case `kind` discriminant.
+    let checkout = CheckoutNode::new(CheckoutId::new(RepoId::new("/r/.git"), "/r"), "/r")
+        .with_worktree(WorktreeMeta {
+            kind: WorktreeKind::Linked,
+            locked: Some("agent running".to_string()),
+            prunable: None,
+        });
+    let encoded = serde_json::to_string(&checkout).expect("serialize");
+    assert!(encoded.contains(r#""kind":"linked""#), "encoded: {encoded}");
+    let decoded: CheckoutNode = serde_json::from_str(&encoded).expect("deserialize");
+    assert_eq!(decoded, checkout);
+    assert!(decoded.worktree.as_ref().unwrap().is_linked());
+}
+
+#[test]
 fn graph_link_preserves_unresolved_endpoint_evidence() {
     let link = GraphLink::new(
         "lineage-1",
@@ -344,8 +373,13 @@ fn populated_snapshot_for_archive_tests() -> GraphSnapshot {
     let mut snap = GraphSnapshot::empty();
     snap.nodes
         .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
-    snap.nodes
-        .push(GraphNode::Checkout(CheckoutNode::new(checkout_id, "/r")));
+    snap.nodes.push(GraphNode::Checkout(
+        CheckoutNode::new(checkout_id, "/r").with_worktree(WorktreeMeta {
+            kind: WorktreeKind::Linked,
+            locked: Some("in use".to_string()),
+            prunable: None,
+        }),
+    ));
     snap.nodes.push(GraphNode::Workspace(WorkspaceNode {
         id: workspace_id,
         root: "/ws".to_string(),

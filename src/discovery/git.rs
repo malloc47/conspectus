@@ -288,6 +288,9 @@ fn checkout_node(checkout_id: CheckoutId, probe: &GitProbeResult) -> CheckoutNod
                 branch.clone(),
             )
         }),
+        // Worktree enumeration (H-WT-002 step 3) populates this; the
+        // single-checkout probe leaves it unset.
+        worktree: None,
     }
 }
 

@@ -22,6 +22,7 @@ fn make_snapshot_with(sessions: &[(&str, &str, &str)]) -> GraphSnapshot {
             root: cwd.to_string(),
             git_dir: None,
             current_branch: None,
+            worktree: None,
         }));
         snap.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
@@ -1425,6 +1426,7 @@ fn snapshot_session_with_mux() -> GraphSnapshot {
         root: "/p/proj".to_string(),
         git_dir: None,
         current_branch: None,
+        worktree: None,
     }));
     snap.nodes.push(GraphNode::AgentSession(
         AgentSessionNode::new(
@@ -2060,6 +2062,7 @@ fn open_value_modal_when_cursor_has_a_long_value() {
             root: "/p/proj".to_string(),
             git_dir: None,
             current_branch: None,
+            worktree: None,
         }));
         snap.nodes.push(GraphNode::AgentSession(
             AgentSessionNode::new(
