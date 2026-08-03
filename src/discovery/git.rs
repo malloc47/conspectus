@@ -8,10 +8,12 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, bail};
 
+use crate::discovery::worktree::{WorktreeBackend, WorktreeRecord};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment, merge_fragments};
 use crate::model::{
     BranchId, BranchNode, CheckoutId, CheckoutNode, Confidence, Freshness, GraphLink, GraphNode,
     LinkEndpoint, LinkState, NodeId, Provenance, RelationKind, RepoId, RepoNode, SourceMetadata,
+    WorktreeMeta,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -169,32 +171,113 @@ impl GitProbe {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Git discovery provider. No `Clone`/`Debug`/`Eq` derive: the
+/// optional worktree backend is a boxed trait object (H-WT-002), so
+/// `Default` is hand-written and the incidental derives are dropped.
+#[derive(Default)]
 pub struct GitDiscovery {
     probe: GitProbe,
+    /// Read-only worktree backend (H-WT-002). When set, git discovery
+    /// enumerates each probed repo's *other* worktrees (the current
+    /// checkout comes from the probe) and folds them in as `Checkout`
+    /// nodes with linked/primary + lock/prune metadata. `None` keeps
+    /// the pre-worktree single-checkout behavior.
+    worktree_backend: Option<Box<dyn WorktreeBackend>>,
 }
 
 impl GitDiscovery {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Attach the worktree read backend (H-WT-002).
+    pub fn with_worktree_backend(mut self, backend: Box<dyn WorktreeBackend>) -> Self {
+        self.worktree_backend = Some(backend);
+        self
+    }
 }
 
 impl DiscoveryProvider for GitDiscovery {
     fn discover(&self, context: &DiscoveryContext) -> Result<GraphFragment> {
         let epoch = crate::discovery::current_epoch();
-        let mut fragments = Vec::new();
+        // Worktree-enumeration fragments are merged *first* so their
+        // enriched sibling checkouts win first-write-wins over any
+        // overlap; probe fragments carry the current checkout (with its
+        // git_dir) plus repo/branch facts.
+        let mut worktree_fragments = Vec::new();
+        let mut probe_fragments = Vec::new();
+        let mut enumerated_repos: BTreeSet<PathBuf> = BTreeSet::new();
 
         for root in context.roots() {
             if let Some(probe) = self.probe.probe(root)? {
-                fragments.push(fragment_from_probe(&probe));
+                if let Some(backend) = &self.worktree_backend
+                    && enumerated_repos.insert(probe.common_dir.clone())
+                {
+                    let records = backend.list(&probe.worktree_root).unwrap_or_default();
+                    if let Some(fragment) = sibling_worktree_fragment(&probe, &records) {
+                        worktree_fragments.push(fragment);
+                    }
+                }
+                probe_fragments.push(fragment_from_probe(&probe));
             }
         }
 
-        let mut fragment = GraphFragment::from(merge_fragments(fragments));
+        worktree_fragments.extend(probe_fragments);
+        let mut fragment = GraphFragment::from(merge_fragments(worktree_fragments));
         crate::discovery::stamp_fragment(&mut fragment, crate::discovery::providers::GIT, epoch);
         Ok(fragment)
     }
+}
+
+/// Build a fragment of `Checkout` nodes for every worktree of a repo
+/// *except* the one the probe already emitted (matched by path), so
+/// the current checkout keeps its probe-derived `git_dir`. Each
+/// sibling carries linked/primary + lock/prune metadata from the
+/// porcelain listing and a `BelongsToRepo` link. Returns `None` when
+/// there are no siblings to add.
+fn sibling_worktree_fragment(
+    probe: &GitProbeResult,
+    records: &[WorktreeRecord],
+) -> Option<GraphFragment> {
+    let repo_id = RepoId::new(crate::discovery::path_to_string(&probe.common_dir));
+    let current = crate::discovery::path_to_string(&probe.worktree_root);
+
+    let mut nodes = Vec::new();
+    let mut candidate_links = Vec::new();
+    for record in records {
+        if record.path == current {
+            continue; // the probe owns the current checkout
+        }
+        let checkout_id = CheckoutId::new(repo_id.clone(), record.path.clone());
+        let current_branch = record
+            .branch
+            .as_ref()
+            .map(|branch| BranchId::new(repo_id.clone(), branch.clone()));
+        let mut checkout = CheckoutNode::new(checkout_id.clone(), record.path.clone())
+            .with_worktree(WorktreeMeta {
+                kind: record.kind,
+                locked: record.locked.clone(),
+                prunable: record.prunable.clone(),
+            });
+        checkout.current_branch = current_branch;
+        nodes.push(GraphNode::Checkout(checkout));
+        candidate_links.push(git_link(
+            NodeId::Checkout(checkout_id),
+            NodeId::Repo(repo_id.clone()),
+            RelationKind::BelongsToRepo,
+            "git worktree list",
+        ));
+    }
+
+    if nodes.is_empty() {
+        return None;
+    }
+    Some(GraphFragment {
+        nodes,
+        candidate_links,
+        diagnostics: Vec::new(),
+        node_provenance: BTreeMap::new(),
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -288,9 +371,15 @@ fn checkout_node(checkout_id: CheckoutId, probe: &GitProbeResult) -> CheckoutNod
                 branch.clone(),
             )
         }),
-        // Worktree enumeration (H-WT-002 step 3) populates this; the
-        // single-checkout probe leaves it unset.
-        worktree: None,
+        // The probe already knows whether this checkout is the repo's
+        // primary working tree or a linked worktree (H-WT-002); lock /
+        // prune status for the current checkout is left to the
+        // enumeration path and stays `None` here.
+        worktree: Some(if probe.is_linked_worktree() {
+            WorktreeMeta::linked()
+        } else {
+            WorktreeMeta::primary()
+        }),
     }
 }
 

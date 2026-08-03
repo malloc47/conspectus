@@ -389,8 +389,16 @@ pub fn discover_local_warm_with(
     let forge_adapters: Vec<Box<dyn forge::ForgeAdapter>> =
         std::mem::take(&mut config.forge_adapters);
 
+    // H-WT-002: hand the worktree read backend to git discovery so it
+    // enumerates each repo's worktrees alongside the single-checkout
+    // probe. `None` leaves git discovery at its pre-worktree behavior.
+    let git_discovery = match config.worktree_backend.take() {
+        Some(backend) => git::GitDiscovery::new().with_worktree_backend(backend),
+        None => git::GitDiscovery::new(),
+    };
+
     let mut providers = LocalDiscovery::new()
-        .with_keyed_provider(&[providers::GIT], git::GitDiscovery::new())
+        .with_keyed_provider(&[providers::GIT], git_discovery)
         .with_keyed_provider(
             &[providers::ATELIER],
             atelier::AtelierWorkspaceDiscovery::new(),
@@ -769,6 +777,13 @@ pub struct LocalDiscoveryConfig {
     /// outside the scan root stay visible. `None` disables the registry
     /// (tests and headless fixtures that don't want state-home I/O).
     pub pin_store_registry: Option<crate::pin_store_registry::PinStoreRegistry>,
+    /// Read-only worktree backend used by git discovery to enumerate a
+    /// repo's worktrees (H-WT-002, ADR 0092). `None` disables worktree
+    /// enumeration (tests / headless fixtures); `from_env` installs the
+    /// thin git backend. The rich `worktrunk` mutation backend
+    /// (H-WT-003) is a CLI/TUI concern, not a discovery one — listing
+    /// only needs the always-available git backend.
+    pub worktree_backend: Option<Box<dyn worktree::WorktreeBackend>>,
     /// Harness keys whose optional aux-attribution mutator pass
     /// (H-EXT-007) should be skipped, even when the harness has a
     /// state root configured. Populated by
@@ -860,6 +875,11 @@ impl LocalDiscoveryConfig {
             orchestrator_roots,
             declared_config_loader: Some(ConfigLoader::from_env()),
             pin_store_registry: Some(crate::pin_store_registry::PinStoreRegistry::from_env()),
+            // H-WT-002: enumerate worktrees via the thin git backend
+            // unless explicitly disabled. Read-only; ADR 0087 clean.
+            worktree_backend: (env::var_os("CONSPECTUS_DISABLE_WORKTREE").is_none()).then(|| {
+                Box::new(worktree::SystemGitWorktree::new()) as Box<dyn worktree::WorktreeBackend>
+            }),
             disabled_aux_harnesses,
         }
     }
@@ -872,6 +892,7 @@ impl LocalDiscoveryConfig {
             process_tree_enabled: false,
             hook_sidecar_root: None,
             orchestrator_roots: BTreeMap::new(),
+            worktree_backend: None,
             declared_config_loader: None,
             pin_store_registry: None,
             disabled_aux_harnesses: BTreeSet::new(),

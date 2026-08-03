@@ -298,3 +298,169 @@ fn probe_cache_serves_none_for_non_repo_without_respawning() {
         "cached non-repo entry must skip every spawn on the second call"
     );
 }
+
+fn wt_record(path: &str, branch: Option<&str>, kind: crate::model::WorktreeKind) -> WorktreeRecord {
+    WorktreeRecord {
+        path: path.to_string(),
+        branch: branch.map(str::to_string),
+        head: Some("abc123".to_string()),
+        kind,
+        locked: None,
+        prunable: None,
+        bare: false,
+        detached: false,
+    }
+}
+
+#[test]
+fn sibling_worktree_fragment_skips_current_and_carries_metadata() {
+    use crate::model::WorktreeKind;
+    let probe = GitProbeResult {
+        common_dir: PathBuf::from("/repo/.git"),
+        worktree_root: PathBuf::from("/repo"),
+        git_dir: PathBuf::from("/repo/.git"),
+        branch_ref: Some("refs/heads/main".to_string()),
+        upstream: None,
+        remotes: Vec::new(),
+        local_branches: Vec::new(),
+    };
+    let mut locked_sibling = wt_record(
+        "/wt/bugfix",
+        Some("refs/heads/bugfix"),
+        WorktreeKind::Linked,
+    );
+    locked_sibling.locked = Some("agent running".to_string());
+    let records = vec![
+        // The current checkout — must be skipped (the probe owns it).
+        wt_record("/repo", Some("refs/heads/main"), WorktreeKind::Primary),
+        wt_record(
+            "/wt/feature",
+            Some("refs/heads/feature"),
+            WorktreeKind::Linked,
+        ),
+        locked_sibling,
+    ];
+
+    let fragment = sibling_worktree_fragment(&probe, &records).expect("two siblings");
+    let checkouts: Vec<&CheckoutNode> = fragment
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::Checkout(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(checkouts.len(), 2, "current checkout skipped");
+    assert!(
+        !checkouts.iter().any(|c| c.root == "/repo"),
+        "the probed checkout must not be re-emitted",
+    );
+    let bugfix = checkouts
+        .iter()
+        .find(|c| c.root == "/wt/bugfix")
+        .expect("bugfix sibling");
+    let meta = bugfix.worktree.as_ref().expect("worktree meta");
+    assert_eq!(meta.kind, WorktreeKind::Linked);
+    assert_eq!(meta.locked.as_deref(), Some("agent running"));
+    // Each sibling links back to the repo.
+    assert_eq!(fragment.candidate_links.len(), 2);
+}
+
+#[test]
+fn sibling_worktree_fragment_is_none_without_siblings() {
+    let probe = GitProbeResult {
+        common_dir: PathBuf::from("/repo/.git"),
+        worktree_root: PathBuf::from("/repo"),
+        git_dir: PathBuf::from("/repo/.git"),
+        branch_ref: Some("refs/heads/main".to_string()),
+        upstream: None,
+        remotes: Vec::new(),
+        local_branches: Vec::new(),
+    };
+    // Only the current worktree — nothing to add.
+    let records = vec![wt_record(
+        "/repo",
+        Some("refs/heads/main"),
+        crate::model::WorktreeKind::Primary,
+    )];
+    assert!(sibling_worktree_fragment(&probe, &records).is_none());
+}
+
+#[test]
+fn checkout_node_marks_primary_and_linked_from_probe() {
+    use crate::model::WorktreeKind;
+    // common_dir == git_dir → primary working tree.
+    let primary = GitProbeResult {
+        common_dir: PathBuf::from("/repo/.git"),
+        worktree_root: PathBuf::from("/repo"),
+        git_dir: PathBuf::from("/repo/.git"),
+        branch_ref: None,
+        upstream: None,
+        remotes: Vec::new(),
+        local_branches: Vec::new(),
+    };
+    let node = checkout_node(
+        CheckoutId::new(RepoId::new("/repo/.git"), "/repo"),
+        &primary,
+    );
+    assert_eq!(node.worktree.unwrap().kind, WorktreeKind::Primary);
+
+    // common_dir != git_dir → linked worktree.
+    let linked = GitProbeResult {
+        git_dir: PathBuf::from("/repo/.git/worktrees/feature"),
+        ..primary
+    };
+    let node = checkout_node(
+        CheckoutId::new(RepoId::new("/repo/.git"), "/wt/feature"),
+        &linked,
+    );
+    assert_eq!(node.worktree.unwrap().kind, WorktreeKind::Linked);
+}
+
+#[test]
+fn git_discovery_enumerates_sibling_worktrees_end_to_end() {
+    // Real git: a repo + a linked worktree, discovered through
+    // GitDiscovery with the real backend. Skips cleanly if git can't
+    // add a worktree on this host.
+    let fixture = GitFixture::init();
+    let wt = fixture.parent().join("wt-feature");
+    let added = Command::new("git")
+        .args(["worktree", "add", "-b", "feature", wt.to_str().unwrap()])
+        .current_dir(fixture.root())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !added {
+        return;
+    }
+
+    let discovery = GitDiscovery::new().with_worktree_backend(Box::new(
+        crate::discovery::worktree::SystemGitWorktree::new(),
+    ));
+    let context = DiscoveryContext::from_root(fixture.root());
+    let fragment = discovery.discover(&context).expect("discover");
+
+    let worktree_checkouts: Vec<&CheckoutNode> = fragment
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::Checkout(c) => Some(c),
+            _ => None,
+        })
+        .filter(|c| c.worktree.is_some())
+        .collect();
+    // Both the primary (from the probe) and the linked worktree (from
+    // enumeration) carry worktree metadata.
+    assert!(
+        worktree_checkouts
+            .iter()
+            .any(|c| c.worktree.as_ref().unwrap().kind == crate::model::WorktreeKind::Primary),
+        "primary checkout marked",
+    );
+    assert!(
+        worktree_checkouts
+            .iter()
+            .any(|c| c.worktree.as_ref().unwrap().is_linked()),
+        "linked worktree enumerated and marked: {worktree_checkouts:?}",
+    );
+}
