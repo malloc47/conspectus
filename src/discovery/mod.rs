@@ -31,6 +31,7 @@ pub mod pins;
 pub mod providers;
 pub mod tmux;
 pub mod workspace;
+pub mod worktree;
 pub mod zellij;
 
 pub fn empty_graph() -> GraphSnapshot {
