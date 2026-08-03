@@ -31,6 +31,7 @@ impl Cli {
             Command::Rename(args) => args.run(),
             Command::Alias(args) => args.run(),
             Command::Pin(args) => args.run(),
+            Command::Worktree(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
             Command::Status(args) => args.run(),
@@ -66,6 +67,9 @@ enum Command {
     Alias(AliasArgs),
     /// Author or inspect session pins (ADR 0057).
     Pin(Box<PinArgs>),
+    /// List git worktrees discovered across the scanned repos
+    /// (H-WT-002). Read-only; mutation lands in a follow-up.
+    Worktree(WorktreeArgs),
     /// Run the long-lived background daemon that keeps the
     /// resolved graph snapshot warm between one-shot CLI
     /// invocations (ADR 0038 / P7-006).
@@ -607,6 +611,10 @@ pub(super) fn resolve_alias_store(
 // H-REF-006 wave 10: pin subtree moved to `cli/pin.rs`.
 mod pin;
 use pin::PinArgs;
+
+// H-WT-002: `conspectus worktree` subcommand.
+mod worktree;
+use worktree::WorktreeArgs;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub(super) enum OutputFormat {
