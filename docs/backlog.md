@@ -13754,12 +13754,37 @@ approach (not raw implementation size). Worked top-to-bottom.
            nodes, stamp `worktree` provenance.
         4. CLI: `conspectus worktree list`.
         5. TUI: linked/primary + lock/prune marker.
-    - [ ] `H-WT-003` `worktrunk` backend (create/list/remove) behind
-      `PATH` autodetection + `[worktree] backend` config; argv mapping
-      per worktrunk's CLI.
-    - [ ] `H-WT-004` `conspectus worktree list/new/rm` CLI + menu-first
-      TUI actions gated on a mutation-capable backend; refuse removal
-      of a worktree hosting a live session.
+    - [ ] `H-WT-003` `worktrunk` backend (create/remove) behind `PATH`
+      autodetection + `[worktree] backend` config.
+      - Scope (settled 2026-08): worktrunk `wt` v0.43 CLI (binary `wt`).
+        Argv (category-4 subprocess, ADR 0087 / ADR 0092):
+        - create: `wt -C <repo> switch --create --no-cd [--base <ref>]
+          <branch>` (`--no-cd` = headless automation; no `-x` so it
+          creates without launching anything).
+        - remove: `wt -C <repo> remove --yes --foreground [--force]
+          <branch>`.
+      - `WorktreeBackend` gains `create` / `remove` (default
+        `Unsupported`, mirroring `MuxBackend`); `WorktrunkBackend`
+        shells out via a `WtRunner` seam (fake for tests). `list`
+        delegates to the git porcelain path (worktrunk worktrees are
+        git worktrees). git backend keeps mutation `Unsupported`.
+      - `[worktree] backend = auto | git | worktrunk` (default `auto`:
+        worktrunk when `wt` on PATH, else read-only; `git` forces
+        read-only; `worktrunk` requires `wt`). A resolver picks the
+        CLI/TUI mutation backend from config + PATH.
+    - [ ] `H-WT-004` `conspectus worktree new/rm` CLI + menu-first TUI
+      actions gated on a mutation-capable backend.
+      - Scope (settled 2026-08): create-only semantics — `worktree new`
+        creates the worktree+branch but does NOT launch an agent
+        (launching stays the pin system's job).
+        - CLI: `worktree new <branch> [--base <ref>] [--repo <path>]`;
+          `worktree rm <branch> [--repo <path>] [--force]`.
+        - Live-session guard on `rm`: refuse (listing the live agent/mux
+          sessions rooted in the worktree, via the resolved
+          session↔checkout links) unless `--force`.
+        - TUI (only when a mutation backend is present, menu-first):
+          "New worktree…" on a Repo node (branch-name prompt), "Remove
+          worktree" on a Checkout node (guarded + confirm).
 
 ## Later
 
