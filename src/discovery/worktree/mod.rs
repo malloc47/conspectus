@@ -30,6 +30,87 @@ pub const GIT_BACKEND: &str = "git";
 /// Backend identifier for the worktrunk mutation backend (H-WT-003).
 pub const WORKTRUNK_BACKEND: &str = "worktrunk";
 
+/// Which backend performs worktree *mutation* for the CLI / TUI
+/// (H-WT-003). Discovery always lists via the git backend; this only
+/// governs create / remove.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
+pub enum WorktreeBackendSelection {
+    /// Use worktrunk when `wt` is on PATH, otherwise stay read-only.
+    #[default]
+    Auto,
+    /// Never mutate — read-only even when `wt` is present.
+    Git,
+    /// Require worktrunk; error when `wt` is absent.
+    Worktrunk,
+}
+
+impl WorktreeBackendSelection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Git => "git",
+            Self::Worktrunk => "worktrunk",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "auto" => Some(Self::Auto),
+            "git" => Some(Self::Git),
+            "worktrunk" => Some(Self::Worktrunk),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the `wt` (worktrunk) binary is resolvable on `$PATH`.
+/// Scans `PATH` for an executable `wt` rather than spawning it, so the
+/// check is cheap and side-effect-free.
+pub fn worktrunk_available() -> bool {
+    binary_on_path("wt")
+}
+
+fn binary_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| dir.join(name).is_file())
+}
+
+/// Resolve the mutation backend for CLI / TUI use from the config
+/// selection and worktrunk availability (H-WT-003):
+///
+/// - [`WorktreeBackendSelection::Git`] → `Ok(None)` (read-only).
+/// - [`WorktreeBackendSelection::Auto`] → the worktrunk backend when
+///   available, else `Ok(None)`.
+/// - [`WorktreeBackendSelection::Worktrunk`] → the worktrunk backend,
+///   or `Err` when `wt` is not on PATH.
+///
+/// `available` is passed in (not probed here) so the decision is
+/// unit-testable; production callers pass [`worktrunk_available`].
+pub fn resolve_mutation_backend(
+    selection: WorktreeBackendSelection,
+    available: bool,
+) -> Result<Option<Box<dyn WorktreeBackend>>> {
+    match selection {
+        WorktreeBackendSelection::Git => Ok(None),
+        WorktreeBackendSelection::Auto => {
+            Ok(available.then(|| Box::new(WorktrunkBackend::new()) as Box<dyn WorktreeBackend>))
+        }
+        WorktreeBackendSelection::Worktrunk => {
+            if available {
+                Ok(Some(Box::new(WorktrunkBackend::new())))
+            } else {
+                anyhow::bail!(
+                    "`[worktree] backend = \"worktrunk\"` but the `wt` binary is not on PATH; \
+                     install worktrunk (https://github.com/max-sixty/worktrunk) or set \
+                     `backend = \"auto\"`"
+                )
+            }
+        }
+    }
+}
+
 /// What a worktree backend can do beyond read-only `list`. The built-in
 /// git backend reports both `false` (ADR 0092: it never mutates git
 /// state); only an external dedicated tool like `worktrunk` reports

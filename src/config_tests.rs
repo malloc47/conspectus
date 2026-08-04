@@ -986,3 +986,59 @@ fn expand_home_preserves_paths_without_tilde() {
     // string rather than silently dropping the `~`.
     assert_eq!(expand_home("~/src", None), PathBuf::from("~/src"));
 }
+
+#[test]
+fn worktree_backend_defaults_to_auto() {
+    let temp = TempDir::new().expect("temp dir");
+    let loader = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(temp.path().join("xdg"));
+    let outcome = loader.load_from(temp.path());
+    assert_eq!(
+        outcome.config.worktree.backend,
+        crate::discovery::worktree::WorktreeBackendSelection::Auto,
+    );
+}
+
+#[test]
+fn worktree_backend_loads_from_config() {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[worktree]\nbackend = \"worktrunk\"\n",
+    );
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+    assert!(outcome.diagnostics.is_empty());
+    assert_eq!(
+        outcome.config.worktree.backend,
+        crate::discovery::worktree::WorktreeBackendSelection::Worktrunk,
+    );
+}
+
+#[test]
+fn worktree_backend_invalid_value_diagnoses_and_keeps_default() {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[worktree]\nbackend = \"svn\"\n",
+    );
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+    assert_eq!(
+        outcome.config.worktree.backend,
+        crate::discovery::worktree::WorktreeBackendSelection::Auto,
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("[worktree] backend")),
+        "expected a worktree backend diagnostic: {:?}",
+        outcome.diagnostics,
+    );
+}

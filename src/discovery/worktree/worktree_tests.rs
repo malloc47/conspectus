@@ -391,3 +391,51 @@ fn git_backend_create_and_remove_are_unsupported() {
         WorktreeMutationOutcome::Unsupported,
     );
 }
+
+// ---- H-WT-003b: mutation backend resolver ----
+
+#[test]
+fn resolver_git_selection_is_always_read_only() {
+    for available in [true, false] {
+        let backend =
+            resolve_mutation_backend(WorktreeBackendSelection::Git, available).expect("ok");
+        assert!(backend.is_none(), "git selection never mutates");
+    }
+}
+
+#[test]
+fn resolver_auto_uses_worktrunk_only_when_available() {
+    let present = resolve_mutation_backend(WorktreeBackendSelection::Auto, true).expect("ok");
+    assert_eq!(present.unwrap().backend_key(), WORKTRUNK_BACKEND);
+
+    let absent = resolve_mutation_backend(WorktreeBackendSelection::Auto, false).expect("ok");
+    assert!(absent.is_none(), "auto stays read-only without wt");
+}
+
+#[test]
+fn resolver_worktrunk_requires_wt_present() {
+    let present = resolve_mutation_backend(WorktreeBackendSelection::Worktrunk, true).expect("ok");
+    assert_eq!(present.unwrap().backend_key(), WORKTRUNK_BACKEND);
+
+    let err = match resolve_mutation_backend(WorktreeBackendSelection::Worktrunk, false) {
+        Ok(_) => panic!("worktrunk selection must require wt on PATH"),
+        Err(err) => err,
+    };
+    assert!(err.to_string().contains("not on PATH"), "{err}");
+}
+
+#[test]
+fn backend_selection_parse_round_trips() {
+    for sel in [
+        WorktreeBackendSelection::Auto,
+        WorktreeBackendSelection::Git,
+        WorktreeBackendSelection::Worktrunk,
+    ] {
+        assert_eq!(WorktreeBackendSelection::parse(sel.as_str()), Some(sel));
+    }
+    assert_eq!(WorktreeBackendSelection::parse("nonsense"), None);
+    assert_eq!(
+        WorktreeBackendSelection::default(),
+        WorktreeBackendSelection::Auto
+    );
+}

@@ -44,6 +44,17 @@ pub struct Config {
     pub table: TableConfig,
     pub tui: TuiConfig,
     pub server: ServerConfig,
+    pub worktree: WorktreeConfig,
+}
+
+/// Settings under `[worktree]` (H-WT-003). Governs which backend
+/// performs worktree mutation (create / remove) in the CLI / TUI;
+/// discovery always lists via the read-only git backend.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WorktreeConfig {
+    /// `[worktree] backend = "auto" | "git" | "worktrunk"`. Defaults to
+    /// `auto` (worktrunk when `wt` is on PATH, else read-only).
+    pub backend: crate::discovery::worktree::WorktreeBackendSelection,
 }
 
 /// Settings under `[server]`. Configures both the `conspectus
@@ -255,11 +266,20 @@ struct ConfigFile {
     /// keeps the [`ServerIntervals::default`] values.
     #[serde(default)]
     server: Option<ServerFile>,
+    /// `[worktree]` table (H-WT-003).
+    #[serde(default)]
+    worktree: Option<WorktreeFile>,
     /// Legacy `[session]` key from before ADR 0021. Its presence
     /// triggers a diagnostic so users discover the schema migrated;
     /// its contents are not read.
     #[serde(default)]
     session: Option<toml::Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct WorktreeFile {
+    #[serde(default)]
+    backend: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -562,6 +582,30 @@ fn merge_from_file(
 
     if let Some(server) = parsed.server {
         merge_server(&mut config.server, server, path, diagnostics);
+    }
+
+    if let Some(worktree) = parsed.worktree {
+        merge_worktree(&mut config.worktree, worktree, path, diagnostics);
+    }
+}
+
+fn merge_worktree(
+    config: &mut WorktreeConfig,
+    file: WorktreeFile,
+    path: &Path,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) {
+    let Some(raw) = file.backend else {
+        return;
+    };
+    match crate::discovery::worktree::WorktreeBackendSelection::parse(&raw) {
+        Some(selection) => config.backend = selection,
+        None => diagnostics.push(ConfigDiagnostic {
+            path: path.to_path_buf(),
+            message: format!(
+                "invalid `[worktree] backend` value `{raw}`; expected auto, git, or worktrunk"
+            ),
+        }),
     }
 }
 
