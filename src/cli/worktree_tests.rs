@@ -97,3 +97,71 @@ fn repo_display_name_strips_dot_git() {
     assert_eq!(repo_display_name(&RepoId::new("/src/bare.git")), "bare");
     assert_eq!(repo_display_name(&RepoId::new("/src/plain")), "plain");
 }
+
+// ---- H-WT-004a: rm guard helpers ----
+
+use conspectus::model::{AgentSessionId, AgentSessionNode, MuxSessionId, MuxSessionNode};
+
+fn snapshot_with_worktree_and_sessions() -> GraphSnapshot {
+    let mut snap = GraphSnapshot::empty();
+    // A linked worktree at /wt/feature checking out `feature`.
+    snap.nodes.push(checkout(
+        "/src/app/.git",
+        "/wt/feature",
+        Some("refs/heads/feature"),
+        WorktreeMeta::linked(),
+    ));
+    // An agent session whose cwd is inside the worktree.
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(AgentSessionId::new("codex", "/state", "s1"), "codex")
+            .with_cwd("/wt/feature/src".to_string()),
+    ));
+    // A mux session whose active pane is inside the worktree.
+    snap.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(MuxSessionId::new("tmux:feat"), "tmux", "feat")
+            .with_active_pane_current_path("/wt/feature".to_string()),
+    ));
+    // A session elsewhere — must NOT count.
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(AgentSessionId::new("codex", "/state", "other"), "codex")
+            .with_cwd("/somewhere/else".to_string()),
+    ));
+    snap
+}
+
+#[test]
+fn worktree_path_for_branch_resolves_short_name() {
+    let snap = snapshot_with_worktree_and_sessions();
+    assert_eq!(
+        worktree_path_for_branch(&snap, "feature").as_deref(),
+        Some("/wt/feature"),
+    );
+    assert_eq!(worktree_path_for_branch(&snap, "nonexistent"), None);
+}
+
+#[test]
+fn live_sessions_in_worktree_finds_agent_and_mux_inside() {
+    let snap = snapshot_with_worktree_and_sessions();
+    let sessions = live_sessions_in_worktree(&snap, "/wt/feature");
+    assert_eq!(
+        sessions.len(),
+        2,
+        "agent + mux inside, other excluded: {sessions:?}"
+    );
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s.contains("codex") && s.contains("agent"))
+    );
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s.contains("feat") && s.contains("mux"))
+    );
+}
+
+#[test]
+fn live_sessions_in_worktree_empty_when_none_inside() {
+    let snap = snapshot_with_worktree_and_sessions();
+    assert!(live_sessions_in_worktree(&snap, "/wt/unused").is_empty());
+}

@@ -1,17 +1,24 @@
-//! `conspectus worktree` subcommand (H-WT-002, ADR 0092).
+//! `conspectus worktree` subcommand (H-WT-002 / H-WT-003 / H-WT-004,
+//! ADR 0092).
 //!
-//! Read-only for now: `worktree list` renders the git worktrees
-//! discovery found across the scanned repos. Mutation
-//! (`worktree new` / `rm`, delegated to `worktrunk`) lands in
-//! H-WT-004.
+//! `worktree list` renders the git worktrees discovery found
+//! (read-only). `worktree new` / `rm` delegate to the configured
+//! mutation backend (worktrunk) — a category-4 subprocess launch
+//! (ADR 0087); `rm` refuses to remove a worktree hosting a live
+//! agent/mux session unless `--force`.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 
-use conspectus::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind};
+use conspectus::config::ConfigLoader;
+use conspectus::discovery::worktree::{
+    WorktreeCreateRequest, WorktreeMutationOutcome, WorktreeRemoveRequest,
+    resolve_mutation_backend, worktrunk_available,
+};
+use conspectus::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind, path_is_ancestor_of};
 
 use super::discover_for_store_selection;
 
@@ -25,14 +32,194 @@ pub struct WorktreeArgs {
 enum WorktreeCommand {
     /// List the git worktrees discovered across the scanned repos.
     List(WorktreeListArgs),
+    /// Create a worktree + branch (delegates to the mutation backend).
+    /// Does not launch anything — pin/attach separately.
+    New(WorktreeNewArgs),
+    /// Remove a worktree. Refuses when it hosts a live session unless
+    /// `--force`.
+    Rm(WorktreeRmArgs),
 }
 
 impl WorktreeArgs {
     pub(super) fn run(self) -> Result<()> {
         match self.command {
             WorktreeCommand::List(args) => args.run(),
+            WorktreeCommand::New(args) => args.run(),
+            WorktreeCommand::Rm(args) => args.run(),
         }
     }
+}
+
+/// Resolve the mutation backend from `[worktree] backend` + `wt`
+/// availability, erroring clearly when none is available.
+fn mutation_backend() -> Result<Box<dyn conspectus::discovery::worktree::WorktreeBackend>> {
+    let cwd = std::env::current_dir()?;
+    let outcome = ConfigLoader::from_env().load_from(&cwd);
+    match resolve_mutation_backend(outcome.config.worktree.backend, worktrunk_available())? {
+        Some(backend) => Ok(backend),
+        None => bail!(
+            "no worktree mutation backend available (read-only). Install worktrunk \
+             (https://github.com/max-sixty/worktrunk) or set `[worktree] backend`"
+        ),
+    }
+}
+
+#[derive(Debug, Args)]
+struct WorktreeNewArgs {
+    /// Branch to create the worktree for.
+    branch: String,
+    /// Base ref to branch from (defaults to the repo's default branch).
+    #[arg(long)]
+    base: Option<String>,
+    /// A path inside the repo to operate on. Defaults to the current
+    /// directory.
+    #[arg(long = "repo", value_name = "PATH")]
+    repo: Option<PathBuf>,
+}
+
+impl WorktreeNewArgs {
+    fn run(self) -> Result<()> {
+        let repo_root = match self.repo {
+            Some(path) => path,
+            None => std::env::current_dir()?,
+        };
+        let backend = mutation_backend()?;
+        let outcome = backend.create(&WorktreeCreateRequest {
+            repo_root,
+            branch: self.branch.clone(),
+            base: self.base.clone(),
+        })?;
+        match outcome {
+            WorktreeMutationOutcome::Succeeded { .. } => {
+                println!("created worktree for branch `{}`", self.branch);
+                Ok(())
+            }
+            WorktreeMutationOutcome::Unsupported => {
+                bail!("the configured worktree backend cannot create worktrees")
+            }
+            WorktreeMutationOutcome::Failed { code, message } => {
+                bail!("worktree create failed{}: {message}", code_suffix(code))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct WorktreeRmArgs {
+    /// Branch whose worktree should be removed.
+    branch: String,
+    /// A path inside the repo to operate on. Defaults to the current
+    /// directory.
+    #[arg(long = "repo", value_name = "PATH")]
+    repo: Option<PathBuf>,
+    /// Remove even when the worktree hosts a live session and/or holds
+    /// untracked files.
+    #[arg(long, short)]
+    force: bool,
+}
+
+impl WorktreeRmArgs {
+    fn run(self) -> Result<()> {
+        let repo_root = match &self.repo {
+            Some(path) => path.clone(),
+            None => std::env::current_dir()?,
+        };
+
+        // Live-session guard: discover, find the worktree's path, and
+        // refuse when a session is rooted in it (unless --force).
+        let snapshot = discover_for_store_selection(std::slice::from_ref(&repo_root))?;
+        if !self.force
+            && let Some(path) = worktree_path_for_branch(&snapshot, &self.branch)
+        {
+            let sessions = live_sessions_in_worktree(&snapshot, &path);
+            if !sessions.is_empty() {
+                let mut msg = format!(
+                    "worktree for `{}` hosts {} live session(s):",
+                    self.branch,
+                    sessions.len()
+                );
+                for s in &sessions {
+                    msg.push_str(&format!("\n  - {s}"));
+                }
+                msg.push_str("\nre-run with --force to remove anyway");
+                bail!(msg);
+            }
+        }
+
+        let backend = mutation_backend()?;
+        let outcome = backend.remove(&WorktreeRemoveRequest {
+            repo_root,
+            branch: self.branch.clone(),
+            force: self.force,
+        })?;
+        match outcome {
+            WorktreeMutationOutcome::Succeeded { .. } => {
+                println!("removed worktree for branch `{}`", self.branch);
+                Ok(())
+            }
+            WorktreeMutationOutcome::Unsupported => {
+                bail!("the configured worktree backend cannot remove worktrees")
+            }
+            WorktreeMutationOutcome::Failed { code, message } => {
+                bail!("worktree remove failed{}: {message}", code_suffix(code))
+            }
+        }
+    }
+}
+
+fn code_suffix(code: Option<i32>) -> String {
+    code.map(|c| format!(" (exit {c})")).unwrap_or_default()
+}
+
+/// Path of the worktree checking out `branch` (short name), from the
+/// discovered graph. `None` when no enumerated worktree matches.
+fn worktree_path_for_branch(snapshot: &GraphSnapshot, branch: &str) -> Option<String> {
+    for node in &snapshot.nodes {
+        let GraphNode::Checkout(checkout) = node else {
+            continue;
+        };
+        if checkout.worktree.is_none() {
+            continue;
+        }
+        if let Some(current) = &checkout.current_branch
+            && short_branch(&current.refname) == branch
+        {
+            return Some(checkout.root.clone());
+        }
+    }
+    None
+}
+
+/// Live agent / mux sessions rooted inside `worktree_path`. A session
+/// counts as "in" the worktree when its cwd (or the mux's active pane
+/// path) is at or under the worktree root.
+fn live_sessions_in_worktree(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<String> {
+    let root = Path::new(worktree_path);
+    let mut sessions = Vec::new();
+    for node in &snapshot.nodes {
+        match node {
+            GraphNode::AgentSession(session) => {
+                if let Some(cwd) = &session.cwd
+                    && path_is_ancestor_of(root, Path::new(cwd))
+                {
+                    sessions.push(format!("{} (agent)", session.harness_key));
+                }
+            }
+            GraphNode::MuxSession(mux) => {
+                let cwd = mux
+                    .active_pane_current_path
+                    .as_deref()
+                    .or(mux.cwd.as_deref());
+                if let Some(cwd) = cwd
+                    && path_is_ancestor_of(root, Path::new(cwd))
+                {
+                    sessions.push(format!("{} (mux)", mux.native_id));
+                }
+            }
+            _ => {}
+        }
+    }
+    sessions
 }
 
 #[derive(Debug, Args)]
