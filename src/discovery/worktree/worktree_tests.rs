@@ -196,3 +196,198 @@ fn git_backend_lists_real_worktrees_when_git_available() {
         |r| r.kind == WorktreeKind::Linked && r.branch.as_deref() == Some("refs/heads/feature")
     ));
 }
+
+// ---- H-WT-003: worktrunk mutation backend ----
+
+use std::sync::Mutex;
+
+/// Records the args each `wt` invocation received and returns a
+/// canned exit status, so create/remove argv is asserted without a
+/// real `wt` binary.
+struct FakeWt {
+    calls: Mutex<Vec<Vec<String>>>,
+    exit_code: i32,
+    stderr: String,
+}
+
+impl FakeWt {
+    fn ok() -> Self {
+        Self {
+            calls: Mutex::new(Vec::new()),
+            exit_code: 0,
+            stderr: String::new(),
+        }
+    }
+
+    fn failing(code: i32, stderr: &str) -> Self {
+        Self {
+            calls: Mutex::new(Vec::new()),
+            exit_code: code,
+            stderr: stderr.to_string(),
+        }
+    }
+}
+
+impl WtRunner for FakeWt {
+    fn run(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(args.iter().map(|s| s.to_string()).collect());
+        use std::os::unix::process::ExitStatusExt;
+        Ok(std::process::Output {
+            status: std::process::ExitStatus::from_raw(self.exit_code << 8),
+            stdout: Vec::new(),
+            stderr: self.stderr.clone().into_bytes(),
+        })
+    }
+}
+
+// A shared-state fake needs Arc so both the backend and the test can
+// read `calls`. WtRunner is impl'd for Arc<FakeWt> via deref.
+impl WtRunner for std::sync::Arc<FakeWt> {
+    fn run(&self, args: &[&str]) -> std::io::Result<std::process::Output> {
+        (**self).run(args)
+    }
+}
+
+#[test]
+fn worktrunk_reports_mutation_capabilities() {
+    let backend = WorktrunkBackend::new();
+    assert_eq!(backend.backend_key(), WORKTRUNK_BACKEND);
+    let caps = backend.capabilities();
+    assert!(caps.can_create);
+    assert!(caps.can_remove);
+}
+
+#[test]
+fn worktrunk_create_builds_switch_create_no_cd_argv() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    let outcome = backend
+        .create(&WorktreeCreateRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "feature-a".to_string(),
+            base: Some("main".to_string()),
+        })
+        .expect("create runs");
+    assert_eq!(outcome, WorktreeMutationOutcome::Succeeded { path: None });
+
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(
+        calls[0],
+        vec![
+            "-C",
+            "/src/app",
+            "switch",
+            "--create",
+            "--no-cd",
+            "--base",
+            "main",
+            "feature-a",
+        ],
+    );
+}
+
+#[test]
+fn worktrunk_create_omits_base_when_absent() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .create(&WorktreeCreateRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "feature-a".to_string(),
+            base: None,
+        })
+        .expect("create runs");
+    let calls = fake.calls.lock().unwrap();
+    assert!(!calls[0].iter().any(|a| a == "--base"));
+    assert_eq!(calls[0].last().map(String::as_str), Some("feature-a"));
+}
+
+#[test]
+fn worktrunk_remove_builds_yes_foreground_argv_and_force() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .remove(&WorktreeRemoveRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "feature-a".to_string(),
+            force: true,
+        })
+        .expect("remove runs");
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(
+        calls[0],
+        vec![
+            "-C",
+            "/src/app",
+            "remove",
+            "--yes",
+            "--foreground",
+            "--force",
+            "feature-a",
+        ],
+    );
+}
+
+#[test]
+fn worktrunk_remove_without_force_omits_force_flag() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .remove(&WorktreeRemoveRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "feature-a".to_string(),
+            force: false,
+        })
+        .expect("remove runs");
+    let calls = fake.calls.lock().unwrap();
+    assert!(!calls[0].iter().any(|a| a == "--force"));
+}
+
+#[test]
+fn worktrunk_surfaces_command_failure() {
+    let fake = std::sync::Arc::new(FakeWt::failing(1, "branch already exists"));
+    let backend = WorktrunkBackend::with_runner(Box::new(fake));
+    let outcome = backend
+        .create(&WorktreeCreateRequest {
+            repo_root: PathBuf::from("/src/app"),
+            branch: "dupe".to_string(),
+            base: None,
+        })
+        .expect("create runs");
+    assert_eq!(
+        outcome,
+        WorktreeMutationOutcome::Failed {
+            code: Some(1),
+            message: "branch already exists".to_string(),
+        },
+    );
+}
+
+#[test]
+fn git_backend_create_and_remove_are_unsupported() {
+    // The built-in git backend never mutates (ADR 0087 prohibition 6).
+    let backend = SystemGitWorktree::new();
+    assert_eq!(
+        backend
+            .create(&WorktreeCreateRequest {
+                repo_root: PathBuf::from("/src/app"),
+                branch: "x".to_string(),
+                base: None,
+            })
+            .unwrap(),
+        WorktreeMutationOutcome::Unsupported,
+    );
+    assert_eq!(
+        backend
+            .remove(&WorktreeRemoveRequest {
+                repo_root: PathBuf::from("/src/app"),
+                branch: "x".to_string(),
+                force: false,
+            })
+            .unwrap(),
+        WorktreeMutationOutcome::Unsupported,
+    );
+}

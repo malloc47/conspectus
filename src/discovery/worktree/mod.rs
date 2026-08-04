@@ -5,9 +5,10 @@
 //! [`capabilities`] report, and swappable implementations. This module
 //! ships the always-available, ADR-0087-clean **git** backend, which
 //! enumerates a repo's worktrees via `git worktree list --porcelain`
-//! and never mutates git state. The rich mutation backend
-//! (`worktrunk`, create/remove) lands in H-WT-003 as a second
-//! implementation of the same trait.
+//! and never mutates git state, plus the **worktrunk** mutation
+//! backend (H-WT-003), which shells out to the `wt` CLI for
+//! `create` / `remove` — a category-4 subprocess launch (ADR 0087),
+//! so the git mutation happens inside worktrunk, not Conspectus.
 //!
 //! [`list`]: WorktreeBackend::list
 //! [`capabilities`]: WorktreeBackend::capabilities
@@ -25,6 +26,9 @@ use crate::model::WorktreeKind;
 /// worktree backend produced a record, the way `tmux` / `zellij` name
 /// mux backends. `worktrunk` joins as a second key in H-WT-003.
 pub const GIT_BACKEND: &str = "git";
+
+/// Backend identifier for the worktrunk mutation backend (H-WT-003).
+pub const WORKTRUNK_BACKEND: &str = "worktrunk";
 
 /// What a worktree backend can do beyond read-only `list`. The built-in
 /// git backend reports both `false` (ADR 0092: it never mutates git
@@ -60,10 +64,50 @@ pub struct WorktreeRecord {
     pub detached: bool,
 }
 
+/// Operator request to create a worktree (H-WT-003).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeCreateRequest {
+    /// A path inside the repo the worktree belongs to.
+    pub repo_root: PathBuf,
+    /// Branch to create the worktree for (created fresh).
+    pub branch: String,
+    /// Base ref to branch from. `None` uses the backend default (the
+    /// repo's default branch).
+    pub base: Option<String>,
+}
+
+/// Operator request to remove a worktree (H-WT-003).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeRemoveRequest {
+    /// A path inside the repo the worktree belongs to.
+    pub repo_root: PathBuf,
+    /// Branch whose worktree should be removed.
+    pub branch: String,
+    /// Force removal even when the worktree holds untracked files
+    /// (maps to worktrunk `-f`). Distinct from Conspectus's
+    /// live-session guard, which is a CLI/TUI concern.
+    pub force: bool,
+}
+
+/// Outcome of a worktree mutation (H-WT-003).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WorktreeMutationOutcome {
+    /// The mutation succeeded. `path` carries the affected worktree
+    /// path when the backend reports it, else `None` (the caller can
+    /// re-discover to find a freshly created worktree).
+    Succeeded { path: Option<String> },
+    /// This backend is read-only and does not perform the operation.
+    Unsupported,
+    /// The backend ran but the operation failed.
+    Failed { code: Option<i32>, message: String },
+}
+
 /// A pluggable worktree backend (ADR 0092). `list` is required and
-/// read-only; mutation (`create` / `remove`) is added by the external
-/// `worktrunk` backend in H-WT-003 and gated behind
-/// [`WorktreeCaps`].
+/// read-only; `create` / `remove` are mutation, default to
+/// `Unsupported` (the read-only git backend), and are implemented by
+/// the external `worktrunk` backend (H-WT-003) as a category-4
+/// subprocess launch (ADR 0087). [`WorktreeCaps`] advertises which a
+/// given backend supports.
 pub trait WorktreeBackend: Send + Sync {
     /// Stable key identifying this backend (`git`, `worktrunk`).
     fn backend_key(&self) -> &'static str;
@@ -76,6 +120,20 @@ pub trait WorktreeBackend: Send + Sync {
     /// not a git repo or the backend binary is absent, so discovery
     /// degrades cleanly on sparse hosts.
     fn list(&self, repo_root: &Path) -> Result<Vec<WorktreeRecord>>;
+
+    /// Create a worktree. Defaults to [`WorktreeMutationOutcome::Unsupported`]
+    /// for read-only backends. `Err` is reserved for a failure to
+    /// *launch* the backend; an operation that ran and failed is a
+    /// [`WorktreeMutationOutcome::Failed`].
+    fn create(&self, _req: &WorktreeCreateRequest) -> Result<WorktreeMutationOutcome> {
+        Ok(WorktreeMutationOutcome::Unsupported)
+    }
+
+    /// Remove a worktree. Defaults to
+    /// [`WorktreeMutationOutcome::Unsupported`].
+    fn remove(&self, _req: &WorktreeRemoveRequest) -> Result<WorktreeMutationOutcome> {
+        Ok(WorktreeMutationOutcome::Unsupported)
+    }
 }
 
 /// The built-in thin git backend: `git worktree list --porcelain`.
@@ -146,6 +204,135 @@ impl WorktreeBackend for SystemGitWorktree {
         Ok(parse_worktree_porcelain(&String::from_utf8_lossy(
             &output.stdout,
         )))
+    }
+}
+
+/// Subprocess seam for the `wt` binary so [`WorktrunkBackend`] argv can
+/// be unit-tested without spawning a real process.
+pub trait WtRunner: Send + Sync {
+    /// Run `wt <args>` and return its captured output.
+    fn run(&self, args: &[&str]) -> io::Result<std::process::Output>;
+}
+
+/// Production [`WtRunner`] spawning the `wt` binary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemWt {
+    binary: PathBuf,
+}
+
+impl Default for SystemWt {
+    fn default() -> Self {
+        Self {
+            binary: PathBuf::from("wt"),
+        }
+    }
+}
+
+impl SystemWt {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_binary(binary: impl Into<PathBuf>) -> Self {
+        Self {
+            binary: binary.into(),
+        }
+    }
+}
+
+impl WtRunner for SystemWt {
+    fn run(&self, args: &[&str]) -> io::Result<std::process::Output> {
+        Command::new(&self.binary).args(args).output()
+    }
+}
+
+/// The worktrunk mutation backend (H-WT-003, ADR 0092). Shells out to
+/// the `wt` CLI for `create` / `remove` — a category-4
+/// Conspectus-constructed subprocess launch (ADR 0087); the git
+/// mutation happens inside worktrunk, the dedicated tool, so
+/// prohibition 6 stays intact. `list` delegates to the git porcelain
+/// path (worktrunk worktrees are ordinary git worktrees).
+pub struct WorktrunkBackend {
+    runner: Box<dyn WtRunner>,
+    git: SystemGitWorktree,
+}
+
+impl Default for WorktrunkBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WorktrunkBackend {
+    pub fn new() -> Self {
+        Self {
+            runner: Box::new(SystemWt::new()),
+            git: SystemGitWorktree::new(),
+        }
+    }
+
+    /// Inject a fake `wt` runner for tests.
+    pub fn with_runner(runner: Box<dyn WtRunner>) -> Self {
+        Self {
+            runner,
+            git: SystemGitWorktree::new(),
+        }
+    }
+
+    fn interpret(output: io::Result<std::process::Output>) -> Result<WorktreeMutationOutcome> {
+        let output =
+            output.map_err(|err| anyhow::anyhow!("failed to spawn worktrunk `wt`: {err}"))?;
+        if output.status.success() {
+            Ok(WorktreeMutationOutcome::Succeeded { path: None })
+        } else {
+            let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Ok(WorktreeMutationOutcome::Failed {
+                code: output.status.code(),
+                message,
+            })
+        }
+    }
+}
+
+impl WorktreeBackend for WorktrunkBackend {
+    fn backend_key(&self) -> &'static str {
+        WORKTRUNK_BACKEND
+    }
+
+    fn capabilities(&self) -> WorktreeCaps {
+        WorktreeCaps {
+            can_create: true,
+            can_remove: true,
+        }
+    }
+
+    fn list(&self, repo_root: &Path) -> Result<Vec<WorktreeRecord>> {
+        // Worktrunk worktrees are git worktrees; reuse the porcelain
+        // enumeration rather than parsing `wt list` output.
+        self.git.list(repo_root)
+    }
+
+    fn create(&self, req: &WorktreeCreateRequest) -> Result<WorktreeMutationOutcome> {
+        // wt -C <repo> switch --create --no-cd [--base <ref>] <branch>
+        let repo = req.repo_root.to_string_lossy();
+        let mut args: Vec<&str> = vec!["-C", &repo, "switch", "--create", "--no-cd"];
+        if let Some(base) = &req.base {
+            args.push("--base");
+            args.push(base);
+        }
+        args.push(&req.branch);
+        Self::interpret(self.runner.run(&args))
+    }
+
+    fn remove(&self, req: &WorktreeRemoveRequest) -> Result<WorktreeMutationOutcome> {
+        // wt -C <repo> remove --yes --foreground [--force] <branch>
+        let repo = req.repo_root.to_string_lossy();
+        let mut args: Vec<&str> = vec!["-C", &repo, "remove", "--yes", "--foreground"];
+        if req.force {
+            args.push("--force");
+        }
+        args.push(&req.branch);
+        Self::interpret(self.runner.run(&args))
     }
 }
 
