@@ -13754,8 +13754,12 @@ approach (not raw implementation size). Worked top-to-bottom.
            nodes, stamp `worktree` provenance.
         4. CLI: `conspectus worktree list`.
         5. TUI: linked/primary + lock/prune marker.
-    - [ ] `H-WT-003` `worktrunk` backend (create/remove) behind `PATH`
-      autodetection + `[worktree] backend` config.
+    - [x] `H-WT-003` `worktrunk` backend (create/remove) behind `PATH`
+      autodetection + `[worktree] backend` config. Landed: trait
+      create/remove (default Unsupported) + `WorktrunkBackend` over a
+      `WtRunner` seam (003a); `[worktree] backend = auto|git|worktrunk`
+      + `resolve_mutation_backend` (003b). Argv verified end-to-end
+      against real `wt`.
       - Scope (settled 2026-08): worktrunk `wt` v0.43 CLI (binary `wt`).
         Argv (category-4 subprocess, ADR 0087 / ADR 0092):
         - create: `wt -C <repo> switch --create --no-cd [--base <ref>]
@@ -13785,6 +13789,18 @@ approach (not raw implementation size). Worked top-to-bottom.
         - TUI (only when a mutation backend is present, menu-first):
           "New worktree…" on a Repo node (branch-name prompt), "Remove
           worktree" on a Checkout node (guarded + confirm).
+      - Status: **CLI + guard landed (004a)**, smoke-verified with real
+        worktrunk (create → git worktree list shows it → remove). The
+        `WorktreeCreate`/`WorktreeRemove` effect wiring + guard helpers
+        are done in the CLI; the TUI mutation actions remain:
+        - [ ] `H-WT-004b` menu-first TUI create/remove. Blocked on a
+          surface decision: there is no generic action/command menu to
+          hang these on today, so this needs either a small worktree
+          action overlay or reuse of the rename-style text-input
+          (create) + a confirm (remove), plus `StoreOp::WorktreeCreate`
+          / `WorktreeRemove` executor branches (mirroring the pin
+          mutation flow) and backend-availability gating. Deferred to
+          its own focused pass rather than rushed.
 
 ## Later
 
