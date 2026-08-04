@@ -1229,7 +1229,10 @@ fn worktree_meta_label_shows_kind_and_status() {
         locked: Some("agent running".to_string()),
         prunable: None,
     };
-    assert_eq!(worktree_meta_label(&locked), "linked · locked (agent running)");
+    assert_eq!(
+        worktree_meta_label(&locked),
+        "linked · locked (agent running)"
+    );
 
     let locked_no_reason = WorktreeMeta {
         kind: WorktreeKind::Linked,
