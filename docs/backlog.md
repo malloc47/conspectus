@@ -13830,10 +13830,17 @@ Sequencing (settled: **ADR first, then in order**):
   and `teardown_grace` (default `3s`), with CLI-flag overrides. The
   `kill_session` backend method + the graceful orchestration land with
   H-WT-006 (close-down).
-- [ ] `H-WT-004b` TUI worktree **action menu** (`w`) wired to the
-  already-built safe actions (create, remove) + reveal/navigate;
-  `StoreOp::WorktreeCreate`/`WorktreeRemove` executor branches
-  (mirror the pin mutation flow); backend-availability gating.
+- [x] `H-WT-004b` TUI worktree **action menu** (`w`) wired to the
+  already-built safe actions (create, remove); `StoreOp::WorktreeCreate`/
+  `WorktreeRemove` executor branches (mirror the pin mutation flow);
+  backend-availability gating. Landed: `WorktreeMenuState` overlay
+  (list → branch-input / confirm state machine reusing TextInputState),
+  `context_for_node` selection resolution + guard, `w` keybind + help
+  entry, executors that resolve the backend / mutate / toast / refresh.
+  Reveal + the later merge/close-down/lock/prune actions stay in the
+  action model, filtered out of the offered set until wired. Full suite
+  green (1988). Deferred to their stories: reveal/navigate (needs
+  selection-jump semantics).
 - [ ] `H-WT-005` `merge` — `WorktrunkBackend::merge` (`wt merge`) +
   action + CLI `worktree merge <branch> [--target]`.
 - [ ] `H-WT-006` `close-down` compound orchestrator (needs H-WT-ENV +
