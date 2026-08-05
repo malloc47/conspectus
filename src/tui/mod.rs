@@ -46,6 +46,7 @@ mod ui;
 pub mod viewer;
 pub mod viewer_bridge;
 pub mod widgets;
+pub mod worktree_actions;
 
 pub use app::{App, Msg};
 pub use effect::Effect;
