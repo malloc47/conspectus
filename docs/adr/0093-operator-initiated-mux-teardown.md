@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -43,7 +43,29 @@ Sanction **`tmux kill-session`** (and its backend-neutral peer
 `MuxBackend::kill_session`) as an **operator-initiated teardown
 mutation** under ADR 0087 category 3. It is available only through an
 explicit operator gesture on a mux the operator has selected, gated by
-a confirmation, and never runs in the background.
+a configurable confirmation, runs graceful-first, and never runs in
+the background.
+
+### Two-phase teardown: graceful, then hard
+
+Termination is **not** an immediate `kill-session`. Teardown gives the
+running agent a chance to shut down cleanly first:
+
+1. **Graceful.** Send `SIGTERM` to the session's foreground process
+   (the pane PID Conspectus already observes as
+   `MuxSessionNode.active_pane_pid`) so the agent can flush and exit on
+   its own. This is a **signal**, not `send-keys` — no characters enter
+   the agent's stdin, so ADR 0028 is untouched.
+2. **Grace period.** Poll for the session to exit for a short,
+   **configurable** window (`[worktree] teardown_grace`, default a few
+   seconds).
+3. **Hard.** If the session is still alive when the window elapses,
+   escalate to `tmux kill-session -t <target>` (SIGHUP + reap).
+
+The escalation is guaranteed: teardown never hangs waiting on a
+wedged agent. The graceful phase is best-effort — if the pane PID is
+unknown, the grace step is skipped and teardown goes straight to the
+hard kill.
 
 ### Why this is not terminal injection (ADR 0028)
 
@@ -75,14 +97,40 @@ so explicitly ("ends the running session; transcript is preserved").
    enumerates every mux and terminates them; the target is the one the
    operator's gesture identifies. No wildcard / bulk kill of live
    sessions without per-session confirmation.
-3. **Explicit confirmation.** Because termination ends a running agent
-   process, the gesture requires a confirmation step that names the
-   mux and the agent(s) that will be ended. The existing live-session
-   guard (H-WT-004a) surfaces exactly this list.
-4. **Blocking / foreground.** The kill completes before the dependent
+3. **Confirmation, per a configurable policy.** Because termination
+   ends a running agent process, the gesture confirms — naming the mux
+   and the agent(s) that will be ended — according to
+   `[worktree] teardown_confirm` (see Configuration). The confirmation
+   list is exactly what the live-session guard (H-WT-004a) already
+   surfaces. Even under a `never` policy the operator still initiated
+   the gesture; the policy governs the interstitial prompt, not
+   whether the operation is operator-initiated.
+4. **Blocking / foreground.** The whole two-phase teardown — graceful
+   signal, grace wait, hard kill — completes before the dependent
    steps (worktree remove) run and before the graph is re-discovered,
    so the snapshot reflects reality and we never remove a worktree out
    from under a still-dying process.
+
+### Configuration
+
+Both the confirmation policy and the grace window live under
+`[worktree]` (H-WT-003's config block):
+
+- `teardown_confirm = "always" | "live" | "never"` (default `"live"`).
+  - `always` — confirm every worktree teardown / removal, even one
+    with no live session.
+  - `live` — confirm only when a live mux/agent would be terminated
+    (the dangerous case); silent otherwise. This is the default and
+    the natural extension of the H-WT-004a guard.
+  - `never` — no interstitial prompt (trust / scripted use). The
+    operator still triggered the gesture.
+- `teardown_grace = "<duration>"` (default `"3s"`). The window between
+  the graceful `SIGTERM` and the hard `kill-session`. `"0s"` skips the
+  graceful phase entirely (immediate hard kill).
+
+CLI flags override config per-invocation (`--yes` to skip the prompt,
+`--grace <dur>`), matching how the rest of the CLI treats config vs
+flags.
 5. **Backend-neutral with a safe default.** `kill_session` joins
    `MuxBackend` with a default `Unsupported` outcome (like the other
    optional verbs), so backends that can't or shouldn't terminate
@@ -107,16 +155,22 @@ category and removes no prohibition:
 - "Close down a stream" becomes a single operator gesture instead of a
   chore that requires the operator to hand-terminate the agent first.
 - The mutation envelope gains its first **destructive** mux verb.
-  Termination ends a running agent process, so the confirmation +
-  clear messaging (constraint 3) are load-bearing, not decorative:
-  this is the point where an operator could lose in-flight agent work
-  if the confirmation is sloppy. The transcript survives; uncommitted
-  *code* in the worktree is protected separately by the discard-vs-merge
-  choice and worktrunk's untracked-file guard.
+  Termination ends a running agent process, so the graceful-first phase
+  and the confirmation policy (constraints 2–3) are load-bearing, not
+  decorative: the `SIGTERM`-then-grace window gives the agent a chance
+  to exit cleanly, and the confirmation is where an operator catches a
+  mistake before in-flight work is lost. The transcript survives;
+  uncommitted *code* in the worktree is protected separately by the
+  discard-vs-merge choice and worktrunk's untracked-file guard.
 - `MuxBackend` grows `kill_session` (default `Unsupported`);
-  `SystemTmux` implements it via `tmux kill-session -t <target>`.
-  `FakeTmux` records the call for tests, matching the existing
-  rename/new-session test seams.
+  `SystemTmux` implements the hard phase via
+  `tmux kill-session -t <target>`. The teardown orchestrator owns the
+  graceful `SIGTERM` + grace-poll (it has the pane PID), so the backend
+  method stays a simple "end this session now" primitive. `FakeTmux`
+  records the call for tests, matching the existing rename/new-session
+  test seams.
+- Two `[worktree]` config keys (`teardown_confirm`, `teardown_grace`)
+  join `backend`, with CLI-flag overrides.
 - H-WT-006 (`close-down`) and a direct "kill session" affordance can
   now be built on a sanctioned primitive.
 
@@ -145,11 +199,11 @@ new envelope category.
 
 ## Open Questions
 
-- **Graceful vs. abrupt.** `kill-session` is abrupt (SIGHUP/SIGKILL to
-  the pane processes). Should teardown first attempt a gentler path
-  (e.g. the harness's own quit command if one exists)? For v1: no —
-  kill is abrupt and the confirmation makes that explicit; a
-  per-harness graceful-quit hook can be a follow-up.
+- **Per-harness graceful quit.** The graceful phase is a generic
+  `SIGTERM`. A harness that exposes a cleaner quit signal or command
+  could get a per-harness graceful hook later; `SIGTERM` + grace is
+  the backend-neutral v1. (A hook must still not be `send-keys` into
+  the pane — ADR 0028.)
 - **Attached sessions.** Terminating a session the operator is
   currently attached to detaches them. Acceptable (they invoked it),
   but the confirmation should note it when the target is the current

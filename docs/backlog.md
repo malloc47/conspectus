@@ -13821,10 +13821,15 @@ catalog and decisions:
 
 Sequencing (settled: **ADR first, then in order**):
 
-- [ ] `H-WT-ENV` ADR: sanction `tmux kill-session` as an
+- [x] `H-WT-ENV` ADR: sanction `tmux kill-session` as an
   operator-initiated teardown mutation (ADR 0087 category-3 extension)
-  + `MuxBackend::kill_session`. Gates `close-down`. **Written for
-  review (ADR 0093); build waits on approval.**
+  + `MuxBackend::kill_session`. **ADR 0093 Accepted.** Teardown is
+  two-phase (graceful `SIGTERM` → configurable grace → hard
+  `kill-session`); confirmation is configurable via
+  `[worktree] teardown_confirm = always|live|never` (default `live`)
+  and `teardown_grace` (default `3s`), with CLI-flag overrides. The
+  `kill_session` backend method + the graceful orchestration land with
+  H-WT-006 (close-down).
 - [ ] `H-WT-004b` TUI worktree **action menu** (`w`) wired to the
   already-built safe actions (create, remove) + reveal/navigate;
   `StoreOp::WorktreeCreate`/`WorktreeRemove` executor branches

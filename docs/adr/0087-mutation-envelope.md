@@ -332,3 +332,5 @@ every new-feature ADR to cite five ADRs instead of one.
   this for the never-persist-payload rule.
 - ADR 0090 (pin-store registry sidecar) — rebuildable pin-store
   index, category 2; extends this ADR by reference.
+- ADR 0093 (operator-initiated mux teardown) — adds `kill-session`
+  (graceful-then-hard) to category 3; extends this ADR by reference.
