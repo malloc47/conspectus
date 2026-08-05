@@ -13790,17 +13790,54 @@ approach (not raw implementation size). Worked top-to-bottom.
           "New worktree…" on a Repo node (branch-name prompt), "Remove
           worktree" on a Checkout node (guarded + confirm).
       - Status: **CLI + guard landed (004a)**, smoke-verified with real
-        worktrunk (create → git worktree list shows it → remove). The
-        `WorktreeCreate`/`WorktreeRemove` effect wiring + guard helpers
-        are done in the CLI; the TUI mutation actions remain:
-        - [ ] `H-WT-004b` menu-first TUI create/remove. Blocked on a
-          surface decision: there is no generic action/command menu to
-          hang these on today, so this needs either a small worktree
-          action overlay or reuse of the rename-style text-input
-          (create) + a confirm (remove), plus `StoreOp::WorktreeCreate`
-          / `WorktreeRemove` executor branches (mirroring the pin
-          mutation flow) and backend-availability gating. Deferred to
-          its own focused pass rather than rushed.
+        worktrunk (create → git worktree list shows it → remove).
+
+### Worktree Interaction Epic (H-WT-ENV / H-WT-004b..008)
+
+Brainstormed 2026-08 across contexts (agent/mux/repo/checkout). Mental
+model: a worktree is a *stream of work* — checkout-on-a-branch +
+optional mux + optional agent, linked in the graph. Settled action
+catalog and decisions:
+
+- Representation (settled): **hybrid** — a context-sensitive worktree
+  action menu opened with `w` on the selected node (primary,
+  discoverable, gated on mutation-backend availability), plus two hot
+  keys: `N` (new stream) and `X` (close down). **Full CLI parity**:
+  every mutation mirrored as a `conspectus worktree <verb>`.
+- Per-context surfacing: repo → create / new-stream / prune; checkout
+  → merge / remove / close-down / lock / new-sibling / launch-here;
+  agent → reveal / close-down / merge; mux → attach / close-down /
+  merge / remove / new-parallel.
+- "Close down a stream" (settled: **full teardown**) = optional merge
+  → **kill the mux (+ its agent pane)** → remove worktree + delete
+  branch → drop the now-stale pin. Two flavors: merge-&-close and
+  discard-&-close. Nuance: Conspectus never types at the agent
+  (ADR 0028) and never deletes harness-native session records
+  (ADR 0087 prohibition 1) — teardown ends the *running process*, the
+  transcript/history stays.
+- "New stream" (settled: **both** entry points) = create worktree +
+  launch, via a pin-create-form "create worktree for branch" toggle
+  AND a standalone repo/checkout "new worktree + launch" action.
+
+Sequencing (settled: **ADR first, then in order**):
+
+- [ ] `H-WT-ENV` ADR: sanction `tmux kill-session` as an
+  operator-initiated teardown mutation (ADR 0087 category-3 extension)
+  + `MuxBackend::kill_session`. Gates `close-down`. **Written for
+  review (ADR 0093); build waits on approval.**
+- [ ] `H-WT-004b` TUI worktree **action menu** (`w`) wired to the
+  already-built safe actions (create, remove) + reveal/navigate;
+  `StoreOp::WorktreeCreate`/`WorktreeRemove` executor branches
+  (mirror the pin mutation flow); backend-availability gating.
+- [ ] `H-WT-005` `merge` — `WorktrunkBackend::merge` (`wt merge`) +
+  action + CLI `worktree merge <branch> [--target]`.
+- [ ] `H-WT-006` `close-down` compound orchestrator (needs H-WT-ENV +
+  H-WT-005) + hot key `X` + CLI `worktree close <branch>
+  [--merge|--discard]`.
+- [ ] `H-WT-007` new-stream: pin-create-form worktree toggle +
+  standalone action + hot key `N`.
+- [ ] `H-WT-008` lock/unlock + prune (+ CLI `worktree
+  lock|unlock|prune`); read-only reveal/navigate polish.
 
 ## Later
 
