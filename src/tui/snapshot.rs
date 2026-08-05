@@ -235,6 +235,7 @@ fn apply_action(app: &mut App, config: &RunConfig, action: Action) {
         Action::OpenPins => app.open_pins_overlay(),
         Action::OpenSearch => app.open_search_overlay(),
         Action::OpenHelp => app.open_help_overlay(),
+        Action::OpenWorktreeMenu => runtime::open_worktree_menu_action(app),
         Action::ControlsOverlayKey(key) => handle_controls_overlay_key(app, config, key),
         Action::PinsOverlayKey(key) => handle_pins_overlay_key(app, key),
         Action::SearchOverlayKey(key) => handle_search_overlay_key(app, key),

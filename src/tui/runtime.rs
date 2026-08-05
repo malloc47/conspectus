@@ -260,6 +260,10 @@ impl LoopMode for LiveMode {
             Some(Action::RenameOverlayKey(key)) => {
                 handle_rename_overlay_key(terminal, app, config, tmux, key)
             }
+            Some(Action::OpenWorktreeMenu) => open_worktree_menu_action(app),
+            Some(Action::WorktreeMenuKey(key)) => {
+                handle_worktree_menu_key(terminal, app, config, tmux, key)
+            }
             Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
             Some(Action::PinBindHint) => pin_bind_hint_action(app),
             Some(Action::OpenPinCreate) => open_pin_create_action(app),
@@ -473,7 +477,10 @@ impl LoopMode for StaticMode {
                 dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
-            Some(Action::OpenRename) | Some(Action::RenameOverlayKey(_)) => {
+            Some(Action::OpenRename)
+            | Some(Action::RenameOverlayKey(_))
+            | Some(Action::OpenWorktreeMenu)
+            | Some(Action::WorktreeMenuKey(_)) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
                 )));
@@ -547,6 +554,9 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.rename_overlay().is_some() {
         return Some(Action::RenameOverlayKey(key));
+    }
+    if app.worktree_menu().is_some() {
+        return Some(Action::WorktreeMenuKey(key));
     }
     if app.controls_overlay().is_some() {
         return Some(Action::ControlsOverlayKey(key));
@@ -934,6 +944,111 @@ fn handle_rename_overlay_key(
     }
 }
 
+/// `w`: build the worktree action menu for the current selection and
+/// open it, or post a status when there is nothing to offer.
+pub(super) fn open_worktree_menu_action(app: &mut App) {
+    use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
+    let Some(node) = app.selection().and_then(selection_node_id) else {
+        app.update(Msg::SetStatus(Some(
+            "worktree: nothing selected".to_string(),
+        )));
+        return;
+    };
+    let can_mutate = worktree_mutation_available();
+    let ctx = match app.graph_db() {
+        Some(db) => context_for_node(db.snapshot(), &node, can_mutate),
+        None => {
+            app.update(Msg::SetStatus(Some(
+                "worktree: no graph loaded".to_string(),
+            )));
+            return;
+        }
+    };
+    match WorktreeMenuState::new(ctx) {
+        Some(state) => {
+            app.open_worktree_menu(state);
+            app.update(Msg::SetStatus(Some(
+                "worktree: ↑/↓ move · Enter pick · Esc close".to_string(),
+            )));
+        }
+        None => {
+            let hint = if can_mutate {
+                "worktree: no actions for this selection"
+            } else {
+                "worktree: read-only — install worktrunk or set `[worktree] backend`"
+            };
+            app.update(Msg::SetStatus(Some(hint.to_string())));
+        }
+    }
+}
+
+/// Extract the underlying node id from a selected row, for node-context
+/// actions like the worktree menu.
+fn selection_node_id(row: &crate::tui::rows::RowId) -> Option<crate::model::NodeId> {
+    use crate::tui::rows::RowId;
+    match row {
+        RowId::Group(id)
+        | RowId::AgentSession(id)
+        | RowId::MuxSession(id)
+        | RowId::Pr(id)
+        | RowId::Fork(id) => Some(id.clone()),
+        _ => None,
+    }
+}
+
+/// Whether a worktree mutation backend is available (config selection +
+/// `wt` on PATH). Governs whether the menu offers mutating actions.
+fn worktree_mutation_available() -> bool {
+    let selection = std::env::current_dir()
+        .ok()
+        .map(|cwd| {
+            crate::config::ConfigLoader::from_env()
+                .load_from(&cwd)
+                .config
+                .worktree
+                .backend
+        })
+        .unwrap_or_default();
+    crate::discovery::worktree::resolve_mutation_backend(
+        selection,
+        crate::discovery::worktree::worktrunk_available(),
+    )
+    .ok()
+    .flatten()
+    .is_some()
+}
+
+/// Forward `key` to the open worktree menu, then act on the outcome
+/// (mirrors the rename overlay). Commit runs the mutation via the
+/// executor and refreshes; Close just dismisses.
+fn handle_worktree_menu_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.worktree_menu_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
+            app.close_worktree_menu();
+            app.update(Msg::SetStatus(Some("worktree: cancelled".to_string())));
+        }
+        OverlayOutcome::Commit(msg) => {
+            app.close_worktree_menu();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
 fn remove_pin_action(
     terminal: &mut DefaultTerminal,
     app: &mut App,
@@ -1207,7 +1322,100 @@ fn execute_store_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect
         StoreOp::CommitMuxRename { mux_id, new_name } => {
             execute_commit_mux_rename(app, tmux, mux_id, new_name)
         }
+        StoreOp::WorktreeCreate { repo_root, branch } => {
+            execute_worktree_create(app, repo_root, branch)
+        }
+        StoreOp::WorktreeRemove {
+            repo_root,
+            branch,
+            force,
+        } => execute_worktree_remove(app, repo_root, branch, force),
     }
+}
+
+/// Resolve the worktree mutation backend for a TUI-triggered create /
+/// remove, or a human-readable reason it's unavailable.
+fn resolve_worktree_mutation_backend()
+-> Result<Box<dyn crate::discovery::worktree::WorktreeBackend>, String> {
+    let selection = std::env::current_dir()
+        .ok()
+        .map(|cwd| {
+            crate::config::ConfigLoader::from_env()
+                .load_from(&cwd)
+                .config
+                .worktree
+                .backend
+        })
+        .unwrap_or_default();
+    match crate::discovery::worktree::resolve_mutation_backend(
+        selection,
+        crate::discovery::worktree::worktrunk_available(),
+    ) {
+        Ok(Some(backend)) => Ok(backend),
+        Ok(None) => Err(
+            "no mutation backend (read-only; install worktrunk or set `[worktree] backend`)"
+                .to_string(),
+        ),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn execute_worktree_create(app: &mut App, repo_root: String, branch: String) {
+    use crate::discovery::worktree::{WorktreeCreateRequest, WorktreeMutationOutcome};
+    let backend = match resolve_worktree_mutation_backend() {
+        Ok(backend) => backend,
+        Err(reason) => {
+            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            return;
+        }
+    };
+    let result = backend.create(&WorktreeCreateRequest {
+        repo_root: std::path::PathBuf::from(&repo_root),
+        branch: branch.clone(),
+        base: None,
+    });
+    let message = match result {
+        Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            format!("created worktree for branch `{branch}`")
+        }
+        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot create".to_string(),
+        Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
+            format!("worktree create failed: {message}")
+        }
+        Err(err) => format!("worktree create failed: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn execute_worktree_remove(app: &mut App, repo_root: String, branch: String, force: bool) {
+    use crate::discovery::worktree::{WorktreeMutationOutcome, WorktreeRemoveRequest};
+    let backend = match resolve_worktree_mutation_backend() {
+        Ok(backend) => backend,
+        Err(reason) => {
+            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            return;
+        }
+    };
+    let result = backend.remove(&WorktreeRemoveRequest {
+        repo_root: std::path::PathBuf::from(&repo_root),
+        branch: branch.clone(),
+        force,
+    });
+    let message = match result {
+        Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            format!("removed worktree for branch `{branch}`")
+        }
+        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot remove".to_string(),
+        Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
+            format!("worktree remove failed: {message}")
+        }
+        Err(err) => format!("worktree remove failed: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
 }
 
 fn execute_pin_remove(app: &mut App, request: crate::tui::widgets::pins::PinRemoveRequest) {

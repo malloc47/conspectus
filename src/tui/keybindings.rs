@@ -187,6 +187,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('w'),
+        action: || Action::OpenWorktreeMenu,
+        help_text: "Open the worktree action menu for the selected node",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
         key: KeyMatcher::Exact {
             modifiers: KeyModifiers::NONE,
             code: KeyCode::Delete,

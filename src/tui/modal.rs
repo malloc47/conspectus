@@ -64,6 +64,11 @@ pub enum Modal {
     /// effect pops the modal; every other effect leaves it on
     /// the stack.
     Viewer(crate::viewer::state::ViewerState),
+    /// `w` worktree action menu (H-WT-004b). Context-free — it
+    /// captures the selected node's worktree facts + guard at open
+    /// time and drives an internal list → branch-input / confirm
+    /// state machine.
+    WorktreeMenu(crate::tui::widgets::worktree_menu::WorktreeMenuState),
 }
 
 /// What an overlay wants the runtime to do after a single key

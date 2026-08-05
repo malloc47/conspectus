@@ -641,6 +641,21 @@ pub enum Msg {
     /// toast. The alias-rename branch also chains an optional
     /// native mux rename inside the executor per lockstep.
     CommitRename(String),
+    /// Commit the worktree menu's "New worktree" branch input
+    /// (H-WT-004b). Reducer emits
+    /// `Effect::WriteStore(StoreOp::WorktreeCreate)`.
+    CommitWorktreeCreate {
+        repo_root: String,
+        branch: String,
+    },
+    /// Commit the worktree menu's "Remove worktree" confirm
+    /// (H-WT-004b). Reducer emits
+    /// `Effect::WriteStore(StoreOp::WorktreeRemove)`.
+    CommitWorktreeRemove {
+        repo_root: String,
+        branch: String,
+        force: bool,
+    },
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot
     /// (or fresh defaults on first visit), and re-derives the row
@@ -799,6 +814,43 @@ impl App {
     /// Pop the rename overlay if it's on top; no-op otherwise.
     pub fn close_rename_overlay(&mut self) {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::Rename(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// Active worktree action menu (H-WT-004b), if on top of the stack.
+    pub fn worktree_menu(&self) -> Option<&crate::tui::widgets::worktree_menu::WorktreeMenuState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::WorktreeMenu(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Mutable access for the runtime's per-key forwarding.
+    pub fn worktree_menu_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::worktree_menu::WorktreeMenuState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::WorktreeMenu(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Push a worktree action menu onto the modal stack (H-WT-004b).
+    pub fn open_worktree_menu(
+        &mut self,
+        state: crate::tui::widgets::worktree_menu::WorktreeMenuState,
+    ) {
+        self.modal_stack
+            .push(crate::tui::Modal::WorktreeMenu(state));
+    }
+
+    /// Pop the worktree menu if it's on top; no-op otherwise.
+    pub fn close_worktree_menu(&mut self) {
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::WorktreeMenu(_))
+        ) {
             self.modal_stack.pop();
         }
     }
@@ -2317,6 +2369,24 @@ impl App {
                     "rename: lost selection before commit".to_string(),
                 )),
             },
+            Msg::CommitWorktreeCreate { repo_root, branch } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::WorktreeCreate { repo_root, branch },
+                ));
+            }
+            Msg::CommitWorktreeRemove {
+                repo_root,
+                branch,
+                force,
+            } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::WorktreeRemove {
+                        repo_root,
+                        branch,
+                        force,
+                    },
+                ));
+            }
         }
         effects
     }

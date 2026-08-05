@@ -11,3 +11,4 @@ pub mod popup_frame;
 pub mod search;
 pub mod toast;
 pub mod value_modal;
+pub mod worktree_menu;

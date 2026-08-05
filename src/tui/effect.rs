@@ -159,4 +159,16 @@ pub enum StoreOp {
         mux_id: MuxSessionId,
         new_name: String,
     },
+    /// Create a worktree via the configured mutation backend
+    /// (H-WT-004b, ADR 0092). The executor resolves the backend,
+    /// runs `create`, toasts the outcome, and refreshes.
+    WorktreeCreate { repo_root: String, branch: String },
+    /// Remove a worktree via the configured mutation backend
+    /// (H-WT-004b). `force` is set when the operator confirmed
+    /// removal past the live-session guard.
+    WorktreeRemove {
+        repo_root: String,
+        branch: String,
+        force: bool,
+    },
 }

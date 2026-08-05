@@ -212,6 +212,10 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Rename the selected agent session (alias), mux (tmux + pin cascade), or pin's display name",
                 ),
                 Binding::new(
+                    "w",
+                    "Open the worktree action menu for the selected repo / worktree / mux (create, remove; needs a mutation backend)",
+                ),
+                Binding::new(
                     "v",
                     "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
                 ),

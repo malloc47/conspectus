@@ -38,6 +38,11 @@ pub enum Action {
     OpenRename,
     /// Forward a key event into the open rename overlay.
     RenameOverlayKey(ratatui::crossterm::event::KeyEvent),
+    /// `w` — open the worktree action menu for the selected node
+    /// (H-WT-004b).
+    OpenWorktreeMenu,
+    /// Forward a key event into the open worktree menu.
+    WorktreeMenuKey(ratatui::crossterm::event::KeyEvent),
     /// `Delete` on an unbound/stale pin row. First press arms a
     /// confirmation; second press shells out to `conspectus pin rm`.
     RemovePin,
