@@ -106,6 +106,16 @@ impl TeardownConfirm {
             _ => None,
         }
     }
+
+    /// Whether a close-down gesture should prompt, given whether any
+    /// live mux/agent session would be terminated.
+    pub fn should_confirm(self, has_live: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Live => has_live,
+            Self::Never => false,
+        }
+    }
 }
 
 /// Settings under `[server]`. Configures both the `conspectus

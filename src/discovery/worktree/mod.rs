@@ -21,6 +21,8 @@ use anyhow::{Context, Result};
 
 use crate::model::WorktreeKind;
 
+pub mod close_down;
+
 /// Backend identifier for the built-in thin git backend. Distinct from
 /// the `git` *provider* key (`providers::GIT`): this names which
 /// worktree backend produced a record, the way `tmux` / `zellij` name

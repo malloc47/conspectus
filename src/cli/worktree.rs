@@ -14,17 +14,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 
-use conspectus::config::{ConfigLoader, TeardownConfirm, parse_duration_short};
+use conspectus::config::{ConfigLoader, parse_duration_short};
 use conspectus::discovery::tmux::SystemTmux;
-use conspectus::discovery::tmux::teardown::{
-    SystemSignaller, TeardownReport, teardown_mux_session,
+use conspectus::discovery::tmux::teardown::SystemSignaller;
+use conspectus::discovery::worktree::close_down::{
+    CloseDownPlan, CloseDownReport, execute_close_down, plan_close_down,
 };
 use conspectus::discovery::worktree::{
     WorktreeCreateRequest, WorktreeMergeRequest, WorktreeMutationOutcome, WorktreeRemoveRequest,
     resolve_mutation_backend, worktrunk_available,
 };
 use conspectus::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind, path_is_ancestor_of};
-use conspectus::pins::remove_pin_entry;
 
 use super::discover_for_store_selection;
 
@@ -252,82 +252,6 @@ impl WorktreeMergeArgs {
     }
 }
 
-/// One mux session to terminate during close-down. `native_id` is the
-/// backend kill target (the tmux session name for default-socket v1);
-/// `pane_pid` drives the graceful `SIGTERM`.
-#[derive(Debug, Clone)]
-struct MuxTeardownTarget {
-    native_id: String,
-    socket_name: Option<String>,
-    pane_pid: Option<i64>,
-}
-
-/// Live mux sessions rooted inside `worktree_path` — the ones
-/// close-down terminates. Ordered by native id for deterministic
-/// output.
-fn live_mux_teardown_targets(
-    snapshot: &GraphSnapshot,
-    worktree_path: &str,
-) -> Vec<MuxTeardownTarget> {
-    let root = Path::new(worktree_path);
-    let mut targets = Vec::new();
-    for node in &snapshot.nodes {
-        let GraphNode::MuxSession(mux) = node else {
-            continue;
-        };
-        let cwd = mux
-            .active_pane_current_path
-            .as_deref()
-            .or(mux.cwd.as_deref());
-        if let Some(cwd) = cwd
-            && path_is_ancestor_of(root, Path::new(cwd))
-        {
-            targets.push(MuxTeardownTarget {
-                native_id: mux.native_id.clone(),
-                // Default-socket only for v1, matching the rename
-                // mux mutation's scope (H-PIN-014 lifts this).
-                socket_name: None,
-                pane_pid: mux.active_pane_pid,
-            });
-        }
-    }
-    targets.sort_by(|a, b| a.native_id.cmp(&b.native_id));
-    targets
-}
-
-/// `(store_path, pin_id, display_name)` for every pin whose declared
-/// cwd is at or under `worktree_path` — the pins close-down drops
-/// because their stream is going away.
-fn pins_rooted_in(snapshot: &GraphSnapshot, worktree_path: &str) -> Vec<(String, String, String)> {
-    let root = Path::new(worktree_path);
-    let mut pins = Vec::new();
-    for node in &snapshot.nodes {
-        let GraphNode::Pin(pin) = node else {
-            continue;
-        };
-        if path_is_ancestor_of(root, Path::new(&pin.cwd)) {
-            pins.push((
-                pin.store_path.clone(),
-                pin.id.id.clone(),
-                pin.display_name.clone(),
-            ));
-        }
-    }
-    pins.sort();
-    pins.dedup();
-    pins
-}
-
-/// Whether the close gesture should prompt, per the resolved policy
-/// and whether any live session would be terminated.
-fn should_confirm(policy: TeardownConfirm, has_live: bool) -> bool {
-    match policy {
-        TeardownConfirm::Always => true,
-        TeardownConfirm::Live => has_live,
-        TeardownConfirm::Never => false,
-    }
-}
-
 /// Interactive y/N prompt for close-down. Returns `true` only on an
 /// explicit yes.
 fn confirm_prompt(summary: &str) -> Result<bool> {
@@ -379,8 +303,7 @@ impl WorktreeCloseArgs {
             Some(path) => path.clone(),
             None => std::env::current_dir()?,
         };
-        let cwd = std::env::current_dir()?;
-        let config = ConfigLoader::from_env().load_from(&cwd).config;
+        let config = ConfigLoader::from_env().load_from(&repo_root).config;
 
         let grace = match &self.grace {
             Some(raw) => parse_duration_short(raw)
@@ -389,7 +312,7 @@ impl WorktreeCloseArgs {
         };
 
         let snapshot = discover_for_store_selection(std::slice::from_ref(&repo_root))?;
-        let Some(worktree_root) = worktree_path_for_branch(&snapshot, &self.branch) else {
+        let Some(plan) = plan_close_down(&snapshot, repo_root.clone(), &self.branch) else {
             bail!(
                 "no discovered worktree for branch `{}` under {}",
                 self.branch,
@@ -397,28 +320,29 @@ impl WorktreeCloseArgs {
             );
         };
 
-        let live_labels = live_sessions_in_worktree(&snapshot, &worktree_root);
-        let mux_targets = live_mux_teardown_targets(&snapshot, &worktree_root);
-        let pins = pins_rooted_in(&snapshot, &worktree_root);
-
-        // Confirmation, per ADR 0093 policy (flag overrides config).
-        if !self.yes && should_confirm(config.worktree.teardown_confirm, !live_labels.is_empty()) {
+        // Confirmation, per ADR 0093 policy (`--yes` overrides).
+        if !self.yes
+            && config
+                .worktree
+                .teardown_confirm
+                .should_confirm(plan.has_live())
+        {
             let mut summary = format!(
                 "Close down `{}` ({}) at {}",
                 self.branch,
                 if self.merge { "merge" } else { "discard" },
-                worktree_root
+                plan.worktree_root
             );
-            if !live_labels.is_empty() {
+            if plan.has_live() {
                 summary.push_str("\nEnds these live sessions (transcripts preserved):");
-                for label in &live_labels {
+                for label in &plan.live_labels {
                     summary.push_str(&format!("\n  - {label}"));
                 }
             }
-            if !pins.is_empty() {
+            if !plan.pins.is_empty() {
                 summary.push_str("\nDrops these pins:");
-                for (_, _, name) in &pins {
-                    summary.push_str(&format!("\n  - {name}"));
+                for pin in &plan.pins {
+                    summary.push_str(&format!("\n  - {}", pin.display_name));
                 }
             }
             if !confirm_prompt(&summary)? {
@@ -427,109 +351,85 @@ impl WorktreeCloseArgs {
             }
         }
 
-        // 1. Terminate mux sessions (graceful SIGTERM -> grace -> hard
-        //    kill) before touching the worktree so we never remove a
-        //    tree out from under a still-dying process (ADR 0093).
-        let tmux = SystemTmux::new();
-        let signaller = SystemSignaller;
-        for target in &mux_targets {
-            let report: TeardownReport = teardown_mux_session(
-                &tmux,
-                &signaller,
-                target.socket_name.as_deref(),
-                &target.native_id,
-                target.pane_pid,
-                grace,
-            )?;
-            report_teardown(&target.native_id, &report);
-        }
-
-        // 2. Land or drop the branch + remove the worktree. `merge`
-        //    removes the worktree itself; `discard` removes it directly.
         let backend = mutation_backend()?;
-        if self.merge {
-            let outcome = backend.merge(&WorktreeMergeRequest {
-                worktree_root: PathBuf::from(&worktree_root),
-                target: self.target.clone(),
-            })?;
-            interpret_terminal_outcome(outcome, "merge", &self.branch)?;
-            println!("merged `{}` back and removed its worktree", self.branch);
-        } else {
-            let outcome = backend.remove(&WorktreeRemoveRequest {
-                repo_root,
-                branch: self.branch.clone(),
-                // Sessions were just terminated; force past the
-                // now-stale live-session/untracked guard.
-                force: true,
-            })?;
-            interpret_terminal_outcome(outcome, "remove", &self.branch)?;
-            println!("removed worktree for `{}`", self.branch);
-        }
+        let report = execute_close_down(
+            &plan,
+            self.discard,
+            self.target,
+            backend.as_ref(),
+            &SystemTmux::new(),
+            &SystemSignaller,
+            grace,
+        )?;
 
-        // 3. Drop pins whose stream just went away. Best-effort: a
-        //    failed pin write is reported but doesn't fail the close.
-        for (store_path, id, name) in &pins {
-            match remove_pin_entry(store_path, id) {
-                Ok(_) => println!("dropped pin `{name}`"),
-                Err(err) => eprintln!("warning: could not drop pin `{name}`: {err}"),
-            }
-        }
-
-        Ok(())
+        render_close_down_report(&plan, &report)
     }
 }
 
-/// Map a worktrunk mutation outcome to a CLI error for the terminal
-/// (merge/remove) step of close-down.
-fn interpret_terminal_outcome(
-    outcome: WorktreeMutationOutcome,
-    verb: &str,
-    branch: &str,
-) -> Result<()> {
-    match outcome {
-        WorktreeMutationOutcome::Succeeded { .. } => Ok(()),
+/// Emit the per-step CLI summary of a close-down, and surface a
+/// merge/remove failure as an error exit.
+fn render_close_down_report(plan: &CloseDownPlan, report: &CloseDownReport) -> Result<()> {
+    use conspectus::discovery::tmux::TmuxKillOutcome;
+    for (target, teardown) in &report.teardowns {
+        let phase = if teardown.graceful_exited {
+            "exited gracefully"
+        } else if teardown.signalled {
+            "terminated"
+        } else {
+            "killed"
+        };
+        match &teardown.kill {
+            TmuxKillOutcome::Killed | TmuxKillOutcome::NoTarget => {
+                println!("session `{target}` {phase}");
+            }
+            TmuxKillOutcome::Unsupported => {
+                eprintln!(
+                    "warning: backend cannot terminate `{target}`; close the session yourself"
+                );
+            }
+            TmuxKillOutcome::Unavailable(reason) => {
+                eprintln!(
+                    "warning: could not terminate `{target}`: {}",
+                    reason.as_str()
+                );
+            }
+            TmuxKillOutcome::Failed { code, message } => {
+                eprintln!(
+                    "warning: could not terminate `{target}`{}: {message}",
+                    code_suffix(*code)
+                );
+            }
+        }
+    }
+
+    let verb = if report.landed { "merge" } else { "remove" };
+    match &report.worktree {
+        WorktreeMutationOutcome::Succeeded { .. } => {
+            if report.landed {
+                println!("merged `{}` back and removed its worktree", plan.branch);
+            } else {
+                println!("removed worktree for `{}`", plan.branch);
+            }
+        }
         WorktreeMutationOutcome::Unsupported => {
             bail!("the configured worktree backend cannot {verb} worktrees")
         }
         WorktreeMutationOutcome::Failed { code, message } => {
             bail!(
-                "worktree {verb} for `{branch}` failed{}: {message}",
-                code_suffix(code)
+                "worktree {verb} for `{}` failed{}: {message}",
+                plan.branch,
+                code_suffix(*code)
             )
         }
     }
-}
 
-/// Print a one-line summary of a mux teardown outcome.
-fn report_teardown(target: &str, report: &TeardownReport) {
-    use conspectus::discovery::tmux::TmuxKillOutcome;
-    let phase = if report.graceful_exited {
-        "exited gracefully"
-    } else if report.signalled {
-        "terminated"
-    } else {
-        "killed"
-    };
-    match &report.kill {
-        TmuxKillOutcome::Killed | TmuxKillOutcome::NoTarget => {
-            println!("session `{target}` {phase}");
-        }
-        TmuxKillOutcome::Unsupported => {
-            eprintln!("warning: backend cannot terminate `{target}`; close the session yourself");
-        }
-        TmuxKillOutcome::Unavailable(reason) => {
-            eprintln!(
-                "warning: could not terminate `{target}`: {}",
-                reason.as_str()
-            );
-        }
-        TmuxKillOutcome::Failed { code, message } => {
-            eprintln!(
-                "warning: could not terminate `{target}`{}: {message}",
-                code_suffix(*code)
-            );
-        }
+    for name in &report.dropped_pins {
+        println!("dropped pin `{name}`");
     }
+    for (name, err) in &report.pin_errors {
+        eprintln!("warning: could not drop pin `{name}`: {err}");
+    }
+    Ok(())
 }
 
 fn code_suffix(code: Option<i32>) -> String {
