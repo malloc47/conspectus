@@ -13863,7 +13863,18 @@ Sequencing (settled: **ADR first, then in order**):
   `execute_worktree_close_down`. Confirmation honors the policy
   (`should_confirm`). Full suite green (2010).
 - [ ] `H-WT-007` new-stream: pin-create-form worktree toggle +
-  standalone action + hot key `N`.
+  standalone action + hot key `N`. Open design questions to settle
+  before building (the invasive part is the toggle inside the intricate
+  ~3.2k-line `pins.rs` create form): (a) **when** the worktree is
+  created — at form commit (before the pin write) seems right, but then
+  a failed pin write leaves an orphaned worktree unless we roll back;
+  (b) **base ref** for the new worktree (repo default vs the selected
+  checkout's branch); (c) how the new branch name derives the pin
+  `mux.name` / `id` (reuse the branch, or keep the existing derivation);
+  (d) whether the toggle is offered in the adopt/launch modes or only
+  fresh-create. The backend create + `close_down` teardown are already
+  in place to build on; this story is the creation-side surface. `N`
+  should reuse whatever the toggle lands as.
 - [ ] `H-WT-008` lock/unlock + prune (+ CLI `worktree
   lock|unlock|prune`); read-only reveal/navigate polish.
 
