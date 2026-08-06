@@ -34,6 +34,8 @@ pub enum WorktreeContext {
 pub enum WorktreeAction {
     /// Create a new worktree + branch (mutation).
     NewWorktree,
+    /// Merge the worktree's branch back and tear it down (mutation).
+    MergeWorktree,
     /// Remove the selected worktree (mutation, guarded).
     RemoveWorktree,
     /// Select the checkout/worktree the selected agent or mux is in.
@@ -47,13 +49,17 @@ impl WorktreeAction {
     /// requires a mutation-capable backend). Reveal actions are
     /// read-only graph navigation.
     pub fn is_mutation(self) -> bool {
-        matches!(self, Self::NewWorktree | Self::RemoveWorktree)
+        matches!(
+            self,
+            Self::NewWorktree | Self::MergeWorktree | Self::RemoveWorktree
+        )
     }
 
     /// Menu label.
     pub fn label(self) -> &'static str {
         match self {
             Self::NewWorktree => "New worktree…",
+            Self::MergeWorktree => "Merge back & close",
             Self::RemoveWorktree => "Remove worktree",
             Self::RevealCheckout => "Reveal checkout",
             Self::RevealSessions => "Reveal sessions",
@@ -78,6 +84,7 @@ pub fn worktree_actions(context: WorktreeContext, can_mutate: bool) -> Vec<Workt
         WorktreeContext::Worktree => {
             if can_mutate {
                 actions.push(NewWorktree); // sibling
+                actions.push(MergeWorktree);
                 actions.push(RemoveWorktree);
             }
             actions.push(RevealSessions);
@@ -88,6 +95,7 @@ pub fn worktree_actions(context: WorktreeContext, can_mutate: bool) -> Vec<Workt
         WorktreeContext::Mux => {
             if can_mutate {
                 actions.push(NewWorktree); // parallel
+                actions.push(MergeWorktree);
                 actions.push(RemoveWorktree);
             }
             actions.push(RevealCheckout);

@@ -656,6 +656,13 @@ pub enum Msg {
         branch: String,
         force: bool,
     },
+    /// Commit the worktree menu's "Merge back & close" confirm
+    /// (H-WT-005). Reducer emits
+    /// `Effect::WriteStore(StoreOp::WorktreeMerge)`.
+    CommitWorktreeMerge {
+        worktree_root: String,
+        target: Option<String>,
+    },
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot
     /// (or fresh defaults on first visit), and re-derives the row
@@ -2384,6 +2391,17 @@ impl App {
                         repo_root,
                         branch,
                         force,
+                    },
+                ));
+            }
+            Msg::CommitWorktreeMerge {
+                worktree_root,
+                target,
+            } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::WorktreeMerge {
+                        worktree_root,
+                        target,
                     },
                 ));
             }

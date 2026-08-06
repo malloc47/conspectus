@@ -16,6 +16,7 @@ fn worktree_offers_create_remove_and_reveal_sessions() {
         actions,
         vec![
             WorktreeAction::NewWorktree,
+            WorktreeAction::MergeWorktree,
             WorktreeAction::RemoveWorktree,
             WorktreeAction::RevealSessions,
         ],
@@ -59,6 +60,7 @@ fn none_context_offers_nothing() {
 #[test]
 fn mutation_flag_matches_action_set() {
     assert!(WorktreeAction::NewWorktree.is_mutation());
+    assert!(WorktreeAction::MergeWorktree.is_mutation());
     assert!(WorktreeAction::RemoveWorktree.is_mutation());
     assert!(!WorktreeAction::RevealCheckout.is_mutation());
     assert!(!WorktreeAction::RevealSessions.is_mutation());

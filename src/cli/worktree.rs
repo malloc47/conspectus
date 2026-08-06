@@ -15,7 +15,7 @@ use clap::{Args, Subcommand};
 
 use conspectus::config::ConfigLoader;
 use conspectus::discovery::worktree::{
-    WorktreeCreateRequest, WorktreeMutationOutcome, WorktreeRemoveRequest,
+    WorktreeCreateRequest, WorktreeMergeRequest, WorktreeMutationOutcome, WorktreeRemoveRequest,
     resolve_mutation_backend, worktrunk_available,
 };
 use conspectus::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind, path_is_ancestor_of};
@@ -38,6 +38,9 @@ enum WorktreeCommand {
     /// Remove a worktree. Refuses when it hosts a live session unless
     /// `--force`.
     Rm(WorktreeRmArgs),
+    /// Merge a worktree's branch back (squash + rebase + fast-forward)
+    /// and remove the worktree. Guarded like `rm`.
+    Merge(WorktreeMergeArgs),
 }
 
 impl WorktreeArgs {
@@ -46,6 +49,7 @@ impl WorktreeArgs {
             WorktreeCommand::List(args) => args.run(),
             WorktreeCommand::New(args) => args.run(),
             WorktreeCommand::Rm(args) => args.run(),
+            WorktreeCommand::Merge(args) => args.run(),
         }
     }
 }
@@ -162,6 +166,76 @@ impl WorktreeRmArgs {
             }
             WorktreeMutationOutcome::Failed { code, message } => {
                 bail!("worktree remove failed{}: {message}", code_suffix(code))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct WorktreeMergeArgs {
+    /// Branch whose worktree should be merged back and removed.
+    branch: String,
+    /// Target branch to merge into (defaults to the repo's default).
+    #[arg(long)]
+    target: Option<String>,
+    /// A path inside the repo to operate on. Defaults to the current
+    /// directory.
+    #[arg(long = "repo", value_name = "PATH")]
+    repo: Option<PathBuf>,
+    /// Merge even when the worktree hosts a live session.
+    #[arg(long, short)]
+    force: bool,
+}
+
+impl WorktreeMergeArgs {
+    fn run(self) -> Result<()> {
+        let repo_root = match &self.repo {
+            Some(path) => path.clone(),
+            None => std::env::current_dir()?,
+        };
+        let snapshot = discover_for_store_selection(std::slice::from_ref(&repo_root))?;
+        let Some(worktree_root) = worktree_path_for_branch(&snapshot, &self.branch) else {
+            bail!(
+                "no discovered worktree for branch `{}` under {}",
+                self.branch,
+                repo_root.display()
+            );
+        };
+        // Merge removes the worktree, so guard live sessions like `rm`.
+        if !self.force {
+            let sessions = live_sessions_in_worktree(&snapshot, &worktree_root);
+            if !sessions.is_empty() {
+                let mut msg = format!(
+                    "worktree for `{}` hosts {} live session(s):",
+                    self.branch,
+                    sessions.len()
+                );
+                for s in &sessions {
+                    msg.push_str(&format!("\n  - {s}"));
+                }
+                msg.push_str("\nre-run with --force to merge & remove anyway");
+                bail!(msg);
+            }
+        }
+
+        let backend = mutation_backend()?;
+        let outcome = backend.merge(&WorktreeMergeRequest {
+            worktree_root: PathBuf::from(&worktree_root),
+            target: self.target.clone(),
+        })?;
+        match outcome {
+            WorktreeMutationOutcome::Succeeded { .. } => {
+                println!(
+                    "merged worktree for branch `{}` back and removed it",
+                    self.branch
+                );
+                Ok(())
+            }
+            WorktreeMutationOutcome::Unsupported => {
+                bail!("the configured worktree backend cannot merge worktrees")
+            }
+            WorktreeMutationOutcome::Failed { code, message } => {
+                bail!("worktree merge failed{}: {message}", code_suffix(code))
             }
         }
     }

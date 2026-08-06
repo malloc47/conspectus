@@ -13841,8 +13841,13 @@ Sequencing (settled: **ADR first, then in order**):
   action model, filtered out of the offered set until wired. Full suite
   green (1988). Deferred to their stories: reveal/navigate (needs
   selection-jump semantics).
-- [ ] `H-WT-005` `merge` — `WorktrunkBackend::merge` (`wt merge`) +
-  action + CLI `worktree merge <branch> [--target]`.
+- [x] `H-WT-005` `merge` — `WorktrunkBackend::merge` (`wt -C <wt> merge
+  [target]`) + `WorktreeCaps.can_merge`; TUI `MergeWorktree` action
+  ("Merge back & close") with `ConfirmMerge` mode →
+  `StoreOp::WorktreeMerge` / `Msg::CommitWorktreeMerge` /
+  `execute_worktree_merge`; CLI `worktree merge <branch> [--target]
+  [--force]`, guarded like `rm`. Merge sits in the Worktree + Mux menu
+  contexts. Full suite green (1991).
 - [ ] `H-WT-006` `close-down` compound orchestrator (needs H-WT-ENV +
   H-WT-005) + hot key `X` + CLI `worktree close <branch>
   [--merge|--discard]`.

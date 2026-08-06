@@ -33,7 +33,11 @@ use crate::tui::worktree_actions::{WorktreeAction, WorktreeContext, worktree_act
 /// Actions the runtime knows how to dispatch today. `worktree_actions`
 /// may return more (reveal, future stories); the menu offers only
 /// these until each is wired.
-const WIRED: &[WorktreeAction] = &[WorktreeAction::NewWorktree, WorktreeAction::RemoveWorktree];
+const WIRED: &[WorktreeAction] = &[
+    WorktreeAction::NewWorktree,
+    WorktreeAction::MergeWorktree,
+    WorktreeAction::RemoveWorktree,
+];
 
 /// Worktree facts captured when the menu opens, so the overlay stays
 /// context-free (`Ctx = ()`) afterwards.
@@ -192,6 +196,7 @@ enum Mode {
     List,
     BranchInput(TextInputState),
     ConfirmRemove,
+    ConfirmMerge,
 }
 
 /// Overlay state: the captured context, the offered actions, a cursor,
@@ -239,6 +244,10 @@ impl WorktreeMenuState {
         match self.selected() {
             WorktreeAction::NewWorktree => {
                 self.mode = Mode::BranchInput(TextInputState::new("New worktree — branch", ""));
+                OverlayOutcome::Consumed
+            }
+            WorktreeAction::MergeWorktree => {
+                self.mode = Mode::ConfirmMerge;
                 OverlayOutcome::Consumed
             }
             WorktreeAction::RemoveWorktree => {
@@ -314,6 +323,27 @@ impl WorktreeMenuState {
             _ => OverlayOutcome::Consumed,
         }
     }
+
+    fn handle_confirm_merge(&mut self, key: KeyEvent) -> OverlayOutcome {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('y') => {
+                let Some(worktree_root) = self.ctx.repo_root.clone() else {
+                    return OverlayOutcome::Close;
+                };
+                // Menu merges into the repo's default branch; explicit
+                // targets are a CLI concern.
+                OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeMerge {
+                    worktree_root,
+                    target: None,
+                }))
+            }
+            KeyCode::Esc | KeyCode::Char('n') => {
+                self.mode = Mode::List;
+                OverlayOutcome::Consumed
+            }
+            _ => OverlayOutcome::Consumed,
+        }
+    }
 }
 
 impl Overlay for WorktreeMenuState {
@@ -324,6 +354,7 @@ impl Overlay for WorktreeMenuState {
             Mode::List => self.handle_list(key),
             Mode::BranchInput(_) => self.handle_branch_input(key),
             Mode::ConfirmRemove => self.handle_confirm_remove(key),
+            Mode::ConfirmMerge => self.handle_confirm_merge(key),
         }
     }
 }
@@ -371,6 +402,29 @@ impl Widget for WorktreeMenuWidget<'_> {
                 let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
                 let mut lines = vec![
                     Line::from(format!("Remove worktree for `{branch}`?")),
+                    Line::from(""),
+                ];
+                if !self.state.ctx.guard_sessions.is_empty() {
+                    lines.push(Line::styled(
+                        format!(
+                            "⚠ hosts {} live session(s):",
+                            self.state.ctx.guard_sessions.len()
+                        ),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ));
+                    for s in &self.state.ctx.guard_sessions {
+                        lines.push(Line::from(format!("  - {s}")));
+                    }
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from("Enter/y to confirm · Esc/n to cancel"));
+                lines
+            }
+            Mode::ConfirmMerge => {
+                let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
+                let mut lines = vec![
+                    Line::from(format!("Merge `{branch}` back and remove its worktree?")),
+                    Line::from("(squash + rebase + fast-forward the default branch)"),
                     Line::from(""),
                 ];
                 if !self.state.ctx.guard_sessions.is_empty() {

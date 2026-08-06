@@ -439,3 +439,46 @@ fn backend_selection_parse_round_trips() {
         WorktreeBackendSelection::Auto
     );
 }
+
+// ---- H-WT-005: merge ----
+
+#[test]
+fn worktrunk_reports_merge_capability() {
+    assert!(WorktrunkBackend::new().capabilities().can_merge);
+    assert!(!SystemGitWorktree::new().capabilities().can_merge);
+}
+
+#[test]
+fn worktrunk_merge_runs_in_worktree_with_optional_target() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .merge(&WorktreeMergeRequest {
+            worktree_root: PathBuf::from("/wt/feature"),
+            target: Some("main".to_string()),
+        })
+        .expect("merge runs");
+    backend
+        .merge(&WorktreeMergeRequest {
+            worktree_root: PathBuf::from("/wt/feature"),
+            target: None,
+        })
+        .expect("merge runs");
+
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(calls[0], vec!["-C", "/wt/feature", "merge", "main"]);
+    assert_eq!(calls[1], vec!["-C", "/wt/feature", "merge"]);
+}
+
+#[test]
+fn git_backend_merge_is_unsupported() {
+    assert_eq!(
+        SystemGitWorktree::new()
+            .merge(&WorktreeMergeRequest {
+                worktree_root: PathBuf::from("/wt/feature"),
+                target: None,
+            })
+            .unwrap(),
+        WorktreeMutationOutcome::Unsupported,
+    );
+}

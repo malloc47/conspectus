@@ -119,6 +119,7 @@ pub fn resolve_mutation_backend(
 pub struct WorktreeCaps {
     pub can_create: bool,
     pub can_remove: bool,
+    pub can_merge: bool,
 }
 
 /// One worktree as reported by a backend's `list`. Maps onto a
@@ -170,6 +171,19 @@ pub struct WorktreeRemoveRequest {
     pub force: bool,
 }
 
+/// Operator request to merge a worktree's branch back and tear down
+/// its worktree (H-WT-005). `wt merge` squash+rebases, fast-forwards
+/// the target, and removes the worktree.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreeMergeRequest {
+    /// The worktree to merge *from* (its checked-out branch is merged).
+    /// `wt` runs with `-C` pointed here so it operates on this worktree.
+    pub worktree_root: PathBuf,
+    /// Target branch to merge into. `None` uses worktrunk's default
+    /// (the repo's default branch).
+    pub target: Option<String>,
+}
+
 /// Outcome of a worktree mutation (H-WT-003).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorktreeMutationOutcome {
@@ -213,6 +227,13 @@ pub trait WorktreeBackend: Send + Sync {
     /// Remove a worktree. Defaults to
     /// [`WorktreeMutationOutcome::Unsupported`].
     fn remove(&self, _req: &WorktreeRemoveRequest) -> Result<WorktreeMutationOutcome> {
+        Ok(WorktreeMutationOutcome::Unsupported)
+    }
+
+    /// Merge a worktree's branch back to the target and tear down the
+    /// worktree (H-WT-005). Defaults to
+    /// [`WorktreeMutationOutcome::Unsupported`].
+    fn merge(&self, _req: &WorktreeMergeRequest) -> Result<WorktreeMutationOutcome> {
         Ok(WorktreeMutationOutcome::Unsupported)
     }
 }
@@ -384,6 +405,7 @@ impl WorktreeBackend for WorktrunkBackend {
         WorktreeCaps {
             can_create: true,
             can_remove: true,
+            can_merge: true,
         }
     }
 
@@ -413,6 +435,18 @@ impl WorktreeBackend for WorktrunkBackend {
             args.push("--force");
         }
         args.push(&req.branch);
+        Self::interpret(self.runner.run(&args))
+    }
+
+    fn merge(&self, req: &WorktreeMergeRequest) -> Result<WorktreeMutationOutcome> {
+        // wt -C <worktree> merge [<target>]  — runs in the worktree so
+        // `merge` acts on its checked-out branch; squash+rebase+ff the
+        // target, then remove the worktree.
+        let worktree = req.worktree_root.to_string_lossy();
+        let mut args: Vec<&str> = vec!["-C", &worktree, "merge"];
+        if let Some(target) = &req.target {
+            args.push(target);
+        }
         Self::interpret(self.runner.run(&args))
     }
 }

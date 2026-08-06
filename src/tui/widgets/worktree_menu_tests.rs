@@ -28,7 +28,11 @@ fn new_offers_wired_mutations_for_a_worktree() {
     let state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
     assert_eq!(
         state.actions,
-        vec![WorktreeAction::NewWorktree, WorktreeAction::RemoveWorktree],
+        vec![
+            WorktreeAction::NewWorktree,
+            WorktreeAction::MergeWorktree,
+            WorktreeAction::RemoveWorktree,
+        ],
     );
 }
 
@@ -64,7 +68,11 @@ fn create_flow_commits_worktree_create() {
 fn remove_flow_forces_when_guarded() {
     let mut state =
         WorktreeMenuState::new(worktree_ctx(vec!["codex (agent)".to_string()], true)).expect("ok");
-    // Move to RemoveWorktree and open the confirm.
+    // Move past MergeWorktree to RemoveWorktree and open the confirm.
+    assert_eq!(
+        state.handle((), key(KeyCode::Down)),
+        OverlayOutcome::Consumed
+    );
     assert_eq!(
         state.handle((), key(KeyCode::Down)),
         OverlayOutcome::Consumed
@@ -87,6 +95,7 @@ fn remove_flow_forces_when_guarded() {
 #[test]
 fn remove_without_live_sessions_does_not_force() {
     let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
+    state.handle((), key(KeyCode::Down));
     state.handle((), key(KeyCode::Down));
     state.handle((), key(KeyCode::Enter));
     assert_eq!(

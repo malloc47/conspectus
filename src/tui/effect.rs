@@ -171,4 +171,10 @@ pub enum StoreOp {
         branch: String,
         force: bool,
     },
+    /// Merge a worktree's branch back and tear it down via the
+    /// configured mutation backend (H-WT-005).
+    WorktreeMerge {
+        worktree_root: String,
+        target: Option<String>,
+    },
 }
