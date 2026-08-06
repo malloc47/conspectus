@@ -47,14 +47,65 @@ pub struct Config {
     pub worktree: WorktreeConfig,
 }
 
-/// Settings under `[worktree]` (H-WT-003). Governs which backend
-/// performs worktree mutation (create / remove) in the CLI / TUI;
+/// Settings under `[worktree]` (H-WT-003 / ADR 0093). Governs which
+/// backend performs worktree mutation (create / remove / merge) in
+/// the CLI / TUI, plus the operator-initiated teardown policy;
 /// discovery always lists via the read-only git backend.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorktreeConfig {
     /// `[worktree] backend = "auto" | "git" | "worktrunk"`. Defaults to
     /// `auto` (worktrunk when `wt` is on PATH, else read-only).
     pub backend: crate::discovery::worktree::WorktreeBackendSelection,
+    /// `[worktree] teardown_confirm = "always" | "live" | "never"`
+    /// (ADR 0093). Governs the interstitial confirmation before a
+    /// close-down that may terminate a live mux/agent. Defaults to
+    /// `live`.
+    pub teardown_confirm: TeardownConfirm,
+    /// `[worktree] teardown_grace` (ADR 0093). Window between the
+    /// graceful `SIGTERM` and the hard `kill-session`. Defaults to
+    /// `3s`; `0s` skips the graceful phase entirely.
+    pub teardown_grace: Duration,
+}
+
+impl Default for WorktreeConfig {
+    fn default() -> Self {
+        Self {
+            backend: crate::discovery::worktree::WorktreeBackendSelection::default(),
+            teardown_confirm: TeardownConfirm::Live,
+            teardown_grace: Duration::from_secs(3),
+        }
+    }
+}
+
+/// `[worktree] teardown_confirm` policy (ADR 0093). Governs the
+/// interstitial confirmation before an operator-initiated worktree
+/// teardown that may terminate a live mux/agent process.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TeardownConfirm {
+    /// Confirm every teardown / removal, even one with no live
+    /// session.
+    Always,
+    /// Confirm only when a live mux/agent would be terminated — the
+    /// dangerous case (default; the natural extension of the
+    /// H-WT-004a guard).
+    #[default]
+    Live,
+    /// No interstitial prompt (trust / scripted use). The operator
+    /// still triggered the gesture.
+    Never,
+}
+
+impl TeardownConfirm {
+    /// Parse a `[worktree] teardown_confirm` value. `None` when the
+    /// token isn't one of the three policies.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "always" => Some(Self::Always),
+            "live" => Some(Self::Live),
+            "never" => Some(Self::Never),
+            _ => None,
+        }
+    }
 }
 
 /// Settings under `[server]`. Configures both the `conspectus
@@ -280,6 +331,10 @@ struct ConfigFile {
 struct WorktreeFile {
     #[serde(default)]
     backend: Option<String>,
+    #[serde(default)]
+    teardown_confirm: Option<String>,
+    #[serde(default)]
+    teardown_grace: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -595,17 +650,42 @@ fn merge_worktree(
     path: &Path,
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) {
-    let Some(raw) = file.backend else {
-        return;
-    };
-    match crate::discovery::worktree::WorktreeBackendSelection::parse(&raw) {
-        Some(selection) => config.backend = selection,
-        None => diagnostics.push(ConfigDiagnostic {
-            path: path.to_path_buf(),
-            message: format!(
-                "invalid `[worktree] backend` value `{raw}`; expected auto, git, or worktrunk"
-            ),
-        }),
+    // Per-field merge: each key is independent, so a malformed value
+    // diagnoses and leaves the default in place rather than dropping
+    // the rest of the table.
+    if let Some(raw) = file.backend {
+        match crate::discovery::worktree::WorktreeBackendSelection::parse(&raw) {
+            Some(selection) => config.backend = selection,
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[worktree] backend` value `{raw}`; expected auto, git, or worktrunk"
+                ),
+            }),
+        }
+    }
+
+    if let Some(raw) = file.teardown_confirm {
+        match TeardownConfirm::parse(&raw) {
+            Some(policy) => config.teardown_confirm = policy,
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[worktree] teardown_confirm` value `{raw}`; \
+                     expected always, live, or never"
+                ),
+            }),
+        }
+    }
+
+    if let Some(raw) = file.teardown_grace {
+        match parse_duration_short(&raw) {
+            Ok(dur) => config.teardown_grace = dur,
+            Err(message) => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!("invalid `[worktree] teardown_grace` value `{raw}`: {message}"),
+            }),
+        }
     }
 }
 

@@ -19,6 +19,8 @@ use anyhow::{Context, Result};
 use crate::discovery::{DiscoveryContext, DiscoveryProvider, GraphFragment};
 use crate::model::{GraphNode, MuxSessionId, MuxSessionNode};
 
+pub mod teardown;
+
 /// Mux-backend identifier stamped on `MuxSessionId` /
 /// `MuxSessionNode.backend` AND on the discovery provenance for
 /// tmux-derived nodes/links. The two concerns (model identity
@@ -140,6 +142,21 @@ pub trait MuxBackend: Send + Sync {
         _press_enter: bool,
     ) -> Result<TmuxSendKeysOutcome> {
         Ok(TmuxSendKeysOutcome::Unsupported)
+    }
+
+    /// Terminate mux session `target` — the hard phase of the
+    /// operator-initiated teardown sanctioned by ADR 0093
+    /// (category 3, destructive). `socket_name` selects the tmux
+    /// server when set. This ends the session and its child
+    /// processes (the agent); it does **not** delete the harness's
+    /// session record or transcript (ADR 0087 prohibition 1) and it
+    /// is **not** terminal injection (ADR 0028) — no characters enter
+    /// the pane's stdin. The graceful `SIGTERM` + grace-poll is the
+    /// orchestrator's job; this primitive is the terminal kill.
+    /// Default returns [`TmuxKillOutcome::Unsupported`] so backends
+    /// that can't terminate sessions degrade gracefully.
+    fn kill_session(&self, _socket_name: Option<&str>, _target: &str) -> Result<TmuxKillOutcome> {
+        Ok(TmuxKillOutcome::Unsupported)
     }
 
     /// Probe the current shell environment to see if the caller is
@@ -284,6 +301,30 @@ pub enum TmuxSendKeysOutcome {
     /// tmux returned non-zero for some other reason.
     Failed { code: Option<i32>, message: String },
     /// Runner doesn't implement send-keys (test runners).
+    Unsupported,
+}
+
+/// Outcome of [`MuxBackend::kill_session`] — the hard phase of the
+/// operator-initiated teardown sanctioned by ADR 0093. The graceful
+/// `SIGTERM` + grace-poll is owned by the teardown orchestrator (it
+/// holds the pane PID); this primitive is the terminal
+/// `tmux kill-session -t <target>`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TmuxKillOutcome {
+    /// `tmux kill-session -t <target>` succeeded (session ended).
+    Killed,
+    /// The session was already gone when the kill ran (graceful
+    /// phase already reaped it, or a race). Treated as success by
+    /// the orchestrator — the goal state is "session not running".
+    NoTarget,
+    /// tmux isn't usable on this host.
+    Unavailable(UnavailableReason),
+    /// tmux returned non-zero for some other reason.
+    Failed { code: Option<i32>, message: String },
+    /// Runner/backend doesn't implement kill-session (default; e.g.
+    /// zellij / screen per ADR 0093 constraint 5). The teardown
+    /// degrades to "remove the worktree after you close the session
+    /// yourself".
     Unsupported,
 }
 
@@ -665,6 +706,45 @@ impl MuxBackend for SystemTmux {
         })
     }
 
+    fn kill_session(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxKillOutcome> {
+        let output = self
+            .cmd(socket_name)
+            .args(["kill-session", "-t", target])
+            .output();
+
+        let output = match output {
+            Ok(output) => output,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                return Ok(TmuxKillOutcome::Unavailable(
+                    UnavailableReason::BinaryNotFound,
+                ));
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to spawn tmux binary at {}", self.binary.display())
+                });
+            }
+        };
+
+        if output.status.success() {
+            return Ok(TmuxKillOutcome::Killed);
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if looks_like_no_server(&stderr) {
+            // No server means no session to kill — the goal state
+            // ("session not running") already holds.
+            return Ok(TmuxKillOutcome::NoTarget);
+        }
+        if looks_like_no_target(&stderr) {
+            return Ok(TmuxKillOutcome::NoTarget);
+        }
+        Ok(TmuxKillOutcome::Failed {
+            code: output.status.code(),
+            message: stderr,
+        })
+    }
+
     fn current_session_context(&self) -> Option<MuxSessionContext> {
         // H-EXT-011: probe `$TMUX` and `tmux display-message` for
         // the caller's mux context. Migrated from
@@ -741,6 +821,9 @@ type FakeTmuxAttachCall = (Option<String>, String);
 /// `(socket_name, target, literal, press_enter)` tuple recorded by
 /// every `FakeTmux::send_keys` call.
 type FakeTmuxSendKeysCall = (Option<String>, String, String, bool);
+/// `(socket_name, target)` pair recorded by every
+/// `FakeTmux::kill_session` call.
+type FakeTmuxKillCall = (Option<String>, String);
 
 /// Test runner that returns pre-canned outcomes.
 #[doc(hidden)]
@@ -774,6 +857,11 @@ pub struct FakeTmux {
     send_keys_outcomes: std::collections::BTreeMap<String, TmuxSendKeysOutcome>,
     /// Recorded tuples across every `send_keys` call.
     send_keys_calls: std::sync::Arc<std::sync::Mutex<Vec<FakeTmuxSendKeysCall>>>,
+    /// Per-target canned `kill_session` outcomes. Default is
+    /// [`TmuxKillOutcome::Killed`].
+    kill_outcomes: std::collections::BTreeMap<String, TmuxKillOutcome>,
+    /// Recorded pairs across every `kill_session` call.
+    kill_calls: std::sync::Arc<std::sync::Mutex<Vec<FakeTmuxKillCall>>>,
 }
 
 impl PartialEq for FakeTmux {
@@ -788,6 +876,8 @@ impl PartialEq for FakeTmux {
             && *self.attach_calls.lock().unwrap() == *other.attach_calls.lock().unwrap()
             && self.send_keys_outcomes == other.send_keys_outcomes
             && *self.send_keys_calls.lock().unwrap() == *other.send_keys_calls.lock().unwrap()
+            && self.kill_outcomes == other.kill_outcomes
+            && *self.kill_calls.lock().unwrap() == *other.kill_calls.lock().unwrap()
     }
 }
 
@@ -806,6 +896,8 @@ impl FakeTmux {
             attach_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             send_keys_outcomes: std::collections::BTreeMap::new(),
             send_keys_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            kill_outcomes: std::collections::BTreeMap::new(),
+            kill_calls: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -872,6 +964,13 @@ impl FakeTmux {
         self
     }
 
+    /// Register a canned `kill_session` response for `target`. Unset
+    /// targets default to [`TmuxKillOutcome::Killed`].
+    pub fn with_kill(mut self, target: impl Into<String>, outcome: TmuxKillOutcome) -> Self {
+        self.kill_outcomes.insert(target.into(), outcome);
+        self
+    }
+
     /// Snapshot of `(socket_name, target, new_name)` triples
     /// recorded by [`MuxBackend::rename_session`].
     pub fn rename_calls(&self) -> Vec<FakeTmuxRenameCall> {
@@ -894,6 +993,12 @@ impl FakeTmux {
     /// tuples recorded by [`MuxBackend::send_keys`].
     pub fn send_keys_calls(&self) -> Vec<FakeTmuxSendKeysCall> {
         self.send_keys_calls.lock().unwrap().clone()
+    }
+
+    /// Snapshot of `(socket_name, target)` pairs recorded by
+    /// [`MuxBackend::kill_session`].
+    pub fn kill_calls(&self) -> Vec<FakeTmuxKillCall> {
+        self.kill_calls.lock().unwrap().clone()
     }
 }
 
@@ -983,6 +1088,18 @@ impl MuxBackend for FakeTmux {
             .cloned()
             .unwrap_or(TmuxSendKeysOutcome::Sent))
     }
+
+    fn kill_session(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxKillOutcome> {
+        self.kill_calls
+            .lock()
+            .unwrap()
+            .push((socket_name.map(str::to_string), target.to_string()));
+        Ok(self
+            .kill_outcomes
+            .get(target)
+            .cloned()
+            .unwrap_or(TmuxKillOutcome::Killed))
+    }
 }
 
 impl MuxBackend for Box<dyn MuxBackend> {
@@ -1029,6 +1146,10 @@ impl MuxBackend for Box<dyn MuxBackend> {
         press_enter: bool,
     ) -> Result<TmuxSendKeysOutcome> {
         (**self).send_keys(socket_name, target, literal, press_enter)
+    }
+
+    fn kill_session(&self, socket_name: Option<&str>, target: &str) -> Result<TmuxKillOutcome> {
+        (**self).kill_session(socket_name, target)
     }
 }
 

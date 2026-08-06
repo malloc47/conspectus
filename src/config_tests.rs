@@ -1042,3 +1042,67 @@ fn worktree_backend_invalid_value_diagnoses_and_keeps_default() {
         outcome.diagnostics,
     );
 }
+
+#[test]
+fn worktree_teardown_defaults_to_live_and_three_seconds() {
+    let temp = TempDir::new().expect("temp dir");
+    let loader = ConfigLoader::new()
+        .with_home(temp.path())
+        .with_xdg_config_home(temp.path().join("xdg"));
+    let outcome = loader.load_from(temp.path());
+    assert_eq!(
+        outcome.config.worktree.teardown_confirm,
+        crate::config::TeardownConfirm::Live,
+    );
+    assert_eq!(
+        outcome.config.worktree.teardown_grace,
+        std::time::Duration::from_secs(3),
+    );
+}
+
+#[test]
+fn worktree_teardown_keys_load_from_config() {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[worktree]\nteardown_confirm = \"never\"\nteardown_grace = \"500ms\"\n",
+    );
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+    assert!(outcome.diagnostics.is_empty(), "{:?}", outcome.diagnostics);
+    assert_eq!(
+        outcome.config.worktree.teardown_confirm,
+        crate::config::TeardownConfirm::Never,
+    );
+    assert_eq!(
+        outcome.config.worktree.teardown_grace,
+        std::time::Duration::from_millis(500),
+    );
+}
+
+#[test]
+fn worktree_teardown_confirm_invalid_diagnoses_and_keeps_default() {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(
+        &project.join(PROJECT_CONFIG_FILENAME),
+        "[worktree]\nteardown_confirm = \"sometimes\"\n",
+    );
+    let loader = ConfigLoader::new().with_home(temp.path());
+    let outcome = loader.load_from(&project);
+    assert_eq!(
+        outcome.config.worktree.teardown_confirm,
+        crate::config::TeardownConfirm::Live,
+    );
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("[worktree] teardown_confirm")),
+        "expected a teardown_confirm diagnostic: {:?}",
+        outcome.diagnostics,
+    );
+}

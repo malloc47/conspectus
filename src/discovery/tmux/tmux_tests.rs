@@ -554,6 +554,46 @@ fn default_trait_impls_for_new_methods_return_unsupported() {
         runner.send_keys(None, "x", "y", false).unwrap(),
         TmuxSendKeysOutcome::Unsupported
     );
+    assert_eq!(
+        runner.kill_session(None, "x").unwrap(),
+        TmuxKillOutcome::Unsupported
+    );
+}
+
+#[test]
+fn fake_runner_default_kill_session_records_call_and_returns_killed() {
+    let runner = FakeTmux::with_sessions("");
+    assert_eq!(
+        runner.kill_session(Some("scratch"), "ingest").unwrap(),
+        TmuxKillOutcome::Killed
+    );
+    assert_eq!(
+        runner.kill_calls(),
+        vec![(Some("scratch".to_string()), "ingest".to_string())]
+    );
+}
+
+#[test]
+fn fake_runner_returns_registered_kill_outcome_by_target() {
+    let runner = FakeTmux::with_sessions("").with_kill("gone", TmuxKillOutcome::NoTarget);
+    assert_eq!(
+        runner.kill_session(None, "gone").unwrap(),
+        TmuxKillOutcome::NoTarget
+    );
+    // Unregistered targets still default to Killed.
+    assert_eq!(
+        runner.kill_session(None, "other").unwrap(),
+        TmuxKillOutcome::Killed
+    );
+}
+
+#[test]
+fn missing_binary_kill_session_reports_unavailable_binary_not_found() {
+    let runner = SystemTmux::with_binary("/definitely/not/here/tmux");
+    assert_eq!(
+        runner.kill_session(None, "ingest").expect("non-fatal"),
+        TmuxKillOutcome::Unavailable(UnavailableReason::BinaryNotFound)
+    );
 }
 
 #[test]
