@@ -261,6 +261,7 @@ impl LoopMode for LiveMode {
                 handle_rename_overlay_key(terminal, app, config, tmux, key)
             }
             Some(Action::OpenWorktreeMenu) => open_worktree_menu_action(app),
+            Some(Action::OpenWorktreeCloseDown) => open_worktree_close_down_action(app),
             Some(Action::WorktreeMenuKey(key)) => {
                 handle_worktree_menu_key(terminal, app, config, tmux, key)
             }
@@ -480,6 +481,7 @@ impl LoopMode for StaticMode {
             Some(Action::OpenRename)
             | Some(Action::RenameOverlayKey(_))
             | Some(Action::OpenWorktreeMenu)
+            | Some(Action::OpenWorktreeCloseDown)
             | Some(Action::WorktreeMenuKey(_)) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
@@ -982,6 +984,44 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
     }
 }
 
+/// The `X` hot key: open the worktree menu straight into the close-down
+/// merge/discard choice for the selected node (H-WT-006).
+pub(super) fn open_worktree_close_down_action(app: &mut App) {
+    use crate::tui::widgets::worktree_menu::{WorktreeMenuState, context_for_node};
+    let Some(node) = app.selection().and_then(selection_node_id) else {
+        app.update(Msg::SetStatus(Some(
+            "worktree: nothing selected".to_string(),
+        )));
+        return;
+    };
+    let can_mutate = worktree_mutation_available();
+    let ctx = match app.graph_db() {
+        Some(db) => context_for_node(db.snapshot(), &node, can_mutate),
+        None => {
+            app.update(Msg::SetStatus(Some(
+                "worktree: no graph loaded".to_string(),
+            )));
+            return;
+        }
+    };
+    match WorktreeMenuState::new_close_down(ctx) {
+        Some(state) => {
+            app.open_worktree_menu(state);
+            app.update(Msg::SetStatus(Some(
+                "close down: m merge · d discard · Esc cancel".to_string(),
+            )));
+        }
+        None => {
+            let hint = if can_mutate {
+                "close down: select a worktree, mux, or checkout with a branch"
+            } else {
+                "worktree: read-only — install worktrunk or set `[worktree] backend`"
+            };
+            app.update(Msg::SetStatus(Some(hint.to_string())));
+        }
+    }
+}
+
 /// Extract the underlying node id from a selected row, for node-context
 /// actions like the worktree menu.
 fn selection_node_id(row: &crate::tui::rows::RowId) -> Option<crate::model::NodeId> {
@@ -1334,6 +1374,11 @@ fn execute_store_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect
             worktree_root,
             target,
         } => execute_worktree_merge(app, worktree_root, target),
+        StoreOp::WorktreeCloseDown {
+            repo_root,
+            branch,
+            discard,
+        } => execute_worktree_close_down(app, tmux, repo_root, branch, discard),
     }
 }
 
@@ -1446,6 +1491,93 @@ fn execute_worktree_merge(app: &mut App, worktree_root: String, target: Option<S
             format!("worktree merge failed: {message}")
         }
         Err(err) => format!("worktree merge failed: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn execute_worktree_close_down(
+    app: &mut App,
+    tmux: &dyn MuxBackend,
+    repo_root: String,
+    branch: String,
+    discard: bool,
+) {
+    use crate::discovery::tmux::teardown::SystemSignaller;
+    use crate::discovery::worktree::WorktreeMutationOutcome;
+    use crate::discovery::worktree::close_down::{execute_close_down, plan_close_down};
+
+    // Rebuild the plan from the held snapshot so it reflects the graph
+    // as of the operator's gesture.
+    let plan = match app.graph_db() {
+        Some(db) => plan_close_down(db.snapshot(), std::path::PathBuf::from(&repo_root), &branch),
+        None => {
+            app.update(Msg::SetStatus(Some(
+                "worktree: no graph loaded".to_string(),
+            )));
+            return;
+        }
+    };
+    let Some(plan) = plan else {
+        app.update(Msg::SetStatus(Some(format!(
+            "worktree: no worktree for `{branch}` to close down"
+        ))));
+        return;
+    };
+
+    let backend = match resolve_worktree_mutation_backend() {
+        Ok(backend) => backend,
+        Err(reason) => {
+            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            return;
+        }
+    };
+
+    let grace = std::env::current_dir().ok().map_or_else(
+        || std::time::Duration::from_secs(3),
+        |cwd| {
+            crate::config::ConfigLoader::from_env()
+                .load_from(&cwd)
+                .config
+                .worktree
+                .teardown_grace
+        },
+    );
+
+    let result = execute_close_down(
+        &plan,
+        discard,
+        None,
+        backend.as_ref(),
+        tmux,
+        &SystemSignaller,
+        grace,
+    );
+
+    let message = match result {
+        Ok(report) => match &report.worktree {
+            WorktreeMutationOutcome::Succeeded { .. } => {
+                let config = app.config().clone();
+                refresh_after_pin_mutation(app, &config);
+                let verb = if report.landed {
+                    "merged & closed"
+                } else {
+                    "closed"
+                };
+                format!(
+                    "{verb} `{branch}` — ended {} session(s), dropped {} pin(s)",
+                    report.teardowns.len(),
+                    report.dropped_pins.len(),
+                )
+            }
+            WorktreeMutationOutcome::Unsupported => format!(
+                "worktree: backend cannot {}",
+                if report.landed { "merge" } else { "remove" }
+            ),
+            WorktreeMutationOutcome::Failed { message, .. } => {
+                format!("close-down failed: {message}")
+            }
+        },
+        Err(err) => format!("close-down failed: {err}"),
     };
     app.update(Msg::SetStatus(Some(message)));
 }

@@ -18,6 +18,7 @@ fn worktree_offers_create_remove_and_reveal_sessions() {
             WorktreeAction::NewWorktree,
             WorktreeAction::MergeWorktree,
             WorktreeAction::RemoveWorktree,
+            WorktreeAction::CloseDownWorktree,
             WorktreeAction::RevealSessions,
         ],
     );
@@ -62,6 +63,7 @@ fn mutation_flag_matches_action_set() {
     assert!(WorktreeAction::NewWorktree.is_mutation());
     assert!(WorktreeAction::MergeWorktree.is_mutation());
     assert!(WorktreeAction::RemoveWorktree.is_mutation());
+    assert!(WorktreeAction::CloseDownWorktree.is_mutation());
     assert!(!WorktreeAction::RevealCheckout.is_mutation());
     assert!(!WorktreeAction::RevealSessions.is_mutation());
 }

@@ -177,4 +177,14 @@ pub enum StoreOp {
         worktree_root: String,
         target: Option<String>,
     },
+    /// Close down a whole stream of work (H-WT-006, ADR 0093): the
+    /// executor rebuilds the close-down plan from the held snapshot,
+    /// terminates the worktree's mux sessions (graceful->hard),
+    /// merges (`discard == false`) or removes (`discard == true`) the
+    /// worktree, and drops its pins.
+    WorktreeCloseDown {
+        repo_root: String,
+        branch: String,
+        discard: bool,
+    },
 }

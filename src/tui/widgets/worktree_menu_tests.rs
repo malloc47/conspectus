@@ -32,8 +32,58 @@ fn new_offers_wired_mutations_for_a_worktree() {
             WorktreeAction::NewWorktree,
             WorktreeAction::MergeWorktree,
             WorktreeAction::RemoveWorktree,
+            WorktreeAction::CloseDownWorktree,
         ],
     );
+}
+
+#[test]
+fn close_down_choice_merges_or_discards() {
+    // Navigate to CloseDownWorktree (index 3) and open the choice.
+    let mut state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("ok");
+    for _ in 0..3 {
+        state.handle((), key(KeyCode::Down));
+    }
+    assert_eq!(
+        state.handle((), key(KeyCode::Enter)),
+        OverlayOutcome::Consumed
+    );
+    // `m` lands the branch (discard = false).
+    assert_eq!(
+        state.handle((), char_key('m')),
+        OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeCloseDown {
+            repo_root: "/wt/feature".to_string(),
+            branch: "feature".to_string(),
+            discard: false,
+        })),
+    );
+}
+
+#[test]
+fn close_down_hotkey_opens_choice_and_discards() {
+    // `new_close_down` skips the action list and opens the choice.
+    let mut state =
+        WorktreeMenuState::new_close_down(worktree_ctx(vec!["codex (agent)".to_string()], true))
+            .expect("close-down applicable");
+    // `d` discards the branch (discard = true).
+    assert_eq!(
+        state.handle((), char_key('d')),
+        OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeCloseDown {
+            repo_root: "/wt/feature".to_string(),
+            branch: "feature".to_string(),
+            discard: true,
+        })),
+    );
+}
+
+#[test]
+fn close_down_hotkey_none_without_branch_or_backend() {
+    // No branch → not applicable.
+    let mut no_branch = worktree_ctx(vec![], true);
+    no_branch.branch = None;
+    assert!(WorktreeMenuState::new_close_down(no_branch).is_none());
+    // Read-only → not applicable.
+    assert!(WorktreeMenuState::new_close_down(worktree_ctx(vec![], false)).is_none());
 }
 
 #[test]

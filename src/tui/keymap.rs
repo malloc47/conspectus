@@ -41,6 +41,9 @@ pub enum Action {
     /// `w` — open the worktree action menu for the selected node
     /// (H-WT-004b).
     OpenWorktreeMenu,
+    /// `X` — open the worktree menu straight into close-down for the
+    /// selected node (H-WT-006).
+    OpenWorktreeCloseDown,
     /// Forward a key event into the open worktree menu.
     WorktreeMenuKey(ratatui::crossterm::event::KeyEvent),
     /// `Delete` on an unbound/stale pin row. First press arms a

@@ -38,6 +38,10 @@ pub enum WorktreeAction {
     MergeWorktree,
     /// Remove the selected worktree (mutation, guarded).
     RemoveWorktree,
+    /// Close down a whole stream of work: land or discard the branch,
+    /// terminate its sessions, remove the worktree, drop its pins
+    /// (compound mutation; ADR 0093).
+    CloseDownWorktree,
     /// Select the checkout/worktree the selected agent or mux is in.
     RevealCheckout,
     /// List the sessions rooted in the selected worktree.
@@ -51,7 +55,10 @@ impl WorktreeAction {
     pub fn is_mutation(self) -> bool {
         matches!(
             self,
-            Self::NewWorktree | Self::MergeWorktree | Self::RemoveWorktree
+            Self::NewWorktree
+                | Self::MergeWorktree
+                | Self::RemoveWorktree
+                | Self::CloseDownWorktree
         )
     }
 
@@ -61,6 +68,7 @@ impl WorktreeAction {
             Self::NewWorktree => "New worktree…",
             Self::MergeWorktree => "Merge back & close",
             Self::RemoveWorktree => "Remove worktree",
+            Self::CloseDownWorktree => "Close down stream…",
             Self::RevealCheckout => "Reveal checkout",
             Self::RevealSessions => "Reveal sessions",
         }
@@ -86,6 +94,7 @@ pub fn worktree_actions(context: WorktreeContext, can_mutate: bool) -> Vec<Workt
                 actions.push(NewWorktree); // sibling
                 actions.push(MergeWorktree);
                 actions.push(RemoveWorktree);
+                actions.push(CloseDownWorktree);
             }
             actions.push(RevealSessions);
         }
@@ -97,6 +106,7 @@ pub fn worktree_actions(context: WorktreeContext, can_mutate: bool) -> Vec<Workt
                 actions.push(NewWorktree); // parallel
                 actions.push(MergeWorktree);
                 actions.push(RemoveWorktree);
+                actions.push(CloseDownWorktree);
             }
             actions.push(RevealCheckout);
         }

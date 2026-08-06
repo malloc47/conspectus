@@ -13848,9 +13848,20 @@ Sequencing (settled: **ADR first, then in order**):
   `execute_worktree_merge`; CLI `worktree merge <branch> [--target]
   [--force]`, guarded like `rm`. Merge sits in the Worktree + Mux menu
   contexts. Full suite green (1991).
-- [ ] `H-WT-006` `close-down` compound orchestrator (needs H-WT-ENV +
-  H-WT-005) + hot key `X` + CLI `worktree close <branch>
-  [--merge|--discard]`.
+- [x] `H-WT-006` `close-down` compound orchestrator (ADR 0093). Landed
+  in layers: (1) `MuxBackend::kill_session` primitive + `tmux::teardown`
+  two-phase graceful(`SIGTERM`)→grace→hard mechanism behind a
+  `ProcessSignaller` seam + `[worktree] teardown_confirm`/`teardown_grace`
+  config; (2) a shared, provider-neutral
+  `discovery::worktree::close_down` module (`plan_close_down` graph query
+  + `execute_close_down` = terminate mux sessions → merge|remove →
+  best-effort pin-drop, returning a `CloseDownReport`), unit-tested with
+  fakes; (3) CLI `worktree close <branch> --merge|--discard [--target]
+  [--yes] [--grace]`; (4) TUI close-down — `CloseDownWorktree` action +
+  hot key `X` opening a merge/discard choice →
+  `Msg::CommitWorktreeCloseDown` → `StoreOp::WorktreeCloseDown` →
+  `execute_worktree_close_down`. Confirmation honors the policy
+  (`should_confirm`). Full suite green (2010).
 - [ ] `H-WT-007` new-stream: pin-create-form worktree toggle +
   standalone action + hot key `N`.
 - [ ] `H-WT-008` lock/unlock + prune (+ CLI `worktree

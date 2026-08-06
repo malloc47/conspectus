@@ -8,10 +8,11 @@
 //! single committed [`Msg`] that the runtime turns into a mutation
 //! effect.
 //!
-//! Only the wired subset (create / remove) is offered today; the rest
-//! of the [`worktree_actions`] policy (reveal, and the later merge /
-//! close-down / lock / prune stories) is filtered out here until each
-//! is wired.
+//! The wired subset (create / merge / remove / close-down) is offered
+//! today; the rest of the [`worktree_actions`] policy (reveal, and the
+//! later lock / prune stories) is filtered out here until each is
+//! wired. Close-down (`X` or the menu entry) opens a merge/discard
+//! choice that commits a compound teardown (ADR 0093).
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -37,6 +38,7 @@ const WIRED: &[WorktreeAction] = &[
     WorktreeAction::NewWorktree,
     WorktreeAction::MergeWorktree,
     WorktreeAction::RemoveWorktree,
+    WorktreeAction::CloseDownWorktree,
 ];
 
 /// Worktree facts captured when the menu opens, so the overlay stays
@@ -197,6 +199,8 @@ enum Mode {
     BranchInput(TextInputState),
     ConfirmRemove,
     ConfirmMerge,
+    /// Close-down: pick merge (land) vs discard, then commit.
+    CloseDownChoice,
 }
 
 /// Overlay state: the captured context, the offered actions, a cursor,
@@ -232,6 +236,22 @@ impl WorktreeMenuState {
         })
     }
 
+    /// Open the menu straight into the close-down merge/discard choice
+    /// (the `X` hot key), skipping the action list. Returns `None` when
+    /// close-down isn't applicable to the selection (no worktree branch
+    /// to close, or no mutation backend).
+    pub fn new_close_down(ctx: WorktreeMenuContext) -> Option<Self> {
+        if !ctx.can_mutate || ctx.repo_root.is_none() || ctx.branch.is_none() {
+            return None;
+        }
+        Some(Self {
+            actions: vec![WorktreeAction::CloseDownWorktree],
+            cursor: 0,
+            mode: Mode::CloseDownChoice,
+            ctx,
+        })
+    }
+
     pub fn context(&self) -> &WorktreeMenuContext {
         &self.ctx
     }
@@ -252,6 +272,10 @@ impl WorktreeMenuState {
             }
             WorktreeAction::RemoveWorktree => {
                 self.mode = Mode::ConfirmRemove;
+                OverlayOutcome::Consumed
+            }
+            WorktreeAction::CloseDownWorktree => {
+                self.mode = Mode::CloseDownChoice;
                 OverlayOutcome::Consumed
             }
             // Reveal actions are filtered out of `actions` today.
@@ -344,6 +368,29 @@ impl WorktreeMenuState {
             _ => OverlayOutcome::Consumed,
         }
     }
+
+    fn handle_close_down(&mut self, key: KeyEvent) -> OverlayOutcome {
+        // `m` lands the branch, `d` discards it; both then tear the
+        // stream down (ADR 0093). Esc/q backs out.
+        let discard = match key.code {
+            KeyCode::Char('m') => false,
+            KeyCode::Char('d') => true,
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = Mode::List;
+                return OverlayOutcome::Consumed;
+            }
+            _ => return OverlayOutcome::Consumed,
+        };
+        let (Some(repo_root), Some(branch)) = (self.ctx.repo_root.clone(), self.ctx.branch.clone())
+        else {
+            return OverlayOutcome::Close;
+        };
+        OverlayOutcome::Commit(Box::new(Msg::CommitWorktreeCloseDown {
+            repo_root,
+            branch,
+            discard,
+        }))
+    }
 }
 
 impl Overlay for WorktreeMenuState {
@@ -355,6 +402,7 @@ impl Overlay for WorktreeMenuState {
             Mode::BranchInput(_) => self.handle_branch_input(key),
             Mode::ConfirmRemove => self.handle_confirm_remove(key),
             Mode::ConfirmMerge => self.handle_confirm_merge(key),
+            Mode::CloseDownChoice => self.handle_close_down(key),
         }
     }
 }
@@ -441,6 +489,34 @@ impl Widget for WorktreeMenuWidget<'_> {
                     lines.push(Line::from(""));
                 }
                 lines.push(Line::from("Enter/y to confirm · Esc/n to cancel"));
+                lines
+            }
+            Mode::CloseDownChoice => {
+                let branch = self.state.ctx.branch.as_deref().unwrap_or("(unknown)");
+                let mut lines = vec![
+                    Line::styled(
+                        format!("Close down stream `{branch}`"),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Line::from("Ends its sessions, removes the worktree, drops its pins."),
+                    Line::from(""),
+                ];
+                if !self.state.ctx.guard_sessions.is_empty() {
+                    lines.push(Line::styled(
+                        format!(
+                            "⚠ ends {} live session(s) (transcripts preserved):",
+                            self.state.ctx.guard_sessions.len()
+                        ),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ));
+                    for s in &self.state.ctx.guard_sessions {
+                        lines.push(Line::from(format!("  - {s}")));
+                    }
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from(
+                    "m = merge & close · d = discard & close · Esc cancel",
+                ));
                 lines
             }
             Mode::BranchInput(_) => unreachable!("handled above"),

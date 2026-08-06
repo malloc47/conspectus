@@ -216,6 +216,10 @@ fn keymap_sections() -> Vec<HelpSection> {
                     "Open the worktree action menu for the selected repo / worktree / mux (create, remove; needs a mutation backend)",
                 ),
                 Binding::new(
+                    "X",
+                    "Close down the selected stream: merge or discard the branch, end its sessions, remove the worktree, drop its pins",
+                ),
+                Binding::new(
                     "v",
                     "Open the selected session's transcript (or the mux row's linked session); q/Esc close, j/k or PgDn/PgUp scroll, g/G start/end, t cycle tool detail, T thinking",
                 ),

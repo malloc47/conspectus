@@ -663,6 +663,15 @@ pub enum Msg {
         worktree_root: String,
         target: Option<String>,
     },
+    /// Commit the worktree menu's "Close down stream" choice
+    /// (H-WT-006). Reducer emits
+    /// `Effect::WriteStore(StoreOp::WorktreeCloseDown)`. `discard`
+    /// drops the branch; otherwise it is merged back first.
+    CommitWorktreeCloseDown {
+        repo_root: String,
+        branch: String,
+        discard: bool,
+    },
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot
     /// (or fresh defaults on first visit), and re-derives the row
@@ -2402,6 +2411,19 @@ impl App {
                     crate::tui::effect::StoreOp::WorktreeMerge {
                         worktree_root,
                         target,
+                    },
+                ));
+            }
+            Msg::CommitWorktreeCloseDown {
+                repo_root,
+                branch,
+                discard,
+            } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::WorktreeCloseDown {
+                        repo_root,
+                        branch,
+                        discard,
                     },
                 ));
             }

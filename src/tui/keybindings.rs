@@ -193,6 +193,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
+        key: KeyMatcher::UpperChar('X'),
+        action: || Action::OpenWorktreeCloseDown,
+        help_text: "Close down the selected stream (merge/discard + teardown)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
         key: KeyMatcher::Exact {
             modifiers: KeyModifiers::NONE,
             code: KeyCode::Delete,
