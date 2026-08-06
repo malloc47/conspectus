@@ -743,9 +743,10 @@ fn set_server_interval(
 /// Parse a short-form duration string of the shape
 /// `<non-negative-integer><ms|s|m|h>`. Shared with the CLI
 /// `--refresh-interval` flag (which calls through its own
-/// historical `parse_tui_duration` wrapper); the format is the
-/// same so operators can copy values between flag and config.
-fn parse_duration_short(input: &str) -> Result<Duration, String> {
+/// historical `parse_tui_duration` wrapper) and the
+/// `worktree close --grace` override; the format is the same so
+/// operators can copy values between flag and config.
+pub fn parse_duration_short(input: &str) -> Result<Duration, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("empty duration".into());
