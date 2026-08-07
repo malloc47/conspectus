@@ -237,7 +237,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 Binding::new("p", "Open the pins overlay (menu listing every action)"),
                 Binding::new(
                     "N",
-                    "New pin — opens the create form seeded from the current selection",
+                    "New stream — opens the create form (worktree toggle pre-enabled) seeded from the current selection; Space toggles the worktree off for a plain pin",
                 ),
                 Binding::new(
                     "L",

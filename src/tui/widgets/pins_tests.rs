@@ -294,6 +294,46 @@ fn create_form_backtab_moves_to_previous_field() {
 }
 
 #[test]
+fn create_form_worktree_toggle_produces_worktree_branch() {
+    // ADR 0094: off by default → plain pin; toggling on defaults the
+    // branch to the derived id and surfaces it in the request.
+    let mut editor = PinCreateState::new(
+        PinCreateDefaults {
+            id: "feature".to_string(),
+            display_name: "feature".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/workspace/project".to_string(),
+            mux_name: "feature".to_string(),
+            mode: PinCreateMode::NewVariation,
+        },
+        None,
+        vec!["codex".to_string()],
+        vec![],
+    );
+    assert_eq!(editor.request().expect("valid").worktree_branch, None);
+
+    move_to_create_field(&mut editor, PinCreateState::FIELD_WORKTREE_TOGGLE);
+    editor.handle_key(key(KeyCode::Char(' ')));
+    assert_eq!(
+        editor.request().expect("valid").worktree_branch.as_deref(),
+        Some("feature")
+    );
+
+    // The branch field is now visible and editable.
+    move_to_create_field(&mut editor, PinCreateState::FIELD_WORKTREE_BRANCH);
+    for _ in 0.."feature".len() {
+        editor.handle_key(key(KeyCode::Backspace));
+    }
+    for ch in "feature-x".chars() {
+        editor.handle_key(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(
+        editor.request().expect("valid").worktree_branch.as_deref(),
+        Some("feature-x")
+    );
+}
+
+#[test]
 fn create_form_forwards_home_and_end_to_active_text_field() {
     let mut editor = PinCreateState::new(
         PinCreateDefaults {
@@ -351,9 +391,8 @@ fn create_form_cycles_known_harness_choices_from_harness_field() {
         vec![],
     );
 
-    editor.handle_key(key(KeyCode::Down));
-    editor.handle_key(key(KeyCode::Down));
-    assert_eq!(editor.render_cursor(), 3);
+    move_to_create_field(&mut editor, PinCreateState::FIELD_HARNESS);
+    assert_eq!(editor.render_cursor(), PinCreateState::FIELD_HARNESS);
     editor.handle_key(key(KeyCode::Right));
     assert_eq!(editor.harness.value(), "claude-code");
     editor.handle_key(key(KeyCode::Left));
@@ -846,8 +885,7 @@ fn create_form_allows_freeform_harness_with_warning() {
         vec![],
     );
 
-    editor.handle_key(key(KeyCode::Down));
-    editor.handle_key(key(KeyCode::Down));
+    move_to_create_field(&mut editor, PinCreateState::FIELD_HARNESS);
     for _ in 0.."codex".len() {
         editor.handle_key(key(KeyCode::Backspace));
     }
@@ -996,11 +1034,9 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
     assert_eq!(editor.mux_name.value(), "live-mux");
     assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
 
-    editor.handle_key(key(KeyCode::Down));
+    move_to_create_field(&mut editor, PinCreateState::FIELD_MODE);
     editor.handle_key(key(KeyCode::Char(' ')));
-    for _ in 0..7 {
-        editor.handle_key(key(KeyCode::Down));
-    }
+    move_to_create_field(&mut editor, PinCreateState::FIELD_MUX_NAME);
     for _ in 0.."live_mux".len() {
         editor.handle_key(key(KeyCode::Backspace));
     }
@@ -1369,6 +1405,7 @@ fn create_form_confirms_defaults() {
             mux_socket: None,
             adopt_source_mux_name: None,
             launch_argv: Vec::new(),
+            worktree_branch: None,
             store: PinCreateStore::Auto,
         }))
     );
@@ -1407,7 +1444,9 @@ fn create_form_preserves_explicit_identity_overrides_after_name_edit() {
 
     // Move to mux.name, edit it, then return to name and change
     // the primary value. The explicit mux override must survive.
-    for _ in 0..6 {
+    // (7 hops clears NAME, CWD, worktree toggle, HARNESS, launch argv,
+    // id, display to reach mux.name.)
+    for _ in 0..7 {
         state.handle_key(&ctx, key(KeyCode::Down));
     }
     for _ in 0.."new-pin".len() {
@@ -1416,7 +1455,7 @@ fn create_form_preserves_explicit_identity_overrides_after_name_edit() {
     for ch in "kept-mux".chars() {
         state.handle_key(&ctx, key(KeyCode::Char(ch)));
     }
-    for _ in 0..6 {
+    for _ in 0..7 {
         state.handle_key(&ctx, key(KeyCode::Up));
     }
     for _ in 0.."new pin".len() {

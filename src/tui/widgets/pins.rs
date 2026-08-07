@@ -119,6 +119,24 @@ struct PinCreateOptions {
     known_pin_ids: Vec<String>,
     known_pin_mux_names: Vec<String>,
     selected_pin_id: Option<String>,
+    /// Open with the worktree toggle pre-enabled (the `N` new-stream
+    /// entry point, ADR 0094).
+    worktree_enabled: bool,
+}
+
+/// Build create options from a pins context, optionally pre-enabling
+/// the worktree toggle (the `N` new-stream entry point).
+fn create_options(ctx: &PinsContext, worktree_enabled: bool) -> PinCreateOptions {
+    PinCreateOptions {
+        adopt_defaults: ctx.pin_adopt_defaults.clone(),
+        known_cwd_candidates: ctx.known_cwd_candidates.clone(),
+        known_harness_keys: ctx.known_harness_keys.clone(),
+        known_mux_names: ctx.known_mux_names.clone(),
+        known_pin_ids: ctx.known_pin_ids.clone(),
+        known_pin_mux_names: ctx.known_pin_mux_names.clone(),
+        selected_pin_id: ctx.selected_pin_id.clone(),
+        worktree_enabled,
+    }
 }
 
 /// One landable row in the pins overlay. Only the action list rows
@@ -171,6 +189,9 @@ pub struct PinCreateRequest {
     pub mux_socket: Option<String>,
     pub adopt_source_mux_name: Option<String>,
     pub launch_argv: Vec<String>,
+    /// When `Some`, the pin is worktree-backed (ADR 0094): its worktree
+    /// for this branch is created (if absent) and entered at launch.
+    pub worktree_branch: Option<String>,
     pub store: PinCreateStore,
 }
 
@@ -231,6 +252,11 @@ pub struct PinCreateState {
     mux_socket: TextInputState,
     launch_argv: TextInputState,
     store: PinCreateStore,
+    /// Worktree-backed toggle + branch (ADR 0094). When enabled, the
+    /// pin declares a worktree for `worktree_branch`, realized at
+    /// launch.
+    worktree_enabled: bool,
+    worktree_branch: TextInputState,
     id_overridden: bool,
     display_overridden: bool,
     mux_overridden: bool,
@@ -340,18 +366,13 @@ impl PinsOverlayState {
     }
 
     pub fn open_with_create_context(ctx: &PinsContext) -> Self {
-        Self::open_with_create_initial(
-            ctx.pin_create_defaults.clone(),
-            PinCreateOptions {
-                adopt_defaults: ctx.pin_adopt_defaults.clone(),
-                known_cwd_candidates: ctx.known_cwd_candidates.clone(),
-                known_harness_keys: ctx.known_harness_keys.clone(),
-                known_mux_names: ctx.known_mux_names.clone(),
-                known_pin_ids: ctx.known_pin_ids.clone(),
-                known_pin_mux_names: ctx.known_pin_mux_names.clone(),
-                selected_pin_id: ctx.selected_pin_id.clone(),
-            },
-        )
+        Self::open_with_create_initial(ctx.pin_create_defaults.clone(), create_options(ctx, false))
+    }
+
+    /// Open the create form with the worktree toggle pre-enabled — the
+    /// `N` new-stream entry point (ADR 0094).
+    pub fn open_with_new_stream_context(ctx: &PinsContext) -> Self {
+        Self::open_with_create_initial(ctx.pin_create_defaults.clone(), create_options(ctx, true))
     }
 
     pub fn open_with_adopt_options(
@@ -378,18 +399,7 @@ impl PinsOverlayState {
     }
 
     pub fn open_with_adopt_context(ctx: &PinsContext) -> Self {
-        Self::open_with_adopt_initial(
-            ctx.pin_create_defaults.clone(),
-            PinCreateOptions {
-                adopt_defaults: ctx.pin_adopt_defaults.clone(),
-                known_cwd_candidates: ctx.known_cwd_candidates.clone(),
-                known_harness_keys: ctx.known_harness_keys.clone(),
-                known_mux_names: ctx.known_mux_names.clone(),
-                known_pin_ids: ctx.known_pin_ids.clone(),
-                known_pin_mux_names: ctx.known_pin_mux_names.clone(),
-                selected_pin_id: ctx.selected_pin_id.clone(),
-            },
-        )
+        Self::open_with_adopt_initial(ctx.pin_create_defaults.clone(), create_options(ctx, false))
     }
 
     fn open_with_adopt_initial(defaults: PinCreateDefaults, options: PinCreateOptions) -> Self {
@@ -515,18 +525,7 @@ impl PinsOverlayState {
                 .clone()
                 .unwrap_or_else(|| ctx.pin_create_defaults.clone());
             self.sub_editor = Some(PinsSubEditor::Create(Box::new(
-                PinCreateState::new_with_options(
-                    initial,
-                    PinCreateOptions {
-                        adopt_defaults: ctx.pin_adopt_defaults.clone(),
-                        known_cwd_candidates: ctx.known_cwd_candidates.clone(),
-                        known_harness_keys: ctx.known_harness_keys.clone(),
-                        known_mux_names: ctx.known_mux_names.clone(),
-                        known_pin_ids: ctx.known_pin_ids.clone(),
-                        known_pin_mux_names: ctx.known_pin_mux_names.clone(),
-                        selected_pin_id: ctx.selected_pin_id.clone(),
-                    },
-                ),
+                PinCreateState::new_with_options(initial, create_options(ctx, false)),
             )));
             PinsOutcome::Continue
         } else if label == "launch" {
@@ -607,7 +606,7 @@ impl PinsOverlayState {
                 }
                 PinCreateOutcome::Confirm(request) => {
                     *slot = None;
-                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinCreate(request))
+                    PinsOutcome::ApplyAndClose(crate::tui::Msg::PinCreate(*request))
                 }
             },
             PinsSubEditor::Edit(state) => match state.handle_key(event) {
@@ -677,7 +676,7 @@ fn move_cursor(cursor: PinsCursor, delta: i32) -> PinsCursor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PinCreateOutcome {
     Continue,
-    Confirm(PinCreateRequest),
+    Confirm(Box<PinCreateRequest>),
     Cancel,
 }
 
@@ -714,6 +713,10 @@ impl PinCreateState {
     const FIELD_MUX_NAME: usize = 8;
     const FIELD_MUX_SOCKET: usize = 9;
     const FIELD_STORE: usize = 10;
+    /// Worktree toggle (ADR 0094): when on, the pin is worktree-backed
+    /// and the branch field below it becomes visible.
+    const FIELD_WORKTREE_TOGGLE: usize = 11;
+    const FIELD_WORKTREE_BRANCH: usize = 12;
 
     #[cfg(test)]
     fn new(
@@ -806,6 +809,9 @@ impl PinCreateState {
             mux_socket: TextInputState::new(" socket ", String::new()),
             launch_argv: TextInputState::new(" launch argv ", String::new()),
             store: PinCreateStore::Auto,
+            worktree_enabled: options.worktree_enabled,
+            // Branch defaults to the derived id; independently editable.
+            worktree_branch: TextInputState::new(" worktree branch ", derived_id),
             id_overridden,
             display_overridden,
             mux_overridden,
@@ -824,7 +830,7 @@ impl PinCreateState {
         match event.code {
             KeyCode::Esc => PinCreateOutcome::Cancel,
             KeyCode::Enter => match self.request() {
-                Ok(request) => PinCreateOutcome::Confirm(request),
+                Ok(request) => PinCreateOutcome::Confirm(Box::new(request)),
                 Err(err) => {
                     self.error = Some(err);
                     PinCreateOutcome::Continue
@@ -889,6 +895,13 @@ impl PinCreateState {
                 });
                 PinCreateOutcome::Continue
             }
+            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
+                if self.logical_cursor() == Self::FIELD_WORKTREE_TOGGLE =>
+            {
+                self.worktree_enabled = !self.worktree_enabled;
+                self.error = None;
+                PinCreateOutcome::Continue
+            }
             _ => {
                 if event.modifiers.contains(KeyModifiers::CONTROL)
                     && matches!(event.code, KeyCode::Char('c'))
@@ -945,6 +958,10 @@ impl PinCreateState {
             fields.push(Self::FIELD_MODE);
         }
         fields.push(Self::FIELD_CWD);
+        fields.push(Self::FIELD_WORKTREE_TOGGLE);
+        if self.worktree_enabled {
+            fields.push(Self::FIELD_WORKTREE_BRANCH);
+        }
         fields.push(Self::FIELD_HARNESS);
         if self.has_launch_options() {
             fields.push(Self::FIELD_LAUNCH_OPTIONS);
@@ -1125,6 +1142,7 @@ impl PinCreateState {
             Self::FIELD_DISPLAY => Some(&mut self.display_name),
             Self::FIELD_MUX_NAME => Some(&mut self.mux_name),
             Self::FIELD_MUX_SOCKET => Some(&mut self.mux_socket),
+            Self::FIELD_WORKTREE_BRANCH => Some(&mut self.worktree_branch),
             _ => None,
         }
     }
@@ -1138,6 +1156,7 @@ impl PinCreateState {
             Self::FIELD_DISPLAY => Some(&self.display_name),
             Self::FIELD_MUX_NAME => Some(&self.mux_name),
             Self::FIELD_MUX_SOCKET => Some(&self.mux_socket),
+            Self::FIELD_WORKTREE_BRANCH => Some(&self.worktree_branch),
             _ => None,
         }
     }
@@ -1226,6 +1245,11 @@ impl PinCreateState {
                 "pin create: launch argv is required for unknown harness `{harness}`"
             ));
         }
+        let worktree_branch = if self.worktree_enabled {
+            Some(required(self.worktree_branch.value(), "worktree branch")?)
+        } else {
+            None
+        };
         Ok(PinCreateRequest {
             id,
             display_name,
@@ -1235,6 +1259,7 @@ impl PinCreateState {
             mux_socket,
             adopt_source_mux_name: self.adopt_source_mux_name(),
             launch_argv,
+            worktree_branch,
             store: self.store,
         })
     }
@@ -2092,8 +2117,9 @@ impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let cursor = self.state.render_cursor();
-        let content_lines = 15
+        let content_lines = 16
             + usize::from(self.state.has_launch_options())
+            + usize::from(self.state.worktree_enabled)
             + usize::from(self.state.error.is_some()) * 2;
         let modal = pin_create_modal_rect(area, content_lines);
         let inner_width = modal.width.saturating_sub(2) as usize;
@@ -2108,6 +2134,27 @@ impl Widget for PinCreateWidget<'_> {
             pin_create_mode_field(self.state, cursor, inner_width),
             pin_create_path_omnibox_field(self.state, cursor, inner_width),
         ];
+        // Worktree toggle (ADR 0094) + branch when enabled.
+        lines.push(pin_create_static_field(
+            PinCreateState::FIELD_WORKTREE_TOGGLE,
+            "worktree",
+            if self.state.worktree_enabled {
+                "[x] create worktree (realized at launch)"
+            } else {
+                "[ ] create worktree"
+            },
+            cursor,
+            inner_width,
+        ));
+        if self.state.worktree_enabled {
+            lines.push(pin_create_input_field(
+                PinCreateState::FIELD_WORKTREE_BRANCH,
+                "wt branch",
+                &self.state.worktree_branch,
+                cursor,
+                inner_width,
+            ));
+        }
         lines.push(pin_create_harness_field(self.state, cursor, inner_width));
         if self.state.has_launch_options() {
             lines.push(pin_create_launch_options_field(

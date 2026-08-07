@@ -209,7 +209,7 @@ fn body_lines_cover_every_documented_key() {
         "Resume the selected un-muxed agent session",
         "Quit",
         "Open the pins overlay (menu listing every action)",
-        "New pin — opens the create form",
+        "New stream — opens the create form",
         "Launch the selected pin",
         "Rebind the selected pin's mux target",
         "Bind picker for the selected PinAmbiguous row",

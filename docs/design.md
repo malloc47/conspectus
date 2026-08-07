@@ -655,6 +655,20 @@ seam, the envelope placement (prohibition 6 unchanged), the
 (worktrunk argv mapping, refusing removal of a worktree hosting a live
 session).
 
+On top of the seam, the worktree epic adds the lifecycle gestures that
+bracket a stream of work. **Merge back & close** lands a worktree's
+branch and tears the worktree down. **Close-down** is the compound
+inverse of creation: it terminates the mux/agent sessions rooted in the
+worktree (a two-phase graceful-`SIGTERM`→hard `kill-session` sanctioned
+by ADR 0093), lands or discards the branch, removes the worktree, and
+drops the pins declared there — one gesture on the CLI (`worktree
+close`) and the TUI (`X` / menu). **New-stream** is the creation side:
+a pin may be *worktree-backed* (`[worktree] branch`), and its worktree
+is realized at launch — created from the repo default and entered
+alongside the mux + agent — rather than at pin-write time, keeping the
+declaration pure (ADR 0094). The `N` key opens the create form with the
+worktree toggle pre-enabled.
+
 ## Status Views
 
 The default `conspectus session` table should be AgentSession-oriented: one row

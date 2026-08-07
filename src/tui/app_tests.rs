@@ -3031,6 +3031,7 @@ mod reducer_effects {
             mux_socket: None,
             adopt_source_mux_name: None,
             launch_argv: Vec::new(),
+            worktree_branch: None,
             store: crate::tui::widgets::pins::PinCreateStore::Auto,
         };
         let effects = app.update(Msg::PinCreate(request.clone()));

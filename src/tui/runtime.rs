@@ -1160,11 +1160,14 @@ fn pin_bind_hint_action(app: &mut App) {
 }
 
 fn open_pin_create_action(app: &mut App) {
+    // `N` is the new-stream entry (ADR 0094): open the create form with
+    // the worktree toggle pre-enabled. Plain pin creation stays one
+    // keystroke away via the `p` pins menu.
     let ctx = app.pins_context();
-    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_create_context(&ctx);
+    let state = crate::tui::widgets::pins::PinsOverlayState::open_with_new_stream_context(&ctx);
     app.set_pins_overlay(state);
     app.update(Msg::SetStatus(Some(
-        "pins: new pin · Up/Down field · Enter create · Esc cancel".to_string(),
+        "pins: new stream · Space toggles worktree · Enter create · Esc cancel".to_string(),
     )));
 }
 
@@ -2456,6 +2459,10 @@ fn write_pin_create(
                 argv: request.launch_argv.clone(),
             })
         },
+        worktree: request
+            .worktree_branch
+            .clone()
+            .map(|branch| crate::pins::PinWorktree { branch }),
         reason: None,
     };
     let outcome = crate::pins::upsert_pin_entry(&selection.path, entry.clone())?;
@@ -2532,6 +2539,10 @@ fn write_pin_bind(
 fn write_pin_edit(request: &crate::tui::widgets::pins::PinEditRequest) -> Result<PinWriteOutcome> {
     let path = std::path::PathBuf::from(&request.store_path);
     preflight_pin_edit(request, &path)?;
+    // The edit form doesn't surface the worktree block (ADR 0094), so
+    // preserve the edited pin's existing worktree intent from disk
+    // rather than dropping it on save.
+    let worktree = existing_pin_worktree(&path, &request.original_id);
     if request.original_id != request.id {
         crate::pins::remove_pin_entry(&path, &request.original_id)?;
     }
@@ -2552,9 +2563,23 @@ fn write_pin_edit(request: &crate::tui::widgets::pins::PinEditRequest) -> Result
                 argv: request.launch_argv.clone(),
             })
         },
+        worktree,
         reason: None,
     };
     Ok(crate::pins::upsert_pin_entry(&path, entry)?)
+}
+
+/// Read the worktree block of the pin `id` in `path` (ADR 0094), so an
+/// edit/rebind can round-trip it without the form having to model it.
+/// Best-effort: a read/parse miss yields `None`.
+fn existing_pin_worktree(path: &std::path::Path, id: &str) -> Option<crate::pins::PinWorktree> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let document = crate::pins::parse_pins_document(&text).ok()?;
+    document
+        .entries()
+        .iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| entry.worktree.clone())
 }
 
 fn preflight_pin_edit(

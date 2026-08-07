@@ -280,6 +280,7 @@ fn write_pin_create_writes_project_store() {
         mux_socket: Some("scratch".to_string()),
         adopt_source_mux_name: None,
         launch_argv: vec!["codex".to_string(), "--resume".to_string()],
+        worktree_branch: None,
         store: PinCreateStore::Project,
     };
 
@@ -329,6 +330,7 @@ fn write_pin_create_user_store_uses_user_config_path() {
         mux_socket: None,
         adopt_source_mux_name: None,
         launch_argv: Vec::new(),
+        worktree_branch: None,
         store: PinCreateStore::User,
     };
 
@@ -359,6 +361,7 @@ fn pin_adopt_mux_rename_renames_source_mux_to_requested_mux_name() {
         mux_socket: Some("scratch".to_string()),
         adopt_source_mux_name: Some("agentdeck_conspectus".to_string()),
         launch_argv: Vec::new(),
+        worktree_branch: None,
         store: PinCreateStore::Project,
     };
 
@@ -390,6 +393,7 @@ fn pin_adopt_mux_rename_skips_when_source_already_matches_target() {
         mux_socket: None,
         adopt_source_mux_name: Some("work".to_string()),
         launch_argv: Vec::new(),
+        worktree_branch: None,
         store: PinCreateStore::Project,
     };
 
@@ -426,6 +430,7 @@ fn write_pin_edit_updates_id_display_mux_and_launch() {
             socket_name: None,
         },
         launch: None,
+        worktree: None,
         reason: None,
     };
     crate::pins::upsert_pin_entry(&path, entry).expect("seed pin");
@@ -471,6 +476,7 @@ fn write_pin_edit_rejects_duplicate_id_without_mutating() {
                     socket_name: None,
                 },
                 launch: None,
+                worktree: None,
                 reason: None,
             },
         )
@@ -512,6 +518,7 @@ fn write_pin_edit_rejects_duplicate_mux_without_mutating() {
                     socket_name: None,
                 },
                 launch: None,
+                worktree: None,
                 reason: None,
             },
         )
@@ -597,6 +604,7 @@ fn write_pin_remove_removes_from_explicit_store_path() {
             socket_name: None,
         },
         launch: None,
+        worktree: None,
         reason: None,
     };
     crate::pins::upsert_pin_entry(&path, entry).expect("seed pin");
