@@ -19,6 +19,10 @@ use conspectus::discovery::harness::launch_argv_for;
 use conspectus::discovery::tmux::{
     MuxBackend, SystemTmux, TmuxAttachOutcome, TmuxNewSessionOutcome, TmuxSendKeysOutcome,
 };
+use conspectus::discovery::worktree::{
+    SystemGitWorktree, WorktreeBackend, WorktreeCreateRequest, WorktreeMutationOutcome,
+    WorktreeRecord, resolve_mutation_backend, worktrunk_available,
+};
 use conspectus::model::{GraphSnapshot, NodeId, PinBinding, Provenance, RelationKind};
 use conspectus::pins::{
     PinEntry, PinLaunch, PinMux, PinStoreKind, PinStoreSelection, TMUX_MUX_BACKEND,
@@ -129,6 +133,11 @@ struct PinCreateArgs {
     /// field.
     #[arg(long)]
     reason: Option<String>,
+    /// Make the pin worktree-backed (ADR 0094): `cwd` is the repo
+    /// anchor and this branch's worktree is created (if absent) and
+    /// entered at launch.
+    #[arg(long, value_name = "BRANCH")]
+    worktree: Option<String>,
     /// Override automatic nearest-store selection.
     #[arg(long, value_enum)]
     store: Option<DeclaredStoreFlag>,
@@ -156,6 +165,9 @@ impl PinCreateArgs {
                     argv: self.launch_argv,
                 })
             },
+            worktree: self
+                .worktree
+                .map(|branch| conspectus::pins::PinWorktree { branch }),
             reason: self.reason,
         };
 
@@ -687,6 +699,9 @@ impl PinAdoptArgs {
                 socket_name: self.mux_socket.clone(),
             },
             launch: None,
+            // Adopt binds to a live mux that already has a cwd; worktree
+            // realization is a launch-time concern, so it's a no-op here.
+            worktree: None,
             reason: None,
         };
 
@@ -799,7 +814,10 @@ impl PinLaunchArgs {
                         pin.id
                     );
                 }
-                let cwd = std::path::PathBuf::from(&pin.cwd);
+                // ADR 0094: a worktree-backed pin realizes its worktree
+                // here — resolve or create it and launch there instead
+                // of the repo anchor.
+                let cwd = realize_worktree_cwd(pin)?;
                 // ADR 0058 / H-PIN-RESUME-004: consult the
                 // per-pin sidecar to splice in resume_argv when a
                 // prior session is known and still reachable.
@@ -822,6 +840,91 @@ impl PinLaunchArgs {
             }
         }
     }
+}
+
+/// Resolve the launch working directory for `pin` (ADR 0094). For a
+/// plain pin this is just its `cwd`. For a worktree-backed pin it
+/// resolves the branch's worktree under the repo anchor, creating it
+/// (from the repo default) via the mutation backend when absent, and
+/// returns the worktree path. Idempotent: an existing worktree is
+/// reused.
+fn realize_worktree_cwd(pin: &conspectus::model::PinCandidate) -> Result<PathBuf> {
+    // The graph candidate doesn't carry the worktree block; read it
+    // from the pin's own store file (cheap, and avoids threading the
+    // field through the whole model/projection chain).
+    let branch = match pin_worktree_branch(&pin.store_path, &pin.id) {
+        Some(branch) => branch,
+        None => return Ok(PathBuf::from(&pin.cwd)),
+    };
+    let branch = branch.as_str();
+    let repo_anchor = PathBuf::from(&pin.cwd);
+    let git = SystemGitWorktree::new();
+
+    // 1. Reuse an existing worktree for the branch.
+    if let Some(path) = worktree_path_in_records(&git.list(&repo_anchor)?, branch) {
+        return Ok(PathBuf::from(path));
+    }
+
+    // 2. Create it via the configured mutation backend.
+    let cwd = std::env::current_dir()?;
+    let config = ConfigLoader::from_env().load_from(&cwd).config;
+    let backend = match resolve_mutation_backend(config.worktree.backend, worktrunk_available())? {
+        Some(backend) => backend,
+        None => bail!(
+            "pin `{}` is worktree-backed but no mutation backend is available; \
+             install worktrunk or set `[worktree] backend`",
+            pin.id
+        ),
+    };
+    match backend.create(&WorktreeCreateRequest {
+        repo_root: repo_anchor.clone(),
+        branch: branch.to_string(),
+        base: None,
+    })? {
+        WorktreeMutationOutcome::Succeeded { path: Some(path) } => return Ok(PathBuf::from(path)),
+        WorktreeMutationOutcome::Succeeded { path: None } => {}
+        WorktreeMutationOutcome::Unsupported => {
+            bail!("the configured worktree backend cannot create worktrees")
+        }
+        WorktreeMutationOutcome::Failed { message, .. } => {
+            bail!("worktree create for `{branch}` failed: {message}")
+        }
+    }
+
+    // 3. Re-resolve the freshly created worktree's path.
+    worktree_path_in_records(&git.list(&repo_anchor)?, branch)
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("created worktree for `{branch}` but could not resolve its path"))
+}
+
+/// Path of the worktree checking out `branch` (short name) among
+/// `records`, if any.
+fn worktree_path_in_records(records: &[WorktreeRecord], branch: &str) -> Option<String> {
+    records
+        .iter()
+        .find(|record| record.branch.as_deref().map(short_ref).as_deref() == Some(branch))
+        .map(|record| record.path.clone())
+}
+
+/// `refs/heads/foo` -> `foo`; already-short names pass through.
+fn short_ref(refname: &str) -> String {
+    refname
+        .strip_prefix("refs/heads/")
+        .unwrap_or(refname)
+        .to_string()
+}
+
+/// Read the worktree branch (ADR 0094) of pin `id` from its store
+/// file. Best-effort: a read/parse miss or a plain pin yields `None`.
+fn pin_worktree_branch(store_path: &str, id: &str) -> Option<String> {
+    let text = std::fs::read_to_string(store_path).ok()?;
+    let document = conspectus::pins::parse_pins_document(&text).ok()?;
+    document
+        .entries()
+        .iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| entry.worktree.as_ref())
+        .map(|worktree| worktree.branch.clone())
 }
 
 /// Consult the per-pin sidecar (ADR 0058) for a prior session and, when
@@ -1187,5 +1290,59 @@ fn format_pin_diagnostic(diagnostic: &conspectus::model::Diagnostic) -> String {
             ..
         } => format!("drift (declared `{declared_cwd}`, observed `{observed_cwd}`)"),
         _ => format!("{diagnostic:?}"),
+    }
+}
+
+#[cfg(test)]
+mod worktree_realize_tests {
+    use super::*;
+    use conspectus::discovery::worktree::parse_worktree_porcelain;
+
+    #[test]
+    fn short_ref_strips_heads_prefix() {
+        assert_eq!(short_ref("refs/heads/feature"), "feature");
+        assert_eq!(short_ref("feature"), "feature");
+    }
+
+    #[test]
+    fn worktree_path_in_records_matches_branch_short_name() {
+        let records = parse_worktree_porcelain(
+            "worktree /repo\nHEAD aaa\nbranch refs/heads/main\n\n\
+             worktree /wt/feature\nHEAD bbb\nbranch refs/heads/feature\n",
+        );
+        assert_eq!(
+            worktree_path_in_records(&records, "feature").as_deref(),
+            Some("/wt/feature")
+        );
+        assert_eq!(worktree_path_in_records(&records, "missing"), None);
+    }
+
+    #[test]
+    fn pin_worktree_branch_reads_the_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join(".conspectus.toml");
+        let entry = PinEntry {
+            id: "feature".to_string(),
+            display_name: "feature".to_string(),
+            harness: "codex".to_string(),
+            cwd: "/repo".to_string(),
+            mux: PinMux {
+                backend: TMUX_MUX_BACKEND.to_string(),
+                name: "feature".to_string(),
+                socket_name: None,
+            },
+            launch: None,
+            worktree: Some(conspectus::pins::PinWorktree {
+                branch: "feature".to_string(),
+            }),
+            reason: None,
+        };
+        upsert_pin_entry(&store, entry).expect("seed pin");
+        let path = store.to_string_lossy().to_string();
+        assert_eq!(
+            pin_worktree_branch(&path, "feature").as_deref(),
+            Some("feature")
+        );
+        assert_eq!(pin_worktree_branch(&path, "absent"), None);
     }
 }

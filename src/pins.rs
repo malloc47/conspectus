@@ -89,8 +89,23 @@ pub struct PinEntry {
     pub mux: PinMux,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<PinLaunch>,
+    /// When set, the pin is worktree-backed (ADR 0094): `cwd` is the
+    /// repo anchor and this branch's worktree is created (if absent)
+    /// and entered at launch, alongside the mux + agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<PinWorktree>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// Worktree intent for a worktree-backed pin (ADR 0094). The worktree
+/// is realized at launch — resolved from the repo's worktrees, created
+/// from the repo default branch if absent, and used as the session's
+/// working directory in place of the pin's `cwd` anchor.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PinWorktree {
+    /// Branch the worktree checks out.
+    pub branch: String,
 }
 
 /// Mux backend coordinates the pin binds against. v1 only accepts

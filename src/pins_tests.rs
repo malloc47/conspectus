@@ -13,6 +13,7 @@ fn sample_entry(id: &str, mux_name: &str) -> PinEntry {
             socket_name: None,
         },
         launch: None,
+        worktree: None,
         reason: None,
     }
 }
@@ -33,6 +34,38 @@ fn round_trip_default_socket_entry() {
     assert!(encoded.contains("[[pins.entries]]"));
     assert!(encoded.contains("backend = \"tmux\""));
     assert!(!encoded.contains("socket_name"));
+}
+
+#[test]
+fn round_trip_worktree_backed_entry() {
+    // ADR 0094: a worktree-backed pin serializes a `[worktree]` block
+    // and parses back unchanged; older stores (no block) stay `None`.
+    let mut entry = sample_entry("feature-x", "feature-x");
+    entry.worktree = Some(PinWorktree {
+        branch: "feature-x".to_string(),
+    });
+    let document = PinsDocument {
+        pins: Some(PinsSection {
+            schema_version: PINS_SCHEMA_VERSION,
+            entries: vec![entry.clone()],
+        }),
+    };
+
+    let encoded = to_toml(&document).expect("serialize");
+    let decoded = parse_pins_document(&encoded).expect("parse");
+
+    assert_eq!(decoded.entries(), &[entry]);
+    assert!(encoded.contains("branch = \"feature-x\""));
+    // A plain pin omits the block entirely.
+    let plain = sample_entry("plain", "plain");
+    let plain_encoded = to_toml(&PinsDocument {
+        pins: Some(PinsSection {
+            schema_version: PINS_SCHEMA_VERSION,
+            entries: vec![plain],
+        }),
+    })
+    .expect("serialize");
+    assert!(!plain_encoded.contains("[pins.entries.worktree]"));
 }
 
 #[test]
@@ -451,6 +484,7 @@ fn write_entry(id: &str, mux_name: &str) -> PinEntry {
             socket_name: None,
         },
         launch: None,
+        worktree: None,
         reason: None,
     }
 }
