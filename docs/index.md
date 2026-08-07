@@ -37,6 +37,16 @@ operation (create, launch, rename, remove, bind, rebind, adopt), the
 mux-death continuity flow, and a dry-run script. Pairs with the
 reference-style §"Session pins" in `docs/operations.md`.
 
+## `docs/worktrees.md`
+
+Purpose: operator entrypoint answering "what worktree operations does
+Conspectus support?" — the model (a worktree is a `Checkout`; mutation
+is delegated to worktrunk), setup, an at-a-glance capability table
+(list / new / rm / merge / close-down / new-stream / prune / reveal)
+across CLI and TUI, the close-down and worktree-backed-pin concepts,
+`[worktree]` config keys, and guardrails. Points to ADR 0092 / 0093 /
+0094 for rationale.
+
 ## `docs/graph-visualization.md`
 
 Purpose: operator guide for `conspectus graph --format {dot,html}`,

@@ -215,7 +215,11 @@ conspectus columns {sessions|mux|union|prs|forks}
                    [--color {auto|always|never}]
 conspectus declared ...
 conspectus pin {create|list|show|rename|rm|launch|attach|bind|rebind|adopt} ...
+conspectus worktree {list|new|rm|merge|close|prune} ...
 ```
+
+Worktree operations (`list` is read-only; the rest delegate to a
+mutation backend) are covered end to end in `docs/worktrees.md`.
 
 Debug/test builds also include hidden developer scenario commands under
 `conspectus dev scenario ...`. They materialize isolated replay worlds for

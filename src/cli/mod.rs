@@ -67,8 +67,9 @@ enum Command {
     Alias(AliasArgs),
     /// Author or inspect session pins (ADR 0057).
     Pin(Box<PinArgs>),
-    /// List git worktrees discovered across the scanned repos
-    /// (H-WT-002). Read-only; mutation lands in a follow-up.
+    /// List, create, and tear down git worktrees (ADR 0092). `list`
+    /// is read-only; new / rm / merge / close / prune delegate to the
+    /// configured mutation backend. See `docs/worktrees.md`.
     Worktree(WorktreeArgs),
     /// Run the long-lived background daemon that keeps the
     /// resolved graph snapshot warm between one-shot CLI
