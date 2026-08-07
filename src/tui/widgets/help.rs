@@ -213,7 +213,7 @@ fn keymap_sections() -> Vec<HelpSection> {
                 ),
                 Binding::new(
                     "w",
-                    "Open the worktree action menu for the selected repo / worktree / mux (create, remove; needs a mutation backend)",
+                    "Open the worktree action menu for the selected repo / worktree / mux (new, merge, remove, close-down, prune, reveal; mutations need a backend)",
                 ),
                 Binding::new(
                     "X",

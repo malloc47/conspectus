@@ -669,6 +669,16 @@ alongside the mux + agent — rather than at pin-write time, keeping the
 declaration pure (ADR 0094). The `N` key opens the create form with the
 worktree toggle pre-enabled.
 
+Maintenance rounds out the surface: **prune** delegates to worktrunk's
+`step prune` (remove worktrees already merged into the default branch)
+— a merged-cleanup distinct from git's stale-admin prune that the
+`prunable` flag reflects — via CLI (`worktree prune`) and a repo-level
+menu action. Lock/unlock are intentionally absent: worktrunk exposes
+neither, and worktree mutation stays routed through worktrunk (ADR
+0092) rather than raw git. **Reveal** actions jump the selection to the
+checkout containing a session, or to a worktree's first live session —
+read-only graph navigation, no backend.
+
 ## Status Views
 
 The default `conspectus session` table should be AgentSession-oriented: one row

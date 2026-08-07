@@ -122,6 +122,7 @@ pub struct WorktreeCaps {
     pub can_create: bool,
     pub can_remove: bool,
     pub can_merge: bool,
+    pub can_prune: bool,
 }
 
 /// One worktree as reported by a backend's `list`. Maps onto a
@@ -186,6 +187,21 @@ pub struct WorktreeMergeRequest {
     pub target: Option<String>,
 }
 
+/// Operator request to prune merged worktrees (H-WT-008). Maps to
+/// worktrunk `wt step prune`: remove every worktree whose branch is
+/// already merged into the repo's default branch. This is a
+/// **merged-cleanup**, distinct from `git worktree prune` (which clears
+/// stale admin entries); the [`WorktreeRecord::prunable`] flag reflects
+/// the latter, so callers must not conflate the two.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorktreePruneRequest {
+    /// A path inside the repo to prune within.
+    pub repo_root: PathBuf,
+    /// Report what would be removed without removing anything
+    /// (worktrunk `--dry-run`).
+    pub dry_run: bool,
+}
+
 /// Outcome of a worktree mutation (H-WT-003).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorktreeMutationOutcome {
@@ -236,6 +252,13 @@ pub trait WorktreeBackend: Send + Sync {
     /// worktree (H-WT-005). Defaults to
     /// [`WorktreeMutationOutcome::Unsupported`].
     fn merge(&self, _req: &WorktreeMergeRequest) -> Result<WorktreeMutationOutcome> {
+        Ok(WorktreeMutationOutcome::Unsupported)
+    }
+
+    /// Prune every worktree already merged into the repo's default
+    /// branch (H-WT-008). Defaults to
+    /// [`WorktreeMutationOutcome::Unsupported`].
+    fn prune(&self, _req: &WorktreePruneRequest) -> Result<WorktreeMutationOutcome> {
         Ok(WorktreeMutationOutcome::Unsupported)
     }
 }
@@ -408,6 +431,7 @@ impl WorktreeBackend for WorktrunkBackend {
             can_create: true,
             can_remove: true,
             can_merge: true,
+            can_prune: true,
         }
     }
 
@@ -448,6 +472,20 @@ impl WorktreeBackend for WorktrunkBackend {
         let mut args: Vec<&str> = vec!["-C", &worktree, "merge"];
         if let Some(target) = &req.target {
             args.push(target);
+        }
+        Self::interpret(self.runner.run(&args))
+    }
+
+    fn prune(&self, req: &WorktreePruneRequest) -> Result<WorktreeMutationOutcome> {
+        // wt -C <repo> step prune --foreground [--dry-run | --yes]
+        // Removes worktrees already merged into the default branch;
+        // worktrunk's own `--min-age` (default 1h) skips fresh ones.
+        let repo = req.repo_root.to_string_lossy();
+        let mut args: Vec<&str> = vec!["-C", &repo, "step", "prune", "--foreground"];
+        if req.dry_run {
+            args.push("--dry-run");
+        } else {
+            args.push("--yes");
         }
         Self::interpret(self.runner.run(&args))
     }

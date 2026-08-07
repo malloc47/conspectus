@@ -1382,6 +1382,7 @@ fn execute_store_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect
             branch,
             discard,
         } => execute_worktree_close_down(app, tmux, repo_root, branch, discard),
+        StoreOp::WorktreePrune { repo_root } => execute_worktree_prune(app, repo_root),
     }
 }
 
@@ -1494,6 +1495,34 @@ fn execute_worktree_merge(app: &mut App, worktree_root: String, target: Option<S
             format!("worktree merge failed: {message}")
         }
         Err(err) => format!("worktree merge failed: {err}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn execute_worktree_prune(app: &mut App, repo_root: String) {
+    use crate::discovery::worktree::{WorktreeMutationOutcome, WorktreePruneRequest};
+    let backend = match resolve_worktree_mutation_backend() {
+        Ok(backend) => backend,
+        Err(reason) => {
+            app.update(Msg::SetStatus(Some(format!("worktree: {reason}"))));
+            return;
+        }
+    };
+    let result = backend.prune(&WorktreePruneRequest {
+        repo_root: std::path::PathBuf::from(&repo_root),
+        dry_run: false,
+    });
+    let message = match result {
+        Ok(WorktreeMutationOutcome::Succeeded { .. }) => {
+            let config = app.config().clone();
+            refresh_after_pin_mutation(app, &config);
+            "pruned merged worktrees".to_string()
+        }
+        Ok(WorktreeMutationOutcome::Unsupported) => "worktree: backend cannot prune".to_string(),
+        Ok(WorktreeMutationOutcome::Failed { message, .. }) => {
+            format!("worktree prune failed: {message}")
+        }
+        Err(err) => format!("worktree prune failed: {err}"),
     };
     app.update(Msg::SetStatus(Some(message)));
 }

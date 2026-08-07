@@ -4,7 +4,7 @@ use super::*;
 fn repo_offers_create_only_when_mutable() {
     assert_eq!(
         worktree_actions(WorktreeContext::Repo, true),
-        vec![WorktreeAction::NewWorktree],
+        vec![WorktreeAction::NewWorktree, WorktreeAction::PruneWorktrees],
     );
     assert!(worktree_actions(WorktreeContext::Repo, false).is_empty());
 }
@@ -64,6 +64,7 @@ fn mutation_flag_matches_action_set() {
     assert!(WorktreeAction::MergeWorktree.is_mutation());
     assert!(WorktreeAction::RemoveWorktree.is_mutation());
     assert!(WorktreeAction::CloseDownWorktree.is_mutation());
+    assert!(WorktreeAction::PruneWorktrees.is_mutation());
     assert!(!WorktreeAction::RevealCheckout.is_mutation());
     assert!(!WorktreeAction::RevealSessions.is_mutation());
 }

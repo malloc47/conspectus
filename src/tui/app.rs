@@ -672,6 +672,12 @@ pub enum Msg {
         branch: String,
         discard: bool,
     },
+    /// Commit the worktree menu's "Prune merged worktrees" confirm
+    /// (H-WT-008). Reducer emits
+    /// `Effect::WriteStore(StoreOp::WorktreePrune)`.
+    CommitWorktreePrune {
+        repo_root: String,
+    },
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot
     /// (or fresh defaults on first visit), and re-derives the row
@@ -837,7 +843,7 @@ impl App {
     /// Active worktree action menu (H-WT-004b), if on top of the stack.
     pub fn worktree_menu(&self) -> Option<&crate::tui::widgets::worktree_menu::WorktreeMenuState> {
         match self.modal_stack.last()? {
-            crate::tui::Modal::WorktreeMenu(state) => Some(state),
+            crate::tui::Modal::WorktreeMenu(state) => Some(state.as_ref()),
             _ => None,
         }
     }
@@ -847,7 +853,7 @@ impl App {
         &mut self,
     ) -> Option<&mut crate::tui::widgets::worktree_menu::WorktreeMenuState> {
         match self.modal_stack.last_mut()? {
-            crate::tui::Modal::WorktreeMenu(state) => Some(state),
+            crate::tui::Modal::WorktreeMenu(state) => Some(state.as_mut()),
             _ => None,
         }
     }
@@ -858,7 +864,7 @@ impl App {
         state: crate::tui::widgets::worktree_menu::WorktreeMenuState,
     ) {
         self.modal_stack
-            .push(crate::tui::Modal::WorktreeMenu(state));
+            .push(crate::tui::Modal::WorktreeMenu(Box::new(state)));
     }
 
     /// Pop the worktree menu if it's on top; no-op otherwise.
@@ -2425,6 +2431,11 @@ impl App {
                         branch,
                         discard,
                     },
+                ));
+            }
+            Msg::CommitWorktreePrune { repo_root } => {
+                effects.push(Effect::WriteStore(
+                    crate::tui::effect::StoreOp::WorktreePrune { repo_root },
                 ));
             }
         }

@@ -482,3 +482,50 @@ fn git_backend_merge_is_unsupported() {
         WorktreeMutationOutcome::Unsupported,
     );
 }
+
+#[test]
+fn worktrunk_reports_prune_capability() {
+    assert!(WorktrunkBackend::new().capabilities().can_prune);
+    assert!(!SystemGitWorktree::new().capabilities().can_prune);
+}
+
+#[test]
+fn worktrunk_prune_runs_step_prune_with_yes_or_dry_run() {
+    let fake = std::sync::Arc::new(FakeWt::ok());
+    let backend = WorktrunkBackend::with_runner(Box::new(fake.clone()));
+    backend
+        .prune(&WorktreePruneRequest {
+            repo_root: PathBuf::from("/repo"),
+            dry_run: false,
+        })
+        .expect("prune runs");
+    backend
+        .prune(&WorktreePruneRequest {
+            repo_root: PathBuf::from("/repo"),
+            dry_run: true,
+        })
+        .expect("prune runs");
+
+    let calls = fake.calls.lock().unwrap();
+    assert_eq!(
+        calls[0],
+        vec!["-C", "/repo", "step", "prune", "--foreground", "--yes"]
+    );
+    assert_eq!(
+        calls[1],
+        vec!["-C", "/repo", "step", "prune", "--foreground", "--dry-run"]
+    );
+}
+
+#[test]
+fn git_backend_prune_is_unsupported() {
+    assert_eq!(
+        SystemGitWorktree::new()
+            .prune(&WorktreePruneRequest {
+                repo_root: PathBuf::from("/repo"),
+                dry_run: false,
+            })
+            .unwrap(),
+        WorktreeMutationOutcome::Unsupported,
+    );
+}

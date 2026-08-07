@@ -187,4 +187,7 @@ pub enum StoreOp {
         branch: String,
         discard: bool,
     },
+    /// Prune worktrees merged into the default branch via the
+    /// configured mutation backend (H-WT-008).
+    WorktreePrune { repo_root: String },
 }

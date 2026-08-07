@@ -55,6 +55,7 @@ impl WorktreeBackend for RecordingBackend {
             can_create: true,
             can_remove: true,
             can_merge: true,
+            can_prune: true,
         }
     }
     fn list(&self, _repo_root: &Path) -> Result<Vec<crate::discovery::worktree::WorktreeRecord>> {

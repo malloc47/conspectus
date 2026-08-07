@@ -68,7 +68,7 @@ pub enum Modal {
     /// captures the selected node's worktree facts + guard at open
     /// time and drives an internal list → branch-input / confirm
     /// state machine.
-    WorktreeMenu(crate::tui::widgets::worktree_menu::WorktreeMenuState),
+    WorktreeMenu(Box<crate::tui::widgets::worktree_menu::WorktreeMenuState>),
 }
 
 /// What an overlay wants the runtime to do after a single key

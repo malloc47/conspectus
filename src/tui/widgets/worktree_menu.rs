@@ -26,6 +26,7 @@ use std::path::Path;
 use crate::model::{GraphNode, GraphSnapshot, NodeId, RepoId, WorktreeKind, path_is_ancestor_of};
 use crate::tui::Msg;
 use crate::tui::modal::{Overlay, OverlayOutcome};
+use crate::tui::rows::RowId;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::{InputOutcome, TextInputState, TextInputWidget};
 use crate::tui::widgets::popup_frame;
@@ -39,6 +40,9 @@ const WIRED: &[WorktreeAction] = &[
     WorktreeAction::MergeWorktree,
     WorktreeAction::RemoveWorktree,
     WorktreeAction::CloseDownWorktree,
+    WorktreeAction::PruneWorktrees,
+    WorktreeAction::RevealCheckout,
+    WorktreeAction::RevealSessions,
 ];
 
 /// Worktree facts captured when the menu opens, so the overlay stays
@@ -55,6 +59,10 @@ pub struct WorktreeMenuContext {
     /// confirm (the H-WT-004a guard list).
     pub guard_sessions: Vec<String>,
     pub can_mutate: bool,
+    /// Row to jump to for the context's reveal action (H-WT-008): the
+    /// containing checkout (from an agent/mux) or the first session in
+    /// the worktree. `None` disables the reveal action.
+    pub reveal_target: Option<RowId>,
 }
 
 /// Build the menu context for the selected `node` from the graph.
@@ -71,6 +79,7 @@ pub fn context_for_node(
             branch: None,
             guard_sessions: Vec::new(),
             can_mutate,
+            reveal_target: None,
         },
         NodeId::Checkout(checkout_id) => {
             let branch = snapshot.nodes.iter().find_map(|n| match n {
@@ -85,6 +94,8 @@ pub fn context_for_node(
                 branch,
                 guard_sessions: live_sessions_in_worktree(snapshot, &checkout_id.root),
                 can_mutate,
+                // Reveal sessions: jump to the first live session inside.
+                reveal_target: first_session_row_in(snapshot, &checkout_id.root),
             }
         }
         NodeId::MuxSession(_) => {
@@ -106,23 +117,78 @@ pub fn context_for_node(
                     .map(|c| live_sessions_in_worktree(snapshot, c))
                     .unwrap_or_default(),
                 can_mutate,
+                // Reveal checkout: jump to the containing checkout row.
+                reveal_target: cwd
+                    .as_deref()
+                    .and_then(|c| checkout_row_containing(snapshot, c)),
             }
         }
-        NodeId::AgentSession(_) => WorktreeMenuContext {
-            context: WorktreeContext::Agent,
-            repo_root: None,
-            branch: None,
-            guard_sessions: Vec::new(),
-            can_mutate,
-        },
+        NodeId::AgentSession(_) => {
+            let cwd = snapshot.nodes.iter().find_map(|n| match n {
+                GraphNode::AgentSession(s) if &NodeId::AgentSession(s.id.clone()) == node => {
+                    s.cwd.clone()
+                }
+                _ => None,
+            });
+            WorktreeMenuContext {
+                context: WorktreeContext::Agent,
+                repo_root: None,
+                branch: None,
+                guard_sessions: Vec::new(),
+                can_mutate,
+                reveal_target: cwd
+                    .as_deref()
+                    .and_then(|c| checkout_row_containing(snapshot, c)),
+            }
+        }
         _ => WorktreeMenuContext {
             context: WorktreeContext::None,
             repo_root: None,
             branch: None,
             guard_sessions: Vec::new(),
             can_mutate,
+            reveal_target: None,
         },
     }
+}
+
+/// The `Group` row of the worktree checkout containing `path` — the
+/// reveal-checkout jump target (H-WT-008).
+fn checkout_row_containing(snapshot: &GraphSnapshot, path: &str) -> Option<RowId> {
+    let p = Path::new(path);
+    snapshot.nodes.iter().find_map(|n| match n {
+        GraphNode::Checkout(c)
+            if c.worktree.is_some() && path_is_ancestor_of(Path::new(&c.root), p) =>
+        {
+            Some(RowId::Group(NodeId::Checkout(c.id.clone())))
+        }
+        _ => None,
+    })
+}
+
+/// The first live session rooted in `worktree_path` — the
+/// reveal-sessions jump target. Prefers a mux session over an agent so
+/// the operator lands on the attachable row.
+fn first_session_row_in(snapshot: &GraphSnapshot, worktree_path: &str) -> Option<RowId> {
+    let root = Path::new(worktree_path);
+    let mux = snapshot.nodes.iter().find_map(|n| match n {
+        GraphNode::MuxSession(m) => {
+            let cwd = m.active_pane_current_path.as_deref().or(m.cwd.as_deref());
+            cwd.filter(|c| path_is_ancestor_of(root, Path::new(c)))
+                .map(|_| RowId::MuxSession(NodeId::MuxSession(m.id.clone())))
+        }
+        _ => None,
+    });
+    mux.or_else(|| {
+        snapshot.nodes.iter().find_map(|n| match n {
+            GraphNode::AgentSession(s) => s
+                .cwd
+                .as_deref()
+                .filter(|c| path_is_ancestor_of(root, Path::new(c)))
+                .map(|_| RowId::AgentSession(NodeId::AgentSession(s.id.clone()))),
+            _ => None,
+        })
+    })
 }
 
 /// The primary worktree's root for a repo (the checkout git lists
@@ -193,6 +259,15 @@ fn short_branch(refname: &str) -> String {
         .to_string()
 }
 
+/// Whether `action` is a read-only reveal/navigate jump (H-WT-008),
+/// which needs a resolved `reveal_target` to be offerable.
+fn is_reveal(action: WorktreeAction) -> bool {
+    matches!(
+        action,
+        WorktreeAction::RevealCheckout | WorktreeAction::RevealSessions
+    )
+}
+
 #[derive(Debug, Clone)]
 enum Mode {
     List,
@@ -201,6 +276,7 @@ enum Mode {
     ConfirmMerge,
     /// Close-down: pick merge (land) vs discard, then commit.
     CloseDownChoice,
+    ConfirmPrune,
 }
 
 /// Overlay state: the captured context, the offered actions, a cursor,
@@ -220,10 +296,13 @@ impl WorktreeMenuState {
     /// runtime can post a status instead of opening an empty modal.
     pub fn new(ctx: WorktreeMenuContext) -> Option<Self> {
         let has_repo = ctx.repo_root.is_some();
+        let has_reveal = ctx.reveal_target.is_some();
         let actions: Vec<WorktreeAction> = worktree_actions(ctx.context, ctx.can_mutate)
             .into_iter()
             .filter(|a| WIRED.contains(a))
             .filter(|a| !a.is_mutation() || has_repo)
+            // Drop reveal actions with no resolved jump target.
+            .filter(|a| !is_reveal(*a) || has_reveal)
             .collect();
         if actions.is_empty() {
             return None;
@@ -278,9 +357,15 @@ impl WorktreeMenuState {
                 self.mode = Mode::CloseDownChoice;
                 OverlayOutcome::Consumed
             }
-            // Reveal actions are filtered out of `actions` today.
+            WorktreeAction::PruneWorktrees => {
+                self.mode = Mode::ConfirmPrune;
+                OverlayOutcome::Consumed
+            }
             WorktreeAction::RevealCheckout | WorktreeAction::RevealSessions => {
-                OverlayOutcome::Close
+                match self.ctx.reveal_target.clone() {
+                    Some(row) => OverlayOutcome::Commit(Box::new(Msg::SelectRow(Box::new(row)))),
+                    None => OverlayOutcome::Close,
+                }
             }
         }
     }
@@ -369,6 +454,22 @@ impl WorktreeMenuState {
         }
     }
 
+    fn handle_confirm_prune(&mut self, key: KeyEvent) -> OverlayOutcome {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('y') => {
+                let Some(repo_root) = self.ctx.repo_root.clone() else {
+                    return OverlayOutcome::Close;
+                };
+                OverlayOutcome::Commit(Box::new(Msg::CommitWorktreePrune { repo_root }))
+            }
+            KeyCode::Esc | KeyCode::Char('n') => {
+                self.mode = Mode::List;
+                OverlayOutcome::Consumed
+            }
+            _ => OverlayOutcome::Consumed,
+        }
+    }
+
     fn handle_close_down(&mut self, key: KeyEvent) -> OverlayOutcome {
         // `m` lands the branch, `d` discards it; both then tear the
         // stream down (ADR 0093). Esc/q backs out.
@@ -403,6 +504,7 @@ impl Overlay for WorktreeMenuState {
             Mode::ConfirmRemove => self.handle_confirm_remove(key),
             Mode::ConfirmMerge => self.handle_confirm_merge(key),
             Mode::CloseDownChoice => self.handle_close_down(key),
+            Mode::ConfirmPrune => self.handle_confirm_prune(key),
         }
     }
 }
@@ -518,6 +620,18 @@ impl Widget for WorktreeMenuWidget<'_> {
                     "m = merge & close · d = discard & close · Esc cancel",
                 ));
                 lines
+            }
+            Mode::ConfirmPrune => {
+                vec![
+                    Line::styled(
+                        "Prune merged worktrees?",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Line::from("Removes every worktree already merged into the default"),
+                    Line::from("branch (worktrunk skips ones younger than its min-age)."),
+                    Line::from(""),
+                    Line::from("Enter/y to confirm · Esc/n to cancel"),
+                ]
             }
             Mode::BranchInput(_) => unreachable!("handled above"),
         };

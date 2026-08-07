@@ -42,6 +42,9 @@ pub enum WorktreeAction {
     /// terminate its sessions, remove the worktree, drop its pins
     /// (compound mutation; ADR 0093).
     CloseDownWorktree,
+    /// Prune worktrees already merged into the repo's default branch
+    /// (repo-level mutation; H-WT-008).
+    PruneWorktrees,
     /// Select the checkout/worktree the selected agent or mux is in.
     RevealCheckout,
     /// List the sessions rooted in the selected worktree.
@@ -59,6 +62,7 @@ impl WorktreeAction {
                 | Self::MergeWorktree
                 | Self::RemoveWorktree
                 | Self::CloseDownWorktree
+                | Self::PruneWorktrees
         )
     }
 
@@ -69,6 +73,7 @@ impl WorktreeAction {
             Self::MergeWorktree => "Merge back & close",
             Self::RemoveWorktree => "Remove worktree",
             Self::CloseDownWorktree => "Close down stream…",
+            Self::PruneWorktrees => "Prune merged worktrees…",
             Self::RevealCheckout => "Reveal checkout",
             Self::RevealSessions => "Reveal sessions",
         }
@@ -87,6 +92,7 @@ pub fn worktree_actions(context: WorktreeContext, can_mutate: bool) -> Vec<Workt
         WorktreeContext::Repo => {
             if can_mutate {
                 actions.push(NewWorktree);
+                actions.push(PruneWorktrees);
             }
         }
         WorktreeContext::Worktree => {

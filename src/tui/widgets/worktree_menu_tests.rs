@@ -20,6 +20,7 @@ fn worktree_ctx(guard: Vec<String>, can_mutate: bool) -> WorktreeMenuContext {
         branch: Some("feature".to_string()),
         guard_sessions: guard,
         can_mutate,
+        reveal_target: None,
     }
 }
 
@@ -242,4 +243,98 @@ fn context_for_mux_resolves_its_rooted_worktree() {
     assert_eq!(ctx.context, WorktreeContext::Mux);
     assert_eq!(ctx.repo_root.as_deref(), Some("/wt/feature"));
     assert_eq!(ctx.branch.as_deref(), Some("feature"));
+    // Reveal-checkout target is the containing checkout's group row.
+    assert_eq!(
+        ctx.reveal_target,
+        Some(RowId::Group(NodeId::Checkout(CheckoutId::new(
+            RepoId::new("/app/.git"),
+            "/wt/feature"
+        ))))
+    );
+}
+
+#[test]
+fn repo_prune_flow_commits_prune() {
+    let ctx = WorktreeMenuContext {
+        context: WorktreeContext::Repo,
+        repo_root: Some("/app".to_string()),
+        branch: None,
+        guard_sessions: vec![],
+        can_mutate: true,
+        reveal_target: None,
+    };
+    let mut state = WorktreeMenuState::new(ctx).expect("actions");
+    assert_eq!(
+        state.actions,
+        vec![WorktreeAction::NewWorktree, WorktreeAction::PruneWorktrees],
+    );
+    // Navigate to prune, confirm.
+    state.handle((), key(KeyCode::Down));
+    assert_eq!(
+        state.handle((), key(KeyCode::Enter)),
+        OverlayOutcome::Consumed
+    );
+    assert_eq!(
+        state.handle((), char_key('y')),
+        OverlayOutcome::Commit(Box::new(Msg::CommitWorktreePrune {
+            repo_root: "/app".to_string(),
+        })),
+    );
+}
+
+// ---- reveal / navigate (H-WT-008) ----
+
+#[test]
+fn context_for_worktree_reveal_targets_first_session() {
+    let mut snap = GraphSnapshot::empty();
+    snap.nodes.push(linked_checkout(
+        "/app/.git",
+        "/wt/feature",
+        "refs/heads/feature",
+    ));
+    snap.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(MuxSessionId::new("tmux:feat"), "tmux", "feat")
+            .with_active_pane_current_path("/wt/feature/src".to_string()),
+    ));
+    let id = NodeId::Checkout(CheckoutId::new(RepoId::new("/app/.git"), "/wt/feature"));
+
+    let ctx = context_for_node(&snap, &id, true);
+    assert_eq!(
+        ctx.reveal_target,
+        Some(RowId::MuxSession(NodeId::MuxSession(MuxSessionId::new(
+            "tmux:feat"
+        ))))
+    );
+    // With a target, the read-only reveal action is offered even on a
+    // read-only host.
+    let state = WorktreeMenuState::new(WorktreeMenuContext {
+        can_mutate: false,
+        ..ctx
+    })
+    .expect("reveal offered");
+    assert!(state.actions.contains(&WorktreeAction::RevealSessions));
+}
+
+#[test]
+fn reveal_action_commits_a_selection_jump() {
+    let mut ctx = worktree_ctx(vec![], true);
+    let target = RowId::MuxSession(NodeId::MuxSession(MuxSessionId::new("tmux:feat")));
+    ctx.reveal_target = Some(target.clone());
+    let mut state = WorktreeMenuState::new(ctx).expect("actions");
+    // RevealSessions is the last offered action for a worktree.
+    while state.selected() != WorktreeAction::RevealSessions {
+        state.handle((), key(KeyCode::Down));
+    }
+    assert_eq!(
+        state.handle((), key(KeyCode::Enter)),
+        OverlayOutcome::Commit(Box::new(Msg::SelectRow(Box::new(target)))),
+    );
+}
+
+#[test]
+fn reveal_dropped_without_a_target() {
+    // A worktree with no live sessions has no reveal target, so the
+    // reveal action isn't offered.
+    let state = WorktreeMenuState::new(worktree_ctx(vec![], true)).expect("actions");
+    assert!(!state.actions.contains(&WorktreeAction::RevealSessions));
 }

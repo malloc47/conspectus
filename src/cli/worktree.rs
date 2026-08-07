@@ -21,8 +21,8 @@ use conspectus::discovery::worktree::close_down::{
     CloseDownPlan, CloseDownReport, execute_close_down, plan_close_down,
 };
 use conspectus::discovery::worktree::{
-    WorktreeCreateRequest, WorktreeMergeRequest, WorktreeMutationOutcome, WorktreeRemoveRequest,
-    resolve_mutation_backend, worktrunk_available,
+    WorktreeCreateRequest, WorktreeMergeRequest, WorktreeMutationOutcome, WorktreePruneRequest,
+    WorktreeRemoveRequest, resolve_mutation_backend, worktrunk_available,
 };
 use conspectus::model::{GraphNode, GraphSnapshot, RepoId, WorktreeKind, path_is_ancestor_of};
 
@@ -51,6 +51,10 @@ enum WorktreeCommand {
     /// discard the branch, terminate the mux/agent sessions rooted in
     /// the worktree, remove the worktree, and drop pins rooted there.
     Close(WorktreeCloseArgs),
+    /// Prune worktrees already merged into the repo's default branch
+    /// (delegates to `wt step prune`; H-WT-008). Distinct from git's
+    /// stale-admin prune.
+    Prune(WorktreePruneArgs),
 }
 
 impl WorktreeArgs {
@@ -61,6 +65,7 @@ impl WorktreeArgs {
             WorktreeCommand::Rm(args) => args.run(),
             WorktreeCommand::Merge(args) => args.run(),
             WorktreeCommand::Close(args) => args.run(),
+            WorktreeCommand::Prune(args) => args.run(),
         }
     }
 }
@@ -363,6 +368,65 @@ impl WorktreeCloseArgs {
         )?;
 
         render_close_down_report(&plan, &report)
+    }
+}
+
+#[derive(Debug, Args)]
+struct WorktreePruneArgs {
+    /// A path inside the repo to prune within. Defaults to the current
+    /// directory.
+    #[arg(long = "repo", value_name = "PATH")]
+    repo: Option<PathBuf>,
+    /// Show what would be removed without removing anything.
+    #[arg(long)]
+    dry_run: bool,
+    /// Skip the confirmation prompt.
+    #[arg(long, short = 'y')]
+    yes: bool,
+}
+
+impl WorktreePruneArgs {
+    fn run(self) -> Result<()> {
+        let repo_root = match &self.repo {
+            Some(path) => path.clone(),
+            None => std::env::current_dir()?,
+        };
+
+        // Removing merged worktrees is bulk + destructive, so confirm
+        // unless it's a dry run or the operator passed --yes.
+        if !self.dry_run && !self.yes {
+            let summary = format!(
+                "Prune worktrees merged into the default branch under {} \
+                 (worktrunk skips worktrees younger than its --min-age)",
+                repo_root.display()
+            );
+            if !confirm_prompt(&summary)? {
+                println!("aborted");
+                return Ok(());
+            }
+        }
+
+        let backend = mutation_backend()?;
+        let outcome = backend.prune(&WorktreePruneRequest {
+            repo_root,
+            dry_run: self.dry_run,
+        })?;
+        match outcome {
+            WorktreeMutationOutcome::Succeeded { .. } => {
+                if self.dry_run {
+                    println!("dry run complete (nothing removed)");
+                } else {
+                    println!("pruned merged worktrees");
+                }
+                Ok(())
+            }
+            WorktreeMutationOutcome::Unsupported => {
+                bail!("the configured worktree backend cannot prune worktrees")
+            }
+            WorktreeMutationOutcome::Failed { code, message } => {
+                bail!("worktree prune failed{}: {message}", code_suffix(code))
+            }
+        }
     }
 }
 
