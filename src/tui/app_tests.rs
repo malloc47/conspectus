@@ -413,6 +413,75 @@ fn pins_context_seeds_pin_mutation_target_from_selected_pin_row() {
     assert_eq!(target.store_path, "/p/project/.conspectus.toml");
 }
 
+#[test]
+fn pins_context_seeds_pin_mutation_target_from_selected_pinned_mux_row() {
+    // H-PIN-EDIT-MUX-001 regression: selecting a live mux row that
+    // backs a pin (mux view) must resolve the same pin target the
+    // corresponding session-row selection resolves. Before the fix
+    // `pin_mutation_target` only matched Pin + AgentSession rows, so
+    // rename/delete on a pinned mux row toasted "no editable pin in
+    // current selection" even though `selected_pin_id` returned the id.
+    let mut snap = snapshot_session_with_mux();
+    snap.pins.push(PinCandidate {
+        id: "work-pin".to_string(),
+        display_name: "Work".to_string(),
+        harness: "claude-code".to_string(),
+        cwd: "/p/proj".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "work".to_string(),
+            socket_name: None,
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/p/proj/.conspectus.toml".to_string(),
+        binding: Some(PinBinding::StaleMux {
+            mux: crate::model::MuxSessionId::new("work"),
+        }),
+    });
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot: &snap,
+        home: None,
+        now: None,
+        filter: crate::tui::RowFilter::default(),
+        grouping: crate::tui::MuxGrouping::Repo,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    let mut app = App::new(RunConfig {
+        default_view: View::Mux,
+        mux_grouping: crate::tui::MuxGrouping::Repo,
+        ..RunConfig::defaults()
+    });
+    app.update(Msg::SetData {
+        snapshot: GraphDb::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let mux_row_id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) if mux.native_id == "work" => Some(row.id.clone()),
+            _ => None,
+        })
+        .expect("pinned mux row");
+    app.set_selection(mux_row_id);
+
+    let ctx = app.pins_context();
+    assert_eq!(ctx.selected_pin_id.as_deref(), Some("work-pin"));
+    let target = ctx.pin_target.expect("pin mutation target from mux row");
+    assert_eq!(target.id, "work-pin");
+    assert_eq!(target.display_name, "Work");
+    assert_eq!(target.harness, "claude-code");
+    assert_eq!(target.cwd, "/p/proj");
+    assert_eq!(target.mux_name, "work");
+    assert_eq!(target.mux_socket, None);
+    assert_eq!(target.store_path, "/p/proj/.conspectus.toml");
+}
+
 fn pin_only_snapshot(binding: Option<PinBinding>) -> GraphSnapshot {
     let mut snap = GraphSnapshot::empty();
     snap.pins.push(PinCandidate {

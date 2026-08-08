@@ -1352,6 +1352,7 @@ impl App {
                 });
             }
             RowKind::AgentSession(session) => session.pin_id.clone()?,
+            RowKind::MuxSession(mux) => mux.pin_id.clone()?,
             _ => return None,
         };
         self.database.as_ref().and_then(|db| {
