@@ -13792,6 +13792,124 @@ approach (not raw implementation size). Worked top-to-bottom.
       - Status: **CLI + guard landed (004a)**, smoke-verified with real
         worktrunk (create → git worktree list shows it → remove).
 
+### Operator Requests 2026-08-07
+
+Fresh batch, added alongside the 2026-07-27 items.
+
+- [ ] `H-PIN-EDIT-MUX-001` Pin edit / delete does not resolve a pin when a
+  pinned mux row is selected in the mux view.
+  - Symptom: on a pinned mux row selected from the Mux view, pressing `R`
+    (rename) or `Delete` (via the pins menu / `p`) reports "no editable
+    pin `<pin_id>` in current selection" even though the row carries the
+    pin's badge and `selected_pin_id()` returns `Some(<id>)`. Selecting
+    the same pin's session row from the Sessions view works.
+  - Root cause: `App::pin_mutation_target` (`src/tui/app.rs:1338`) is the
+    single source of truth the pins menu, `CommitRename` pin branch, and
+    `remove_pin_action` (`src/tui/runtime.rs:1092`) all consume. It
+    matches `RowKind::Pin` and `RowKind::AgentSession(session).pin_id`
+    but omits the parallel `RowKind::MuxSession(mux).pin_id` case that
+    `row_pin_id` (`src/tui/app.rs:3188`) and `selected_pin_id`
+    (`src/tui/app.rs:1581`) already handle. So `selected_pin_id()`
+    returns `Some(...)`, `pin_mutation_target()` returns `None`, and the
+    caller falls through to the "not selected" toast.
+  - Fix: extend the `match &row.kind` arm to resolve
+    `RowKind::MuxSession(mux)` via `mux.pin_id.clone()?` (mirroring the
+    AgentSession arm) so the pin lookup in `database.snapshot().pins`
+    fires the same way as it does from a session row.
+  - Tests: regression modeled on
+    `pins_context_seeds_pin_mutation_target_from_selected_pin_row`
+    (`src/tui/app_tests.rs:366`), but selecting the mux row that backs
+    the pin. Assert `pin_target` resolves to the same
+    `PinMutationTarget` fields the session-row test asserts.
+  - Blockers: none.
+- [ ] `H-HARNESS-ATELIER-001` Atelier `exec claude` panes render as "No
+  agent" in the TUI / CLI.
+  - Symptom: launching claude via atelier's `atelier exec claude`
+    convention produces a live claude process in the pane's tree, but
+    Conspectus attributes no harness to the mux — the row renders as
+    "No agent" and no `AgentSession` is linked. Direct `claude` launches
+    are unaffected.
+  - Suspected surface: process-tree harness attribution
+    (`process_command_harnesses` in `src/discovery/cross_link.rs:1472`)
+    keys off the argv[0] basename of each descendant pid, lowercased and
+    matched against each adapter's `RuntimeSignature.process_command_basenames`.
+    The claude adapter lists `["claude", "claude-code"]`
+    (`src/discovery/harness/claude_code.rs:97`). If `atelier exec`
+    inserts a wrapper whose descendant argv[0] is not one of those
+    tokens (e.g. a nix-store path with an unexpected basename, a shim
+    binary, a shell-form command line, or a depth exceeding
+    `PROCESS_TREE_MAX_DEPTH`), attribution silently misses.
+  - Investigation (needs live repro): from an operator box with a live
+    `atelier exec claude` pane, capture `ps -eo pid,ppid,command
+    --forest` rooted at the pane pid, plus `/proc/<pid>/cmdline` for
+    each descendant. Compare against the matcher above to identify the
+    concrete miss (argv shape, depth, or command basename).
+  - Likely fix directions (pick after diagnosis): (a) add the observed
+    wrapper basename to `process_command_basenames`; (b) fall back to
+    `command_substrings` when basename match fails; (c) raise
+    `PROCESS_TREE_MAX_DEPTH`; (d) special-case an `atelier` adapter that
+    delegates attribution.
+  - Tests: once the miss shape is known, add a cross_link fixture that
+    reproduces the process tree and asserts claude attribution.
+  - Blockers: needs live process-tree data. Deferred until repro
+    provided.
+- [x] `H-MUX-NEW-001` Create bare tmux sessions from within Conspectus
+  (no pin, no agent).
+  - Motivation: operators currently drop out of Conspectus to run a
+    plain `tmux new-session -s <name> -c <cwd>` when they want a bare
+    console session rooted in a repo/checkout. The mux view should
+    support this in-place, distinct from the pin-launch path (which
+    always creates a pin + attributes a harness).
+  - Envelope: sanctioned by ADR 0087 category 3 (operator-initiated mux
+    lifecycle: rename / new-session / attach). No new mutation category
+    needed. `MuxBackend::new_session` primitive already exists
+    (`src/discovery/tmux/mod.rs:112`) and is used by pin launch; this
+    story adds a no-argv, no-pin caller.
+  - Scope:
+    - Design note (short — in `docs/design.md` under a Mux Lifecycle
+      section, or extend the existing pins/worktree lifecycle prose)
+      distinguishing "bare mux" (no pin, no agent) from "pin launch"
+      and "worktree stream". Consider whether a full ADR is warranted;
+      likely a paragraph is enough if no new envelope categories are
+      needed.
+    - TUI: menu-first "New tmux session…" action in the mux-context
+      action menu, plus a lowercase `n` hot key (uppercase `N` is the
+      worktree-backed pin create shortcut per ADR 0094). Prompt is a
+      single-field name input; on submit, invoke `new_session` with
+      no argv and hand off to the existing attach path.
+    - Default cwd seeding: selected row's cwd when a Repo / Checkout /
+      Mux / Session row is selected, else `$HOME`. Editable in the
+      form.
+    - CLI parity: `conspectus mux new <name> [--cwd <path>]
+      [--socket <name>]`.
+    - Backend availability: requires the tmux mutation backend already
+      required by pin launch. No new capability flag needed.
+    - Post-create UX: after `new_session` returns `Created`, follow the
+      existing pin-launch exec-replace attach path so the operator
+      lands inside the fresh session. On `NameTaken`, toast + keep the
+      form open (parallel to pin create's duplicate handling).
+  - Non-goals: this story does not persist a pin, run an agent, tie
+    the session to a worktree, or affect discovery. A bare mux is
+    picked up by the existing tmux discovery on the next refresh.
+  - Tests: `new_session` call assertion via `FakeTmux`; snapshot the
+    new form's initial state; cwd-defaulting unit tests for each row
+    kind; CLI arg parse + dispatch test.
+  - Outcome: **landed as ADR 0095**. Design memorialized in ADR 0095
+    (bare mux as ADR 0087 category-3, distinct from pin-launch /
+    worktree-stream) plus a `## Mux Lifecycle` section in
+    `docs/design.md`. CLI: `conspectus mux new <name> [--cwd <path>]
+    [--socket <name>] [--no-attach]` in `src/cli/mux.rs`, reusing the
+    pin-launch attach + report helpers. TUI: lowercase `n` opens a
+    two-field `NewMuxFormState` overlay (name + cwd; cwd seeded from
+    the selected row's cwd else `$HOME`; `Tab` cycles focus; `Enter`
+    advances/commits). On commit the TUI re-execs into
+    `conspectus mux new … --no-attach`, refreshes discovery, then
+    attaches. A dedicated `m`-keyed mux action menu (which would fold
+    in attach `a` / `Enter` and rename `R` for discovery alongside New)
+    is deferred until a second bare-mux-shape verb lands; today attach
+    and rename are polymorphic-across-node-kinds global bindings rather
+    than mux-specific menu entries. See ADR 0095 follow-ups.
+
 ### Worktree Interaction Epic (H-WT-ENV / H-WT-004b..008)
 
 Brainstormed 2026-08 across contexts (agent/mux/repo/checkout). Mental
