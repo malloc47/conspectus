@@ -69,6 +69,10 @@ pub enum Modal {
     /// time and drives an internal list → branch-input / confirm
     /// state machine.
     WorktreeMenu(Box<crate::tui::widgets::worktree_menu::WorktreeMenuState>),
+    /// `n` bare tmux new-session form (H-MUX-NEW-001 / ADR 0095).
+    /// Context-free two-field form (name + cwd) that emits
+    /// [`Msg::CommitMuxNew`].
+    NewMux(crate::tui::widgets::new_mux::NewMuxFormState),
 }
 
 /// What an overlay wants the runtime to do after a single key

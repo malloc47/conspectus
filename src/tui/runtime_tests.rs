@@ -1541,4 +1541,24 @@ mod pin_launch_scan_root {
             ]
         );
     }
+
+    #[test]
+    fn mux_new_argv_carries_name_cwd_and_no_attach() {
+        // H-MUX-NEW-001 / ADR 0095: the TUI re-execs into
+        // `conspectus mux new` with the operator-supplied fields;
+        // `--no-attach` is always present so the TUI's own attach
+        // path (not the subprocess) hands the terminal off.
+        let argv = mux_new_argv("dev", "/home/op/proj");
+        assert_eq!(
+            argv,
+            vec![
+                "mux".to_string(),
+                "new".to_string(),
+                "dev".to_string(),
+                "--cwd".to_string(),
+                "/home/op/proj".to_string(),
+                "--no-attach".to_string(),
+            ]
+        );
+    }
 }

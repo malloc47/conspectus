@@ -79,6 +79,7 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_help_overlay(app, frame, area);
     draw_rename_overlay(app, frame, area);
     draw_worktree_menu(app, frame, area);
+    draw_new_mux_form(app, frame, area);
     draw_value_modal(app, frame, area);
     draw_toast(app, frame, area);
 }
@@ -89,6 +90,14 @@ fn draw_worktree_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
     };
     use crate::tui::widgets::worktree_menu::WorktreeMenuWidget;
     frame.render_widget(WorktreeMenuWidget::new(state, app.theme()), area);
+}
+
+fn draw_new_mux_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.new_mux_form() else {
+        return;
+    };
+    use crate::tui::widgets::new_mux::NewMuxFormWidget;
+    frame.render_widget(NewMuxFormWidget::new(state, app.theme()), area);
 }
 
 fn draw_toast(app: &App, frame: &mut Frame<'_>, area: Rect) {

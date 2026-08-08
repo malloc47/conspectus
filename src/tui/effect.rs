@@ -91,6 +91,12 @@ pub enum ExecSpec {
         pin_id: String,
         attach_target: Option<PinLaunchTarget>,
     },
+    /// Suspend the alt screen, re-exec into
+    /// `conspectus mux new <name> --cwd <cwd> --no-attach`, refresh
+    /// so the row tree picks up the new session, then attach.
+    /// Mirrors [`ExecSpec::LaunchPin`] but with no pin lookup —
+    /// the operator supplied the fields via the form (ADR 0095).
+    MuxNew { name: String, cwd: String },
 }
 
 /// A mux backend op the executor should run. The reducer emits this

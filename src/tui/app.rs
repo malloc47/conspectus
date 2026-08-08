@@ -678,6 +678,15 @@ pub enum Msg {
     CommitWorktreePrune {
         repo_root: String,
     },
+    /// Commit the bare tmux `new-session` form (H-MUX-NEW-001 /
+    /// ADR 0095). Reducer emits `Effect::Exec(ExecSpec::MuxNew)` so
+    /// the runtime re-execs into `conspectus mux new` with the same
+    /// UX (alt-screen suspend → subprocess → refresh → attach) as
+    /// pin launch.
+    CommitMuxNew {
+        name: String,
+        cwd: String,
+    },
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot
     /// (or fresh defaults on first visit), and re-derives the row
@@ -873,6 +882,36 @@ impl App {
             self.modal_stack.last(),
             Some(crate::tui::Modal::WorktreeMenu(_))
         ) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// Active bare mux form (H-MUX-NEW-001), if on top of the stack.
+    pub fn new_mux_form(&self) -> Option<&crate::tui::widgets::new_mux::NewMuxFormState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::NewMux(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Mutable access for the runtime's per-key forwarding.
+    pub fn new_mux_form_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::new_mux::NewMuxFormState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::NewMux(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Push the bare mux form onto the modal stack (H-MUX-NEW-001).
+    pub fn open_new_mux_form(&mut self, state: crate::tui::widgets::new_mux::NewMuxFormState) {
+        self.modal_stack.push(crate::tui::Modal::NewMux(state));
+    }
+
+    /// Pop the bare mux form if it's on top; no-op otherwise.
+    pub fn close_new_mux_form(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::NewMux(_))) {
             self.modal_stack.pop();
         }
     }
@@ -2438,6 +2477,12 @@ impl App {
                 effects.push(Effect::WriteStore(
                     crate::tui::effect::StoreOp::WorktreePrune { repo_root },
                 ));
+            }
+            Msg::CommitMuxNew { name, cwd } => {
+                effects.push(Effect::Exec(crate::tui::effect::ExecSpec::MuxNew {
+                    name,
+                    cwd,
+                }));
             }
         }
         effects

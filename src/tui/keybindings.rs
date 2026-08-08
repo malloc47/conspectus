@@ -214,6 +214,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('n'),
+        action: || Action::OpenNewMuxForm,
+        help_text: "Create a new bare tmux session (no pin, no agent)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
         key: KeyMatcher::UpperChar('B'),
         action: || Action::OpenPinRebind,
         help_text: "Rebind the selected pin",

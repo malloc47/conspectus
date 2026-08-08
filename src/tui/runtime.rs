@@ -265,6 +265,10 @@ impl LoopMode for LiveMode {
             Some(Action::WorktreeMenuKey(key)) => {
                 handle_worktree_menu_key(terminal, app, config, tmux, key)
             }
+            Some(Action::OpenNewMuxForm) => open_new_mux_form_action(app),
+            Some(Action::NewMuxFormKey(key)) => {
+                handle_new_mux_form_key(terminal, app, config, tmux, key)
+            }
             Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
             Some(Action::PinBindHint) => pin_bind_hint_action(app),
             Some(Action::OpenPinCreate) => open_pin_create_action(app),
@@ -482,7 +486,9 @@ impl LoopMode for StaticMode {
             | Some(Action::RenameOverlayKey(_))
             | Some(Action::OpenWorktreeMenu)
             | Some(Action::OpenWorktreeCloseDown)
-            | Some(Action::WorktreeMenuKey(_)) => {
+            | Some(Action::WorktreeMenuKey(_))
+            | Some(Action::OpenNewMuxForm)
+            | Some(Action::NewMuxFormKey(_)) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
                 )));
@@ -559,6 +565,9 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.worktree_menu().is_some() {
         return Some(Action::WorktreeMenuKey(key));
+    }
+    if app.new_mux_form().is_some() {
+        return Some(Action::NewMuxFormKey(key));
     }
     if app.controls_overlay().is_some() {
         return Some(Action::ControlsOverlayKey(key));
@@ -1081,6 +1090,108 @@ fn handle_worktree_menu_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_worktree_menu();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
+/// Open the bare-tmux new-session form (`n`), seeding cwd from the
+/// selected row's cwd when it resolves to a repo, checkout, mux, or
+/// agent-session row; otherwise fall back to `$HOME`. Name defaults
+/// to a unique-per-live-mux slug derived from the selected row when
+/// possible, else empty (operator types it in).
+pub(super) fn open_new_mux_form_action(app: &mut App) {
+    use crate::tui::widgets::new_mux::NewMuxFormState;
+    let seeded_cwd = derive_new_mux_cwd(app).unwrap_or_else(default_new_mux_cwd);
+    let seeded_name = derive_new_mux_name(app);
+    app.open_new_mux_form(NewMuxFormState::new(seeded_name, seeded_cwd));
+    app.update(Msg::SetStatus(Some(
+        "mux: Tab switch field · Enter next/commit · Esc cancel".to_string(),
+    )));
+}
+
+/// Read the selected row's cwd (repo / checkout / mux / agent
+/// session). Returns `None` when nothing is selected or the row has
+/// no cwd we can inherit.
+fn derive_new_mux_cwd(app: &App) -> Option<String> {
+    use crate::model::GraphNode;
+    use crate::tui::rows::RowKind;
+    let selection = app.selection()?.clone();
+    let rows = app.visible_rows();
+    let row = rows.iter().find(|row| row.id == selection)?;
+    let snapshot = app.graph_db()?.snapshot();
+    match &row.kind {
+        RowKind::Group(group) => group
+            .primary_node
+            .as_ref()
+            .and_then(|node| cwd_for_node(snapshot, node)),
+        RowKind::Repo(r) => cwd_for_node(snapshot, &r.primary_node),
+        RowKind::MuxSession(mux) => snapshot.nodes.iter().find_map(|n| match n {
+            GraphNode::MuxSession(m) if m.id == mux.mux => {
+                m.active_pane_current_path.clone().or_else(|| m.cwd.clone())
+            }
+            _ => None,
+        }),
+        RowKind::AgentSession(session) => snapshot.nodes.iter().find_map(|n| match n {
+            GraphNode::AgentSession(s) if s.id == session.session => s.cwd.clone(),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn cwd_for_node(
+    snapshot: &crate::model::GraphSnapshot,
+    node: &crate::model::NodeId,
+) -> Option<String> {
+    use crate::model::{GraphNode, NodeId};
+    snapshot.nodes.iter().find_map(|n| match (node, n) {
+        (NodeId::Checkout(id), GraphNode::Checkout(c)) if &c.id == id => Some(c.root.clone()),
+        (NodeId::Repo(id), GraphNode::Repo(r)) if &r.id == id => r.source_paths.first().cloned(),
+        (NodeId::MuxSession(id), GraphNode::MuxSession(m)) if &m.id == id => {
+            m.active_pane_current_path.clone().or_else(|| m.cwd.clone())
+        }
+        (NodeId::AgentSession(id), GraphNode::AgentSession(s)) if &s.id == id => s.cwd.clone(),
+        _ => None,
+    })
+}
+
+fn default_new_mux_cwd() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+}
+
+/// Derive a default session-name seed from the selected row. Today
+/// this is intentionally empty — the operator picks a name that fits
+/// their workflow, and tmux forbids some of the punctuation we might
+/// derive from a path anyway. Kept as a helper so a future refinement
+/// (e.g. slugify the repo basename) has one place to land.
+fn derive_new_mux_name(_app: &App) -> String {
+    String::new()
+}
+
+fn handle_new_mux_form_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.new_mux_form_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
+            app.close_new_mux_form();
+            app.update(Msg::SetStatus(Some("mux: cancelled".to_string())));
+        }
+        OverlayOutcome::Commit(msg) => {
+            app.close_new_mux_form();
             dispatch_live(terminal, app, config, tmux, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -2047,6 +2158,9 @@ fn execute_exec_spec(
         } => {
             execute_launch_pin(terminal, app, config, &pin_id, attach_target.as_ref());
         }
+        ExecSpec::MuxNew { name, cwd } => {
+            execute_mux_new(terminal, app, config, &name, &cwd);
+        }
     }
 }
 
@@ -2831,6 +2945,97 @@ fn summarize_pin_launch_output(pin_id: &str, output: std::io::Result<Output>) ->
         Err(err) => PinLaunchSummary {
             success: false,
             message: format!("pin `{pin_id}` launch failed to spawn: {err}"),
+        },
+    }
+}
+
+/// Argv the TUI passes when re-execing into `conspectus mux new`
+/// (H-MUX-NEW-001 / ADR 0095). Split out so the shape is unit-testable
+/// without running the actual subprocess. `--no-attach` is always
+/// present so the subprocess exits after spawning; the TUI's own
+/// attach path takes over once we're back in the alt screen.
+fn mux_new_argv(name: &str, cwd: &str) -> Vec<String> {
+    vec![
+        "mux".to_string(),
+        "new".to_string(),
+        name.to_string(),
+        "--cwd".to_string(),
+        cwd.to_string(),
+        "--no-attach".to_string(),
+    ]
+}
+
+/// Executor branch for `ExecSpec::MuxNew`: suspend the alt screen,
+/// re-exec into `conspectus mux new <name> --cwd <cwd> --no-attach`,
+/// refresh discovery, then attach to the resulting tmux session on
+/// success. Mirrors `execute_launch_pin` but without the pin lookup
+/// or the store-write path.
+fn execute_mux_new(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    name: &str,
+    cwd: &str,
+) {
+    let args = mux_new_argv(name, cwd);
+    ratatui::restore();
+    let output = std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
+    )
+    .args(&args)
+    .output();
+    *terminal = ratatui::init();
+    let _ = terminal.clear();
+
+    refresh(app, config);
+    let launch = summarize_mux_new_output(name, output);
+    app.update(Msg::SetStatus(Some(launch.message.clone())));
+    if !launch.success {
+        app.post_toast(launch.message);
+        return;
+    }
+
+    let attach_target = AttachTarget {
+        mux: MuxSessionId::new(format!("tmux:{name}")),
+        backend: "tmux".to_string(),
+        native_id: name.to_string(),
+    };
+    let outcome = run_tmux_attach(terminal, &attach_target);
+    refresh(app, config);
+    let message = match outcome {
+        AttachOutcome::Detached => format!("mux `{name}` attached/detached"),
+        AttachOutcome::Failed(reason) => format!("mux `{name}` attach failed: {reason}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn summarize_mux_new_output(name: &str, output: std::io::Result<Output>) -> PinLaunchSummary {
+    match output {
+        Ok(output) if output.status.success() => {
+            let detail = command_output_excerpt(&output);
+            PinLaunchSummary {
+                success: true,
+                message: if detail.is_empty() {
+                    format!("mux `{name}` created")
+                } else {
+                    format!("mux `{name}` created: {detail}")
+                },
+            }
+        }
+        Ok(output) => {
+            let detail = command_output_excerpt(&output);
+            PinLaunchSummary {
+                success: false,
+                message: if detail.is_empty() {
+                    format!("mux `{name}` create exited with {}", output.status)
+                } else {
+                    format!("mux `{name}` create failed: {detail}")
+                },
+            }
+        }
+        Err(err) => PinLaunchSummary {
+            success: false,
+            message: format!("mux `{name}` create failed to spawn: {err}"),
         },
     }
 }
