@@ -679,6 +679,34 @@ neither, and worktree mutation stays routed through worktrunk (ADR
 checkout containing a session, or to a worktree's first live session —
 read-only graph navigation, no backend.
 
+## Mux Lifecycle
+
+Conspectus's operator-initiated mux mutations (ADR 0087 category 3) are
+three separate creation flavors plus rename, attach, and teardown:
+
+- **Bare mux** (ADR 0095) — a plain tmux session with no pin, no
+  agent, no worktree. `conspectus mux new <name> [--cwd <path>]` on
+  the CLI; lowercase `n` in the TUI opens a create form. The
+  operator gets a shell in the requested cwd; nothing is persisted
+  and no argv is injected (ADR 0028). The bare session appears in
+  discovery on the next refresh and can later be adopted as a pin
+  (`pin adopt`) if the operator wants durable declaration.
+- **Pin launch** (ADRs 0057 / 0058) — a `pin launch` (or `Enter` on
+  an unbound pin row) starts a tmux session running the pin's
+  harness argv, spliced with `resume_argv` when a continuity
+  sidecar applies.
+- **Worktree stream** (ADR 0094) — a worktree-backed pin realizes
+  its branch's worktree at launch and then runs the pin-launch
+  path inside the fresh worktree cwd. The `N` TUI shortcut opens
+  the pin create form with the worktree toggle pre-enabled.
+
+Rename (ADR 0029, with pin-lockstep), attach (via `MuxBackend`), and
+teardown (ADR 0093, two-phase graceful → hard `kill-session`) round
+out the surface. All four flavors share the `MuxBackend::new_session`
+/ `attach_session` / `kill_session` primitives (ADR 0089) — the
+distinctions are in what the caller passes as argv and whether a pin
+or worktree wraps the call.
+
 ## Status Views
 
 The default `conspectus session` table should be AgentSession-oriented: one row
