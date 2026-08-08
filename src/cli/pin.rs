@@ -1017,7 +1017,11 @@ pub(super) fn resolve_resume_argv_with_cache(
     }
 }
 
-fn attach_and_report(runner: &dyn MuxBackend, socket: Option<&str>, name: &str) -> Result<()> {
+pub(super) fn attach_and_report(
+    runner: &dyn MuxBackend,
+    socket: Option<&str>,
+    name: &str,
+) -> Result<()> {
     let outcome = runner
         .attach_session(socket, name)
         .map_err(|err| anyhow!("tmux attach failed: {err}"))?;
@@ -1056,7 +1060,7 @@ fn report_send_keys(outcome: TmuxSendKeysOutcome, name: &str) -> Result<()> {
     }
 }
 
-fn report_new_session(outcome: TmuxNewSessionOutcome, name: &str) -> Result<()> {
+pub(super) fn report_new_session(outcome: TmuxNewSessionOutcome, name: &str) -> Result<()> {
     match outcome {
         TmuxNewSessionOutcome::Created => Ok(()),
         TmuxNewSessionOutcome::NameTaken => bail!(

@@ -31,6 +31,7 @@ impl Cli {
             Command::Rename(args) => args.run(),
             Command::Alias(args) => args.run(),
             Command::Pin(args) => args.run(),
+            Command::Mux(args) => args.run(),
             Command::Worktree(args) => args.run(),
             Command::Serve(args) => args.run(),
             Command::Refresh(args) => args.run(),
@@ -67,6 +68,9 @@ enum Command {
     Alias(AliasArgs),
     /// Author or inspect session pins (ADR 0057).
     Pin(Box<PinArgs>),
+    /// Create a bare tmux session (no pin, no agent, no worktree —
+    /// ADR 0095). Only `new` today.
+    Mux(MuxArgs),
     /// List, create, and tear down git worktrees (ADR 0092). `list`
     /// is read-only; new / rm / merge / close / prune delegate to the
     /// configured mutation backend. See `docs/worktrees.md`.
@@ -612,6 +616,10 @@ pub(super) fn resolve_alias_store(
 // H-REF-006 wave 10: pin subtree moved to `cli/pin.rs`.
 mod pin;
 use pin::PinArgs;
+
+// H-MUX-NEW-001 / ADR 0095: `conspectus mux new` subcommand.
+mod mux;
+use mux::MuxArgs;
 
 // H-WT-002: `conspectus worktree` subcommand.
 mod worktree;
