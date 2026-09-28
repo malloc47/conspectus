@@ -1439,14 +1439,24 @@ impl App {
                     .display_label()
                     .map_or_else(|| session.session.session_key.clone(), str::to_string);
                 let display = pin_create_default_name_candidate(&display);
-                let id = pin_id_candidate(&display);
-                let mux_name = self.unique_pin_mux_name(&id);
+                let raw_id = pin_id_candidate(&display);
+                let series = self.next_pin_series_name(&raw_id);
+                // A numeric bump (`worker-1` → `worker-2`, H-PIN-TUI-011)
+                // replaces the primary display name too so all three
+                // derived fields open aligned. Plain `-N` suffix
+                // collisions leave the operator-visible display name
+                // alone so verbose session titles stay readable.
+                let display_name = if series.bumped_numerically {
+                    series.name.clone()
+                } else {
+                    display
+                };
                 PinCreateDefaults {
-                    id,
-                    display_name: display,
+                    id: series.name.clone(),
+                    display_name,
                     harness: session.session.harness_key.clone(),
                     cwd,
-                    mux_name,
+                    mux_name: series.name,
                     mode: PinCreateMode::NewVariation,
                 }
             }
@@ -1478,6 +1488,23 @@ impl App {
                     // validator's `is_absolute` check on commit.
                     cwd: self.mux_cwd_for(&mux.mux).unwrap_or_default(),
                     mux_name,
+                    mode: PinCreateMode::NewVariation,
+                }
+            }
+            RowKind::Pin(pin) => {
+                // Creating a fresh pin with an existing pin selected
+                // (H-PIN-TUI-011) seeds harness / cwd from the source
+                // and picks the next name in the series so `worker-1`
+                // → `worker-2` needs no manual retype. Bases that do
+                // not end in digits still fall back to `<name>-2`.
+                let base_name = pin_create_default_name_candidate(&pin.pin_id);
+                let series = self.next_pin_series_name(&base_name);
+                PinCreateDefaults {
+                    id: series.name.clone(),
+                    display_name: series.name.clone(),
+                    harness: pin.harness.clone(),
+                    cwd: pin.cwd.clone(),
+                    mux_name: series.name,
                     mode: PinCreateMode::NewVariation,
                 }
             }
@@ -1577,18 +1604,61 @@ impl App {
     }
 
     fn unique_pin_mux_name(&self, base: &str) -> String {
+        self.next_pin_series_name(base).name
+    }
+
+    /// Next available name in the pin/mux "series" for `base`.
+    ///
+    /// When `base` ends in one or more digits (e.g. `worker-1`), bumps
+    /// the trailing number until it lands on a free variant. Otherwise
+    /// falls back to appending `-2`, `-3`, ... The `bumped_numerically`
+    /// flag lets callers know whether they should propagate the new
+    /// value to the primary `display_name` — a numeric bump changes
+    /// the series index, so `worker-1` → `worker-2` should replace
+    /// the operator-visible name; a `-N` suffix appended to a
+    /// non-numeric base keeps the human-readable label intact.
+    fn next_pin_series_name(&self, base: &str) -> PinSeriesName {
         let base = pin_id_candidate(base);
-        let used = self.used_pin_mux_names();
+        let used = self.used_pin_series_names();
         if !used.contains(&base) {
-            return base;
+            return PinSeriesName {
+                name: base,
+                bumped_numerically: false,
+            };
+        }
+        if let Some((stem, num)) = split_trailing_number(&base) {
+            let mut next = num.saturating_add(1);
+            loop {
+                let candidate = format!("{stem}{next}");
+                if !used.contains(&candidate) {
+                    return PinSeriesName {
+                        name: candidate,
+                        bumped_numerically: true,
+                    };
+                }
+                next = next.saturating_add(1);
+            }
         }
         for idx in 2.. {
             let candidate = format!("{base}-{idx}");
             if !used.contains(&candidate) {
-                return candidate;
+                return PinSeriesName {
+                    name: candidate,
+                    bumped_numerically: false,
+                };
             }
         }
-        unreachable!("unbounded suffix search must find a free mux name")
+        unreachable!("unbounded suffix search must find a free pin series name")
+    }
+
+    /// Union of names that a new pin's id/mux name must avoid: live
+    /// mux native ids, existing pinned mux names, and existing pin
+    /// ids. Kept together so numeric-bump variants land on a value
+    /// that is free in every namespace the create form will check.
+    fn used_pin_series_names(&self) -> BTreeSet<String> {
+        let mut names = self.used_pin_mux_names();
+        names.extend(self.used_pin_ids());
+        names
     }
 
     fn used_pin_mux_names(&self) -> BTreeSet<String> {
@@ -3158,6 +3228,38 @@ fn pin_cwd_from_node(id: &NodeId) -> Option<String> {
             .or_else(|| Some(repo.common_dir.clone())),
         _ => None,
     }
+}
+
+/// Result of walking the pin/mux name series for a base value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PinSeriesName {
+    /// Free variant chosen for the base (the base itself when unused,
+    /// otherwise a numerically-bumped or `-N`-suffixed variant).
+    pub(crate) name: String,
+    /// True when the variant came from bumping a trailing number
+    /// (`worker-1` → `worker-2`), false when the base was already
+    /// free or a `-N` suffix was appended.
+    pub(crate) bumped_numerically: bool,
+}
+
+/// Split `s` into (stem, trailing_number) when it ends in one or more
+/// ASCII digits. `worker-1` → `("worker-", 1)`; `worker` → `None`;
+/// `42` → `("", 42)`. Overflow-tolerant: returns `None` when the
+/// trailing digits do not fit in a `u64` rather than panicking.
+fn split_trailing_number(s: &str) -> Option<(String, u64)> {
+    let mut split = s.len();
+    for (idx, ch) in s.char_indices().rev() {
+        if ch.is_ascii_digit() {
+            split = idx;
+        } else {
+            break;
+        }
+    }
+    if split == s.len() {
+        return None;
+    }
+    let num: u64 = s[split..].parse().ok()?;
+    Some((s[..split].to_string(), num))
 }
 
 fn pin_id_candidate(raw: &str) -> String {

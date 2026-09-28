@@ -200,6 +200,235 @@ fn pins_context_seeds_pin_create_cwd_from_selected_mux_absolute() {
 }
 
 #[test]
+fn split_trailing_number_handles_common_shapes() {
+    // No trailing digit.
+    assert_eq!(split_trailing_number("worker"), None);
+    // Single trailing digit with a `-` separator.
+    assert_eq!(
+        split_trailing_number("worker-1"),
+        Some(("worker-".to_string(), 1)),
+    );
+    // Multi-digit tail, no separator.
+    assert_eq!(
+        split_trailing_number("worker42"),
+        Some(("worker".to_string(), 42)),
+    );
+    // Digits-only base is still walkable; empty stem is allowed.
+    assert_eq!(split_trailing_number("42"), Some(("".to_string(), 42)));
+    // Interior digits with a trailing non-digit stay `None`.
+    assert_eq!(split_trailing_number("v1-alpha"), None);
+    // Empty input.
+    assert_eq!(split_trailing_number(""), None);
+}
+
+fn snapshot_with_numbered_pin_and_mux(name: &str) -> GraphSnapshot {
+    // Session `abc` → tmux mux `<name>` bound to pin `<name>` in
+    // `/p/proj`. Mirrors the shape `snapshot_session_with_mux`
+    // produces but with a caller-chosen mux/pin name so tests can
+    // exercise the numbered-suffix code paths without editing the
+    // shared fixture.
+    let mut snap = GraphSnapshot::empty();
+    let repo_id = RepoId::new("/p/proj");
+    snap.nodes
+        .push(GraphNode::Repo(RepoNode::new(repo_id.clone())));
+    snap.nodes.push(GraphNode::Checkout(CheckoutNode {
+        id: CheckoutId::new(repo_id, "/p/proj".to_string()),
+        root: "/p/proj".to_string(),
+        git_dir: None,
+        current_branch: None,
+        worktree: None,
+    }));
+    snap.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "abc"),
+            "claude-code".to_string(),
+        )
+        .with_cwd("/p/proj".to_string())
+        .with_last_active_epoch(1_700_000_000),
+    ));
+    snap.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(
+            crate::model::MuxSessionId::new(name),
+            "tmux".to_string(),
+            name.to_string(),
+        )
+        .with_client_attached(true)
+        .with_activity_epoch(1_700_000_000)
+        .with_created_epoch(1_700_000_000)
+        .with_cwd("/p/proj".to_string()),
+    ));
+    let session_id = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
+    let mux_id = NodeId::MuxSession(crate::model::MuxSessionId::new(name));
+    snap.candidate_links.push(crate::model::GraphLink {
+        id: "l1".to_string(),
+        source: session_id,
+        target: LinkEndpoint::Node { id: mux_id },
+        relation: RelationKind::LinkedToMux,
+        provenance: crate::model::Provenance::StrongDiscovered,
+        confidence: crate::model::Confidence::High,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: SourceMetadata::default(),
+        state: LinkState::Active,
+    });
+    snap.pins.push(PinCandidate {
+        id: name.to_string(),
+        display_name: name.to_string(),
+        harness: "claude-code".to_string(),
+        cwd: "/p/proj".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: name.to_string(),
+            socket_name: None,
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/p/proj/.conspectus.toml".to_string(),
+        binding: None,
+    });
+    resolve_snapshot(snap)
+}
+
+fn app_with_mux_selected(snap: GraphSnapshot, mux_name: &str) -> App {
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot: &snap,
+        home: None,
+        now: None,
+        filter: crate::tui::RowFilter::default(),
+        grouping: crate::tui::MuxGrouping::Session,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: GraphDb::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let mux_row_id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::MuxSession(mux) if mux.native_id == mux_name => Some(row.id.clone()),
+            _ => None,
+        })
+        .expect("mux row in tree");
+    app.set_selection(mux_row_id);
+    app
+}
+
+#[test]
+fn pin_create_defaults_bumps_trailing_number_from_pinned_mux_row() {
+    // H-PIN-TUI-011: selecting a pinned mux whose name ends in a
+    // number should suggest the next integer in the series across
+    // id, display_name, and mux_name — not `worker-1-2`.
+    let snap = snapshot_with_numbered_pin_and_mux("worker-1");
+    let app = app_with_mux_selected(snap, "worker-1");
+
+    let defaults = app.pins_context().pin_create_defaults;
+    assert_eq!(defaults.mode, PinCreateMode::NewVariation);
+    assert_eq!(defaults.id, "worker-2");
+    assert_eq!(defaults.display_name, "worker-2");
+    assert_eq!(defaults.mux_name, "worker-2");
+    assert_eq!(defaults.cwd, "/p/proj");
+}
+
+#[test]
+fn pin_create_defaults_skips_taken_numbers_in_series() {
+    // Existing pins occupy `worker-1` and `worker-2`; the next
+    // suggestion should skip to `worker-3`.
+    let mut snap = snapshot_with_numbered_pin_and_mux("worker-1");
+    snap.pins.push(PinCandidate {
+        id: "worker-2".to_string(),
+        display_name: "worker-2".to_string(),
+        harness: "claude-code".to_string(),
+        cwd: "/p/proj".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "worker-2".to_string(),
+            socket_name: None,
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/p/proj/.conspectus.toml".to_string(),
+        binding: None,
+    });
+    let snap = resolve_snapshot(snap);
+    let app = app_with_mux_selected(snap, "worker-1");
+
+    let defaults = app.pins_context().pin_create_defaults;
+    assert_eq!(defaults.id, "worker-3");
+    assert_eq!(defaults.display_name, "worker-3");
+    assert_eq!(defaults.mux_name, "worker-3");
+}
+
+#[test]
+fn pin_create_defaults_fills_gap_in_numbered_series() {
+    // Pins `worker-1` and `worker-3` exist but `worker-2` is free.
+    // The first available integer above the selected base wins.
+    let mut snap = snapshot_with_numbered_pin_and_mux("worker-1");
+    snap.pins.push(PinCandidate {
+        id: "worker-3".to_string(),
+        display_name: "worker-3".to_string(),
+        harness: "claude-code".to_string(),
+        cwd: "/p/proj".to_string(),
+        mux: PinMuxRef {
+            backend: "tmux".to_string(),
+            name: "worker-3".to_string(),
+            socket_name: None,
+        },
+        launch_argv: None,
+        reason: None,
+        provenance: Provenance::LocalPin,
+        store_path: "/p/proj/.conspectus.toml".to_string(),
+        binding: None,
+    });
+    let snap = resolve_snapshot(snap);
+    let app = app_with_mux_selected(snap, "worker-1");
+
+    let defaults = app.pins_context().pin_create_defaults;
+    assert_eq!(defaults.id, "worker-2");
+    assert_eq!(defaults.mux_name, "worker-2");
+    assert_eq!(defaults.display_name, "worker-2");
+}
+
+#[test]
+fn pin_create_defaults_bumps_trailing_number_from_agent_session_bound_to_pin() {
+    // When the selected agent-session row is bound to a numbered
+    // pin (its alias overlay carries `worker-1`), pin create must
+    // suggest `worker-2` — id, mux, and display name in lockstep.
+    let snap = snapshot_with_numbered_pin_and_mux("worker-1");
+    let tree = build_tree(&snap);
+    let mut app = App::new(RunConfig::defaults());
+    app.update(Msg::SetData {
+        snapshot: GraphDb::from_snapshot(&snap),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let session_row_id = app
+        .visible_rows()
+        .iter()
+        .find_map(|row| match &row.kind {
+            RowKind::AgentSession(session) if session.pin_id.as_deref() == Some("worker-1") => {
+                Some(row.id.clone())
+            }
+            _ => None,
+        })
+        .expect("session row bound to worker-1 pin");
+    app.set_selection(session_row_id);
+
+    let defaults = app.pins_context().pin_create_defaults;
+    assert_eq!(defaults.id, "worker-2");
+    assert_eq!(defaults.display_name, "worker-2");
+    assert_eq!(defaults.mux_name, "worker-2");
+    assert_eq!(defaults.harness, "claude-code");
+    assert_eq!(defaults.cwd, "/p/proj");
+}
+
+#[test]
 fn pin_adopt_defaults_preserve_selected_live_mux_name() {
     let snap = snapshot_session_with_mux();
     let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
