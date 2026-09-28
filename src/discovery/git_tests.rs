@@ -15,6 +15,40 @@ fn probe_returns_none_outside_git_repo() {
 }
 
 #[test]
+fn probe_returns_none_for_a_non_directory_path() {
+    // Probing a regular file must not spawn `git` with a
+    // non-directory `current_dir` (which fails with ENOTDIR / "Not a
+    // directory", os error 20). It reports no repo instead of a hard
+    // error so a single bad path can't fail the whole discovery cycle.
+    let temp = TempDir::new().expect("temp dir");
+    let file = temp.path().join("plain.txt");
+    fs::write(&file, b"contents").expect("write file");
+
+    let result = GitProbe::new().probe(&file).expect("probe succeeds");
+
+    assert!(result.is_none());
+}
+
+#[test]
+fn probe_returns_none_for_a_symlink_to_a_file() {
+    // `GenericWorkspaceDiscovery` reaches `probe` with symlink children
+    // of a non-git scan root. A symlink that resolves to a file passes
+    // its `is_symlink()` filter but is not a directory, so the probe
+    // must degrade to `None` rather than surfacing the ENOTDIR spawn
+    // failure that previously broke `conspectus serve` from a non-git
+    // directory.
+    let temp = TempDir::new().expect("temp dir");
+    let file = temp.path().join("target.txt");
+    fs::write(&file, b"contents").expect("write file");
+    let link = temp.path().join("link-to-file");
+    std::os::unix::fs::symlink(&file, &link).expect("symlink");
+
+    let result = GitProbe::new().probe(&link).expect("probe succeeds");
+
+    assert!(result.is_none());
+}
+
+#[test]
 fn probe_reads_plain_repo_identity_branch_remote_and_upstream() {
     let fixture = GitFixture::init();
     fixture.git(&["checkout", "-b", "feature"]);

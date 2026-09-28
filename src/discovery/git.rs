@@ -37,6 +37,23 @@ impl GitProbe {
     pub fn probe(&self, root: impl AsRef<Path>) -> Result<Option<GitProbeResult>> {
         let root = root.as_ref().to_path_buf();
 
+        // A probe root that is not a directory can never be a git work
+        // tree, and spawning `git` with a non-directory `current_dir`
+        // fails with ENOTDIR (`Not a directory`, os error 20) rather
+        // than git's own "not a repository" exit — which
+        // `GitProbe::optional` would surface as a hard error and fail
+        // the whole discovery cycle. `GenericWorkspaceDiscovery` reaches
+        // here with symlink children that resolve to files, so this
+        // guard is load-bearing for `conspectus serve` started from a
+        // non-git directory. `is_dir()` follows symlinks, so a symlink
+        // to a real directory still probes normally; a missing path or
+        // a path whose parent is a file both fall through to `None`.
+        // Skipping the spawn is also a small perf win on non-repo
+        // children.
+        if !root.is_dir() {
+            return Ok(None);
+        }
+
         // H-SERVE-PERF-004: consult the process-wide probe cache
         // before spawning any git subprocesses. Each probe otherwise
         // fires 8-15 `git rev-parse`/`symbolic-ref`/`remote`/
