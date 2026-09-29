@@ -2151,6 +2151,41 @@ fn explorer_back_armed_state_clears_on_intervening_message() {
 }
 
 #[test]
+fn explorer_back_arm_survives_per_frame_viewport_reconciliation() {
+    // Regression: the draw path dispatches `LeftViewportChanged` /
+    // `ExplorerViewportChanged` every frame (H-TUI-005 wave 2), and
+    // `draw_frame` runs before each key poll. Those layout-plumbing
+    // messages must not count as an "intervening action", otherwise the
+    // empty-stack Backspace arm is cleared before the operator can land
+    // the confirming second press and focus never leaves the right pane
+    // no matter how many times Backspace is pressed.
+    let mut app = app_for_explorer();
+    app.update(Msg::CycleFocus);
+    assert_eq!(app.focus(), Focus::Right);
+    // First press arms the shift and surfaces the hint.
+    app.update(Msg::ExplorerBack);
+    assert_eq!(app.focus(), Focus::Right);
+    assert!(
+        app.status_message()
+            .is_some_and(|s| s.contains("press Backspace again"))
+    );
+    // A frame renders between presses, dispatching both reconciliation
+    // messages. These must leave the arm intact.
+    app.update(Msg::LeftViewportChanged {
+        viewport_height: 20,
+    });
+    app.update(Msg::ExplorerViewportChanged {
+        cursor_first_row: 0,
+        cursor_last_row: 0,
+        viewport_height: 20,
+    });
+    // Second press now completes the focus shift.
+    app.update(Msg::ExplorerBack);
+    assert_eq!(app.focus(), Focus::Left);
+    assert!(app.status_message().is_none());
+}
+
+#[test]
 fn explorer_back_unwinds_drill_then_arms_then_shifts_focus() {
     // T8-031 follow-up: with one drilldown hop on the stack, three
     // Backspace taps now (1) pop the hop, (2) arm the focus shift

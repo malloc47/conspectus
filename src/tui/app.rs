@@ -2151,11 +2151,29 @@ impl App {
     /// no clock reads.
     pub fn update(&mut self, msg: Msg) -> Vec<super::Effect> {
         use super::Effect;
-        // The empty-stack Backspace arming only persists across
-        // consecutive Backspace presses; any other message clears it
-        // so the operator doesn't accidentally back out of the right
-        // pane after an intervening action.
-        if !matches!(msg, Msg::ExplorerBack) {
+        // The empty-stack Backspace arming persists across consecutive
+        // Backspace presses so the two-press "leave the right pane"
+        // confirmation can complete. An intervening operator action
+        // (navigation, focus cycle, …) clears it so the next Backspace
+        // re-surfaces the hint instead of jumping straight to the focus
+        // shift.
+        //
+        // The draw path dispatches `LeftViewportChanged` /
+        // `ExplorerViewportChanged` every frame for scroll
+        // reconciliation (H-TUI-005 wave 2). Those are layout plumbing,
+        // not operator input — and because `draw_frame` runs at the top
+        // of every event-loop iteration, before the next key is polled,
+        // counting them as an "intervening action" would disarm the
+        // shift before the operator could ever land the second press
+        // (the observed regression: the hint reappears but focus never
+        // moves). Treat them as transparent so the arm survives to the
+        // confirming Backspace.
+        if !matches!(
+            msg,
+            Msg::ExplorerBack
+                | Msg::LeftViewportChanged { .. }
+                | Msg::ExplorerViewportChanged { .. }
+        ) {
             self.explorer_back_armed = false;
         }
         let mut effects: Vec<Effect> = Vec::new();
