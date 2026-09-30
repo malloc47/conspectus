@@ -14162,6 +14162,555 @@ Sequencing (settled: **ADR first, then in order**):
   session row from a worktree) and commit `Msg::SelectRow`; offered
   only when a target resolves. Full suite green (2022).
 
+## Release Readiness: 0.1.0
+
+Catalog assembled 2026-09-30 while rewriting `README.md` for a public
+release and an upcoming talk. Baseline at the time: `cargo fmt`,
+`cargo clippy -D warnings`, and 2,070 nextest tests all green; no tags;
+GitHub repo private. Tiers: **P0** blocks going public or would embarrass
+a live demo; **P1** should land with the 0.1.0 release; **P2** can follow
+it. P0 is organized as a workstream with its own decisions, dependency
+shape, and sub-stories. Work P1 and P2 top-to-bottom.
+
+### P0 Workstream: Public Release And Talk Readiness (REL-001..REL-009)
+
+Goal: make Conspectus safe to publish and ready to demo. The repository
+flips from private to public with a license, accurate docs, and truthful
+`--help`, and the talk demo runs on the showcase fixture without visible
+defects. Sources: the 2026-09-30 README rewrite (which re-derived the
+feature set from the binary) plus a sweep of every `--help`, the
+user-facing docs, the TUI (rendered with `conspectus tui --snapshot`
+against `tests/fixtures/showcase.json`), git history, and this backlog.
+
+Scope bounds:
+
+- Fix what is wrong or misleading; add no features. The ambiguous-mux
+  picker (`P8-014`), resume-into-mux (`P8-011`), and release, packaging,
+  and platform work (`REL-010`..`REL-013`) stay out.
+- No new dependencies and no new checked-in workflow tools. A
+  demo-recording tool enters the repo only through an ADR (`AGENTS.md`).
+- Behavior changes are limited to the defects named below. Validate every
+  TUI story with `conspectus tui --snapshot` (ADR 0067) against the
+  showcase fixture; code changes pass `just check`, docs-only changes pass
+  `git diff --check`.
+
+Definition of done:
+
+- `LICENSE` exists and the README links it; the vendored-asset `NOTICE`
+  is accurate.
+- `--help` for every subcommand is free of backlog IDs, rustdoc link
+  syntax, and retired semantics, and a test keeps it that way.
+- `README.md`, `docs/operations.md`, `docs/design.md`, and the guides
+  describe only commands and config keys that exist.
+- On the refreshed showcase fixture the TUI shows relative ages, accurate
+  hints, a readable help overlay, visible related-row labels, and sane
+  header counts.
+- Backlog checkboxes match landed work, and `CHANGELOG.md` carries the
+  0.1.0 content.
+- Talk captures exist; the README hero frame and numbers are refreshed.
+- `REL-002b` (flip to public) lands last on the publication track.
+
+Decisions to collect in one sitting (recommendation in parentheses):
+
+1. `REL-001a`: the copyright line (`Copyright (c) 2026 Jarrell Waggoner`).
+2. `REL-002a`: personal home paths in five tracked files (accept them in
+   ADR and backlog prose; normalize `examples/pantry.rs` and the test
+   string to `/home/user`), and `Claude-Session:` URLs in four commit
+   trailers (accept; don't rewrite `main`).
+3. `REL-004b`: ADR numbers in `--help` (drop them from command summaries
+   and point at docs; the dev-only snapshot/fixture flags may keep them).
+4. `REL-004b`: `tui --view union|prs|forks` (hide the values from help to
+   match `H-VIEW-001`, but keep accepting them so scripts don't break).
+5. `REL-006`: `docs/feature-summary.md` (delete; the README supersedes it).
+6. `REL-008`: the Phase 11 notes in `CHANGELOG.md` (fold them into a short
+   "Upgrading from development builds" subsection).
+7. `REL-009b`: capture tooling (keep it operator-local; putting it in the
+   repo needs an ADR).
+
+Dependency shape inside the workstream:
+
+```
+REL-001a ──┐
+REL-001b ──┤
+REL-002a ──┤
+REL-004a ──┤
+REL-004b ──┤
+REL-005a ──┼──→ REL-002b  (flip the repo public)
+REL-005b ──┤
+REL-005c ──┤
+REL-005d ──┤
+REL-006  ──┤
+REL-008  ──┘
+
+REL-003a..e ───────┐
+REL-009a ──┬───────┴──→ REL-009b  (captures) ──┐
+           │                                   ├──→ REL-009d  (README refresh)
+           └──→ REL-009c  (just demo)          │
+REL-007 ───────────────────────────────────────┘
+```
+
+Every story without an incoming arrow can start now and land in any order.
+The publication track ends at `REL-002b`; the demo track ends at
+`REL-009d`. `REL-003` and `REL-007` don't block going public, but landing
+them first means the public repo opens with a clean demo and an accurate
+backlog. Suggested order: collect the decisions, then `REL-003`,
+`REL-004`, `REL-005` and `REL-006`, `REL-007`, `REL-008`, `REL-009`, and
+finally `REL-002b`.
+
+- [ ] `REL-001` License and third-party notices.
+  - [ ] `REL-001a` Add `LICENSE`.
+    - Scope: `Cargo.toml` declares `license = "MIT"`, but the repo has no
+      license file. Add the standard MIT text with the chosen copyright
+      line, and point the README "License" section at `LICENSE` instead of
+      `Cargo.toml`. `plugins/opencode-hook/package.json` already declares
+      MIT and needs its own file only if the plugin is published to npm.
+    - Tests: docs-only; `git diff --check`.
+    - Blockers: decision 1.
+  - [ ] `REL-001b` Correct the vendored-asset notice.
+    - Scope: `src/output/html/assets/NOTICE` opens with "All four packages
+      are MIT-licensed" but reproduces six license texts (cytoscape,
+      cytoscape-fcose, cose-base, cytoscape-dagre, the dagre copy embedded
+      in cytoscape-dagre, and layout-base), while `VERSIONS` says "all five
+      packages". Fix the wording. Whether `graph --format html` output
+      should also carry the notices is a binary-distribution question for
+      `REL-010`: after inlining (`src/output/html/mod.rs:120`), only
+      `cytoscape.min.js` keeps its license header.
+    - Tests: docs-only; `git diff --check`.
+    - Blockers: none.
+- [ ] `REL-002` Pre-publication review, then flip the repository public.
+  - [ ] `REL-002a` Pre-publication review.
+    - Scope: verified on 2026-09-30: no credential patterns (GitHub
+      tokens, API keys, private keys) and no blobs over 1 MB anywhere in
+      history; the captured fixtures under `tests/fixtures/` use sanitized
+      `/home/user/...` paths; no tracked file links to a private
+      repository (Atelier is referenced by name only). Remaining: apply
+      decision 2, and keep the operator's local files out of the repo.
+      `graph-snapshot.json` is already gitignored. The local
+      `.conspectus.toml` holds personal pins with
+      `--dangerously-skip-permissions` launch argv; list it in
+      `.git/info/exclude` rather than `.gitignore`, because project
+      `.conspectus.toml` files are meant to be versionable (ADR 0012).
+    - Tests: `git status --short` shows only intended changes; rerun the
+      history scan if later commits add fixtures.
+    - Blockers: decision 2.
+  - [ ] `REL-002b` Flip the repository public.
+    - Scope: set the GitHub description and topics, decide whether Issues
+      and Discussions open now (see `REL-020`), confirm CI runs on a pull
+      request, then change visibility. `REL-017` (how docs refer to
+      Atelier) can follow: no tracked file links to Atelier, and the README
+      already calls it unreleased.
+    - Tests: after the flip, browse the README and `docs/index.md` signed
+      out and follow the links; CI is green on `main`.
+    - Blockers: `REL-001a`, `REL-001b`, `REL-002a`, `REL-004a`,
+      `REL-004b`, `REL-005a`..`REL-005d`, `REL-006`, `REL-008`.
+- [ ] `REL-003` Fix demo-visible TUI defects.
+  - Each sub-story was found on, and should be validated against,
+    `tests/fixtures/showcase.json` with `conspectus tui --snapshot`. Land
+    `REL-009a` alongside so the fixture reflects current discovery.
+  - [ ] `REL-003a` Render relative ages in the detail pane.
+    - Symptom: session status reads `active · last 1781611140s`; mux
+      `last_active` reads `1781610300s`.
+    - Root cause: `relative_epoch` (`src/tui/explorer.rs:1638`) is a v1
+      placeholder that prints the raw epoch. It has five call sites: mux
+      `last_active` (`:1374`), mux `created` (`:1383`), runtime-process
+      `observed` (`:1493`), PR `updated` (`:1601`), and session status
+      (`:1633`). The explorer has no clock: `ExplorerInputs` (`:51`)
+      carries only `snapshot`, `target`, and `home`.
+    - Fix: add `now: Option<i64>` to `ExplorerInputs`, fill it at the
+      three `build_node_view` call sites in `src/tui/app.rs` (`:3010`,
+      `:3199`, `:3305`) the same way `build_tree_for_view` reads the clock
+      (`src/tui/rows/mod.rs:662`), and format with `format_recency`
+      (`src/tui/rows/mod.rs:453`) so the pane matches the row tree's `4m`
+      / `2d` style. Delete `relative_epoch`.
+    - Tests: explorer unit tests with a fixed `now` for each of the five
+      fields; showcase snapshots of a session and a mux detail pane.
+    - Blockers: none.
+  - [ ] `REL-003b` Stop advertising `m choose` on ambiguous-mux rows.
+    - Symptom: the status line for a session with ambiguous tmux
+      candidates reads `Enter/a attach preferred tmux:… · m choose`, but
+      `m` opens the Mux action menu.
+    - Root cause: the hint (`src/tui/ui.rs:3227`) was written for the
+      inline picker `P8-014`, which reserved `m` but never landed. ADR 0096
+      then bound `m` globally to the Mux menu
+      (`src/tui/keybindings.rs:223`).
+    - Fix: replace the affordance with one that exists today (for example
+      `Tab inspect candidates`, since the right pane lists the competing
+      candidates under Other). Rename and update
+      `contextual_status_offers_ambiguous_attach_hint_with_choose_affordance`
+      (`src/tui/ui_tests.rs:2329`). Annotate `P8-014`: `m` is taken, and
+      the menu-first home for the picker is a context entry in the `m` Mux
+      menu when the selection has ambiguous candidates.
+    - Tests: the renamed status-line test; a showcase snapshot of an
+      ambiguous row.
+    - Blockers: none.
+  - [ ] `REL-003c` Make the help overlay readable.
+    - Symptom: `?` opens a 78×28 modal regardless of terminal size, long
+      descriptions are cut off at the modal edge, and nothing indicates
+      that the overlay scrolls.
+    - Root cause: `centered_modal_rect` (`src/tui/widgets/help.rs:462`)
+      caps width at 78 and height at 28, and `HelpBody` renders an
+      unwrapped `Paragraph` (`:159`). Scrolling exists (`j` / `k`,
+      `PgUp` / `PgDn`, `g` / `G`; `:39`) but nothing on screen says so.
+      Titles and one binding carry IDs: "Discoverable controls (ADR 0031)"
+      (`:185`), "(T8-043)" (`:203`), "Mux (ADRs 0095, 0096)" (`:235`),
+      "Pins (ADR 0057)" (`:248`), and "Node kind icons (ADR 0073)"
+      (`:370`).
+    - Fix: size the modal to the terminal (height up to the frame less a
+      margin), wrap descriptions with a hanging indent under the
+      description column, show the ADR 0076 scrollbar the detail pane
+      already uses, and drop the IDs from user-facing text.
+    - Tests: help-overlay snapshots at 80×24 and 150×60. The keybinding
+      drift test (`src/tui/keybindings.rs`) requires every binding's
+      `help_text` to appear in `keymap_sections`, so edit both together.
+    - Blockers: none.
+  - [ ] `REL-003d` Keep related-row labels on their row.
+    - Symptom: on the showcase `bare-project` repo at 120 columns the
+      detail pane shows `checked out at ◇` with no label; at 170 columns
+      the label `/fixture/checkouts/bare-project` appears.
+    - Root cause: `render_related_row` (`src/tui/ui.rs:2349`) emits the
+      neighbor label untruncated, and the explorer paragraph word-wraps
+      (`:2015`). An unbreakable path therefore moves to the next line,
+      often below the scrolled viewport.
+    - Fix: pass the available width into `render_related_row` (and
+      `render_other_link_line`, `:2316`) and shorten labels with
+      `truncate_to_width_middle` (`:1720`), matching the left pane's
+      `/fixture/check…s/bare-project`.
+    - Tests: a snapshot at 120 columns asserting the label renders on the
+      same line as its verb.
+    - Blockers: none.
+  - [ ] `REL-003e` Fix the Mux view's session count.
+    - Symptom: switching to the Mux view changes the header to
+      `0/10 sessions`, which reads as "everything is filtered out".
+    - Root cause: `visible_agent_session_count` (`src/tui/ui.rs:325`)
+      counts `RowKind::AgentSession` rows. The Mux view renders a single
+      attributed agent inline in its mux row and emits agent child rows
+      only for muxes with more than one attributed agent
+      (`src/tui/rows/mux.rs:160`), so the count is usually zero.
+    - Fix: in the Mux view, count the sessions attributed to the visible
+      (filtered) mux rows, or show the plain total when no filter is
+      active.
+    - Tests: header snapshots in both views, with and without a filter.
+    - Blockers: none.
+- [ ] `REL-004` True up CLI `--help`.
+  - [ ] `REL-004a` Describe `--refresh` and `--no-cache` as they behave
+    today.
+    - Scope: the help on `graph` (`src/cli/graph.rs:32`, `:35`),
+      `node show` (`src/cli/node.rs:59`, `:64`), `table`
+      (`src/cli/table.rs:97`, `:103`), and `tui` (`src/cli/tui.rs:66`,
+      `:71`) cites "P7-003 phase 4" and describes a warm-start read from
+      the cache; `table` adds "Phase 3 will graduate the warm-start path…".
+      Phase 11 removed that read. One-shot commands now take the daemon's
+      snapshot when `conspectus serve` answers, and otherwise rebuild
+      in-process and write `graph.bin` (`warm_start_discover_and_resolve`,
+      `src/cli/mod.rs:181`). Reword: `--refresh` ignores a running daemon
+      and rebuilds from live providers; `--no-cache` skips writing
+      `graph.bin`. Confirm the TUI's refresh loop honors the same meanings
+      before rewording the `tui` flags.
+    - Tests: covered by the `REL-004b` sweep.
+    - Blockers: none.
+  - [ ] `REL-004b` Remove internal IDs and stale text from help, and add a
+    regression test.
+    - Scope:
+      - Backlog IDs: `P7-006` in the `serve` summary
+        (`src/cli/mod.rs:80`), `F8-013` in `tui --view` and
+        `--no-resume-view` (`src/cli/tui.rs:25`, `:30`), and `H-WT-008` in
+        `worktree prune` (`src/cli/worktree.rs:55`).
+      - `--color` value help renders "See [`resolve_color`] for the full
+        precedence table" (`src/cli/mod.rs:248`) on every command that
+        takes `--color`.
+      - The `conspectus mux` summary says "Only `new` today", but
+        `mux launch` exists (`src/cli/mod.rs:72`).
+      - `--grouping` help says its values "depend on `--view`"
+        (`src/cli/mod.rs:473`), but `table` has no `--view` flag (the row
+        type is positional).
+      - `mux launch --scan-root` documents itself as a no-op
+        (`src/cli/mux.rs:145`); hide or remove it.
+      - `pin create --store` offers `all` (the shared `DeclaredStoreFlag`,
+        `src/cli/mod.rs:651`), and `pin create` then rejects it at runtime
+        (`src/cli/pin.rs:1122`). Give writes a value set without `all`.
+      - Apply decisions 3 and 4.
+    - Tests: a CLI test that runs `--help` for every subcommand and fails
+      on backlog IDs (`P[0-9]+-`, `F8-`, `T8-`, `H-[A-Z]+-[0-9]`) or
+      rustdoc link syntax (`` [` ``); existing `cli_smoke` help tests stay
+      green.
+    - Blockers: decisions 3 and 4.
+- [ ] `REL-005` True up the docs.
+  - [ ] `REL-005a` Remove references to retired commands.
+    - Scope: `conspectus session` and `--projection` were replaced by
+      `conspectus table <rows>` (ADR 0021) but remain in
+      `docs/atelier-migration.md` (`:14`–`:16`, `:23`–`:24`) and in
+      `docs/design.md`. There they appear in Status Views (`:726`, plus a
+      `[session] projection` example at `:738`–`:742` that
+      `docs/operations.md` now documents as diagnostic-only) and in
+      Decisions (`:1346`–`:1350`). `docs/operations.md:603` lists the
+      retired `query` command in the pins read-only invariant. Skip
+      `docs/feature-summary.md` if `REL-006` deletes it.
+    - Tests: afterwards,
+      `git grep -nE 'conspectus (session|query)\b' -- README.md 'docs/*.md' ':!docs/adr/' ':!docs/implementation/' ':!docs/backlog.md' ':!docs/adr-audit.md'`
+      matches only the "Migration from earlier 0.x" notes in
+      `docs/operations.md` (`:693`–`:725`). The bare `query` at `:603` needs
+      a manual check.
+    - Blockers: none.
+  - [ ] `REL-005b` Bring `docs/design.md` in line with the accepted ADRs.
+    - Scope:
+      - Decisions says snapshots persist as versioned JSON under
+        `$XDG_DATA_HOME/conspectus/snapshots/` (`:1356`); that was
+        superseded by `graph.bin` (ADR 0083).
+      - The "Accepted ADRs" digest (`:1157`–`:1324`) stops at 0089 and
+        skips most ADRs. Replace it with a pointer to the ADR index
+        (`REL-016`), or complete it.
+      - Migration Plan step 7 (`:1149`) still calls repository placement
+        pending although ADR 0017 settled it, and step 6 (`:1141`) needs a
+        current status.
+      - The shared `[theme]` and `[html.theme]` tables (`:956`) are
+        described, but `src/config.rs` doesn't parse them; mark them
+        planned.
+    - Tests: docs-only; `git diff --check`.
+    - Blockers: none.
+  - [ ] `REL-005c` Complete the `docs/operations.md` reference.
+    - Scope:
+      - CLI Surface (`:197`) lists only `graph`, `table`, `node show`,
+        `columns`, `declared`, `pin`, and `worktree`. Add `tui`, `hook`,
+        `rename`, `alias`, `mux`, `serve`, `refresh`, and `status`.
+      - Configuration File (`:102`) covers only `[table.<rows>]` and
+        `[tui.theme]`. Add the `[tui]` scalars (`default_view`,
+        `scan_roots`, `show_harness_chips`, `narrow_layout_threshold`, and
+        the deprecated `sessions_grouping`), `[tui.views.<name>]`,
+        `[tui.detail]`, `[server.intervals]`, and `[worktree]` (linking
+        `docs/worktrees.md`).
+      - Caches (`:622`) omits the pin-store registry
+        (`$XDG_STATE_HOME/conspectus/pin-stores.json`, ADR 0090). It also
+        says daemonless consumers read `graph.bin` back via mmap, which
+        one-shot commands no longer do.
+    - Tests: docs-only; `git diff --check`; check each documented key
+      against `src/config.rs`.
+    - Blockers: none.
+  - [ ] `REL-005d` Fix developer-facing claims.
+    - Scope: `AGENTS.md:80` and the `[features]` comment in
+      `Cargo.toml:60` say the nix dev shell builds with the `snapshot`
+      feature on. It doesn't; only `just check` and CI do, through
+      `--all-features`. Fix the text, or make the shell enable the
+      feature. `docs/implementation/README.md:16` lists Phase 07 as
+      pending and stops at Phase 08.
+    - Tests: docs-only; `git diff --check`.
+    - Blockers: none.
+- [ ] `REL-006` Retire `docs/feature-summary.md`.
+  - Scope: the Phase 6 snapshot says there is "no MCP server, daemon, or
+    caching layer yet" and omits the TUI, pins, worktrees, the transcript
+    viewer, and the exports. `README.md` now carries the feature
+    inventory. Per decision 5, delete the file and its `docs/index.md`
+    entry (`:21`). Nothing else links to it except two historical mentions
+    in this backlog.
+  - Tests: docs-only; link check over `README.md` and `docs/*.md`.
+  - Blockers: decision 5.
+- [ ] `REL-007` True up backlog checkboxes.
+  - Scope:
+    - Tick, with an outcome line: `H-VIEW-001` (`b84aa05`),
+      `H-LAYOUT-001` (`93406b5`), `H-PIN-EDIT-MUX-001` (`084967f`),
+      `H-PIN-TUI-011` (`c6905bb`), `H-MUXPROC-020` (`4c63044`), `H-WT-004`
+      (CLI `004a` plus TUI `004b`), and the `H-WT-001` epic (002–008
+      landed). Also tick `P7-007`: the daemon snapshot read path landed as
+      `try_daemon_snapshot` (`src/cli/mod.rs:209`), though the story text
+      still says `conspectus session`. Tick `P8-004` too: row builders for
+      all five row types live in `src/tui/rows/`.
+    - Tick and move the remainder: `P8-007` (v1 landed in `bc7a1b0`; the
+      empty/loading/error frame matrix continues as `T8-003`).
+    - Verify with the operator: `H-PIN-TUI-010` (WIP `719d77a`, then
+      `8870e82`, `fc55193`, `88450d8`, `0524fdd`).
+    - Annotate and leave open: `P8-011` (`S` resumes in a new terminal;
+      resuming into a mux is still open) and `P8-014` (see `REL-003b`).
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: none.
+- [ ] `REL-008` Write the 0.1.0 CHANGELOG entry.
+  - Scope: `CHANGELOG.md` covers only Phase 11 (2026-06-23). Under
+    `[Unreleased]`, write the first-release summary:
+    - the interactive TUI (sessions and mux views, relationship explorer,
+      controls, search, themes);
+    - pins with resume continuity, and worktree-backed pins;
+    - mux lifecycle (`mux new`, `mux launch`, teardown);
+    - worktree list, new, rm, merge, close, and prune through worktrunk;
+    - `conspectus serve` and the zero-copy snapshot;
+    - the native transcript viewer;
+    - `graph --format dot|html`;
+    - `hook init|status|remove`;
+    - zellij discovery and agent-deck workspaces;
+    - the serve idle-cost work.
+
+    Per decision 6, fold the Phase 11 removals into an "Upgrading from
+    development builds" subsection. `REL-010` stamps the version and date
+    at tag time, so this story doesn't wait on the release decision.
+  - Tests: docs-only; `git diff --check`.
+  - Blockers: decision 6.
+- [ ] `REL-009` Talk and demo assets.
+  - [ ] `REL-009a` Refresh the showcase fixture.
+    - Scope:
+      - `tests/fixtures/showcase.json` was last regenerated on 2026-06-18
+        and predates worktree discovery. Every checkout has
+        `worktree: null`, while a fresh `dev scenario graph showcase`
+        marks the bare-project checkout `linked`.
+      - All four tmux sessions have `client_attached: null`, so the Mux
+        view shows `?` on every row. Give the scenario's tmux rows
+        (`TmuxReplayRow`, `src/dev_scenarios.rs:305`) attached and
+        detached states.
+      - Harden `just regen-showcase-fixture` first. Its `sed`
+        (`justfile:36`) only normalizes paths when the scenario root sits
+        one directory below `/tmp`; with `TMPDIR` unset, about 370 raw
+        `/tmp/...` paths survive. Pin `TMPDIR` in the recipe or widen the
+        pattern.
+      - Bump `SHOWCASE_NOW_EPOCH` (`src/dev_scenarios.rs:802`) and the
+        recipe's `--arg now` (`justfile:37`) to near the talk date.
+    - Tests: `tests/showcase_scenario.rs`; the regenerated fixture has no
+      `/tmp/` paths; snapshot suites that read the fixture stay green
+      (re-bless intentional diffs).
+    - Blockers: none.
+  - [ ] `REL-009b` Capture screenshots and graph exports.
+    - Scope:
+      - Capture the sessions view, an explorer drill-down with
+        breadcrumbs, and the pins, mux, and worktree menus, plus the
+        transcript viewer, from the showcase fixture
+        (`cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json`)
+        with a pinned clock (faketime recipe in `docs/dev-scenarios.md`).
+      - Render `showcase.html` and a Graphviz image from
+        `cargo run -- dev scenario graph showcase --format html|dot` (a
+        debug build).
+      - Per decision 7, keep capture tooling operator-local. A dev-only
+        clock override (for example `--snapshot-now`) would replace
+        faketime, but it needs an ADR 0067 amendment.
+      - Avoid the Atelier fork checkout in demos: its root is
+        workspace-relative (`REL-018`).
+    - Tests: none; assets live outside the repo unless the operator
+      decides otherwise.
+    - Blockers: `REL-003a`..`REL-003e`, `REL-009a`.
+  - [ ] `REL-009c` Add an optional `just demo` recipe.
+    - Scope: one recipe that launches the interactive TUI on the showcase
+      fixture, so a demo machine needs only a checkout. Fixture mode
+      requires the `snapshot` feature and `dev scenario` requires a debug
+      build, and the recipe should encode both. It uses the existing task
+      runner (ADR 0010), so it adds no new tool.
+    - Tests: run the recipe once from a clean checkout.
+    - Blockers: `REL-009a`.
+  - [ ] `REL-009d` Refresh the README for the talk.
+    - Scope: re-render the hero frame after `REL-003`, using the same
+      command and pinned clock as the current frame. Right before the
+      talk, update the dated "By the numbers" table (commits, tests, and
+      backlog completion after `REL-007`).
+    - Tests: README link check; `git diff --check`.
+    - Blockers: `REL-007`, `REL-009b`.
+
+### P1: With The 0.1.0 Release
+
+- [ ] `REL-010` Define the release process and cut `v0.1.0`.
+  - Scope: advances `H-DIST-002` / `H-DIST-003` / `H-DIST-004`. Decide
+    tag + GitHub release now and crates.io now or later (ADR 0016 prefers
+    crates.io; the ADR audit's C6 suggests "don't break gratuitously"
+    until a consumer exists). Fill `Cargo.toml` metadata (`repository`,
+    `homepage`, `readme`, `keywords`, `categories`, `rust-version`).
+    Stamp the `[Unreleased]` 0.1.0 entry from `REL-008` with the version
+    and date. Decide whether binary and HTML-export distributions carry
+    third-party notices (see `REL-001b`). Record the outcome as an ADR
+    0016 amendment.
+  - Blockers: `REL-001a`, `REL-002b`, `REL-008`.
+- [ ] `REL-011` Add installation paths beyond `--path`.
+  - Scope: once public, document `cargo install --locked --git
+    https://github.com/malloc47/conspectus`. The flake exposes only
+    `devShells.default`; add `packages.default` / `apps.default` so
+    `nix run github:malloc47/conspectus` works (a distribution surface,
+    so record it in an ADR). Verify a release build without
+    `--features snapshot` on a clean machine.
+  - Blockers: `REL-002b`.
+- [ ] `REL-012` Settle platform posture and CI shape.
+  - Scope: CI is ubuntu-only and runs the suite twice (`cargo test`, then
+    `cargo nextest`). Process-tree attribution reads `/proc`; signal
+    handling and watchers are Unix-only. Either add a macOS build/test job
+    or state Linux-only in the README; drop the duplicate test run.
+  - Blockers: none.
+- [ ] `REL-013` Clean up dependency and tooling leftovers.
+  - Scope: `proptest` and `rstest` are dev-dependencies with zero uses;
+    `tui-pantry` serves only `examples/pantry.rs` (confirm the `T8-044`
+    "go" still holds); the flake ships `pre-commit` but there is no
+    `.pre-commit-config.yaml` (ADR 0007 promised hooks); dead helper
+    `_selection_display` (`src/cli/mod.rs:769`); historical
+    "H-REF-006 wave N" comments in `src/cli/mod.rs`.
+  - Blockers: none.
+- [ ] `REL-014` Make the on-disk footprint consistent with ADR 0087.
+  - Scope: ADR 0087 and `AGENTS.md` say rebuildable sidecars live under
+    `$XDG_STATE_HOME/conspectus/`, but pin-binding sidecars live under
+    `$XDG_CACHE_HOME/conspectus/pin-bindings/` and `graph.bin` under
+    `$XDG_DATA_HOME/conspectus/`. `graph_bin_path()`
+    (`src/snapshot.rs:74`) falls back to `./conspectus/graph.bin` in the
+    cwd when neither `$XDG_DATA_HOME` nor `$HOME` is set, which can write
+    inside a project tree. Amend ADR 0087 to describe the real layout (or
+    move files), fix the fallback, and add one "Files Conspectus writes"
+    table to `docs/operations.md`.
+  - Blockers: none.
+- [ ] `REL-015` Consolidate harness-hook docs.
+  - Scope: `docs/operations.md` documents only the Claude Code hook;
+    `conspectus hook init` also supports codex; the opencode plugin
+    (`plugins/opencode-hook`, ADR 0049) and the older
+    `scripts/conspectus-claude-hook-sidecar.py` need one "Harness hooks"
+    section, or the script retires in favor of `conspectus hook write`.
+  - Blockers: none.
+- [ ] `REL-016` Complete the documentation index and add an ADR index.
+  - Scope: `docs/index.md` omits `mux-link-resolution.md`,
+    `provider-adapter-guide.md`, `comparison.md`, the three audits,
+    `transcript-viewer-deps.md`, the `tui-*` reviews and mockups, and
+    `plans/`. Add `docs/adr/README.md` grouping the 97 ADRs by theme with
+    status (model and evidence, discovery and attribution, persistence and
+    daemon, TUI, pins and mux lifecycle, worktrees, process and tooling,
+    superseded); it doubles as a talk slide.
+  - Blockers: none.
+- [ ] `REL-017` Decide how public docs refer to Atelier.
+  - Scope: Atelier is private. `docs/atelier-migration.md`,
+    `docs/design.md` ("Relationship To Atelier"), and backlog path
+    references assume it. Publish Atelier alongside, or reframe it as a
+    companion workspace tool and move the migration guide into Atelier's
+    repo. `README.md` currently notes that Atelier is unreleased. No
+    tracked file links to Atelier, so this can land shortly after
+    `REL-002b` rather than block it.
+  - Blockers: operator decision.
+
+### P2: After 0.1.0
+
+- [ ] `REL-018` Fix or document known functional gaps.
+  - Scope: `H-HARNESS-ATELIER-001` (`atelier exec claude` panes show
+    "No agent"), `H-PIN-F-001` (non-default tmux socket discovery),
+    `P8-014` (inline picker for ambiguous mux candidates; `m` now belongs
+    to the Mux menu, see `REL-003b`), `H-SERVE-PERF-001c` (per-cycle
+    resolve/publish cost), zellij mutation capabilities. Also: Atelier
+    fork-index paths are used verbatim (`src/discovery/atelier.rs:377`),
+    so a fork's checkouts get workspace-relative roots and repo ids
+    (`.atelier/forks/alpha/repo-a`, `repo-a`) that never join the
+    canonical nodes git discovery produces. Existing Atelier snapshot
+    tests pin this shape, so fixing it means re-blessing them.
+  - Blockers: per item.
+- [ ] `REL-019` Close the ADR-alignment items that shape the public story.
+  - Scope: `H-ADR-003` (retire the deprecated `[tui].sessions_grouping`
+    and `--sessions-grouping` alias before users depend on it);
+    `H-ADR-004` (`docs/mux-link-resolution.md` exists but was last updated
+    2026-06-23, before `H-EXT-004` and `H-MUXPROC-020`; refresh it and
+    close); `H-ADR-005` (two-tier decision records; decide before outside
+    contributors write ADRs).
+  - Blockers: none.
+- [ ] `REL-020` Add contributor onboarding.
+  - Scope: `CONTRIBUTING.md` explaining the ADR + backlog workflow for
+    outside contributors (stable IDs, when an ADR is required,
+    `just check`, snapshot mode), plus issue/PR templates if the repo
+    accepts outside contributions.
+  - Blockers: `REL-002b`.
+- [ ] `REL-021` Decide the backlog's long-term shape.
+  - Scope: this file is ~14k lines and `REL-007` shows checkbox drift, so
+    ADR 0009's trigger ("evaluate Backlog.md when the manual backlog
+    becomes difficult to maintain") may have fired. Options: archive
+    completed phases to a separate file, or migrate to Backlog.md. Decide
+    via ADR.
+  - Blockers: none.
+- [ ] `REL-022` Decide the library API posture.
+  - Scope: `README.md` marks `conspectus::api` unstable (ADR audit C6).
+    Decide whether 0.1.0 advertises it; if so, reconcile
+    `docs/library-api.md` with the current facade and add the `H-DOC-003`
+    examples.
+  - Blockers: `REL-010`.
+
 ## Later
 
 - [ ] Evaluate Backlog.md migration once task count, dependencies, or
