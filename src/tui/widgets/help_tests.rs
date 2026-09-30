@@ -173,7 +173,7 @@ fn body_lines_cover_every_documented_key() {
         "b ",
         "Delete ",
         "q / Ctrl-C",
-        "1 – 5",
+        "1 / 2",
         "] / [",
         "F ",
         "Ctrl-G",
@@ -215,7 +215,7 @@ fn body_lines_cover_every_documented_key() {
         "Bind picker for the selected PinAmbiguous row",
         "Adopt the selected live mux row as a new pin",
         "Remove the selected pin (two-press confirmation)",
-        "Switch directly to view",
+        "Switch directly to the sessions / mux view",
         "Cycle to next / previous view",
         "Clear all active filters",
         "Cycle grouping forward",
@@ -238,4 +238,57 @@ fn body_lines_cover_every_documented_key() {
             "help text missing description `{desc}`; full text:\n{rendered}"
         );
     }
+}
+
+fn line_text(line: &Line<'_>) -> String {
+    line.spans.iter().map(|s| s.content.as_ref()).collect()
+}
+
+#[test]
+fn narrow_width_wraps_descriptions_under_a_hanging_indent() {
+    let theme = Theme::default();
+    let width = 60;
+    let lines = body_lines_for_width(&theme, Some(width));
+    // The icon legend is a fixed-width table; only the keymap wraps.
+    let keymap_end = lines
+        .iter()
+        .position(|l| line_text(l) == "Node kind icons")
+        .expect("legend header");
+    for line in &lines[..keymap_end] {
+        assert!(
+            unicode_width::UnicodeWidthStr::width(line_text(line).as_str()) <= width,
+            "line exceeds {width} cells: {:?}",
+            line_text(line)
+        );
+    }
+    // The long `w` description continues on an indented line.
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let w_idx = texts
+        .iter()
+        .position(|t| t.starts_with("  w "))
+        .expect("w binding");
+    assert!(texts[w_idx + 1].starts_with(&" ".repeat(KEY_COLUMN_WIDTH)));
+    assert!(body_lines(&theme).len() < lines.len());
+}
+
+#[test]
+fn jumping_to_the_end_shows_the_last_lines_not_blank_space() {
+    let theme = Theme::default();
+    let mut state = HelpOverlayState::new();
+    state.handle_key(key(KeyCode::Char('G')));
+    let area = Rect::new(0, 0, 80, 24);
+    let mut buf = Buffer::empty(area);
+    HelpOverlayWidget::new(&state, &theme).render(area, &mut buf);
+    let rendered: String = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        rendered.contains("to close"),
+        "end of keymap should be visible after G:\n{rendered}"
+    );
 }

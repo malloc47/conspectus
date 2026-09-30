@@ -512,7 +512,7 @@ fn wrap_plain(body: &str, width: u16, style: Style) -> Vec<Line<'static>> {
 /// whitespace where possible. Convenience wrapper over
 /// [`word_wrap_with_budgets`] when first-line and subsequent-line
 /// budgets are the same.
-fn word_wrap(input: &str, width: u16) -> Vec<String> {
+pub(crate) fn word_wrap(input: &str, width: u16) -> Vec<String> {
     word_wrap_with_budgets(input, width, width)
 }
 

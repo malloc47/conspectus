@@ -9,11 +9,11 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
+use ratatui::layout::{Margin, Rect};
 use ratatui::macros::{line, span};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget};
 use ratatui_cheese::help::Binding;
 use tui_popup::KnownSize;
 
@@ -121,7 +121,7 @@ impl Widget for HelpOverlayWidget<'_> {
         // wrapper reports the same cap dimensions
         // `centered_modal_rect` computed before, so the popup's
         // auto-sizing reproduces the in-tree rect.
-        let modal = centered_modal_rect(area);
+        let modal = help_modal_rect(area);
         let body = HelpBody {
             state: self.state,
             theme: self.theme,
@@ -157,8 +157,52 @@ impl KnownSize for HelpBody<'_> {
 
 impl Widget for HelpBody<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let para = Paragraph::new(body_lines(self.theme)).scroll((self.state.scroll, 0));
-        para.render(area, buf);
+        // Reserve the rightmost column for the scrollbar only when the
+        // keymap overflows, so short keymaps keep the full width.
+        let full = body_lines_for_width(self.theme, Some(area.width as usize));
+        let overflows = full.len() > area.height as usize && area.width > 1;
+        let text_width = if overflows {
+            area.width - 1
+        } else {
+            area.width
+        };
+        let lines = if overflows {
+            body_lines_for_width(self.theme, Some(text_width as usize))
+        } else {
+            full
+        };
+        let content_len = lines.len();
+        let viewport = area.height as usize;
+        let max_scroll = content_len.saturating_sub(viewport);
+        let scroll = (self.state.scroll as usize).min(max_scroll);
+        let text_area = Rect {
+            width: text_width,
+            ..area
+        };
+        Paragraph::new(lines)
+            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
+            .render(text_area, buf);
+        if overflows {
+            let bar_area = Rect {
+                x: area.x + area.width - 1,
+                width: 1,
+                ..area
+            };
+            let mut bar_state = ScrollbarState::new(max_scroll + 1)
+                .position(scroll)
+                .viewport_content_length(viewport);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().remove_modifier(Modifier::REVERSED));
+            ratatui::widgets::StatefulWidget::render(
+                scrollbar,
+                bar_area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                buf,
+                &mut bar_state,
+            );
+        }
     }
 }
 
@@ -182,7 +226,7 @@ struct HelpSection {
 fn keymap_sections() -> Vec<HelpSection> {
     vec![
         HelpSection {
-            title: "Discoverable controls (ADR 0031)",
+            title: "Discoverable controls",
             bindings: vec![
                 Binding::new(
                     "f",
@@ -200,7 +244,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             bindings: vec![
                 Binding::new(
                     "Enter",
-                    "Default action on the selected row (T8-043): attach mux/muxed sessions, view un-muxed sessions, expand groups",
+                    "Default action on the selected row: attach mux/muxed sessions, view un-muxed sessions, expand groups",
                 ),
                 Binding::new("a", "Attach to the selected mux"),
                 Binding::new(
@@ -232,7 +276,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             ],
         },
         HelpSection {
-            title: "Mux (ADRs 0095, 0096)",
+            title: "Mux",
             bindings: vec![
                 Binding::new(
                     "n",
@@ -245,7 +289,7 @@ fn keymap_sections() -> Vec<HelpSection> {
             ],
         },
         HelpSection {
-            title: "Pins (ADR 0057)",
+            title: "Pins",
             bindings: vec![
                 Binding::new("p", "Open the pins overlay (menu listing every action)"),
                 Binding::new(
@@ -275,10 +319,7 @@ fn keymap_sections() -> Vec<HelpSection> {
         HelpSection {
             title: "View switching",
             bindings: vec![
-                Binding::new(
-                    "1 – 5",
-                    "Switch directly to view N (sessions, mux, union, prs, forks)",
-                ),
+                Binding::new("1 / 2", "Switch directly to the sessions / mux view"),
                 Binding::new("] / [", "Cycle to next / previous view"),
             ],
         },
@@ -353,7 +394,15 @@ fn keymap_sections() -> Vec<HelpSection> {
 /// cheese's short / multi-column Help modes don't fit our long
 /// descriptions; the win is that the keymap is now data
 /// ([`keymap_sections`]) rather than imperative `bind(...)` calls.
+#[cfg(test)]
 fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
+    body_lines_for_width(theme, None)
+}
+
+/// [`body_lines`] with binding descriptions wrapped to `width` cells
+/// under a hanging indent aligned with the description column. `None`
+/// leaves every binding on one line.
+fn body_lines_for_width(theme: &Theme, width: Option<usize>) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     for section in keymap_sections() {
@@ -362,29 +411,54 @@ fn body_lines(theme: &Theme) -> Vec<Line<'static>> {
             if !binding.is_enabled() {
                 continue;
             }
-            lines.push(binding_line(binding.key(), binding.description(), theme));
+            lines.extend(binding_lines(
+                binding.key(),
+                binding.description(),
+                theme,
+                width,
+            ));
         }
         blank(&mut lines);
     }
 
-    self::section(&mut lines, "Node kind icons (ADR 0073)");
+    self::section(&mut lines, "Node kind icons");
     push_icon_legend(&mut lines, theme);
     blank(&mut lines);
 
     lines.push(line![
-        span!(theme.placeholder; "Press Esc, q, or ? to close.")
+        span!(theme.placeholder; "j/k or PgDn/PgUp to scroll · Esc, q, or ? to close.")
     ]);
     lines
 }
 
-/// Render a single binding as `  <key:<14>  <description>`. The
-/// key column inherits `theme.panel_focus_accent` so operators
-/// scan the keymap by accent color.
-fn binding_line(key: &str, description: &str, theme: &Theme) -> Line<'static> {
-    line![
-        span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}"),
-        description.to_string(),
-    ]
+/// Width of the `  <key:<14>` column that precedes each description.
+const KEY_COLUMN_WIDTH: usize = 16;
+
+/// Render a binding as `  <key:<14>  <description>`, wrapping the
+/// description under a hanging indent when `width` is too narrow. The
+/// key column inherits `theme.panel_focus_accent` so operators scan
+/// the keymap by accent color.
+fn binding_lines(
+    key: &str,
+    description: &str,
+    theme: &Theme,
+    width: Option<usize>,
+) -> Vec<Line<'static>> {
+    let key_span = span!(Style::default().fg(theme.panel_focus_accent); "  {key:<14}");
+    let Some(width) = width.filter(|w| *w > KEY_COLUMN_WIDTH + 8) else {
+        return vec![line![key_span, description.to_string()]];
+    };
+    let budget = u16::try_from(width - KEY_COLUMN_WIDTH).unwrap_or(u16::MAX);
+    let mut chunks = crate::viewer::render::word_wrap(description, budget).into_iter();
+    let first = chunks.next().unwrap_or_default();
+    let mut out = vec![line![key_span, first.trim_end().to_string()]];
+    for chunk in chunks {
+        out.push(line![
+            " ".repeat(KEY_COLUMN_WIDTH),
+            chunk.trim_end().to_string()
+        ]);
+    }
+    out
 }
 
 /// Built-in legend mapping each `NodeKind` glyph to its
@@ -407,7 +481,7 @@ fn push_icon_legend(lines: &mut Vec<Line<'static>>, theme: &Theme) {
         lines.push(line![
             "  ",
             span!(Style::default().fg(color); "{} ", style.glyph),
-            span!(Modifier::BOLD; "{:<14}", node_kind_display_name(kind)),
+            span!(Modifier::BOLD; "{:<16}", node_kind_display_name(kind)),
             node_kind_help_blurb(kind).to_string(),
         ]);
     }
@@ -457,8 +531,18 @@ fn blank(lines: &mut Vec<Line<'static>>) {
     lines.push(line![""]);
 }
 
+/// Help-overlay modal: as tall as the terminal allows (less a small
+/// margin) so more of the keymap is visible at once, and up to 100
+/// columns wide so long descriptions wrap less.
+fn help_modal_rect(area: Rect) -> Rect {
+    let width = std::cmp::min(100, area.width.saturating_sub(4)).max(40);
+    let height = area.height.saturating_sub(4).max(10);
+    super::popup_frame::centered_rect(area, width, height)
+}
+
 /// Centered modal sized to roughly two thirds of the terminal,
-/// capped so it stays readable on wide screens.
+/// capped so it stays readable on wide screens. Shared with the
+/// value modal.
 pub fn centered_modal_rect(area: Rect) -> Rect {
     let width = std::cmp::min(78, area.width.saturating_sub(4)).max(40);
     let max_height = area.height.saturating_sub(2);

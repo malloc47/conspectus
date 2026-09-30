@@ -14359,7 +14359,14 @@ finally `REL-002b`.
     - Tests: the renamed status-line test; a showcase snapshot of an
       ambiguous row.
     - Blockers: none.
-  - [ ] `REL-003c` Make the help overlay readable.
+  - [x] `REL-003c` Make the help overlay readable.
+    - Outcome: the overlay gets its own `help_modal_rect` (terminal height
+      less a margin, up to 100 columns; `centered_modal_rect` stays for
+      the value modal), wraps descriptions under a hanging indent via the
+      viewer's `word_wrap`, clamps `G` to the last page, draws a
+      scrollbar when the keymap overflows, and says how to scroll. IDs are
+      gone from the text, the stale `1 – 5` view entry now reads `1 / 2`,
+      and the icon legend's name column fits `Runtime process`.
     - Symptom: `?` opens a 78×28 modal regardless of terminal size, long
       descriptions are cut off at the modal edge, and nothing indicates
       that the overlay scrolls.
