@@ -593,6 +593,17 @@ mod resume_resolver {
         });
     }
 
+    /// Resolve against the harness's default launch argv — the
+    /// shape an unconfigured pin launches with.
+    fn resume_with_default_argv(
+        snap: &GraphSnapshot,
+        pin: &PinCandidate,
+        cache: &PinBindingsCache,
+    ) -> Option<Vec<std::ffi::OsString>> {
+        let base = conspectus::discovery::harness::launch_argv_for(&pin.harness);
+        super::resolve_resume_argv_with_cache(snap, pin, Path::new("/p"), &base, cache)
+    }
+
     fn seed_sidecar(cache: &PinBindingsCache, session_key: &str, harness: &str) {
         let record = PinBindingRecord::new(
             "ingest",
@@ -611,9 +622,7 @@ mod resume_resolver {
         let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
         let snap = GraphSnapshot::empty();
         let pin = make_pin("codex");
-        assert!(
-            super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache).is_none()
-        );
+        assert!(resume_with_default_argv(&snap, &pin, &cache).is_none());
     }
 
     #[test]
@@ -627,8 +636,7 @@ mod resume_resolver {
             .push(GraphNode::AgentSession(make_session("codex", "session-a")));
         let pin = make_pin("codex");
 
-        let argv = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
-            .expect("resume argv produced");
+        let argv = resume_with_default_argv(&snap, &pin, &cache).expect("resume argv produced");
         // codex resume_argv per H-PIN-RESUME-002: ["codex",
         // "exec", "--resume", "session-a"].
         assert_eq!(
@@ -659,8 +667,7 @@ mod resume_resolver {
         parent_link(&mut snap, "codex", "c", "b");
 
         let pin = make_pin("codex");
-        let argv = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
-            .expect("resume argv");
+        let argv = resume_with_default_argv(&snap, &pin, &cache).expect("resume argv");
         assert!(argv.contains(&std::ffi::OsString::from("c")));
         assert!(!argv.contains(&std::ffi::OsString::from("a")));
     }
@@ -680,7 +687,7 @@ mod resume_resolver {
         parent_link(&mut snap, "codex", "c", "a");
 
         let pin = make_pin("codex");
-        let outcome = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache);
+        let outcome = resume_with_default_argv(&snap, &pin, &cache);
         assert!(outcome.is_none(), "fork should fall back to default argv");
         // Sidecar is NOT deleted on fork — the data isn't stale,
         // just ambiguous.
@@ -697,7 +704,7 @@ mod resume_resolver {
         let snap = GraphSnapshot::empty();
         let pin = make_pin("codex");
 
-        let outcome = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache);
+        let outcome = resume_with_default_argv(&snap, &pin, &cache);
         assert!(outcome.is_none());
         assert!(
             read_sidecar(&cache, "ingest").unwrap().is_none(),
@@ -717,7 +724,7 @@ mod resume_resolver {
             .push(GraphNode::AgentSession(make_session("aider", "session-a")));
         let pin = make_pin("aider");
 
-        let outcome = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache);
+        let outcome = resume_with_default_argv(&snap, &pin, &cache);
         assert!(outcome.is_none());
         // Sidecar is not deleted — the session exists, just
         // can't be resumed via CLI.
@@ -737,8 +744,7 @@ mod resume_resolver {
         )));
         let pin = make_pin("claude-code");
 
-        let argv = super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &cache)
-            .expect("claude resume argv");
+        let argv = resume_with_default_argv(&snap, &pin, &cache).expect("claude resume argv");
         assert_eq!(
             argv,
             vec![
@@ -747,5 +753,74 @@ mod resume_resolver {
                 std::ffi::OsString::from("session-c"),
             ]
         );
+    }
+
+    #[test]
+    fn custom_launch_argv_keeps_wrapper_and_options_on_resume() {
+        // ADR 0098: a pin launched via `atelier exec claude
+        // --dangerously-skip-permissions` must resume with the same
+        // wrapper and options, not a bare `claude --resume`.
+        let temp = tempdir().unwrap();
+        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+        seed_sidecar(&cache, "session-c", "claude-code");
+
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes.push(GraphNode::AgentSession(make_session(
+            "claude-code",
+            "session-c",
+        )));
+        let pin = make_pin("claude-code");
+        let base: Vec<std::ffi::OsString> = [
+            "atelier",
+            "exec",
+            "claude",
+            "--dangerously-skip-permissions",
+        ]
+        .into_iter()
+        .map(std::ffi::OsString::from)
+        .collect();
+
+        let argv =
+            super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &base, &cache)
+                .expect("spliced resume argv");
+        let argv: Vec<_> = argv
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            argv,
+            [
+                "atelier",
+                "exec",
+                "claude",
+                "--resume",
+                "session-c",
+                "--dangerously-skip-permissions",
+            ]
+        );
+    }
+
+    #[test]
+    fn launch_argv_without_harness_binary_launches_fresh_and_keeps_sidecar() {
+        let temp = tempdir().unwrap();
+        let cache = PinBindingsCache::new().with_xdg_cache_home(temp.path());
+        seed_sidecar(&cache, "session-c", "claude-code");
+
+        let mut snap = GraphSnapshot::empty();
+        snap.nodes.push(GraphNode::AgentSession(make_session(
+            "claude-code",
+            "session-c",
+        )));
+        let pin = make_pin("claude-code");
+        let base = vec![std::ffi::OsString::from("./start-agent.sh")];
+
+        let outcome =
+            super::resolve_resume_argv_with_cache(&snap, &pin, Path::new("/p"), &base, &cache);
+        assert!(
+            outcome.is_none(),
+            "unspliceable argv falls back to fresh launch"
+        );
+        // The session is still valid; only this argv can't carry it.
+        assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
     }
 }

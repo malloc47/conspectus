@@ -824,8 +824,8 @@ impl PinLaunchArgs {
                 // Falls back to the default argv on every honest
                 // failure path (no sidecar, session missing, fork,
                 // harness without resume CLI).
-                let effective_argv =
-                    resolve_resume_argv(&snapshot, pin, &cwd).unwrap_or_else(|| argv.clone());
+                let effective_argv = resolve_resume_argv(&snapshot, pin, &cwd, &argv)
+                    .unwrap_or_else(|| argv.clone());
                 let outcome = runner
                     .new_session(socket, mux_name, &cwd, &effective_argv)
                     .map_err(|err| anyhow!("tmux new-session failed: {err}"))?;
@@ -933,23 +933,30 @@ fn pin_worktree_branch(store_path: &str, id: &str) -> Option<String> {
 /// mode: no sidecar, recorded session no longer on disk (deletes the
 /// sidecar), fork in the lineage chain, or the harness has no
 /// resume CLI.
+///
+/// ADR 0098: the resume tokens are spliced into `base_argv` (the pin's
+/// effective launch argv) so wrapper prefixes and launch options
+/// survive; a `base_argv` that never invokes the harness binary also
+/// falls back to a fresh launch.
 fn resolve_resume_argv(
     snapshot: &GraphSnapshot,
     pin: &conspectus::model::PinCandidate,
     cwd: &std::path::Path,
+    base_argv: &[std::ffi::OsString],
 ) -> Option<Vec<std::ffi::OsString>> {
     let cache = conspectus::pin_bindings::PinBindingsCache::from_env();
     cache.directory()?;
-    resolve_resume_argv_with_cache(snapshot, pin, cwd, &cache)
+    resolve_resume_argv_with_cache(snapshot, pin, cwd, base_argv, &cache)
 }
 
 pub(super) fn resolve_resume_argv_with_cache(
     snapshot: &GraphSnapshot,
     pin: &conspectus::model::PinCandidate,
     cwd: &std::path::Path,
+    base_argv: &[std::ffi::OsString],
     cache: &conspectus::pin_bindings::PinBindingsCache,
 ) -> Option<Vec<std::ffi::OsString>> {
-    use conspectus::discovery::harness::resume_argv_for;
+    use conspectus::discovery::harness::{resume_argv_for, splice_resume_argv};
     use conspectus::pin_bindings::{LineageOutcome, delete as delete_sidecar, lineage_head, read};
 
     let record = match read(cache, &pin.id) {
@@ -999,13 +1006,25 @@ pub(super) fn resolve_resume_argv_with_cache(
     };
 
     match resume_argv_for(&pin.harness, &head.session_key, cwd) {
-        Some(argv) => {
-            println!(
-                "pin `{}`: resuming recorded session `{}`",
-                pin.id, head.session_key
-            );
-            Some(argv)
-        }
+        Some(resume) => match splice_resume_argv(base_argv, &resume) {
+            Some(argv) => {
+                println!(
+                    "pin `{}`: resuming recorded session `{}`",
+                    pin.id, head.session_key
+                );
+                Some(argv)
+            }
+            None => {
+                eprintln!(
+                    "conspectus: pin `{}`: launch argv does not invoke `{}`; \
+                     cannot splice resume of session `{}`, launching fresh",
+                    pin.id,
+                    resume[0].to_string_lossy(),
+                    head.session_key,
+                );
+                None
+            }
+        },
         None => {
             eprintln!(
                 "conspectus: pin `{}`: harness `{}` does not expose a resume command; \

@@ -562,6 +562,33 @@ pub fn resume_argv_for(
     adapter_for(harness_key).and_then(|a| a.resume_argv(session_id, cwd))
 }
 
+/// Splice a harness `resume_argv` into a pin's configured launch argv
+/// (ADR 0098). The first token of `resume` names the harness binary;
+/// the remaining tokens (`--resume <id>`, `exec --resume <id>`, ...)
+/// are inserted immediately after the first `base` token whose file
+/// name matches that binary. Wrapper prefixes (`atelier exec`,
+/// `nono run --`) and trailing launch options
+/// (`--dangerously-skip-permissions`) are preserved in place.
+///
+/// Returns `None` when `base` never invokes the harness binary (e.g.
+/// an opaque shell script); callers fall back to a fresh launch with
+/// `base` rather than discarding the operator's argv.
+pub fn splice_resume_argv(
+    base: &[std::ffi::OsString],
+    resume: &[std::ffi::OsString],
+) -> Option<Vec<std::ffi::OsString>> {
+    let (binary, resume_args) = resume.split_first()?;
+    let binary = Path::new(binary).file_name()?;
+    let idx = base
+        .iter()
+        .position(|token| Path::new(token).file_name() == Some(binary))?;
+    let mut out = Vec::with_capacity(base.len() + resume_args.len());
+    out.extend_from_slice(&base[..=idx]);
+    out.extend_from_slice(resume_args);
+    out.extend_from_slice(&base[idx + 1..]);
+    Some(out)
+}
+
 #[derive(Default)]
 pub struct HarnessDiscovery {
     adapters: Vec<Box<dyn HarnessAdapter>>,
@@ -665,6 +692,88 @@ mod registry_tests {
         );
         assert!(resume_argv_for("aider", "sess-123", cwd).is_none());
         assert!(resume_argv_for("never-registered", "sess", cwd).is_none());
+    }
+
+    fn os(tokens: &[&str]) -> Vec<std::ffi::OsString> {
+        tokens.iter().map(std::ffi::OsString::from).collect()
+    }
+
+    #[test]
+    fn splice_resume_argv_default_argv_matches_bare_resume() {
+        assert_eq!(
+            splice_resume_argv(&os(&["claude"]), &os(&["claude", "--resume", "s"])),
+            Some(os(&["claude", "--resume", "s"]))
+        );
+    }
+
+    #[test]
+    fn splice_resume_argv_preserves_wrapper_and_launch_options() {
+        // ADR 0098: `atelier exec` prefix and skip-permissions survive.
+        assert_eq!(
+            splice_resume_argv(
+                &os(&[
+                    "atelier",
+                    "exec",
+                    "claude",
+                    "--dangerously-skip-permissions"
+                ]),
+                &os(&["claude", "--resume", "s"]),
+            ),
+            Some(os(&[
+                "atelier",
+                "exec",
+                "claude",
+                "--resume",
+                "s",
+                "--dangerously-skip-permissions",
+            ]))
+        );
+    }
+
+    #[test]
+    fn splice_resume_argv_places_subcommand_right_after_binary() {
+        // codex resume is a subcommand; options must follow it.
+        assert_eq!(
+            splice_resume_argv(
+                &os(&["codex", "--dangerously-bypass-approvals-and-sandbox"]),
+                &os(&["codex", "exec", "--resume", "s"]),
+            ),
+            Some(os(&[
+                "codex",
+                "exec",
+                "--resume",
+                "s",
+                "--dangerously-bypass-approvals-and-sandbox",
+            ]))
+        );
+    }
+
+    #[test]
+    fn splice_resume_argv_matches_binary_by_file_name() {
+        assert_eq!(
+            splice_resume_argv(
+                &os(&["/nix/store/abc/bin/claude", "--verbose"]),
+                &os(&["claude", "--resume", "s"]),
+            ),
+            Some(os(&[
+                "/nix/store/abc/bin/claude",
+                "--resume",
+                "s",
+                "--verbose"
+            ]))
+        );
+    }
+
+    #[test]
+    fn splice_resume_argv_none_when_binary_absent() {
+        assert_eq!(
+            splice_resume_argv(
+                &os(&["./start-agent.sh"]),
+                &os(&["claude", "--resume", "s"])
+            ),
+            None
+        );
+        assert_eq!(splice_resume_argv(&os(&["claude"]), &[]), None);
     }
 
     #[test]
