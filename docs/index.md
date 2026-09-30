@@ -75,8 +75,8 @@ to Conspectus CLI and library entry points.
 
 ## `docs/adr/`
 
-Purpose: accepted architecture decisions, including the Phase 6 library API
-surface and distribution policy.
+Purpose: architecture decision records. `docs/adr/README.md` indexes all of
+them by theme with their status.
 
 ## `docs/implementation/`
 

@@ -494,7 +494,7 @@ use.
 | Manage worktrees and streams of work | [docs/worktrees.md](docs/worktrees.md) |
 | Export and explore the graph visually | [docs/graph-visualization.md](docs/graph-visualization.md) |
 | Understand the model and intent | [docs/design.md](docs/design.md) |
-| See why things are the way they are | [docs/adr/](docs/adr/) |
+| See why things are the way they are | [docs/adr/](docs/adr/README.md) |
 | Understand how sessions get attributed to tmux panes | [docs/mux-link-resolution.md](docs/mux-link-resolution.md) |
 | Add a harness, mux, forge, or orchestrator adapter | [docs/provider-adapter-guide.md](docs/provider-adapter-guide.md) |
 | Use Conspectus as a library | [docs/library-api.md](docs/library-api.md) |
