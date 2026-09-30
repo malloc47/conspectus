@@ -526,4 +526,6 @@ features at once. Commit, review, and pre-merge conventions are in
 
 ## License
 
-MIT, as declared in [`Cargo.toml`](Cargo.toml).
+MIT; see [`LICENSE`](LICENSE). The vendored JavaScript behind the HTML
+graph explorer carries its own MIT notices in
+[`src/output/html/assets/NOTICE`](src/output/html/assets/NOTICE).

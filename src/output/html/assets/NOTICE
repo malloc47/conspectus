@@ -1,7 +1,9 @@
 Third-party license notices for vendored JavaScript assets.
 
-All four packages are MIT-licensed. The full license texts are
-reproduced below.
+All vendored packages are MIT-licensed: the five bundles listed in
+VERSIONS (cytoscape, cytoscape-fcose, cose-base, layout-base,
+cytoscape-dagre) plus dagre, which cytoscape-dagre embeds. The full
+license texts are reproduced below.
 
 ================================================================
 cytoscape (https://github.com/cytoscape/cytoscape.js)

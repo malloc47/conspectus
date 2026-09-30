@@ -41,4 +41,5 @@ Load order matters: layout-base → cose-base → cytoscape →
 cytoscape-fcose → cytoscape-dagre. The Rust template inlines them
 in that order so the UMD globals attach cleanly.
 
-License texts for all five packages are reproduced in NOTICE.
+License texts for all five packages, plus the dagre copy embedded in
+cytoscape-dagre, are reproduced in NOTICE.

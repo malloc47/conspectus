@@ -14257,8 +14257,10 @@ backlog. Suggested order: collect the decisions, then `REL-003`,
 `REL-004`, `REL-005` and `REL-006`, `REL-007`, `REL-008`, `REL-009`, and
 finally `REL-002b`.
 
-- [ ] `REL-001` License and third-party notices.
-  - [ ] `REL-001a` Add `LICENSE`.
+- [x] `REL-001` License and third-party notices.
+  - [x] `REL-001a` Add `LICENSE`.
+    - Outcome: MIT, `Copyright (c) 2026 Jarrell Waggoner`; the README
+      License section links `LICENSE` and the vendored-asset `NOTICE`.
     - Scope: `Cargo.toml` declares `license = "MIT"`, but the repo has no
       license file. Add the standard MIT text with the chosen copyright
       line, and point the README "License" section at `LICENSE` instead of
@@ -14266,7 +14268,9 @@ finally `REL-002b`.
       MIT and needs its own file only if the plugin is published to npm.
     - Tests: docs-only; `git diff --check`.
     - Blockers: decision 1.
-  - [ ] `REL-001b` Correct the vendored-asset notice.
+  - [x] `REL-001b` Correct the vendored-asset notice.
+    - Outcome: `NOTICE` and `VERSIONS` now name the five bundles plus the
+      embedded dagre copy. The HTML-export question stays with `REL-010`.
     - Scope: `src/output/html/assets/NOTICE` opens with "All four packages
       are MIT-licensed" but reproduces six license texts (cytoscape,
       cytoscape-fcose, cose-base, cytoscape-dagre, the dagre copy embedded
