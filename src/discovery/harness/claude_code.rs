@@ -45,7 +45,7 @@
 //!   See backlog `H-LINEAGE-006` for the closure notes.
 
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -220,9 +220,9 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             })
             .collect();
 
-        let session_keys: HashMap<&str, ()> = entries
+        let session_keys: HashSet<&str> = entries
             .iter()
-            .map(|entry| (entry.node.id.session_key.as_str(), ()))
+            .map(|entry| entry.node.id.session_key.as_str())
             .collect();
 
         for entry in &entries {
@@ -232,7 +232,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
             // them.
             if let Some(parent_session_id) = entry.forked_from_session_id.as_deref() {
                 if !parent_session_id.is_empty() && parent_session_id != entry.node.id.session_key {
-                    let resolved = session_keys.contains_key(parent_session_id);
+                    let resolved = session_keys.contains(parent_session_id);
                     candidate_links.push(build_fork_lineage_link(
                         entry,
                         parent_session_id,

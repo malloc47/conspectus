@@ -31,7 +31,7 @@
 //! The reader never selects `feedback_log_body` (privacy). Connections open
 //! read-only with `query_only = ON` and stay short-lived.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
@@ -124,14 +124,14 @@ pub fn apply_codex_log_attribution(
     // Dedupe so the same (mux, thread) only produces one log-derived link
     // even if several Codex pids under the same mux happen to write to the
     // same thread (rare, but possible during fork transitions).
-    let mut seen: BTreeMap<(MuxSessionId, String), bool> = BTreeMap::new();
+    let mut seen: BTreeSet<(MuxSessionId, String)> = BTreeSet::new();
 
     for candidate in candidates {
         let Some(observation) = observations.get(&candidate.pid).cloned() else {
             continue;
         };
         let key = (candidate.mux_id.clone(), observation.thread_id.clone());
-        if seen.insert(key, true).is_some() {
+        if !seen.insert(key) {
             continue;
         }
 
@@ -248,14 +248,14 @@ fn collect_codex_pane_processes(
     codex_pids_per_mux: &BTreeMap<MuxSessionId, Vec<(String, i64)>>,
 ) -> Vec<CodexPaneProcess> {
     let mut output: Vec<CodexPaneProcess> = Vec::new();
-    let mut seen: BTreeMap<(MuxSessionId, i64), ()> = BTreeMap::new();
+    let mut seen: BTreeSet<(MuxSessionId, i64)> = BTreeSet::new();
 
     for (mux_id, entries) in codex_pids_per_mux {
         for (harness_key, pid) in entries {
             if harness_key != CODEX_HARNESS_KEY {
                 continue;
             }
-            if seen.insert((mux_id.clone(), *pid), ()).is_some() {
+            if !seen.insert((mux_id.clone(), *pid)) {
                 continue;
             }
             output.push(CodexPaneProcess {
@@ -611,12 +611,12 @@ fn runtime_process_for_mux_pid(
     mux_id: &MuxSessionId,
     pid: i64,
 ) -> Option<NodeId> {
-    let process_ids: BTreeMap<_, _> = snapshot
+    let process_ids: BTreeSet<NodeId> = snapshot
         .nodes
         .iter()
         .filter_map(|node| match node {
             GraphNode::RuntimeProcess(process) if process.pid == Some(pid) => {
-                Some((NodeId::RuntimeProcess(process.id.clone()), ()))
+                Some(NodeId::RuntimeProcess(process.id.clone()))
             }
             _ => None,
         })
@@ -626,7 +626,7 @@ fn runtime_process_for_mux_pid(
         if link.relation == RelationKind::MuxContainsProcess
             && link.source == mux_node_id
             && let Some(target) = link.target_node_id()
-            && process_ids.contains_key(target)
+            && process_ids.contains(target)
         {
             return Some(target.clone());
         }

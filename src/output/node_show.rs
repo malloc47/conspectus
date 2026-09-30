@@ -22,7 +22,7 @@
 //! In-memory renderer (P11-011b / ADR 0082). Iterates the
 //! resolved [`GraphSnapshot`] directly — no SQLite materialization.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use crate::model::{
@@ -74,7 +74,7 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
         && trimmed.len() <= 16
         && trimmed.chars().all(|c| c.is_ascii_hexdigit());
 
-    let mut matches: BTreeMap<NodeId, ()> = BTreeMap::new();
+    let mut matches: BTreeSet<NodeId> = BTreeSet::new();
 
     for node in &snapshot.nodes {
         let id = node.id();
@@ -83,7 +83,7 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
             && node_short_id_from_display(&display).starts_with(trimmed))
             || display == trimmed;
         if matches_input {
-            matches.insert(id, ());
+            matches.insert(id);
         }
     }
 
@@ -102,24 +102,24 @@ pub fn resolve_node_id(input: &str, snapshot: &GraphSnapshot) -> Result<NodeId, 
                     || key_label == trimmed
                     || title_label.as_deref() == Some(trimmed)
                 {
-                    matches.insert(NodeId::AgentSession(agent.id.clone()), ());
+                    matches.insert(NodeId::AgentSession(agent.id.clone()));
                 }
             }
             GraphNode::MuxSession(mux) => {
                 if format!("{}:{}", mux.backend, mux.native_id) == trimmed {
-                    matches.insert(NodeId::MuxSession(mux.id.clone()), ());
+                    matches.insert(NodeId::MuxSession(mux.id.clone()));
                 }
             }
             GraphNode::Pin(pin) => {
                 if pin.id.id == trimmed || pin.display_name == trimmed {
-                    matches.insert(NodeId::Pin(pin.id.clone()), ());
+                    matches.insert(NodeId::Pin(pin.id.clone()));
                 }
             }
             _ => {}
         }
     }
 
-    let mut candidates: Vec<NodeId> = matches.into_keys().collect();
+    let mut candidates: Vec<NodeId> = matches.into_iter().collect();
     match candidates.len() {
         0 => Err(NodeResolveError::NotFound {
             input: trimmed.to_string(),

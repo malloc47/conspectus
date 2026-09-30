@@ -291,7 +291,7 @@ fn checkout_roots(snapshot: &GraphSnapshot) -> Vec<(CheckoutId, String)> {
 /// the canonical path; it just doesn't drive the
 /// session→workspace association.
 fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
-    let mut roots = HashMap::new();
+    let mut roots = BTreeSet::new();
 
     for link in &snapshot.candidate_links {
         if link.relation != RelationKind::WorkspaceContainsRepo {
@@ -301,9 +301,7 @@ fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
         // Workspace root itself — covers `cd <workspace> && agent`
         // (the typical agent-deck launch shape).
         if let NodeId::Workspace(ws) = &link.source {
-            roots
-                .entry((link.source.clone(), normalize_path(&ws.root)))
-                .or_insert(());
+            roots.insert((link.source.clone(), normalize_path(&ws.root)));
         }
 
         // Member `logical_path` — covers `cd <workspace>/<member> && agent`
@@ -316,13 +314,11 @@ fn workspace_member_roots(snapshot: &GraphSnapshot) -> Vec<(NodeId, String)> {
             .get(crate::model::source_field::LOGICAL_PATH)
             .and_then(serde_json::Value::as_str)
         {
-            roots
-                .entry((link.source.clone(), normalize_path(path)))
-                .or_insert(());
+            roots.insert((link.source.clone(), normalize_path(path)));
         }
     }
 
-    roots.into_keys().collect()
+    roots.into_iter().collect()
 }
 
 fn matching_workspaces<'a>(
