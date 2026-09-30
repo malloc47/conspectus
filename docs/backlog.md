@@ -6068,8 +6068,9 @@ failure:
   - Blockers: access to Claude Code v2.1.154+ with workflows enabled.
   - Related: `H-MUXPROC-018`, `H-MUXPROC-015`, ADR 0028.
 
-- [ ] `H-MUXPROC-020` Record the harness pid, not the hook writer's
+- [x] `H-MUXPROC-020` Record the harness pid, not the hook writer's
   pid, in hook sidecar records.
+  - Outcome (2026-09-30, `REL-007`): landed in `4c63044`.
   - Problem: `conspectus hook write claude-code` (and the codex /
     opencode variants) persist `record.pid = std::process::id()` in
     `src/cli.rs:417`, but `std::process::id()` is the pid of the
@@ -7610,8 +7611,11 @@ layout or awkward key semantics.
   - Blockers: ADR/model decision for pin node identity and relation
     kinds.
 
-- [ ] `H-PIN-TUI-010` Project pins as placeholder session and mux
+- [x] `H-PIN-TUI-010` Project pins as placeholder session and mux
   entities.
+  - Outcome (2026-09-30, `REL-007`): done per operator review: WIP
+    `719d77a`, then `8870e82`, `fc55193`, `88450d8`, and `0524fdd` finished
+    the polish.
   - Motivation: creating a new, unlaunched pin from the mux view can
     currently leave no mux-shaped row to select because no real
     `MuxSessionNode` exists yet. A pin is a first-class declaration,
@@ -7683,8 +7687,9 @@ layout or awkward key semantics.
     `H-PIN-016`; search / model / JSON placeholder identity is still
     open under this story.
 
-- [ ] `H-PIN-TUI-011` Numeric-suffix auto-increment for derived pin
+- [x] `H-PIN-TUI-011` Numeric-suffix auto-increment for derived pin
   names.
+  - Outcome (2026-09-30, `REL-007`): landed in `c6905bb`.
   - Motivation: a common workflow is spinning up `worker-2` from an
     already-pinned `worker-1` selection. The current derived-name
     helper (`unique_pin_mux_name`) treats the whole base as opaque
@@ -9394,7 +9399,11 @@ code.
     becomes dedicated (and would unblock the per-mutation
     audit trail P7-008 will want).
 
-- [ ] `P7-007` Implement CLI ↔ server snapshot read path.
+- [x] `P7-007` Implement CLI ↔ server snapshot read path.
+  - Outcome (2026-09-30, `REL-007`): landed through the Phase 11 socket
+    `snapshot` command; one-shot commands take the daemon snapshot via
+    `try_daemon_snapshot` (`src/cli/mod.rs`). The text above predates the
+    `table` rename of `session`.
   - Scope: when a server is running (detected by an existing
     transport endpoint), `conspectus session` / `conspectus graph`
     / `conspectus node show` read the server's current snapshot
@@ -9572,7 +9581,9 @@ work. `P8-014` is post-v1 polish that does not block the release.
     translation are unit-tested without a terminal. Integration
     smoke tests cover `tui --help` and flag validation.
 
-- [ ] `P8-004` Build TUI row tree view-models for every table row-type.
+- [x] `P8-004` Build TUI row tree view-models for every table row-type.
+  - Outcome (2026-09-30, `REL-007`): row builders for all five row types
+    live in `src/tui/rows/` (first slice `50f206c`).
   - Scope: add pure row-tree builders for `sessions`, `mux`, `union`,
     `prs`, and `forks`. The builders consume a resolved `GraphSnapshot`
     and produce stable row ids, labels, depth, row kind, primary node id,
@@ -9617,7 +9628,9 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `r` refresh-intent dispatch (waits on P8-008 to have
     something to refresh), `?` help overlay.
 
-- [ ] `P8-007` Render the two-panel Ratatui UI.
+- [x] `P8-007` Render the two-panel Ratatui UI.
+  - Outcome (2026-09-30, `REL-007`): v1 landed in `bc7a1b0`; the
+    empty/loading/error frame matrix continues as `T8-003`.
   - Scope: implement the visible layout per the wireframe and panel
     composition in `docs/implementation/phase-08-interactive-tui.md`:
     50/50 left/right split at wide widths, stacked layout below
@@ -9731,6 +9744,8 @@ work. `P8-014` is post-v1 polish that does not block the release.
     real-tmux attach via a manual script.
 
 - [ ] `P8-011` Implement resume un-muxed agent session into mux.
+  - Outcome (2026-09-30, `REL-007`): still open. `S` resumes an un-muxed
+    session in a new terminal; resuming it into a mux remains to do.
   - Scope: model harness-specific resume command support for the
     discovered harnesses Conspectus can safely resume. Add a confirmation
     flow that creates or selects the mux target per the P8-001 answer,
@@ -13491,8 +13506,9 @@ A batch of operator-requested items, listed easiest → hardest where
 "harder" means more product direction is needed to scope and set the
 approach (not raw implementation size). Worked top-to-bottom.
 
-- [ ] `H-VIEW-001` Drop the Union view and hide the PRs and Forks views
+- [x] `H-VIEW-001` Drop the Union view and hide the PRs and Forks views
   from the TUI.
+  - Outcome (2026-09-30, `REL-007`): landed in `b84aa05`.
   - Scope: `VIEW_OPTIONS` (`src/tui/widgets/controls.rs`) is the single
     source of truth for both the controls-overlay View section and the
     `[` / `]` view-cycle accelerator. Reduce it to `[Sessions, Mux]` so
@@ -13505,8 +13521,10 @@ approach (not raw implementation size). Worked top-to-bottom.
     view-cycle tests to the shortened option set; confirm no default
     view/grouping resolves to a now-hidden view.
   - Blockers: none.
-- [ ] `H-LAYOUT-001` Make the column-reflow (narrow → stacked) threshold
+- [x] `H-LAYOUT-001` Make the column-reflow (narrow → stacked) threshold
   configurable.
+  - Outcome (2026-09-30, `REL-007`): landed in `93406b5` as `[tui]
+    narrow_layout_threshold`.
   - Scope: `NARROW_LAYOUT_THRESHOLD` (`src/tui/ui.rs:56`, hard-coded
     `100`) governs when `draw_body` switches the side-by-side left/right
     panes to a vertical stack; `src/tui/snapshot.rs` reads the same
@@ -13721,8 +13739,10 @@ approach (not raw implementation size). Worked top-to-bottom.
   work (001c resolve/publish deferral, `try_class_cycle` gate
   bypass, empty-fragment gate hole), lives at the bottom of
   `docs/adr/0091-serve-idle-cost-and-class-gated-mutators.md`.
-- [ ] `H-WT-001` Integrate first-class worktree management with pluggable
+- [x] `H-WT-001` Integrate first-class worktree management with pluggable
   backends.
+  - Outcome (2026-09-30, `REL-007`): epic complete; `H-WT-002` through
+    `H-WT-008` landed.
   - Scope: product design for creating / listing / removing git
     worktrees from Conspectus with a pluggable backend seam targeting
     `worktrunk` (https://github.com/max-sixty/worktrunk) as the rich
@@ -13812,8 +13832,10 @@ approach (not raw implementation size). Worked top-to-bottom.
         worktrunk when `wt` on PATH, else read-only; `git` forces
         read-only; `worktrunk` requires `wt`). A resolver picks the
         CLI/TUI mutation backend from config + PATH.
-    - [ ] `H-WT-004` `conspectus worktree new/rm` CLI + menu-first TUI
+    - [x] `H-WT-004` `conspectus worktree new/rm` CLI + menu-first TUI
       actions gated on a mutation-capable backend.
+      - Outcome (2026-09-30, `REL-007`): CLI (`004a`) and TUI (`004b`) both
+        landed.
       - Scope (settled 2026-08): create-only semantics — `worktree new`
         creates the worktree+branch but does NOT launch an agent
         (launching stays the pin system's job).
@@ -13832,8 +13854,9 @@ approach (not raw implementation size). Worked top-to-bottom.
 
 Fresh batch, added alongside the 2026-07-27 items.
 
-- [ ] `H-PIN-EDIT-MUX-001` Pin edit / delete does not resolve a pin when a
+- [x] `H-PIN-EDIT-MUX-001` Pin edit / delete does not resolve a pin when a
   pinned mux row is selected in the mux view.
+  - Outcome (2026-09-30, `REL-007`): landed in `084967f`.
   - Symptom: on a pinned mux row selected from the Mux view, pressing `R`
     (rename) or `Delete` (via the pins menu / `p`) reports "no editable
     pin `<pin_id>` in current selection" even though the row carries the
@@ -14577,7 +14600,9 @@ finally `REL-002b`.
     in this backlog.
   - Tests: docs-only; link check over `README.md` and `docs/*.md`.
   - Blockers: decision 5.
-- [ ] `REL-007` True up backlog checkboxes.
+- [x] `REL-007` True up backlog checkboxes.
+  - Outcome: ticked the eleven landed items with outcome notes (including
+    `H-PIN-TUI-010`, confirmed by the operator) and annotated `P8-011`.
   - Scope:
     - Tick, with an outcome line: `H-VIEW-001` (`b84aa05`),
       `H-LAYOUT-001` (`93406b5`), `H-PIN-EDIT-MUX-001` (`084967f`),
