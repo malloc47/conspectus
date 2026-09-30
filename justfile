@@ -20,8 +20,9 @@ diff-check:
 # Three post-processing steps:
 #
 # 1. `sed` replaces the temp-dir prefix with `/fixture` so the JSON
-#    is stable across machines. The regex stops at the next `/` so
-#    a link id that mentions the temp root twice doesn't collapse.
+#    is stable across machines. It matches any depth of `$TMPDIR`
+#    (including unset, i.e. `/tmp`) and stops at `"`, whitespace, or
+#    `:` so id prefixes like `repo:` survive.
 # 2. `jq` rewrites `last_active_epoch` on every `agent_session` to
 #    a varied offset from `$SHOWCASE_NOW_EPOCH`. The codex /
 #    claude-code adapters source last-active from the JSONL file
@@ -33,8 +34,8 @@ diff-check:
 #    re-run this recipe.
 regen-showcase-fixture:
     cargo run --quiet -- dev scenario graph showcase --format json | \
-        sed -E 's#/tmp/[^/]+/conspectus-scenario-showcase-[0-9]+-[0-9]+#/fixture#g' | \
-        jq --arg now 1781611200 ' \
+        sed -E 's#(/[^/"[:space:]:]+)*/conspectus-scenario-showcase-[0-9]+-[0-9]+#/fixture#g' | \
+        jq --arg now 1790769600 ' \
             (.nodes[] | select(.type == "agent_session")) |= ( \
                 .last_active_epoch = ( \
                     if .id.session_key | test("ambig|hook|deck-launcher") then ($now|tonumber) - 60 \

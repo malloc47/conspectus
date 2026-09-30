@@ -494,6 +494,10 @@ struct TmuxReplayRow {
     active_pane_pid: Option<i64>,
     active_pane_current_path: Option<String>,
     active_pane_start_command: Option<String>,
+    /// `#{session_attached}` client count; `None` leaves the field
+    /// empty so discovery reports attachment as unknown.
+    attached_clients: Option<usize>,
+    last_attached_epoch: Option<i64>,
 }
 
 impl TmuxReplayRow {
@@ -511,6 +515,12 @@ impl TmuxReplayRow {
 
     fn with_activity(mut self, epoch: i64) -> Self {
         self.activity_epoch = Some(epoch);
+        self
+    }
+
+    fn with_attached(mut self, attached: bool, last_attached_epoch: i64) -> Self {
+        self.attached_clients = Some(usize::from(attached));
+        self.last_attached_epoch = Some(last_attached_epoch);
         self
     }
 
@@ -544,7 +554,13 @@ impl TmuxReplayRow {
                 .unwrap_or_default(),
             self.active_pane_current_path.clone().unwrap_or_default(),
             self.active_pane_start_command.clone().unwrap_or_default(),
+            self.attached_clients
+                .map(|count| count.to_string())
+                .unwrap_or_default(),
             String::new(),
+            self.last_attached_epoch
+                .map(|epoch| epoch.to_string())
+                .unwrap_or_default(),
         ]
         .join("\t")
     }
@@ -799,7 +815,7 @@ root = ".atelier/forks/beta"
 /// every PR is "6 months ago"), bump this constant and re-run
 /// `just regen-showcase-fixture` so the fresh JSON lands in one
 /// commit.
-const SHOWCASE_NOW_EPOCH: i64 = 1_781_611_200; // 2026-06-16T13:00:00Z (approx)
+const SHOWCASE_NOW_EPOCH: i64 = 1_790_769_600; // 2026-09-30T12:00:00Z
 
 /// Comprehensive showcase scenario (ADR 0070). Built from modular
 /// `add_*_to_showcase` helpers so a future edge case is one new
@@ -1013,6 +1029,7 @@ fn add_mux_layout_to_showcase(
         TmuxReplayRow::new("project")
             .with_cwd(project)
             .with_activity(SHOWCASE_NOW_EPOCH - 5 * 60)
+            .with_attached(true, SHOWCASE_NOW_EPOCH - 5 * 60)
             .with_active_pane("claude", 1101, project, "claude --resume showcase-claude"),
     );
     // Mux that two harness sessions could plausibly attach to —
@@ -1021,6 +1038,7 @@ fn add_mux_layout_to_showcase(
         TmuxReplayRow::new("ambiguous")
             .with_cwd(project)
             .with_activity(SHOWCASE_NOW_EPOCH - 15 * 60)
+            .with_attached(false, SHOWCASE_NOW_EPOCH - 20 * 60)
             .with_active_pane("claude", 1102, project, "claude"),
     );
     world.harness.write_claude_code_session(
@@ -1047,6 +1065,7 @@ fn add_mux_layout_to_showcase(
         TmuxReplayRow::new("bare-work")
             .with_cwd(bare_worktree)
             .with_activity(SHOWCASE_NOW_EPOCH - 2 * 3600)
+            .with_attached(false, SHOWCASE_NOW_EPOCH - 3 * 3600)
             .with_active_pane(
                 "codex",
                 1103,
@@ -1061,6 +1080,7 @@ fn add_mux_layout_to_showcase(
         TmuxReplayRow::new("showcase-deck")
             .with_cwd(deck_dir)
             .with_activity(SHOWCASE_NOW_EPOCH - 30 * 60)
+            .with_attached(false, SHOWCASE_NOW_EPOCH - 45 * 60)
             .with_active_pane(
                 "claude",
                 1104,

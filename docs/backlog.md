@@ -14651,7 +14651,15 @@ finally `REL-002b`.
   - Tests: docs-only; `git diff --check`.
   - Blockers: decision 6.
 - [ ] `REL-009` Talk and demo assets.
-  - [ ] `REL-009a` Refresh the showcase fixture.
+  - [x] `REL-009a` Refresh the showcase fixture.
+    - Outcome: `TmuxReplayRow` gained attached-client and last-attached
+      fields (other scenarios leave them empty); the showcase marks
+      `project` attached and the rest detached. The regen recipe's `sed`
+      now matches any `$TMPDIR` depth and keeps id prefixes like `repo:`.
+      `SHOWCASE_NOW_EPOCH` and the recipe's `--arg now` moved to
+      2026-09-30T12:00Z (re-bump before the talk). The regenerated fixture
+      carries worktree metadata and `node_provenance`; node, link, and
+      relationship counts are unchanged and all 2,081 tests pass.
     - Scope:
       - `tests/fixtures/showcase.json` was last regenerated on 2026-06-18
         and predates worktree discovery. Every checkout has
