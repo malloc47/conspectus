@@ -701,7 +701,9 @@ four separate creation flavors plus rename, attach, and teardown:
 - **Pin launch** (ADRs 0057 / 0058) — a `pin launch` (or `Enter` on
   an unbound pin row) starts a tmux session running the pin's
   harness argv, spliced with `resume_argv` when a continuity
-  sidecar applies. Distinguished from mux launch by durable
+  sidecar applies. Resume tokens are inserted after the harness
+  binary inside the pin's argv, so wrappers and launch options
+  survive (ADR 0098). Distinguished from mux launch by durable
   `[[pins.entries]]` persistence, alias overlay, and resume
   continuity.
 - **Worktree stream** (ADR 0094) — a worktree-backed pin realizes

@@ -14049,6 +14049,17 @@ Fresh batch, added alongside the 2026-07-27 items.
     accessors) and 5 (`MuxLaunchState` rename) folded into the
     extraction; wrapper diet is thin enough that the rename
     would only rewrite spelling.
+- [x] `H-PIN-RESUME-ARGV-001` Pin resume drops the pin's launch argv
+  (ADR 0098).
+  - Symptom: a pin with `launch.argv = ["atelier", "exec", "claude",
+    "--dangerously-skip-permissions"]` relaunched as bare `claude
+    --resume <id>` when its continuity sidecar had a session — no
+    wrapper, no skip-permissions, despite the pin form showing both.
+  - Fix: `discovery::harness::splice_resume_argv` inserts the resume
+    tokens after the harness binary inside the pin's effective argv;
+    argv that never invokes the binary launches fresh with a hint and
+    keeps the sidecar. Unit tests cover default, wrapper + option,
+    codex subcommand, path-qualified binary, and no-binary cases.
 
 ### Worktree Interaction Epic (H-WT-ENV / H-WT-004b..008)
 
