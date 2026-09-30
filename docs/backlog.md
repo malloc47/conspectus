@@ -14525,7 +14525,16 @@ finally `REL-002b`.
         planned.
     - Tests: docs-only; `git diff --check`.
     - Blockers: none.
-  - [ ] `REL-005c` Complete the `docs/operations.md` reference.
+  - [x] `REL-005c` Complete the `docs/operations.md` reference.
+    - Outcome: CLI Surface lists every command; Configuration File has a
+      commented reference for `[table.*]`, `[tui]`, `[tui.views.*]`,
+      `[tui.detail]`, `[server.intervals]`, and `[worktree]`, with
+      grouping values, filter shape, duration grammar, and view
+      precedence; Caches adds the pin-store registry and corrects the
+      `graph.bin` readback. Checking keys against `src/config.rs` found
+      `[tui] default_view` documented but never parsed; per the
+      operator's call it is now implemented (`feat(config)` commit, with
+      three config tests).
     - Scope:
       - CLI Surface (`:197`) lists only `graph`, `table`, `node show`,
         `columns`, `declared`, `pin`, and `worktree`. Add `tui`, `hook`,

@@ -112,17 +112,54 @@ See ADR 0012 for the layout and precedence rules. Briefly:
 Project values win over user values, which win over built-in
 defaults. Both files are TOML and entirely optional.
 
-The schema is keyed on the `[table]` parent with one subsection per
-row-type rendered by `conspectus table <ROWS>` (see ADR 0021):
+The same files also hold user-authored intent: `[declared]` links
+(ADR 0014), `[[aliases]]` (ADR 0029), and `[[pins.entries]]` (ADR 0057,
+see [Session pins](#session-pins)). The tables below are the
+configuration keys.
 
 ```toml
-[table.sessions]
-# Per-row-type knobs land here; H-TBL-007 adds `columns = [...]`.
+[table.sessions]            # also mux, union, prs, forks (ADR 0021)
+columns = ["default", "+preview"]   # same tokens as `--columns`
 
-[table.mux]
+[tui]
+default_view = "sessions"   # sessions | mux (union | prs | forks also accepted)
+scan_roots = ["~/work"]     # used when --scan-root is absent; `~` expands
+show_harness_chips = false  # per-harness count chips in the header
+narrow_layout_threshold = 100  # columns below which the panes stack
+# sessions_grouping = "graph"  # deprecated alias for [tui.views.sessions] grouping
 
-[table.union]
+[tui.views.sessions]        # also mux, union, prs, forks (ADR 0031)
+grouping = "graph"
+filters = { harness = ["codex"], max_age = "7d", mux_state = ["attached"] }
+
+[tui.detail]
+show_edge_meta = false      # provenance · confidence · state on link rows
+
+[server.intervals]          # conspectus serve cadence; also the CLI's warm-start TTL (ADR 0079)
+harness = "5s"
+mux = "5s"
+git = "30s"
+forge = "5m"
+
+[worktree]                  # see docs/worktrees.md
+backend = "auto"            # auto | git | worktrunk
+teardown_confirm = "live"   # always | live | never
+teardown_grace = "3s"
 ```
+
+- **Grouping values per view:** sessions `graph` (default), `workspace`,
+  `repo`, `checkout`, `scan-root`, `none`; mux `session`, `host`,
+  `repo`; union `kind`, `repo`; prs `repo`, `state`; forks `provider`,
+  `parent`.
+- **Filters:** `filters` takes one inline table or an array of tables
+  (`[[tui.views.<name>.filters]]`); entries OR together per dimension.
+  `max_age` accepts `s`, `m`, `h`, and `d` suffixes; `mux_state` values are
+  `attached`, `ambiguous`, and `unmuxed`.
+- **Durations** in `[server.intervals]` and `teardown_grace` use
+  `<integer><ms|s|m|h>`.
+- **View precedence at startup:** `--view`, then the view you last used
+  (unless `--no-resume-view`), then `[tui] default_view`, then
+  `sessions`.
 
 Unknown sections and unknown keys are ignored. Malformed TOML
 surfaces as a `ConfigDiagnostic` on stderr but does not abort the
@@ -213,10 +250,31 @@ conspectus node show <id> [--scan-root PATH]...
 conspectus columns {sessions|mux|union|prs|forks}
                    [--pager | --no-pager]
                    [--color {auto|always|never}]
-conspectus declared ...
+conspectus tui [--view {sessions|mux}] [--grouping VALUE] [--sort {hierarchy|recency}]
+               [--harness H]... [--max-age D] [--mux-state S]...
+               [--scan-root PATH]... [--refresh-interval D] [--no-live-preview]
+conspectus declared {list|create|remove|confirm|ignore|override} ...
+conspectus rename session <id> [NAME] [--clear] [--no-mux]
+conspectus rename mux <id> <NAME>
+conspectus alias list
 conspectus pin {create|list|show|rename|rm|launch|attach|bind|rebind|adopt} ...
+conspectus mux new <NAME> [--cwd PATH] [--socket NAME] [--no-attach]
+conspectus mux launch <HARNESS> --name <NAME> [--cwd PATH] [--argv ARG...]
+                                              [--worktree-branch B --worktree-repo PATH]
 conspectus worktree {list|new|rm|merge|close|prune} ...
+conspectus hook {init|status|remove} <claude-code|codex> [--scope {user|project}]
+conspectus hook write <HARNESS>          # invoked by the harness hook itself
+conspectus serve [--scan-root PATH]...
+conspectus refresh [--class {git|mux|harness|forge}]
+conspectus status [--format {human|json}]
 ```
+
+Running `conspectus` with no subcommand opens the TUI. Every command's
+`--help` lists its full flag set.
+
+`graph`, `table`, `node show`, and `tui` also take `--refresh` (ignore a
+running `conspectus serve` and rebuild in-process) and `--no-cache`
+(don't write the rebuilt graph to `graph.bin`).
 
 Worktree operations (`list` is read-only; the rest delegate to a
 mutation backend) are covered end to end in `docs/worktrees.md`.
@@ -621,16 +679,18 @@ the cache-side rules.
 
 ## Caches
 
-Conspectus has two persistent cache surfaces:
+Conspectus has three persistent cache surfaces:
 
 - **The resolved-graph artifact** at
   `$XDG_DATA_HOME/conspectus/graph.bin` (ADRs 0082 / 0083).
   Written by `conspectus serve` after every successful
   refresh cycle and by daemonless one-shot CLI invocations
   (`conspectus table`, `node show`, `graph`) at the end of
-  their cold-rebuild path. Daemonless consumers and the
-  daemon's own warm-restart read it back via mmap; the
-  daemon's `snapshot` socket command serves the same bytes.
+  their cold-rebuild path. The daemon reads it back via mmap
+  to restart warm, and library consumers can mmap it with
+  `snapshot::open_mmap`; one-shot commands don't read it (they
+  ask a running daemon or rebuild). The daemon's `snapshot`
+  socket command serves the same bytes.
   Clearing it (`rm`) only loses warm-start; the next
   daemon cycle or CLI invocation rebuilds. There are no
   sidecars, no schema migrations, no backup rotation.
@@ -640,6 +700,13 @@ Conspectus has two persistent cache surfaces:
   The sidecar is fully rebuildable from a fresh discovery
   cycle, so clearing it (`rm -r`) only loses continuity
   until the next `pin launch` from a bound state.
+- **The pin-store registry** at
+  `$XDG_STATE_HOME/conspectus/pin-stores.json` (ADR 0090).
+  `pin create`, `pin adopt`, and the TUI's pin-create action
+  record the project store they wrote to, so pins in repos
+  outside the current scan roots stay visible. Entries whose
+  store no longer exists are pruned; clearing the file only
+  hides such out-of-root pins until they are next written.
 
 Future caches (PR fetches, transcript indices, etc.) land
 under the same `$XDG_*_HOME/conspectus/` roots rather than
