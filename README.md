@@ -19,20 +19,21 @@ It is a Rust CLI and library. It is developed on Linux and is pre-release
 
 ```text
 updated 0s ago · 10 sessions · 4 mux  ·  ⚠ 4
-┌ ▸ sessions · mux ──────────────────────────────────────┐┌   ◆ repo ──────────────────────────────────────────────┐
-│▼ ▦ showcase-deck  atelier-repo-a…  (agent-deck)  (1)   ││  id            c9552ea76aef4a46                        │
-│    showcase   claude       4m  ◉  Showcase: agent-deck ││  common_dir    /fixture/repos/project/.git            ▲│
-│▶ ◆ repo-a         /fixture/atelier-demo/repo-a   (2)   ││  remotes                                              █│
-│▶ ◆ repo-b         /fixture/atelier-demo/repo-b   (1)   ││origin=git@github.com:conspectus/project.git           █│
-│▶ ◆ bare-project   /fixture/check…s/bare-project  (1)   ││  source_paths  /fixture/repos/project                 █│
-│▼ ◆ project        /fixture/repos/project         (4)  ⚠││  full_id       repo:/fixture/repos/project/.git       █│
-│    showcase   claude       4m  ◯  ambiguous mux candida││─────────────────────────────── 2 validated  Related ──▼│
-│    showcase   claude       4m  ◯  ambiguous mux candida││  member of              ▦ showcase-deck                │
-│    showcase   claude       4m  ◯  hook-supersession cur││───────────────────────────────────────────── Preview ──│
-│    showcase   claude       1h  ◯  claude-code in projec││no preview for this row                                 │
-│▶ Ungrouped                                       (1)   ││                                                        │
+┌ ▸ sessions · mux ──────────────────────────────────────┐┌   ● session ───────────────────────────────────────────┐
+│▼ ▦ showcase-deck  atelier-repo-a…  (agent-deck)  (1)   ││  id            showcase-claude-ambig-a                 │
+│    showcase   claude       4m  ◉  Showcase: agent-deck ││  harness       claude-code                             │
+│▶ ◆ repo-a         /fixture/atelier-demo/repo-a   (2)   ││  title         ambiguous mux candidate A               │
+│▶ ◆ repo-b         /fixture/atelier-demo/repo-b   (1)   ││  cwd           ◇ /fixture/repos/project                │
+│▶ ◆ bare-project   /fixture/check…s/bare-project  (1)   ││  status        active · last 4m ago                    │
+│▼ ◆ project        /fixture/repos/project         (4)  ⚠││─────────────── 1 validated · 2 other · 2 ⚠  Related ── │
+│    showcase   claude       4m  ◯  ambiguous mux candida││  associated with        ◇ /fixture/repos/project       │
+│    showcase   claude       4m  ◯  ambiguous mux candida││  ▶ Other  (2 · 2 ⚠)                                    │
+│    showcase   claude       4m  ◯  hook-supersession cur││                                                        │
+│    showcase   claude       1h  ◯  claude-code in projec││───────────────────────────────────────────── Preview ──│
+│▶ Ungrouped                                       (1)   ││loading mux preview…                                    │
+│                                                        ││                                                        │
 └────────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────┘
-[left] group:graph · filter:all · sort:hierarchy · Enter/l expand · h collapse · j/k move · h/l fold · Enter default
+[left] group:graph · filter:all · sort:hierarchy · Enter/a attach preferred tmux:ambiguous · Tab inspect candidates
 ```
 
 <sub>The sessions view rendered from the checked-in showcase fixture
@@ -40,9 +41,9 @@ updated 0s ago · 10 sessions · 4 mux  ·  ⚠ 4
 `--features snapshot` build).
 Sessions are grouped under the workspace and repo they belong to. `◉` means
 the session is running in a tmux session you can attach to, and `◯` means it
-isn't in one. `⚠` marks a group where tmux attribution is ambiguous: the
-evidence supports more than one answer, and Conspectus shows that instead of
-guessing.</sub>
+isn't in one. The selected session sits in a group marked `⚠`: its tmux
+attribution is ambiguous, so the right pane lists the competing candidates
+under "Other" instead of guessing.</sub>
 
 ## Why Conspectus exists
 
@@ -458,12 +459,12 @@ use.
 | Measure | Value |
 | --- | --- |
 | Development window | 2026-05-12 to 2026-09-30 |
-| Commits | 829, of which 629 (76%) have an AI co-author trailer |
+| Commits | 850, of which 650 (76%) have an AI co-author trailer |
 | Architecture decision records | 97, of which 10 are superseded or partially superseded |
-| Backlog items | about 550, of which nearly 80% are checked off |
-| Commits that touch `docs/backlog.md` | 395 (48%) |
+| Backlog items | about 590, of which nearly 80% are checked off |
+| Commits that touch `docs/backlog.md` | 413 (49%) |
 | Rust | about 130k lines, over 40% of it tests |
-| Tests | 2,070, all passing, in about 3 seconds with `cargo nextest` |
+| Tests | 2,081, all passing, in about 5 seconds with `cargo nextest` |
 
 ## Status and limits
 

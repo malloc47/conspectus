@@ -14650,7 +14650,7 @@ finally `REL-002b`.
     at tag time, so this story doesn't wait on the release decision.
   - Tests: docs-only; `git diff --check`.
   - Blockers: decision 6.
-- [ ] `REL-009` Talk and demo assets.
+- [x] `REL-009` Talk and demo assets.
   - [x] `REL-009a` Refresh the showcase fixture.
     - Outcome: `TmuxReplayRow` gained attached-client and last-attached
       fields (other scenarios leave them empty); the showcase marks
@@ -14680,7 +14680,24 @@ finally `REL-002b`.
       `/tmp/` paths; snapshot suites that read the fixture stay green
       (re-bless intentional diffs).
     - Blockers: none.
-  - [ ] `REL-009b` Capture screenshots and graph exports.
+  - [x] `REL-009b` Capture screenshots and graph exports.
+    - Outcome (assets kept outside the repo per decision 7): PNG and SVG
+      frames of the sessions view, an ambiguous session's detail, the mux
+      view, help, and the pins menu, plus the showcase graph as HTML and
+      resolved/evidence Graphviz SVG and PNG. Recipe: render with
+      `TZ=UTC faketime -f '@2026-09-30 12:03:00' conspectus tui --snapshot
+      --snapshot-fixture tests/fixtures/showcase.json --snapshot-width 140
+      --snapshot-height 32 --snapshot-keys …`, then
+      `freeze --language ansi --window --font.family "DejaVu Sans Mono"`
+      to SVG and `resvg --use-font-file DejaVuSansMono.ttf --zoom 2` to
+      PNG (freeze's own PNG path crashes, and fonts without the geometric
+      glyphs misalign columns). Tools come from a throwaway
+      `nix shell nixpkgs#{libfaketime,charm-freeze,resvg,dejavu_fonts,graphviz}`.
+    - Gaps found, not fixed: snapshot key replay can't open the `m` Mux
+      menu ("skipped unsupported action"), and after `Tab` a `j` clears
+      the selection instead of moving the right-pane cursor, so the
+      explorer drill-down and the Mux menu weren't captured; the worktree
+      menu needs a mutation backend the fixture doesn't have.
     - Scope:
       - Capture the sessions view, an explorer drill-down with
         breadcrumbs, and the pins, mux, and worktree menus, plus the
@@ -14709,7 +14726,11 @@ finally `REL-002b`.
       runner (ADR 0010), so it adds no new tool.
     - Tests: run the recipe once from a clean checkout.
     - Blockers: `REL-009a`.
-  - [ ] `REL-009d` Refresh the README for the talk.
+  - [x] `REL-009d` Refresh the README for the talk.
+    - Outcome: the hero frame now shows an ambiguous session's detail
+      (relative age, `Tab inspect candidates`, `Other (2 · 2 ⚠)`) from the
+      refreshed fixture, and "By the numbers" reflects 850 commits, about
+      590 backlog items, and 2,081 tests. Re-run right before the talk.
     - Scope: re-render the hero frame after `REL-003`, using the same
       command and pinned clock as the current frame. Right before the
       talk, update the dated "By the numbers" table (commits, tests, and
