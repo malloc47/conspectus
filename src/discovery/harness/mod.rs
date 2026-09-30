@@ -453,7 +453,7 @@ fn adapter_for(harness_key: &str) -> Option<&'static dyn HarnessAdapter> {
 /// re-instantiating an adapter or walking the discovery registry.
 pub fn launch_argv_for(harness_key: &str) -> Vec<std::ffi::OsString> {
     adapter_for(harness_key)
-        .map(|a| a.launch_argv())
+        .map(HarnessAdapter::launch_argv)
         .unwrap_or_default()
 }
 

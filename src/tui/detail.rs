@@ -527,8 +527,9 @@ fn pin_fields_for_mux(snapshot: &GraphSnapshot, mux: &MuxSessionNode) -> Vec<Hea
         .pins
         .iter()
         .filter(|pin| match &pin.binding {
-            Some(PinBinding::Bound { mux: bound, .. })
-            | Some(PinBinding::StaleMux { mux: bound }) => bound == &mux.id,
+            Some(PinBinding::Bound { mux: bound, .. } | PinBinding::StaleMux { mux: bound }) => {
+                bound == &mux.id
+            }
             Some(PinBinding::Unbound) | None => false,
         })
         .map(pin_summary_field)
@@ -590,13 +591,13 @@ fn session_pr_field(
     // resolves session → worktree → branch → PR. v1 detail shows
     // the same: walk the resolved relationships once to find the
     // PR keyed off the session's checkout (cwd-matched).
-    let session_node = match snapshot.nodes.iter().find(|n| n.id() == *session) {
-        Some(GraphNode::AgentSession(node)) => node,
-        _ => return placeholder("pr", "— (no PR)"),
+    let Some(GraphNode::AgentSession(session_node)) =
+        snapshot.nodes.iter().find(|n| n.id() == *session)
+    else {
+        return placeholder("pr", "— (no PR)");
     };
-    let cwd = match session_node.cwd.as_deref() {
-        Some(cwd) => cwd,
-        None => return placeholder("pr", "— (no PR)"),
+    let Some(cwd) = session_node.cwd.as_deref() else {
+        return placeholder("pr", "— (no PR)");
     };
     let Some(worktree_id) = snapshot.nodes.iter().find_map(|node| match node {
         GraphNode::Checkout(wt) if wt.root == cwd => Some(NodeId::Checkout(wt.id.clone())),

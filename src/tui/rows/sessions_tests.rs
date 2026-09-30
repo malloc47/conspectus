@@ -188,9 +188,8 @@ fn single_session_with_one_worktree_collapses_worktree_level() {
     // Expect: repo row, then session row. No worktree row.
     assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
     assert!(matches!(tree.rows[0].kind, RowKind::Group(_)));
-    let group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(group) = &tree.rows[0].kind else {
+        unreachable!()
     };
     assert_eq!(group.display_path, "~/src/proj");
     assert_eq!(tree.rows[0].depth, 0);
@@ -289,9 +288,8 @@ fn repo_group_prefers_source_path_over_git_common_dir() {
         filter: RowFilter::default(),
     });
 
-    let group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(group) = &tree.rows[0].kind else {
+        unreachable!()
     };
     assert_eq!(group.display_path, "~/src/proj");
     assert!(group.is_launch_context);
@@ -322,9 +320,8 @@ fn repo_group_strips_git_suffix_when_source_path_is_missing() {
         filter: RowFilter::default(),
     });
 
-    let group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(group) = &tree.rows[0].kind else {
+        unreachable!()
     };
     assert_eq!(group.display_path, "~/src/proj");
     assert!(group.is_launch_context);
@@ -382,9 +379,8 @@ fn repo_group_prefers_canonical_over_non_canonical_source_path() {
             .iter()
             .find(|row| matches!(&row.kind, RowKind::Group(g) if matches!(&g.primary_node, Some(NodeId::Repo(_)))))
             .expect("repo group row");
-    let group = match &repo_row.kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(group) = &repo_row.kind else {
+        unreachable!()
     };
     assert_eq!(group.display_path, "~/src/proj");
 }
@@ -418,9 +414,8 @@ fn session_nested_inside_checkout_groups_under_checkout() {
     });
 
     assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
-    let group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(group) = &tree.rows[0].kind else {
+        unreachable!()
     };
     assert_eq!(group.display_path, "~/src/proj");
     assert!(matches!(tree.rows[1].kind, RowKind::AgentSession(_)));
@@ -466,9 +461,8 @@ fn graph_grouping_uses_session_workspace_context() {
     });
 
     assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
-    let workspace_group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(workspace_group) = &tree.rows[0].kind else {
+        unreachable!()
     };
     assert!(matches!(
         workspace_group.primary_node,
@@ -515,9 +509,8 @@ fn repo_grouping_excludes_workspace_context() {
     });
 
     assert_eq!(tree.rows.len(), 2, "{:#?}", tree.rows);
-    let group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => unreachable!(),
+    let RowKind::Group(group) = &tree.rows[0].kind else {
+        unreachable!()
     };
     assert!(matches!(group.primary_node, Some(NodeId::Repo(_))));
     assert_eq!(tree.rows[0].depth, 0);
@@ -601,9 +594,8 @@ fn workspace_rooted_session_nests_directly_under_workspace() {
     );
     // Workspace header uses the shared format_workspace_display
     // helper: name + member list + provider chip.
-    let ws_group = match &tree.rows[0].kind {
-        RowKind::Group(g) => g,
-        _ => panic!("expected workspace group row at index 0:\n{:#?}", tree.rows),
+    let RowKind::Group(ws_group) = &tree.rows[0].kind else {
+        panic!("expected workspace group row at index 0:\n{:#?}", tree.rows)
     };
     assert!(
         ws_group.display_path.contains("atelier-ws"),
@@ -796,9 +788,8 @@ fn hybrid_emits_workspace_and_repo_buckets_as_peer_top_level_parents() {
         tree.rows
     );
 
-    let first = match &top_level[0].kind {
-        RowKind::Group(g) => g,
-        _ => panic!("expected Group row at top of tree:\n{:#?}", tree.rows),
+    let RowKind::Group(first) = &top_level[0].kind else {
+        panic!("expected Group row at top of tree:\n{:#?}", tree.rows)
     };
     assert!(
         matches!(first.primary_node, Some(NodeId::Workspace(_))),
@@ -806,9 +797,8 @@ fn hybrid_emits_workspace_and_repo_buckets_as_peer_top_level_parents() {
         tree.rows,
     );
 
-    let second = match &top_level[1].kind {
-        RowKind::Group(g) => g,
-        _ => panic!("expected Group row for repo bucket:\n{:#?}", tree.rows),
+    let RowKind::Group(second) = &top_level[1].kind else {
+        panic!("expected Group row for repo bucket:\n{:#?}", tree.rows)
     };
     assert!(
         matches!(second.primary_node, Some(NodeId::Repo(_))),

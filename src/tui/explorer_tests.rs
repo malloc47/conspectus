@@ -182,7 +182,7 @@ fn relationship_groups_sort_by_kind_then_verb_then_label() {
         .iter()
         .map(|g| {
             crate::tui::icons::NodeKind::from_snake_case(&g.neighbor_kind)
-                .map_or(usize::MAX, |k| k.ordinal())
+                .map_or(usize::MAX, super::super::icons::NodeKind::ordinal)
         })
         .collect();
     for pair in ordinals.windows(2) {

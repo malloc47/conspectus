@@ -75,7 +75,7 @@ fn session_table_agent_projection_with_pr_snapshot() {
 #[test]
 fn session_table_mux_projection_empty_snapshot() {
     let fixture = RepoFixture::new("git@github.com:octo/repo.git");
-    let body = r#"[]"#;
+    let body = r"[]";
 
     let config = LocalDiscoveryConfig::empty().with_forge_runner(FakeGh::with_pull_requests(body));
     let rendered = render_table(&fixture, config, Projection::Mux);

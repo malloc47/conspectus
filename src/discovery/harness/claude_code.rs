@@ -199,11 +199,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
 
         for entry in fs::read_dir(&project_dir)? {
             let path = entry?.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-
-            if !name.ends_with(".jsonl") {
+            if path.extension().is_none_or(|ext| ext != "jsonl") {
                 continue;
             }
 
@@ -657,32 +653,29 @@ fn build_lineage_link(
     let child_session_key = entry.node.id.session_key.as_str();
     let source = NodeId::AgentSession(entry.node.id.clone());
 
-    let (target, link_id) = match resolved_parent_session_key {
-        Some(parent_key) => {
-            let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
-            (
-                LinkEndpoint::Node {
-                    id: NodeId::AgentSession(parent_id),
-                },
-                format!("claude-code:lineage:{child_session_key}:parent_session:{parent_key}"),
-            )
-        }
-        None => {
-            let evidence = UnresolvedEndpoint {
-                node_type: "agent_session".to_string(),
-                harness_key: Some(HARNESS_KEY.to_string()),
-                native_id: Some(parent_uuid.to_string()),
-                state_scope: Some(state_scope.to_string()),
-                path: None,
-                metadata: fields.clone(),
-            };
-            (
-                LinkEndpoint::Unresolved { evidence },
-                format!(
-                    "claude-code:lineage:{child_session_key}:parent_session:unresolved:{parent_uuid}"
-                ),
-            )
-        }
+    let (target, link_id) = if let Some(parent_key) = resolved_parent_session_key {
+        let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
+        (
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent_id),
+            },
+            format!("claude-code:lineage:{child_session_key}:parent_session:{parent_key}"),
+        )
+    } else {
+        let evidence = UnresolvedEndpoint {
+            node_type: "agent_session".to_string(),
+            harness_key: Some(HARNESS_KEY.to_string()),
+            native_id: Some(parent_uuid.to_string()),
+            state_scope: Some(state_scope.to_string()),
+            path: None,
+            metadata: fields.clone(),
+        };
+        (
+            LinkEndpoint::Unresolved { evidence },
+            format!(
+                "claude-code:lineage:{child_session_key}:parent_session:unresolved:{parent_uuid}"
+            ),
+        )
     };
 
     GraphLink {

@@ -208,9 +208,8 @@ pub(super) fn warm_start_discover_and_resolve(
 /// operator was reading.
 fn try_daemon_snapshot() -> Option<conspectus::model::GraphSnapshot> {
     use conspectus::server::{ClientOutcome, client_snapshot};
-    let bytes = match client_snapshot() {
-        ClientOutcome::Ok(bytes) => bytes,
-        _ => return None,
+    let ClientOutcome::Ok(bytes) = client_snapshot() else {
+        return None;
     };
     conspectus::snapshot::from_bytes(&bytes).ok()
 }
@@ -759,11 +758,11 @@ pub(super) fn candidate_store_paths(
 
     let include_project = matches!(
         store,
-        None | Some(DeclaredStoreFlag::All) | Some(DeclaredStoreFlag::Project)
+        None | Some(DeclaredStoreFlag::All | DeclaredStoreFlag::Project)
     );
     let include_user = matches!(
         store,
-        None | Some(DeclaredStoreFlag::All) | Some(DeclaredStoreFlag::User)
+        None | Some(DeclaredStoreFlag::All | DeclaredStoreFlag::User)
     );
 
     if include_project {

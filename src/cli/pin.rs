@@ -371,7 +371,7 @@ fn civil_from_unix_seconds(secs: u64) -> (i32, u32, u32, u32, u32, u32) {
     let mp = (5 * doy + 2) / 153;
     let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = (y + if month <= 2 { 1 } else { 0 }) as i32;
+    let year = (y + i64::from(month <= 2)) as i32;
 
     (year, month, day, hour, minute, second)
 }
@@ -677,14 +677,13 @@ impl PinAdoptArgs {
             ),
         };
 
-        let cwd = match self.cwd {
-            Some(explicit) => explicit,
-            None => {
-                let observed = mux_node.cwd.as_deref().ok_or_else(|| {
-                    anyhow!("mux `{native_id}` has no observed cwd; pass `--cwd <PATH>` explicitly")
-                })?;
-                PathBuf::from(observed)
-            }
+        let cwd = if let Some(explicit) = self.cwd {
+            explicit
+        } else {
+            let observed = mux_node.cwd.as_deref().ok_or_else(|| {
+                anyhow!("mux `{native_id}` has no observed cwd; pass `--cwd <PATH>` explicitly")
+            })?;
+            PathBuf::from(observed)
         };
 
         let display = self.display.clone().unwrap_or_else(|| self.id.clone());
@@ -852,9 +851,8 @@ fn realize_worktree_cwd(pin: &conspectus::model::PinCandidate) -> Result<PathBuf
     // The graph candidate doesn't carry the worktree block; read it
     // from the pin's own store file (cheap, and avoids threading the
     // field through the whole model/projection chain).
-    let branch = match pin_worktree_branch(&pin.store_path, &pin.id) {
-        Some(branch) => branch,
-        None => return Ok(PathBuf::from(&pin.cwd)),
+    let Some(branch) = pin_worktree_branch(&pin.store_path, &pin.id) else {
+        return Ok(PathBuf::from(&pin.cwd));
     };
     let branch = branch.as_str();
     let repo_anchor = PathBuf::from(&pin.cwd);
@@ -868,13 +866,13 @@ fn realize_worktree_cwd(pin: &conspectus::model::PinCandidate) -> Result<PathBuf
     // 2. Create it via the configured mutation backend.
     let cwd = std::env::current_dir()?;
     let config = ConfigLoader::from_env().load_from(&cwd).config;
-    let backend = match resolve_mutation_backend(config.worktree.backend, worktrunk_available())? {
-        Some(backend) => backend,
-        None => bail!(
+    let Some(backend) = resolve_mutation_backend(config.worktree.backend, worktrunk_available())?
+    else {
+        bail!(
             "pin `{}` is worktree-backed but no mutation backend is available; \
              install worktrunk or set `[worktree] backend`",
             pin.id
-        ),
+        )
     };
     match backend.create(&WorktreeCreateRequest {
         repo_root: repo_anchor.clone(),

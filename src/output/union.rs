@@ -190,7 +190,7 @@ fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionRow<'_>> {
                 let alias = snapshot
                     .aliases
                     .get(&NodeId::AgentSession(agent.id.clone()))
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
                 Some(UnionRow {
                     node_id_display: display,
                     kind: UnionKind::Agent,

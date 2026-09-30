@@ -206,7 +206,7 @@ pub fn unique_prefix_len(full_ids: &[String]) -> usize {
     }
     let cap = full_ids
         .iter()
-        .map(|s| s.len())
+        .map(std::string::String::len)
         .max()
         .unwrap_or(SHORT_ID_FLOOR);
     for len in SHORT_ID_FLOOR..=cap {

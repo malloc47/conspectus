@@ -233,7 +233,7 @@ impl WtRunner for FakeWt {
         self.calls
             .lock()
             .unwrap()
-            .push(args.iter().map(|s| s.to_string()).collect());
+            .push(args.iter().map(std::string::ToString::to_string).collect());
         use std::os::unix::process::ExitStatusExt;
         Ok(std::process::Output {
             status: std::process::ExitStatus::from_raw(self.exit_code << 8),
@@ -417,9 +417,8 @@ fn resolver_worktrunk_requires_wt_present() {
     let present = resolve_mutation_backend(WorktreeBackendSelection::Worktrunk, true).expect("ok");
     assert_eq!(present.unwrap().backend_key(), WORKTRUNK_BACKEND);
 
-    let err = match resolve_mutation_backend(WorktreeBackendSelection::Worktrunk, false) {
-        Ok(_) => panic!("worktrunk selection must require wt on PATH"),
-        Err(err) => err,
+    let Err(err) = resolve_mutation_backend(WorktreeBackendSelection::Worktrunk, false) else {
+        panic!("worktrunk selection must require wt on PATH")
     };
     assert!(err.to_string().contains("not on PATH"), "{err}");
 }

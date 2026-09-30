@@ -156,7 +156,7 @@ fn canonicalize_document_cwds_rewrites_each_entry() {
     // absolute path.
     fn canonicalize_with(document: &mut PinsDocument, home: &Path) {
         if let Some(section) = document.pins.as_mut() {
-            for entry in section.entries.iter_mut() {
+            for entry in &mut section.entries {
                 entry.cwd = expand_home_prefix_with(&entry.cwd, Some(home));
             }
         }
@@ -178,10 +178,10 @@ fn canonicalize_document_cwds_rewrites_each_entry() {
 #[test]
 fn unsupported_schema_version_is_an_error() {
     let err = parse_pins_document(
-        r#"
+        r"
             [pins]
             schema_version = 99
-            "#,
+            ",
     )
     .expect_err("unsupported schema");
     assert!(matches!(err, PinParseError::UnsupportedSchemaVersion(99)));

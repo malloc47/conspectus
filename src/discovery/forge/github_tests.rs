@@ -480,15 +480,17 @@ fn provider_emits_forge_pr_nodes_for_github_repo() {
     let context = DiscoveryContext::from_roots([root]).expect("context");
     let fragment = provider.discover(&context).expect("discover");
 
-    let pr_nodes: Vec<_> = fragment
-        .nodes
-        .iter()
-        .filter_map(|node| match node {
-            GraphNode::ForgePr(pr) => Some(pr),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(pr_nodes.len(), 2);
+    assert_eq!(
+        fragment
+            .nodes
+            .iter()
+            .filter_map(|node| match node {
+                GraphNode::ForgePr(pr) => Some(pr),
+                _ => None,
+            })
+            .count(),
+        2
+    );
     assert_eq!(fragment.candidate_links.len(), 2);
 }
 

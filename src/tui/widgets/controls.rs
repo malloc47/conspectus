@@ -372,7 +372,11 @@ fn build_max_age_editor(filter: &RowFilter) -> TextInputState {
 fn indices_to_harness_values(indices: &[usize]) -> Vec<String> {
     indices
         .iter()
-        .filter_map(|idx| harness_options().get(*idx).map(|s| s.to_string()))
+        .filter_map(|idx| {
+            harness_options()
+                .get(*idx)
+                .map(std::string::ToString::to_string)
+        })
         .collect()
 }
 

@@ -503,7 +503,7 @@ fn assert_at_most_one_active_hook_link_per_mux_pane(snapshot: &GraphSnapshot) {
             .get("hook_pane_id")
             .or_else(|| link.source_metadata.fields.get("pane_id"))
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let key = (mux_id, pane_id);
         *active_count.entry(key).or_default() += 1;
     }

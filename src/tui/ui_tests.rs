@@ -2094,7 +2094,7 @@ fn session_recency_span_picks_bucket_style_from_theme() {
         harness_label: "codex".into(),
         cwd_display: None,
         project_display: None,
-        recency: recency.map(|s| s.to_string()),
+        recency: recency.map(std::string::ToString::to_string),
         activity_epoch: epoch,
         mux_state: MuxIndicator::Unmuxed,
         preview: None,

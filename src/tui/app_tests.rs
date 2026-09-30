@@ -156,7 +156,7 @@ fn pins_context_seeds_pin_create_cwd_from_selected_mux_absolute() {
     // it via `Path::is_absolute`. The form must instead carry
     // the raw absolute cwd off the mux node.
     let mut snap = snapshot_session_with_mux();
-    for node in snap.nodes.iter_mut() {
+    for node in &mut snap.nodes {
         if let crate::model::GraphNode::MuxSession(mux) = node {
             mux.cwd = Some("/p/proj".to_string());
         }
@@ -214,7 +214,7 @@ fn split_trailing_number_handles_common_shapes() {
         Some(("worker".to_string(), 42)),
     );
     // Digits-only base is still walkable; empty stem is allowed.
-    assert_eq!(split_trailing_number("42"), Some(("".to_string(), 42)));
+    assert_eq!(split_trailing_number("42"), Some((String::new(), 42)));
     // Interior digits with a trailing non-digit stay `None`.
     assert_eq!(split_trailing_number("v1-alpha"), None);
     // Empty input.
@@ -1482,7 +1482,7 @@ fn scenario_ambiguous_mux_session_is_leaf_after_adr_0071() {
         .visible_rows()
         .iter()
         .find(|row| row.id == session_row_id)
-        .cloned()
+        .copied()
         .expect("session row visible");
     assert!(
         !session_row.expandable,
@@ -2538,7 +2538,7 @@ fn scenario_ambiguous_mux_exposes_two_candidate_muxes() {
             g.direction == crate::tui::explorer::Direction::Downstream
                 && g.neighbor_kind == "mux_session"
         })
-        .map(|g| g.link_count())
+        .map(super::super::explorer::RelationshipGroup::link_count)
         .sum();
     assert!(
         total_mux_links >= 2,

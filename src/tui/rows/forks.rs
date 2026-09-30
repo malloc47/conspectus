@@ -147,7 +147,7 @@ fn collect_agents(snapshot: &GraphSnapshot) -> Vec<super::AgentData<'_>> {
                 let alias = snapshot
                     .aliases
                     .get(&NodeId::AgentSession(id.clone()))
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
                 Some(super::AgentData {
                     node_id: node_id_display,
                     id,

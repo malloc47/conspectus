@@ -161,7 +161,7 @@ fn collect_agents(snapshot: &GraphSnapshot) -> Vec<super::AgentData<'_>> {
                 let alias = snapshot
                     .aliases
                     .get(&NodeId::AgentSession(id.clone()))
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
                 Some(super::AgentData {
                     node_id: NodeId::AgentSession(id.clone()).to_string(),
                     id,
@@ -207,10 +207,11 @@ fn collect_preferred_branch_per_pr(snapshot: &GraphSnapshot) -> HashMap<String, 
             continue;
         }
         let branch_node_id = NodeId::Branch(branch_id.clone()).to_string();
-        out.entry(link.source.to_string()).or_insert(BranchLink {
-            branch_node_id,
-            refname: branch_id.refname.clone(),
-        });
+        out.entry(link.source.to_string())
+            .or_insert_with(|| BranchLink {
+                branch_node_id,
+                refname: branch_id.refname.clone(),
+            });
     }
     out
 }

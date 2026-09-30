@@ -178,7 +178,7 @@ fn canonicalize_document_cwds(document: &mut PinsDocument) {
     let Some(section) = document.pins.as_mut() else {
         return;
     };
-    for entry in section.entries.iter_mut() {
+    for entry in &mut section.entries {
         entry.cwd = expand_home_prefix(&entry.cwd);
     }
 }

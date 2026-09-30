@@ -1308,7 +1308,7 @@ impl ProcessSnapshot for LinuxProcSnapshot {
         };
 
         entries
-            .filter_map(|entry| entry.ok())
+            .filter_map(std::result::Result::ok)
             .filter_map(|entry| {
                 let pid = entry.file_name().to_string_lossy().parse::<i64>().ok()?;
                 process_record_from_proc(pid, &entry.path())
@@ -1585,11 +1585,13 @@ struct SessionKeyEvidence {
 
 fn active_pane_fd_session_evidence(pid: i64) -> Option<SessionKeyEvidence> {
     let fd_dir = fs::read_dir(format!("/proc/{pid}/fd")).ok()?;
-    let paths = fd_dir.filter_map(|entry| entry.ok()).filter_map(|entry| {
-        fs::read_link(entry.path())
-            .ok()
-            .and_then(|path| path.into_os_string().into_string().ok())
-    });
+    let paths = fd_dir
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| {
+            fs::read_link(entry.path())
+                .ok()
+                .and_then(|path| path.into_os_string().into_string().ok())
+        });
     Some(session_key_evidence_from_fd_paths(paths))
 }
 

@@ -729,7 +729,7 @@ fn apply_mutators(
         let registry_stores = config
             .pin_store_registry
             .as_ref()
-            .map(|registry| registry.read())
+            .map(super::pin_store_registry::PinStoreRegistry::read)
             .unwrap_or_default();
         pins::apply_pins(snapshot, context, loader, &registry_stores);
     }
@@ -946,7 +946,7 @@ impl LocalDiscoveryConfig {
         self.mux_backends
             .iter()
             .find(|b| b.backend_key() == key)
-            .map(|b| b.as_ref())
+            .map(std::convert::AsRef::as_ref)
     }
 
     /// Consume and return the first registered backend whose

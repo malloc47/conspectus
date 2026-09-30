@@ -333,7 +333,7 @@ fn read_sqlite_sessions(path: &Path) -> Vec<SessionInfo> {
     // in this rusqlite build, which the `bundled` feature ensures we
     // have) degrade to `None`.
     let previews = read_last_message_previews(&connection);
-    for session in sessions.iter_mut() {
+    for session in &mut sessions {
         if let Some(text) = previews.get(&session.id) {
             session.last_message_preview = normalize_last_message_preview(text);
         }
@@ -513,32 +513,29 @@ fn build_lineage_link(
         child_session_key,
     ));
 
-    let (target, link_id) = match resolved_parent {
-        Some(parent_key) => {
-            let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
-            (
-                LinkEndpoint::Node {
-                    id: NodeId::AgentSession(parent_id),
-                },
-                format!("opencode:lineage:{child_session_key}:parent_session:{parent_key}"),
-            )
-        }
-        None => {
-            let evidence = UnresolvedEndpoint {
-                node_type: "agent_session".to_string(),
-                harness_key: Some(HARNESS_KEY.to_string()),
-                native_id: Some(parent_session_key.to_string()),
-                state_scope: Some(state_scope.to_string()),
-                path: None,
-                metadata: fields.clone(),
-            };
-            (
-                LinkEndpoint::Unresolved { evidence },
-                format!(
-                    "opencode:lineage:{child_session_key}:parent_session:unresolved:{parent_session_key}"
-                ),
-            )
-        }
+    let (target, link_id) = if let Some(parent_key) = resolved_parent {
+        let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
+        (
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent_id),
+            },
+            format!("opencode:lineage:{child_session_key}:parent_session:{parent_key}"),
+        )
+    } else {
+        let evidence = UnresolvedEndpoint {
+            node_type: "agent_session".to_string(),
+            harness_key: Some(HARNESS_KEY.to_string()),
+            native_id: Some(parent_session_key.to_string()),
+            state_scope: Some(state_scope.to_string()),
+            path: None,
+            metadata: fields.clone(),
+        };
+        (
+            LinkEndpoint::Unresolved { evidence },
+            format!(
+                "opencode:lineage:{child_session_key}:parent_session:unresolved:{parent_session_key}"
+            ),
+        )
     };
 
     GraphLink {

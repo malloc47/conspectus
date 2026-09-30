@@ -255,7 +255,7 @@ fn collect_session_rows(snapshot: &GraphSnapshot) -> Vec<SessionRow<'_>> {
                 let alias = snapshot
                     .aliases
                     .get(&NodeId::AgentSession(agent.id.clone()))
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
                 let (checkout_node_id, checkout_root, repo_common_dir) =
                     deepest_checkout_for(&checkouts, agent.cwd.as_deref());
                 Some(SessionRow {

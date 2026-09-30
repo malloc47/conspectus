@@ -216,8 +216,8 @@ fn malformed_and_blank_lines_skip() {
         "sess",
         &[
             r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"a"}]}}"#,
-            r#""#,
-            r#"not json"#,
+            r"",
+            r"not json",
             r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"b"}]}}"#,
         ],
     );

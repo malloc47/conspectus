@@ -340,9 +340,8 @@ pub enum LineageOutcome {
 /// current session as the head (best-effort honesty rather than
 /// looping or panicking).
 pub fn lineage_head(snapshot: &GraphSnapshot, harness: &str, session_key: &str) -> LineageOutcome {
-    let start = match find_session(snapshot, harness, session_key) {
-        Some(id) => id,
-        None => return LineageOutcome::SessionMissing,
+    let Some(start) = find_session(snapshot, harness, session_key) else {
+        return LineageOutcome::SessionMissing;
     };
 
     let mut current = start;

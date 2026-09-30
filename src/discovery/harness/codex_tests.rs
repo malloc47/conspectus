@@ -607,7 +607,8 @@ fn write_state_db(
             names.join(", "),
             placeholders.join(", ")
         );
-        let refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(std::convert::AsRef::as_ref).collect();
         conn.execute(&sql, refs.as_slice()).expect("insert thread");
     }
 
@@ -888,14 +889,17 @@ fn state_fork_and_spawn_coexist_on_same_session() {
     );
     // Two parent_session candidates from the same child are fine — they
     // describe different lineage operations.
-    let multi_links: Vec<_> = lineage
-        .iter()
-        .filter(|link| match &link.source {
-            NodeId::AgentSession(id) => id.session_key == "multi",
-            _ => false,
-        })
-        .collect();
-    assert_eq!(multi_links.len(), 2);
+
+    assert_eq!(
+        lineage
+            .iter()
+            .filter(|link| match &link.source {
+                NodeId::AgentSession(id) => id.session_key == "multi",
+                _ => false,
+            })
+            .count(),
+        2
+    );
 }
 
 #[test]

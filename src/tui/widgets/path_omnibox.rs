@@ -98,25 +98,22 @@ impl PathOmniboxState {
     }
 
     pub fn handle_key(&mut self, event: KeyEvent) -> PathOmniboxOutcome {
-        match event.code {
-            KeyCode::Tab => {
-                if let Some(path) = self.selected_suggestion_path() {
-                    self.input = TextInputState::new(self.title.clone(), path);
-                    self.selected = 0;
-                    PathOmniboxOutcome::Completed
-                } else {
-                    PathOmniboxOutcome::NoCompletion
-                }
+        if event.code == KeyCode::Tab {
+            if let Some(path) = self.selected_suggestion_path() {
+                self.input = TextInputState::new(self.title.clone(), path);
+                self.selected = 0;
+                PathOmniboxOutcome::Completed
+            } else {
+                PathOmniboxOutcome::NoCompletion
             }
-            _ => {
-                let before = self.input.value().to_string();
-                let _ = self.input.handle_key(event);
-                if self.input.value() != before {
-                    self.selected = 0;
-                    PathOmniboxOutcome::Changed
-                } else {
-                    PathOmniboxOutcome::Continue
-                }
+        } else {
+            let before = self.input.value().to_string();
+            let _ = self.input.handle_key(event);
+            if self.input.value() != before {
+                self.selected = 0;
+                PathOmniboxOutcome::Changed
+            } else {
+                PathOmniboxOutcome::Continue
             }
         }
     }

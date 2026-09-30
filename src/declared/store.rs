@@ -230,7 +230,7 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
         };
         if let Err(err) = file
             .write_all(text.as_bytes())
-            .and_then(|_| file.sync_all())
+            .and_then(|()| file.sync_all())
         {
             let _ = fs::remove_file(&temp_path);
             return Err(err);

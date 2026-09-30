@@ -11,7 +11,7 @@ fn fixture(session_id: &str, seed: impl Fn(&Connection)) -> (tempfile::TempDir, 
     let db_path = dir.path().join("opencode.db");
     let conn = Connection::open(&db_path).expect("open db");
     conn.execute_batch(
-        r#"
+        r"
             CREATE TABLE session (
                 id text PRIMARY KEY,
                 directory text NOT NULL,
@@ -31,7 +31,7 @@ fn fixture(session_id: &str, seed: impl Fn(&Connection)) -> (tempfile::TempDir, 
                 time_created integer NOT NULL,
                 data text NOT NULL
             );
-            "#,
+            ",
     )
     .expect("create schema");
     seed(&conn);

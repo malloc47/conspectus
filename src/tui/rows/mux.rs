@@ -74,7 +74,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
     let mut pin_id_by_mux: HashMap<NodeId, String> = HashMap::new();
     for pin in &pins {
         match &pin.binding {
-            Some(PinBinding::Bound { mux, .. }) | Some(PinBinding::StaleMux { mux }) => {
+            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
                 pin_id_by_mux.insert(NodeId::MuxSession(mux.clone()), pin.id.clone());
             }
             Some(PinBinding::Unbound) | None => {}
@@ -137,7 +137,7 @@ pub fn build_mux_tree(inputs: MuxBuildInputs<'_>) -> RowTree {
             None
         };
         let attached_count = visible_attached.len();
-        let cwd = mux.effective_cwd().map(|s| s.to_string());
+        let cwd = mux.effective_cwd().map(std::string::ToString::to_string);
 
         let parent_row = MuxSessionRow {
             mux: mux.id.clone(),
@@ -227,7 +227,7 @@ fn emit_pins_group_for_mux(
 
     for pin in pins {
         let bound_mux = match &pin.binding {
-            Some(PinBinding::Bound { mux, .. }) | Some(PinBinding::StaleMux { mux }) => {
+            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
                 Some(NodeId::MuxSession(mux.clone()))
             }
             Some(PinBinding::Unbound) | None => None,
@@ -651,7 +651,7 @@ fn collect_attached_agents(snapshot: &GraphSnapshot) -> HashMap<String, Vec<Atta
         let alias = snapshot
             .aliases
             .get(&NodeId::AgentSession(agent.id.clone()))
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         collected.push((
             target_id.to_string(),
             AttachedAgent {

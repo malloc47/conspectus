@@ -255,7 +255,7 @@ fn parse_separator_row(line: &str, expected_cols: usize) -> Option<Vec<TableAlig
         aligns.push(match (starts, ends) {
             (true, true) => TableAlign::Center,
             (false, true) => TableAlign::Right,
-            (true, false) | (false, false) => TableAlign::Left,
+            (true | false, false) => TableAlign::Left,
         });
     }
     Some(aligns)

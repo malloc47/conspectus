@@ -146,7 +146,7 @@ fn collect_union_rows(snapshot: &GraphSnapshot) -> Vec<UnionData<'_>> {
                 let alias = snapshot
                     .aliases
                     .get(&NodeId::AgentSession(id.clone()))
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
                 rows.push(UnionData::Agent(super::AgentData {
                     node_id: NodeId::AgentSession(id.clone()).to_string(),
                     id,

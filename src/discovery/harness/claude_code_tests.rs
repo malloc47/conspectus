@@ -690,11 +690,10 @@ fn discover_one_session(context: &DiscoveryContext) -> AgentSessionNode {
     fragment
         .nodes
         .into_iter()
-        .filter_map(|node| match node {
+        .find_map(|node| match node {
             GraphNode::AgentSession(s) => Some(s),
             _ => None,
         })
-        .next()
         .expect("one agent session")
 }
 

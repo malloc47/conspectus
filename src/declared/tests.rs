@@ -150,10 +150,10 @@ fn malformed_declared_toml_is_an_error() {
 #[test]
 fn unsupported_schema_version_is_an_error() {
     let err = parse_declared_document(
-        r#"
+        r"
             [declared]
             schema_version = 99
-            "#,
+            ",
     )
     .expect_err("unsupported version");
 

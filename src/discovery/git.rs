@@ -454,17 +454,16 @@ fn trim_output(bytes: Vec<u8>) -> String {
 fn is_expected_absence(args: &[&str], code: Option<i32>) -> bool {
     matches!(
         (args, code),
-        (["rev-parse", "--is-inside-work-tree"], Some(128))
-            | (["symbolic-ref", "--quiet", "HEAD"], Some(1))
-            | (
-                [
+        (
+            ["rev-parse", "--is-inside-work-tree"]
+                | [
                     "rev-parse",
                     "--abbrev-ref",
                     "--symbolic-full-name",
                     "@{upstream}"
                 ],
-                Some(128)
-            )
+            Some(128)
+        ) | (["symbolic-ref", "--quiet", "HEAD"], Some(1))
             | (["remote"], Some(_))
     )
 }

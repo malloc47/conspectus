@@ -212,12 +212,9 @@ fn redact_for_snapshot(html: &str) -> String {
                 }
             }
         };
-        let (offset, open, close) = match pick {
-            Some(t) => t,
-            None => {
-                out.push_str(rest);
-                break;
-            }
+        let Some((offset, open, close)) = pick else {
+            out.push_str(rest);
+            break;
         };
         // Copy up to and including the opener.
         out.push_str(&rest[..offset + open.len()]);

@@ -587,7 +587,7 @@ fn dot_quote_inner(label: &str) -> String {
                 // Preserve `\n` / `\l` / `\r` escape sequences; escape
                 // a lone backslash.
                 match chars.peek() {
-                    Some('n') | Some('l') | Some('r') | Some('t') => {
+                    Some('n' | 'l' | 'r' | 't') => {
                         out.push('\\');
                         out.push(chars.next().unwrap());
                     }

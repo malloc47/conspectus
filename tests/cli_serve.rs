@@ -907,7 +907,9 @@ fn wait_for_harness_started_at_or_after(
             && out.status.success()
             && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&out.stdout)
             && let Some(harness) = value.get("harness")
-            && let Some(epoch) = harness.get("last_started_epoch").and_then(|v| v.as_u64())
+            && let Some(epoch) = harness
+                .get("last_started_epoch")
+                .and_then(serde_json::Value::as_u64)
             && epoch >= floor_epoch
         {
             return true;

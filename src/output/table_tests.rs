@@ -2425,25 +2425,28 @@ fn fit_to_width_settles_at_floors_when_target_is_impossible() {
 fn three_session_snapshot() -> GraphSnapshot {
     let mut snapshot = GraphSnapshot::empty();
     // claude session, recent
-    let mut claude = match agent_session("claude-code", "c1", Some("/home/op/src/proj")) {
-        GraphNode::AgentSession(s) => s,
-        _ => unreachable!(),
+    let GraphNode::AgentSession(mut claude) =
+        agent_session("claude-code", "c1", Some("/home/op/src/proj"))
+    else {
+        unreachable!()
     };
     claude.last_active_epoch = Some(1_000_000);
     snapshot.nodes.push(GraphNode::AgentSession(claude));
 
     // codex session, 8 days old
-    let mut codex = match agent_session("codex", "x1", Some("/home/op/src/proj")) {
-        GraphNode::AgentSession(s) => s,
-        _ => unreachable!(),
+    let GraphNode::AgentSession(mut codex) =
+        agent_session("codex", "x1", Some("/home/op/src/proj"))
+    else {
+        unreachable!()
     };
     codex.last_active_epoch = Some(1_000_000 - 8 * 24 * 60 * 60);
     snapshot.nodes.push(GraphNode::AgentSession(codex));
 
     // opencode session, recent, attached to mux
-    let mut opencode = match agent_session("opencode", "o1", Some("/home/op/src/proj")) {
-        GraphNode::AgentSession(s) => s,
-        _ => unreachable!(),
+    let GraphNode::AgentSession(mut opencode) =
+        agent_session("opencode", "o1", Some("/home/op/src/proj"))
+    else {
+        unreachable!()
     };
     opencode.last_active_epoch = Some(1_000_000 - 600);
     snapshot.nodes.push(GraphNode::AgentSession(opencode));

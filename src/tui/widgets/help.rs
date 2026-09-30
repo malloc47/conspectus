@@ -43,7 +43,7 @@ impl HelpOverlayState {
             return HelpOutcome::Close;
         }
         match event.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => HelpOutcome::Close,
+            KeyCode::Esc | KeyCode::Char('q' | '?') => HelpOutcome::Close,
             KeyCode::Char('j') | KeyCode::Down => {
                 self.scroll_by(1);
                 HelpOutcome::Continue

@@ -191,7 +191,7 @@ fn discover_state(state_root: &Path) -> Result<GraphFragment> {
         })?;
     }
 
-    let known_ids: HashSet<&str> = sessions.keys().map(|k| k.as_str()).collect();
+    let known_ids: HashSet<&str> = sessions.keys().map(std::string::String::as_str).collect();
     let mut nodes = Vec::with_capacity(sessions.len());
     let mut candidate_links = Vec::new();
 
@@ -353,32 +353,29 @@ fn build_lineage_link(
         child_session_key,
     ));
 
-    let (target, link_id) = match resolved_parent {
-        Some(parent_key) => {
-            let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
-            (
-                LinkEndpoint::Node {
-                    id: NodeId::AgentSession(parent_id),
-                },
-                format!("codex:lineage:{segment}{child_session_key}:parent_session:{parent_key}"),
-            )
-        }
-        None => {
-            let evidence = UnresolvedEndpoint {
-                node_type: "agent_session".to_string(),
-                harness_key: Some(HARNESS_KEY.to_string()),
-                native_id: Some(parent_session_key.to_string()),
-                state_scope: Some(state_scope.to_string()),
-                path: None,
-                metadata: fields.clone(),
-            };
-            (
-                LinkEndpoint::Unresolved { evidence },
-                format!(
-                    "codex:lineage:{segment}{child_session_key}:parent_session:unresolved:{parent_session_key}"
-                ),
-            )
-        }
+    let (target, link_id) = if let Some(parent_key) = resolved_parent {
+        let parent_id = AgentSessionId::new(HARNESS_KEY, state_scope, parent_key);
+        (
+            LinkEndpoint::Node {
+                id: NodeId::AgentSession(parent_id),
+            },
+            format!("codex:lineage:{segment}{child_session_key}:parent_session:{parent_key}"),
+        )
+    } else {
+        let evidence = UnresolvedEndpoint {
+            node_type: "agent_session".to_string(),
+            harness_key: Some(HARNESS_KEY.to_string()),
+            native_id: Some(parent_session_key.to_string()),
+            state_scope: Some(state_scope.to_string()),
+            path: None,
+            metadata: fields.clone(),
+        };
+        (
+            LinkEndpoint::Unresolved { evidence },
+            format!(
+                "codex:lineage:{segment}{child_session_key}:parent_session:unresolved:{parent_session_key}"
+            ),
+        )
     };
 
     GraphLink {
@@ -575,7 +572,7 @@ fn visit_rollouts(dir: &Path, on_rollout: &mut dyn FnMut(&Path)) -> Result<()> {
             continue;
         };
 
-        if name.starts_with("rollout-") && name.ends_with(".jsonl") {
+        if name.starts_with("rollout-") && path.extension().is_some_and(|ext| ext == "jsonl") {
             on_rollout(&path);
         }
     }

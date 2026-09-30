@@ -144,16 +144,15 @@ fn codex_forked_rollout_emits_parent_session_link() {
         .with_harness_state_root(CodexAdapter::new().harness_key(), &state_root);
     let fragment = CodexAdapter::new().discover(&context).expect("discover");
 
-    let sessions: Vec<_> = fragment
-        .nodes
-        .iter()
-        .filter_map(|n| match n {
-            GraphNode::AgentSession(s) => Some(s),
-            _ => None,
-        })
-        .collect();
     assert_eq!(
-        sessions.len(),
+        fragment
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                GraphNode::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .count(),
         2,
         "both parent and forked sessions discovered"
     );
@@ -244,15 +243,17 @@ fn claude_resume_transcript_captures_parent_uuid() {
         "claude/transcript-resume.jsonl",
     );
 
-    let sessions: Vec<_> = fragment
-        .nodes
-        .iter()
-        .filter_map(|n| match n {
-            GraphNode::AgentSession(s) => Some(s),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(sessions.len(), 1);
+    assert_eq!(
+        fragment
+            .nodes
+            .iter()
+            .filter_map(|n| match n {
+                GraphNode::AgentSession(s) => Some(s),
+                _ => None,
+            })
+            .count(),
+        1
+    );
 
     let parent_link = fragment.candidate_links.iter().find(|link| {
         link.source_metadata.fields.contains_key("harness_key")

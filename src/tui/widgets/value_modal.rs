@@ -54,7 +54,7 @@ impl ValueModalState {
             return ValueModalOutcome::Close;
         }
         match event.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => ValueModalOutcome::Close,
+            KeyCode::Esc | KeyCode::Char('q' | 'o') => ValueModalOutcome::Close,
             KeyCode::Char('j') | KeyCode::Down => {
                 self.scroll_by(1);
                 ValueModalOutcome::Continue

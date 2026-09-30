@@ -379,7 +379,10 @@ pub fn client_refresh(class: Option<&str>) -> ClientOutcome<u64> {
         None => serde_json::Value::Null,
     };
     match call_command("refresh", args, "cli-refresh") {
-        ClientOutcome::Ok(value) => match value.get("refreshed_epoch").and_then(|v| v.as_u64()) {
+        ClientOutcome::Ok(value) => match value
+            .get("refreshed_epoch")
+            .and_then(serde_json::Value::as_u64)
+        {
             Some(epoch) => ClientOutcome::Ok(epoch),
             None => ClientOutcome::Transport(anyhow!(
                 "refresh response missing refreshed_epoch: {value}"
@@ -793,7 +796,7 @@ fn handle_refresh(request: &Request, ctx: &DispatchCtx) -> Response {
             result: "ok",
             data: Some(serde_json::json!({
                 "refreshed_epoch": started,
-                "class": class.map(|c| c.name()),
+                "class": class.map(super::discovery::providers::ProviderClass::name),
             })),
             error: None,
         },
@@ -1161,7 +1164,7 @@ fn build_watcher_for(class: ProviderClass) -> Box<dyn Watcher> {
             .values()
             .cloned()
             .collect();
-        match NotifyWatcher::new(paths.iter().map(|p| p.as_path())) {
+        match NotifyWatcher::new(paths.iter().map(std::path::PathBuf::as_path)) {
             Ok(watcher) => {
                 let path_summary: Vec<String> =
                     paths.iter().map(|p| p.display().to_string()).collect();

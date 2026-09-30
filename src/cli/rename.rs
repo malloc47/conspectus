@@ -226,44 +226,40 @@ fn execute_rename_plan(
     let endpoint = declared_endpoint_from_node_id(&NodeId::AgentSession(
         plan.agent_alias_write.session.clone(),
     ));
-    match &plan.agent_alias_write.display_name {
-        Some(display_name) => {
-            let path = resolve_alias_store(store, &endpoint, scan_roots)?;
-            let entry = AliasEntry {
-                node: endpoint,
-                display_name: display_name.clone(),
-                reason: None,
-            };
+    if let Some(display_name) = &plan.agent_alias_write.display_name {
+        let path = resolve_alias_store(store, &endpoint, scan_roots)?;
+        let entry = AliasEntry {
+            node: endpoint,
+            display_name: display_name.clone(),
+            reason: None,
+        };
+        let outcome = upsert_alias_entry(&path, entry).map_err(|err| anyhow!(err.to_string()))?;
+        let verb = if outcome.changed {
+            "wrote"
+        } else {
+            "unchanged"
+        };
+        println!("{verb} alias `{}` in {}", display_name, path.display());
+    } else {
+        // H-REF-006 wave 2: former `alias_candidate_store_paths`
+        // trivially delegated to `candidate_store_paths` — the
+        // wrapper retired here.
+        let stores = candidate_store_paths(store, scan_roots)?;
+        let mut removed_from = None;
+        for path in &stores {
+            if !path.is_file() {
+                continue;
+            }
             let outcome =
-                upsert_alias_entry(&path, entry).map_err(|err| anyhow!(err.to_string()))?;
-            let verb = if outcome.changed {
-                "wrote"
-            } else {
-                "unchanged"
-            };
-            println!("{verb} alias `{}` in {}", display_name, path.display());
+                remove_alias_entry(path, &endpoint).map_err(|err| anyhow!(err.to_string()))?;
+            if outcome.changed {
+                removed_from = Some(path.clone());
+                break;
+            }
         }
-        None => {
-            // H-REF-006 wave 2: former `alias_candidate_store_paths`
-            // trivially delegated to `candidate_store_paths` — the
-            // wrapper retired here.
-            let stores = candidate_store_paths(store, scan_roots)?;
-            let mut removed_from = None;
-            for path in &stores {
-                if !path.is_file() {
-                    continue;
-                }
-                let outcome =
-                    remove_alias_entry(path, &endpoint).map_err(|err| anyhow!(err.to_string()))?;
-                if outcome.changed {
-                    removed_from = Some(path.clone());
-                    break;
-                }
-            }
-            match removed_from {
-                Some(path) => println!("removed alias from {}", path.display()),
-                None => println!("no alias found for session"),
-            }
+        match removed_from {
+            Some(path) => println!("removed alias from {}", path.display()),
+            None => println!("no alias found for session"),
         }
     }
 

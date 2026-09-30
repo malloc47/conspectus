@@ -297,7 +297,7 @@ impl GhPullRequestParser {
 
 fn parse_row(value: &Value) -> Option<PullRequestRecord> {
     let row = value.as_object()?;
-    let number = row.get("number").and_then(|v| v.as_u64())?;
+    let number = row.get("number").and_then(serde_json::Value::as_u64)?;
     let head_ref = string_field(row.get("headRefName"))?;
 
     let state = row.get("state").and_then(|v| v.as_str()).map_or_else(

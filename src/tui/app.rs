@@ -1769,7 +1769,7 @@ impl App {
     fn known_harness_keys(&self) -> BTreeSet<String> {
         let mut keys: BTreeSet<String> = harness_options()
             .iter()
-            .map(|key| key.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         if let Some(database) = self.database.as_ref() {
             for node in &database.snapshot().nodes {
@@ -2411,13 +2411,14 @@ impl App {
                     effects.push(Effect::Toast("resume: nothing selected".to_string()));
                     return effects;
                 };
-                let session_id = match &selection {
-                    RowId::AgentSession(crate::model::NodeId::AgentSession(id)) => id.clone(),
-                    _ => {
+                let session_id =
+                    if let RowId::AgentSession(crate::model::NodeId::AgentSession(id)) = &selection
+                    {
+                        id.clone()
+                    } else {
                         effects.push(Effect::Toast("resume: select an agent session".to_string()));
                         return effects;
-                    }
-                };
+                    };
                 let target = crate::tui::resume::resolve_resume_target(&session_id);
                 match &target {
                     crate::tui::resume::ResumeTarget::Launch { .. } => {
@@ -2883,7 +2884,7 @@ impl App {
     }
 
     fn toggle_expand_selected(&mut self) {
-        let Some(id) = self.selection.as_ref().cloned() else {
+        let Some(id) = self.selection.clone() else {
             return;
         };
         let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
@@ -2898,7 +2899,7 @@ impl App {
     }
 
     fn expand_selected(&mut self) {
-        let Some(id) = self.selection.as_ref().cloned() else {
+        let Some(id) = self.selection.clone() else {
             return;
         };
         let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
@@ -2909,7 +2910,7 @@ impl App {
     }
 
     fn collapse_selected(&mut self) {
-        let Some(id) = self.selection.as_ref().cloned() else {
+        let Some(id) = self.selection.clone() else {
             return;
         };
         let is_expandable = self.tree.rows.iter().any(|r| r.id == id && r.expandable);
@@ -3021,13 +3022,13 @@ impl App {
                 }
                 // When the focused node hasn't changed, preserve
                 // cursor / expansion / breadcrumb across refresh.
-                let preserved =
-                    self.explorer
-                        .as_ref()
-                        .and_then(|state| match state.view.focused == target {
-                            true => Some(state.clone()),
-                            false => None,
-                        });
+                let preserved = self.explorer.as_ref().and_then(|state| {
+                    if state.view.focused == target {
+                        Some(state.clone())
+                    } else {
+                        None
+                    }
+                });
                 match preserved {
                     Some(mut state) => {
                         let prev_key = state.selected_row().map(|row| row.key(&state.view));
@@ -3535,7 +3536,7 @@ fn placeholder_detail_target(snapshot: &GraphSnapshot, pin_id: &str, view: View)
     };
     match view {
         View::Mux => match &pin.binding {
-            Some(PinBinding::Bound { mux, .. }) | Some(PinBinding::StaleMux { mux }) => {
+            Some(PinBinding::Bound { mux, .. } | PinBinding::StaleMux { mux }) => {
                 NodeId::MuxSession(mux.clone())
             }
             _ => pin_node(),

@@ -947,14 +947,12 @@ fn graph_json_emits_no_mux_nodes_when_tmux_disabled() {
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
     let json: serde_json::Value = serde_json::from_str(&output).expect("valid json output");
 
-    let mux_nodes: Vec<_> = json["nodes"]
-        .as_array()
-        .expect("nodes array")
-        .iter()
-        .filter(|node| node["type"] == "mux_session")
-        .collect();
     assert!(
-        mux_nodes.is_empty(),
+        !json["nodes"]
+            .as_array()
+            .expect("nodes array")
+            .iter()
+            .any(|node| node["type"] == "mux_session"),
         "tmux discovery should be skipped when CONSPECTUS_DISABLE_TMUX is set"
     );
 }
@@ -1051,8 +1049,10 @@ fn table_sessions_width_flag_truncates_long_cells_within_target() {
         .success();
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
 
-    let body_rows: Vec<&str> = output.lines().skip(2).collect();
-    assert!(!body_rows.is_empty(), "expected at least one body row");
+    assert!(
+        output.lines().nth(2).is_some(),
+        "expected at least one body row"
+    );
     for line in output.lines() {
         // Each row must fit; the truncation algorithm settles at column
         // floors when the target is impossibly narrow, so use a small
@@ -2325,7 +2325,7 @@ fn discovered_belongs_to_repo_candidate_id(home: &Path, repo: &tempfile::TempDir
         .iter()
         .find_map(|link| {
             if link["relation"] == "belongs_to_repo" {
-                link["id"].as_str().map(|s| s.to_string())
+                link["id"].as_str().map(std::string::ToString::to_string)
             } else {
                 None
             }

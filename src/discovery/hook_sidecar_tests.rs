@@ -456,14 +456,17 @@ fn old_hook_record_still_links_when_no_fresher_record_supersedes() {
     // record still links because no fresher observation supersedes it.
     apply_hook_sidecars(&mut snapshot, temp.path(), 1_700_000_000 + 86_400);
 
-    let active: Vec<_> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.relation == RelationKind::LinkedToMux && matches!(link.state, LinkState::Active)
-        })
-        .collect();
-    assert_eq!(active.len(), 1);
+    assert_eq!(
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && matches!(link.state, LinkState::Active)
+            })
+            .count(),
+        1
+    );
 }
 
 #[test]

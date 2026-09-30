@@ -226,9 +226,9 @@ impl Direction {
 fn sort_relationship_groups(groups: &mut [RelationshipGroup]) {
     groups.sort_by(|a, b| {
         let ord_a = crate::tui::icons::NodeKind::from_snake_case(&a.neighbor_kind)
-            .map_or(usize::MAX, |k| k.ordinal());
+            .map_or(usize::MAX, super::icons::NodeKind::ordinal);
         let ord_b = crate::tui::icons::NodeKind::from_snake_case(&b.neighbor_kind)
-            .map_or(usize::MAX, |k| k.ordinal());
+            .map_or(usize::MAX, super::icons::NodeKind::ordinal);
         ord_a
             .cmp(&ord_b)
             .then_with(|| {

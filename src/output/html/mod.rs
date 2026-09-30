@@ -293,7 +293,7 @@ fn build_payload(snapshot: &GraphSnapshot, opts: HtmlOptions) -> Payload {
 
     // 5. Annotate resolver-preferred edges with their competing
     //    candidate ids so the inspector can show winner vs. losers.
-    for edge in edges.iter_mut() {
+    for edge in &mut edges {
         if edge.is_resolved
             && let Some(competing) = selected.get(edge.id.as_str())
         {

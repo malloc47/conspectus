@@ -353,7 +353,7 @@ fn build_match_line(
         );
         if let Some(range) = snippet.highlight.clone() {
             let pre = snippet.text[..range.start].to_string();
-            let mid = snippet.text[range.start..range.end].to_string();
+            let mid = snippet.text[range.clone()].to_string();
             let post = snippet.text[range.end..].to_string();
             let dim = span_style(true, Style::default());
             spans.push(span!(dim; "{pre}"));

@@ -400,7 +400,7 @@ fn append_declared_records(
                         path: path.clone(),
                         link: Ok(link),
                     }),
-            )
+            );
         }
         Err(err) => records.push(DeclaredListRecord {
             store,

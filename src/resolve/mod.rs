@@ -611,7 +611,9 @@ fn suppress_ambiguous_cwd_mux_links(candidates: &[GraphLink], output: &mut Resol
         if !is_cwd_evidence(link) {
             continue;
         }
-        let distinct_session_count = mux_all_keys.get(&rel.target).map_or(0, |keys| keys.len());
+        let distinct_session_count = mux_all_keys
+            .get(&rel.target)
+            .map_or(0, std::collections::BTreeSet::len);
         if distinct_session_count > 1 {
             indices_to_suppress.push(idx);
         }

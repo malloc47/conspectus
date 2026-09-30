@@ -346,15 +346,17 @@ fn cwd_match_generated_across_harnesses_when_no_pid_match() {
 
     infer(&mut snapshot);
 
-    let links: Vec<_> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.relation == RelationKind::LinkedToMux
-                && link.source_metadata.evidence.as_deref() == Some("exact_cwd_match")
-        })
-        .collect();
-    assert_eq!(links.len(), 2);
+    assert_eq!(
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref() == Some("exact_cwd_match")
+            })
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -381,11 +383,15 @@ fn session_matches_multiple_mux_sessions_with_preserved_candidates() {
         3,
         "every plausible mux candidate is preserved"
     );
-    let strong: Vec<_> = mux_links
-        .iter()
-        .filter(|link| link.provenance == Provenance::StrongDiscovered)
-        .collect();
-    assert_eq!(strong.len(), 2, "two exact-cwd matches");
+
+    assert_eq!(
+        mux_links
+            .iter()
+            .filter(|link| link.provenance == Provenance::StrongDiscovered)
+            .count(),
+        2,
+        "two exact-cwd matches"
+    );
 }
 
 #[test]
@@ -937,15 +943,17 @@ fn multiple_agent_processes_allow_multiple_session_attribution() {
 
     infer_with_process_snapshot(&mut snapshot, &processes);
 
-    let process_links: Vec<_> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.relation == RelationKind::LinkedToMux
-                && link.source_metadata.evidence.as_deref() == Some("active_pane_process_match")
-        })
-        .collect();
-    assert_eq!(process_links.len(), 2);
+    assert_eq!(
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref() == Some("active_pane_process_match")
+            })
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -1092,15 +1100,18 @@ fn ambiguous_same_cwd_activity_matches_remain_candidates() {
 
     infer_without_process_tree(&mut snapshot);
 
-    let activity_links: Vec<_> = snapshot
-        .candidate_links
-        .iter()
-        .filter(|link| {
-            link.relation == RelationKind::LinkedToMux
-                && link.source_metadata.evidence.as_deref() == Some("session_file_activity_match")
-        })
-        .collect();
-    assert_eq!(activity_links.len(), 2);
+    assert_eq!(
+        snapshot
+            .candidate_links
+            .iter()
+            .filter(|link| {
+                link.relation == RelationKind::LinkedToMux
+                    && link.source_metadata.evidence.as_deref()
+                        == Some("session_file_activity_match")
+            })
+            .count(),
+        2
+    );
 }
 
 #[test]

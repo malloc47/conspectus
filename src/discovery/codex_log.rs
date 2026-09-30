@@ -484,7 +484,9 @@ fn query_freshest_thread(
         let process_uuid: String = row.get(1)?;
         let ts: i64 = row.get(2)?;
         Ok(ThreadObservation {
-            process_uuid_suffix: process_uuid.strip_prefix(&prefix).map(|s| s.to_string()),
+            process_uuid_suffix: process_uuid
+                .strip_prefix(&prefix)
+                .map(std::string::ToString::to_string),
             thread_id,
             process_uuid,
             ts,
@@ -713,9 +715,8 @@ fn demote_stale_codex_command_matches(snapshot: &mut GraphSnapshot, fresh: &Grap
         if stale_target != &fresh_target {
             continue;
         }
-        let stale_source = match &link.source {
-            NodeId::AgentSession(id) => id,
-            _ => continue,
+        let NodeId::AgentSession(stale_source) = &link.source else {
+            continue;
         };
         if stale_source.harness_key != CODEX_HARNESS_KEY {
             continue;

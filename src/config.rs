@@ -948,18 +948,17 @@ fn merge_tui_theme(
             });
             continue;
         };
-        let raw = match value.as_str() {
-            Some(s) => s.to_string(),
-            None => {
-                diagnostics.push(ConfigDiagnostic {
-                    path: path.to_path_buf(),
-                    message: format!(
-                        "`[tui.theme].{key}` must be a string (got `{}`)",
-                        value.type_str()
-                    ),
-                });
-                continue;
-            }
+        let raw = if let Some(s) = value.as_str() {
+            s.to_string()
+        } else {
+            diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "`[tui.theme].{key}` must be a string (got `{}`)",
+                    value.type_str()
+                ),
+            });
+            continue;
         };
         match kind {
             ThemeKeyKind::Color => match parse_color(&raw) {
@@ -1065,7 +1064,10 @@ fn merge_tui_theme_harness(
             .collect();
     for (key, value) in table {
         if !registered.contains(key.as_str()) {
-            let registered_list: Vec<String> = registered.iter().map(|s| s.to_string()).collect();
+            let registered_list: Vec<String> = registered
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
             diagnostics.push(ConfigDiagnostic {
                 path: path.to_path_buf(),
                 message: format!(

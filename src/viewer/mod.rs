@@ -78,7 +78,7 @@ mod tests {
             sorted(
                 ALLOWED_EXTERNAL_DEPS
                     .iter()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect()
             ),
             "src/viewer/mod.rs ALLOWED_EXTERNAL_DEPS and docs/transcript-viewer-deps.md \
@@ -88,7 +88,12 @@ mod tests {
         let binary_deps = extract_deps_under_heading(DOC, "## Binary-only dependencies");
         assert_eq!(
             sorted(binary_deps),
-            sorted(ALLOWED_BINARY_DEPS.iter().map(|s| s.to_string()).collect()),
+            sorted(
+                ALLOWED_BINARY_DEPS
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect()
+            ),
             "src/viewer/mod.rs ALLOWED_BINARY_DEPS and docs/transcript-viewer-deps.md \
              disagree on the viewer's binary-only dependencies. Update both."
         );

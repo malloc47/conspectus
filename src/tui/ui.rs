@@ -390,7 +390,7 @@ pub(crate) mod test_clock {
     }
 
     pub fn now() -> i64 {
-        NOW.with(|cell| cell.get())
+        NOW.with(std::cell::Cell::get)
     }
 }
 
@@ -569,7 +569,11 @@ fn truncate_chip_list(values: &[String], cap: usize) -> String {
     if values.len() <= cap {
         return values.join(",");
     }
-    let head: Vec<&str> = values.iter().take(cap).map(|s| s.as_str()).collect();
+    let head: Vec<&str> = values
+        .iter()
+        .take(cap)
+        .map(std::string::String::as_str)
+        .collect();
     let extra = values.len() - cap;
     format!("{}+{extra} more", head.join(","))
 }
@@ -1188,7 +1192,7 @@ fn render_left_row(
             append_session_preview(&mut spans, session, width, theme);
         }
         RowKind::AgentSessionMuxCandidate(candidate) => {
-            spans.extend(render_candidate_spans(candidate, theme))
+            spans.extend(render_candidate_spans(candidate, theme));
         }
         RowKind::MuxSession(mux) => {
             let remaining = width.saturating_sub(spans_width(&spans));
@@ -1804,10 +1808,10 @@ fn pad_to_width(mut text: String, width: usize) -> String {
     text
 }
 
-fn fit_spans_to_width(mut spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+fn fit_spans_to_width(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
     let mut used = 0;
     let mut out = Vec::with_capacity(spans.len());
-    for span in spans.drain(..) {
+    for span in spans {
         let span_width = UnicodeWidthStr::width(span.content.as_ref());
         if used + span_width <= width {
             used += span_width;
@@ -3198,13 +3202,11 @@ fn contextual_status_text(app: &App) -> String {
 /// target nor a viewable transcript so the operator still sees a
 /// one-line "disabled because …" cue.
 fn default_action_status_hint(app: &App) -> String {
-    let selection = match app.selection() {
-        Some(id) => id,
-        None => return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection),
+    let Some(selection) = app.selection() else {
+        return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection);
     };
-    let row = match app.tree().rows.iter().find(|r| &r.id == selection) {
-        Some(row) => row,
-        None => return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection),
+    let Some(row) = app.tree().rows.iter().find(|r| &r.id == selection) else {
+        return attach_disabled_reason(&crate::tui::actions::AttachDisabled::NoSelection);
     };
     // Group rows: Enter expands/collapses; h/l explicitly fold.
     if matches!(row.kind, RowKind::Group(_)) {

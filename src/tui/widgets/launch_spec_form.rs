@@ -323,7 +323,7 @@ pub fn parse_launch_argv(raw: &str, error_prefix: &str) -> Result<Vec<String>, S
                 current.push(c);
                 in_arg = true;
             }
-            (None, '"') | (None, '\'') => {
+            (None, '"' | '\'') => {
                 quote = Some(ch);
                 in_arg = true;
             }

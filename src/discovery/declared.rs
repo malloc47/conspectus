@@ -25,7 +25,11 @@ pub fn apply_declared_links(
     context: &DiscoveryContext,
     loader: &ConfigLoader,
 ) {
-    let known_nodes: BTreeSet<NodeId> = snapshot.nodes.iter().map(|node| node.id()).collect();
+    let known_nodes: BTreeSet<NodeId> = snapshot
+        .nodes
+        .iter()
+        .map(super::super::model::GraphNode::id)
+        .collect();
     let mut paths = Vec::new();
 
     if let Some(path) = loader.user_config_path()

@@ -181,8 +181,8 @@ fn malformed_lines_and_blank_lines_are_skipped() {
         "sess",
         &[
             r#"{"type":"user","message":{"role":"user","content":"good"}}"#,
-            r#""#,
-            r#"not json"#,
+            r"",
+            r"not json",
             r#"{"type":"user","message":{"role":"user","content":"also good"}}"#,
         ],
     );

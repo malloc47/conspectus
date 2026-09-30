@@ -188,12 +188,14 @@ fn broken_symlinks_are_skipped_but_others_count() {
 
     let fragment = fragment_for(&worktrees_root);
 
-    let membership: Vec<&GraphLink> = fragment
-        .candidate_links
-        .iter()
-        .filter(|link| link.relation == RelationKind::WorkspaceContainsRepo)
-        .collect();
-    assert_eq!(membership.len(), 2);
+    assert_eq!(
+        fragment
+            .candidate_links
+            .iter()
+            .filter(|link| link.relation == RelationKind::WorkspaceContainsRepo)
+            .count(),
+        2
+    );
 }
 
 #[test]
@@ -250,7 +252,7 @@ fn multiple_workspaces_under_root_are_independent() {
         })
         .collect();
     let mut sorted = names.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     assert_eq!(sorted, vec!["one", "two"]);
 }
 

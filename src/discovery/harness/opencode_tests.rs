@@ -271,7 +271,7 @@ fn write_sqlite_sessions(path: &Path, config: SqliteSchemaConfig, rows: &[Sqlite
         }
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
+            params.iter().map(std::convert::AsRef::as_ref).collect();
         connection
             .execute(&sql, param_refs.as_slice())
             .unwrap_or_else(|e| panic!("insert session row: {e}"));

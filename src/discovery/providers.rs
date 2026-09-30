@@ -277,7 +277,7 @@ pub fn provider_class(provider: &str) -> Option<ProviderClass> {
     REGISTRY
         .iter()
         .find(|d| d.key == provider)
-        .and_then(|d| d.class())
+        .and_then(ProviderDescriptor::class)
 }
 
 /// Mutator provider keys derived from the registry. Kept as a

@@ -258,21 +258,21 @@ impl LoopMode for LiveMode {
             Some(Action::DefaultAction) => default_action(terminal, app, config, tmux),
             Some(Action::OpenRename) => open_rename_overlay(app),
             Some(Action::RenameOverlayKey(key)) => {
-                handle_rename_overlay_key(terminal, app, config, tmux, key)
+                handle_rename_overlay_key(terminal, app, config, tmux, key);
             }
             Some(Action::OpenWorktreeMenu) => open_worktree_menu_action(app),
             Some(Action::OpenWorktreeCloseDown) => open_worktree_close_down_action(app),
             Some(Action::WorktreeMenuKey(key)) => {
-                handle_worktree_menu_key(terminal, app, config, tmux, key)
+                handle_worktree_menu_key(terminal, app, config, tmux, key);
             }
             Some(Action::OpenNewMuxForm) => open_new_mux_form_action(app),
             Some(Action::NewMuxFormKey(key)) => {
-                handle_new_mux_form_key(terminal, app, config, tmux, key)
+                handle_new_mux_form_key(terminal, app, config, tmux, key);
             }
             Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
             Some(Action::MuxMenuKey(key)) => handle_mux_menu_key(terminal, app, config, tmux, key),
             Some(Action::MuxLaunchFormKey(key)) => {
-                handle_mux_launch_form_key(terminal, app, config, tmux, key)
+                handle_mux_launch_form_key(terminal, app, config, tmux, key);
             }
             Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
             Some(Action::PinBindHint) => pin_bind_hint_action(app),
@@ -296,7 +296,7 @@ impl LoopMode for LiveMode {
                 )));
             }
             Some(Action::PinsOverlayKey(key)) => {
-                handle_pins_overlay_key(terminal, app, config, tmux, key)
+                handle_pins_overlay_key(terminal, app, config, tmux, key);
             }
             Some(Action::SwitchView(view)) => dispatch(app, Msg::SwitchView(view)),
             Some(Action::CycleView(delta)) => {
@@ -487,16 +487,18 @@ impl LoopMode for StaticMode {
                 dispatch(app, Msg::SetFilter(crate::filter::RowFilter::default()));
                 app.update(Msg::SetStatus(Some("filters cleared".to_string())));
             }
-            Some(Action::OpenRename)
-            | Some(Action::RenameOverlayKey(_))
-            | Some(Action::OpenWorktreeMenu)
-            | Some(Action::OpenWorktreeCloseDown)
-            | Some(Action::WorktreeMenuKey(_))
-            | Some(Action::OpenNewMuxForm)
-            | Some(Action::NewMuxFormKey(_))
-            | Some(Action::OpenMuxMenu)
-            | Some(Action::MuxMenuKey(_))
-            | Some(Action::MuxLaunchFormKey(_)) => {
+            Some(
+                Action::OpenRename
+                | Action::RenameOverlayKey(_)
+                | Action::OpenWorktreeMenu
+                | Action::OpenWorktreeCloseDown
+                | Action::WorktreeMenuKey(_)
+                | Action::OpenNewMuxForm
+                | Action::NewMuxFormKey(_)
+                | Action::OpenMuxMenu
+                | Action::MuxMenuKey(_)
+                | Action::MuxLaunchFormKey(_),
+            ) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
                 )));
@@ -884,12 +886,11 @@ pub(super) fn discover_and_resolve(config: &RunConfig) -> Result<crate::model::G
 /// session.
 fn try_daemon_snapshot() -> Option<crate::model::GraphSnapshot> {
     use crate::server::{ClientOutcome, client_snapshot};
-    let bytes = match client_snapshot() {
-        ClientOutcome::Ok(bytes) => bytes,
-        // Every other outcome is "fall back to local discovery."
-        // The daemon may be absent, mid-first-cycle, or hung; any
-        // of those means the local path is the right answer.
-        _ => return None,
+    // Every other outcome is "fall back to local discovery." The daemon
+    // may be absent, mid-first-cycle, or hung; any of those means the
+    // local path is the right answer.
+    let ClientOutcome::Ok(bytes) = client_snapshot() else {
+        return None;
     };
     crate::snapshot::from_bytes(&bytes).ok()
 }
@@ -980,30 +981,26 @@ pub(super) fn open_worktree_menu_action(app: &mut App) {
         return;
     };
     let can_mutate = worktree_mutation_available();
-    let ctx = match app.graph_db() {
-        Some(db) => context_for_node(db.snapshot(), &node, can_mutate),
-        None => {
-            app.update(Msg::SetStatus(Some(
-                "worktree: no graph loaded".to_string(),
-            )));
-            return;
-        }
+    let ctx = if let Some(db) = app.graph_db() {
+        context_for_node(db.snapshot(), &node, can_mutate)
+    } else {
+        app.update(Msg::SetStatus(Some(
+            "worktree: no graph loaded".to_string(),
+        )));
+        return;
     };
-    match WorktreeMenuState::new(ctx) {
-        Some(state) => {
-            app.open_worktree_menu(state);
-            app.update(Msg::SetStatus(Some(
-                "worktree: ↑/↓ move · Enter pick · Esc close".to_string(),
-            )));
-        }
-        None => {
-            let hint = if can_mutate {
-                "worktree: no actions for this selection"
-            } else {
-                "worktree: read-only — install worktrunk or set `[worktree] backend`"
-            };
-            app.update(Msg::SetStatus(Some(hint.to_string())));
-        }
+    if let Some(state) = WorktreeMenuState::new(ctx) {
+        app.open_worktree_menu(state);
+        app.update(Msg::SetStatus(Some(
+            "worktree: ↑/↓ move · Enter pick · Esc close".to_string(),
+        )));
+    } else {
+        let hint = if can_mutate {
+            "worktree: no actions for this selection"
+        } else {
+            "worktree: read-only — install worktrunk or set `[worktree] backend`"
+        };
+        app.update(Msg::SetStatus(Some(hint.to_string())));
     }
 }
 
@@ -1018,30 +1015,26 @@ pub(super) fn open_worktree_close_down_action(app: &mut App) {
         return;
     };
     let can_mutate = worktree_mutation_available();
-    let ctx = match app.graph_db() {
-        Some(db) => context_for_node(db.snapshot(), &node, can_mutate),
-        None => {
-            app.update(Msg::SetStatus(Some(
-                "worktree: no graph loaded".to_string(),
-            )));
-            return;
-        }
+    let ctx = if let Some(db) = app.graph_db() {
+        context_for_node(db.snapshot(), &node, can_mutate)
+    } else {
+        app.update(Msg::SetStatus(Some(
+            "worktree: no graph loaded".to_string(),
+        )));
+        return;
     };
-    match WorktreeMenuState::new_close_down(ctx) {
-        Some(state) => {
-            app.open_worktree_menu(state);
-            app.update(Msg::SetStatus(Some(
-                "close down: m merge · d discard · Esc cancel".to_string(),
-            )));
-        }
-        None => {
-            let hint = if can_mutate {
-                "close down: select a worktree, mux, or checkout with a branch"
-            } else {
-                "worktree: read-only — install worktrunk or set `[worktree] backend`"
-            };
-            app.update(Msg::SetStatus(Some(hint.to_string())));
-        }
+    if let Some(state) = WorktreeMenuState::new_close_down(ctx) {
+        app.open_worktree_menu(state);
+        app.update(Msg::SetStatus(Some(
+            "close down: m merge · d discard · Esc cancel".to_string(),
+        )));
+    } else {
+        let hint = if can_mutate {
+            "close down: select a worktree, mux, or checkout with a branch"
+        } else {
+            "worktree: read-only — install worktrunk or set `[worktree] backend`"
+        };
+        app.update(Msg::SetStatus(Some(hint.to_string())));
     }
 }
 
@@ -1359,15 +1352,12 @@ fn remove_pin_action(
         )));
         return;
     };
-    let pin_id = match selection {
-        RowId::Pin { pin_id } => pin_id,
-        _ => {
-            app.set_pending_pin_remove(None);
-            app.update(Msg::SetStatus(Some(
-                "pin remove: select an unbound pin row".to_string(),
-            )));
-            return;
-        }
+    let RowId::Pin { pin_id } = selection else {
+        app.set_pending_pin_remove(None);
+        app.update(Msg::SetStatus(Some(
+            "pin remove: select an unbound pin row".to_string(),
+        )));
+        return;
     };
     if app.pending_pin_remove() != Some(pin_id.as_str()) {
         app.set_pending_pin_remove(Some(pin_id.clone()));
@@ -1621,10 +1611,10 @@ fn execute_store_op(app: &mut App, tmux: &dyn MuxBackend, op: crate::tui::effect
             new_display_name,
         } => execute_commit_alias_rename(app, tmux, session_id, new_display_name),
         StoreOp::CommitMuxRename { mux_id, new_name } => {
-            execute_commit_mux_rename(app, tmux, mux_id, new_name)
+            execute_commit_mux_rename(app, tmux, mux_id, new_name);
         }
         StoreOp::WorktreeCreate { repo_root, branch } => {
-            execute_worktree_create(app, repo_root, branch)
+            execute_worktree_create(app, repo_root, branch);
         }
         StoreOp::WorktreeRemove {
             repo_root,
@@ -1798,14 +1788,13 @@ fn execute_worktree_close_down(
 
     // Rebuild the plan from the held snapshot so it reflects the graph
     // as of the operator's gesture.
-    let plan = match app.graph_db() {
-        Some(db) => plan_close_down(db.snapshot(), std::path::PathBuf::from(&repo_root), &branch),
-        None => {
-            app.update(Msg::SetStatus(Some(
-                "worktree: no graph loaded".to_string(),
-            )));
-            return;
-        }
+    let plan = if let Some(db) = app.graph_db() {
+        plan_close_down(db.snapshot(), std::path::PathBuf::from(&repo_root), &branch)
+    } else {
+        app.update(Msg::SetStatus(Some(
+            "worktree: no graph loaded".to_string(),
+        )));
+        return;
     };
     let Some(plan) = plan else {
         app.update(Msg::SetStatus(Some(format!(
@@ -2043,15 +2032,16 @@ fn execute_commit_alias_rename(
         &endpoint, &endpoint, &snapshot, &loader,
     ) {
         Some(selection) => selection.path,
-        None => match loader.user_config_path() {
-            Some(path) => path,
-            None => {
+        None => {
+            if let Some(path) = loader.user_config_path() {
+                path
+            } else {
                 let _ = app.update(Msg::SetStatus(Some(
                     "rename failed: no alias store available".to_string(),
                 )));
                 return;
             }
-        },
+        }
     };
 
     let alias_outcome = match &plan.agent_alias_write.display_name {
@@ -3456,28 +3446,29 @@ fn handle_viewer_overlay_key(app: &mut App, key: ratatui::crossterm::event::KeyE
     if app.viewer_modal().is_none() {
         return;
     }
-    let vmsg =
-        match (key.modifiers, key.code) {
-            (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
-            (_, KeyCode::Esc) | (_, KeyCode::Char('q')) => Some(ViewerMsg::Close),
-            (_, KeyCode::Char('j')) | (_, KeyCode::Down) => Some(ViewerMsg::ScrollDown),
-            (_, KeyCode::Char('k')) | (_, KeyCode::Up) => Some(ViewerMsg::ScrollUp),
-            (_, KeyCode::PageDown) | (_, KeyCode::Char(' ')) => Some(ViewerMsg::PageDown),
-            (_, KeyCode::PageUp) => Some(ViewerMsg::PageUp),
-            (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(ViewerMsg::HalfPageDown),
-            (KeyModifiers::CONTROL, KeyCode::Char('u')) => Some(ViewerMsg::HalfPageUp),
-            (_, KeyCode::Char('g')) | (_, KeyCode::Home) => Some(ViewerMsg::JumpToStart),
-            (KeyModifiers::SHIFT, KeyCode::Char('G'))
-            | (KeyModifiers::NONE, KeyCode::Char('G'))
-            | (_, KeyCode::End) => Some(ViewerMsg::JumpToEnd),
-            (_, KeyCode::Char('t')) => Some(ViewerMsg::CycleToolDetail),
-            (KeyModifiers::SHIFT, KeyCode::Char('T'))
-            | (KeyModifiers::NONE, KeyCode::Char('T')) => Some(ViewerMsg::ToggleThinking),
-            (KeyModifiers::SHIFT, KeyCode::Char('I'))
-            | (KeyModifiers::NONE, KeyCode::Char('I')) => Some(ViewerMsg::ToggleAborted),
-            (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
-            _ => None,
-        };
+    let vmsg = match (key.modifiers, key.code) {
+        (KeyModifiers::CONTROL, KeyCode::Char('c')) => Some(ViewerMsg::Close),
+        (_, KeyCode::Esc | KeyCode::Char('q')) => Some(ViewerMsg::Close),
+        (_, KeyCode::Char('j') | KeyCode::Down) => Some(ViewerMsg::ScrollDown),
+        (_, KeyCode::Char('k') | KeyCode::Up) => Some(ViewerMsg::ScrollUp),
+        (_, KeyCode::PageDown | KeyCode::Char(' ')) => Some(ViewerMsg::PageDown),
+        (_, KeyCode::PageUp) => Some(ViewerMsg::PageUp),
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => Some(ViewerMsg::HalfPageDown),
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => Some(ViewerMsg::HalfPageUp),
+        (_, KeyCode::Char('g') | KeyCode::Home) => Some(ViewerMsg::JumpToStart),
+        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('G')) | (_, KeyCode::End) => {
+            Some(ViewerMsg::JumpToEnd)
+        }
+        (_, KeyCode::Char('t')) => Some(ViewerMsg::CycleToolDetail),
+        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('T')) => {
+            Some(ViewerMsg::ToggleThinking)
+        }
+        (KeyModifiers::SHIFT | KeyModifiers::NONE, KeyCode::Char('I')) => {
+            Some(ViewerMsg::ToggleAborted)
+        }
+        (_, KeyCode::Char('?')) => Some(ViewerMsg::ToggleHelp),
+        _ => None,
+    };
     let Some(vmsg) = vmsg else {
         return;
     };

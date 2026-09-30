@@ -254,7 +254,7 @@ impl Theme {
         // pass harness keys.
         let canonical_key = crate::discovery::harness::registered_adapters()
             .find(|a| a.harness_key() == label_or_key || a.display_label() == label_or_key)
-            .map(|a| a.harness_key());
+            .map(super::super::discovery::harness::HarnessAdapter::harness_key);
         match canonical_key {
             Some(key) => self
                 .harness_colors

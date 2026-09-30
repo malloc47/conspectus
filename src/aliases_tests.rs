@@ -69,10 +69,10 @@ fn unknown_keys_are_ignored_for_forward_compatibility() {
 #[test]
 fn unsupported_schema_version_is_an_error() {
     let err = parse_aliases_document(
-        r#"
+        r"
             [aliases]
             schema_version = 99
-            "#,
+            ",
     )
     .expect_err("unsupported version");
     assert_eq!(err, AliasParseError::UnsupportedSchemaVersion(99));
