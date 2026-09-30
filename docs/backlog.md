@@ -1200,7 +1200,7 @@ this repo.
     maintainer) has accepted the tracker.
   - Blockers: `P6-004`, `P6-005`.
   - Outcome: added the Atelier-side tracker in
-    `/home/malloc47/src/atelier/docs/conspectus-delegation.md` and
+    `/home/user/src/atelier/docs/conspectus-delegation.md` and
     linked it from Atelier docs in commit `b765c16` (`docs: track
     Conspectus delegation work`). The tracker points Atelier at
     Conspectus commits `46d31ac`, `652dd43`, and `49f170d`, covers
@@ -14310,7 +14310,13 @@ finally `REL-002b`.
     - Tests: docs-only; `git diff --check`.
     - Blockers: none.
 - [ ] `REL-002` Pre-publication review, then flip the repository public.
-  - [ ] `REL-002a` Pre-publication review.
+  - [x] `REL-002a` Pre-publication review.
+    - Outcome: per the operator's call, home paths are normalized to
+      `/home/user` in all five files (the Claude Code decoder test uses the
+      encoded `-home-user--agent-deck`); GitHub `malloc47/conspectus`
+      references stay because they name the public repo. The four
+      `Claude-Session:` trailers are accepted (no history rewrite). The
+      local `.conspectus.toml` is listed in `.git/info/exclude`.
     - Scope: verified on 2026-09-30: no credential patterns (GitHub
       tokens, API keys, private keys) and no blobs over 1 MB anywhere in
       history; the captured fixtures under `tests/fixtures/` use sanitized

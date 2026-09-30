@@ -671,7 +671,7 @@ fn main() -> std::io::Result<()> {
         }),
         Box::new(ValueModalVariant {
             label: "cwd",
-            value: "/home/malloc47/src/conspectus".to_string(),
+            value: "/home/user/src/conspectus".to_string(),
             scroll: 0,
             variant_name: "Single-line value",
             description_text: "Short scalar that fits on one row — the common `cwd` / id case.",
@@ -685,8 +685,8 @@ fn main() -> std::io::Result<()> {
                 "  --append-system-prompt 'reviewing the spike outcome and recording findings'",
                 "  --setting-source local",
                 "  --ide vscode-attached",
-                "  --working-directory /home/malloc47/src/conspectus",
-                "  --hooks /home/malloc47/.claude/hooks.json",
+                "  --working-directory /home/user/src/conspectus",
+                "  --hooks /home/user/.claude/hooks.json",
             ]
             .join("\n"),
             scroll: 0,
@@ -799,7 +799,7 @@ fn main() -> std::io::Result<()> {
                 id: "ingest-refactor".to_string(),
                 display_name: "Ingest refactor".to_string(),
                 harness: "codex".to_string(),
-                cwd: "/home/malloc47/work/ingest".to_string(),
+                cwd: "/home/user/work/ingest".to_string(),
                 mux_name: "ingest-refactor".to_string(),
                 ..PinCreateDefaults::default()
             }),
@@ -824,12 +824,12 @@ fn main() -> std::io::Result<()> {
                 PinBindOption {
                     pin_id: "ingest-refactor".to_string(),
                     session_key: "codex:project:01J9X4T8N3GHJ8FNYK1S0E4VZ2".to_string(),
-                    label: "codex:01J9X4T8N3GHJ8FNYK1S0E4VZ2 · /home/malloc47/work/ingest".to_string(),
+                    label: "codex:01J9X4T8N3GHJ8FNYK1S0E4VZ2 · /home/user/work/ingest".to_string(),
                 },
                 PinBindOption {
                     pin_id: "ingest-refactor".to_string(),
                     session_key: "codex:project:01J9X5RT4V8H1H8YP9X7VVRK0M".to_string(),
-                    label: "codex:01J9X5RT4V8H1H8YP9X7VVRK0M · /home/malloc47/work/ingest".to_string(),
+                    label: "codex:01J9X5RT4V8H1H8YP9X7VVRK0M · /home/user/work/ingest".to_string(),
                 },
             ]),
             variant_name: "Bind picker (PinAmbiguous)",
@@ -1097,11 +1097,11 @@ fn pins_mock_target() -> PinMutationTarget {
         id: "ingest-refactor".to_string(),
         display_name: "Ingest refactor".to_string(),
         harness: "codex".to_string(),
-        cwd: "/home/malloc47/work/ingest".to_string(),
+        cwd: "/home/user/work/ingest".to_string(),
         mux_name: "ingest-refactor".to_string(),
         mux_socket: None,
         launch_argv: vec!["codex".to_string()],
-        store_path: "/home/malloc47/work/ingest/.conspectus.toml".to_string(),
+        store_path: "/home/user/work/ingest/.conspectus.toml".to_string(),
     }
 }
 

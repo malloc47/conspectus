@@ -187,7 +187,7 @@ for store selection.
 A naive `(harness, cwd)` binding rule is unstable at realistic
 densities. Empirically a single repo cwd can host dozens of historical
 harness session files: in the Conspectus dev tree, `cwd =
-/home/malloc47/src/conspectus` resolves to 47+ live `AgentSession`
+/home/user/src/conspectus` resolves to 47+ live `AgentSession`
 nodes (31 claude-code with empty titles, ~16 codex, ~14 opencode)
 across three concurrent `tmux:agentdeck_conspectus_*` muxes. A binding
 rule that picks "the latest harness session at this cwd" would
@@ -687,7 +687,7 @@ These are added to Open Questions Deferred rather than v1 scope.
   proposal in this ADR; rejected after pressure-testing against the
   live Conspectus dev tree. A single repo cwd can host dozens of
   historical harness session files (47+ live `AgentSession` nodes
-  share `/home/malloc47/src/conspectus` across 3 concurrent muxes);
+  share `/home/user/src/conspectus` across 3 concurrent muxes);
   any cwd-anchored rule would either pick essentially at random or
   flip every time a stale transcript's mtime changed. The mux native
   name plus the existing mux-to-agent-session attribution pipeline

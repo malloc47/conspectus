@@ -19,7 +19,7 @@ library boundary stabilized. Phase 6 has now produced:
 - an Atelier-side delegation tracker in Atelier commit `b765c16`
 
 The current checkout is already a standalone Conspectus repository at
-`/home/malloc47/src/conspectus`. The remaining question is whether to do
+`/home/user/src/conspectus`. The remaining question is whether to do
 another repository move or combine Conspectus with Atelier into a shared
 workspace.
 

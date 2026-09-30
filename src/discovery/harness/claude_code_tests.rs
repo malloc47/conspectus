@@ -185,8 +185,8 @@ fn decode_project_dir_coalesces_consecutive_slashes() {
     // fallback at least produces a plausible absolute path. Callers should
     // prefer the JSONL-derived cwd whenever it exists.
     assert_eq!(
-        decode_project_dir("-home-malloc47--agent-deck"),
-        "/home/malloc47/agent/deck"
+        decode_project_dir("-home-user--agent-deck"),
+        "/home/user/agent/deck"
     );
 }
 
