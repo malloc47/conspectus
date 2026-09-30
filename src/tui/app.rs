@@ -687,6 +687,19 @@ pub enum Msg {
         name: String,
         cwd: String,
     },
+    /// Mux action menu → open the bare-mux form. Reducer arm pushes
+    /// the modal after seeding defaults from the current selection
+    /// (H-MUX-LAUNCH-001 / ADR 0096).
+    OpenNewMuxForm,
+    /// Mux action menu → open the mux-launch form. Reducer arm pushes
+    /// the modal after seeding defaults from the current selection
+    /// (H-MUX-LAUNCH-001 / ADR 0096).
+    OpenMuxLaunchForm,
+    /// Commit the mux-launch form (H-MUX-LAUNCH-001 / ADR 0096).
+    /// Reducer emits `Effect::Exec(ExecSpec::MuxLaunch)` so the
+    /// runtime re-execs into `conspectus mux launch <harness> …`,
+    /// refreshes discovery, then attaches. No pin write; no sidecar.
+    CommitMuxLaunch(crate::tui::widgets::mux_launch::MuxLaunchRequest),
     /// Switch the active row-tree view (ADR 0031). Reducer saves
     /// the current view's per-view slot, loads the target's slot
     /// (or fresh defaults on first visit), and re-derives the row
@@ -912,6 +925,65 @@ impl App {
     /// Pop the bare mux form if it's on top; no-op otherwise.
     pub fn close_new_mux_form(&mut self) {
         if matches!(self.modal_stack.last(), Some(crate::tui::Modal::NewMux(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// Active mux action menu (H-MUX-LAUNCH-001), if on top of stack.
+    pub fn mux_menu(&self) -> Option<&crate::tui::widgets::mux_menu::MuxMenuState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::MuxMenu(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn mux_menu_mut(&mut self) -> Option<&mut crate::tui::widgets::mux_menu::MuxMenuState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::MuxMenu(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub fn open_mux_menu(&mut self, state: crate::tui::widgets::mux_menu::MuxMenuState) {
+        self.modal_stack.push(crate::tui::Modal::MuxMenu(state));
+    }
+
+    pub fn close_mux_menu(&mut self) {
+        if matches!(self.modal_stack.last(), Some(crate::tui::Modal::MuxMenu(_))) {
+            self.modal_stack.pop();
+        }
+    }
+
+    /// Active mux-launch form (H-MUX-LAUNCH-001), if on top of stack.
+    pub fn mux_launch_form(&self) -> Option<&crate::tui::widgets::mux_launch::MuxLaunchFormState> {
+        match self.modal_stack.last()? {
+            crate::tui::Modal::MuxLaunch(state) => Some(state.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn mux_launch_form_mut(
+        &mut self,
+    ) -> Option<&mut crate::tui::widgets::mux_launch::MuxLaunchFormState> {
+        match self.modal_stack.last_mut()? {
+            crate::tui::Modal::MuxLaunch(state) => Some(state.as_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn open_mux_launch_form(
+        &mut self,
+        state: crate::tui::widgets::mux_launch::MuxLaunchFormState,
+    ) {
+        self.modal_stack
+            .push(crate::tui::Modal::MuxLaunch(Box::new(state)));
+    }
+
+    pub fn close_mux_launch_form(&mut self) {
+        if matches!(
+            self.modal_stack.last(),
+            Some(crate::tui::Modal::MuxLaunch(_))
+        ) {
             self.modal_stack.pop();
         }
     }
@@ -2570,6 +2642,37 @@ impl App {
                 effects.push(Effect::Exec(crate::tui::effect::ExecSpec::MuxNew {
                     name,
                     cwd,
+                }));
+            }
+            Msg::OpenNewMuxForm => {
+                let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
+                    .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
+                self.open_new_mux_form(crate::tui::widgets::new_mux::NewMuxFormState::new(
+                    String::new(),
+                    seeded_cwd,
+                ));
+            }
+            Msg::OpenMuxLaunchForm => {
+                let seeded_cwd = crate::tui::runtime::derive_mux_form_cwd(self)
+                    .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
+                let seeded_mux_name =
+                    crate::tui::runtime::derive_mux_launch_name(self).unwrap_or_default();
+                let known_harness_keys = crate::tui::runtime::known_harness_keys();
+                let known_mux_names = crate::tui::runtime::known_live_mux_names(self);
+                let default_harness = known_harness_keys.first().cloned().unwrap_or_default();
+                self.open_mux_launch_form(
+                    crate::tui::widgets::mux_launch::MuxLaunchFormState::new(
+                        default_harness,
+                        seeded_cwd,
+                        seeded_mux_name,
+                        known_harness_keys,
+                        known_mux_names,
+                    ),
+                );
+            }
+            Msg::CommitMuxLaunch(request) => {
+                effects.push(Effect::Exec(crate::tui::effect::ExecSpec::MuxLaunch {
+                    request,
                 }));
             }
         }

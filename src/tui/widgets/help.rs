@@ -232,6 +232,19 @@ fn keymap_sections() -> Vec<HelpSection> {
             ],
         },
         HelpSection {
+            title: "Mux (ADRs 0095, 0096)",
+            bindings: vec![
+                Binding::new(
+                    "n",
+                    "Create a bare tmux session (no pin, no agent, no worktree) — shell in the selected cwd",
+                ),
+                Binding::new(
+                    "m",
+                    "Open the Mux action menu — pick between new bare session and launching a harness in a fresh mux with no pin",
+                ),
+            ],
+        },
+        HelpSection {
             title: "Pins (ADR 0057)",
             bindings: vec![
                 Binding::new("p", "Open the pins overlay (menu listing every action)"),

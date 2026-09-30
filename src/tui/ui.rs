@@ -80,8 +80,26 @@ pub fn draw(app: &mut App, frame: &mut Frame<'_>) {
     draw_rename_overlay(app, frame, area);
     draw_worktree_menu(app, frame, area);
     draw_new_mux_form(app, frame, area);
+    draw_mux_menu(app, frame, area);
+    draw_mux_launch_form(app, frame, area);
     draw_value_modal(app, frame, area);
     draw_toast(app, frame, area);
+}
+
+fn draw_mux_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.mux_menu() else {
+        return;
+    };
+    use crate::tui::widgets::mux_menu::MuxMenuWidget;
+    frame.render_widget(MuxMenuWidget::new(state, app.theme()), area);
+}
+
+fn draw_mux_launch_form(app: &App, frame: &mut Frame<'_>, area: Rect) {
+    let Some(state) = app.mux_launch_form() else {
+        return;
+    };
+    use crate::tui::widgets::mux_launch::MuxLaunchFormWidget;
+    frame.render_widget(MuxLaunchFormWidget::new(state, app.theme()), area);
 }
 
 fn draw_worktree_menu(app: &App, frame: &mut Frame<'_>, area: Rect) {

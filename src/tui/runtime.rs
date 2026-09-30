@@ -269,6 +269,11 @@ impl LoopMode for LiveMode {
             Some(Action::NewMuxFormKey(key)) => {
                 handle_new_mux_form_key(terminal, app, config, tmux, key)
             }
+            Some(Action::OpenMuxMenu) => open_mux_menu_action(app),
+            Some(Action::MuxMenuKey(key)) => handle_mux_menu_key(terminal, app, config, tmux, key),
+            Some(Action::MuxLaunchFormKey(key)) => {
+                handle_mux_launch_form_key(terminal, app, config, tmux, key)
+            }
             Some(Action::RemovePin) => remove_pin_action(terminal, app, config, tmux),
             Some(Action::PinBindHint) => pin_bind_hint_action(app),
             Some(Action::OpenPinCreate) => open_pin_create_action(app),
@@ -488,7 +493,10 @@ impl LoopMode for StaticMode {
             | Some(Action::OpenWorktreeCloseDown)
             | Some(Action::WorktreeMenuKey(_))
             | Some(Action::OpenNewMuxForm)
-            | Some(Action::NewMuxFormKey(_)) => {
+            | Some(Action::NewMuxFormKey(_))
+            | Some(Action::OpenMuxMenu)
+            | Some(Action::MuxMenuKey(_))
+            | Some(Action::MuxLaunchFormKey(_)) => {
                 app.update(Msg::SetStatus(Some(
                     "scenario TUI keeps mutating actions disabled".to_string(),
                 )));
@@ -568,6 +576,12 @@ fn overlay_key_from_event(app: &App, event: &Event) -> Option<Action> {
     }
     if app.new_mux_form().is_some() {
         return Some(Action::NewMuxFormKey(key));
+    }
+    if app.mux_menu().is_some() {
+        return Some(Action::MuxMenuKey(key));
+    }
+    if app.mux_launch_form().is_some() {
+        return Some(Action::MuxLaunchFormKey(key));
     }
     if app.controls_overlay().is_some() {
         return Some(Action::ControlsOverlayKey(key));
@@ -1113,6 +1127,67 @@ pub(super) fn open_new_mux_form_action(app: &mut App) {
     )));
 }
 
+/// Public alias for [`derive_new_mux_cwd`] so the reducer's
+/// `Msg::OpenNewMuxForm` / `Msg::OpenMuxLaunchForm` arms can seed
+/// the cwd from the selected row (H-MUX-LAUNCH-001 / ADR 0096).
+pub(crate) fn derive_mux_form_cwd(app: &App) -> Option<String> {
+    derive_new_mux_cwd(app)
+}
+
+/// Known harness keys from the registered adapters. Used by the
+/// mux-launch form's `known_harness_keys` autocomplete + cycling.
+pub(crate) fn known_harness_keys() -> Vec<String> {
+    let mut keys: Vec<String> = crate::discovery::harness::registered_adapters()
+        .map(|a| a.harness_key().to_string())
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+/// Known live tmux session names from the current graph snapshot.
+/// Used by the mux-launch form's name-collision check. Strips the
+/// `<backend>:` prefix so the compared value matches what the operator
+/// types (tmux uses `tmux:<socket>:<name>` on non-default sockets and
+/// `tmux:<name>` on the default socket per ADR 0057).
+pub(crate) fn known_live_mux_names(app: &App) -> Vec<String> {
+    use crate::model::GraphNode;
+    let Some(db) = app.graph_db() else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = db
+        .snapshot()
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            GraphNode::MuxSession(m) => Some(strip_tmux_prefix(&m.native_id)),
+            _ => None,
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn strip_tmux_prefix(native_id: &str) -> String {
+    match native_id.strip_prefix("tmux:") {
+        Some(rest) => match rest.split_once(':') {
+            Some((_socket, name)) => name.to_string(),
+            None => rest.to_string(),
+        },
+        None => native_id.to_string(),
+    }
+}
+
+/// Derive a default mux name for the mux-launch form. Today this
+/// mirrors [`derive_new_mux_name`] (empty — operator picks); a
+/// future refinement (slugify repo basename etc.) has one place to
+/// land.
+pub(crate) fn derive_mux_launch_name(app: &App) -> Option<String> {
+    let name = derive_new_mux_name(app);
+    if name.is_empty() { None } else { Some(name) }
+}
+
 /// Read the selected row's cwd (repo / checkout / mux / agent
 /// session). Returns `None` when nothing is selected or the row has
 /// no cwd we can inherit.
@@ -1192,6 +1267,78 @@ fn handle_new_mux_form_key(
         }
         OverlayOutcome::Commit(msg) => {
             app.close_new_mux_form();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
+/// Open the Mux action menu (`m`). Context-free — the menu itself
+/// derives per-entry defaults when its selection commits.
+pub(super) fn open_mux_menu_action(app: &mut App) {
+    use crate::tui::widgets::mux_menu::MuxMenuState;
+    app.open_mux_menu(MuxMenuState::new());
+    app.update(Msg::SetStatus(Some(
+        "mux: ↑/↓ move · Enter pick · Esc close".to_string(),
+    )));
+}
+
+/// Forward a key to the Mux action menu (H-MUX-LAUNCH-001 / ADR 0096).
+/// Commit pops the menu and dispatches the emitted Msg through the
+/// reducer; the reducer's `Msg::OpenNewMuxForm` /
+/// `Msg::OpenMuxLaunchForm` arm pushes the target modal seeded from
+/// current selection.
+fn handle_mux_menu_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.mux_menu_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
+            app.close_mux_menu();
+            app.update(Msg::SetStatus(Some("mux: cancelled".to_string())));
+        }
+        OverlayOutcome::Commit(msg) => {
+            app.close_mux_menu();
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+        OverlayOutcome::CommitAndStay(msg) => {
+            dispatch_live(terminal, app, config, tmux, *msg);
+        }
+    }
+}
+
+/// Forward a key to the mux-launch form (H-MUX-LAUNCH-001 / ADR 0096).
+fn handle_mux_launch_form_key(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    tmux: &dyn MuxBackend,
+    key: ratatui::crossterm::event::KeyEvent,
+) {
+    use crate::tui::{Overlay, OverlayOutcome};
+    let outcome = match app.mux_launch_form_mut() {
+        Some(state) => state.handle((), key),
+        None => return,
+    };
+    match outcome {
+        OverlayOutcome::Consumed => {}
+        OverlayOutcome::Close => {
+            app.close_mux_launch_form();
+            app.update(Msg::SetStatus(Some("mux launch: cancelled".to_string())));
+        }
+        OverlayOutcome::Commit(msg) => {
+            app.close_mux_launch_form();
             dispatch_live(terminal, app, config, tmux, *msg);
         }
         OverlayOutcome::CommitAndStay(msg) => {
@@ -2161,6 +2308,9 @@ fn execute_exec_spec(
         ExecSpec::MuxNew { name, cwd } => {
             execute_mux_new(terminal, app, config, &name, &cwd);
         }
+        ExecSpec::MuxLaunch { request } => {
+            execute_mux_launch(terminal, app, config, request);
+        }
     }
 }
 
@@ -3036,6 +3186,122 @@ fn summarize_mux_new_output(name: &str, output: std::io::Result<Output>) -> PinL
         Err(err) => PinLaunchSummary {
             success: false,
             message: format!("mux `{name}` create failed to spawn: {err}"),
+        },
+    }
+}
+
+/// Argv the TUI passes when re-execing into
+/// `conspectus mux launch` (H-MUX-LAUNCH-001 / ADR 0096). Split out
+/// so the shape is unit-testable without running the actual
+/// subprocess. `--no-attach` is always present so the subprocess
+/// exits after spawning; the TUI's own attach path takes over once
+/// we're back in the alt screen.
+pub(super) fn mux_launch_argv(
+    request: &crate::tui::widgets::mux_launch::MuxLaunchRequest,
+) -> Vec<String> {
+    let mut args = vec![
+        "mux".to_string(),
+        "launch".to_string(),
+        request.harness.clone(),
+        "--name".to_string(),
+        request.name.clone(),
+        "--cwd".to_string(),
+        request.cwd.clone(),
+        "--no-attach".to_string(),
+    ];
+    if let Some(socket) = request.mux_socket.as_deref() {
+        args.push("--socket".to_string());
+        args.push(socket.to_string());
+    }
+    if let Some(branch) = request.worktree_branch.as_deref() {
+        args.push("--worktree-branch".to_string());
+        args.push(branch.to_string());
+    }
+    if let Some(repo) = request.worktree_repo.as_deref() {
+        args.push("--worktree-repo".to_string());
+        args.push(repo.to_string());
+    }
+    if !request.launch_argv.is_empty() {
+        args.push("--argv".to_string());
+        for arg in &request.launch_argv {
+            args.push(arg.clone());
+        }
+    }
+    args
+}
+
+/// Executor branch for `ExecSpec::MuxLaunch`: suspend the alt
+/// screen, re-exec into `conspectus mux launch …`, refresh discovery
+/// so the row tree picks up the fresh mux + attributed harness
+/// session, then attach. Mirrors [`execute_launch_pin`] and
+/// [`execute_mux_new`] but with the mux-launch argv shape.
+fn execute_mux_launch(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    config: &RunConfig,
+    request: crate::tui::widgets::mux_launch::MuxLaunchRequest,
+) {
+    let name = request.name.clone();
+    let args = mux_launch_argv(&request);
+    ratatui::restore();
+    let output = std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("conspectus")),
+    )
+    .args(&args)
+    .output();
+    *terminal = ratatui::init();
+    let _ = terminal.clear();
+
+    refresh(app, config);
+    let launch = summarize_mux_launch_output(&name, output);
+    app.update(Msg::SetStatus(Some(launch.message.clone())));
+    if !launch.success {
+        app.post_toast(launch.message);
+        return;
+    }
+
+    let attach_target = AttachTarget {
+        mux: MuxSessionId::new(format!("tmux:{name}")),
+        backend: "tmux".to_string(),
+        native_id: name.clone(),
+    };
+    let outcome =
+        run_tmux_attach_with_socket(terminal, &attach_target, request.mux_socket.as_deref());
+    refresh(app, config);
+    let message = match outcome {
+        AttachOutcome::Detached => format!("mux `{name}` launch attached/detached"),
+        AttachOutcome::Failed(reason) => format!("mux `{name}` launch attach failed: {reason}"),
+    };
+    app.update(Msg::SetStatus(Some(message)));
+}
+
+fn summarize_mux_launch_output(name: &str, output: std::io::Result<Output>) -> PinLaunchSummary {
+    match output {
+        Ok(output) if output.status.success() => {
+            let detail = command_output_excerpt(&output);
+            PinLaunchSummary {
+                success: true,
+                message: if detail.is_empty() {
+                    format!("mux `{name}` launched")
+                } else {
+                    format!("mux `{name}` launched: {detail}")
+                },
+            }
+        }
+        Ok(output) => {
+            let detail = command_output_excerpt(&output);
+            PinLaunchSummary {
+                success: false,
+                message: if detail.is_empty() {
+                    format!("mux `{name}` launch exited with {}", output.status)
+                } else {
+                    format!("mux `{name}` launch failed: {detail}")
+                },
+            }
+        }
+        Err(err) => PinLaunchSummary {
+            success: false,
+            message: format!("mux `{name}` launch failed to spawn: {err}"),
         },
     }
 }

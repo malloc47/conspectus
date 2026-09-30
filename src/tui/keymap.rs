@@ -51,6 +51,14 @@ pub enum Action {
     OpenNewMuxForm,
     /// Forward a key event into the open bare mux form.
     NewMuxFormKey(ratatui::crossterm::event::KeyEvent),
+    /// `m` — open the Mux action menu (H-MUX-LAUNCH-001 / ADR 0096).
+    /// Discharges the ADR 0095 follow-up now that a second bare-mux-
+    /// shape verb (mux launch) has landed.
+    OpenMuxMenu,
+    /// Forward a key event into the open Mux action menu.
+    MuxMenuKey(ratatui::crossterm::event::KeyEvent),
+    /// Forward a key event into the open mux-launch form.
+    MuxLaunchFormKey(ratatui::crossterm::event::KeyEvent),
     /// `Delete` on an unbound/stale pin row. First press arms a
     /// confirmation; second press shells out to `conspectus pin rm`.
     RemovePin,

@@ -12,6 +12,7 @@
 use crate::model::{AgentSessionId, MuxSessionId};
 use crate::tui::actions::{AttachTarget, PinLaunchTarget};
 use crate::tui::resume::ResumeTarget;
+use crate::tui::widgets::mux_launch::MuxLaunchRequest;
 use crate::tui::widgets::pins::{
     PinBindRequest, PinCreateRequest, PinEditRequest, PinRemoveRequest,
 };
@@ -97,6 +98,12 @@ pub enum ExecSpec {
     /// Mirrors [`ExecSpec::LaunchPin`] but with no pin lookup —
     /// the operator supplied the fields via the form (ADR 0095).
     MuxNew { name: String, cwd: String },
+    /// Suspend the alt screen, re-exec into
+    /// `conspectus mux launch <harness> --name <name> …
+    /// --no-attach`, refresh so the row tree picks up the new mux
+    /// and its attributed harness session, then attach
+    /// (H-MUX-LAUNCH-001 / ADR 0096). No pin is written.
+    MuxLaunch { request: MuxLaunchRequest },
 }
 
 /// A mux backend op the executor should run. The reducer emits this

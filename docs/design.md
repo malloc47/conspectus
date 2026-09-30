@@ -682,7 +682,7 @@ read-only graph navigation, no backend.
 ## Mux Lifecycle
 
 Conspectus's operator-initiated mux mutations (ADR 0087 category 3) are
-three separate creation flavors plus rename, attach, and teardown:
+four separate creation flavors plus rename, attach, and teardown:
 
 - **Bare mux** (ADR 0095) — a plain tmux session with no pin, no
   agent, no worktree. `conspectus mux new <name> [--cwd <path>]` on
@@ -691,21 +691,35 @@ three separate creation flavors plus rename, attach, and teardown:
   and no argv is injected (ADR 0028). The bare session appears in
   discovery on the next refresh and can later be adopted as a pin
   (`pin adopt`) if the operator wants durable declaration.
+- **Mux launch** (ADR 0096) — an ephemeral harness session in a
+  fresh mux, no pin persistence. `conspectus mux launch <harness>
+  --name <mux-name> [--cwd <path>]` on the CLI; the `m`-keyed Mux
+  action menu in the TUI opens a parameterized launch-spec form
+  (ADR 0097) for it. The mux and its harness session appear in
+  discovery next refresh; `pin adopt` remains the after-the-fact
+  persistence path when the operator changes their mind.
 - **Pin launch** (ADRs 0057 / 0058) — a `pin launch` (or `Enter` on
   an unbound pin row) starts a tmux session running the pin's
   harness argv, spliced with `resume_argv` when a continuity
-  sidecar applies.
+  sidecar applies. Distinguished from mux launch by durable
+  `[[pins.entries]]` persistence, alias overlay, and resume
+  continuity.
 - **Worktree stream** (ADR 0094) — a worktree-backed pin realizes
   its branch's worktree at launch and then runs the pin-launch
   path inside the fresh worktree cwd. The `N` TUI shortcut opens
-  the pin create form with the worktree toggle pre-enabled.
+  the pin create form with the worktree toggle pre-enabled. Mux
+  launch (ADR 0096) also exposes the worktree toggle, materializing
+  the worktree without writing a pin.
 
 Rename (ADR 0029, with pin-lockstep), attach (via `MuxBackend`), and
 teardown (ADR 0093, two-phase graceful → hard `kill-session`) round
-out the surface. All four flavors share the `MuxBackend::new_session`
+out the surface. All flavors share the `MuxBackend::new_session`
 / `attach_session` / `kill_session` primitives (ADR 0089) — the
 distinctions are in what the caller passes as argv and whether a pin
-or worktree wraps the call.
+or worktree wraps the call. The pin-create and mux-launch TUI forms
+share a launch-spec form primitive (ADR 0097) with per-caller
+wrappers that fix mode at open time; no in-flow toggle switches
+between persistence shapes.
 
 ## Status Views
 

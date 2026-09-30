@@ -73,6 +73,16 @@ pub enum Modal {
     /// Context-free two-field form (name + cwd) that emits
     /// [`Msg::CommitMuxNew`].
     NewMux(crate::tui::widgets::new_mux::NewMuxFormState),
+    /// `m` mux action menu (H-MUX-LAUNCH-001 / ADR 0096). Fronts the
+    /// mux-specific verbs; each entry commits a Msg that opens the
+    /// corresponding target overlay.
+    MuxMenu(crate::tui::widgets::mux_menu::MuxMenuState),
+    /// Mux-launch form — ephemeral harness in a fresh mux, no pin
+    /// (H-MUX-LAUNCH-001 / ADR 0096). Commits
+    /// [`Msg::CommitMuxLaunch`]. Boxed to keep the `Modal` enum
+    /// discriminant small — the launch form carries eight
+    /// `TextInputState` fields.
+    MuxLaunch(Box<crate::tui::widgets::mux_launch::MuxLaunchFormState>),
 }
 
 /// What an overlay wants the runtime to do after a single key

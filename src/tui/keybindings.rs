@@ -220,6 +220,12 @@ pub const KEYBINDINGS: &[KeyBinding] = &[
     },
     KeyBinding {
         mode: KeyMode::Global,
+        key: KeyMatcher::AnyModExceptCtrl('m'),
+        action: || Action::OpenMuxMenu,
+        help_text: "Open the Mux action menu (new session / launch harness)",
+    },
+    KeyBinding {
+        mode: KeyMode::Global,
         key: KeyMatcher::UpperChar('B'),
         action: || Action::OpenPinRebind,
         help_text: "Rebind the selected pin",
