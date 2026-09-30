@@ -1,346 +1,529 @@
 # Conspectus
 
-Conspectus is a Rust CLI and library for surveying local AI-agent work across
-sessions, muxes, repos, checkouts, workspaces, forks, branches, and forge PRs.
-It reads local state, records relationship evidence in a provider-neutral graph,
-and renders deterministic JSON or compact session tables.
+> *conspectus* (Latin): a comprehensive view; a survey.
 
-Conspectus is read-only except for explicit `conspectus declared`,
-`conspectus alias`, `conspectus rename`, and `conspectus pin`
-commands, which store user-authored intent in `.conspectus.toml` or
-user config.
+Conspectus builds one map of the AI-agent work on your machine. It finds your
+agent sessions (Claude Code, Codex, opencode, aider), terminal multiplexer
+sessions (tmux, zellij), git repos, checkouts and worktrees, branches,
+multi-repo workspaces, forks, and GitHub pull requests. It records every
+plausible relationship between them as evidence, then resolves that evidence
+into a single provider-neutral graph.
 
-## CLI
+On top of that graph you get a keyboard-driven TUI, scriptable tables, and
+JSON, Graphviz, and HTML exports. Conspectus can also take a small set of
+explicitly bounded actions: pin a session, launch or attach it in tmux, and
+open or close down a worktree.
+
+It is a Rust CLI and library. It is developed on Linux and is pre-release
+(`0.1.0`, no tagged release yet); see [Status and limits](#status-and-limits).
+
+```text
+updated 0s ago · 10 sessions · 4 mux  ·  ⚠ 4
+┌ ▸ sessions · mux ──────────────────────────────────────┐┌   ◆ repo ──────────────────────────────────────────────┐
+│▼ ▦ showcase-deck  atelier-repo-a…  (agent-deck)  (1)   ││  id            c9552ea76aef4a46                        │
+│    showcase   claude       4m  ◉  Showcase: agent-deck ││  common_dir    /fixture/repos/project/.git            ▲│
+│▶ ◆ repo-a         /fixture/atelier-demo/repo-a   (2)   ││  remotes                                              █│
+│▶ ◆ repo-b         /fixture/atelier-demo/repo-b   (1)   ││origin=git@github.com:conspectus/project.git           █│
+│▶ ◆ bare-project   /fixture/check…s/bare-project  (1)   ││  source_paths  /fixture/repos/project                 █│
+│▼ ◆ project        /fixture/repos/project         (4)  ⚠││  full_id       repo:/fixture/repos/project/.git       █│
+│    showcase   claude       4m  ◯  ambiguous mux candida││─────────────────────────────── 2 validated  Related ──▼│
+│    showcase   claude       4m  ◯  ambiguous mux candida││  member of              ▦ showcase-deck                │
+│    showcase   claude       4m  ◯  hook-supersession cur││───────────────────────────────────────────── Preview ──│
+│    showcase   claude       1h  ◯  claude-code in projec││no preview for this row                                 │
+│▶ Ungrouped                                       (1)   ││                                                        │
+└────────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────┘
+[left] group:graph · filter:all · sort:hierarchy · Enter/l expand · h collapse · j/k move · h/l fold · Enter default
+```
+
+<sub>The sessions view rendered from the checked-in showcase fixture
+(`tui --snapshot --snapshot-fixture tests/fixtures/showcase.json` in a
+`--features snapshot` build).
+Sessions are grouped under the workspace and repo they belong to. `◉` means
+the session is running in a tmux session you can attach to, and `◯` means it
+isn't in one. `⚠` marks a group where tmux attribution is ambiguous: the
+evidence supports more than one answer, and Conspectus shows that instead of
+guessing.</sub>
+
+## Why Conspectus exists
+
+Running several coding agents at once spreads one piece of work across many
+tools, and each tool only knows its own part:
+
+- The agent harness knows its transcripts, but not which terminal it runs in.
+- tmux knows its panes, but not which agent session a pane is running.
+- git knows branches and worktrees, GitHub knows pull requests, and workspace
+  tools such as Atelier and [agent-deck](https://github.com/asheshgoplani/agent-deck)
+  know their own layouts.
+- None of them know how these pieces connect.
+
+The questions you actually ask cut across all of them. *Which agent is in this
+tmux session? What branch is it on, and is there a PR yet? Which of the forty
+Claude sessions in this repo is the one I compacted yesterday? What is still
+running in the worktree I'm about to delete?*
+
+Conspectus answers these questions using state that is already on disk, and
+you don't have to change how you launch your agents.
+
+## What makes it different
+
+### 1. A graph, not a session list
+
+Conspectus has ten node kinds: agent session, mux (terminal multiplexer)
+session, repo, checkout (a plain clone or a linked worktree), branch,
+workspace, fork, forge PR, pin, and runtime process. Twenty-two typed
+relation kinds connect them. The graph is sparse by default: an orphan agent
+session, a tmux session with no agent, and a branch with a PR but no session
+are all valid, not errors. Projections never assume things connect.
+([ADR 0001](docs/adr/0001-node-identity-and-stable-ids.md),
+[0003](docs/adr/0003-polymorphic-fork-node.md),
+[0026](docs/adr/0026-checkout-context-model.md),
+[0047](docs/adr/0047-runtime-process-nodes-candidate.md),
+[0084](docs/adr/0084-first-class-pin-nodes.md))
+
+### 2. Evidence first, resolution second
+
+Discovery never decides anything. Every plausible relationship becomes a
+`GraphLink` candidate that records its provenance (declared, strongly
+discovered, discovered, convention, or cached), a confidence level, and how
+fresh it is. A resolver then picks the preferred relationship for each slot
+and keeps the losing candidates. Ambiguity and conflicts stay visible as data
+(the `◐` and `⚠` glyphs, and `conspectus graph --explain` score breakdowns)
+instead of being silently collapsed.
+([ADR 0002](docs/adr/0002-graphlink-and-typed-relationships.md),
+[0006](docs/adr/0006-session-mux-link-candidates.md),
+[0041](docs/adr/0041-resolver-stays-in-rust.md),
+[0077](docs/adr/0077-resolver-ambiguous-slot-preservation.md))
+
+### 3. Attribution without touching your agents
+
+The hardest link to make is "which agent session is running in which tmux
+pane?" Conspectus answers it by layering independent evidence. When
+signals disagree, the strongest one wins. This table is simplified;
+[mux link resolution](docs/mux-link-resolution.md) has the full rules.
+
+| Rank | Evidence | Where it comes from |
+| --- | --- | --- |
+| 1 | You declared the link | `.conspectus.toml` or user config |
+| 2 | The harness reported its current session, or the pane's process has the session transcript open | Opt-in hook sidecar; `/proc/<pid>/fd` |
+| 3 | The harness's own state names the current session | Codex state and log databases (opened read-only); session-file activity |
+| 4 | A harness process is running in the pane | Walking the process tree down from the pane's PID |
+| 5 | The pane's launch command names a session | The command line (argv) that started the pane |
+| 6 | The pane's working directory matches the session's | tmux metadata plus the session transcript |
+
+Stale evidence is demoted by freshness rules. A pane running a single harness
+process can claim at most one session. When the evidence still ties,
+Conspectus shows the ambiguity rather than guessing.
+
+Conspectus never types into a live agent pane to ask for its session id,
+never writes harness-owned state, and never walks your whole home directory.
+([ADR 0027](docs/adr/0027-workspace-detection-precedence.md),
+[0028](docs/adr/0028-hook-sidecar-mux-attribution.md),
+[0046](docs/adr/0046-process-tree-pane-linker.md),
+[0048](docs/adr/0048-codex-state-and-log-readers.md))
+
+### 4. Your intent lives in reviewable TOML; everything else is a rebuildable cache
+
+Declared links, session aliases, and pins are small TOML entries in a
+`.conspectus.toml` file next to the project. Relationships that don't belong
+to any one project go in your user config instead. Both are easy to review
+and safe to version-control.
+
+A declared link overrides discovered evidence without erasing it. Caches (the
+graph snapshot and the observation sidecars) live under your XDG directories,
+never inside a project tree, so deleting them only costs a rebuild.
+([ADR 0012](docs/adr/0012-config-file-layout.md),
+[0014](docs/adr/0014-declared-link-storage-schema.md),
+[0029](docs/adr/0029-session-alias-overlay.md),
+[0083](docs/adr/0083-zero-copy-snapshot-format.md))
+
+### 5. Pins: sessions that outlive their processes
+
+Harness session ids change with every `/compact`, `/resume`, and restart, but
+the way you think about your work ("the Codex session for the ingest
+refactor") doesn't. A **pin** declares that logical session as a harness,
+working directory, display name, and tmux session name. It stays on the
+dashboard whether or not anything is running.
+
+When a matching tmux session is live, the pin binds to it through the
+attribution pipeline above. When the tmux session dies, `Enter` relaunches
+it. Conspectus follows the session's compaction and resume chain to the
+latest session and resumes that conversation instead of starting a new one.
+
+Conspectus doesn't own your tmux server or impose a window layout. It
+records what you intend and reconciles it with what is actually running.
+([ADR 0018](docs/adr/0018-intra-harness-session-lineage.md),
+[0057](docs/adr/0057-session-pins.md),
+[0058](docs/adr/0058-pin-session-continuity.md))
+
+### 6. A bounded mutation envelope
+
+Conspectus is read-only by default. Every write it can make falls into one
+of four enumerated categories:
+
+- its own TOML stores;
+- rebuildable sidecar files;
+- tmux session lifecycle actions (create, rename, attach, tear down) that you
+  start yourself;
+- subprocesses that Conspectus launches itself.
+
+These prohibitions are absolute:
+
+- no writes to harness-owned state;
+- no terminal input into a live agent pane;
+- no persisted transcript content;
+- no writes to shared or system locations;
+- no background mutation;
+- no direct git mutation (worktree changes are delegated to
+  [worktrunk](https://github.com/max-sixty/worktrunk));
+- no skipping hooks or signing: there is no `--no-verify` equivalent, and if
+  a hook fails, the write fails.
+
+([ADR 0086](docs/adr/0086-payload-privacy-tenet.md),
+[0087](docs/adr/0087-mutation-envelope.md),
+[0092](docs/adr/0092-worktree-backend-seam.md),
+[0093](docs/adr/0093-operator-initiated-mux-teardown.md))
+
+### 7. The daemon is optional, and JSON is the contract
+
+Every command works on its own by building the graph in-process from scratch.
+`conspectus serve` is an optional background daemon that keeps the graph
+warm. It refreshes each kind of source on its own schedule and wakes early
+when harness state changes on disk. It serves the current graph to clients
+over a Unix socket and saves it as a zero-copy [`rkyv`](https://rkyv.org)
+archive (`graph.bin`) so that it can restart warm. When the daemon isn't
+running, clients fall back to building the graph themselves without any
+error.
+
+For other tools, `conspectus graph --format json` is the stable boundary: a
+deterministic document of nodes, candidate links, resolved relationships,
+and diagnostics.
+([ADR 0038](docs/adr/0038-cli-server-transport-wal.md),
+[0050](docs/adr/0050-graph-visualization-exports.md),
+[0079](docs/adr/0079-server-intervals-dual-role-as-warm-start-ttl.md),
+[0082](docs/adr/0082-retire-sqlite-persistence-and-query-surface.md))
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph S["Local state, read-only"]
+    H["Agent harnesses<br/>claude-code · codex · opencode · aider"]
+    M["Terminal multiplexers<br/>tmux · zellij"]
+    G["git<br/>repos · checkouts · worktrees · branches"]
+    W["Workspaces<br/>Atelier · agent-deck · multi-repo roots"]
+    F["Forge<br/>GitHub via gh"]
+    P["Runtime evidence<br/>process tree · hook sidecars · harness logs"]
+  end
+  U["Your intent (TOML)<br/>declared links · aliases · pins"]
+  S --> C["GraphLink candidates<br/>provenance · confidence · freshness"]
+  U --> C
+  C --> R["Resolver"]
+  R --> N["Resolved GraphSnapshot<br/>losing candidates and conflicts kept"]
+  N --> TUI["TUI"]
+  N --> T["table · node show"]
+  N --> X["graph: JSON · DOT · HTML"]
+  N --> D["conspectus serve<br/>Unix socket · graph.bin"]
+```
+
+Each source is read by an adapter registered in a per-family registry:
+harness adapters, mux backends, forge adapters, workspace providers, and
+worktree backends. Adapters translate provider-specific state into the
+neutral model. Everything downstream consumes the same resolved
+`GraphSnapshot`, so the TUI, the tables, and the exports can never disagree
+about what is linked to what. See the
+[provider adapter guide](docs/provider-adapter-guide.md) and the
+[north-star design](docs/design.md).
+
+## What it discovers
+
+| Family | Supported today | What Conspectus reads |
+| --- | --- | --- |
+| Agent harnesses | Claude Code, Codex, opencode, aider | Sessions, titles, last-message previews, and session lineage (compaction, resume, forks). Harness SQLite databases are opened read-only. |
+| Terminal multiplexers | tmux; zellij (discovery and attach only) | Sessions, working directories, activity, attached clients, and pane process trees. |
+| Version control | git | Repos, checkouts, linked worktrees (including worktrees of bare repos), branches, remotes, and upstreams. |
+| Workspaces | Atelier, [agent-deck](https://github.com/asheshgoplani/agent-deck), and generic multi-repo roots | Workspace membership, plus fork provenance from Atelier. |
+| Forges | GitHub, via the `gh` CLI | Pull requests, matched to local branches. A GitLab adapter exists only as a stub. |
+| Harness hooks (optional) | Claude Code and Codex (`conspectus hook init`), plus an [opencode plugin](plugins/opencode-hook/) | The harness's current session id, which sharpens tmux attribution. |
+
+Discovery starts from the current directory (or the `--scan-root` paths you
+pass), plus each harness's home-level state directory. It then checks the
+working directory of every session it finds for git context. When a provider
+is missing (no tmux server, no `gh`, no harness state), that part of the
+graph is simply empty rather than an error.
+
+## Quick start
+
+Conspectus builds from source with stable Rust (2024 edition). From a clone
+of this repository:
 
 ```sh
-conspectus
-conspectus tui [--view {sessions|mux|union|prs|forks}] [--scan-root PATH]...
-conspectus graph --format {json|dot|html} [--scan-root PATH]...
-                                          [--candidates {include|exclude}]
-                                          [--diagnostic-nodes {include|exclude}]
-conspectus session [--projection {agent|mux|union}] [--scan-root PATH]...
-
-conspectus declared list [--store {all|project|user}] [--scan-root PATH]...
-conspectus pin {create|list|show|launch|attach|bind|rebind|adopt|rename|rm} ...
+cargo install --locked --path .
 ```
 
-Running `conspectus` without a subcommand opens the interactive TUI.
-`graph` emits the full evidence-preserving graph document: `--format json`
-is machine-readable, `--format dot` pipes through Graphviz for static
-inspection, and `--format html` produces a self-contained interactive
-explorer (see [graph visualization guide](docs/graph-visualization.md)).
-`session` renders
-agent-, mux-, or union-oriented table projections after resolution. The
-`declared` subcommands can pin, ignore, remove, confirm, or override
-relationships. `conspectus pin` (ADR 0057) declares a session pin — a
-`(harness, cwd, display_name, mux)` tuple persisted in
-`.conspectus.toml` — that renders as a first-class dashboard row
-whether or not a live session realizes it, binds 1:1 on the mux
-native name through the existing attribution pipeline, and can
-launch the configured harness into a fresh tmux session on demand.
-This replaces the agent-deck "new card" workflow without inheriting
-the broader orchestrator scope; see
-[`docs/operations.md`](docs/operations.md#session-pins) for the full
-command surface and the agent-deck migration path via `pin adopt`.
+Run it from inside a repo you work in:
 
-## Session Pins
-
-A **session pin** is a small TOML entry that declares "I want a logical
-agent session here" — a `(harness, cwd, display_name, mux)` tuple
-stored in `.conspectus.toml` (project) or the user-level config. It
-behaves as a stable, one-keystroke dashboard row whether or not the
-underlying tmux session is currently running. When a matching live mux
-exists, the resolver binds the pin to its attributed agent session 1:1;
-when nothing matches, the pin renders as `unbound` and `pin launch`
-spawns the tmux session on demand.
-
-Pins are a lightweight alternative to a full mux/agent orchestrator.
-Conspectus does not own your tmux server, does not manage long-running
-processes, and does not impose a window/pane layout. It just records
-the *intent* of a session, watches what's actually running, and lets
-you reach the running pieces with consistent keystrokes from the TUI
-or scripts from the CLI.
-
-### Lifecycle at a glance
-
-```
-pin create  ──►  pin launch  ──►  bound to live mux  ──►  pin attach
-                                                              │
-                  ▲                                            │
-                  │                                            ▼
-            pin adopt           ◄── operator already running tmux
-            pin rebind          ◄── mux was renamed outside conspectus
-            pin bind            ◄── multiple harness sessions claim the mux
+```sh
+conspectus                                    # open the TUI (same as `conspectus tui`)
+conspectus table sessions                     # one row per agent session
+conspectus table mux                          # one row per tmux session
+conspectus graph --format html > graph.html   # self-contained interactive explorer
 ```
 
-The leftmost path is "I'm starting fresh"; the bottom-right transitions
-are recovery paths — none of them touch tmux, they only update the
-TOML so the resolver re-binds correctly.
+Two optional extras:
 
-### Command guide
+```sh
+conspectus hook init claude-code   # let Claude Code report its session id
+conspectus serve                   # keep the graph warm in the background
+```
 
-| Command | What it does |
-|---|---|
-| `pin create <id> --harness <K> --cwd <PATH>` | Declare a new pin. Mux may not exist yet; the pin renders `unbound` until `pin launch`. |
-| `pin list [--store ...] [--state ...]` | Print every pin, its binding state, store path, and bound session id. Read-only. |
-| `pin show <id>` | Show the full entry plus any resolver diagnostic. Read-only. |
-| `pin launch <id> [--no-attach]` | Resolve the pin's binding and act: bound → attach; stale → send-keys then attach; unbound → `tmux new-session` then attach. |
-| `pin attach <id> [--no-attach]` | Same as `launch` semantically; intent label differs. Unbound falls through to launch with a note. |
-| `pin rename <id> [<new-id>] [--display <name>]` | Rename the pin's id and/or display name. With `--display`, applies the ADR 0029 lockstep mux rename when bound. |
-| `pin rm <id>` | Remove the pin from its owning store. Live tmux is left alone. |
-| `pin bind <id> --to <SESSION_KEY>` | Resolve `PinAmbiguous` by writing a `LocalDeclared linked_to_mux` override (`label = "pin:<id>"`) the resolver treats as authoritative. |
-| `pin rebind <id> --mux <NEW_NAME>` | Update the pin's `mux.name` (and optional `--mux-socket`) after an external tmux rename. Pure TOML write — never touches tmux. |
-| `pin adopt <new-id> <existing-mux-name>` | Capture an already-running tmux session as a pin. Harness inferred from active attribution; cwd from the mux's observed `cwd`. |
+## A tour of the surfaces
 
-The TUI exposes every action with a direct shortcut and a discoverable
-`p` modal — see `docs/operations.md` for the keymap.
+### Interactive TUI
 
-### Watch for these confusable pairs
+- **Views.** The Sessions view groups sessions by graph topology by default:
+  workspace, then repo, then checkout, with resumed and forked sessions
+  nested under their parents. It can also group by workspace, repo,
+  checkout, or scan root, or show a flat list. The Mux view shows one row
+  per terminal-multiplexer session.
+- **Relationship explorer.** The right-hand pane shows a node's own fields,
+  its upstream and downstream relationships, how each link was established
+  (its provenance), and which candidate the resolver picked. `Enter` drills
+  into a neighbor and `Backspace` walks back.
+- **Actions.** `Enter` does the obvious thing for the selected row: attach
+  to the tmux session, launch the pin, or open the transcript. `v` opens a
+  built-in transcript viewer for Claude Code, Codex, and opencode.
+- **Menus first, shortcuts second.** `?` lists every key. `f` opens view,
+  grouping, filter, and sort controls, and `/` searches. `p`, `m`, and `w`
+  open the pin, mux, and worktree menus. Every action can be reached from a
+  menu, and the frequent ones also have single-key shortcuts, so you don't
+  have to memorize anything to get started.
+- **Theming** through `[tui.theme]`
+  ([operations guide](docs/operations.md#tuitheme--palette-overrides-adr-0032)).
 
-**`create` vs `adopt`** — both write a new TOML entry, but they answer
-different questions:
-- `create` is a **forward declaration**. The mux may not exist; the
-  pin sits `unbound` until you launch it. Use this for sessions you
-  haven't started yet.
-- `adopt` is **reverse capture**. The mux *must* already be running
-  (CLI bails otherwise). Use this when you're migrating an existing
-  agent-deck / hand-managed tmux session into a managed pin without
-  restarting anything. Harness and cwd default from current
-  attribution; `create` demands you type them.
+### Scriptable CLI
 
-**`bind` vs `rebind`** — both write to disk, but to different places:
-- `bind` resolves **`PinAmbiguous`**: multiple harness sessions are
-  attributed to the same mux and the resolver can't pick one. The
-  override is a `LocalDeclared` link tagged `pin:<id>`, not an edit to
-  the pin entry itself. The pin's `mux.name` stays the same.
-- `rebind` recovers from an **external tmux rename**: the pin's
-  configured `mux.name` no longer matches a running mux. The fix is to
-  edit the pin's own TOML entry to point at the new mux name. No
-  declared links involved.
+```sh
+conspectus table {sessions|mux|union|prs|forks} \
+    [--columns default,+preview] [--layout card] [--harness codex] [--max-age 7d]
+conspectus columns sessions        # list the columns a row type supports
+conspectus node show <id>          # one node, its evidence, and diagnostics
+conspectus graph --format {json|dot|html} [--explain] [--candidates exclude]
+```
 
-**`launch` vs `attach`** — they share the same code path, only the
-intent label differs. `pin attach` on an unbound pin falls through to
-launch with a one-line note; `pin launch` on a bound pin just
-attaches. Prefer `launch` in scripts that may run before the mux
-exists; prefer `attach` in muscle-memory wrappers when you know the
-mux is up.
+Tables adapt to your terminal width, page through `$PAGER`, and respect
+`NO_COLOR`. The [graph visualization guide](docs/graph-visualization.md)
+covers the DOT and HTML exports.
 
-**`rename` vs `rebind`** — `rename` changes how the *operator* refers
-to the pin (`id`, `display_name`); when `--display` changes and the
-pin is bound, it also lockstep-renames the mux per ADR 0029.
-`rebind` changes which *mux* the pin points at and never touches
-tmux. Use `rename` when you don't like the label; use `rebind` when
-the mux moved.
+### Declared links and aliases
 
-### Diagnostics
+```sh
+conspectus declared {list|create|remove|confirm|ignore|override} ...
+conspectus rename session <id> "ingest refactor"   # alias, plus a matching tmux rename
+conspectus rename mux <id> <new-name>
+conspectus alias list
+```
 
-The resolver emits four pin-specific diagnostics that surface in
-`pin show`, the TUI status line, and the right detail pane:
+### Session pins
 
-- **`PinUnbound`** — `pin.mux.name` matches no live mux. Action:
-  `pin launch <id>`. Carries an optional `last_session` field
-  populated from the continuity sidecar (see below); when present,
-  `pin show` and the TUI advertise `Enter resume <session-id>`
-  instead of a generic `Enter launch`.
-- **`PinStaleMux`** — mux is live but no `pin.harness` session is
-  attributed. Action: `pin launch <id>` to inject the harness into
-  the existing pane.
-- **`PinAmbiguous`** — multiple harness sessions of the right kind
-  are attributed to the bound mux. Action: `pin bind <id> --to
-  <session-key>`.
-- **`PinDrift`** — bound session's observed cwd diverges from the
-  pin's declared cwd. Advisory; the binding still holds.
+```sh
+conspectus pin create ingest --harness codex --cwd ~/work/ingest
+conspectus pin launch ingest          # attach, relaunch, or resume, depending on state
+conspectus pin adopt ingest ingest    # turn an already-running tmux session into a pin
+conspectus pin {list|show|attach|rename|rm|bind|rebind} ...
+```
 
-### Session continuity
+A pin is in one of four states: `bound` (live and attributed), `unbound`
+(no tmux session yet, or it died), stale (the tmux session is alive but the
+agent has exited), or ambiguous (several sessions claim it). Each state has
+a matching recovery action. The
+[pins walkthrough](docs/pins-walkthrough.md) teaches the lifecycle, and
+[operations](docs/operations.md#session-pins) is the reference.
 
-Per ADR 0058, every fresh `Bound` resolution is recorded to a
-per-pin JSON sidecar under
-`$XDG_CACHE_HOME/conspectus/pin-bindings/<pin_id>.json`. When the
-mux later dies and `pin launch <id>` flips to the unbound branch,
-the launch path reads the sidecar, walks the ADR 0018
-`parent_session` chain forward to the current head (stopping at
-any fork), validates the session still exists on disk, and splices
-the harness's `resume_argv(<head>, <cwd>)` into the tmux
-`new-session` call. The result: closing tmux and relaunching the
-pin resumes the same agent session you were last working in
-(codex, claude-code, opencode) rather than starting fresh. Aider
-tracks chat history per-cwd rather than per-session and falls back
-to a fresh launch with a hint.
+### Launching tmux sessions
 
-The sidecar is a rebuildable cache, not authoritative state — the
-resolver never reads it, stale entries self-prune at launch time,
-and clearing
-`$XDG_CACHE_HOME/conspectus/pin-bindings/` only loses continuity
-until the next `pin launch` from a bound state.
+```sh
+conspectus mux new scratch --cwd ~/work/ingest               # bare shell, nothing persisted
+conspectus mux launch codex --name spike --cwd ~/work/ingest  # agent in a new tmux session, no pin
+```
 
-### Read-only invariant
+### Worktree streams
 
-Read commands (`graph`, `node show`, `table`, `pin list`,
-`pin show`, `tui`) never create, mtime-touch, or content-modify any
-`.conspectus.toml` / user config bearing a `[pins]` section. Mutation
-is reserved to `pin create / rename / rm / bind / rebind / adopt` and
-the TUI write paths they back. Enforced by
-[`tests/cli_pin_invariants.rs`](tests/cli_pin_invariants.rs).
+```sh
+conspectus worktree list                                     # read-only; always available
+conspectus pin create feat-x --harness claude-code \
+    --cwd ~/work/repo --worktree feat-x                      # worktree created when the pin launches
+conspectus worktree close feat-x --merge                     # stop sessions, merge, remove worktree, drop pins
+conspectus worktree {new|rm|merge|prune} ...
+```
 
-The same invariant extends to the continuity sidecar: read-only
-commands run against configs with only unbound pins leave the
-cache directory untouched, and existing sidecars survive
-byte-for-byte across read-only commands. The positive case (a
-`Bound` resolution producing a sidecar write) is by design.
-Enforced by [`tests/cli_pin_resume_invariants.rs`](tests/cli_pin_resume_invariants.rs).
+Listing worktrees is built in. Creating, removing, merging, and pruning them
+is delegated to [worktrunk](https://github.com/max-sixty/worktrunk)
+(`wt`), which must be on your `PATH`. Conspectus itself never runs
+`git worktree add` or `remove`. See the [worktrees guide](docs/worktrees.md).
 
-For the full reference — TOML schema, store-selection rules, launch
-semantics, TUI keymap, scenario-mode behavior, continuity sidecar
-internals — see
-[`docs/operations.md`](docs/operations.md#session-pins) and ADRs
-[0057](docs/adr/0057-session-pins.md) and
-[0058](docs/adr/0058-pin-session-continuity.md).
+### Continuous mode
 
-## Docs
+```sh
+conspectus serve                        # default refresh: harness 5s, mux 5s, git 30s, forge 5m
+conspectus status                       # when each kind of source last refreshed, and any errors
+conspectus refresh [--class git|mux|harness|forge]
+```
 
-- [Feature summary](docs/feature-summary.md) describes the current CLI,
-  discovery providers, declared-link behavior, and known limits.
-- [Operations](docs/operations.md) documents runtime environment variables,
-  provider toggles, state-root overrides, and config-file precedence.
-- [Graph visualization](docs/graph-visualization.md) covers `--format dot`
-  and `--format html`, the HTML explorer chrome, and common debugging
-  recipes.
-- [Library API](docs/library-api.md) describes stable entry points and
-  pure/impure boundaries for consumers.
-- [Atelier migration guide](docs/atelier-migration.md) maps overlapping Atelier
-  observability commands to Conspectus replacements.
-- [ADR index](docs/adr/) records architecture decisions, including the Phase 6
-  library API and distribution policies.
-- [Design notes](docs/design.md) remain as historical and forward-looking design
-  context.
+## How Conspectus is built
+
+Conspectus is written by one developer working with AI coding agents. The
+repository is set up so that agents can do most of the implementation
+without drifting from the design. The project's memory lives in three files
+checked into the repo, not in chat history.
+
+### `docs/design.md`: the north star
+
+The [design document](docs/design.md) is written data-model-first. It covers
+the product goal, the entity model, and the discovery, persistence, and
+mutation rules. Every feature is checked against the graph model before it is
+built, which is why provider specifics (tmux, GitHub, each harness) live in
+adapters and metadata rather than in the shape of the graph. The design
+document stays short enough to plan from, and the detailed reasoning lives in
+ADRs.
+
+### `docs/adr/`: 97 architecture decision records
+
+Every significant decision gets an ADR, whether it's a model change, a new
+dependency, a new write path, a workflow tool, or a UI convention. Each ADR
+follows the same template: Status, Context, Decision, Consequences,
+Alternatives Considered, and, where it applies, Open Questions Answered. A few
+habits have grown out of that discipline:
+
+- **Few dependencies.** Adding a crate requires an ADR that compares the
+  alternatives, and many of those ADRs conclude "keep it in-tree": no rules
+  engine ([0059](docs/adr/0059-resolver-rules-engine-evaluation.md)), no
+  `sysinfo` ([0046](docs/adr/0046-process-tree-pane-linker.md)), no
+  scrollbar crate ([0076](docs/adr/0076-scrollbar-widget-choice.md)), and
+  OSC 52 escape codes instead of a clipboard crate
+  ([0056](docs/adr/0056-tui-clipboard-backend-osc52.md)).
+- **Named revisit triggers.** Many decisions name the condition that should
+  reopen them, so revisiting a decision is planned rather than ad hoc.
+- **Superseded, never deleted.** Retired decisions stay in place, with a link
+  forward to whatever replaced them.
+- **Cheap reversals.** Over about four weeks the project built an embedded
+  SQL persistence, query, and vector-search layer
+  ([0036](docs/adr/0036-embedded-query-engine-selection.md)–[0044](docs/adr/0044-nodeid-foreign-references-as-json.md)).
+  It then recognized that the design had made storage the thing views read
+  from, and replaced the layer with a zero-copy snapshot
+  ([0082](docs/adr/0082-retire-sqlite-persistence-and-query-surface.md),
+  [0083](docs/adr/0083-zero-copy-snapshot-format.md)). Because an earlier
+  ADR had kept the resolver in Rust
+  ([0041](docs/adr/0041-resolver-stays-in-rust.md)), undoing it meant
+  swapping out the storage, not rewriting the application. ADR 0082 records
+  two lessons: consumers read the typed model, and no capability lands
+  before something needs it.
+
+### `docs/backlog.md`: the work tracker
+
+The [backlog](docs/backlog.md) is a single Markdown file used instead of an
+issue tracker. [ADR 0009](docs/adr/0009-lightweight-backlog-tracking.md)
+chose it over Beads, Backlog.md, and GitHub Issues. Every story has a stable
+ID (`P8-014`, `H-WT-006`, `H-PIN-TUI-011`), a scope, the tests it needs, its
+blockers, and an outcome note once it lands. The IDs appear in commit
+subjects and code comments, so `git log --grep` and `grep` connect a
+decision, the work it caused, and the code it produced.
+
+Numbered phases (P0 through P11) cover the planned arc. Hardening workstreams
+(`H-*`) and dated batches of operator requests cover what came up in daily
+use.
+
+### Making the loop work with agents
+
+- **Guardrails in the repo.** [`AGENTS.md`](AGENTS.md) (also available as
+  `CLAUDE.md`) spells out the rules: design data-model-first, keep the core
+  provider-neutral, treat the graph as sparse, stay inside the mutation
+  envelope, record decisions as ADRs, use Conventional Commits, and pass the
+  checks before merging to main.
+- **A UI agents can see.** `conspectus tui --snapshot` renders a single frame
+  to stdout, with ANSI colors preserved, after replaying a scripted key
+  sequence. It can render the live world or a checked-in fixture, so an
+  agent can iterate on the interface without asking a human for screenshots
+  ([ADRs 0067–0070](docs/adr/0067-tui-snapshot-mode-for-agent-iteration.md)).
+- **Offline, deterministic tests.** Fake tmux, `gh`, and git runners;
+  programmatic replay worlds; sanitized captures of real provider data; named
+  developer scenarios; and `insta` snapshot tests. The whole suite runs in a
+  few seconds.
+- **Periodic audits.** An [ADR corpus audit](docs/adr-audit.md), a
+  [code-hygiene audit](docs/code-hygiene-audit.md), and an
+  [extensibility assessment](docs/extensibility-assessment.md) each turned
+  accumulated drift into backlog items.
+
+### By the numbers (as of 2026-09-30)
+
+| Measure | Value |
+| --- | --- |
+| Development window | 2026-05-12 to 2026-09-30 |
+| Commits | 829, of which 629 (76%) have an AI co-author trailer |
+| Architecture decision records | 97, of which 10 are superseded or partially superseded |
+| Backlog items | about 550, of which nearly 80% are checked off |
+| Commits that touch `docs/backlog.md` | 395 (48%) |
+| Rust | about 130k lines, over 40% of it tests |
+| Tests | 2,070, all passing, in about 3 seconds with `cargo nextest` |
+
+## Status and limits
+
+- **Pre-release.** The version is `0.1.0`. There is no tagged release and no
+  crates.io package, so install from source.
+- **Linux first.** Process-tree attribution reads `/proc`. On platforms
+  without it, attribution falls back to the remaining evidence. macOS is
+  untested.
+- **tmux is the primary mux backend.** zellij supports discovery and attach
+  only. Pins on a non-default tmux socket (`tmux -L`) launch and attach
+  correctly, but discovery doesn't list those sockets yet.
+- **GitHub only.** Forge discovery goes through an authenticated `gh` CLI.
+  GitLab is a stub.
+- **Worktree mutation needs worktrunk.** Without `wt` on your `PATH`,
+  worktree support is read-only.
+- **The library API isn't stable yet.** `conspectus::api` exists
+  ([library API](docs/library-api.md)), but no external consumer relies on
+  it, so treat it as unstable.
+- **Atelier support targets an unreleased companion tool.** Atelier is the
+  workspace and fork tool Conspectus grew out of, and it isn't public yet.
+
+## Documentation
+
+| If you want to… | Read |
+| --- | --- |
+| Configure and run it: environment variables, config files, the CLI reference, caches, TUI state | [docs/operations.md](docs/operations.md) |
+| Learn pins hands-on | [docs/pins-walkthrough.md](docs/pins-walkthrough.md) |
+| Manage worktrees and streams of work | [docs/worktrees.md](docs/worktrees.md) |
+| Export and explore the graph visually | [docs/graph-visualization.md](docs/graph-visualization.md) |
+| Understand the model and intent | [docs/design.md](docs/design.md) |
+| See why things are the way they are | [docs/adr/](docs/adr/) |
+| Understand how sessions get attributed to tmux panes | [docs/mux-link-resolution.md](docs/mux-link-resolution.md) |
+| Add a harness, mux, forge, or orchestrator adapter | [docs/provider-adapter-guide.md](docs/provider-adapter-guide.md) |
+| Use Conspectus as a library | [docs/library-api.md](docs/library-api.md) |
+| See what's being worked on | [docs/backlog.md](docs/backlog.md) |
+| Find every document | [docs/index.md](docs/index.md) |
 
 ## Development
 
-Use the Nix flake for a local development shell:
-
 ```sh
-nix develop
+nix develop    # Rust toolchain, cargo-nextest, just, tmux, gh
+just check     # fmt, clippy -D warnings, test, nextest, git diff --check
 ```
 
-The shell provides Rust tooling, `cargo-nextest`, `just`, `pre-commit`, tmux,
-and GitHub CLI.
-
-Common checks:
-
-```sh
-just check
-cargo doc --no-deps
-```
-
-### TUI snapshot and fixture mode
-
-A dev-only `snapshot` cargo feature exposes a one-shot render path and
-fixture I/O on the `tui` subcommand. The flags do not appear in
-production builds (no `--features snapshot`); the nix dev shell and
-`just check` build with the feature on.
+To iterate on the TUI, use snapshot mode instead of screenshots. It lives
+behind the developer-only `snapshot` cargo feature, which `just check` and CI
+enable through `--all-features`:
 
 ```sh
-# Render one frame to stdout with ANSI styling preserved and exit
-conspectus tui --snapshot
-
-# Slice to a single pane (header | left | right | status)
-conspectus tui --snapshot --snapshot-pane left --snapshot-width 160 --snapshot-height 40
-
-# Drive the UI to a non-default state before snapshotting (vim-style:
-# literals + `<Name>` for non-printables, `<C-x>` / `<A-x>` modifiers).
-conspectus tui --snapshot --snapshot-keys '2'           # switch to mux view
-conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
-
-# Capture the live world to a fixture JSON for later iteration
-conspectus tui --snapshot --snapshot-export-fixture world.json
-
-# Re-render from a fixture (skips live discovery, deterministic)
-conspectus tui --snapshot --snapshot-fixture world.json --snapshot-pane left
-
-# Explore a fixture interactively in the full TUI. `r` re-reads the
-# JSON from disk so you can edit the fixture in another buffer and
-# cycle in the new state without leaving the session.
-conspectus tui --fixture world.json
+cargo run --features snapshot -- tui --snapshot --snapshot-pane left --snapshot-keys 'jj<Enter>'
+cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixtures/showcase.json
+cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # interactive; `r` reloads
 ```
 
-Snapshot output uses the same row builders and renderer as the
-interactive TUI, so what you see is byte-for-byte what an operator
-sees. Lift a dialed-in fixture into a regression test with
-`serde_json::from_str(include_str!(...))` plus the existing
-`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`.
+[docs/dev-scenarios.md](docs/dev-scenarios.md) covers the fixture workflow,
+the three test-world surfaces (`ReplayWorld`, the captured-fixture corpus,
+and named `dev_scenarios`), and the `showcase` scenario that exercises most
+features at once. Commit, review, and pre-merge conventions are in
+[`AGENTS.md`](AGENTS.md).
 
-A fixture is the *resolved* graph fed into the renderer, so it
-validates UI behavior but does not exercise the discovery →
-resolver pipeline. To test graph building itself, the test corpus
-offers three complementary surfaces:
+## License
 
-- **`ReplayWorld` (`tests/support/replay.rs`)** — the day-to-day
-  surface for programmatic test worlds. Fluently writes harness
-  session JSON, hook sidecar records, fake `tmux list-sessions`
-  rows, and `/proc` fd evidence into a temp tree, then runs the
-  real `discover_local_with` + `resolve_snapshot` pipeline. Use
-  `world.write_snapshot_fixture("path.json")` to drop a
-  normalized JSON the snapshot tool's `--fixture` /
-  `--snapshot-fixture` flags can consume — discovery tests and
-  renderer tests share one fixture format.
-- **Captured-fixture corpus (`tests/fixtures/`,
-  `tests/fixture_corpus.rs`)** — sanitized real-provider
-  artifacts (codex transcripts, claude sidecars, opencode
-  sessions, tmux output, `/proc` snapshots, hook DBs) run through
-  the same adapter/parser paths discovery uses. Reach for this
-  when a parser bug shows up on real data and you want a
-  regression test against that real shape; the file header
-  documents the sanitization workflow.
-- **`dev_scenarios` (`src/dev_scenarios.rs`)** — named curated
-  worlds (empty, orphan-session, ambiguous-mux, hook-supersession,
-  …). Reachable interactively through `conspectus dev scenario
-  tui <name>` for visual inspection of recurring edge cases. The
-  `showcase` entry (ADR 0070) is the umbrella world that lights
-  up most surfaces at once (atelier + agent-deck workspaces,
-  three+ agent harnesses, codex parent → child fork lineage,
-  bare repo with a linked worktree, ambiguous mux, hook
-  supersession, two PRs). A corresponding
-  `tests/fixtures/showcase.json` is checked in so the fixture
-  path works without a debug build:
-
-  ```sh
-  # Interactive (rebuilds the world from scratch; debug builds only)
-  conspectus dev scenario tui showcase
-
-  # Interactive, against the checked-in fixture (any build with
-  # --features snapshot; press `r` to reload after editing the JSON)
-  conspectus tui --fixture tests/fixtures/showcase.json
-
-  # One-shot ANSI snapshot of a single pane against the fixture
-  conspectus tui --snapshot \
-    --snapshot-fixture tests/fixtures/showcase.json \
-    --snapshot-pane left
-
-  # Regenerate the checked-in fixture after a showcase change
-  just regen-showcase-fixture
-  ```
-
-  Coverage at a glance:
-
-  | Layer | Count / contents |
-  |---|---|
-  | Workspaces | 2 (atelier + agent-deck, latter named via `state.db`) |
-  | Repos | 5 |
-  | Checkouts | 5 (incl. bare-repo linked worktree) |
-  | Branches | 7 (`main`, `feature/extra`, `feature/bare`, atelier branches…) |
-  | Agent sessions | 10 — claude-code × 5, codex × 4, opencode × 1 + aider state on disk |
-  | Mux sessions | 4 (project, ambiguous, bare-work with fd evidence, agent-deck composite) |
-  | Forks | 1 (atelier alpha) |
-  | Forge PRs | 2 (open + draft) |
-  | Resolved relationships | 40 across 13 distinct relation kinds incl. `parent_session` lineage |
-
-Together they cover programmatic, real-data, and curated paths.
-A new graph-build bug typically starts as a `ReplayWorld` test,
-gets a captured artifact under `tests/fixtures/` if a real
-provider's data triggered it, and becomes a `dev_scenarios` entry
-if it's recurring enough to deserve a name.
-
-Design recorded in ADRs
-[0067](docs/adr/0067-tui-snapshot-mode-for-agent-iteration.md),
-[0068](docs/adr/0068-snapshot-fixture-mode.md), and
-[0069](docs/adr/0069-interactive-fixture-mode-for-tui.md).
+MIT, as declared in [`Cargo.toml`](Cargo.toml).

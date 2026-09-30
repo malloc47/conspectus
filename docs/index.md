@@ -32,7 +32,8 @@ config-file precedence, and the current CLI surface.
 ## `docs/pins-walkthrough.md`
 
 Purpose: teaching-style walkthrough for session pins covering the "why"
-behind pinning, the four binding states, the TUI controls for each pin
+behind pinning, the four binding states, the lifecycle at a glance, the
+commonly confused command pairs, the TUI controls for each pin
 operation (create, launch, rename, remove, bind, rebind, adopt), the
 mux-death continuity flow, and a dry-run script. Pairs with the
 reference-style §"Session pins" in `docs/operations.md`.
@@ -57,7 +58,9 @@ panel, inspector, search, focus navigation) with debugging recipes.
 
 Purpose: developer reference for named replay scenarios, including the
 hidden debug-only `conspectus dev scenario ...` commands and how to add new
-scenario builders.
+scenario builders, plus the TUI snapshot/fixture workflow, the three
+test-world surfaces (`ReplayWorld`, captured fixtures, `dev_scenarios`),
+and the `showcase` scenario's coverage.
 
 ## `docs/tui-review.md`
 

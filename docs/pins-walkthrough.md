@@ -46,6 +46,58 @@ outlives any individual harness process.
   last bound session so that the next `pin launch` after a mux death
   can splice in `--resume <id>` instead of starting cold.
 
+## Lifecycle at a glance
+
+```
+pin create  ──►  pin launch  ──►  bound to live mux  ──►  pin attach
+                                                              │
+                  ▲                                            │
+                  │                                            ▼
+            pin adopt           ◄── operator already running tmux
+            pin rebind          ◄── mux was renamed outside conspectus
+            pin bind            ◄── multiple harness sessions claim the mux
+```
+
+The top row is the "starting fresh" path. The entries on the bottom are
+recovery paths: none of them touch tmux, they only update TOML so the
+resolver binds correctly on the next cycle.
+
+## Commonly confused commands
+
+**`create` vs `adopt`**: both write a new TOML entry, but they answer
+different questions.
+
+- `create` is a **forward declaration**. The mux may not exist yet; the
+  pin sits `unbound` until you launch it. Use it for sessions you haven't
+  started.
+- `adopt` is a **reverse capture**. The mux *must* already be running (the
+  CLI refuses otherwise). Use it to bring an existing agent-deck or
+  hand-managed tmux session under a pin without restarting anything.
+  Harness and cwd default from current attribution; `create` requires you
+  to type them.
+
+**`bind` vs `rebind`**: both write to disk, but to different places.
+
+- `bind` resolves **`PinAmbiguous`**: several harness sessions are
+  attributed to the same mux and the resolver can't pick one. It writes a
+  `LocalDeclared` link tagged `pin:<id>`, not an edit to the pin entry;
+  the pin's `mux.name` stays the same.
+- `rebind` recovers from an **external tmux rename**: the pin's configured
+  `mux.name` no longer matches a running mux. It edits the pin's own TOML
+  entry to point at the new name. No declared links are involved.
+
+**`launch` vs `attach`**: they share one code path and differ only in the
+intent label. `pin attach` on an unbound pin falls through to launch with
+a one-line note; `pin launch` on a bound pin just attaches. Prefer
+`launch` in scripts that may run before the mux exists, and `attach` in
+muscle-memory wrappers when you know the mux is up.
+
+**`rename` vs `rebind`**: `rename` changes how *you* refer to the pin
+(`id`, `display_name`); when `--display` changes on a bound pin it also
+renames the tmux session in lockstep (ADR 0029). `rebind` changes which
+*mux* the pin points at and never touches tmux. Use `rename` when you
+don't like the label, and `rebind` when the mux moved.
+
 ## TUI walkthrough
 
 All pin operations live behind a single discoverable modal (`p`) and

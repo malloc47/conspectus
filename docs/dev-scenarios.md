@@ -39,6 +39,7 @@ Current scenarios:
 | `process-cardinality` | One mux pane with two human-agent runtime processes. |
 | `workspace-pr` | Git workspace with a fake GitHub pull request. |
 | `fork-lineage` | Atelier fork lineage with unresolved harness lineage. |
+| `showcase` | Comprehensive world exercising most Conspectus surfaces (ADR 0070); see [The showcase scenario](#the-showcase-scenario). |
 
 ## Launching
 
@@ -138,6 +139,123 @@ Each scenario highlights a different aspect of the explorer:
 - `process-cardinality` — two upstream runtime-process groups so the
   explorer surfaces `process_identifies_session` vs
   `process_candidates_session` separately.
+
+## Snapshot And Fixture Mode
+
+A dev-only `snapshot` cargo feature exposes a one-shot render path and
+fixture I/O on the `tui` subcommand (ADRs 0067, 0068, 0069). The flags do
+not appear in builds without `--features snapshot`; `just check` and CI
+build with `--all-features`, so they cover it. For manual use, run
+`cargo run --features snapshot -- tui …` (the examples below abbreviate
+that as `conspectus tui …`).
+
+```sh
+# Render one frame to stdout with ANSI styling preserved and exit
+conspectus tui --snapshot
+
+# Slice to a single pane (header | left | right | status)
+conspectus tui --snapshot --snapshot-pane left --snapshot-width 160 --snapshot-height 40
+
+# Drive the UI to a non-default state before snapshotting (vim-style:
+# literals + `<Name>` for non-printables, `<C-x>` / `<A-x>` modifiers).
+conspectus tui --snapshot --snapshot-keys '2'           # switch to mux view
+conspectus tui --snapshot --snapshot-keys 'jjj<Enter>'  # navigate, expand
+
+# Capture the live world to a fixture JSON for later iteration
+conspectus tui --snapshot --snapshot-export-fixture world.json
+
+# Re-render from a fixture (skips live discovery, deterministic)
+conspectus tui --snapshot --snapshot-fixture world.json --snapshot-pane left
+
+# Explore a fixture interactively in the full TUI. `r` re-reads the
+# JSON from disk so you can edit the fixture in another buffer and
+# cycle in the new state without leaving the session.
+conspectus tui --fixture world.json
+```
+
+Snapshot output uses the same row builders and renderer as the
+interactive TUI, so what you see is byte-for-byte what an operator
+sees. Lift a dialed-in fixture into a regression test with
+`serde_json::from_str(include_str!(...))` plus the existing
+`render_to_buffer` / `buffer_to_string` helpers in `src/tui/ui.rs`.
+
+Relative ages ("4m", "2d") are computed against the wall clock, so a
+fixture rendered long after it was captured shows stale ages. For
+illustrative captures, pin the clock, for example with
+`TZ=UTC faketime -f '@2026-06-16 12:03:00' conspectus tui --snapshot …`
+(`nix shell nixpkgs#libfaketime` provides `faketime`).
+
+## Test Worlds
+
+A fixture is the *resolved* graph fed into the renderer, so it validates
+UI behavior but does not exercise the discovery → resolver pipeline. To
+test graph building itself, the test corpus offers three complementary
+surfaces:
+
+- **`ReplayWorld` (`tests/support/replay.rs`)** — the day-to-day surface
+  for programmatic test worlds. Fluently writes harness session JSON, hook
+  sidecar records, fake `tmux list-sessions` rows, and `/proc` fd evidence
+  into a temp tree, then runs the real `discover_local_with` +
+  `resolve_snapshot` pipeline. Use `world.write_snapshot_fixture("path.json")`
+  to drop a normalized JSON the snapshot tool's `--fixture` /
+  `--snapshot-fixture` flags can consume — discovery tests and renderer
+  tests share one fixture format.
+- **Captured-fixture corpus (`tests/fixtures/`, `tests/fixture_corpus.rs`)**
+  — sanitized real-provider artifacts (codex transcripts, claude sidecars,
+  opencode sessions, tmux output, `/proc` snapshots, hook DBs) run through
+  the same adapter/parser paths discovery uses. Reach for this when a
+  parser bug shows up on real data and you want a regression test against
+  that real shape; the file header documents the sanitization workflow.
+- **`dev_scenarios` (`src/dev_scenarios.rs`)** — the named curated worlds
+  documented above, reachable interactively through `conspectus dev
+  scenario tui <name>` for visual inspection of recurring edge cases.
+
+Together they cover programmatic, real-data, and curated paths. A new
+graph-build bug typically starts as a `ReplayWorld` test, gets a captured
+artifact under `tests/fixtures/` if a real provider's data triggered it,
+and becomes a `dev_scenarios` entry if it's recurring enough to deserve a
+name.
+
+## The Showcase Scenario
+
+The `showcase` entry (ADR 0070) is the umbrella world that lights up most
+surfaces at once: atelier + agent-deck workspaces, three agent harnesses
+with sessions (plus aider state on disk),
+codex parent → child fork lineage, a bare repo with a linked worktree, an
+ambiguous mux, hook supersession, and two PRs. A corresponding
+`tests/fixtures/showcase.json` is checked in so the fixture path works
+without a debug build:
+
+```sh
+# Interactive (rebuilds the world from scratch; debug builds only)
+conspectus dev scenario tui showcase
+
+# Interactive, against the checked-in fixture (any build with
+# --features snapshot; press `r` to reload after editing the JSON)
+conspectus tui --fixture tests/fixtures/showcase.json
+
+# One-shot ANSI snapshot of a single pane against the fixture
+conspectus tui --snapshot \
+  --snapshot-fixture tests/fixtures/showcase.json \
+  --snapshot-pane left
+
+# Regenerate the checked-in fixture after a showcase change
+just regen-showcase-fixture
+```
+
+Coverage at a glance:
+
+| Layer | Count / contents |
+|---|---|
+| Workspaces | 2 (atelier + agent-deck, latter named via `state.db`) |
+| Repos | 5 |
+| Checkouts | 5 (incl. bare-repo linked worktree) |
+| Branches | 7 (`main`, `feature/extra`, `feature/bare`, atelier branches…) |
+| Agent sessions | 10 — claude-code × 5, codex × 4, opencode × 1 + aider state on disk |
+| Mux sessions | 4 (project, ambiguous, bare-work with fd evidence, agent-deck composite) |
+| Forks | 1 (atelier alpha) |
+| Forge PRs | 2 (open + draft) |
+| Resolved relationships | 37 across 11 distinct relation kinds incl. `parent_session` lineage |
 
 ## Adding A Scenario
 
