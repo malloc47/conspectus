@@ -14481,7 +14481,7 @@ finally `REL-002b`.
       rustdoc link syntax (`` [` ``); existing `cli_smoke` help tests stay
       green.
     - Blockers: decisions 3 and 4.
-- [ ] `REL-005` True up the docs.
+- [x] `REL-005` True up the docs.
   - [x] `REL-005a` Remove references to retired commands.
     - Outcome: `docs/atelier-migration.md` maps to `table sessions|mux|prs`
       and describes the ADR 0087 write envelope instead of "only
@@ -14552,7 +14552,12 @@ finally `REL-002b`.
     - Tests: docs-only; `git diff --check`; check each documented key
       against `src/config.rs`.
     - Blockers: none.
-  - [ ] `REL-005d` Fix developer-facing claims.
+  - [x] `REL-005d` Fix developer-facing claims.
+    - Outcome: per the operator's call, the text now says `just check` and
+      CI enable `snapshot` via `--all-features` and shows the manual
+      `cargo run --features snapshot` form (`AGENTS.md`, `Cargo.toml`).
+      `docs/implementation/README.md` marks Phases 07 and 11 complete,
+      notes that 09–10 were retired, and points at backlog workstreams.
     - Scope: `AGENTS.md:80` and the `[features]` comment in
       `Cargo.toml:60` say the nix dev shell builds with the `snapshot`
       feature on. It doesn't; only `just check` and CI do, through

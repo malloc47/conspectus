@@ -57,8 +57,8 @@ description = "AI work graph status tool"
 # Dev-only `conspectus tui --snapshot` mode (ADR 0067). Renders one
 # TUI frame to stdout with ANSI styling preserved so agents can
 # iterate on renderer changes without a manual screenshot loop.
-# Off by default; the nix dev shell and CI build with the feature
-# on, while release/downstream builds leave it off.
+# Off by default; `just check` and CI enable it through
+# `--all-features`, while release/downstream builds leave it off.
 snapshot = []
 
 [dependencies]

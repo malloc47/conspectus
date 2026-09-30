@@ -13,8 +13,17 @@ end-state behavior, test strategy, and manual checks for that milestone.
 5. [Phase 04: Forge And Table Views](phase-04-forge-and-table-views.md)
 6. [Phase 05: Declared Links](phase-05-declared-links.md)
 7. [Phase 06: Atelier Delegation](phase-06-atelier-delegation.md)
-8. Phase 07: Continuous Operation And Snapshot Persistence (pending)
+8. Phase 07: Continuous Operation And Snapshot Persistence (complete; planned
+   directly in `docs/backlog.md`)
 9. [Phase 08: Interactive TUI](phase-08-interactive-tui.md)
+10. Phases 09–10: Embedded Query Engine and SQLite As Sole Consumption Surface
+    (built, then retired by Phase 11; see ADR 0082)
+11. Phase 11: SQLite Retirement And Zero-Copy Snapshot (complete; planned
+    directly in `docs/backlog.md`)
+
+Work after Phase 11 is organized as workstreams in `docs/backlog.md` (for
+example `H-PIN-*`, `H-WT-*`, and the `REL-*` release-readiness items) rather
+than numbered phases.
 
 ## Defaults Chosen
 
