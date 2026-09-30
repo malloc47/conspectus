@@ -14620,7 +14620,11 @@ finally `REL-002b`.
       resuming into a mux is still open) and `P8-014` (see `REL-003b`).
   - Tests: docs-only; `git diff --check`.
   - Blockers: none.
-- [ ] `REL-008` Write the 0.1.0 CHANGELOG entry.
+- [x] `REL-008` Write the 0.1.0 CHANGELOG entry.
+  - Outcome: `[Unreleased]` now describes the 0.1.0 feature set; per the
+    operator's call the Phase 11 development-build notes were dropped
+    (the upgrade notes remain in `docs/operations.md`). `REL-010` stamps
+    the version and date.
   - Scope: `CHANGELOG.md` covers only Phase 11 (2026-06-23). Under
     `[Unreleased]`, write the first-release summary:
     - the interactive TUI (sessions and mux views, relationship explorer,

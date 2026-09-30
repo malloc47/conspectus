@@ -1,85 +1,64 @@
 # Changelog
 
 All notable changes to Conspectus are tracked here. The format
-follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-Conspectus is pre-1.0, so the version cadence is "phase
-boundaries land in `[Unreleased]` until a tag is cut."
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
+the project uses [Semantic Versioning](https://semver.org/) from 0.1.0
+onward (pre-1.0, so minor versions may break).
 
 ## [Unreleased]
 
-### Removed (breaking)
-
-- **`conspectus query` subcommand** (P11-010). The user-facing
-  SQL surface backed by SQLite is gone, along with the
-  `--list-views`, `--similar-to`, `--load-extension`, and
-  `--format {table,json,csv,tsv}` flags it carried. The
-  replacement for ad-hoc graph inspection is `conspectus graph
-  --format json | jq …`. The saved-view library
-  (`v_sessions_with_repo`, `v_mux_attachments`,
-  `v_pr_by_branch`, `v_fork_ancestry`,
-  `v_workspace_member_repos`) and `docs/query-guide.md` retire
-  with the subcommand.
-- **Vector-search surface** (P11-010 / ADR 0082). The
-  `embeddings` overlay table, `conspectus query --similar-to`,
-  `--load-extension`, and `docs/vector-search.md` go with the
-  query subcommand. The `sqlite-vec` dependency leaves the
-  runtime distribution.
-- **`graph.sqlite` persistence layer** (P11-011a). The
-  canonical persisted artifact is now a single zero-copy
-  binary at `$XDG_DATA_HOME/conspectus/graph.bin` (ADRs 0082,
-  0083). The legacy `graph.sqlite{,-wal,-shm}` and `backups/`
-  artifacts are auto-cleaned by `conspectus serve` on
-  startup. Schema migrations, backup rotation, and
-  `PRAGMA user_version`-driven cache invalidation are gone
-  with the SQLite layer.
+The first public release, 0.1.0. Conspectus builds one evidence-backed
+graph of the AI-agent work on your machine and gives you a TUI,
+scriptable tables, and exports on top of it. See the
+[README](README.md) for the overview.
 
 ### Added
 
-- **`graph.bin` zero-copy snapshot** (P11-004, ADR 0083). A
-  single rkyv-archived `GraphSnapshot` written via atomic
-  POSIX rename; daemonless consumers mmap it directly via
-  `snapshot::open_mmap`.
-- **`snapshot` socket command** (P11-006). `conspectus serve`
-  serves its in-memory snapshot bytes verbatim to connected
-  clients, base64-encoded under `data.bytes`. The TUI and
-  one-shot CLI prefer this path when reachable.
-- **Daemon warm-restart** (P11-009, delivered as part of
-  P11-011a). On startup, the daemon mmaps `graph.bin` to seed
-  its in-memory snapshot state so the first per-class refresh
-  has a prior to evict from instead of paying a cold-rebuild
-  cost. Missing-file / version-mismatch / validation failures
-  fall through silently.
-- **Legacy-cache cleanup** (P11-011a). The daemon unlinks
-  leftover `graph.sqlite{,-wal,-shm}` and the `backups/`
-  directory on startup so upgrading operator data dirs trim
-  themselves over time.
-
-### Changed
-
-- **`conspectus refresh` / `status` flows now route through
-  the socket** when `conspectus serve` is reachable, falling
-  through to in-process cold rebuild otherwise. Both paths
-  surface which one they took.
-- **`--no-cache` / `--refresh` semantics** preserved across
-  the SQLite retirement: `--refresh` forces a local
-  cold-rebuild (bypassing the daemon-snapshot short-circuit);
-  `--no-cache` suppresses the `graph.bin` write at the end of
-  a cold rebuild.
-
-### Unchanged
-
-- User-authored TOML (`.conspectus.toml` for declared links
-  and pins, user-level config for aliases) keeps its existing
-  shape and location. Phase 11 changed *how the resolved
-  graph is cached*, not *what the operator authors*.
-- Provider-owned SQLite stores, including the OpenCode
-  harness adapter's read-only access to OpenCode's own
-  databases, are independent of the retired `src/query/`
-  persistence layer and continue to work. Hook-sidecar
-  fallback storage now uses `hooks-latest.json` rather than
-  Conspectus-owned SQLite.
-
-### Migration notes
-
-See [`docs/operations.md`](docs/operations.md#migration-from-earlier-0x)
-for the full operator-facing migration write-up.
+- **Discovery** of agent sessions from Claude Code, Codex, opencode,
+  and aider (titles, last-message previews, compaction/resume/fork
+  lineage); tmux sessions, plus zellij for discovery and attach; git
+  repos, checkouts, linked worktrees, and branches; Atelier,
+  agent-deck, and generic multi-repo workspaces; and GitHub pull
+  requests through `gh`.
+- **Evidence-preserving resolution.** Every relationship is a
+  `GraphLink` candidate with provenance, confidence, and freshness; the
+  resolver picks preferred links and keeps the rest, so ambiguity and
+  conflicts stay visible (`graph --explain` shows score breakdowns).
+- **Session-to-pane attribution** from layered evidence: opt-in harness
+  hooks (`conspectus hook init|status|remove` for Claude Code and Codex,
+  plus an opencode plugin), open transcript file descriptors, Codex
+  state and log databases, process-tree walks, launch commands, and
+  working directories.
+- **Interactive TUI** (`conspectus` or `conspectus tui`): sessions and
+  mux views, graph/workspace/repo/checkout/flat grouping, filters and
+  search, a relationship explorer with drill-down and breadcrumbs, a
+  native transcript viewer for Claude Code, Codex, and opencode,
+  menu-first controls, and `[tui.theme]` theming.
+- **CLI views**: `conspectus table sessions|mux|union|prs|forks` with
+  column selection, card layout, paging, and color; `conspectus columns`;
+  `conspectus node show`.
+- **Graph exports**: `conspectus graph --format json|dot|html`, where
+  HTML is a self-contained interactive explorer.
+- **Declared links and aliases**: `conspectus declared
+  list|create|remove|confirm|ignore|override`, `conspectus rename
+  session|mux` (alias plus lockstep tmux rename), and `conspectus alias
+  list`, all stored as reviewable TOML.
+- **Session pins**: `conspectus pin
+  create|list|show|launch|attach|rename|rm|bind|rebind|adopt`. Pins stay
+  on the dashboard when nothing is running, bind to the live tmux
+  session, and resume the last conversation on relaunch. Pins can be
+  worktree-backed (`--worktree`).
+- **tmux lifecycle**: `conspectus mux new` (bare shell) and `conspectus
+  mux launch` (a harness with no pin).
+- **Worktrees**: `conspectus worktree list` (read-only) and
+  `new|rm|merge|close|prune`, delegated to
+  [worktrunk](https://github.com/max-sixty/worktrunk). `worktree close`
+  winds a stream down: it stops the stream's tmux sessions (graceful, then
+  forced), merges or discards the branch, removes the worktree, and drops
+  its pins.
+- **Continuous mode**: `conspectus serve` keeps the graph warm with
+  per-source refresh intervals and filesystem watchers, serves it over
+  a Unix socket, and saves a zero-copy `graph.bin` for warm restarts;
+  `conspectus status` and `conspectus refresh` inspect and drive it.
+  Every command still works without the daemon.
+- **Library API** at `conspectus::api` (not yet a stable contract).
