@@ -66,18 +66,18 @@ enum Command {
     Rename(RenameArgs),
     /// Inspect operator-authored session aliases.
     Alias(AliasArgs),
-    /// Author or inspect session pins (ADR 0057).
+    /// Author, launch, or inspect session pins. See `docs/pins-walkthrough.md`.
     Pin(Box<PinArgs>),
-    /// Create a bare tmux session (no pin, no agent, no worktree —
-    /// ADR 0095). Only `new` today.
+    /// Start a tmux session: a bare shell (`new`) or a harness with no
+    /// pin (`launch`).
     Mux(MuxArgs),
-    /// List, create, and tear down git worktrees (ADR 0092). `list`
-    /// is read-only; new / rm / merge / close / prune delegate to the
-    /// configured mutation backend. See `docs/worktrees.md`.
+    /// List, create, and tear down git worktrees. `list` is read-only;
+    /// new / rm / merge / close / prune delegate to the configured
+    /// mutation backend (worktrunk). See `docs/worktrees.md`.
     Worktree(WorktreeArgs),
     /// Run the long-lived background daemon that keeps the
     /// resolved graph snapshot warm between one-shot CLI
-    /// invocations (ADR 0038 / P7-006).
+    /// invocations.
     Serve(ServeArgs),
     /// Force a full cold rebuild of the graph cache. Talks to a
     /// running `conspectus serve` daemon over the mutation
@@ -244,8 +244,8 @@ pub(super) fn cache_resolved_snapshot(snapshot: &conspectus::model::GraphSnapsho
 /// we can document the per-token semantics in `--help`.
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub(super) enum ColorFlag {
-    /// Auto-detect: color when stdout is a TTY and no env opt-out
-    /// is set. See [`resolve_color`] for the full precedence table.
+    /// Auto-detect: color when stdout is a TTY, unless `NO_COLOR`,
+    /// `CLICOLOR=0`, or `TERM=dumb` opts out (`CLICOLOR_FORCE` opts in).
     #[default]
     Auto,
     /// Force color on, even when stdout is not a TTY. Overrides
@@ -434,8 +434,13 @@ pub(super) enum ViewFlag {
     #[default]
     Sessions,
     Mux,
+    // Hidden from the TUI's view switcher (H-VIEW-001); still accepted
+    // so existing scripts and configs keep working.
+    #[value(hide = true)]
     Union,
+    #[value(hide = true)]
     Prs,
+    #[value(hide = true)]
     Forks,
 }
 
@@ -470,8 +475,8 @@ pub(super) struct FilterArgs {
     /// Legal values: `attached`, `ambiguous`, `unmuxed`.
     #[arg(long = "mux-state", value_name = "STATE", value_delimiter = ',')]
     mux_state: Vec<String>,
-    /// Per-view grouping. Accepted values depend on `--view`; see
-    /// `conspectus tui --help` for the per-view list (ADR 0031).
+    /// Grouping for the view or row type. Valid values differ per
+    /// view; an invalid value errors with the list of valid ones.
     #[arg(long = "grouping", value_name = "VALUE")]
     grouping: Option<String>,
 }
@@ -652,6 +657,23 @@ pub(super) enum DeclaredStoreFlag {
     All,
     Project,
     User,
+}
+
+/// `--store` for commands that write a new entry. `all` names no single
+/// destination, so only `project` and `user` are offered.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum WriteStoreFlag {
+    Project,
+    User,
+}
+
+impl From<WriteStoreFlag> for DeclaredStoreFlag {
+    fn from(flag: WriteStoreFlag) -> Self {
+        match flag {
+            WriteStoreFlag::Project => Self::Project,
+            WriteStoreFlag::User => Self::User,
+        }
+    }
 }
 
 pub(super) fn store_label(store: DeclaredStoreFlag) -> &'static str {

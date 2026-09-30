@@ -290,7 +290,7 @@ fn pin_create_store_all_is_rejected() {
         .args(["--store", "all"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("`--store all` is not valid"));
+        .stderr(predicate::str::contains("invalid value 'all' for '--store"));
 }
 
 #[test]

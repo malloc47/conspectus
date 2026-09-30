@@ -56,14 +56,11 @@ struct NodeShowArgs {
     /// the resolution rules.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
-    /// P7-003 phase 4: suppress the writer for this invocation.
-    /// The render still uses the warm-start cache; the post-render
-    /// write is skipped.
+    /// Don't write the rebuilt graph to the `graph.bin` cache.
     #[arg(long = "no-cache")]
     no_cache: bool,
-    /// P7-003 phase 4: skip the warm-start read so this run scans
-    /// every provider cold. Writer still runs unless `--no-cache`
-    /// is also set.
+    /// Ignore a running `conspectus serve` daemon and rebuild the
+    /// graph in-process from live providers.
     #[arg(long = "refresh")]
     refresh: bool,
 }

@@ -88,24 +88,18 @@ struct TableRowsArgs {
     /// `never` forces it off.
     #[arg(long, value_enum, default_value_t = ColorFlag::Auto)]
     color: ColorFlag,
-    /// Filter / grouping flags (ADR 0031). Applied by the
+    /// Filter / grouping flags. Applied by the
     /// `output::*` projection layer in `TableRowsArgs::run` so the
     /// static table narrows the same rows the TUI does for the same
     /// flag set.
     #[command(flatten)]
     filter_args: FilterArgs,
-    /// P7-003: skip writing the resolved snapshot to the canonical
-    /// `graph.bin` cache after this invocation. Useful for
-    /// debugging or when running against a non-writable `$HOME`.
-    /// Does not affect the rendered output.
+    /// Don't write the rebuilt graph to the `graph.bin` cache. Useful
+    /// when `$HOME` isn't writable; doesn't affect the output.
     #[arg(long = "no-cache")]
     no_cache: bool,
-    /// P7-003: skip the warm-start read so this invocation rebuilds
-    /// from the live providers alone, ignoring the persisted cache.
-    /// The writer side still runs unless `--no-cache` is also set,
-    /// so the next invocation can warm-start off this run's output.
-    /// Phase 3 will graduate the warm-start path from a backstop
-    /// merge into per-provider TTL comparison + selective re-run.
+    /// Ignore a running `conspectus serve` daemon and rebuild the
+    /// graph in-process from live providers.
     #[arg(long = "refresh")]
     refresh: bool,
 }

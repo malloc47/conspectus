@@ -824,3 +824,126 @@ mod resume_resolver {
         assert!(read_sidecar(&cache, "ingest").unwrap().is_some());
     }
 }
+
+mod help_text {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    /// Dev-only snapshot/fixture flags may cite their ADRs; everything
+    /// an operator sees in normal help may not.
+    const ADR_ALLOWED_ARGS: &[&str] = &[
+        "snapshot",
+        "snapshot_fixture",
+        "snapshot_export_fixture",
+        "fixture",
+    ];
+
+    /// `P7-003`, `F8-013`, `T8-043`, `GV-002`, `H-WT-008`, …
+    fn backlog_ids(text: &str) -> Vec<String> {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .filter(|token| {
+                let Some((prefix, number)) = token.rsplit_once('-') else {
+                    return false;
+                };
+                let numeric = !number.is_empty() && number.chars().all(|c| c.is_ascii_digit());
+                let phase = prefix.len() > 1
+                    && prefix.starts_with('P')
+                    && prefix[1..].chars().all(|c| c.is_ascii_digit());
+                let workstream = prefix.starts_with("H-")
+                    && prefix.len() > 2
+                    && prefix[2..].chars().all(|c| c.is_ascii_uppercase());
+                numeric && (phase || workstream || matches!(prefix, "F8" | "T8" | "GV"))
+            })
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn check(path: &str, text: &str, allow_adr: bool, problems: &mut Vec<String>) {
+        for id in backlog_ids(text) {
+            problems.push(format!("{path}: backlog id `{id}` in {text:?}"));
+        }
+        if text.contains("[`") {
+            problems.push(format!("{path}: rustdoc link syntax in {text:?}"));
+        }
+        if !allow_adr && text.contains("ADR 0") {
+            problems.push(format!("{path}: ADR number in {text:?}"));
+        }
+    }
+
+    fn walk(cmd: &clap::Command, path: &str, problems: &mut Vec<String>) {
+        if cmd.is_hide_set() {
+            return;
+        }
+        for text in [cmd.get_about(), cmd.get_long_about()]
+            .into_iter()
+            .flatten()
+        {
+            check(path, &text.to_string(), false, problems);
+        }
+        for arg in cmd.get_arguments().filter(|a| !a.is_hide_set()) {
+            let allow_adr = ADR_ALLOWED_ARGS.contains(&arg.get_id().as_str());
+            let arg_path = format!("{path} --{}", arg.get_id());
+            for text in [arg.get_help(), arg.get_long_help()].into_iter().flatten() {
+                check(&arg_path, &text.to_string(), allow_adr, problems);
+            }
+            for value in arg
+                .get_possible_values()
+                .iter()
+                .filter(|v| !v.is_hide_set())
+            {
+                if let Some(help) = value.get_help() {
+                    check(&arg_path, &help.to_string(), allow_adr, problems);
+                }
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            walk(sub, &format!("{path} {}", sub.get_name()), problems);
+        }
+    }
+
+    #[test]
+    fn help_text_has_no_internal_ids_or_rustdoc_links() {
+        let mut problems = Vec::new();
+        walk(&Cli::command(), "conspectus", &mut problems);
+        assert!(
+            problems.is_empty(),
+            "help text problems:\n{}",
+            problems.join("\n")
+        );
+    }
+
+    #[test]
+    fn backlog_id_detector_matches_real_ids_only() {
+        assert_eq!(
+            backlog_ids("see P7-003, F8-013, H-WT-008 and T8-043"),
+            vec!["P7-003", "F8-013", "H-WT-008", "T8-043"]
+        );
+        assert!(backlog_ids("claude-code on utf-8, x86-64, ADR 0057").is_empty());
+    }
+
+    #[test]
+    fn write_commands_do_not_offer_store_all() {
+        let root = Cli::command();
+        for path in [
+            &["pin", "create"][..],
+            &["pin", "adopt"],
+            &["pin", "bind"],
+            &["declared", "create"],
+            &["rename", "session"],
+        ] {
+            let cmd = path.iter().fold(&root, |cmd, name| {
+                cmd.find_subcommand(name).expect("subcommand exists")
+            });
+            let store = cmd
+                .get_arguments()
+                .find(|a| a.get_id() == "store")
+                .expect("--store");
+            let values: Vec<String> = store
+                .get_possible_values()
+                .iter()
+                .map(|v| v.get_name().to_string())
+                .collect();
+            assert_eq!(values, ["project", "user"], "{path:?}");
+        }
+    }
+}

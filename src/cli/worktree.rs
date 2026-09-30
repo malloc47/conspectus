@@ -47,12 +47,12 @@ enum WorktreeCommand {
     /// Merge a worktree's branch back (squash + rebase + fast-forward)
     /// and remove the worktree. Guarded like `rm`.
     Merge(WorktreeMergeArgs),
-    /// Close down a stream of work (ADR 0093): optionally merge or
+    /// Close down a stream of work: optionally merge or
     /// discard the branch, terminate the mux/agent sessions rooted in
     /// the worktree, remove the worktree, and drop pins rooted there.
     Close(WorktreeCloseArgs),
     /// Prune worktrees already merged into the repo's default branch
-    /// (delegates to `wt step prune`; H-WT-008). Distinct from git's
+    /// (delegates to `wt step prune`). Distinct from git's
     /// stale-admin prune.
     Prune(WorktreePruneArgs),
 }

@@ -50,14 +50,8 @@ enum HookCommand {
 
 #[derive(Debug, Args)]
 struct HookWriteArgs {
-    /// Registered harness key
-    /// (e.g. `claude-code`, `codex`, `opencode`).
-    /// H-EXT-005: the pre-H-EXT-005 three subcommands
-    /// (`hook write claude-code` / `codex` / `opencode`) are
-    /// now positional dispatches through the adapter registry.
-    /// Existing operator configs that invoke
-    /// `conspectus hook write <harness>` continue to work
-    /// unchanged.
+    /// Registered harness key (e.g. `claude-code`, `codex`,
+    /// `opencode`), as in `conspectus hook write claude-code`.
     harness: String,
     /// Override hook state root. Primarily useful for tests
     /// and experiments.

@@ -31,8 +31,8 @@ use conspectus::pins::{
 
 use super::declared::resolve_write_store;
 use super::{
-    DeclaredStoreFlag, discover_for_store_selection, effective_scan_roots, provenance_label,
-    store_label,
+    DeclaredStoreFlag, WriteStoreFlag, discover_for_store_selection, effective_scan_roots,
+    provenance_label, store_label,
 };
 
 // =====================================================================
@@ -133,14 +133,14 @@ struct PinCreateArgs {
     /// field.
     #[arg(long)]
     reason: Option<String>,
-    /// Make the pin worktree-backed (ADR 0094): `cwd` is the repo
+    /// Make the pin worktree-backed: `cwd` is the repo
     /// anchor and this branch's worktree is created (if absent) and
     /// entered at launch.
     #[arg(long, value_name = "BRANCH")]
     worktree: Option<String>,
     /// Override automatic nearest-store selection.
     #[arg(long, value_enum)]
-    store: Option<DeclaredStoreFlag>,
+    store: Option<WriteStoreFlag>,
 }
 
 impl PinCreateArgs {
@@ -171,7 +171,7 @@ impl PinCreateArgs {
             reason: self.reason,
         };
 
-        let selection = resolve_pin_write_store(self.store, &self.cwd)?;
+        let selection = resolve_pin_write_store(self.store.map(Into::into), &self.cwd)?;
 
         let outcome = upsert_pin_entry(&selection.path, entry.clone())
             .map_err(|err| anyhow!(err.to_string()))?;
@@ -475,7 +475,7 @@ pub struct PinBindArgs {
     /// Override automatic nearest-store selection for the declared
     /// link write.
     #[arg(long, value_enum)]
-    store: Option<DeclaredStoreFlag>,
+    store: Option<WriteStoreFlag>,
     /// Root used to discover project-local stores.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
@@ -534,7 +534,7 @@ impl PinBindArgs {
         };
 
         let path = resolve_write_store(
-            self.store,
+            self.store.map(Into::into),
             Some(&link.source),
             Some(&link.target),
             &self.scan_roots,
@@ -623,7 +623,7 @@ pub struct PinAdoptArgs {
     cwd: Option<PathBuf>,
     /// Override automatic nearest-store selection.
     #[arg(long, value_enum)]
-    store: Option<DeclaredStoreFlag>,
+    store: Option<WriteStoreFlag>,
     /// Root used to discover project-local pin stores.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
@@ -705,7 +705,7 @@ impl PinAdoptArgs {
             reason: None,
         };
 
-        let selection = resolve_pin_write_store(self.store, &cwd)?;
+        let selection = resolve_pin_write_store(self.store.map(Into::into), &cwd)?;
         let outcome = upsert_pin_entry(&selection.path, entry.clone())
             .map_err(|err| anyhow!(err.to_string()))?;
         // Record the project store (H-PIN-ROOT-001) so an adopted pin

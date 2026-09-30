@@ -25,8 +25,8 @@ use conspectus::declared::{
 use conspectus::model::{GraphLink, GraphSnapshot, LinkEndpoint, Provenance, RelationKind};
 
 use super::{
-    DeclaredStoreFlag, candidate_store_paths, discover_for_store_selection, project_store_path,
-    provenance_label, store_label,
+    DeclaredStoreFlag, WriteStoreFlag, candidate_store_paths, discover_for_store_selection,
+    project_store_path, provenance_label, store_label,
 };
 
 #[derive(Debug, Args)]
@@ -166,7 +166,7 @@ struct DeclaredCreateArgs {
     label: Option<String>,
     /// Override automatic nearest-store selection.
     #[arg(long, value_enum)]
-    store: Option<DeclaredStoreFlag>,
+    store: Option<WriteStoreFlag>,
     /// Root used to discover project-local stores for nearest-store selection.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
@@ -186,7 +186,7 @@ impl DeclaredCreateArgs {
         };
 
         let path = resolve_write_store(
-            self.store,
+            self.store.map(Into::into),
             Some(&link.source),
             Some(&link.target),
             &self.scan_roots,

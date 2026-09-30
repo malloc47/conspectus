@@ -18,22 +18,21 @@ pub(super) struct GraphArgs {
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
     /// DOT/HTML only: include or exclude non-resolved candidate
-    /// links (and their unresolved-endpoint stubs). Defaults to
-    /// include (ADR 0050).
+    /// links (and their unresolved-endpoint stubs).
     #[arg(long, value_enum, default_value_t = InclusionFlag::Include)]
     candidates: InclusionFlag,
     /// DOT/HTML only: include or exclude RuntimeProcess diagnostic
-    /// nodes. Defaults to include (ADR 0050).
+    /// nodes.
     #[arg(long = "diagnostic-nodes", value_enum, default_value_t = InclusionFlag::Include)]
     diagnostic_nodes: InclusionFlag,
     /// Include resolver score breakdowns on resolved relationships.
     #[arg(long)]
     explain: bool,
-    /// P7-003 phase 4: suppress the writer for this invocation.
+    /// Don't write the rebuilt graph to the `graph.bin` cache.
     #[arg(long = "no-cache")]
     no_cache: bool,
-    /// P7-003 phase 4: skip the warm-start read so this run scans
-    /// every provider cold.
+    /// Ignore a running `conspectus serve` daemon and rebuild the
+    /// graph in-process from live providers.
     #[arg(long = "refresh")]
     refresh: bool,
 }

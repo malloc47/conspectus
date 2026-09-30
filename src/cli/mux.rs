@@ -37,12 +37,12 @@ impl MuxArgs {
 #[derive(Debug, Subcommand)]
 enum MuxCommand {
     /// Create a bare tmux session (no pin, no agent, no worktree).
-    /// See ADR 0095. The next discovery cycle picks the mux up; if you
+    /// The next discovery cycle picks the mux up; if you
     /// want a durable declaration, follow up with `conspectus pin
     /// adopt <name>`.
     New(MuxNewArgs),
     /// Launch a harness in a fresh tmux session with no pin
-    /// persistence (ADR 0096). Distinct from `pin launch` (which
+    /// persistence. Distinct from `pin launch` (which
     /// requires + writes a pin) and from `mux new` (which spawns a
     /// bare shell). The mux and its attributed harness session
     /// appear in discovery on the next refresh; `conspectus pin
@@ -131,7 +131,8 @@ struct MuxLaunchArgs {
     argv: Option<Vec<String>>,
     /// Realize the worktree for `<BRANCH>` under `--worktree-repo`
     /// at launch, and use the worktree path as the mux cwd
-    /// (idempotent per ADR 0094). Requires `--worktree-repo`.
+    /// (reuses the worktree if it already exists). Requires
+    /// `--worktree-repo`.
     #[arg(long = "worktree-branch", value_name = "BRANCH")]
     worktree_branch: Option<String>,
     /// Repo anchor for the worktree realization. Required with
@@ -142,10 +143,9 @@ struct MuxLaunchArgs {
     /// and `mux new --no-attach`.
     #[arg(long = "no-attach")]
     no_attach: bool,
-    /// Scan root for discovery lookups. Reserved for symmetry with
-    /// other CLI verbs; today `mux launch` has no discovery-driven
-    /// state so this is a no-op.
-    #[arg(long = "scan-root", value_name = "PATH")]
+    /// Accepted for symmetry with other verbs; `mux launch` has no
+    /// discovery-driven state, so it's hidden from help.
+    #[arg(long = "scan-root", value_name = "PATH", hide = true)]
     #[allow(dead_code)]
     scan_root: Vec<PathBuf>,
 }

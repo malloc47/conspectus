@@ -29,7 +29,8 @@ use conspectus::rename::{
 };
 
 use super::{
-    DeclaredStoreFlag, candidate_store_paths, discover_for_store_selection, resolve_alias_store,
+    DeclaredStoreFlag, WriteStoreFlag, candidate_store_paths, discover_for_store_selection,
+    resolve_alias_store,
 };
 
 #[derive(Debug, Args)]
@@ -54,7 +55,7 @@ enum RenameCommand {
     /// pass `--no-mux` to skip the tmux side.
     Session(RenameSessionArgs),
     /// Rename a tmux session. No alias is written; only the tmux
-    /// native name changes (per ADR 0029 mux-id stability rule).
+    /// native name changes.
     Mux(RenameMuxArgs),
 }
 
@@ -75,7 +76,7 @@ struct RenameSessionArgs {
     clear: bool,
     /// Restrict the alias write to one store.
     #[arg(long, value_enum)]
-    store: Option<DeclaredStoreFlag>,
+    store: Option<WriteStoreFlag>,
     /// Root used to discover project-local alias stores.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
@@ -112,7 +113,12 @@ impl RenameSessionArgs {
         let plan = plan_session_rename(&snapshot, &session_id, new_display_name, self.no_mux)
             .map_err(|err| anyhow!(err.to_string()))?;
 
-        execute_rename_plan(&plan, self.store, &self.scan_roots, &SystemTmux::new())
+        execute_rename_plan(
+            &plan,
+            self.store.map(Into::into),
+            &self.scan_roots,
+            &SystemTmux::new(),
+        )
     }
 }
 
@@ -122,7 +128,7 @@ struct RenameMuxArgs {
     /// display form, or the `tmux:<native>` label.
     id: String,
     /// New tmux session name. Required because mux aliases are not
-    /// stored (per ADR 0029) — only the native tmux name changes.
+    /// stored; only the native tmux name changes.
     name: Option<String>,
     /// Rejected: mux sessions have no Conspectus-owned alias to
     /// clear. Surfaced so the help text documents the constraint.

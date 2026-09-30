@@ -14424,9 +14424,14 @@ finally `REL-002b`.
       active.
     - Tests: header snapshots in both views, with and without a filter.
     - Blockers: none.
-- [ ] `REL-004` True up CLI `--help`.
-  - [ ] `REL-004a` Describe `--refresh` and `--no-cache` as they behave
+- [x] `REL-004` True up CLI `--help`.
+  - [x] `REL-004a` Describe `--refresh` and `--no-cache` as they behave
     today.
+    - Outcome: all four commands now say `--refresh` ignores a running
+      daemon and rebuilds in-process, and `--no-cache` skips the
+      `graph.bin` write. The TUI was confirmed to apply the same
+      semantics on every refresh (`src/tui/runtime.rs`
+      `discover_and_resolve`).
     - Scope: the help on `graph` (`src/cli/graph.rs:32`, `:35`),
       `node show` (`src/cli/node.rs:59`, `:64`), `table`
       (`src/cli/table.rs:97`, `:103`), and `tui` (`src/cli/tui.rs:66`,
@@ -14441,8 +14446,17 @@ finally `REL-002b`.
       before rewording the `tui` flags.
     - Tests: covered by the `REL-004b` sweep.
     - Blockers: none.
-  - [ ] `REL-004b` Remove internal IDs and stale text from help, and add a
+  - [x] `REL-004b` Remove internal IDs and stale text from help, and add a
     regression test.
+    - Outcome: decisions 3 and 4 applied (ADR numbers dropped outside the
+      dev-only snapshot/fixture flags; `tui --view union|prs|forks`
+      hidden but still accepted). `mux launch --scan-root` is hidden. A new
+      `WriteStoreFlag` limits `--store` to `project|user` on every write
+      command (`pin create`/`adopt`/`bind`, `declared create`,
+      `rename session`), not just `pin create`. The sweep also caught
+      `H-EXT-005` in `hook write --harness`. Tests in `src/cli/tests.rs`
+      (`help_text` module) walk clap's command tree and fail on backlog
+      IDs, rustdoc links, stray ADR numbers, or `all` on write stores.
     - Scope:
       - Backlog IDs: `P7-006` in the `serve` summary
         (`src/cli/mod.rs:80`), `F8-013` in `tui --view` and

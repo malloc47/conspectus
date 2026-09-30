@@ -22,20 +22,19 @@ pub(super) struct TuiArgs {
     /// working directory when omitted.
     #[arg(long = "scan-root", value_name = "PATH")]
     scan_roots: Vec<PathBuf>,
-    /// Initial left-panel organization. When omitted, F8-013's
-    /// persisted-last-view sidecar wins; if absent, falls back to
-    /// `[tui].default_view` and finally `sessions`.
+    /// Initial view. When omitted, the view you last used wins, then
+    /// `[tui].default_view`, then `sessions`.
     #[arg(long, value_enum)]
     view: Option<ViewFlag>,
-    /// Disable the F8-013 persisted-last-view sidecar for this
-    /// run. The session still uses the standard precedence
+    /// Don't restore or remember the last-used view for this run.
+    /// The session still uses the standard precedence
     /// (`--view` > config default > `sessions`) for its starting
     /// view but does not write the sidecar on view switches.
     /// `--snapshot` implies this automatically.
     #[arg(long = "no-resume-view")]
     no_resume_view: bool,
     /// Deprecated alias for `--grouping` when `--view sessions` is
-    /// active (ADR 0031). Continues to work but emits a one-line
+    /// active. Continues to work but emits a one-line
     /// deprecation warning to stderr; `--grouping` overrides on
     /// conflict.
     #[arg(long = "sessions-grouping", value_enum)]
@@ -63,15 +62,11 @@ pub(super) struct TuiArgs {
     /// reads. Graph-resident previews continue to render.
     #[arg(long = "no-live-preview")]
     no_live_preview: bool,
-    /// P7-003 phase 4: suppress the writer for this TUI invocation.
-    /// The discovery loop still reads from the cache on each
-    /// refresh; only the post-refresh write is skipped.
+    /// Don't write each refreshed graph to the `graph.bin` cache.
     #[arg(long = "no-cache")]
     no_cache: bool,
-    /// P7-003 phase 4: force a cold scan on every refresh. The
-    /// writer still runs unless `--no-cache` is also set so
-    /// concurrent one-shot CLI invocations in other shells still
-    /// benefit from this session's discovery output.
+    /// Ignore a running `conspectus serve` daemon and rebuild the
+    /// graph in-process on every refresh.
     #[arg(long = "refresh")]
     refresh: bool,
     /// When to colorize the output. `auto` (default) emits ANSI

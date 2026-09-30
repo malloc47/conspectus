@@ -2030,7 +2030,7 @@ fn declared_create_rejects_store_all() {
         .arg("all")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("not valid for write commands"));
+        .stderr(predicate::str::contains("invalid value 'all' for '--store"));
 }
 
 #[test]
