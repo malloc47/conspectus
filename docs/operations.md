@@ -600,8 +600,8 @@ the cache self-prunes as the operator drives it.
 
 ### Read-only invariant
 
-`graph`, `node show`, `table <rows>`, `query`, `pin list`, and
-`pin show` never create, mtime-touch, or content-modify
+`graph`, `node show`, `table <rows>`, `pin list`, and `pin show`
+never create, mtime-touch, or content-modify
 `.conspectus.toml` / user-config files bearing a `[pins]` section.
 Mutation is reserved to the explicit `pin create / rename / rm /
 bind / rebind / adopt` commands and the TUI write paths they back.

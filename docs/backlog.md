@@ -14482,7 +14482,13 @@ finally `REL-002b`.
       green.
     - Blockers: decisions 3 and 4.
 - [ ] `REL-005` True up the docs.
-  - [ ] `REL-005a` Remove references to retired commands.
+  - [x] `REL-005a` Remove references to retired commands.
+    - Outcome: `docs/atelier-migration.md` maps to `table sessions|mux|prs`
+      and describes the ADR 0087 write envelope instead of "only
+      `declared` writes"; `docs/design.md` Status Views and Decisions
+      describe `conspectus table <rows>` and `[table.<rows>]`; the pins
+      read-only invariant in `docs/operations.md` no longer lists `query`.
+      The verification grep now matches only intentional history.
     - Scope: `conspectus session` and `--projection` were replaced by
       `conspectus table <rows>` (ADR 0021) but remain in
       `docs/atelier-migration.md` (`:14`–`:16`, `:23`–`:24`) and in

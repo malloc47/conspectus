@@ -725,24 +725,24 @@ between persistence shapes.
 
 ## Status Views
 
-The default `conspectus session` table should be AgentSession-oriented: one row
-per discovered agent session, with mux information shown as a sparse joined
-column when a mux session can be linked. This avoids pretending agent sessions
-and mux sessions are the same kind of thing.
+Tabular views are projections chosen by row type, per ADR 0021:
+`conspectus table <rows>`. The `sessions` table is AgentSession-oriented: one
+row per discovered agent session, with mux information shown as a sparse
+joined column when a mux session can be linked. This avoids pretending agent
+sessions and mux sessions are the same kind of thing.
 
-The session view should support configurable projections:
+The row types are:
 
-- `agent`: default; one row per agent session, with linked mux data in sparse
+- `sessions`: one row per agent session, with linked mux data in sparse
   columns
 - `mux`: one row per mux session, with linked agent data in sparse columns
 - `union`: rows for both node types, with a `tool` / `kind` column
+- `prs` and `forks`: one row per forge PR or fork
 
-Use `session.projection` as the configuration key in TOML:
-
-```toml
-[session]
-projection = "agent" # "agent", "mux", or "union"
-```
+Per-row-type configuration lives under `[table.<rows>]` in TOML (for example
+`columns = [...]`). The earlier `conspectus session --projection` command and
+its `[session] projection` key are retired; the key is recognized only to
+print a pointer to the new schema.
 
 Future TODO: if no agent sessions are auto-discovered but mux sessions are
 available, consider falling back to the MuxSession-oriented view for that run,
@@ -1345,11 +1345,10 @@ migration helper and harmless if it fails.
 - Declared links win over discovered links; conflicts are displayed, not fatal.
 - Durable declared state should be TOML; cache/index internals may use another
   storage format later.
-- Default `conspectus session` view is AgentSession-oriented with MuxSession as
-  a sparse joined column.
-- Alternate session projections should be configurable as `agent`, `mux`, and
-  `union`.
-- The config key for selecting a session projection is `session.projection`.
+- The `conspectus table sessions` view is AgentSession-oriented with
+  MuxSession as a sparse joined column; `mux`, `union`, `prs`, and `forks` are
+  sibling row types (ADR 0021).
+- Per-row-type table configuration lives under `[table.<rows>]`.
 - Bootstrap scans should print suggested roots and links by default. Persisting
   them to global config should require an explicit write flag.
 - Conspectus supports an opt-in continuous server mode that maintains a live
