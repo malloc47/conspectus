@@ -14698,7 +14698,10 @@ finally `REL-002b`.
     - Tests: none; assets live outside the repo unless the operator
       decides otherwise.
     - Blockers: `REL-003a`..`REL-003e`, `REL-009a`.
-  - [ ] `REL-009c` Add an optional `just demo` recipe.
+  - [x] `REL-009c` Add an optional `just demo` recipe.
+    - Outcome: `just demo` runs the TUI in fixture mode on the showcase
+      (with `--features snapshot`, so it works in any build profile);
+      the README's Development section mentions it.
     - Scope: one recipe that launches the interactive TUI on the showcase
       fixture, so a demo machine needs only a checkout. Fixture mode
       requires the `snapshot` feature and `dev scenario` requires a debug

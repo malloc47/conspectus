@@ -518,6 +518,9 @@ cargo run --features snapshot -- tui --snapshot --snapshot-fixture tests/fixture
 cargo run --features snapshot -- tui --fixture tests/fixtures/showcase.json   # interactive; `r` reloads
 ```
 
+`just demo` runs that last command, which is the easiest way to show the TUI
+without exposing your own sessions.
+
 [docs/dev-scenarios.md](docs/dev-scenarios.md) covers the fixture workflow,
 the three test-world surfaces (`ReplayWorld`, the captured-fixture corpus,
 and named `dev_scenarios`), and the `showcase` scenario that exercises most

@@ -49,4 +49,12 @@ regen-showcase-fixture:
                 ) \
             )' > tests/fixtures/showcase.json
 
+# Needs the dev-only `snapshot` feature (fixture mode). There is no live
+# discovery, so nothing on the demo machine leaks into the view; press `r`
+# to reload the fixture after editing it.
+#
+# Interactive TUI on the checked-in showcase fixture, for demos
+demo:
+    cargo run --quiet --features snapshot -- tui --fixture tests/fixtures/showcase.json
+
 check: fmt clippy test nextest diff-check
