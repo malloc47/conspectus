@@ -34,6 +34,9 @@ use crate::discovery::harness::{
 };
 use crate::tui::Theme;
 use crate::tui::widgets::input::TextInputState;
+use crate::tui::widgets::launch_spec_form::{
+    LaunchSpecFormState, LaunchSpecInit, SpecTextField, optional_string, parse_launch_argv,
+};
 use crate::tui::widgets::path_omnibox::{
     PathCandidate, PathOmniboxOutcome, PathOmniboxState, PathValidation,
 };
@@ -246,28 +249,20 @@ pub struct PinCreateState {
     name: TextInputState,
     id: TextInputState,
     display_name: TextInputState,
-    harness: TextInputState,
-    cwd: PathOmniboxState,
-    mux_name: TextInputState,
-    mux_socket: TextInputState,
-    launch_argv: TextInputState,
+    /// Shared launch-spec fields (harness, cwd, mux name/socket,
+    /// launch argv, worktree toggle + branch, known-harness /
+    /// known-live-mux collections, error). See ADR 0097 and
+    /// [`crate::tui::widgets::launch_spec_form`].
+    spec: LaunchSpecFormState,
     store: PinCreateStore,
-    /// Worktree-backed toggle + branch (ADR 0094). When enabled, the
-    /// pin declares a worktree for `worktree_branch`, realized at
-    /// launch.
-    worktree_enabled: bool,
-    worktree_branch: TextInputState,
     id_overridden: bool,
     display_overridden: bool,
     mux_overridden: bool,
-    known_harness_keys: Vec<String>,
-    known_mux_names: Vec<String>,
     known_pin_ids: Vec<String>,
     known_pin_mux_names: Vec<String>,
     selected_pin_id: Option<String>,
     adopt_auto_uncheck_armed: bool,
     adopt_auto_checked_by_collision: bool,
-    error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -701,6 +696,17 @@ enum PinRemoveOutcome {
     Cancel,
 }
 
+/// Field labels for the shared launch-spec fields as pin-create
+/// renders them. Kept as module-level constants so the primitive's
+/// wholesale-replace helpers (harness cycle, mux-name derivation)
+/// pass the same label back to the underlying `TextInputState`.
+const PIN_HARNESS_LABEL: &str = " harness ";
+const PIN_CWD_LABEL: &str = " cwd ";
+const PIN_MUX_NAME_LABEL: &str = " mux ";
+const PIN_MUX_SOCKET_LABEL: &str = " socket ";
+const PIN_LAUNCH_ARGV_LABEL: &str = " launch argv ";
+const PIN_WORKTREE_BRANCH_LABEL: &str = " worktree branch ";
+
 impl PinCreateState {
     const FIELD_NAME: usize = 0;
     const FIELD_MODE: usize = 1;
@@ -717,6 +723,20 @@ impl PinCreateState {
     /// and the branch field below it becomes visible.
     const FIELD_WORKTREE_TOGGLE: usize = 11;
     const FIELD_WORKTREE_BRANCH: usize = 12;
+
+    /// Read-only access to the shared launch-spec fields. Renderers,
+    /// tests, and any code outside the reducer's edit path go through
+    /// this borrow.
+    pub fn spec(&self) -> &LaunchSpecFormState {
+        &self.spec
+    }
+
+    /// Mutable access to the shared launch-spec fields. Used by
+    /// wrapper-internal helpers that need to poke a shared field
+    /// without going through a dedicated setter.
+    pub fn spec_mut(&mut self) -> &mut LaunchSpecFormState {
+        &mut self.spec
+    }
 
     #[cfg(test)]
     fn new(
@@ -790,12 +810,28 @@ impl PinCreateState {
         let mux_overridden = mux_name != derived_mux_name;
         let known_harness_keys =
             normalized_harness_keys(options.known_harness_keys, [&defaults.harness]);
-        let mut cwd = PathOmniboxState::new(" cwd ", defaults.cwd.clone());
-        cwd.set_known_candidates(pin_create_cwd_candidates(
+        let cwd_candidates = pin_create_cwd_candidates(
             &defaults,
             options.adopt_defaults.as_ref(),
             options.known_cwd_candidates,
-        ));
+        );
+        let mut spec = LaunchSpecFormState::new(LaunchSpecInit {
+            harness_label: PIN_HARNESS_LABEL,
+            harness_value: defaults.harness,
+            cwd_label: PIN_CWD_LABEL,
+            cwd_value: defaults.cwd,
+            mux_name_label: PIN_MUX_NAME_LABEL,
+            mux_name_value: mux_name,
+            mux_socket_label: PIN_MUX_SOCKET_LABEL,
+            launch_argv_label: PIN_LAUNCH_ARGV_LABEL,
+            worktree_branch_label: PIN_WORKTREE_BRANCH_LABEL,
+            // Branch defaults to the derived id; independently editable.
+            worktree_branch_value: derived_id,
+            known_harness_keys,
+            known_mux_names: options.known_mux_names,
+        });
+        spec.set_cwd_candidates(cwd_candidates);
+        spec.set_worktree_enabled(options.worktree_enabled);
         Self {
             mode: defaults.mode,
             cursor: 0,
@@ -803,26 +839,16 @@ impl PinCreateState {
             name: TextInputState::new(" name ", name),
             id: TextInputState::new(" id ", id),
             display_name: TextInputState::new(" display ", display_name),
-            harness: TextInputState::new(" harness ", defaults.harness),
-            cwd,
-            mux_name: TextInputState::new(" mux ", mux_name),
-            mux_socket: TextInputState::new(" socket ", String::new()),
-            launch_argv: TextInputState::new(" launch argv ", String::new()),
+            spec,
             store: PinCreateStore::Auto,
-            worktree_enabled: options.worktree_enabled,
-            // Branch defaults to the derived id; independently editable.
-            worktree_branch: TextInputState::new(" worktree branch ", derived_id),
             id_overridden,
             display_overridden,
             mux_overridden,
-            known_harness_keys,
-            known_mux_names: options.known_mux_names,
             known_pin_ids: options.known_pin_ids,
             known_pin_mux_names: options.known_pin_mux_names,
             selected_pin_id: options.selected_pin_id,
             adopt_auto_uncheck_armed: defaults.mode == PinCreateMode::AdoptSelected,
             adopt_auto_checked_by_collision: false,
-            error: None,
         }
     }
 
@@ -832,7 +858,7 @@ impl PinCreateState {
             KeyCode::Enter => match self.request() {
                 Ok(request) => PinCreateOutcome::Confirm(Box::new(request)),
                 Err(err) => {
-                    self.error = Some(err);
+                    self.spec.set_error(err);
                     PinCreateOutcome::Continue
                 }
             },
@@ -841,9 +867,9 @@ impl PinCreateState {
                 PinCreateOutcome::Continue
             }
             KeyCode::Tab if self.logical_cursor() == Self::FIELD_CWD => {
-                match self.cwd.handle_key(event) {
+                match self.spec.cwd_handle_key(event) {
                     PathOmniboxOutcome::Completed | PathOmniboxOutcome::Changed => {
-                        self.error = None;
+                        self.spec.clear_error();
                     }
                     PathOmniboxOutcome::NoCompletion | PathOmniboxOutcome::Continue => {}
                 }
@@ -871,7 +897,7 @@ impl PinCreateState {
                 } else {
                     1
                 });
-                self.error = None;
+                self.spec.clear_error();
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
@@ -882,7 +908,7 @@ impl PinCreateState {
                 } else {
                     1
                 });
-                self.error = None;
+                self.spec.clear_error();
                 PinCreateOutcome::Continue
             }
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
@@ -898,8 +924,8 @@ impl PinCreateState {
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
                 if self.logical_cursor() == Self::FIELD_WORKTREE_TOGGLE =>
             {
-                self.worktree_enabled = !self.worktree_enabled;
-                self.error = None;
+                self.spec.toggle_worktree();
+                self.spec.clear_error();
                 PinCreateOutcome::Continue
             }
             _ => {
@@ -908,29 +934,88 @@ impl PinCreateState {
                 {
                     return PinCreateOutcome::Cancel;
                 }
-                let before = self
-                    .active_input()
-                    .map(|input| input.value().to_string())
-                    .unwrap_or_default();
+                let before = self.active_input_value().unwrap_or_default();
                 let active = self.logical_cursor();
                 if active == Self::FIELD_CWD {
-                    let outcome = self.cwd.handle_key(event);
+                    let outcome = self.spec.cwd_handle_key(event);
                     if matches!(
                         outcome,
                         PathOmniboxOutcome::Changed | PathOmniboxOutcome::Completed
                     ) {
-                        self.error = None;
+                        self.spec.clear_error();
                     }
-                } else if let Some(input) = self.active_input_mut() {
-                    let _ = input.handle_key(event);
-                    let changed = input.value() != before;
-                    if changed {
-                        self.after_active_input_changed(active);
+                } else {
+                    let handled = self.forward_to_active_input(active, event);
+                    if handled {
+                        let after = self.active_input_value().unwrap_or_default();
+                        if after != before {
+                            self.after_active_input_changed(active);
+                        }
+                        self.spec.clear_error();
                     }
-                    self.error = None;
                 }
                 PinCreateOutcome::Continue
             }
+        }
+    }
+
+    /// Read the current value of the cursor's active text input, or
+    /// `None` when the cursor is on a non-text row (mode / store /
+    /// worktree toggle / launch-options carousel). Used by the
+    /// change-detection path so pin-specific `sync_*` hooks fire when
+    /// the operator actually typed something.
+    fn active_input_value(&self) -> Option<String> {
+        match self.logical_cursor() {
+            Self::FIELD_NAME => Some(self.name.value().to_string()),
+            Self::FIELD_HARNESS => Some(self.spec.harness().value().to_string()),
+            Self::FIELD_LAUNCH_ARGV => Some(self.spec.launch_argv().value().to_string()),
+            Self::FIELD_ID => Some(self.id.value().to_string()),
+            Self::FIELD_DISPLAY => Some(self.display_name.value().to_string()),
+            Self::FIELD_MUX_NAME => Some(self.spec.mux_name().value().to_string()),
+            Self::FIELD_MUX_SOCKET => Some(self.spec.mux_socket().value().to_string()),
+            Self::FIELD_WORKTREE_BRANCH => Some(self.spec.worktree_branch().value().to_string()),
+            _ => None,
+        }
+    }
+
+    /// Forward the key event into the text input for `active`, if one
+    /// applies. Returns `true` when a text input handled the key.
+    fn forward_to_active_input(&mut self, active: usize, event: KeyEvent) -> bool {
+        match active {
+            Self::FIELD_NAME => {
+                let _ = self.name.handle_key(event);
+                true
+            }
+            Self::FIELD_HARNESS => {
+                self.spec.handle_text_key(SpecTextField::Harness, event);
+                true
+            }
+            Self::FIELD_LAUNCH_ARGV => {
+                self.spec.handle_text_key(SpecTextField::LaunchArgv, event);
+                true
+            }
+            Self::FIELD_ID => {
+                let _ = self.id.handle_key(event);
+                true
+            }
+            Self::FIELD_DISPLAY => {
+                let _ = self.display_name.handle_key(event);
+                true
+            }
+            Self::FIELD_MUX_NAME => {
+                self.spec.handle_text_key(SpecTextField::MuxName, event);
+                true
+            }
+            Self::FIELD_MUX_SOCKET => {
+                self.spec.handle_text_key(SpecTextField::MuxSocket, event);
+                true
+            }
+            Self::FIELD_WORKTREE_BRANCH => {
+                self.spec
+                    .handle_text_key(SpecTextField::WorktreeBranch, event);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -959,7 +1044,7 @@ impl PinCreateState {
         }
         fields.push(Self::FIELD_CWD);
         fields.push(Self::FIELD_WORKTREE_TOGGLE);
-        if self.worktree_enabled {
+        if self.spec.worktree_enabled() {
             fields.push(Self::FIELD_WORKTREE_BRANCH);
         }
         fields.push(Self::FIELD_HARNESS);
@@ -998,8 +1083,8 @@ impl PinCreateState {
                 self.adopt_auto_uncheck_armed = false;
                 self.adopt_auto_checked_by_collision = false;
                 if !self.mux_overridden {
-                    self.mux_name = TextInputState::new(
-                        " mux ",
+                    self.spec.set_mux_name(
+                        PIN_MUX_NAME_LABEL,
                         derived_mux_name_for_mode(
                             self.mode,
                             self.name.value(),
@@ -1013,8 +1098,8 @@ impl PinCreateState {
                 self.adopt_auto_uncheck_armed = false;
                 self.adopt_auto_checked_by_collision = false;
                 if !self.mux_overridden {
-                    self.mux_name = TextInputState::new(
-                        " mux ",
+                    self.spec.set_mux_name(
+                        PIN_MUX_NAME_LABEL,
                         derived_mux_name_for_mode(
                             self.mode,
                             self.name.value(),
@@ -1040,29 +1125,17 @@ impl PinCreateState {
     }
 
     fn cycle_harness(&mut self, delta: i32) {
-        if self.known_harness_keys.is_empty() {
+        if self.spec.known_harness_keys().is_empty() {
             return;
         }
         let before = self.launch_argv_override().ok();
         let previous_default = self.default_launch_argv();
-        let value = self.harness.value().trim();
-        let idx = match self
-            .known_harness_keys
-            .iter()
-            .position(|known| known == value)
-        {
-            Some(idx) => {
-                let len = self.known_harness_keys.len() as i32;
-                ((idx as i32 + delta) % len + len) % len
-            }
-            None if delta < 0 => self.known_harness_keys.len().saturating_sub(1) as i32,
-            None => 0,
-        } as usize;
-        self.harness = TextInputState::new(" harness ", self.known_harness_keys[idx].clone());
+        self.spec.cycle_harness(delta, PIN_HARNESS_LABEL);
         if let Some(argv) = before {
             let stripped = strip_known_launch_option_fragments(argv);
             if stripped == previous_default {
-                self.launch_argv = TextInputState::new(" launch argv ", String::new());
+                self.spec
+                    .set_launch_argv(PIN_LAUNCH_ARGV_LABEL, String::new());
             } else {
                 self.set_launch_argv_from_effective(stripped);
             }
@@ -1070,7 +1143,7 @@ impl PinCreateState {
     }
 
     fn launch_options(&self) -> &'static [HarnessLaunchOption] {
-        launch_options_for(self.harness.value().trim())
+        launch_options_for(self.spec.harness().value().trim())
     }
 
     fn selected_launch_option_ids(&self) -> Vec<&'static str> {
@@ -1126,39 +1199,12 @@ impl PinCreateState {
 
     fn set_launch_argv_from_effective(&mut self, argv: Vec<String>) {
         let default = self.default_launch_argv();
-        if argv.is_empty() || argv == default {
-            self.launch_argv = TextInputState::new(" launch argv ", String::new());
+        let value = if argv.is_empty() || argv == default {
+            String::new()
         } else {
-            self.launch_argv = TextInputState::new(" launch argv ", display_launch_argv(&argv));
-        }
-    }
-
-    fn active_input_mut(&mut self) -> Option<&mut TextInputState> {
-        match self.logical_cursor() {
-            Self::FIELD_NAME => Some(&mut self.name),
-            Self::FIELD_HARNESS => Some(&mut self.harness),
-            Self::FIELD_LAUNCH_ARGV => Some(&mut self.launch_argv),
-            Self::FIELD_ID => Some(&mut self.id),
-            Self::FIELD_DISPLAY => Some(&mut self.display_name),
-            Self::FIELD_MUX_NAME => Some(&mut self.mux_name),
-            Self::FIELD_MUX_SOCKET => Some(&mut self.mux_socket),
-            Self::FIELD_WORKTREE_BRANCH => Some(&mut self.worktree_branch),
-            _ => None,
-        }
-    }
-
-    fn active_input(&self) -> Option<&TextInputState> {
-        match self.logical_cursor() {
-            Self::FIELD_NAME => Some(&self.name),
-            Self::FIELD_HARNESS => Some(&self.harness),
-            Self::FIELD_LAUNCH_ARGV => Some(&self.launch_argv),
-            Self::FIELD_ID => Some(&self.id),
-            Self::FIELD_DISPLAY => Some(&self.display_name),
-            Self::FIELD_MUX_NAME => Some(&self.mux_name),
-            Self::FIELD_MUX_SOCKET => Some(&self.mux_socket),
-            Self::FIELD_WORKTREE_BRANCH => Some(&self.worktree_branch),
-            _ => None,
-        }
+            display_launch_argv(&argv)
+        };
+        self.spec.set_launch_argv(PIN_LAUNCH_ARGV_LABEL, value);
     }
 
     fn after_active_input_changed(&mut self, active: usize) {
@@ -1174,7 +1220,7 @@ impl PinCreateState {
             Self::FIELD_ID => self.id_overridden = !self.id.value().is_empty(),
             Self::FIELD_DISPLAY => self.display_overridden = !self.display_name.value().is_empty(),
             Self::FIELD_MUX_NAME => {
-                self.mux_overridden = !self.mux_name.value().is_empty();
+                self.mux_overridden = !self.spec.mux_name().value().is_empty();
                 self.sync_mode_from_mux_collision();
             }
             _ => {}
@@ -1191,8 +1237,8 @@ impl PinCreateState {
             self.mode = PinCreateMode::NewVariation;
             self.adopt_auto_checked_by_collision = false;
             if !self.mux_overridden {
-                self.mux_name = TextInputState::new(
-                    " mux ",
+                self.spec.set_mux_name(
+                    PIN_MUX_NAME_LABEL,
                     derived_mux_name_for_mode(
                         self.mode,
                         self.name.value(),
@@ -1213,8 +1259,8 @@ impl PinCreateState {
             self.display_name = TextInputState::new(" display ", name);
         }
         if !self.mux_overridden {
-            self.mux_name = TextInputState::new(
-                " mux ",
+            self.spec.set_mux_name(
+                PIN_MUX_NAME_LABEL,
                 derived_mux_name_for_mode(self.mode, self.name.value(), &derived_id),
             );
         }
@@ -1222,11 +1268,12 @@ impl PinCreateState {
 
     fn request(&self) -> Result<PinCreateRequest, String> {
         let id = required(self.id.value(), "id")?;
-        let harness = required(self.harness.value(), "harness")?;
-        let cwd = required(&self.cwd.expanded_value(), "cwd")?;
+        let harness = required(self.spec.harness().value(), "harness")?;
+        let cwd = required(&self.spec.cwd().expanded_value(), "cwd")?;
         let display_name = optional(self.display_name.value()).unwrap_or_else(|| id.clone());
-        let mux_name = optional(self.mux_name.value()).unwrap_or_else(|| display_name.clone());
-        let mux_socket = optional(self.mux_socket.value());
+        let mux_name =
+            optional_string(self.spec.mux_name().value()).unwrap_or_else(|| display_name.clone());
+        let mux_socket = optional_string(self.spec.mux_socket().value());
         if self.known_pin_ids.iter().any(|known| known == &id) {
             return Err(format!("pin create: pin `{id}` already exists"));
         }
@@ -1245,8 +1292,11 @@ impl PinCreateState {
                 "pin create: launch argv is required for unknown harness `{harness}`"
             ));
         }
-        let worktree_branch = if self.worktree_enabled {
-            Some(required(self.worktree_branch.value(), "worktree branch")?)
+        let worktree_branch = if self.spec.worktree_enabled() {
+            Some(required(
+                self.spec.worktree_branch().value(),
+                "worktree branch",
+            )?)
         } else {
             None
         };
@@ -1265,16 +1315,11 @@ impl PinCreateState {
     }
 
     fn launch_argv_override(&self) -> Result<Vec<String>, String> {
-        let raw = self.launch_argv.value().trim();
-        if raw.is_empty() {
-            Ok(Vec::new())
-        } else {
-            parse_launch_argv(raw)
-        }
+        parse_launch_argv(self.spec.launch_argv().value().trim(), "pin create")
     }
 
     fn default_launch_argv(&self) -> Vec<String> {
-        launch_argv_for(self.harness.value().trim())
+        launch_argv_for(self.spec.harness().value().trim())
             .into_iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect()
@@ -1308,18 +1353,14 @@ impl PinCreateState {
     }
 
     fn matching_known_mux_name(&self) -> Option<&str> {
-        let mux_name = self.mux_name.value().trim();
-        if mux_name.is_empty() {
-            return None;
-        }
-        self.known_mux_names
-            .iter()
-            .find(|known| known.as_str() == mux_name)
-            .map(String::as_str)
+        self.spec.matching_known_mux_name()
     }
 
     fn mux_name_collides(&self, mux_name: &str) -> bool {
-        self.known_mux_names.iter().any(|known| known == mux_name)
+        self.spec
+            .known_mux_names()
+            .iter()
+            .any(|known| known == mux_name)
             || self
                 .known_pin_mux_names
                 .iter()
@@ -1327,7 +1368,7 @@ impl PinCreateState {
     }
 
     fn mux_name_display(&self) -> String {
-        let value = self.mux_name.value();
+        let value = self.spec.mux_name().value();
         match self.adopt_source_mux_name() {
             Some(source) if source != value => format!("{value} (rename of: {source})"),
             _ => value.to_string(),
@@ -1336,8 +1377,14 @@ impl PinCreateState {
 
     #[cfg(test)]
     fn harness_warning(&self) -> Option<String> {
-        let value = self.harness.value().trim();
-        if value.is_empty() || self.known_harness_keys.iter().any(|known| known == value) {
+        let value = self.spec.harness().value().trim();
+        if value.is_empty()
+            || self
+                .spec
+                .known_harness_keys()
+                .iter()
+                .any(|known| known == value)
+        {
             None
         } else {
             Some(format!("custom harness `{value}` will be saved as typed"))
@@ -1410,73 +1457,6 @@ fn pin_create_cwd_candidates(
     }
     candidates.extend(known);
     candidates
-}
-
-fn parse_launch_argv(raw: &str) -> Result<Vec<String>, String> {
-    let mut args = Vec::new();
-    let mut current = String::new();
-    let mut chars = raw.chars().peekable();
-    let mut quote: Option<char> = None;
-    let mut in_arg = false;
-
-    while let Some(ch) = chars.next() {
-        match (quote, ch) {
-            (Some(q), c) if c == q => {
-                quote = None;
-                in_arg = true;
-            }
-            (Some('"'), '\\') => match chars.next() {
-                Some(next @ ('"' | '\\' | '$' | '`')) => {
-                    current.push(next);
-                    in_arg = true;
-                }
-                Some(next) => {
-                    current.push('\\');
-                    current.push(next);
-                    in_arg = true;
-                }
-                None => {
-                    current.push('\\');
-                    in_arg = true;
-                }
-            },
-            (Some(_), c) => {
-                current.push(c);
-                in_arg = true;
-            }
-            (None, '\'' | '"') => {
-                quote = Some(ch);
-                in_arg = true;
-            }
-            (None, '\\') => match chars.next() {
-                Some(next) => {
-                    current.push(next);
-                    in_arg = true;
-                }
-                None => return Err("pin create: launch argv has a trailing escape".to_string()),
-            },
-            (None, c) if c.is_whitespace() => {
-                if in_arg {
-                    args.push(std::mem::take(&mut current));
-                    in_arg = false;
-                }
-            }
-            (None, c) => {
-                current.push(c);
-                in_arg = true;
-            }
-        }
-    }
-
-    if let Some(q) = quote {
-        return Err(format!(
-            "pin create: launch argv has an unclosed `{q}` quote"
-        ));
-    }
-    if in_arg {
-        args.push(current);
-    }
-    Ok(args)
 }
 
 fn display_launch_argv(argv: &[String]) -> String {
@@ -1775,12 +1755,7 @@ impl PinEditState {
     }
 
     fn launch_argv_override(&self) -> Result<Vec<String>, String> {
-        let raw = self.launch_argv.value().trim();
-        if raw.is_empty() {
-            Ok(Vec::new())
-        } else {
-            parse_launch_argv(raw)
-        }
+        parse_launch_argv(self.launch_argv.value().trim(), "pin edit")
     }
 
     fn default_launch_argv(&self) -> Vec<String> {
@@ -2117,10 +2092,11 @@ impl Widget for PinCreateWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // H-WIDG-004: framing through `tui_popup::Popup`.
         let cursor = self.state.render_cursor();
+        let spec = self.state.spec();
         let content_lines = 16
             + usize::from(self.state.has_launch_options())
-            + usize::from(self.state.worktree_enabled)
-            + usize::from(self.state.error.is_some()) * 2;
+            + usize::from(spec.worktree_enabled())
+            + usize::from(spec.error().is_some()) * 2;
         let modal = pin_create_modal_rect(area, content_lines);
         let inner_width = modal.width.saturating_sub(2) as usize;
         let mut lines = vec![
@@ -2138,7 +2114,7 @@ impl Widget for PinCreateWidget<'_> {
         lines.push(pin_create_static_field(
             PinCreateState::FIELD_WORKTREE_TOGGLE,
             "worktree",
-            if self.state.worktree_enabled {
+            if spec.worktree_enabled() {
                 "[x] create worktree (realized at launch)"
             } else {
                 "[ ] create worktree"
@@ -2146,11 +2122,11 @@ impl Widget for PinCreateWidget<'_> {
             cursor,
             inner_width,
         ));
-        if self.state.worktree_enabled {
+        if spec.worktree_enabled() {
             lines.push(pin_create_input_field(
                 PinCreateState::FIELD_WORKTREE_BRANCH,
                 "wt branch",
-                &self.state.worktree_branch,
+                spec.worktree_branch(),
                 cursor,
                 inner_width,
             ));
@@ -2167,7 +2143,7 @@ impl Widget for PinCreateWidget<'_> {
             pin_create_input_field(
                 PinCreateState::FIELD_LAUNCH_ARGV,
                 "launch argv",
-                &self.state.launch_argv,
+                spec.launch_argv(),
                 cursor,
                 inner_width,
             ),
@@ -2192,22 +2168,22 @@ impl Widget for PinCreateWidget<'_> {
                 PinCreateState::FIELD_MUX_NAME,
                 "mux.name",
                 &self.state.mux_name_display(),
-                self.state.mux_name.cursor(),
+                spec.mux_name().cursor(),
                 cursor,
                 inner_width,
             ),
             pin_create_input_field(
                 PinCreateState::FIELD_MUX_SOCKET,
                 "mux.socket",
-                &self.state.mux_socket,
+                spec.mux_socket(),
                 cursor,
                 inner_width,
             ),
             pin_create_store_field(self.state.store, cursor, inner_width),
         ]);
-        if let Some(error) = &self.state.error {
+        if let Some(error) = spec.error() {
             lines.push(line![""]);
-            lines.push(line![span!(Modifier::BOLD; "{}", error.clone())]);
+            lines.push(line![span!(Modifier::BOLD; "{}", error.to_string())]);
         }
         lines.push(line![""]);
         lines.push(line![span!(
@@ -2254,7 +2230,7 @@ fn pin_create_path_omnibox_field(
     let is_focused = cursor == PinCreateState::FIELD_CWD;
     pin_path_omnibox_field(
         PinCreateState::FIELD_CWD,
-        &state.cwd,
+        state.spec.cwd(),
         is_focused,
         cursor,
         inner_width,
@@ -2440,8 +2416,8 @@ fn pin_create_harness_field(
 ) -> Line<'static> {
     pin_harness_field(
         PinCreateState::FIELD_HARNESS,
-        &state.harness,
-        &state.known_harness_keys,
+        state.spec.harness(),
+        state.spec.known_harness_keys(),
         cursor,
         inner_width,
     )

@@ -146,7 +146,7 @@ fn create_form_starts_adopt_checked_then_auto_unchecks_on_first_name_edit() {
         Some(PinsSubEditor::Create(editor)) => {
             assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
             assert_eq!(editor.name.value(), "agentdeck_conspectus");
-            assert_eq!(editor.mux_name.value(), "agentdeck_conspectus");
+            assert_eq!(editor.spec().mux_name().value(), "agentdeck_conspectus");
             assert_eq!(editor.mux_name_display(), "agentdeck_conspectus");
             let request = editor.request().expect("valid create request");
             assert_eq!(request.mux_name, "agentdeck_conspectus");
@@ -171,7 +171,7 @@ fn create_form_starts_adopt_checked_then_auto_unchecks_on_first_name_edit() {
             assert_eq!(editor.name.value(), "agentdeck-conspectus-v2");
             assert_eq!(editor.id.value(), "agentdeck-conspectus-v2");
             assert_eq!(editor.display_name.value(), "agentdeck-conspectus-v2");
-            assert_eq!(editor.mux_name.value(), "agentdeck-conspectus-v2");
+            assert_eq!(editor.spec().mux_name().value(), "agentdeck-conspectus-v2");
             assert_eq!(editor.mux_name_display(), "agentdeck-conspectus-v2");
             assert_eq!(
                 editor
@@ -257,7 +257,7 @@ fn direct_adopt_opens_create_form_with_adopt_selected_and_toggleable() {
     match state.sub_editor() {
         Some(PinsSubEditor::Create(editor)) => {
             assert_eq!(editor.mode, PinCreateMode::NewVariation);
-            assert_eq!(editor.mux_name.value(), "work");
+            assert_eq!(editor.spec().mux_name().value(), "work");
         }
         other => panic!("unexpected editor: {other:?}"),
     }
@@ -394,11 +394,11 @@ fn create_form_cycles_known_harness_choices_from_harness_field() {
     move_to_create_field(&mut editor, PinCreateState::FIELD_HARNESS);
     assert_eq!(editor.render_cursor(), PinCreateState::FIELD_HARNESS);
     editor.handle_key(key(KeyCode::Right));
-    assert_eq!(editor.harness.value(), "claude-code");
+    assert_eq!(editor.spec().harness().value(), "claude-code");
     editor.handle_key(key(KeyCode::Left));
-    assert_eq!(editor.harness.value(), "codex");
+    assert_eq!(editor.spec().harness().value(), "codex");
     editor.handle_key(key(KeyCode::Char(' ')));
-    assert_eq!(editor.harness.value(), "claude-code");
+    assert_eq!(editor.spec().harness().value(), "claude-code");
 }
 
 #[test]
@@ -461,8 +461,9 @@ fn create_form_launch_preview_uses_shell_parsed_override() {
         vec![],
     );
 
-    editor.launch_argv =
-        TextInputState::new(" launch argv ", "sandbox --name 'two words'".to_string());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", "sandbox --name 'two words'".to_string());
 
     let preview = editor.effective_launch_argv().expect("preview");
     assert_eq!(preview.source, LaunchArgvSource::Override);
@@ -503,7 +504,7 @@ fn create_form_launch_option_toggles_codex_skip_permissions_into_argv() {
     move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
     editor.handle_key(key(KeyCode::Char(' ')));
     assert_eq!(
-        editor.launch_argv.value(),
+        editor.spec().launch_argv().value(),
         "codex --dangerously-bypass-approvals-and-sandbox"
     );
     assert_eq!(
@@ -515,7 +516,7 @@ fn create_form_launch_option_toggles_codex_skip_permissions_into_argv() {
     );
 
     editor.handle_key(key(KeyCode::Char(' ')));
-    assert_eq!(editor.launch_argv.value(), "");
+    assert_eq!(editor.spec().launch_argv().value(), "");
     assert_eq!(
         editor.request().expect("valid request").launch_argv,
         Vec::<String>::new()
@@ -542,7 +543,7 @@ fn create_form_launch_option_toggles_claude_skip_permissions_into_argv() {
     editor.handle_key(key(KeyCode::Char(' ')));
 
     assert_eq!(
-        editor.launch_argv.value(),
+        editor.spec().launch_argv().value(),
         "claude --dangerously-skip-permissions"
     );
 }
@@ -562,16 +563,18 @@ fn create_form_launch_option_preserves_manual_argv_tokens() {
         vec![],
         vec![],
     );
-    editor.launch_argv = TextInputState::new(" launch argv ", "sandbox run codex".to_string());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", "sandbox run codex".to_string());
 
     move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
     editor.handle_key(key(KeyCode::Char(' ')));
     assert_eq!(
-        editor.launch_argv.value(),
+        editor.spec().launch_argv().value(),
         "sandbox run codex --dangerously-bypass-approvals-and-sandbox"
     );
     editor.handle_key(key(KeyCode::Char(' ')));
-    assert_eq!(editor.launch_argv.value(), "sandbox run codex");
+    assert_eq!(editor.spec().launch_argv().value(), "sandbox run codex");
 }
 
 #[test]
@@ -592,14 +595,14 @@ fn create_form_switching_harness_removes_incompatible_option_flags() {
     move_to_create_field(&mut editor, PinCreateState::FIELD_LAUNCH_OPTIONS);
     editor.handle_key(key(KeyCode::Char(' ')));
     assert_eq!(
-        editor.launch_argv.value(),
+        editor.spec().launch_argv().value(),
         "codex --dangerously-bypass-approvals-and-sandbox"
     );
 
     move_to_create_field(&mut editor, PinCreateState::FIELD_HARNESS);
     editor.handle_key(key(KeyCode::Left));
-    assert_eq!(editor.harness.value(), "claude-code");
-    assert_eq!(editor.launch_argv.value(), "");
+    assert_eq!(editor.spec().harness().value(), "claude-code");
+    assert_eq!(editor.spec().launch_argv().value(), "");
 }
 
 #[test]
@@ -618,12 +621,16 @@ fn create_form_clearing_launch_override_returns_to_default() {
         vec![],
     );
 
-    editor.launch_argv = TextInputState::new(" launch argv ", "sandbox codex".to_string());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", "sandbox codex".to_string());
     assert_eq!(
         editor.effective_launch_argv().expect("preview").source,
         LaunchArgvSource::Override
     );
-    editor.launch_argv = TextInputState::new(" launch argv ", String::new());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", String::new());
     let preview = editor.effective_launch_argv().expect("preview");
     assert_eq!(preview.source, LaunchArgvSource::Default);
     assert_eq!(preview.argv, vec!["codex".to_string()]);
@@ -653,7 +660,9 @@ fn create_form_requires_launch_override_for_unknown_harness() {
         editor.request().expect_err("missing launch argv"),
         "pin create: launch argv is required for unknown harness `custom-harness`"
     );
-    editor.launch_argv = TextInputState::new(" launch argv ", "custom run".to_string());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", "custom run".to_string());
     assert_eq!(
         editor.request().expect("valid request").launch_argv,
         vec!["custom".to_string(), "run".to_string()]
@@ -693,7 +702,7 @@ fn create_form_cwd_tab_completes_ranked_path_candidate() {
     editor.handle_key(key(KeyCode::Tab));
 
     assert_eq!(editor.render_cursor(), PinCreateState::FIELD_CWD);
-    assert_eq!(editor.cwd.value(), "/workspace/high");
+    assert_eq!(editor.spec().cwd().value(), "/workspace/high");
 }
 
 #[test]
@@ -730,7 +739,7 @@ fn create_form_cwd_tab_without_completion_stays_on_cwd_field() {
     editor.handle_key(key(KeyCode::Tab));
 
     assert_eq!(editor.render_cursor(), PinCreateState::FIELD_CWD);
-    assert_eq!(editor.cwd.value(), "/no/completion");
+    assert_eq!(editor.spec().cwd().value(), "/no/completion");
 }
 
 #[test]
@@ -858,7 +867,9 @@ fn create_form_reports_invalid_launch_argv_quotes() {
         vec![],
     );
 
-    editor.launch_argv = TextInputState::new(" launch argv ", "codex 'unterminated".to_string());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", "codex 'unterminated".to_string());
 
     assert_eq!(
         editor.request().expect_err("invalid argv"),
@@ -892,7 +903,9 @@ fn create_form_allows_freeform_harness_with_warning() {
     for ch in "custom-harness".chars() {
         editor.handle_key(key(KeyCode::Char(ch)));
     }
-    editor.launch_argv = TextInputState::new(" launch argv ", "custom run".to_string());
+    editor
+        .spec_mut()
+        .set_launch_argv(" launch argv ", "custom run".to_string());
 
     assert_eq!(
         editor.harness_warning().as_deref(),
@@ -947,7 +960,7 @@ fn create_form_auto_checks_adopt_for_known_mux_name_collisions() {
         editor.handle_key(key(KeyCode::Char(ch)));
     }
     assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
-    assert_eq!(editor.mux_name.value(), "busy-mux");
+    assert_eq!(editor.spec().mux_name().value(), "busy-mux");
     assert_eq!(editor.mux_name_display(), "busy-mux");
     assert_eq!(
         editor
@@ -961,7 +974,7 @@ fn create_form_auto_checks_adopt_for_known_mux_name_collisions() {
     editor.handle_key(key(KeyCode::Char('x')));
     assert_eq!(editor.mode, PinCreateMode::NewVariation);
     assert_eq!(editor.name.value(), "busy_muxx");
-    assert_eq!(editor.mux_name.value(), "busy-muxx");
+    assert_eq!(editor.spec().mux_name().value(), "busy-muxx");
     assert_eq!(
         editor
             .request()
@@ -1031,7 +1044,7 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
         editor.handle_key(key(KeyCode::Char(ch)));
     }
     assert_eq!(editor.name.value(), "live_mux");
-    assert_eq!(editor.mux_name.value(), "live-mux");
+    assert_eq!(editor.spec().mux_name().value(), "live-mux");
     assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
 
     move_to_create_field(&mut editor, PinCreateState::FIELD_MODE);
@@ -1044,7 +1057,7 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
         editor.handle_key(key(KeyCode::Char(ch)));
     }
     assert_eq!(editor.name.value(), "live_mux");
-    assert_eq!(editor.mux_name.value(), "not-live");
+    assert_eq!(editor.spec().mux_name().value(), "not-live");
     assert_eq!(editor.mode, PinCreateMode::NewVariation);
 
     for _ in 0.."not-live".len() {
@@ -1054,7 +1067,7 @@ fn create_form_collision_tracking_uses_mux_name_not_primary_name() {
         editor.handle_key(key(KeyCode::Char(ch)));
     }
     assert_eq!(editor.name.value(), "live_mux");
-    assert_eq!(editor.mux_name.value(), "live-mux");
+    assert_eq!(editor.spec().mux_name().value(), "live-mux");
     assert_eq!(editor.mode, PinCreateMode::AdoptSelected);
     assert_eq!(
         editor
@@ -1431,7 +1444,7 @@ fn create_form_name_drives_default_identity_fields() {
             assert_eq!(editor.name.value(), "Client Sandbox");
             assert_eq!(editor.id.value(), "client-sandbox");
             assert_eq!(editor.display_name.value(), "Client Sandbox");
-            assert_eq!(editor.mux_name.value(), "client-sandbox");
+            assert_eq!(editor.spec().mux_name().value(), "client-sandbox");
         }
         other => panic!("unexpected editor: {other:?}"),
     }
@@ -1469,7 +1482,7 @@ fn create_form_preserves_explicit_identity_overrides_after_name_edit() {
         Some(PinsSubEditor::Create(editor)) => {
             assert_eq!(editor.id.value(), "renamed-pin");
             assert_eq!(editor.display_name.value(), "Renamed Pin");
-            assert_eq!(editor.mux_name.value(), "kept-mux");
+            assert_eq!(editor.spec().mux_name().value(), "kept-mux");
         }
         other => panic!("unexpected editor: {other:?}"),
     }
@@ -1508,7 +1521,7 @@ fn create_form_cleared_identity_field_rejoins_name_derivation() {
 
     match state.sub_editor() {
         Some(PinsSubEditor::Create(editor)) => {
-            assert_eq!(editor.mux_name.value(), "client-sandbox");
+            assert_eq!(editor.spec().mux_name().value(), "client-sandbox");
         }
         other => panic!("unexpected editor: {other:?}"),
     }
@@ -1533,7 +1546,7 @@ fn create_form_keeps_validation_errors_open() {
     match state.sub_editor() {
         Some(PinsSubEditor::Create(editor)) => {
             assert_eq!(
-                editor.error.as_deref(),
+                editor.spec().error(),
                 Some("pin create: harness is required")
             );
         }
