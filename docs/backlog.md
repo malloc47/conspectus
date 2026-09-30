@@ -9822,6 +9822,11 @@ work. `P8-014` is post-v1 polish that does not block the release.
     `P8-012c` if included in the v1 release boundary.
 
 - [ ] `P8-014` Inline mux-picker for ambiguous `LinkedToMux` candidates.
+  - Note (2026-09-30, `REL-003b`): `m` is no longer free; ADR 0096 bound
+    it globally to the Mux action menu. The menu-first home for this
+    picker is a context entry in the `m` menu, offered when the selected
+    session has ambiguous mux candidates. The status line now advertises
+    `Tab inspect candidates` instead of `m choose`.
   - Scope: bind the `m` key (reserved in v1, see the
     keybindings table in
     `docs/implementation/phase-08-interactive-tui.md`) so it opens
@@ -14333,7 +14338,10 @@ finally `REL-002b`.
     - Tests: explorer unit tests with a fixed `now` for each of the five
       fields; showcase snapshots of a session and a mux detail pane.
     - Blockers: none.
-  - [ ] `REL-003b` Stop advertising `m choose` on ambiguous-mux rows.
+  - [x] `REL-003b` Stop advertising `m choose` on ambiguous-mux rows.
+    - Outcome: the hint reads `Tab inspect candidates`; the test is now
+      `contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance`
+      and asserts `m choose` is gone. `P8-014` carries the `m` note.
     - Symptom: the status line for a session with ambiguous tmux
       candidates reads `Enter/a attach preferred tmux:… · m choose`, but
       `m` opens the Mux action menu.

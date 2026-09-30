@@ -2326,10 +2326,11 @@ fn status_bar_shows_group_filter_and_sort_settings() {
 }
 
 #[test]
-fn contextual_status_offers_ambiguous_attach_hint_with_choose_affordance() {
+fn contextual_status_offers_ambiguous_attach_hint_with_inspect_affordance() {
     // T8-014: when the selected agent-session row resolves to an
     // ambiguous mux candidate set, the status bar advertises the
-    // preferred-target attach plus the `m choose` affordance.
+    // preferred-target attach and points at the right pane, which lists
+    // the competing candidates. (`m` belongs to the Mux menu, ADR 0096.)
     //
     // Forcing `MuxIndicator::Ambiguous` on a session row goes
     // through the cwd-suppression path in `resolve::mod`: two
@@ -2455,8 +2456,12 @@ fn contextual_status_offers_ambiguous_attach_hint_with_choose_affordance() {
         "ambiguous row should advertise preferred attach: {text}"
     );
     assert!(
-        text.contains("m choose"),
-        "ambiguous row should advertise the choose affordance: {text}"
+        text.contains("Tab inspect candidates"),
+        "ambiguous row should point at the candidate list: {text}"
+    );
+    assert!(
+        !text.contains("m choose"),
+        "`m` opens the Mux menu, not a candidate picker: {text}"
     );
 }
 

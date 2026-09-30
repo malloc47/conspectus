@@ -3224,7 +3224,7 @@ fn default_action_status_hint(app: &App) -> String {
             let label = target_label(&target);
             match selected_mux_state(app) {
                 Some(MuxIndicator::Ambiguous { .. }) => {
-                    format!("Enter/a attach preferred {label} · m choose")
+                    format!("Enter/a attach preferred {label} · Tab inspect candidates")
                 }
                 _ => format!("Enter/a attach {}", compact_mux_label(&label)),
             }
