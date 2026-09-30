@@ -3011,6 +3011,7 @@ impl App {
             snapshot: database.snapshot(),
             target: &target,
             home,
+            now: crate::tui::rows::tree_current_unix_epoch(),
         });
         match view {
             None => self.explorer = None,
@@ -3200,6 +3201,7 @@ impl App {
             snapshot: database.snapshot(),
             target: &target,
             home: home.as_deref(),
+            now: crate::tui::rows::tree_current_unix_epoch(),
         });
         match next {
             None => {
@@ -3306,6 +3308,7 @@ impl App {
             snapshot: database.snapshot(),
             target: &hop.focused,
             home: home.as_deref(),
+            now: crate::tui::rows::tree_current_unix_epoch(),
         });
         let Some(view) = view else {
             self.status_message = Some(

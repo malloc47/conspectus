@@ -54,6 +54,9 @@ pub struct ExplorerInputs<'a> {
     /// Home directory for `~`-shortening. `None` leaves paths in
     /// their full form.
     pub home: Option<&'a Path>,
+    /// Current unix epoch for relative ages (`4m ago`). `None` renders
+    /// timestamps as unknown.
+    pub now: Option<i64>,
 }
 
 /// Build the explorer view model for the given node id. Returns
@@ -68,10 +71,22 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
     let kind_label = kind_label(node);
     let title_line = title_line(inputs.snapshot, node);
     let short_id = node_short_id(&id);
-    let core_fields = core_fields(inputs.snapshot, node, inputs.home);
-    let all_fields = all_fields(inputs.snapshot, node, inputs.home);
-    let upstream = build_explorer(inputs.snapshot, &id, Direction::Upstream, inputs.home);
-    let downstream = build_explorer(inputs.snapshot, &id, Direction::Downstream, inputs.home);
+    let core_fields = core_fields(inputs.snapshot, node, inputs.home, inputs.now);
+    let all_fields = all_fields(inputs.snapshot, node, inputs.home, inputs.now);
+    let upstream = build_explorer(
+        inputs.snapshot,
+        &id,
+        Direction::Upstream,
+        inputs.home,
+        inputs.now,
+    );
+    let downstream = build_explorer(
+        inputs.snapshot,
+        &id,
+        Direction::Downstream,
+        inputs.home,
+        inputs.now,
+    );
     let mut groups = upstream.groups;
     groups.extend(downstream.groups);
     sort_relationship_groups(&mut groups);
@@ -1136,24 +1151,34 @@ fn title_line(snapshot: &GraphSnapshot, node: &GraphNode) -> String {
     }
 }
 
-fn core_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) -> Vec<CoreField> {
+fn core_fields(
+    snapshot: &GraphSnapshot,
+    node: &GraphNode,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Vec<CoreField> {
     match node {
         GraphNode::Repo(r) => repo_core(r, home),
         GraphNode::Checkout(c) => checkout_core(c, home),
         GraphNode::Workspace(w) => workspace_core(w, home),
-        GraphNode::AgentSession(s) => agent_session_core(snapshot, s, home),
-        GraphNode::MuxSession(m) => mux_session_core(snapshot, m, home),
+        GraphNode::AgentSession(s) => agent_session_core(snapshot, s, home, now),
+        GraphNode::MuxSession(m) => mux_session_core(snapshot, m, home, now),
         GraphNode::Pin(p) => pin_core(p, home),
-        GraphNode::RuntimeProcess(p) => runtime_process_core(p, home),
+        GraphNode::RuntimeProcess(p) => runtime_process_core(p, home, now),
         GraphNode::Branch(b) => branch_core(b),
         GraphNode::Fork(f) => fork_core(f),
-        GraphNode::ForgePr(pr) => forge_pr_core(pr),
+        GraphNode::ForgePr(pr) => forge_pr_core(pr, now),
     }
 }
 
-fn all_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) -> Vec<CoreField> {
-    let mut fields = core_fields(snapshot, node, home);
-    let extras = extra_fields(snapshot, node, home);
+fn all_fields(
+    snapshot: &GraphSnapshot,
+    node: &GraphNode,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Vec<CoreField> {
+    let mut fields = core_fields(snapshot, node, home, now);
+    let extras = extra_fields(snapshot, node, home, now);
     for extra in extras {
         if fields.iter().any(|f| f.label == extra.label) {
             continue;
@@ -1163,10 +1188,15 @@ fn all_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) -
     fields
 }
 
-fn extra_fields(snapshot: &GraphSnapshot, node: &GraphNode, home: Option<&Path>) -> Vec<CoreField> {
+fn extra_fields(
+    snapshot: &GraphSnapshot,
+    node: &GraphNode,
+    home: Option<&Path>,
+    now: Option<i64>,
+) -> Vec<CoreField> {
     match node {
         GraphNode::AgentSession(s) => agent_session_extras(snapshot, s, home),
-        GraphNode::MuxSession(m) => mux_session_extras(m),
+        GraphNode::MuxSession(m) => mux_session_extras(m, now),
         GraphNode::Pin(p) => pin_extras(p, home),
         GraphNode::RuntimeProcess(p) => runtime_process_extras(snapshot, p, home),
         GraphNode::Fork(f) => fork_extras(f),
@@ -1259,6 +1289,7 @@ fn agent_session_core(
     snapshot: &GraphSnapshot,
     s: &AgentSessionNode,
     home: Option<&Path>,
+    now: Option<i64>,
 ) -> Vec<CoreField> {
     let id_node = NodeId::AgentSession(s.id.clone());
     let mut fields = vec![
@@ -1293,7 +1324,7 @@ fn agent_session_core(
         }
         None => CoreField::placeholder("cwd", "— (unknown)"),
     });
-    fields.push(CoreField::plain("status", session_status(s)));
+    fields.push(CoreField::plain("status", session_status(s, now)));
     fields
 }
 
@@ -1340,6 +1371,7 @@ fn mux_session_core(
     snapshot: &GraphSnapshot,
     m: &MuxSessionNode,
     home: Option<&Path>,
+    now: Option<i64>,
 ) -> Vec<CoreField> {
     // `id` carries the external mux session name (e.g. the raw tmux
     // session id), mirroring the agent-session detail's external
@@ -1371,16 +1403,16 @@ fn mux_session_core(
     }
     fields.push(attached_field);
     fields.push(match m.activity_epoch {
-        Some(epoch) => CoreField::plain("last_active", relative_epoch(epoch)),
+        Some(epoch) => CoreField::plain("last_active", relative_epoch(epoch, now)),
         None => CoreField::placeholder("last_active", "—"),
     });
     fields
 }
 
-fn mux_session_extras(m: &MuxSessionNode) -> Vec<CoreField> {
+fn mux_session_extras(m: &MuxSessionNode, now: Option<i64>) -> Vec<CoreField> {
     let mut fields = Vec::new();
     if let Some(epoch) = m.created_epoch {
-        fields.push(CoreField::plain("created", relative_epoch(epoch)));
+        fields.push(CoreField::plain("created", relative_epoch(epoch, now)));
     }
     if let Some(cmd) = &m.active_pane_command {
         let truncated = truncate(cmd, 48);
@@ -1437,7 +1469,11 @@ fn pin_extras(p: &PinNode, home: Option<&Path>) -> Vec<CoreField> {
     fields
 }
 
-fn runtime_process_core(p: &RuntimeProcessNode, _home: Option<&Path>) -> Vec<CoreField> {
+fn runtime_process_core(
+    p: &RuntimeProcessNode,
+    _home: Option<&Path>,
+    now: Option<i64>,
+) -> Vec<CoreField> {
     let mut fields = vec![CoreField::plain(
         "id",
         node_short_id(&NodeId::RuntimeProcess(p.id.clone())),
@@ -1490,7 +1526,7 @@ fn runtime_process_core(p: &RuntimeProcessNode, _home: Option<&Path>) -> Vec<Cor
         .to_string(),
     ));
     fields.push(match p.observed_epoch {
-        Some(epoch) => CoreField::plain("observed", relative_epoch(epoch)),
+        Some(epoch) => CoreField::plain("observed", relative_epoch(epoch, now)),
         None => CoreField::placeholder("observed", "—"),
     });
     fields
@@ -1584,7 +1620,7 @@ fn fork_extras(f: &ForkNode) -> Vec<CoreField> {
     )]
 }
 
-fn forge_pr_core(pr: &ForgePrNode) -> Vec<CoreField> {
+fn forge_pr_core(pr: &ForgePrNode, now: Option<i64>) -> Vec<CoreField> {
     let id_node = NodeId::ForgePr(pr.id.clone());
     let state = pr.state.as_deref().unwrap_or("?");
     let composite = format!("{}/{}#{} ({state})", pr.owner, pr.repo, pr.number);
@@ -1598,7 +1634,7 @@ fn forge_pr_core(pr: &ForgePrNode) -> Vec<CoreField> {
         fields.push(CoreField::placeholder("draft", "false"));
     }
     fields.push(match pr.updated_epoch {
-        Some(epoch) => CoreField::plain("updated", relative_epoch(epoch)),
+        Some(epoch) => CoreField::plain("updated", relative_epoch(epoch, now)),
         None => CoreField::placeholder("updated", "—"),
     });
     fields.push(match &pr.url {
@@ -1628,20 +1664,16 @@ fn forge_pr_extras(pr: &ForgePrNode) -> Vec<CoreField> {
 
 // ----- Helpers ---------------------------------------------------------------
 
-fn session_status(s: &AgentSessionNode) -> String {
+fn session_status(s: &AgentSessionNode, now: Option<i64>) -> String {
     match s.last_active_epoch {
-        Some(epoch) => format!("active · last {}", relative_epoch(epoch)),
+        Some(epoch) => format!("active · last {}", relative_epoch(epoch, now)),
         None => "—".to_string(),
     }
 }
 
-fn relative_epoch(_epoch: i64) -> String {
-    // v1 keeps the relative-recency formatting simple — the existing
-    // sessions renderer already maps epochs to "Xs / Xm / Xh / Xd"
-    // strings. Until the explorer wiring story routes that helper in,
-    // we surface the raw epoch so tests are deterministic and the
-    // renderer can substitute the proper relative string later.
-    format!("{_epoch}s")
+fn relative_epoch(epoch: i64, now: Option<i64>) -> String {
+    crate::tui::rows::format_recency(now, Some(epoch))
+        .map_or_else(|| "—".to_string(), |age| format!("{age} ago"))
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -1660,6 +1692,7 @@ fn build_explorer(
     focused: &NodeId,
     direction: Direction,
     home: Option<&Path>,
+    now: Option<i64>,
 ) -> RelationshipExplorer {
     let mut groups_by_key: BTreeMap<(RelationKind, String), GroupBuilder> = BTreeMap::new();
     for link in &snapshot.candidate_links {
@@ -1713,7 +1746,7 @@ fn build_explorer(
 
     let groups = groups_by_key
         .into_values()
-        .map(|builder| finalize_group(snapshot, focused, direction, builder, home))
+        .map(|builder| finalize_group(snapshot, focused, direction, builder, home, now))
         .collect();
     RelationshipExplorer { groups }
 }
@@ -1736,6 +1769,7 @@ fn finalize_group(
     direction: Direction,
     builder: GroupBuilder,
     home: Option<&Path>,
+    now: Option<i64>,
 ) -> RelationshipGroup {
     let GroupBuilder {
         relation,
@@ -1813,7 +1847,7 @@ fn finalize_group(
                 |n| neighbor_display_label(n, home),
             );
             let preview = neighbor_node
-                .map(|n| core_fields(snapshot, n, home))
+                .map(|n| core_fields(snapshot, n, home, now))
                 .unwrap_or_default();
             RelationshipLink {
                 link_id: link.id.clone(),

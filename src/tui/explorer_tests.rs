@@ -362,11 +362,16 @@ fn unresolved_link(
     }
 }
 
+/// Fixed clock for explorer views: one hour after the fixtures'
+/// `1_700_000_000` session activity.
+const TEST_NOW: i64 = 1_700_003_600;
+
 fn build(snapshot: &GraphSnapshot, target: &NodeId, home: Option<&Path>) -> NodeView {
     build_node_view(ExplorerInputs {
         snapshot,
         target,
         home,
+        now: Some(TEST_NOW),
     })
     .expect("view exists")
 }
@@ -380,6 +385,7 @@ fn unknown_node_returns_none() {
             snapshot: &snapshot,
             target: &phantom,
             home: None,
+            now: Some(TEST_NOW),
         })
         .is_none()
     );
@@ -982,6 +988,58 @@ fn checkout_repo_branch_fork_have_top5_only() {
         labels,
         vec!["id", "common_dir", "remotes", "source_paths", "full_id"]
     );
+}
+
+#[test]
+fn detail_timestamps_render_as_relative_ages() {
+    let pr = ForgePrNode {
+        id: ForgePrId::new("github", "github.com", "owner", "repo", 7),
+        provider: "github".to_string(),
+        host: "github.com".to_string(),
+        owner: "owner".to_string(),
+        repo: "repo".to_string(),
+        number: 7,
+        state: Some("open".to_string()),
+        url: None,
+        updated_epoch: Some(TEST_NOW - 2 * 86_400),
+        is_draft: false,
+    };
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot
+        .nodes
+        .push(agent("codex", "s1", Some("/home/op/src/x"), None));
+    snapshot.nodes.push(mux("tmux", "editor", None));
+    snapshot.nodes.push(process("proc-1", 42, "codex"));
+    snapshot.nodes.push(GraphNode::ForgePr(pr.clone()));
+    let snapshot = resolve_snapshot(snapshot);
+    let field = |target: NodeId, label: &str| -> String {
+        let view = build(&snapshot, &target, None);
+        view.all_fields
+            .iter()
+            .find(|f| f.label == label)
+            .unwrap_or_else(|| panic!("{label} field"))
+            .value
+            .clone()
+    };
+
+    assert_eq!(
+        field(
+            NodeId::AgentSession(AgentSessionId::new("codex", "/state", "s1")),
+            "status"
+        ),
+        "active · last 1h ago"
+    );
+    let mux_id = NodeId::MuxSession(MuxSessionId::new("editor"));
+    assert_eq!(field(mux_id.clone(), "last_active"), "59m ago");
+    assert_eq!(field(mux_id, "created"), "11d ago");
+    assert_eq!(
+        field(
+            NodeId::RuntimeProcess(RuntimeProcessId::new("proc-1")),
+            "observed"
+        ),
+        "59m ago"
+    );
+    assert_eq!(field(NodeId::ForgePr(pr.id), "updated"), "2d ago");
 }
 
 #[test]

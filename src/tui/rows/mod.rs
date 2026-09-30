@@ -719,7 +719,9 @@ fn tree_home_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
-fn tree_current_unix_epoch() -> Option<i64> {
+/// Wall-clock unix epoch that view-model derivations (row trees, the
+/// node explorer) use for relative ages.
+pub(crate) fn tree_current_unix_epoch() -> Option<i64> {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -14311,7 +14311,11 @@ finally `REL-002b`.
   - Each sub-story was found on, and should be validated against,
     `tests/fixtures/showcase.json` with `conspectus tui --snapshot`. Land
     `REL-009a` alongside so the fixture reflects current discovery.
-  - [ ] `REL-003a` Render relative ages in the detail pane.
+  - [x] `REL-003a` Render relative ages in the detail pane.
+    - Outcome: `ExplorerInputs` gained `now`, threaded through the field
+      builders and `build_explorer`; `relative_epoch` now wraps
+      `format_recency` and renders `4m ago`. New test
+      `detail_timestamps_render_as_relative_ages` pins all five fields.
     - Symptom: session status reads `active · last 1781611140s`; mux
       `last_active` reads `1781610300s`.
     - Root cause: `relative_epoch` (`src/tui/explorer.rs:1638`) is a v1
