@@ -1069,7 +1069,10 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
         UnicodeWidthStr::width(text.as_str()) <= width,
         "row must fit the pane so it never wraps: `{text}`"
     );
-    assert!(text.contains('…'), "label should be middle-truncated: `{text}`");
+    assert!(
+        text.contains('…'),
+        "label should be middle-truncated: `{text}`"
+    );
     assert!(
         text.ends_with("bare-project"),
         "truncation keeps the basename: `{text}`"
@@ -3432,4 +3435,87 @@ fn right_pane_explorer_hides_scrollbar_when_related_list_fits() {
             buffer_to_string(&buffer)
         );
     }
+}
+
+#[test]
+fn mux_view_header_counts_sessions_in_visible_muxes() {
+    // REL-003e: the Mux view renders single agents inline in their mux
+    // row, so counting agent-session rows read `0/M sessions`.
+    use crate::model::{
+        Confidence, GraphLink, LinkEndpoint, LinkState, MuxSessionNode, Provenance, RelationKind,
+    };
+    let mux_id = MuxSessionId::new("work");
+    let codex = AgentSessionId::new("codex", "/state", "abc");
+    let mut snapshot = GraphSnapshot::empty();
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(codex.clone(), "codex".to_string())
+            .with_cwd("/home/op/src/proj".to_string()),
+    ));
+    snapshot.nodes.push(GraphNode::AgentSession(
+        AgentSessionNode::new(
+            AgentSessionId::new("claude-code", "/state", "xyz"),
+            "claude-code".to_string(),
+        )
+        .with_cwd("/home/op/src/other".to_string()),
+    ));
+    snapshot.nodes.push(GraphNode::MuxSession(
+        MuxSessionNode::new(mux_id.clone(), "tmux".to_string(), "work".to_string())
+            .with_cwd("/home/op/src/proj".to_string()),
+    ));
+    snapshot.candidate_links.push(GraphLink {
+        id: "session-mux".to_string(),
+        source: NodeId::AgentSession(codex),
+        target: LinkEndpoint::Node {
+            id: NodeId::MuxSession(mux_id),
+        },
+        relation: RelationKind::LinkedToMux,
+        provenance: Provenance::Discovered,
+        confidence: Confidence::Medium,
+        freshness: crate::model::Freshness::Fresh,
+        source_metadata: crate::model::SourceMetadata::default(),
+        state: LinkState::Active,
+    });
+    let snapshot = resolve_snapshot(snapshot);
+    let tree = crate::tui::rows::mux::build_mux_tree(crate::tui::rows::mux::MuxBuildInputs {
+        snapshot: &snapshot,
+        home: Some(std::path::Path::new("/home/op")),
+        now: None,
+        filter: RowFilter::default(),
+        grouping: crate::tui::MuxGrouping::Session,
+        sort: crate::tui::Sort::Hierarchy,
+        mux_recency: crate::tui::MuxRecency::default(),
+    });
+    let mut config = RunConfig::defaults();
+    config.default_view = View::Mux;
+    let mut app = App::new(config);
+    app.update(Msg::SetData {
+        snapshot: GraphDb::from_snapshot(&snapshot),
+        tree,
+        loaded_at_epoch: 1_700_000_000,
+        initial_selection_hint: None,
+    });
+    let area = Rect::new(0, 0, 120, 12);
+    let header = |app: &mut App| {
+        buffer_to_string(&render_to_buffer(app, area))
+            .lines()
+            .next()
+            .expect("header line")
+            .to_string()
+    };
+
+    let unfiltered = header(&mut app);
+    assert!(
+        unfiltered.contains("2 sessions") && !unfiltered.contains("0/2"),
+        "no filter: plain total: {unfiltered}"
+    );
+
+    app.update(Msg::SetFilter(RowFilter {
+        harness: Some(crate::filter::HarnessFilter::from_values(["codex"])),
+        ..RowFilter::default()
+    }));
+    let filtered = header(&mut app);
+    assert!(
+        filtered.contains("1/2 sessions"),
+        "filtered: sessions in visible muxes: {filtered}"
+    );
 }

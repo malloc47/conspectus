@@ -209,7 +209,7 @@ fn draw_header(app: &App, frame: &mut Frame<'_>, area: Rect) {
     // promoted to the lead position.
     let theme = app.theme();
     let (agents_total, mux_total) = snapshot_counts(app.graph_db());
-    let visible_sessions = visible_agent_session_count(app);
+    let visible_sessions = visible_agent_session_count(app, agents_total);
     let freshness = header_freshness(app);
     let session_cell = format_count_with_filtered(visible_sessions, agents_total);
 
@@ -318,14 +318,30 @@ fn format_count_with_filtered(visible: usize, total: usize) -> String {
     }
 }
 
-/// Count agent-session rows currently in the row tree. Mirrors the
-/// "filtered count" the operator sees in the left panel, since the
-/// row-tree builder is the authority on what's visible after
+/// Count the agent sessions the visible row tree accounts for, so the
+/// header's `N/M sessions` mirrors what the left panel shows after
 /// filters apply.
-fn visible_agent_session_count(app: &App) -> usize {
-    app.tree()
-        .rows
-        .iter()
+///
+/// The Mux view renders a single attributed agent inline in its mux
+/// row and only emits agent child rows for muxes with several agents,
+/// so counting `AgentSession` rows there would read `0/M`. Instead it
+/// reports the plain total when no filter narrows the view, and
+/// otherwise sums the sessions attributed to the visible mux rows.
+fn visible_agent_session_count(app: &App, total: usize) -> usize {
+    let rows = &app.tree().rows;
+    if app.active_view() == View::Mux {
+        if !app.filter().has_narrowing_predicates() {
+            return total;
+        }
+        return rows
+            .iter()
+            .filter_map(|row| match &row.kind {
+                RowKind::MuxSession(mux) => Some(mux.attached_count),
+                _ => None,
+            })
+            .sum();
+    }
+    rows.iter()
         .filter(|row| matches!(row.kind, RowKind::AgentSession(_)))
         .count()
 }

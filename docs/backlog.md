@@ -14312,7 +14312,7 @@ finally `REL-002b`.
       out and follow the links; CI is green on `main`.
     - Blockers: `REL-001a`, `REL-001b`, `REL-002a`, `REL-004a`,
       `REL-004b`, `REL-005a`..`REL-005d`, `REL-006`, `REL-008`.
-- [ ] `REL-003` Fix demo-visible TUI defects.
+- [x] `REL-003` Fix demo-visible TUI defects.
   - Each sub-story was found on, and should be validated against,
     `tests/fixtures/showcase.json` with `conspectus tui --snapshot`. Land
     `REL-009a` alongside so the fixture reflects current discovery.
@@ -14406,7 +14406,12 @@ finally `REL-002b`.
     - Tests: a snapshot at 120 columns asserting the label renders on the
       same line as its verb.
     - Blockers: none.
-  - [ ] `REL-003e` Fix the Mux view's session count.
+  - [x] `REL-003e` Fix the Mux view's session count.
+    - Outcome: the Mux view shows the plain total when no narrowing
+      filter is active and otherwise sums `attached_count` over the
+      visible mux rows (resolved attachments give each session at most
+      one mux). The showcase header reads `10 sessions · 4 mux`. Test:
+      `mux_view_header_counts_sessions_in_visible_muxes`.
     - Symptom: switching to the Mux view changes the header to
       `0/10 sessions`, which reads as "everything is filtered out".
     - Root cause: `visible_agent_session_count` (`src/tui/ui.rs:325`)
