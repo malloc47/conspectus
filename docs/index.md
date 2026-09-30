@@ -18,11 +18,6 @@ names, collision notes, and the rationale for choosing `conspectus`.
 Purpose: interim work tracker for turning the design and ADRs into phases,
 stories, blockers, and follow-up implementation tasks.
 
-## `docs/feature-summary.md`
-
-Purpose: current feature inventory for the CLI, discovery providers,
-declared-link flows, known limits, and planned next areas.
-
 ## `docs/operations.md`
 
 Purpose: user-facing runtime reference covering the environment variables

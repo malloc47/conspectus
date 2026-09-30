@@ -14541,7 +14541,9 @@ finally `REL-002b`.
       pending and stops at Phase 08.
     - Tests: docs-only; `git diff --check`.
     - Blockers: none.
-- [ ] `REL-006` Retire `docs/feature-summary.md`.
+- [x] `REL-006` Retire `docs/feature-summary.md`.
+  - Outcome: deleted per decision 5, along with its `docs/index.md`
+    entry. `README.md` is the feature inventory.
   - Scope: the Phase 6 snapshot says there is "no MCP server, daemon, or
     caching layer yet" and omits the TUI, pins, worktrees, the transcript
     viewer, and the exports. `README.md` now carries the feature
