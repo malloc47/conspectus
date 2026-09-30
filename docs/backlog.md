@@ -14386,7 +14386,12 @@ finally `REL-002b`.
       drift test (`src/tui/keybindings.rs`) requires every binding's
       `help_text` to appear in `keymap_sections`, so edit both together.
     - Blockers: none.
-  - [ ] `REL-003d` Keep related-row labels on their row.
+  - [x] `REL-003d` Keep related-row labels on their row.
+    - Outcome: `render_related_row` takes the content width and
+      middle-truncates the label to what fits (the edge-meta suffix gives
+      up its room below 8 cells). The showcase repro now reads
+      `checked out at ◇ /fixture/checko…s/bare-project` at 120 columns.
+      Test: `related_row_truncates_long_labels_instead_of_wrapping_them_away`.
     - Symptom: on the showcase `bare-project` repo at 120 columns the
       detail pane shows `checked out at ◇` with no label; at 170 columns
       the label `/fixture/checkouts/bare-project` appears.

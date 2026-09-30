@@ -2147,6 +2147,7 @@ fn render_explorer_lines(
                         highlight,
                         theme,
                         show_edge_meta,
+                        width,
                     ));
                     true
                 } else {
@@ -2177,6 +2178,7 @@ fn render_explorer_lines(
                         highlight,
                         theme,
                         show_edge_meta,
+                        width,
                     ));
                     true
                 } else {
@@ -2283,6 +2285,7 @@ fn render_validated_link_line(
     highlight: bool,
     theme: &Theme,
     show_edge_meta: bool,
+    width: usize,
 ) -> Line<'static> {
     render_related_row(
         group,
@@ -2290,6 +2293,7 @@ fn render_validated_link_line(
         highlight,
         theme,
         show_edge_meta,
+        width,
         "  ",
         None,
         Style::default()
@@ -2319,6 +2323,7 @@ fn render_other_link_line(
     highlight: bool,
     theme: &Theme,
     show_edge_meta: bool,
+    width: usize,
 ) -> Line<'static> {
     use crate::tui::explorer::EdgeStateLabel;
     let (indent, prefix_span, label_style) = match link.edge_state {
@@ -2339,12 +2344,22 @@ fn render_other_link_line(
         highlight,
         theme,
         show_edge_meta,
+        width,
         indent,
         prefix_span,
         label_style,
     )
 }
 
+/// Narrowest label budget worth middle-truncating to; below this the
+/// optional edge-meta suffix gives up its room instead.
+const MIN_RELATED_LABEL_WIDTH: usize = 8;
+
+/// Render one related-entities row. The neighbor label is
+/// middle-truncated to the space left after the indent, verb column,
+/// and kind glyph: the explorer paragraph word-wraps, so an unbroken
+/// path that overflows would otherwise drop onto the next line and
+/// leave this row visually empty.
 #[allow(clippy::too_many_arguments)]
 fn render_related_row(
     group: &crate::tui::explorer::RelationshipGroup,
@@ -2352,6 +2367,7 @@ fn render_related_row(
     highlight: bool,
     theme: &Theme,
     show_edge_meta: bool,
+    width: usize,
     indent: &str,
     prefix: Option<Span<'static>>,
     label_style_base: Style,
@@ -2368,6 +2384,28 @@ fn render_related_row(
     if highlight {
         kind_chip.style = kind_chip.style.add_modifier(Modifier::REVERSED);
     }
+    let edge_meta = show_edge_meta.then(|| {
+        format!(
+            "  · {} · {} · {}",
+            link.provenance.snake_case(),
+            link.confidence.snake_case(),
+            link.state.snake_case(),
+        )
+    });
+    let prefix_width = prefix
+        .as_ref()
+        .map_or(0, |p| UnicodeWidthStr::width(p.content.as_ref()));
+    // verb column + glyph + separating space
+    let fixed = prefix_width + UnicodeWidthStr::width(verb_text.as_str()) + 2;
+    let meta_width = edge_meta.as_deref().map_or(0, UnicodeWidthStr::width);
+    let with_meta = width.saturating_sub(fixed + meta_width);
+    let label_budget = if with_meta >= MIN_RELATED_LABEL_WIDTH {
+        with_meta
+    } else {
+        width.saturating_sub(fixed).max(1)
+    };
+    let label = truncate_to_width_middle(&link.neighbor_label, label_budget);
+
     let mut spans: Vec<Span<'static>> = Vec::new();
     if let Some(mut prefix) = prefix {
         if highlight {
@@ -2378,14 +2416,8 @@ fn render_related_row(
     spans.push(span!(row_style; "{verb_text}"));
     spans.push(kind_chip);
     spans.push(Span::raw(" "));
-    spans.push(span!(label_style; "{}", link.neighbor_label.clone()));
-    if show_edge_meta {
-        let trailing = format!(
-            "  · {} · {} · {}",
-            link.provenance.snake_case(),
-            link.confidence.snake_case(),
-            link.state.snake_case(),
-        );
+    spans.push(span!(label_style; "{label}"));
+    if let Some(trailing) = edge_meta {
         spans.push(span!(label_style; "{trailing}"));
     }
     Line::from(spans)

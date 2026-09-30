@@ -933,6 +933,7 @@ fn other_link_line_dispatches_per_edge_state() {
         false,
         &theme,
         false,
+        200,
     );
     let text: String = conflict_line
         .spans
@@ -959,6 +960,7 @@ fn other_link_line_dispatches_per_edge_state() {
         false,
         &theme,
         false,
+        200,
     );
     let alt_text: String = alt_line
         .spans
@@ -1014,7 +1016,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
         edge_state: EdgeStateLabel::Resolves,
         preview: Vec::<CoreField>::new(),
     };
-    let line = render_validated_link_line(&group, &link, false, &theme, true);
+    let line = render_validated_link_line(&group, &link, false, &theme, true, 200);
     let text: String = line
         .spans
         .iter()
@@ -1025,6 +1027,57 @@ fn validated_link_line_drops_the_legacy_winner_star() {
         !text.contains("★"),
         "validated row should no longer carry the `★` marker: `{text}`",
     );
+}
+
+#[test]
+fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
+    // REL-003d: the explorer paragraph word-wraps, so an unbreakable
+    // path wider than the pane used to drop onto the next line and
+    // leave `checked out at ◇` with no visible label.
+    use crate::model::{CheckoutId, Confidence, NodeId, Provenance, RelationKind, RepoId};
+    use crate::tui::explorer::{
+        CoreField, Direction, EdgeStateLabel, LinkStateLabel, RelationshipGroup, RelationshipLink,
+    };
+    let theme = Theme::default();
+    let group = RelationshipGroup {
+        direction: Direction::Downstream,
+        relation: RelationKind::BelongsToRepo,
+        neighbor_kind: "checkout".into(),
+        links: Vec::new(),
+        unresolved: Vec::new(),
+        ambiguous: false,
+        unresolved_count: 0,
+    };
+    let path = "/fixture/checkouts/a-rather-long-directory-name/bare-project";
+    let link = RelationshipLink {
+        link_id: "l".into(),
+        neighbor_id: NodeId::Checkout(CheckoutId::new(RepoId::new("/r.git"), path)),
+        neighbor_kind: "checkout",
+        neighbor_label: path.into(),
+        neighbor_short_id: "c".into(),
+        provenance: Provenance::Discovered,
+        confidence: Confidence::High,
+        state: LinkStateLabel::Active,
+        resolved_winner: true,
+        edge_state: EdgeStateLabel::Resolves,
+        preview: Vec::<CoreField>::new(),
+    };
+    let width = 56;
+    let line = render_validated_link_line(&group, &link, false, &theme, false, width);
+    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        UnicodeWidthStr::width(text.as_str()) <= width,
+        "row must fit the pane so it never wraps: `{text}`"
+    );
+    assert!(text.contains('…'), "label should be middle-truncated: `{text}`");
+    assert!(
+        text.ends_with("bare-project"),
+        "truncation keeps the basename: `{text}`"
+    );
+
+    let wide = render_validated_link_line(&group, &link, false, &theme, false, 200);
+    let wide_text: String = wide.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(wide_text.ends_with(path), "no truncation when it fits");
 }
 
 #[test]
