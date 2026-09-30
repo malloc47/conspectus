@@ -189,6 +189,9 @@ pub struct TuiConfig {
     /// from `[tui] narrow_layout_threshold`; defaults to
     /// [`DEFAULT_NARROW_LAYOUT_THRESHOLD`].
     pub narrow_layout_threshold: u16,
+    /// Starting view when neither `--view` nor a remembered last-used
+    /// view applies. Sourced from `[tui] default_view`.
+    pub default_view: Option<crate::tui::View>,
 }
 
 impl Default for TuiConfig {
@@ -200,6 +203,7 @@ impl Default for TuiConfig {
             theme: Theme::default(),
             show_harness_chips: false,
             narrow_layout_threshold: DEFAULT_NARROW_LAYOUT_THRESHOLD,
+            default_view: None,
         }
     }
 }
@@ -398,6 +402,9 @@ struct TuiFile {
     /// diagnostic instead of failing the whole file parse.
     #[serde(default)]
     narrow_layout_threshold: Option<i64>,
+    /// `[tui] default_view` — starting view name.
+    #[serde(default)]
+    default_view: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -892,6 +899,19 @@ fn merge_tui(
         }
     }
 
+    if let Some(raw) = file.default_view {
+        match parse_view_name(&raw) {
+            Some(view) => config.default_view = Some(view),
+            None => diagnostics.push(ConfigDiagnostic {
+                path: path.to_path_buf(),
+                message: format!(
+                    "invalid `[tui] default_view` value `{raw}`; \
+                     expected one of sessions, mux, union, prs, forks"
+                ),
+            }),
+        }
+    }
+
     if let Some(theme_file) = file.theme {
         merge_tui_theme(&mut config.theme, theme_file, path, diagnostics);
     }
@@ -1246,6 +1266,19 @@ fn env_path(key: &str) -> Option<PathBuf> {
     std::env::var_os(key)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+/// Parse a view name as `--view` spells it (case-insensitive).
+fn parse_view_name(raw: &str) -> Option<crate::tui::View> {
+    use crate::tui::View;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "sessions" => Some(View::Sessions),
+        "mux" => Some(View::Mux),
+        "union" => Some(View::Union),
+        "prs" => Some(View::Prs),
+        "forks" => Some(View::Forks),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

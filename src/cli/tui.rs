@@ -289,13 +289,18 @@ impl TuiArgs {
         let suppress_resume = self.no_resume_view || self.snapshot;
         #[cfg(not(feature = "snapshot"))]
         let suppress_resume = self.no_resume_view;
+        let configured_view = outcome
+            .config
+            .tui
+            .default_view
+            .unwrap_or(conspectus::tui::View::Sessions);
         let view = if let Some(flag) = self.view {
             view_from_flag(flag)
         } else if !suppress_resume {
             let cache = conspectus::tui_state::TuiStateCache::from_env();
-            conspectus::tui_state::read_last_view(&cache).unwrap_or(conspectus::tui::View::Sessions)
+            conspectus::tui_state::read_last_view(&cache).unwrap_or(configured_view)
         } else {
-            conspectus::tui::View::Sessions
+            configured_view
         };
 
         // Resolve initial filter: CLI flags win over config.

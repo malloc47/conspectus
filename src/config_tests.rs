@@ -1106,3 +1106,41 @@ fn worktree_teardown_confirm_invalid_diagnoses_and_keeps_default() {
         outcome.diagnostics,
     );
 }
+
+fn load_tui_config(body: &str) -> crate::config::LoadOutcome {
+    let temp = TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    fs::create_dir(&project).expect("create project dir");
+    write_file(&project.join(PROJECT_CONFIG_FILENAME), body);
+    ConfigLoader::new()
+        .with_home(temp.path())
+        .load_from(&project)
+}
+
+#[test]
+fn tui_default_view_is_unset_by_default() {
+    let outcome = load_tui_config("[tui]\n");
+    assert!(outcome.diagnostics.is_empty());
+    assert_eq!(outcome.config.tui.default_view, None);
+}
+
+#[test]
+fn tui_default_view_loads_from_config() {
+    let outcome = load_tui_config("[tui]\ndefault_view = \"Mux\"\n");
+    assert!(outcome.diagnostics.is_empty());
+    assert_eq!(outcome.config.tui.default_view, Some(crate::tui::View::Mux));
+}
+
+#[test]
+fn tui_default_view_unknown_value_diagnoses_and_stays_unset() {
+    let outcome = load_tui_config("[tui]\ndefault_view = \"graph\"\n");
+    assert_eq!(outcome.config.tui.default_view, None);
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("default_view")),
+        "{:?}",
+        outcome.diagnostics
+    );
+}
