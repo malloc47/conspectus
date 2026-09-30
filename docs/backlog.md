@@ -14504,7 +14504,12 @@ finally `REL-002b`.
       `docs/operations.md` (`:693`–`:725`). The bare `query` at `:603` needs
       a manual check.
     - Blockers: none.
-  - [ ] `REL-005b` Bring `docs/design.md` in line with the accepted ADRs.
+  - [x] `REL-005b` Bring `docs/design.md` in line with the accepted ADRs.
+    - Outcome: Decisions now name `graph.bin`; Migration Plan step 7 cites
+      ADR 0017 and step 6 reads "Conspectus side complete; Atelier side
+      pending"; `[theme]` / `[html.theme]` are marked planned. Per the
+      operator's call, the 168-line ADR digest became a pointer to a new
+      themed index, `docs/adr/README.md` (pulled forward from `REL-016`).
     - Scope:
       - Decisions says snapshots persist as versioned JSON under
         `$XDG_DATA_HOME/conspectus/snapshots/` (`:1356`); that was
@@ -14706,6 +14711,8 @@ finally `REL-002b`.
     section, or the script retires in favor of `conspectus hook write`.
   - Blockers: none.
 - [ ] `REL-016` Complete the documentation index and add an ADR index.
+  - Progress: the ADR index (`docs/adr/README.md`) landed with `REL-005b`;
+    the `docs/index.md` gaps remain.
   - Scope: `docs/index.md` omits `mux-link-resolution.md`,
     `provider-adapter-guide.md`, `comparison.md`, the three audits,
     `transcript-viewer-deps.md`, the `tui-*` reviews and mockups, and

@@ -955,10 +955,11 @@ and are filterable. Emission is deterministic so the GV-002 / GV-003
 snapshot tests are stable. A live HTML view hosted by the continuous
 server (ADR 0038) is an explicit follow-on left to a later ADR.
 
-Theming grows a shared `[theme]` table for the per-`NodeKind` colors
-and per-`Provenance` modifiers the visualizer needs and that the TUI
-does not yet expose. The existing `[tui.theme]` keys are unaffected;
-`[html.theme]` is the new surface-specific override.
+Theming is planned to grow a shared `[theme]` table for the per-`NodeKind`
+colors and per-`Provenance` modifiers the visualizer needs and that the TUI
+does not yet expose, with `[html.theme]` as the surface-specific override.
+Neither table is implemented yet: the HTML export uses its built-in palette,
+and `[tui.theme]` remains the only theming config.
 
 Cytoscape is the chosen v1 library but is treated as a swappable
 implementation detail. The Rust renderer emits a library-neutral JSON
@@ -1140,7 +1141,8 @@ migration helper and harmless if it fails.
    context, and fork lineage.
 5. Complete: add local/global declared-link stores plus manual relationship
    commands.
-6. In progress: have Atelier delegate or deprecate overlapping commands:
+6. Conspectus side complete; Atelier side pending: have Atelier delegate or
+   deprecate overlapping commands:
    - `atelier session list`
    - `atelier mux status`
    - forge-related status surfaces
@@ -1148,182 +1150,16 @@ migration helper and harmless if it fails.
    The Conspectus side is tracked by the Phase 6 backlog and
    `docs/atelier-migration.md`; the Atelier side is tracked in Atelier commit
    `b765c16`.
-7. Pending Phase 6 decision: reassess whether the standalone binary should stay
-   in this repository or be extracted once the shared library boundary
-   stabilizes. ADR 0015 defines the current API contract and ADR 0016 defines
-   the distribution policy that any extraction must preserve.
+7. Settled by ADR 0017: the standalone binary stays in this repository. ADR
+   0015 defines the current API contract and ADR 0016 defines the
+   distribution policy that any later extraction must preserve.
 
 ## Decisions
 
 - Name: `conspectus`.
-- Accepted ADRs:
-  - ADR 0001: use structured provider-aware local node identities.
-  - ADR 0002: collect all relationship evidence as `GraphLink` candidates and
-    derive typed resolved relationships from them.
-  - ADR 0003: use one polymorphic `Fork` node instead of multiple fork node
-    classes.
-  - ADR 0004: represent fork context effects with provider-neutral relation
-    kinds such as `created_checkout`, `referenced_checkout`, `created_branch`,
-    `associated_branch`, `rooted_at_path`, and `parent_fork`.
-  - ADR 0005: preserve unresolved session-lineage endpoint evidence without
-    creating placeholder `AgentSession` nodes.
-  - ADR 0018: allow intra-harness `parent_session` / `child_session` links to
-    attach directly between two `AgentSession` nodes, and standardize a
-    `lineage_kind` operation vocabulary separate from `lineage_fidelity`.
-  - ADR 0006: preserve many mux/session link candidates and let projections
-    choose preferred links while exposing ambiguity.
-  - ADR 0015: stabilize the Conspectus library API surface and add a curated
-    facade for consumers.
-  - ADR 0016: prefer crates.io releases for steady-state distribution, allow
-    pinned git revisions for Atelier migration, and keep path dependencies
-    local-development only.
-  - ADR 0026: use `Checkout` as the provider-neutral model term for concrete
-    editable repo working trees.
-  - ADR 0027: infer generic workspaces only from explicit scan roots with two
-    or more immediate checkout children, and let provider-specific workspace
-    metadata take precedence over generic inference at the same root.
-  - ADR 0028: use opt-in hook sidecar records for non-mutating current-session
-    mux attribution, and reject terminal injection as a discovery strategy.
-  - ADR 0029: store user-chosen session display names as a Conspectus-owned
-    alias overlay in a sibling `[[aliases]]` TOML table; never mutate
-    harness-native titles, never store mux aliases (lockstep mux renames
-    mutate the tmux native name directly), and apply
-    `alias > title > id-suffix` precedence at projection time.
-  - ADR 0030: adopt `tui-input` as the shared TUI text-input primitive
-    underwriting the rename overlay, the search overlay, and the inline
-    mux-picker; lock `Enter` confirm / `Esc` cancel semantics and centered-
-    modal placement.
-  - ADR 0031: layer structured filters with `/` fuzzy search, scope
-    filter / grouping / selection / expanded state per view (sort stays
-    global), give each view its own grouping enum, share a single
-    `RowFilter` predicate between CLI `table` and the TUI, and front the
-    capability with a discoverable Controls overlay before accelerator
-    keys.
-  - ADR 0032: centralize TUI styling in a single `Theme` value, expose it
-    through a flat `[tui.theme]` config table with named-ANSI / 256-color /
-    `#RRGGBB` / modifier-suffix grammar, and treat parse errors as
-    soft-failure warnings that fall back to defaults without aborting the
-    TUI.
-  - ADR 0033: structure the right-panel detail view as typed sections with
-    omit-when-placeholder-only suppression, right-anchored labeled
-    dividers, and per-`(section, label)` colorization dispatched against
-    the ADR 0032 `Theme`. The current target refines this into a focused
-    node inspector plus relationship explorer: relationship groups expand
-    compact edge rows, while graph depth is navigated through explicit
-    drilldown and breadcrumbs instead of recursive inline child details.
-  - ADR 0050: ship `conspectus graph --format {dot,html}` alongside the
-    existing JSON, with the HTML export inlining a vendored Cytoscape.js
-    bundle into a single self-contained file. Visual encoding is
-    provider-neutral and keyed on `NodeKind` / `RelationKind` /
-    `Provenance`. Candidate and resolved graphs are both visible (toggle
-    in HTML, distinct styling in DOT). `RuntimeProcess` and
-    unresolved-endpoint stubs render by default and are filterable.
-    Theming grows a shared `[theme]` table with `[tui.theme]` /
-    `[html.theme]` overrides. A live server-hosted HTML view is left to
-    a follow-up ADR.
-  - ADR 0057 (Accepted): add **Session Pins** as a third sibling
-    TOML write surface (`[[pins.entries]]`) alongside `[declared]`
-    and `[aliases]`. A pin is a user-authored
-    `(harness, cwd, display_name, mux)` declaration that renders as a
-    first-class row whether or not a live session realizes it, binds
-    1:1 on the mux native name through the existing mux-to-agent-
-    session attribution pipeline (ADR 0006 / ADR 0028 / ADR 0046 /
-    ADR 0047 / ADR 0048) — cwd is a launch parameter and drift
-    sanity check, not the discriminator — and launches via
-    `TmuxRunner::new_session` (or `send_keys` into an existing stale
-    mux) plus the existing P8-010 attach exec-replace. `display_name`
-    doubles as the bound session's alias overlay (ADR 0029
-    precedence) and as the initial tmux name. The binding is
-    recomputed each discovery pass rather than persisted. Per-harness
-    default launch argv lives on `HarnessAdapter::launch_argv`.
-    Operator escape hatches (`pin bind` / `pin rebind` / `pin adopt`)
-    handle ambiguity, external renames, and migration from existing
-    tmux sessions.
-  - ADR 0084 (Accepted): project effective session pins into the graph
-    as first-class `PinNode`s with stable `pin:<id>` identities,
-    store-lineage fields, and pin-specific relation kinds
-    (`pin_targets_mux`, `pin_realized_by_session`). The TOML pin entry
-    remains authoritative; graph nodes and binding fields are rebuilt
-    from the pin sidecar and resolver output.
-  - ADR 0085 (Accepted): the TUI is a single-store Elm/MVU loop with
-    effects-as-data, a modal stack, and derived view-models. One
-    `Msg`, one `update(&mut App, Msg) -> Vec<Effect>`, one runtime
-    that owns the terminal / mux / process / store effects, and a
-    `Vec<Modal>` with a shared `Overlay` trait. `RowTree` /
-    `NodeDetail` / `ExplorerState` are pure derivations of
-    `(snapshot, view, grouping, filter, sort, now, selection)`;
-    projection changes never trigger discovery. `RunConfig` is
-    initial-values-only; per-view UI state lives on `App`.
-    Immediate-mode ratatui rendering is strictly `&App → pixels`
-    (scroll reconciliation moves into the reducer). Non-goals: no
-    tui-realm or component framework, no retained-mode rewrite, no
-    async reducer, no actor-per-pane. Governs the H-TUI-001..005
-    convergence work and every future TUI feature.
-  - ADR 0086 (Accepted): payload access follows a three-tier
-    invariant graded by reader purpose. Tier 1 (attribution and
-    identity readers): never read payload. Tier 2 (operator-
-    facing content features like the sessions preview column and
-    the native transcript viewer): may read payload subject to
-    capping / normalization / an operator gesture and an ADR
-    entry documenting the surface. Tier 3 (hook sidecars and
-    rebuildable state records): stay payload-free. Supersedes
-    the earlier "never selects privacy-sensitive payload
-    columns" wording in ADR 0048, which was already narrower
-    than the codebase (opencode preview + native viewer are
-    compliant Tier 2 surfaces).
-  - ADR 0087 (Accepted): the mutation envelope. Read-only stays
-    the default for discovery and orchestration; sanctioned
-    writes are (1) user-intent TOML stores under Conspectus's
-    ownership (declared / aliases / pins per ADR 0014 / 0029 /
-    0057), (2) rebuildable observation sidecars under
-    `$XDG_STATE_HOME/conspectus/` (hook sidecars per ADR 0028,
-    pin-binding sidecars per ADR 0058, snapshot cache per
-    ADR 0083), (3) operator-initiated mux lifecycle (tmux
-    rename / new-session / attach and the narrow pin-launch
-    `send-keys` on Conspectus-constructed argv per ADR 0029 /
-    0057), and (4) Conspectus-owned subprocess launches (resume
-    spawn, external viewer fallback, pin launch re-exec).
-    Prohibitions are absolute: no writes to harness-native
-    state, no `send-keys` into a live agent pane (ADR 0028), no
-    payload persistence (ADR 0086), no shared/system locations,
-    no background mutation, no git-state mutation, no hook
-    bypass. Any new write path must land in one of the
-    sanctioned categories or supersede this ADR. Replaces the
-    "start read-only unless a task explicitly calls for
-    persistence or link CRUD" wording in CLAUDE.md.
-  - ADR 0088 (Accepted): the provider descriptor registry.
-    `discovery/providers.rs` owns a single
-    `&[ProviderDescriptor]` table naming every discovery
-    adapter and mutator pass; the freshness gate
-    (`cache::provider_class`), the mutator list
-    (`cache::mutator_providers`), and future H-EXT surfaces
-    derive from it. Descriptor stays metadata-only for
-    H-EXT-001 (`key` + `kind` where `kind` is `Heavy(class)`
-    or `Mutator`); per-entity constructor callbacks and
-    env-var opt-out plumbing land in H-EXT-002/004/008/012/014
-    when the adapter trait shape per family is decided.
-    `ProviderClass` moves from `cache` to `providers`
-    (semantic fit — the class is a provider attribute);
-    `cache` re-exports it so existing call sites compile
-    unchanged.
-  - ADR 0089 (Accepted): the mux-backend trait. `TmuxRunner`
-    renames to `MuxBackend`; every backend implementation
-    (SystemTmux today, zellij next per H-EXT-010) returns a
-    `backend_key()` string that pin entries
-    (`mux.backend`), `MuxSessionNode.backend`, and the
-    `LocalDiscoveryConfig::mux_backend_by_key` /
-    `take_mux_backend_by_key` accessors all key off.
-    `LocalDiscoveryConfig.tmux_runner: Option<Box<...>>` becomes
-    `mux_backends: Vec<Box<dyn MuxBackend>>` so a second
-    backend is `.with_mux_backend(...)` away. Capability
-    methods keep their `Unsupported` defaults; H-EXT-009 will
-    migrate the pre-existing `backend == "tmux"` string checks
-    in `src/tui/actions.rs` and `src/pins.rs` to
-    outcome-based capability gating. Outcome enum names,
-    `TmuxDiscovery` wrapper, and `socket_name → namespace`
-    generalization stay put for now and land alongside
-    H-EXT-010. Supersedes tmux-specific launch prose in
-    ADR 0057 (annotation follow-up).
+- Accepted ADRs: [`docs/adr/README.md`](adr/README.md) indexes every ADR by
+  theme with its status. The sections above summarize the decisions that shape
+  the current model; the ADRs carry the rationale.
 - Node identity:
   - repos use canonical git common dir for local discovery
   - checkouts use repo identity plus canonical checkout root
@@ -1354,10 +1190,10 @@ migration helper and harmless if it fails.
 - Conspectus supports an opt-in continuous server mode that maintains a live
   graph via per-provider interval-based refreshes. The one-shot CLI remains
   the default and works without a server.
-- Graph snapshots persist as versioned JSON under
-  `$XDG_DATA_HOME/conspectus/snapshots/`. Partial eviction operates at
-  provider granularity using node/link provenance and per-provider freshness
-  timestamps; both the server and the one-shot CLI use the same format.
+- The resolved graph persists as a single zero-copy rkyv archive at
+  `$XDG_DATA_HOME/conspectus/graph.bin` (ADRs 0082 and 0083). Partial
+  eviction operates at provider granularity using node/link provenance and
+  per-provider freshness timestamps.
 - Hook sidecar records are local rebuildable observations written through
   `conspectus hook write`. When the daemon is available, hook evidence is
   ingested into `SnapshotState` and persisted through `graph.bin`. When no
