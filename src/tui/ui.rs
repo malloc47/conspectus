@@ -202,9 +202,7 @@ fn draw_pins_overlay(app: &App, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(widget, area);
 }
 
-// -----------------------------------------------------------------------------
-// Header / status bar
-// -----------------------------------------------------------------------------
+// Render clock: wall time in production, a settable clock in tests.
 
 #[cfg(not(test))]
 fn current_unix_epoch_for_render() -> i64 {
@@ -262,10 +260,6 @@ fn focus_marker_span(app: &App, panel: Focus) -> Span<'static> {
     let glyph = if focused { "▸ " } else { "  " };
     span!(Style::default().fg(app.theme().panel_focus_accent); "{glyph}")
 }
-
-// -----------------------------------------------------------------------------
-// Right panel
-// -----------------------------------------------------------------------------
 
 /// Sum of post-wrap terminal rows the given lines occupy when
 /// rendered into a paragraph `width` wide. Mirrors the per-line
