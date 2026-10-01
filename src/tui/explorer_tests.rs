@@ -401,7 +401,7 @@ fn sparse_agent_session_renders_core_and_empty_explorers() {
     let target = NodeId::AgentSession(AgentSessionId::new("claude-code", "/state", "abc"));
 
     let view = build(&snapshot, &target, Some(home().as_path()));
-    assert_eq!(view.kind_label, "agent_session");
+    assert_eq!(view.kind, crate::model::NodeKind::AgentSession);
     assert_eq!(view.title_line, "claude-code:abc");
     let labels: Vec<&str> = view.core_fields.iter().map(|f| f.label).collect();
     assert_eq!(labels, vec!["id", "harness", "alias", "cwd", "status"]);
@@ -982,7 +982,7 @@ fn checkout_repo_branch_fork_have_top5_only() {
     let snapshot = resolve_snapshot(snapshot);
     let target = NodeId::Repo(RepoId::new("/srv/git/conspectus.git"));
     let view = build(&snapshot, &target, Some(home().as_path()));
-    assert_eq!(view.kind_label, "repo");
+    assert_eq!(view.kind, crate::model::NodeKind::Repo);
     let labels: Vec<&str> = view.core_fields.iter().map(|f| f.label).collect();
     assert_eq!(
         labels,
@@ -1317,17 +1317,17 @@ fn cwd_owner_kind_resolves_to_checkout_workspace_then_repo() {
     // Checkout wins over Repo for the same path.
     assert_eq!(
         cwd_owner_kind(&snapshot, "/home/op/src/conspectus"),
-        Some("checkout")
+        Some(crate::model::NodeKind::Checkout)
     );
     // Workspace beats Repo when no checkout matches.
     assert_eq!(
         cwd_owner_kind(&snapshot, "/home/op/atelier/demo"),
-        Some("workspace")
+        Some(crate::model::NodeKind::Workspace)
     );
     // Repo by common_dir.
     assert_eq!(
         cwd_owner_kind(&snapshot, "/srv/git/conspectus.git"),
-        Some("repo")
+        Some(crate::model::NodeKind::Repo)
     );
     // No match anywhere → bare cwd.
     assert_eq!(cwd_owner_kind(&snapshot, "/tmp/scratch"), None);
@@ -1368,7 +1368,7 @@ fn agent_session_cwd_field_carries_kind_chip_when_resolved() {
         .iter()
         .find(|f| f.label == "cwd")
         .expect("cwd field present");
-    assert_eq!(cwd.kind_chip, Some("checkout"));
+    assert_eq!(cwd.kind_chip, Some(crate::model::NodeKind::Checkout));
 }
 
 #[test]

@@ -26,8 +26,8 @@ use std::path::Path;
 
 use crate::model::{
     AgentSessionNode, CheckoutId, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, MuxSessionNode, NodeId, Provenance, RelationKind, RuntimeProcessId,
-    RuntimeProcessNode, RuntimeProcessRole, SessionKind, SourceMetadata,
+    LinkEndpoint, LinkState, MatchKind, MuxSessionNode, NodeId, Provenance, RelationKind,
+    RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SessionKind, SourceMetadata,
 };
 
 const ADAPTER_NAME: &str = crate::discovery::providers::CROSS_LINK;
@@ -409,7 +409,7 @@ fn mux_match(
         return Some(linked_to_mux(
             session,
             mux,
-            "exact_cwd_match",
+            MatchKind::ExactCwdMatch,
             Provenance::StrongDiscovered,
             Confidence::High,
         ));
@@ -419,7 +419,7 @@ fn mux_match(
         return Some(linked_to_mux(
             session,
             mux,
-            "cwd_prefix_match",
+            MatchKind::CwdPrefixMatch,
             Provenance::Discovered,
             Confidence::Medium,
         ));
@@ -436,7 +436,7 @@ fn process_linked_to_mux(
     let mut link = linked_to_mux(
         session,
         mux,
-        crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH,
+        MatchKind::ActivePaneProcessMatch,
         Provenance::StrongDiscovered,
         Confidence::High,
     );
@@ -493,7 +493,7 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
     let mut fields = crate::model::Metadata::new();
     fields.insert(
         crate::model::source_field::MATCH_KIND.to_string(),
-        serde_json::Value::String(crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH.to_string()),
+        serde_json::Value::String(MatchKind::ActivePaneProcessMatch.to_string()),
     );
     insert_process_fields(&mut fields, evidence);
 
@@ -543,7 +543,7 @@ fn process_unresolved_link(mux: &MuxSessionNode, evidence: &ProcessPaneEvidence)
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some(crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH.to_string()),
+            evidence: Some(MatchKind::ActivePaneProcessMatch.to_string()),
             fields,
             freshness_epoch: None,
         },
@@ -585,7 +585,7 @@ fn runtime_process_graph(
                     id: process_id.clone(),
                 },
                 RelationKind::MuxContainsProcess,
-                "active_pane_process_observation",
+                MatchKind::ActivePaneProcessObservation,
                 Confidence::High,
                 evidence,
             );
@@ -615,7 +615,7 @@ fn runtime_process_graph(
                         },
                     },
                     RelationKind::ProcessCandidatesSession,
-                    crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH,
+                    MatchKind::ActivePaneProcessMatch,
                     Confidence::Low,
                     evidence,
                 );
@@ -643,7 +643,7 @@ fn runtime_process_graph(
                     process_id.clone(),
                     LinkEndpoint::Node { id: target },
                     relation,
-                    crate::resolve::evidence::ACTIVE_PANE_PROCESS_MATCH,
+                    MatchKind::ActivePaneProcessMatch,
                     confidence,
                     evidence,
                 );
@@ -688,7 +688,7 @@ fn runtime_process_link(
     source: NodeId,
     target: LinkEndpoint,
     relation: RelationKind,
-    evidence_label: &'static str,
+    evidence_label: MatchKind,
     confidence: Confidence,
     evidence: &ProcessPaneEvidence,
 ) -> GraphLink {
@@ -746,7 +746,7 @@ fn fd_runtime_process_graph(
         let Some(evidence) = active_pane_evidence(mux, fd_reader) else {
             continue;
         };
-        if evidence.link_evidence == crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH {
+        if evidence.link_evidence == MatchKind::ActivePaneCommandSessionMatch {
             continue;
         }
 
@@ -964,8 +964,7 @@ fn active_mux_sessions(
                 .collect();
 
             if direct_matches.is_empty()
-                && evidence.link_evidence
-                    != crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH
+                && evidence.link_evidence != MatchKind::ActivePaneCommandSessionMatch
             {
                 matches.unresolved_identity = true;
             } else if !direct_matches.is_empty() {
@@ -1001,8 +1000,7 @@ fn active_mux_sessions(
                     sessions: matched_sessions,
                     evidence: evidence.link_evidence,
                 });
-                if evidence.link_evidence
-                    == crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH
+                if evidence.link_evidence == MatchKind::ActivePaneCommandSessionMatch
                     && let Some(activity_match) = &activity_match
                     && most_recent_epoch(&activity_match.sessions, sessions)
                         > most_recent_epoch(
@@ -1130,7 +1128,7 @@ fn session_file_activity_match(
 
     (!sessions.is_empty()).then_some(ActiveMuxSessionMatch {
         sessions,
-        evidence: "session_file_activity_match",
+        evidence: MatchKind::SessionFileActivityMatch,
     })
 }
 
@@ -1203,7 +1201,7 @@ impl ActiveMuxSessionMatches {
 #[derive(Clone)]
 struct ActiveMuxSessionMatch {
     sessions: BTreeSet<crate::model::AgentSessionId>,
-    evidence: &'static str,
+    evidence: MatchKind,
 }
 
 impl ActiveMuxSessionMatch {
@@ -1496,7 +1494,7 @@ fn process_command_harnesses(command: &str) -> BTreeSet<String> {
 struct ActivePaneEvidence {
     session_keys: BTreeSet<String>,
     harnesses: BTreeSet<String>,
-    link_evidence: &'static str,
+    link_evidence: MatchKind,
 }
 
 impl ActivePaneEvidence {
@@ -1533,7 +1531,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: fd_evidence.session_keys,
             harnesses: fd_harnesses,
-            link_evidence: crate::resolve::evidence::ACTIVE_PANE_FD_SESSION_MATCH,
+            link_evidence: MatchKind::ActivePaneFdSessionMatch,
         });
     }
 
@@ -1548,7 +1546,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: intersection,
             harnesses,
-            link_evidence: crate::resolve::evidence::ACTIVE_PANE_FD_COMMAND_SESSION_MATCH,
+            link_evidence: MatchKind::ActivePaneFdCommandSessionMatch,
         });
     }
 
@@ -1558,7 +1556,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: command_evidence.session_keys,
             harnesses,
-            link_evidence: crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH,
+            link_evidence: MatchKind::ActivePaneCommandSessionMatch,
         });
     }
 
@@ -1566,7 +1564,7 @@ fn active_pane_evidence_from_sources(
         return Some(ActivePaneEvidence {
             session_keys: fd_evidence.session_keys,
             harnesses: fd_harnesses,
-            link_evidence: crate::resolve::evidence::ACTIVE_PANE_FD_SESSION_MATCH,
+            link_evidence: MatchKind::ActivePaneFdSessionMatch,
         });
     }
 
@@ -1754,7 +1752,7 @@ fn parent_session_keys_by_child(
 fn linked_to_mux(
     session: &AgentSessionNode,
     mux: &MuxSessionNode,
-    evidence: &str,
+    evidence: MatchKind,
     provenance: Provenance,
     confidence: Confidence,
 ) -> GraphLink {

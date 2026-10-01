@@ -27,7 +27,7 @@ use std::path::Path;
 
 use crate::model::{
     AgentSessionNode, BranchNode, CheckoutNode, Confidence, Diagnostic, ForgePrNode, ForkNode,
-    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId,
+    GraphLink, GraphNode, GraphSnapshot, LinkEndpoint, LinkState, MuxSessionNode, NodeId, NodeKind,
     PinBinding, PinCandidate, PinNode, Provenance, RelationKind, RepoNode, ResolvedRelationship,
     RuntimeProcessNode, RuntimeProcessRole, WorkspaceNode, WorktreeKind, WorktreeMeta,
 };
@@ -51,7 +51,7 @@ pub fn build_node_detail(inputs: DetailInputs<'_>) -> Option<NodeDetail> {
     let node = inputs.snapshot.find_node(inputs.target)?;
     let id = node.id();
 
-    let kind_label = kind_label(node);
+    let kind = NodeKind::from(node);
     let title_line = title_line(node);
     let short_id = node_short_id(&id);
     let header_fields = header_fields(inputs.snapshot, node, inputs.home);
@@ -60,7 +60,7 @@ pub fn build_node_detail(inputs: DetailInputs<'_>) -> Option<NodeDetail> {
     let diagnostics = diagnostic_summaries(inputs.snapshot, &id);
 
     Some(NodeDetail {
-        kind_label,
+        kind,
         title_line,
         short_id,
         full_id: id,
@@ -78,9 +78,7 @@ pub fn build_node_detail(inputs: DetailInputs<'_>) -> Option<NodeDetail> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeDetail {
-    /// `agent_session`, `mux_session`, `repo`, etc. Matches the
-    /// snake-case label `node show` already prints.
-    pub kind_label: &'static str,
+    pub kind: NodeKind,
     /// Compact identity label for callers that need a selected-node
     /// display name outside the field list.
     pub title_line: String,
@@ -111,7 +109,7 @@ impl NodeDetail {
     /// no-annotation placeholder — operators see a shorter pane
     /// rather than rows of dashes.
     pub fn sections(&self) -> Vec<DetailSection> {
-        group_fields_into_sections(self.kind_label, &self.header_fields)
+        group_fields_into_sections(self.kind, &self.header_fields)
     }
 }
 
@@ -119,18 +117,18 @@ impl NodeDetail {
 /// Shared between [`NodeDetail::sections`] and the inline expansion
 /// path so a linked entity's expanded view renders through the same
 /// section structure as its standalone detail.
-pub fn group_fields_into_sections(kind_label: &str, fields: &[HeaderField]) -> Vec<DetailSection> {
+pub fn group_fields_into_sections(kind: NodeKind, fields: &[HeaderField]) -> Vec<DetailSection> {
     let mut grouped: std::collections::BTreeMap<SectionKind, Vec<HeaderField>> =
         std::collections::BTreeMap::new();
     for field in fields {
-        let kind = section_for(kind_label, field.label);
-        grouped.entry(kind).or_default().push(field.clone());
+        let section = section_for(kind, field.label);
+        grouped.entry(section).or_default().push(field.clone());
     }
-    let order = section_order(kind_label);
+    let order = section_order(kind);
     order
         .iter()
-        .filter_map(|kind| {
-            let fields = grouped.remove(kind)?;
+        .filter_map(|section| {
+            let fields = grouped.remove(section)?;
             let all_blank_placeholders = fields
                 .iter()
                 .all(|f| f.placeholder && f.annotation.is_none());
@@ -138,7 +136,7 @@ pub fn group_fields_into_sections(kind_label: &str, fields: &[HeaderField]) -> V
                 return None;
             }
             Some(DetailSection {
-                kind: *kind,
+                kind: *section,
                 fields,
             })
         })
@@ -161,12 +159,12 @@ pub struct HeaderField {
     /// Node referenced by this field, when the row is a compact
     /// linked-entity summary that can expand in place.
     pub target: Option<NodeId>,
-    /// `kind_label` of [`Self::target`] when the field carries an
+    /// Kind of [`Self::target`] when the field carries an
     /// expanded sub-detail. The renderer uses this to route
     /// [`Self::expanded_fields`] into the same section grouping the
     /// standalone detail of the target would produce, so the
     /// expansion matches the normal detail view byte-for-byte.
-    pub expanded_kind_label: Option<&'static str>,
+    pub expanded_kind: Option<NodeKind>,
     /// One-level detail rows for [`Self::target`]. These are
     /// populated eagerly while the builder has the source snapshot;
     /// the renderer decides whether to show them.
@@ -215,40 +213,44 @@ pub struct DetailSection {
     pub fields: Vec<HeaderField>,
 }
 
-/// Map a `(kind_label, field_label)` pair to its owning section.
+/// Map a `(node kind, field_label)` pair to its owning section.
 /// Defaults to [`SectionKind::Session`] so any field added without
 /// an explicit routing still lands somewhere visible — the
 /// suppression rule then hides empty sections.
-fn section_for(kind_label: &str, field_label: &str) -> SectionKind {
+fn section_for(kind: NodeKind, field_label: &str) -> SectionKind {
     use SectionKind::*;
-    match (kind_label, field_label) {
-        ("agent_session", "mux") => Mux,
-        ("agent_session", "process") => Process,
-        ("agent_session", "pr") => Pr,
-        ("agent_session", "lineage") => Lineage,
-        ("pin", "store" | "source") => Lineage,
-        ("pin", "mux" | "binding") => Mux,
-        ("pin", "session") => Session,
-        ("mux_session", "name" | "backend" | "cwd" | "attached" | "pin") => Mux,
-        ("mux_session", "session" | "id" | "harness" | "alias" | "title") => Session,
-        ("mux_session", "process") => Process,
-        ("runtime_process", "mux") => Mux,
-        ("runtime_process", "session") => Session,
-        ("runtime_process", _) => Process,
-        ("forge_pr", _) => Pr,
-        ("fork", _) => Lineage,
+    match (kind, field_label) {
+        (NodeKind::AgentSession, "mux") => Mux,
+        (NodeKind::AgentSession, "process") => Process,
+        (NodeKind::AgentSession, "pr") => Pr,
+        (NodeKind::AgentSession, "lineage") => Lineage,
+        (NodeKind::Pin, "store" | "source") => Lineage,
+        (NodeKind::Pin, "mux" | "binding") => Mux,
+        (NodeKind::Pin, "session") => Session,
+        (NodeKind::MuxSession, "name" | "backend" | "cwd" | "attached" | "pin") => Mux,
+        (NodeKind::MuxSession, "session" | "id" | "harness" | "alias" | "title") => Session,
+        (NodeKind::MuxSession, "process") => Process,
+        (NodeKind::RuntimeProcess, "mux") => Mux,
+        (NodeKind::RuntimeProcess, "session") => Session,
+        (NodeKind::RuntimeProcess, _) => Process,
+        (NodeKind::ForgePr, _) => Pr,
+        (NodeKind::Fork, _) => Lineage,
         // ADR 0071: scoped ambiguous-mux roll-up on group details.
-        ("workspace" | "repo" | "checkout", "ambiguous_mux") => AmbiguousMux,
+        (NodeKind::Workspace | NodeKind::Repo | NodeKind::Checkout, "ambiguous_mux") => {
+            AmbiguousMux
+        }
         _ => Session,
     }
 }
 
-fn section_order(kind_label: &str) -> &'static [SectionKind] {
+fn section_order(kind: NodeKind) -> &'static [SectionKind] {
     use SectionKind::*;
-    match kind_label {
-        "mux_session" => &[Mux, Process, Session, Pr, Lineage],
-        "runtime_process" => &[Process, Mux, Session, Pr, Lineage],
-        "workspace" | "repo" | "checkout" => &[Session, AmbiguousMux, Process, Mux, Pr, Lineage],
+    match kind {
+        NodeKind::MuxSession => &[Mux, Process, Session, Pr, Lineage],
+        NodeKind::RuntimeProcess => &[Process, Mux, Session, Pr, Lineage],
+        NodeKind::Workspace | NodeKind::Repo | NodeKind::Checkout => {
+            &[Session, AmbiguousMux, Process, Mux, Pr, Lineage]
+        }
         _ => &[Session, Process, Mux, Pr, Lineage],
     }
 }
@@ -314,21 +316,6 @@ pub enum DiagnosticSummary {
 // -----------------------------------------------------------------------------
 // Per-kind header builders
 // -----------------------------------------------------------------------------
-
-fn kind_label(node: &GraphNode) -> &'static str {
-    match node {
-        GraphNode::Repo(_) => "repo",
-        GraphNode::Checkout(_) => "checkout",
-        GraphNode::Workspace(_) => "workspace",
-        GraphNode::AgentSession(_) => "agent_session",
-        GraphNode::MuxSession(_) => "mux_session",
-        GraphNode::Pin(_) => "pin",
-        GraphNode::RuntimeProcess(_) => "runtime_process",
-        GraphNode::Branch(_) => "branch",
-        GraphNode::Fork(_) => "fork",
-        GraphNode::ForgePr(_) => "forge_pr",
-    }
-}
 
 fn title_line(node: &GraphNode) -> String {
     match node {
@@ -1036,7 +1023,7 @@ fn plain(label: &'static str, value: String) -> HeaderField {
         placeholder: false,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     }
 }
@@ -1048,7 +1035,7 @@ fn placeholder(label: &'static str, value: &str) -> HeaderField {
         placeholder: true,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     }
 }
@@ -1060,7 +1047,7 @@ fn linked(label: &'static str, value: String, target: Option<NodeId>) -> HeaderF
         placeholder: false,
         annotation: None,
         target,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     }
 }
@@ -1077,14 +1064,14 @@ fn attach_linked_details(
         let Some(node) = snapshot.find_node(target) else {
             continue;
         };
-        let sub_kind_label = kind_label(node);
+        let sub_kind = NodeKind::from(node);
         let mut expanded = header_fields_inner(snapshot, node, home, false);
         for nested in &mut expanded {
             nested.target = None;
-            nested.expanded_kind_label = None;
+            nested.expanded_kind = None;
             nested.expanded_fields.clear();
         }
-        field.expanded_kind_label = Some(sub_kind_label);
+        field.expanded_kind = Some(sub_kind);
         field.expanded_fields = expanded;
     }
 }

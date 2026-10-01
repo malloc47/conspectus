@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::hook::{self, HookRecord, HookTmuxRecord};
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, Metadata, MuxSessionId, MuxSessionNode, NodeId, Provenance,
+    LinkEndpoint, LinkState, MatchKind, Metadata, MuxSessionId, MuxSessionNode, NodeId, Provenance,
     RelationKind, RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
 };
 
@@ -158,12 +158,12 @@ fn demote_weaker_mux_links(snapshot: &mut GraphSnapshot, current_link: &GraphLin
 
 fn is_weaker_mux_evidence(link: &GraphLink) -> bool {
     matches!(
-        link.source_metadata
-            .fields
-            .get(crate::model::source_field::MATCH_KIND)
-            .and_then(serde_json::Value::as_str)
-            .or(link.source_metadata.evidence.as_deref()),
-        Some("active_pane_command_session_match" | "exact_cwd_match" | "cwd_prefix_match")
+        link.source_metadata.match_kind(),
+        Some(
+            MatchKind::ActivePaneCommandSessionMatch
+                | MatchKind::ExactCwdMatch
+                | MatchKind::CwdPrefixMatch
+        )
     )
 }
 
@@ -289,9 +289,9 @@ fn linked_to_mux(
     let source = NodeId::AgentSession(session.id.clone());
     let target = NodeId::MuxSession(mux.id.clone());
     let match_kind = if record.transcript_path.is_some() {
-        "hook_session_path_match"
+        MatchKind::HookSessionPathMatch
     } else {
-        "hook_session_match"
+        MatchKind::HookSessionMatch
     };
     let mut fields = Metadata::new();
     fields.insert(
@@ -463,7 +463,7 @@ fn hook_process_link(
     let mut fields = Metadata::new();
     fields.insert(
         crate::model::source_field::MATCH_KIND.to_string(),
-        serde_json::Value::String("hook_process_observation".to_string()),
+        serde_json::Value::String(MatchKind::HookProcessObservation.to_string()),
     );
     fields.insert(
         "observed_epoch".to_string(),
@@ -492,7 +492,7 @@ fn hook_process_link(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some("hook_process_observation".to_string()),
+            evidence: Some(MatchKind::HookProcessObservation.to_string()),
             fields,
             freshness_epoch: None,
         },

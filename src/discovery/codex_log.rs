@@ -42,7 +42,7 @@ use crate::discovery::harness::codex::HARNESS_KEY as CODEX_HARNESS_KEY;
 use crate::discovery::memo::FileStamp;
 use crate::model::{
     AgentSessionId, AgentSessionNode, Confidence, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, Metadata, MuxSessionId, NodeId, Provenance, RelationKind,
+    LinkEndpoint, LinkState, MatchKind, Metadata, MuxSessionId, NodeId, Provenance, RelationKind,
     RuntimeProcessId, RuntimeProcessNode, RuntimeProcessRole, SourceMetadata,
 };
 
@@ -483,7 +483,7 @@ fn build_link(
     let mut fields = Metadata::new();
     fields.insert(
         crate::model::source_field::MATCH_KIND.to_string(),
-        serde_json::Value::String("codex_log_current_thread_match".to_string()),
+        serde_json::Value::String(MatchKind::CodexLogCurrentThreadMatch.to_string()),
     );
     fields.insert(
         "observed_epoch".to_string(),
@@ -517,7 +517,7 @@ fn build_link(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some("codex_log_current_thread_match".to_string()),
+            evidence: Some(MatchKind::CodexLogCurrentThreadMatch.to_string()),
             fields,
             freshness_epoch: None,
         },
@@ -566,7 +566,7 @@ fn ensure_codex_runtime_process(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some("codex_log_process_observation".to_string()),
+            evidence: Some(MatchKind::CodexLogProcessObservation.to_string()),
             fields: Metadata::new(),
             freshness_epoch: None,
         },
@@ -619,9 +619,7 @@ fn codex_process_link(
     let mut fields = Metadata::new();
     fields.insert(
         crate::model::source_field::MATCH_KIND.to_string(),
-        serde_json::Value::String(
-            crate::resolve::evidence::CODEX_LOG_PROCESS_THREAD_MATCH.to_string(),
-        ),
+        serde_json::Value::String(MatchKind::CodexLogProcessThreadMatch.to_string()),
     );
     fields.insert(
         "observed_epoch".to_string(),
@@ -645,7 +643,7 @@ fn codex_process_link(
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: ADAPTER_NAME.to_string(),
-            evidence: Some(crate::resolve::evidence::CODEX_LOG_PROCESS_THREAD_MATCH.to_string()),
+            evidence: Some(MatchKind::CodexLogProcessThreadMatch.to_string()),
             fields,
             freshness_epoch: None,
         },
@@ -675,13 +673,7 @@ fn demote_stale_codex_command_matches(snapshot: &mut GraphSnapshot, fresh: &Grap
         if !matches!(link.state, LinkState::Active) {
             continue;
         }
-        let match_kind = link
-            .source_metadata
-            .fields
-            .get(crate::model::source_field::MATCH_KIND)
-            .and_then(serde_json::Value::as_str)
-            .or(link.source_metadata.evidence.as_deref());
-        if match_kind != Some(crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH) {
+        if link.source_metadata.match_kind() != Some(MatchKind::ActivePaneCommandSessionMatch) {
             continue;
         }
 

@@ -10,12 +10,9 @@ fn repo_id() -> RepoId {
 }
 
 #[test]
-fn snake_case_matches_existing_kind_label_vocabulary() {
-    // These strings are returned by the duplicated `kind_label`
-    // helpers in `src/tui/detail.rs:358` and
-    // `src/tui/explorer.rs:831`. Subsequent stories swap those
-    // callers onto `NodeKind::snake_case`; the test pins the
-    // vocabulary so the swap is a no-op on the wire.
+fn snake_case_matches_the_kind_vocabulary() {
+    // These strings appear in unresolved endpoints' `node_type`,
+    // `node show` output, and the CLI, so they must not drift.
     assert_eq!(NodeKind::Workspace.snake_case(), "workspace");
     assert_eq!(NodeKind::Repo.snake_case(), "repo");
     assert_eq!(NodeKind::Checkout.snake_case(), "checkout");

@@ -1269,7 +1269,10 @@ fn active_pane_evidence_prefers_single_fd_session_over_command() {
     let evidence =
         active_pane_evidence_from_sources(fd, command, active_pane_harnesses(&mux)).unwrap();
 
-    assert_eq!(evidence.link_evidence, "active_pane_fd_session_match");
+    assert_eq!(
+        evidence.link_evidence,
+        crate::model::MatchKind::ActivePaneFdSessionMatch
+    );
     assert_eq!(
         evidence.session_keys,
         BTreeSet::from(["019e4354-26b9-7ad2-9521-4ad921cc312b".to_string()])
@@ -1290,7 +1293,7 @@ fn active_pane_evidence_uses_fd_command_intersection() {
 
     assert_eq!(
         evidence.link_evidence,
-        "active_pane_fd_command_session_match"
+        crate::model::MatchKind::ActivePaneFdCommandSessionMatch
     );
     assert_eq!(
         evidence.session_keys,

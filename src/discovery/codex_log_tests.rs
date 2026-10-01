@@ -70,7 +70,7 @@ fn stale_command_match_link(state_scope: &str, native_id: &str, session_key: &st
     fields.insert(
         "match_kind".to_string(),
         serde_json::Value::String(
-            crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH.to_string(),
+            crate::model::MatchKind::ActivePaneCommandSessionMatch.to_string(),
         ),
     );
     GraphLink {
@@ -83,7 +83,7 @@ fn stale_command_match_link(state_scope: &str, native_id: &str, session_key: &st
         freshness: Freshness::Fresh,
         source_metadata: SourceMetadata {
             adapter: "cross_link".to_string(),
-            evidence: Some(crate::resolve::evidence::ACTIVE_PANE_COMMAND_SESSION_MATCH.to_string()),
+            evidence: Some(crate::model::MatchKind::ActivePaneCommandSessionMatch.to_string()),
             fields,
             freshness_epoch: None,
         },

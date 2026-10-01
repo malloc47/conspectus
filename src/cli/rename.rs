@@ -3,8 +3,8 @@
 //! Two subcommands: `session` (agent-session alias write +
 //! lockstep tmux rename per ADR 0029) and `mux` (tmux native
 //! rename only). Extracted from `cli/mod.rs` alongside the
-//! rename-specific helpers `execute_rename_plan`,
-//! `run_mux_rename`, and `node_kind_label`.
+//! rename-specific helpers `execute_rename_plan` and
+//! `run_mux_rename`.
 //!
 //! Shared surface reached back through `super`:
 //! - `super::discover_for_store_selection` — snapshot for
@@ -106,7 +106,7 @@ impl RenameSessionArgs {
             other => bail!(
                 "`{}` resolves to a {} node; rename session only operates on agent sessions",
                 self.id,
-                node_kind_label(&other)
+                conspectus::model::NodeKind::from(&other).snake_case()
             ),
         };
 
@@ -169,7 +169,7 @@ impl RenameMuxArgs {
             other => bail!(
                 "`{}` resolves to a {} node; rename mux only operates on mux sessions",
                 self.id,
-                node_kind_label(&other)
+                conspectus::model::NodeKind::from(&other).snake_case()
             ),
         };
 
@@ -296,20 +296,5 @@ fn run_mux_rename(rename: &MuxNativeRename, tmux: &dyn MuxBackend) -> Result<()>
             bail!("tmux rename-session failed (exit code {code:?}): {message}")
         }
         TmuxRenameOutcome::Unsupported => bail!("tmux runner does not support rename_session"),
-    }
-}
-
-fn node_kind_label(id: &NodeId) -> &'static str {
-    match id {
-        NodeId::Repo(_) => "repo",
-        NodeId::Checkout(_) => "checkout",
-        NodeId::Workspace(_) => "workspace",
-        NodeId::AgentSession(_) => "agent_session",
-        NodeId::MuxSession(_) => "mux_session",
-        NodeId::Pin(_) => "pin",
-        NodeId::RuntimeProcess(_) => "runtime_process",
-        NodeId::Branch(_) => "branch",
-        NodeId::Fork(_) => "fork",
-        NodeId::ForgePr(_) => "forge_pr",
     }
 }

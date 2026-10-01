@@ -64,7 +64,7 @@ pub struct ExplorerInputs<'a> {
 pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
     let node = inputs.snapshot.find_node(inputs.target)?;
     let id = node.id();
-    let kind_label = kind_label(node);
+    let kind = NodeKind::from(node);
     let title_line = title_line(inputs.snapshot, node);
     let short_id = node_short_id(&id);
     let core_fields = core_fields(inputs.snapshot, node, inputs.home, inputs.now);
@@ -91,7 +91,7 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
     let short_label = short_node_label(node);
     Some(NodeView {
         focused: id.clone(),
-        kind_label,
+        kind,
         title_line,
         short_label,
         short_id,
@@ -110,8 +110,7 @@ pub fn build_node_view(inputs: ExplorerInputs<'_>) -> Option<NodeView> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeView {
     pub focused: NodeId,
-    /// `agent_session`, `mux_session`, etc.
-    pub kind_label: &'static str,
+    pub kind: NodeKind,
     /// Compact identity line shown in the title.
     pub title_line: String,
     /// Compact `kind:short_tag` label for this node (T8-038). Used
@@ -156,7 +155,7 @@ pub struct CoreField {
     /// Used by the renderer to surface that e.g. a `cwd` path
     /// resolves to a `repo` / `workspace` / `checkout` node, without
     /// stuffing that metadata into the value string.
-    pub kind_chip: Option<&'static str>,
+    pub kind_chip: Option<NodeKind>,
 }
 
 impl CoreField {
@@ -187,7 +186,7 @@ impl CoreField {
         self
     }
 
-    fn with_kind_chip(mut self, kind: &'static str) -> Self {
+    fn with_kind_chip(mut self, kind: NodeKind) -> Self {
         self.kind_chip = Some(kind);
         self
     }
@@ -221,10 +220,10 @@ impl Direction {
 /// groups but after labelled ones.
 fn sort_relationship_groups(groups: &mut [RelationshipGroup]) {
     groups.sort_by(|a, b| {
-        let ord_a = crate::tui::icons::NodeKind::from_snake_case(&a.neighbor_kind)
-            .map_or(usize::MAX, super::icons::NodeKind::ordinal);
-        let ord_b = crate::tui::icons::NodeKind::from_snake_case(&b.neighbor_kind)
-            .map_or(usize::MAX, super::icons::NodeKind::ordinal);
+        let ord_a =
+            NodeKind::from_snake_case(&a.neighbor_kind).map_or(usize::MAX, NodeKind::ordinal);
+        let ord_b =
+            NodeKind::from_snake_case(&b.neighbor_kind).map_or(usize::MAX, NodeKind::ordinal);
         ord_a
             .cmp(&ord_b)
             .then_with(|| {
@@ -350,7 +349,9 @@ pub struct RelationshipGroup {
     pub relation: RelationKind,
     /// Kind label of the neighbor node (`runtime_process`,
     /// `agent_session`, …). For unresolved-only groups this is the
-    /// declared `node_type` carried in the evidence.
+    /// declared `node_type` carried in the evidence, which can name
+    /// something that isn't a node kind (`path`), so it stays a
+    /// string.
     pub neighbor_kind: String,
     /// Resolver-preferred candidates sort first; the rest follow in
     /// `(provenance, confidence, link_id)` order matching
@@ -387,7 +388,8 @@ impl RelationshipGroup {
 pub struct RelationshipLink {
     pub link_id: String,
     pub neighbor_id: NodeId,
-    pub neighbor_kind: &'static str,
+    /// `None` when the neighbor is missing from the snapshot.
+    pub neighbor_kind: Option<NodeKind>,
     /// Short label rendered in the row (`proc:claude · pid 82310`).
     pub neighbor_label: String,
     /// FNV-1a short id of the neighbor, exposed for the breadcrumb
@@ -1005,21 +1007,6 @@ impl EdgeStateLabel {
 // Builder internals
 // -----------------------------------------------------------------------------
 
-fn kind_label(node: &GraphNode) -> &'static str {
-    match node {
-        GraphNode::Repo(_) => "repo",
-        GraphNode::Checkout(_) => "checkout",
-        GraphNode::Workspace(_) => "workspace",
-        GraphNode::AgentSession(_) => "agent_session",
-        GraphNode::MuxSession(_) => "mux_session",
-        GraphNode::Pin(_) => "pin",
-        GraphNode::RuntimeProcess(_) => "runtime_process",
-        GraphNode::Branch(_) => "branch",
-        GraphNode::Fork(_) => "fork",
-        GraphNode::ForgePr(_) => "forge_pr",
-    }
-}
-
 /// Reverse-lookup helper for the cwd field (T8-039): returns the
 /// owning node's kind label when `cwd` matches a Repo, Workspace,
 /// or Checkout in the snapshot. Match precedence is Checkout (most
@@ -1027,7 +1014,7 @@ fn kind_label(node: &GraphNode) -> &'static str {
 /// `source_paths` entry). Returns `None` when nothing in the
 /// snapshot claims the path, in which case the renderer leaves the
 /// cwd value bare rather than guessing.
-fn cwd_owner_kind(snapshot: &GraphSnapshot, cwd: &str) -> Option<&'static str> {
+fn cwd_owner_kind(snapshot: &GraphSnapshot, cwd: &str) -> Option<NodeKind> {
     let cwd = cwd.trim_end_matches('/');
     if cwd.is_empty() {
         return None;
@@ -1053,11 +1040,11 @@ fn cwd_owner_kind(snapshot: &GraphSnapshot, cwd: &str) -> Option<&'static str> {
         }
     }
     if found_checkout {
-        Some("checkout")
+        Some(NodeKind::Checkout)
     } else if found_workspace {
-        Some("workspace")
+        Some(NodeKind::Workspace)
     } else if found_repo {
-        Some("repo")
+        Some(NodeKind::Repo)
     } else {
         None
     }
@@ -1717,7 +1704,7 @@ fn build_explorer(
         let neighbor_kind = match &endpoint {
             NeighborEndpoint::Node(id) => snapshot
                 .find_node(id)
-                .map_or("unknown", kind_label)
+                .map_or("unknown", |node| NodeKind::from(node).snake_case())
                 .to_string(),
             NeighborEndpoint::Unresolved(e) => e.node_type.clone(),
         };
@@ -1831,7 +1818,6 @@ fn finalize_group(
                 EdgeStateLabel::AltOf(relation.clone())
             };
             let neighbor_node = snapshot.find_node(&neighbor_id);
-            let neighbor_kind_label = neighbor_node.map_or("unknown", kind_label);
             let neighbor_label = neighbor_node.map_or_else(
                 || format!("{neighbor_id}"),
                 |n| neighbor_display_label(n, home),
@@ -1843,7 +1829,7 @@ fn finalize_group(
                 link_id: link.id.clone(),
                 neighbor_short_id: node_short_id(&neighbor_id),
                 neighbor_id,
-                neighbor_kind: neighbor_kind_label,
+                neighbor_kind: neighbor_node.map(NodeKind::from),
                 neighbor_label,
                 provenance: link.provenance,
                 confidence: link.confidence,

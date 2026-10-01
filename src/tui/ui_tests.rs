@@ -657,7 +657,7 @@ fn render_node_field_line_places_kind_chip_before_value() {
         placeholder: false,
         annotation: None,
         long_value: None,
-        kind_chip: Some("workspace"),
+        kind_chip: Some(crate::model::NodeKind::Workspace),
     };
     let line = render_node_field_line(&field, false, &theme);
     let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -812,34 +812,32 @@ fn link_rows_hide_edge_meta_by_default_and_surface_it_after_toggle() {
 #[test]
 fn kind_chip_span_renders_per_kind_glyph_in_node_kind_color() {
     // ADR 0073 §3: the dim `[kind]` text chip is replaced by the
-    // per-kind slate glyph in the node-kind color. Every known
-    // tag round-trips through `NodeKind::from_snake_case` and
-    // resolves to the corresponding glyph; unknown tags fall
-    // back to a dim `?` so the chip slot stays visible without
-    // misleading the operator.
+    // per-kind slate glyph in the node-kind color. A missing kind
+    // falls back to a dim `?` so the chip slot stays visible
+    // without misleading the operator.
     let theme = Theme::default();
-    let cases: [(&str, &str, ratatui::style::Color); 4] = [
-        ("workspace", "▦", theme.node_workspace),
-        ("mux_session", "▣", theme.node_mux_session),
-        ("fork", "⑂", theme.node_fork),
-        ("checkout", "◇", theme.node_checkout),
+    let cases = [
+        (NodeKind::Workspace, "▦", theme.node_workspace),
+        (NodeKind::MuxSession, "▣", theme.node_mux_session),
+        (NodeKind::Fork, "⑂", theme.node_fork),
+        (NodeKind::Checkout, "◇", theme.node_checkout),
     ];
     for (tag, glyph, expected_color) in cases {
-        let span = kind_chip_span(tag, &theme);
-        assert_eq!(span.content.as_ref(), glyph, "wrong glyph for `{tag}`");
+        let span = kind_chip_span(Some(tag), &theme);
+        assert_eq!(span.content.as_ref(), glyph, "wrong glyph for `{tag:?}`");
         assert_eq!(
             span.style.fg,
             Some(expected_color),
-            "wrong color for `{tag}`"
+            "wrong color for `{tag:?}`"
         );
     }
     // ForgePr's kind glyph reuses `pr_open` at chip surfaces
     // because the chip layer doesn't carry PR state.
-    let pr = kind_chip_span("forge_pr", &theme);
+    let pr = kind_chip_span(Some(NodeKind::ForgePr), &theme);
     assert_eq!(pr.content.as_ref(), "⇄");
     assert_eq!(pr.style.fg, Some(theme.pr_open));
-    // Unknown tag → dim `?` fallback.
-    let unknown = kind_chip_span("not_a_kind", &theme);
+    // Missing kind → dim `?` fallback.
+    let unknown = kind_chip_span(None, &theme);
     assert_eq!(unknown.content.as_ref(), "?");
     assert!(unknown.style.add_modifier.contains(theme.placeholder));
 }
@@ -915,7 +913,7 @@ fn other_link_line_dispatches_per_edge_state() {
     let link = |edge_state: EdgeStateLabel| RelationshipLink {
         link_id: "l".into(),
         neighbor_id: NodeId::MuxSession(crate::model::MuxSessionId::new("x")),
-        neighbor_kind: "mux_session",
+        neighbor_kind: Some(crate::model::NodeKind::MuxSession),
         neighbor_label: "tmux:x".into(),
         neighbor_short_id: "x".into(),
         provenance: Provenance::Discovered,
@@ -1006,7 +1004,7 @@ fn validated_link_line_drops_the_legacy_winner_star() {
     let link = RelationshipLink {
         link_id: "l".into(),
         neighbor_id: NodeId::MuxSession(crate::model::MuxSessionId::new("x")),
-        neighbor_kind: "mux_session",
+        neighbor_kind: Some(crate::model::NodeKind::MuxSession),
         neighbor_label: "tmux:x".into(),
         neighbor_short_id: "x".into(),
         provenance: Provenance::Discovered,
@@ -1052,7 +1050,7 @@ fn related_row_truncates_long_labels_instead_of_wrapping_them_away() {
     let link = RelationshipLink {
         link_id: "l".into(),
         neighbor_id: NodeId::Checkout(CheckoutId::new(RepoId::new("/r.git"), path)),
-        neighbor_kind: "checkout",
+        neighbor_kind: Some(crate::model::NodeKind::Checkout),
         neighbor_label: path.into(),
         neighbor_short_id: "c".into(),
         provenance: Provenance::Discovered,
@@ -1179,7 +1177,7 @@ fn header_field_line_count_grows_with_value_wrap() {
         placeholder: false,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     };
     let long = HeaderField {
@@ -1188,7 +1186,7 @@ fn header_field_line_count_grows_with_value_wrap() {
         placeholder: false,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     };
     // 40-cell-wide panel: short value fits on one row, long
@@ -1207,7 +1205,7 @@ fn header_field_line_count_grows_with_value_wrap() {
         placeholder: false,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     };
     assert_eq!(header_field_line_count(&just_fits, 40, 0), 1);
@@ -1224,7 +1222,7 @@ fn header_zone_height_accounts_for_wrapped_field_values() {
         placeholder: false,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     };
     let session_field = HeaderField {
@@ -1235,12 +1233,12 @@ fn header_zone_height_accounts_for_wrapped_field_values() {
         target: Some(NodeId::AgentSession(AgentSessionId::new(
             "codex", "/state", "abc",
         ))),
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     };
 
     let with_value = |value: &str| NodeDetail {
-        kind_label: "mux_session",
+        kind: crate::model::NodeKind::MuxSession,
         title_line: "tmux:editor".to_string(),
         short_id: "deadbeef".to_string(),
         full_id: NodeId::MuxSession(MuxSessionId::new("editor")),

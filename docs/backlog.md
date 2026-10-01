@@ -14314,7 +14314,21 @@ Queued chunks:
     wave; check that the diff touches comment lines only. Consider an
     `AGENTS.md` line ("comments explain why; IDs go in commit
     messages") so new IDs stop accumulating.
-- [ ] `H-RUST-014` Use typed kinds instead of strings.
+- [x] `H-RUST-014` Use typed kinds instead of strings.
+  - Outcome: `model::MatchKind` names the 16 mux-attribution match
+    kinds that adapters actually emit, and `SourceMetadata::match_kind()`
+    reads one back. Producers in `cross_link`, `codex_log`, and
+    `hook_sidecar` and the resolver's rankers and filters use it, with
+    exhaustive `match`es; `resolve::evidence` is gone. On the wire it is
+    still the same snake_case string, so the graph JSON and
+    `graph.bin` are unchanged (no ADR 0083 bump). `SourceMetadata.evidence`
+    stays free-form text, because most adapters write prose there
+    ("gh pr list head ref"). `NodeKind` moved from `tui::icons` into
+    `model`. The detail and explorer view models carry it instead of
+    `&'static str` labels, and the four duplicated `kind_label`
+    helpers are gone. The explorer's relationship-group key stays a
+    string, because unresolved endpoints can name non-node types
+    (`path`). Typing the match kinds surfaced `H-RUST-020`.
   - Problem: the node explorer carries `neighbor_kind` as
     `&'static str` or `String` (`"mux_session"`) and parses it back
     with `NodeKind::from_snake_case` at render time, although
@@ -14369,6 +14383,27 @@ Queued chunks:
     enforcing `items_after_statements`, `needless_pass_by_value` for
     non-message functions, and `rustdoc::private_intra_doc_links` in
     `[lints]`, so the cleanup holds.
+- [ ] `H-RUST-020` Decide how Codex-log evidence ranks in mux resolution.
+  - Problem: typing the match kinds (`H-RUST-014`) showed that the
+    resolver's string matches had drifted from what adapters emit:
+    - `mux_evidence_rank` gives `codex_log_current_thread_match`
+      rank 0, below `exact_cwd_match` (20). ADR 0048 says log-derived
+      evidence should rank above `active_pane_command_session_match`
+      and `active_pane_fd_session_match` for Codex.
+    - `has_compatible_session_mux_link` accepted
+      `codex_log_thread_match`, which nothing emits; the emitted kind is
+      `codex_log_current_thread_match`.
+    - The ranks for `control_plane_current_session_match`,
+      `harness_state_current_session_match`, and
+      `hook_process_session_match` matched nothing, because nothing
+      emits them.
+  - `H-RUST-014` kept the existing behavior: those three kinds were
+    dropped from the vocabulary, and Codex-log links still rank 0.
+  - Plan: give `CodexLogCurrentThreadMatch` a rank consistent with
+    ADR 0048, decide whether it counts as process evidence in
+    `identifies_process`, and add resolver tests for a Codex session
+    with competing cwd and log-derived candidates. This changes
+    attribution results, so confirm the intent first.
 
 ## Release Readiness: 0.1.0
 

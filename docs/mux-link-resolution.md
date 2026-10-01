@@ -86,7 +86,7 @@ Hook sidecar records override these candidate link types on the same mux target:
 - `exact_cwd_match`
 - `cwd_prefix_match`
 
-Stronger evidence (`active_pane_fd_session_match`, `hook_session_match`, `control_plane_current_session_match`) survives untouched.
+Stronger evidence (`active_pane_fd_session_match`, `hook_session_match`) survives untouched.
 
 ---
 
@@ -144,15 +144,19 @@ This means CWD resolution passes through only in the one-to-one case:
 
 ## Evidence Rank Reference
 
+The vocabulary is the `MatchKind` enum in `src/model/mod.rs`; the
+ranks live in `mux_evidence_rank` in `src/resolve/mod.rs`.
+
 | Evidence Kind | Rank | Source | Decays? |
 |---|---|---|---|
-| `control_plane_current_session_match` | 50 | Agent deck control plane | No |
 | `hook_session_match` | 50 | Hook sidecar record | No |
 | `hook_session_path_match` | 50 | Hook sidecar path | No |
 | `active_pane_fd_session_match` | 50 | `/proc/{pid}/fd/` | No |
 | `active_pane_fd_command_session_match` | 45 | fd ∩ argv session keys | No |
 | `session_file_activity_match` | 40 | Most recent session file mtime | No |
-| `harness_state_current_session_match` | 40 | Harness native state file | No |
+| `active_pane_process_match` | 35 | Harness process in the pane's process tree | No |
+| `runtime_process_identifies_session` / `runtime_process_candidates_session` | 35 | Resolver-derived from a runtime process | No |
 | `active_pane_command_session_match` | 30 | Session key in process argv | Yes (overridden by hook sidecar) |
 | `exact_cwd_match` | 20 | session.cwd == mux.cwd | Yes (overridden by hook sidecar) |
 | `cwd_prefix_match` | 10 | One cwd is prefix of other | Yes (overridden by hook sidecar) |
+| `codex_log_current_thread_match` | 0 | Codex logs DB | No; see `H-RUST-020` |

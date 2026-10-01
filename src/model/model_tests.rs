@@ -745,3 +745,28 @@ fn has_id_agrees_with_owned_id_comparison() {
             .is_none()
     );
 }
+
+#[test]
+fn match_kind_round_trips_through_its_wire_string() {
+    for kind in MatchKind::ALL {
+        assert_eq!(MatchKind::from_snake_case(kind.snake_case()), Some(kind));
+    }
+    assert_eq!(
+        MatchKind::from_snake_case("session cwd within fork root"),
+        None
+    );
+}
+
+#[test]
+fn source_metadata_match_kind_prefers_the_field_over_evidence() {
+    let mut metadata = SourceMetadata {
+        evidence: Some("exact_cwd_match".to_string()),
+        ..SourceMetadata::default()
+    };
+    assert_eq!(metadata.match_kind(), Some(MatchKind::ExactCwdMatch));
+    metadata.fields.insert(
+        source_field::MATCH_KIND.to_string(),
+        serde_json::Value::String("hook_session_match".to_string()),
+    );
+    assert_eq!(metadata.match_kind(), Some(MatchKind::HookSessionMatch));
+}

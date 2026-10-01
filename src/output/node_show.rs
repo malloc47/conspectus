@@ -156,21 +156,6 @@ fn write_section_header(out: &mut String, text: &str, color: bool) {
     out.push('\n');
 }
 
-fn node_kind_label(id: &NodeId) -> &'static str {
-    match id {
-        NodeId::Repo(_) => "repo",
-        NodeId::Checkout(_) => "checkout",
-        NodeId::Workspace(_) => "workspace",
-        NodeId::AgentSession(_) => "agent_session",
-        NodeId::MuxSession(_) => "mux_session",
-        NodeId::Pin(_) => "pin",
-        NodeId::RuntimeProcess(_) => "runtime_process",
-        NodeId::Branch(_) => "branch",
-        NodeId::Fork(_) => "fork",
-        NodeId::ForgePr(_) => "forge_pr",
-    }
-}
-
 /// External display label for a node referenced from a link or
 /// resolved relationship. Mirrors the pre-P11-011b
 /// `node_reference_label_from_display` behavior.
@@ -231,7 +216,11 @@ fn write_node_summary(
     let display = id.to_string();
     let id_short = node_short_id_from_display(&display);
     write_section_header(out, &format!("node {id_short}"), color);
-    let _ = writeln!(out, "  kind: {}", node_kind_label(id));
+    let _ = writeln!(
+        out,
+        "  kind: {}",
+        crate::model::NodeKind::from(id).snake_case()
+    );
     let _ = writeln!(out, "  id:   {display}");
 
     match (id, find_node(snapshot, id)) {

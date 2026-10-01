@@ -824,7 +824,7 @@ fn placeholder_pin_detail_strips_candidate_link_summaries() {
         .expect("placeholder pin row");
     app.set_selection(pin_row_id);
     let detail = app.detail().expect("detail computed for pin placeholder");
-    assert_eq!(detail.kind_label, "pin");
+    assert_eq!(detail.kind, crate::model::NodeKind::Pin);
     assert!(
         detail.outgoing_links.is_empty(),
         "pin fallback should not list outgoing candidate links: {:?}",
@@ -932,7 +932,7 @@ fn selected_bound_pin_row_shows_realizing_session_detail() {
     let detail = app
         .detail()
         .expect("bound pin session row should resolve detail");
-    assert_eq!(detail.kind_label, "agent_session");
+    assert_eq!(detail.kind, crate::model::NodeKind::AgentSession);
     assert!(
         detail
             .header_fields
@@ -1839,7 +1839,7 @@ fn explorer_enter_on_link_drills_into_neighbor_and_pushes_breadcrumb() {
     let after = app.explorer().expect("explorer state after drill");
     // Focus now points at the mux.
     assert_ne!(after.view.focused, before);
-    assert_eq!(after.view.kind_label, "mux_session");
+    assert_eq!(after.view.kind, crate::model::NodeKind::MuxSession);
     assert_eq!(after.breadcrumb.len(), 1);
     assert_eq!(after.breadcrumb[0].focused, before);
 }
@@ -1883,8 +1883,8 @@ fn explorer_drill_mirror_sync_keeps_left_pane_when_neighbor_has_no_row() {
     // mirror sync's missing-row fallback only affects the left
     // pane.
     assert_eq!(
-        app.explorer().expect("state").view.kind_label,
-        "mux_session"
+        app.explorer().expect("state").view.kind,
+        crate::model::NodeKind::MuxSession
     );
     let hop = app
         .explorer()
@@ -2027,8 +2027,8 @@ fn explorer_backspace_restores_left_pane_selection() {
         "left pane should be restored to the pre-drill row",
     );
     assert_eq!(
-        app.explorer().expect("state").view.kind_label,
-        "agent_session",
+        app.explorer().expect("state").view.kind,
+        crate::model::NodeKind::AgentSession,
         "right pane should be restored to the pre-drill node",
     );
 }

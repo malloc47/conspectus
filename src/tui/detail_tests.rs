@@ -88,7 +88,7 @@ fn agent_session_with_no_mux_or_pr_shows_placeholders() {
     let target = NodeId::AgentSession(AgentSessionId::new("codex", "/state", "abc"));
 
     let detail = build(&snapshot, &target, Some(home().as_path()));
-    assert_eq!(detail.kind_label, "agent_session");
+    assert_eq!(detail.kind, crate::model::NodeKind::AgentSession);
     assert_eq!(detail.title_line, "codex:abc");
 
     // No title row when unset.
@@ -579,7 +579,7 @@ fn mux_session_detail_counts_attached_agents() {
     let snapshot = resolve_snapshot(snapshot);
     let target = NodeId::MuxSession(mux_id);
     let detail = build(&snapshot, &target, Some(home().as_path()));
-    assert_eq!(detail.kind_label, "mux_session");
+    assert_eq!(detail.kind, crate::model::NodeKind::MuxSession);
     assert_eq!(detail.title_line, "tmux:editor");
     let attached = detail
         .header_fields
@@ -1060,7 +1060,10 @@ fn workspace_member_links_expand_inline_under_linked_details() {
         .iter()
         .find(|f| f.label == "member" && f.value == "atelier")
         .expect("atelier member field");
-    assert_eq!(atelier_member.expanded_kind_label, Some("repo"));
+    assert_eq!(
+        atelier_member.expanded_kind,
+        Some(crate::model::NodeKind::Repo)
+    );
     assert!(
         !atelier_member.expanded_fields.is_empty(),
         "linked details should inline the repo's fields"

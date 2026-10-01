@@ -4,11 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
     CandidateScore, Confidence, Diagnostic, Freshness, GraphLink, GraphNode, GraphSnapshot,
-    LinkEndpoint, LinkState, NodeId, Provenance, RelationKind, ResolutionExplanation,
+    LinkEndpoint, LinkState, MatchKind, NodeId, Provenance, RelationKind, ResolutionExplanation,
     ResolvedRelationship, RuntimeProcessRole, ScoreAxis, SourceMetadata,
 };
-
-pub mod evidence;
 pub mod pins;
 
 pub fn resolve_snapshot(mut snapshot: GraphSnapshot) -> GraphSnapshot {
@@ -405,32 +403,38 @@ fn has_compatible_session_mux_link(
         {
             return false;
         }
-        let match_kind = link
-            .source_metadata
-            .fields
-            .get(crate::model::source_field::MATCH_KIND)
-            .and_then(serde_json::Value::as_str)
-            .or(link.source_metadata.evidence.as_deref());
+        let match_kind = link.source_metadata.match_kind();
         let process_id = link
             .source_metadata
             .fields
             .get("runtime_process")
             .and_then(serde_json::Value::as_str);
         let process_id_matches = process_id.is_some_and(|value| value == process.to_string());
-        matches!(
-            match_kind,
-            Some(
-                "active_pane_process_match"
-                    | "active_pane_fd_session_match"
-                    | "active_pane_fd_command_session_match"
-                    | "hook_session_match"
-                    | "hook_session_path_match"
-                    | "codex_log_thread_match"
-                    | "runtime_process_identifies_session"
-                    | "runtime_process_candidates_session"
-            )
-        ) || process_id_matches
+        match_kind.is_some_and(identifies_process) || process_id_matches
     })
+}
+
+/// Whether a session ↔ mux link with this match kind came from
+/// evidence about a process in the pane.
+fn identifies_process(kind: MatchKind) -> bool {
+    match kind {
+        MatchKind::ActivePaneProcessMatch
+        | MatchKind::ActivePaneFdSessionMatch
+        | MatchKind::ActivePaneFdCommandSessionMatch
+        | MatchKind::HookSessionMatch
+        | MatchKind::HookSessionPathMatch
+        | MatchKind::RuntimeProcessIdentifiesSession
+        | MatchKind::RuntimeProcessCandidatesSession => true,
+        MatchKind::ExactCwdMatch
+        | MatchKind::CwdPrefixMatch
+        | MatchKind::SessionFileActivityMatch
+        | MatchKind::ActivePaneCommandSessionMatch
+        | MatchKind::ActivePaneProcessObservation
+        | MatchKind::HookProcessObservation
+        | MatchKind::CodexLogCurrentThreadMatch
+        | MatchKind::CodexLogProcessThreadMatch
+        | MatchKind::CodexLogProcessObservation => false,
+    }
 }
 
 fn process_mux_link(
@@ -443,9 +447,9 @@ fn process_mux_link(
 ) -> GraphLink {
     let identifies = session_link.relation == RelationKind::ProcessIdentifiesSession;
     let match_kind = if identifies {
-        "runtime_process_identifies_session"
+        MatchKind::RuntimeProcessIdentifiesSession
     } else {
-        "runtime_process_candidates_session"
+        MatchKind::RuntimeProcessCandidatesSession
     };
     let mut fields = crate::model::Metadata::new();
     fields.insert(
@@ -647,13 +651,10 @@ fn session_logical_key(source: &NodeId) -> Option<String> {
 }
 
 fn is_cwd_evidence(link: &GraphLink) -> bool {
-    let match_kind = link
-        .source_metadata
-        .fields
-        .get(crate::model::source_field::MATCH_KIND)
-        .and_then(|v| v.as_str())
-        .or(link.source_metadata.evidence.as_deref());
-    matches!(match_kind, Some("exact_cwd_match" | "cwd_prefix_match"))
+    matches!(
+        link.source_metadata.match_kind(),
+        Some(MatchKind::ExactCwdMatch | MatchKind::CwdPrefixMatch)
+    )
 }
 
 fn multi_target_relation(relation: &RelationKind) -> bool {
@@ -712,15 +713,11 @@ struct ProcessIdentityScore {
 }
 
 fn process_identity_score(link: &GraphLink) -> ProcessIdentityScore {
-    let match_kind = link
-        .source_metadata
-        .fields
-        .get(crate::model::source_field::MATCH_KIND)
-        .and_then(serde_json::Value::as_str)
-        .or(link.source_metadata.evidence.as_deref());
-
     ProcessIdentityScore {
-        evidence_rank: process_identity_evidence_rank(match_kind),
+        evidence_rank: link
+            .source_metadata
+            .match_kind()
+            .map_or(0, process_identity_evidence_rank),
         confidence: link.confidence,
         observed_epoch: link
             .source_metadata
@@ -737,21 +734,24 @@ fn process_identity_score(link: &GraphLink) -> ProcessIdentityScore {
     }
 }
 
-fn process_identity_evidence_rank(match_kind: Option<&str>) -> u8 {
-    // H-EXT-004: match against the shared evidence-string
-    // constants so a rename anywhere in the pipeline is caught
-    // at compile time instead of silently losing rank.
-    use evidence::*;
-    match match_kind {
-        Some(s) if s == CODEX_LOG_PROCESS_THREAD_MATCH || s == HOOK_PROCESS_SESSION_MATCH => 60,
-        Some(s)
-            if s == ACTIVE_PANE_FD_SESSION_MATCH || s == ACTIVE_PANE_FD_COMMAND_SESSION_MATCH =>
-        {
-            50
-        }
-        Some(s) if s == ACTIVE_PANE_PROCESS_MATCH => 35,
-        Some(s) if s == ACTIVE_PANE_COMMAND_SESSION_MATCH => 30,
-        _ => 0,
+/// Rank of a process ↔ session link's evidence; higher wins.
+fn process_identity_evidence_rank(kind: MatchKind) -> u8 {
+    match kind {
+        MatchKind::CodexLogProcessThreadMatch => 60,
+        MatchKind::ActivePaneFdSessionMatch | MatchKind::ActivePaneFdCommandSessionMatch => 50,
+        MatchKind::ActivePaneProcessMatch => 35,
+        MatchKind::ActivePaneCommandSessionMatch => 30,
+        MatchKind::ExactCwdMatch
+        | MatchKind::CwdPrefixMatch
+        | MatchKind::SessionFileActivityMatch
+        | MatchKind::ActivePaneProcessObservation
+        | MatchKind::HookSessionMatch
+        | MatchKind::HookSessionPathMatch
+        | MatchKind::HookProcessObservation
+        | MatchKind::CodexLogCurrentThreadMatch
+        | MatchKind::CodexLogProcessObservation
+        | MatchKind::RuntimeProcessIdentifiesSession
+        | MatchKind::RuntimeProcessCandidatesSession => 0,
     }
 }
 
@@ -829,16 +829,12 @@ impl ProvenanceTier {
 }
 
 fn mux_score(link: &GraphLink) -> MuxScore {
-    let match_kind = link
-        .source_metadata
-        .fields
-        .get(crate::model::source_field::MATCH_KIND)
-        .and_then(serde_json::Value::as_str)
-        .or(link.source_metadata.evidence.as_deref());
-
     MuxScore {
         tier: ProvenanceTier::from_provenance(link.provenance),
-        evidence_rank: mux_evidence_rank(match_kind),
+        evidence_rank: link
+            .source_metadata
+            .match_kind()
+            .map_or(0, mux_evidence_rank),
         confidence: link.confidence,
         activity_epoch: link
             .source_metadata
@@ -861,25 +857,25 @@ fn mux_score_axes(link: &GraphLink) -> Vec<ScoreAxis> {
     ]
 }
 
-fn mux_evidence_rank(match_kind: Option<&str>) -> u8 {
-    match match_kind {
-        Some(
-            "control_plane_current_session_match"
-            | "hook_session_match"
-            | "hook_session_path_match"
-            | "active_pane_fd_session_match",
-        ) => 50,
-        Some("active_pane_fd_command_session_match") => 45,
-        Some("session_file_activity_match" | "harness_state_current_session_match") => 40,
-        Some(
-            "active_pane_process_match"
-            | "runtime_process_identifies_session"
-            | "runtime_process_candidates_session",
-        ) => 35,
-        Some("active_pane_command_session_match") => 30,
-        Some("exact_cwd_match") => 20,
-        Some("cwd_prefix_match") => 10,
-        _ => 0,
+/// Rank of a session ↔ mux link's evidence; higher wins.
+fn mux_evidence_rank(kind: MatchKind) -> u8 {
+    match kind {
+        MatchKind::HookSessionMatch
+        | MatchKind::HookSessionPathMatch
+        | MatchKind::ActivePaneFdSessionMatch => 50,
+        MatchKind::ActivePaneFdCommandSessionMatch => 45,
+        MatchKind::SessionFileActivityMatch => 40,
+        MatchKind::ActivePaneProcessMatch
+        | MatchKind::RuntimeProcessIdentifiesSession
+        | MatchKind::RuntimeProcessCandidatesSession => 35,
+        MatchKind::ActivePaneCommandSessionMatch => 30,
+        MatchKind::ExactCwdMatch => 20,
+        MatchKind::CwdPrefixMatch => 10,
+        MatchKind::ActivePaneProcessObservation
+        | MatchKind::HookProcessObservation
+        | MatchKind::CodexLogCurrentThreadMatch
+        | MatchKind::CodexLogProcessThreadMatch
+        | MatchKind::CodexLogProcessObservation => 0,
     }
 }
 

@@ -23,64 +23,12 @@ use std::collections::BTreeMap;
 use ratatui::style::Color;
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{GraphNode, NodeId};
 use crate::tui::theme::Theme;
 
-/// The `GraphNode` variants, lifted to a flat enum so call
-/// sites don't pattern-match on the full `GraphNode` tree just to
-/// pick a glyph or color. Conversions are provided from both
-/// [`GraphNode`] and [`NodeId`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum NodeKind {
-    Workspace,
-    Repo,
-    Checkout,
-    AgentSession,
-    MuxSession,
-    Pin,
-    RuntimeProcess,
-    Branch,
-    Fork,
-    ForgePr,
-}
+pub use crate::model::NodeKind;
 
+/// TUI presentation of each kind (ADR 0073).
 impl NodeKind {
-    /// Every kind, in canonical display order. Used by the catalog
-    /// test and by config-loader iteration so new variants are
-    /// caught at compile time via exhaustive matches.
-    pub const ALL: [NodeKind; 10] = [
-        NodeKind::Workspace,
-        NodeKind::Repo,
-        NodeKind::Checkout,
-        NodeKind::AgentSession,
-        NodeKind::MuxSession,
-        NodeKind::Pin,
-        NodeKind::RuntimeProcess,
-        NodeKind::Branch,
-        NodeKind::Fork,
-        NodeKind::ForgePr,
-    ];
-
-    /// Stable snake-case tag for the kind. Matches the strings the
-    /// existing duplicated `kind_label` helpers in
-    /// `src/tui/detail.rs` and `src/tui/explorer.rs` return, so the
-    /// later stories in the H-VIS workstream can swap callers over
-    /// without changing the on-wire vocabulary.
-    pub fn snake_case(self) -> &'static str {
-        match self {
-            NodeKind::Workspace => "workspace",
-            NodeKind::Repo => "repo",
-            NodeKind::Checkout => "checkout",
-            NodeKind::AgentSession => "agent_session",
-            NodeKind::MuxSession => "mux_session",
-            NodeKind::Pin => "pin",
-            NodeKind::RuntimeProcess => "runtime_process",
-            NodeKind::Branch => "branch",
-            NodeKind::Fork => "fork",
-            NodeKind::ForgePr => "forge_pr",
-        }
-    }
-
     /// Theme-key suffix used in `[tui.theme.icons]` and for the
     /// matching `node_*` color field on [`Theme`]. The icons table
     /// key is the same string (e.g. `node_repo = "◆"`), so the
@@ -100,26 +48,6 @@ impl NodeKind {
         }
     }
 
-    /// Display-order ordinal for sorting (ADR 0074 §4: detail-pane
-    /// `Related entities` rows sort by kind first). Matches
-    /// [`Self::ALL`] order so the visual scan reads
-    /// `▦ ◆ ◇ ● ▣ ⚙ ⎇ ⑂ ⇄` top-to-bottom.
-    pub fn ordinal(self) -> usize {
-        Self::ALL
-            .iter()
-            .position(|k| *k == self)
-            .unwrap_or(usize::MAX)
-    }
-
-    /// Inverse of [`Self::snake_case`]: parse a stable kind tag back
-    /// into a `NodeKind`. Used by render sites whose state carries
-    /// the kind as a `&'static str` (the detail-pane field
-    /// `kind_chip`, the explorer's `neighbor_kind`) so they can look
-    /// up the slate glyph without round-tripping through `GraphNode`.
-    pub fn from_snake_case(tag: &str) -> Option<NodeKind> {
-        NodeKind::ALL.into_iter().find(|k| k.snake_case() == tag)
-    }
-
     /// Default glyph from the ADR 0073 slate. Operators override
     /// this via `[tui.theme.icons]`; the override flow runs through
     /// [`node_kind_style`].
@@ -135,40 +63,6 @@ impl NodeKind {
             NodeKind::Branch => "⎇",
             NodeKind::Fork => "⑂",
             NodeKind::ForgePr => "⇄",
-        }
-    }
-}
-
-impl From<&GraphNode> for NodeKind {
-    fn from(node: &GraphNode) -> Self {
-        match node {
-            GraphNode::Workspace(_) => NodeKind::Workspace,
-            GraphNode::Repo(_) => NodeKind::Repo,
-            GraphNode::Checkout(_) => NodeKind::Checkout,
-            GraphNode::AgentSession(_) => NodeKind::AgentSession,
-            GraphNode::MuxSession(_) => NodeKind::MuxSession,
-            GraphNode::Pin(_) => NodeKind::Pin,
-            GraphNode::RuntimeProcess(_) => NodeKind::RuntimeProcess,
-            GraphNode::Branch(_) => NodeKind::Branch,
-            GraphNode::Fork(_) => NodeKind::Fork,
-            GraphNode::ForgePr(_) => NodeKind::ForgePr,
-        }
-    }
-}
-
-impl From<&NodeId> for NodeKind {
-    fn from(id: &NodeId) -> Self {
-        match id {
-            NodeId::Workspace(_) => NodeKind::Workspace,
-            NodeId::Repo(_) => NodeKind::Repo,
-            NodeId::Checkout(_) => NodeKind::Checkout,
-            NodeId::AgentSession(_) => NodeKind::AgentSession,
-            NodeId::MuxSession(_) => NodeKind::MuxSession,
-            NodeId::Pin(_) => NodeKind::Pin,
-            NodeId::RuntimeProcess(_) => NodeKind::RuntimeProcess,
-            NodeId::Branch(_) => NodeKind::Branch,
-            NodeId::Fork(_) => NodeKind::Fork,
-            NodeId::ForgePr(_) => NodeKind::ForgePr,
         }
     }
 }

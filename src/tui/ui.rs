@@ -827,9 +827,8 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
     // glyph is suppressed when there is no resolved selection
     // (fallback "detail" label) so a placeholder pane does not stamp
     // a misleading kind cue.
-    if let Some(detail) = app.detail()
-        && let Some(node_kind) = NodeKind::from_snake_case(detail.kind_label)
-    {
+    if let Some(detail) = app.detail() {
+        let node_kind = detail.kind;
         let style = node_kind_style(node_kind, app.theme());
         let color = if matches!(node_kind, NodeKind::ForgePr) {
             app.theme().pr_open
@@ -856,10 +855,7 @@ fn right_panel_title(app: &App, width: usize) -> Line<'static> {
         // ADR 0073 §3 prefix glyph: `<glyph> ` between the focus
         // marker and the bold label takes 2 cells when the detail
         // pane resolves to a known node kind.
-        let kind_glyph_width = app
-            .detail()
-            .and_then(|d| NodeKind::from_snake_case(d.kind_label))
-            .map_or(0, |_| 2);
+        let kind_glyph_width = if app.detail().is_some() { 2 } else { 0 };
         let fixed_width = 1
             + focus_marker_width(app, Focus::Right)
             + kind_glyph_width
@@ -894,17 +890,17 @@ fn right_panel_kind_label(app: &App) -> &'static str {
     let Some(detail) = app.detail() else {
         return "detail";
     };
-    match detail.kind_label {
-        "agent_session" => "session",
-        "mux_session" => "mux",
-        "forge_pr" => "pr",
-        "fork" => "fork",
-        "repo" => "repo",
-        "checkout" => "checkout",
-        "workspace" => "workspace",
-        "branch" => "branch",
-        "pin" => "pin",
-        _ => "detail",
+    match detail.kind {
+        NodeKind::AgentSession => "session",
+        NodeKind::MuxSession => "mux",
+        NodeKind::ForgePr => "pr",
+        NodeKind::Fork => "fork",
+        NodeKind::Repo => "repo",
+        NodeKind::Checkout => "checkout",
+        NodeKind::Workspace => "workspace",
+        NodeKind::Branch => "branch",
+        NodeKind::Pin => "pin",
+        NodeKind::RuntimeProcess => "detail",
     }
 }
 
@@ -2243,7 +2239,7 @@ fn render_node_field_line(
     // onto a new line in a narrow pane (otherwise the chip strands at
     // the wrap tail and reads as a stray symbol).
     if let Some(kind) = field.kind_chip {
-        spans.push(kind_chip_span(kind, theme));
+        spans.push(kind_chip_span(Some(kind), theme));
         spans.push(Span::raw(" "));
     }
     spans.push(span!(style; "{}", field.value.clone()));
@@ -2265,15 +2261,16 @@ fn render_node_field_line(
 /// value (T8-039) or beside a relationship-explorer neighbor. ADR
 /// 0073 §3 replaces the prior dim `[kind]` text with a 1-cell glyph
 /// in the node-kind color so the chip carries identity at a glance.
-/// Unknown kind strings (none in the slate) fall back to a dim `?`
-/// so the chip slot stays visible without misleading the operator.
+/// A missing kind (the neighbor isn't in the snapshot) falls back to
+/// a dim `?` so the chip slot stays visible without misleading the
+/// operator.
 ///
 /// `ForgePr`'s glyph color reuses `theme.pr_open` here because the
 /// chip-rendering surfaces do not carry PR state down — the row
 /// tree's [`forge_pr_glyph_span`] handles state-aware coloring
 /// directly off the row.
-fn kind_chip_span(kind: &str, theme: &Theme) -> Span<'static> {
-    let Some(node_kind) = NodeKind::from_snake_case(kind) else {
+fn kind_chip_span(kind: Option<NodeKind>, theme: &Theme) -> Span<'static> {
+    let Some(node_kind) = kind else {
         return span!(theme.placeholder; "?");
     };
     let style = node_kind_style(node_kind, theme);
@@ -2657,7 +2654,7 @@ fn header_zone_height(
     panel_width: u16,
 ) -> u16 {
     let natural = count_detail_lines(
-        detail.kind_label,
+        detail.kind,
         &detail.header_fields,
         extra_mux_rows,
         expand_linked,
@@ -2675,14 +2672,14 @@ fn header_zone_height(
 /// functions structurally identical is how the wrap-aware fix avoids
 /// re-introducing the "Session row clipped" class of bug.
 fn count_detail_lines(
-    kind_label: &'static str,
+    kind: NodeKind,
     fields: &[HeaderField],
     extra_mux_rows: &[HeaderField],
     expand_linked: bool,
     panel_width: u16,
     indent: usize,
 ) -> usize {
-    let sections = crate::tui::detail::group_fields_into_sections(kind_label, fields);
+    let sections = crate::tui::detail::group_fields_into_sections(kind, fields);
     let mut total = 0usize;
     let mut first = true;
     for section in &sections {
@@ -2693,7 +2690,7 @@ fn count_detail_lines(
         for field in &section.fields {
             total += header_field_line_count(field, panel_width, indent);
             if expand_linked
-                && let Some(sub_kind) = field.expanded_kind_label
+                && let Some(sub_kind) = field.expanded_kind
                 && !field.expanded_fields.is_empty()
             {
                 total += count_detail_lines(
@@ -2761,7 +2758,7 @@ fn draw_detail_header(
     theme: &Theme,
 ) {
     let lines = emit_detail_section_lines(
-        detail.kind_label,
+        detail.kind,
         &detail.header_fields,
         extra_mux_rows,
         expand_linked,
@@ -2781,7 +2778,7 @@ fn draw_detail_header(
 /// label widths, same colorization, same section dividers — only
 /// shifted right by `indent` cells per `H-RIGHT-EXPAND-UNIFY`.
 fn emit_detail_section_lines(
-    kind_label: &'static str,
+    kind: NodeKind,
     fields: &[HeaderField],
     extra_mux_rows: &[HeaderField],
     expand_linked: bool,
@@ -2789,7 +2786,7 @@ fn emit_detail_section_lines(
     indent: usize,
     theme: &Theme,
 ) -> Vec<Line<'static>> {
-    let sections = crate::tui::detail::group_fields_into_sections(kind_label, fields);
+    let sections = crate::tui::detail::group_fields_into_sections(kind, fields);
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut first = true;
     let divider_width = panel_width.saturating_sub(indent);
@@ -2801,7 +2798,7 @@ fn emit_detail_section_lines(
         for field in &section.fields {
             lines.push(render_header_field(field, section.kind, theme));
             if expand_linked
-                && let Some(sub_kind) = field.expanded_kind_label
+                && let Some(sub_kind) = field.expanded_kind
                 && !field.expanded_fields.is_empty()
             {
                 let sub_lines = emit_detail_section_lines(
@@ -2857,7 +2854,7 @@ fn mux_runtime_rows(app: &App) -> Vec<HeaderField> {
         placeholder: false,
         annotation: None,
         target: None,
-        expanded_kind_label: None,
+        expanded_kind: None,
         expanded_fields: Vec::new(),
     }]
 }

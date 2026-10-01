@@ -1397,6 +1397,19 @@ pub struct SourceMetadata {
     pub freshness_epoch: Option<i64>,
 }
 
+impl SourceMetadata {
+    /// The link's [`MatchKind`], read from the
+    /// [`source_field::MATCH_KIND`] field or, failing that, from
+    /// `evidence`.
+    pub fn match_kind(&self) -> Option<MatchKind> {
+        self.fields
+            .get(source_field::MATCH_KIND)
+            .and_then(Value::as_str)
+            .or(self.evidence.as_deref())
+            .and_then(MatchKind::from_snake_case)
+    }
+}
+
 /// H-REF-008: canonical field-name constants for
 /// [`SourceMetadata::fields`]. Every producer that stamps a
 /// value into the map and every consumer that reads one back
@@ -1439,6 +1452,214 @@ pub mod source_field {
     /// Free-form evidence provenance scope stamp (per-adapter
     /// substring; used by cross_link tie-breakers).
     pub const SCOPE: &str = "scope";
+}
+
+/// The `GraphNode` variants as a flat enum, so call sites can name a
+/// node's kind without matching on the whole node. Converts from both
+/// [`GraphNode`] and [`NodeId`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NodeKind {
+    Workspace,
+    Repo,
+    Checkout,
+    AgentSession,
+    MuxSession,
+    Pin,
+    RuntimeProcess,
+    Branch,
+    Fork,
+    ForgePr,
+}
+
+impl NodeKind {
+    /// Every kind, in canonical display order. Used by the catalog
+    /// test and by config-loader iteration so new variants are
+    /// caught at compile time via exhaustive matches.
+    pub const ALL: [NodeKind; 10] = [
+        NodeKind::Workspace,
+        NodeKind::Repo,
+        NodeKind::Checkout,
+        NodeKind::AgentSession,
+        NodeKind::MuxSession,
+        NodeKind::Pin,
+        NodeKind::RuntimeProcess,
+        NodeKind::Branch,
+        NodeKind::Fork,
+        NodeKind::ForgePr,
+    ];
+
+    /// Stable snake-case tag for the kind, as used in unresolved
+    /// endpoints' `node_type` and in CLI output.
+    pub fn snake_case(self) -> &'static str {
+        match self {
+            NodeKind::Workspace => "workspace",
+            NodeKind::Repo => "repo",
+            NodeKind::Checkout => "checkout",
+            NodeKind::AgentSession => "agent_session",
+            NodeKind::MuxSession => "mux_session",
+            NodeKind::Pin => "pin",
+            NodeKind::RuntimeProcess => "runtime_process",
+            NodeKind::Branch => "branch",
+            NodeKind::Fork => "fork",
+            NodeKind::ForgePr => "forge_pr",
+        }
+    }
+
+    /// Display-order ordinal for sorting (ADR 0074 §4: detail-pane
+    /// `Related entities` rows sort by kind first). Matches
+    /// [`Self::ALL`] order so the visual scan reads
+    /// `▦ ◆ ◇ ● ▣ ⚙ ⎇ ⑂ ⇄` top-to-bottom.
+    pub fn ordinal(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|k| *k == self)
+            .unwrap_or(usize::MAX)
+    }
+
+    /// Inverse of [`Self::snake_case`]. `None` for tags that don't
+    /// name a node kind, such as an unresolved endpoint's `"path"`.
+    pub fn from_snake_case(tag: &str) -> Option<NodeKind> {
+        NodeKind::ALL.into_iter().find(|k| k.snake_case() == tag)
+    }
+}
+
+impl From<&GraphNode> for NodeKind {
+    fn from(node: &GraphNode) -> Self {
+        match node {
+            GraphNode::Workspace(_) => NodeKind::Workspace,
+            GraphNode::Repo(_) => NodeKind::Repo,
+            GraphNode::Checkout(_) => NodeKind::Checkout,
+            GraphNode::AgentSession(_) => NodeKind::AgentSession,
+            GraphNode::MuxSession(_) => NodeKind::MuxSession,
+            GraphNode::Pin(_) => NodeKind::Pin,
+            GraphNode::RuntimeProcess(_) => NodeKind::RuntimeProcess,
+            GraphNode::Branch(_) => NodeKind::Branch,
+            GraphNode::Fork(_) => NodeKind::Fork,
+            GraphNode::ForgePr(_) => NodeKind::ForgePr,
+        }
+    }
+}
+
+impl From<&NodeId> for NodeKind {
+    fn from(id: &NodeId) -> Self {
+        match id {
+            NodeId::Workspace(_) => NodeKind::Workspace,
+            NodeId::Repo(_) => NodeKind::Repo,
+            NodeId::Checkout(_) => NodeKind::Checkout,
+            NodeId::AgentSession(_) => NodeKind::AgentSession,
+            NodeId::MuxSession(_) => NodeKind::MuxSession,
+            NodeId::Pin(_) => NodeKind::Pin,
+            NodeId::RuntimeProcess(_) => NodeKind::RuntimeProcess,
+            NodeId::Branch(_) => NodeKind::Branch,
+            NodeId::Fork(_) => NodeKind::Fork,
+            NodeId::ForgePr(_) => NodeKind::ForgePr,
+        }
+    }
+}
+
+/// How a discovery adapter matched the two ends of a mux-attribution
+/// link. Stored as its snake_case string in
+/// [`SourceMetadata::fields`] under [`source_field::MATCH_KIND`] and
+/// usually repeated in [`SourceMetadata::evidence`]; the resolver
+/// ranks candidates by it. Read it back with
+/// [`SourceMetadata::match_kind`]. See `docs/mux-link-resolution.md`
+/// for the ranking.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum MatchKind {
+    /// The session's cwd equals the mux's cwd.
+    ExactCwdMatch,
+    /// One cwd is a prefix of the other.
+    CwdPrefixMatch,
+    /// The session file most recently written under the pane's
+    /// harness state matches the session.
+    SessionFileActivityMatch,
+    /// The mux's active pane holds an open harness state file (session
+    /// JSONL, rollout log, or OpenCode DB path).
+    ActivePaneFdSessionMatch,
+    /// The open state file agrees with a session key on the pane's
+    /// start command.
+    ActivePaneFdCommandSessionMatch,
+    /// The pane's start command carries a session key argument (for
+    /// example `--resume <uuid>`). Demoted by fresher hook and
+    /// codex-log evidence (ADR 0028, ADR 0048).
+    ActivePaneCommandSessionMatch,
+    /// The active pane's process tree contains a harness process.
+    ActivePaneProcessMatch,
+    /// The process tree walk observed a harness process in the pane.
+    ActivePaneProcessObservation,
+    /// A hook sidecar record names the session (ADR 0028).
+    HookSessionMatch,
+    /// A hook sidecar record names the session's transcript path.
+    HookSessionPathMatch,
+    /// A hook sidecar record observed a harness process in the pane.
+    HookProcessObservation,
+    /// The Codex logs DB shows the pane's Codex process writing the
+    /// session's thread (ADR 0048).
+    CodexLogCurrentThreadMatch,
+    /// The Codex logs DB binds a process to a thread (ADR 0048).
+    CodexLogProcessThreadMatch,
+    /// The Codex logs DB observed a Codex process in the pane.
+    CodexLogProcessObservation,
+    /// The resolver derived the link from a runtime process that
+    /// identifies the session.
+    RuntimeProcessIdentifiesSession,
+    /// The resolver derived the link from a runtime process that is
+    /// one of several candidates for the session.
+    RuntimeProcessCandidatesSession,
+}
+
+impl MatchKind {
+    pub const ALL: [Self; 16] = [
+        Self::ExactCwdMatch,
+        Self::CwdPrefixMatch,
+        Self::SessionFileActivityMatch,
+        Self::ActivePaneFdSessionMatch,
+        Self::ActivePaneFdCommandSessionMatch,
+        Self::ActivePaneCommandSessionMatch,
+        Self::ActivePaneProcessMatch,
+        Self::ActivePaneProcessObservation,
+        Self::HookSessionMatch,
+        Self::HookSessionPathMatch,
+        Self::HookProcessObservation,
+        Self::CodexLogCurrentThreadMatch,
+        Self::CodexLogProcessThreadMatch,
+        Self::CodexLogProcessObservation,
+        Self::RuntimeProcessIdentifiesSession,
+        Self::RuntimeProcessCandidatesSession,
+    ];
+
+    pub fn snake_case(self) -> &'static str {
+        match self {
+            Self::ExactCwdMatch => "exact_cwd_match",
+            Self::CwdPrefixMatch => "cwd_prefix_match",
+            Self::SessionFileActivityMatch => "session_file_activity_match",
+            Self::ActivePaneFdSessionMatch => "active_pane_fd_session_match",
+            Self::ActivePaneFdCommandSessionMatch => "active_pane_fd_command_session_match",
+            Self::ActivePaneCommandSessionMatch => "active_pane_command_session_match",
+            Self::ActivePaneProcessMatch => "active_pane_process_match",
+            Self::ActivePaneProcessObservation => "active_pane_process_observation",
+            Self::HookSessionMatch => "hook_session_match",
+            Self::HookSessionPathMatch => "hook_session_path_match",
+            Self::HookProcessObservation => "hook_process_observation",
+            Self::CodexLogCurrentThreadMatch => "codex_log_current_thread_match",
+            Self::CodexLogProcessThreadMatch => "codex_log_process_thread_match",
+            Self::CodexLogProcessObservation => "codex_log_process_observation",
+            Self::RuntimeProcessIdentifiesSession => "runtime_process_identifies_session",
+            Self::RuntimeProcessCandidatesSession => "runtime_process_candidates_session",
+        }
+    }
+
+    /// `None` for strings outside the vocabulary, such as free-form
+    /// evidence text from other adapters.
+    pub fn from_snake_case(raw: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.snake_case() == raw)
+    }
+}
+
+impl fmt::Display for MatchKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.snake_case())
+    }
 }
 
 /// Per-node producing-provider metadata (P7-002 / ADR 0037). The
