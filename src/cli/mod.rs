@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, Stdio};
 
 use conspectus::config::{ConfigLoader, PROJECT_CONFIG_FILENAME};
-use conspectus::declared::{
-    DeclaredEndpoint, DeclaredStoreKind, DeclaredStoreSelection, select_store_for_declaration,
-};
+use conspectus::declared::{DeclaredEndpoint, select_store_for_declaration};
 use conspectus::model::{GraphSnapshot, Provenance};
 
 #[derive(Debug, Parser)]
@@ -758,14 +756,4 @@ pub(super) fn candidate_store_paths(
     }
 
     Ok(paths)
-}
-
-/// Borrow checker convenience: lets us reuse the existing
-/// [`DeclaredStoreSelection`] type for emitted CLI messages.
-fn _selection_display(selection: &DeclaredStoreSelection) -> String {
-    let kind = match selection.kind {
-        DeclaredStoreKind::Project => "project",
-        DeclaredStoreKind::User => "user",
-    };
-    format!("{kind} {}", selection.path.display())
 }

@@ -43,26 +43,6 @@ use crate::tui::{RunConfig, ui};
 /// the app's current view config.
 type DiscoveryResult = Result<crate::model::GraphSnapshot>;
 
-/// One event the TUI runtime consumes per iteration (ADR 0085
-/// contract 5, H-TUI-004). Wave 1 introduces the type but each
-/// loop still gathers its own events inline; wave 3 refactors the
-/// loops to consume a `next_ui_event(...)` stream once the
-/// module split lands.
-///
-/// `Input` carries a crossterm event (key press, resize, focus,
-/// mouse). `Tick` fires from the refresh timer. `Discovery`
-/// carries a completed background discovery result off the
-/// mpsc channel. Fixture mode's `r` re-reads happen synchronously
-/// on `Input(Refresh)` in the current shape and don't need their
-/// own variant.
-#[allow(dead_code)]
-#[derive(Debug)]
-pub(super) enum UiEvent {
-    Input(Event),
-    Tick,
-    Discovery(DiscoveryResult),
-}
-
 /// Mode-specific behavior for the shared [`run_loop`] driver
 /// (ADR 0085 contract 5, H-TUI-004 wave 2). Each mode owns its
 /// own async event sources (discovery worker + refresh timer

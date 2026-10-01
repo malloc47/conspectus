@@ -26,31 +26,25 @@ pub fn apply_aliases(
 ) {
     // Local stores first so they win over global. Per ADR 0029 the
     // first writer wins inside [`AliasOverlay::insert_if_absent`].
-    let mut paths: Vec<AliasStore> = Vec::new();
+    let mut paths: Vec<PathBuf> = Vec::new();
 
     let mut seen_project_paths = BTreeSet::new();
     for root in context.roots() {
         if let Some(path) = loader.locate_project_config(root)
             && seen_project_paths.insert(path.clone())
         {
-            paths.push(AliasStore {
-                path,
-                scope: AliasStoreScope::Local,
-            });
+            paths.push(path);
         }
     }
 
     if let Some(path) = loader.user_config_path()
         && path.is_file()
     {
-        paths.push(AliasStore {
-            path,
-            scope: AliasStoreScope::Global,
-        });
+        paths.push(path);
     }
 
-    for store in paths {
-        let Some(document) = read_aliases_document(&store, &mut snapshot.diagnostics) else {
+    for path in paths {
+        let Some(document) = read_aliases_document(&path, &mut snapshot.diagnostics) else {
             continue;
         };
 
@@ -63,28 +57,15 @@ pub fn apply_aliases(
     }
 }
 
-#[derive(Clone, Debug)]
-struct AliasStore {
-    path: PathBuf,
-    #[allow(dead_code)]
-    scope: AliasStoreScope,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum AliasStoreScope {
-    Local,
-    Global,
-}
-
 fn read_aliases_document(
-    store: &AliasStore,
+    path: &Path,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<crate::aliases::AliasesDocument> {
-    let text = match fs::read_to_string(&store.path) {
+    let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) => {
             diagnostics.push(config_diagnostic(
-                &store.path,
+                path,
                 format!("failed to read aliases: {err}"),
             ));
             return None;
@@ -95,7 +76,7 @@ fn read_aliases_document(
         Ok(document) => Some(document),
         Err(err) => {
             diagnostics.push(config_diagnostic(
-                &store.path,
+                path,
                 format!("failed to parse aliases: {err}"),
             ));
             None

@@ -156,6 +156,4 @@ insta = "1.42"
 # spike's go/no-go outcome.
 tui-pantry = "0.4"
 predicates = "3.1"
-proptest = "1.6"
-rstest = "0.24"
 tempfile = "3.15"

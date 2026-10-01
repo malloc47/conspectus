@@ -815,16 +815,6 @@ fn scan_session_cached(
     Some(discovered)
 }
 
-/// Clear the process-wide session-scan cache. Tests that observe
-/// the cache short-circuit call this in setup so a prior test's
-/// entries don't leak into their assertions.
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn reset_session_scan_cache_for_tests() {
-    let mut guard = SESSION_SCAN_CACHE.lock().unwrap();
-    *guard = None;
-}
-
 #[cfg(test)]
 #[path = "claude_code_tests.rs"]
 mod tests;

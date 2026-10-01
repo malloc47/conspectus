@@ -309,15 +309,6 @@ fn store_zellij_fragment(fragment: &GraphFragment) {
     });
 }
 
-/// Clear the process-wide zellij fragment cache. Tests that
-/// observe the cache short-circuit call this in setup.
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn reset_zellij_cache_for_tests() {
-    let mut guard = ZELLIJ_CACHE.lock().unwrap();
-    *guard = None;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

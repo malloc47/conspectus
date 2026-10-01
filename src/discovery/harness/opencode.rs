@@ -656,15 +656,6 @@ fn read_sqlite_sessions_cached(path: &Path) -> Vec<SessionInfo> {
     sessions
 }
 
-/// Clear the process-wide opencode SQLite scan cache. Tests that
-/// observe the cache short-circuit call this in setup.
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn reset_sqlite_sessions_cache_for_tests() {
-    let mut guard = SQLITE_SESSIONS_CACHE.lock().unwrap();
-    *guard = None;
-}
-
 #[cfg(test)]
 #[path = "opencode_tests.rs"]
 mod tests;

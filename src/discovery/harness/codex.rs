@@ -693,15 +693,6 @@ fn scan_rollout_cached(path: &Path) -> Option<RolloutScan> {
     Some(scan)
 }
 
-/// Clear the process-wide rollout-scan cache. Tests that observe
-/// the cache short-circuit call this in setup.
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn reset_rollout_scan_cache_for_tests() {
-    let mut guard = ROLLOUT_SCAN_CACHE.lock().unwrap();
-    *guard = None;
-}
-
 /// Extract the rollout's most recent user/assistant text content as a
 /// preview (ADR 0023). Walks the trailing [`TAIL_SCAN_BYTES`] of the
 /// JSONL file backward, dropping the partial first line when the
